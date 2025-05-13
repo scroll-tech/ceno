@@ -593,11 +593,11 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
 
         match (&mut self.evaluations, rhs_eval) {
             (FieldType::Base(e1), FieldType::Base(e2)) => {
-                e1.extend(e2.into_owned());
+                e1.extend(e2.to_vec());
                 self.num_vars = ceil_log2(e1.len());
             }
             (FieldType::Ext(e1), FieldType::Ext(e2)) => {
-                e1.extend(e2.into_owned());
+                e1.extend(e2.to_vec());
                 self.num_vars = ceil_log2(e1.len());
             }
             (FieldType::Unreachable, b @ FieldType::Base(..)) => {

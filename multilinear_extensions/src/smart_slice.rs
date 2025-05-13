@@ -29,19 +29,16 @@ impl<'a, T> Default for SmartSlice<'a, T> {
 }
 
 impl<'a, T> SmartSlice<'a, T> {
-    /// converts to a mutable slice, cloning to owned if needed
+    /// ensures the data is owned and returns a mutable slice.
+    ///
+    /// if the data is borrowed (either immutable or mutable), it will be cloned into owned memory
+    /// to allow mutable access.
     pub fn to_mut(&mut self) -> &mut [T]
     where
         T: Clone,
     {
         match self {
-            SmartSlice::Borrowed(slice) => {
-                *self = SmartSlice::Owned(slice.to_vec());
-                match self {
-                    SmartSlice::Owned(vec) => vec.as_mut_slice(),
-                    _ => unreachable!(),
-                }
-            }
+            SmartSlice::Borrowed(_) => unimplemented!("calling to_mut on immutable slice"),
             SmartSlice::BorrowedMut(slice) => slice,
             SmartSlice::Owned(vec) => vec.as_mut_slice(),
         }
@@ -64,18 +61,6 @@ impl<'a, T> SmartSlice<'a, T> {
     /// returns true if the slice is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// converts to an owned Vec<T>
-    pub fn into_owned(self) -> Vec<T>
-    where
-        T: Clone,
-    {
-        match self {
-            SmartSlice::Owned(vec) => vec,
-            SmartSlice::Borrowed(slice) => slice.to_vec(),
-            SmartSlice::BorrowedMut(slice) => slice.to_vec(),
-        }
     }
 
     /// clone inner vector
@@ -104,10 +89,7 @@ impl<'a, T> SmartSlice<'a, T> {
                 let len = slice.len().min(new_len);
                 SmartSlice::BorrowedMut(&mut slice[..len])
             }
-            SmartSlice::Borrowed(slice) => {
-                let vec = slice[..new_len.min(slice.len())].to_vec();
-                SmartSlice::Owned(vec)
-            }
+            SmartSlice::Borrowed(_) => unimplemented!("truncate on immutable slice"),
         };
         *self = new_self;
     }

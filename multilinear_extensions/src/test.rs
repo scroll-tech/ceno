@@ -14,26 +14,6 @@ use crate::{
     virtual_poly::build_eq_x_r,
 };
 
-// #[test]
-// fn test_virtual_polynomial_additions() {
-//     let mut rng = thread_rng();
-//     for nv in 2..5 {
-//         for num_products in 2..5 {
-//             let base: Vec<E> = (0..nv).map(|_| E::random(&mut rng)).collect();
-
-//             let (a, _a_sum) = VirtualPolynomial::<E>::random(nv, (2, 3), num_products, &mut rng);
-//             let (b, _b_sum) = VirtualPolynomial::<E>::random(nv, (2, 3), num_products, &mut rng);
-//             let mut c = a.clone();
-//             c.merge(&b);
-
-//             assert_eq!(
-//                 a.evaluate(base.as_ref()) + b.evaluate(base.as_ref()),
-//                 c.evaluate(base.as_ref())
-//             );
-//         }
-//     }
-// }
-
 #[test]
 fn test_eq_xr() {
     let mut rng = thread_rng();

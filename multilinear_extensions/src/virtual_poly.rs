@@ -258,7 +258,11 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
         (poly, sum)
     }
 
-    /// Sample a random virtual polynomial, return the polynomial and its sum.
+    /// creates a read-only view of the current virtual polynomial by converting all
+    /// underlying multilinear extensions into borrowed views. This avoids cloning
+    /// the full data while preserving structure.
+    ///
+    /// returns a new `VirtualPolynomial` containing views into the original data.
     pub fn as_view(&'a self) -> Self {
         let flattened_ml_extensions_view = self
             .flattened_ml_extensions

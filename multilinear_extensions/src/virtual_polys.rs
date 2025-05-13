@@ -88,7 +88,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         virtual_polys.register_mles(mles_storage);
 
         // convert expression into monomial_terms and add to virtual_polys
-        for expression in expressions.iter() {
+        for expression in expressions {
             let monomial_terms_expr = expression.get_monomial_terms();
             let monomial_terms = monomial_terms_expr
                 .into_iter()
@@ -118,8 +118,6 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
 pub struct VirtualPolynomials<'a, E: ExtensionField> {
     pub num_threads: usize,
     polys: Vec<VirtualPolynomial<'a, E>>,
-    /// a storage to keep thread based mles, specific to multi-thread logic
-    // thread_based_mles_storage: HashMap<usize, Vec<ArcMultilinearExtension<'a, E>>>,
     pub(crate) poly_meta: BTreeMap<usize, PolyMeta>,
 }
 
@@ -131,7 +129,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             polys: (0..num_threads)
                 .map(|_| VirtualPolynomial::new(max_num_variables - ceil_log2(num_threads)))
                 .collect_vec(),
-            // thread_based_mles_storage: HashMap::new(),
             poly_meta: BTreeMap::new(),
         }
     }
@@ -176,7 +173,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .collect_vec()
     }
 
-    /// registers a batch of multilinear extensions (MLEs) across all threads,
+    /// registers a batch of multilinear extensions (MLEs) reference across all threads,
     /// distributing each based on num_vars.
     ///
     /// for each input `mle`, if it is large enough (i.e., has more variables than `log2(num_threads)`),
@@ -194,7 +191,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             } else {
                 PolyMeta::Phase2Only
             };
-            // let mle_ptr: usize = Arc::as_ptr(&mle) as *const () as usize;
             let mles = match mle {
                 Either::Left(mle) => {
                     (0..self.num_threads)
@@ -235,7 +231,6 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 .unwrap();
             self.poly_meta.insert(index, poly_meta);
             indexes.push(index);
-            // self.thread_based_mles_storage.insert(mle_ptr, mles);
         }
         indexes
     }
