@@ -355,8 +355,8 @@ fn run_elf_inner<
     Ok(run_e2e_with_checkpoint::<E, PCS>(
         program,
         platform,
-        hints,
-        public_io,
+        &hints,
+        &public_io,
         options.max_steps,
         options.max_num_variables,
         options.security_level,

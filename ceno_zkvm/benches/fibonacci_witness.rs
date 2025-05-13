@@ -60,8 +60,8 @@ fn fibonacci_witness(c: &mut Criterion) {
                     let result = run_e2e_with_checkpoint::<E, Pcs>(
                         program.clone(),
                         platform.clone(),
-                        (&hints).into(),
-                        vec![],
+                        &Vec::from(&hints),
+                        &[],
                         max_steps,
                         MAX_NUM_VARIABLES,
                         SecurityLevel::default(),
