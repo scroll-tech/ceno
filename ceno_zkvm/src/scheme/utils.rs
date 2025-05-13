@@ -185,14 +185,12 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
                         .into_par_iter()
                         .map(|_| E::ONE)
                         .collect::<Vec<_>>()
-                        .into_mle()
-                        .into(),
+                        .into_mle(),
                     (0..len)
                         .into_par_iter()
                         .map(|_| E::ONE)
                         .collect::<Vec<_>>()
-                        .into_mle()
-                        .into(),
+                        .into_mle(),
                 ]
                 .into_iter()
                 .chain(q)

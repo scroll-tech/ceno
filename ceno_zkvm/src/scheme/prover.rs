@@ -871,10 +871,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 let (first, second) = wit
                     .get_ext_field_vec()
                     .split_at(wit.evaluations().len() / 2);
-                let res = vec![
-                    first.to_vec().into_mle().into(),
-                    second.to_vec().into_mle().into(),
-                ];
+                let res = vec![first.to_vec().into_mle(), second.to_vec().into_mle()];
                 assert_eq!(res.len(), NUM_FANIN_LOGUP);
                 res
             })
@@ -887,10 +884,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 let (first, second) = wit
                     .get_base_field_vec()
                     .split_at(wit.evaluations().len() / 2);
-                let res = vec![
-                    first.to_vec().into_mle().into(),
-                    second.to_vec().into_mle().into(),
-                ];
+                let res = vec![first.to_vec().into_mle(), second.to_vec().into_mle()];
                 assert_eq!(res.len(), NUM_FANIN_LOGUP);
                 res
             })
@@ -1080,7 +1074,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
                 let mut eq = eq;
                 let mut eq_rw: Vec<_> = eq.drain(..cs.r_table_expressions.len()).collect();
-                let mut eq_lk: Vec<_> = eq.drain(..).collect(); // drain the rest
+                let mut eq_lk: Vec<_> = std::mem::take(&mut eq); // drain the rest
 
                 let mut expr_builder = VirtualPolynomialsBuilder::default();
                 let mut exprs =
@@ -1284,8 +1278,9 @@ impl TowerProver {
 
         let mut layer_witness: Vec<Vec<GroupedMLE<'a, E>>> = vec![Vec::new(); max_round_index + 1];
 
+        #[allow(clippy::type_complexity)]
         fn merge_spec_witness<'a, E: ExtensionField>(
-            merged: &mut Vec<Vec<GroupedMLE<'a, E>>>,
+            merged: &mut [Vec<GroupedMLE<'a, E>>],
             spec: TowerProverSpec<'a, E>,
             index: usize,
             group_ctor: fn((usize, Vec<MultilinearExtension<'a, E>>)) -> GroupedMLE<'a, E>,
@@ -1330,7 +1325,7 @@ impl TowerProver {
                                 .all(|f| { f.evaluations().len() == 1 << (log_num_fanin * round) })
                         );
                         let layer_polys = layer_polys
-                            .into_iter()
+                            .iter_mut()
                             .map(|layer_poly| expr_builder.lift(Either::Right(layer_poly)))
                             .collect_vec();
                         witness_prod_expr[*i].extend(layer_polys.clone());
@@ -1409,8 +1404,9 @@ impl TowerProver {
             );
             let evals = state.get_mle_flatten_final_evaluations();
             // retrieve final evaluation to proof
-            for i in 0..prod_specs_len {
-                let evals = witness_prod_expr[i]
+            for (i, witness_prod_expr) in witness_prod_expr.iter().enumerate().take(prod_specs_len)
+            {
+                let evals = witness_prod_expr
                     .iter()
                     .map(|expr| match expr {
                         Expression::WitIn(wit_id) => evals[*wit_id as usize],
@@ -1422,8 +1418,8 @@ impl TowerProver {
                     proofs.push_prod_evals_and_point(i, evals, rt_prime.clone());
                 }
             }
-            for i in 0..logup_specs_len {
-                let evals = witness_lk_expr[i]
+            for (i, witness_lk_expr) in witness_lk_expr.iter().enumerate().take(logup_specs_len) {
+                let evals = witness_lk_expr
                     .iter()
                     .map(|expr| match expr {
                         Expression::WitIn(wit_id) => evals[*wit_id as usize],

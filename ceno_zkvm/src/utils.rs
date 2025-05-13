@@ -300,7 +300,7 @@ mod tests {
     use multilinear_extensions::{
         Expression, ToExpr,
         mle::{ArcMultilinearExtension, IntoMLE},
-        virtual_polys::VirtualPolynomials,
+        virtual_polys::VirtualPolynomialsBuilder,
     };
     use p3::field::PrimeCharacteristicRing;
 
@@ -323,13 +323,15 @@ mod tests {
             .map(|_| vec![F::from_u64(1)].into_mle().into())
             .collect();
 
-        let mut virtual_polys = VirtualPolynomials::new(1, 0);
+        let mut expr_builder = VirtualPolynomialsBuilder::default();
+        let mut exprs = vec![];
 
         // 3xy + 2y
         let expr: Expression<E> = 3 * x.expr() * y.expr() + 2 * y.expr();
 
         let distrinct_zerocheck_terms_set = add_mle_list_by_expr(
-            &mut virtual_polys,
+            &mut expr_builder,
+            &mut exprs,
             None,
             wits_in.iter().collect_vec(),
             &expr,
@@ -337,12 +339,20 @@ mod tests {
             GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 2);
-        assert!(virtual_polys.degree() == 2);
+        assert!(
+            expr_builder
+                .to_virtual_polys(1, 0, &[exprs.into_iter().sum::<Expression<E>>()], &[])
+                .degree()
+                == 2
+        );
 
         // 3x^3
+        let mut expr_builder = VirtualPolynomialsBuilder::default();
+        let mut exprs = vec![];
         let expr: Expression<E> = 3 * x.expr() * x.expr() * x.expr();
         let distrinct_zerocheck_terms_set = add_mle_list_by_expr(
-            &mut virtual_polys,
+            &mut expr_builder,
+            &mut exprs,
             None,
             wits_in.iter().collect_vec(),
             &expr,
@@ -350,6 +360,11 @@ mod tests {
             GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 1);
-        assert!(virtual_polys.degree() == 3);
+        assert!(
+            expr_builder
+                .to_virtual_polys(1, 0, &[exprs.into_iter().sum::<Expression<E>>()], &[])
+                .degree()
+                == 3
+        );
     }
 }

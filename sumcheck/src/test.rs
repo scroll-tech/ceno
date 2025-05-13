@@ -7,6 +7,7 @@ use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
 use multilinear_extensions::{
     mle::Point,
+    monomial::Term,
     util::max_usable_threads,
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
@@ -45,14 +46,9 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
         max_num_variables,
         monimials
             .iter_mut()
-            .map(|(scalar, product)| {
-                (
-                    Either::Right(*scalar),
-                    product
-                        .iter_mut()
-                        .map(|mle| Either::Right(mle))
-                        .collect_vec(),
-                )
+            .map(|Term { scalar, product }| Term {
+                scalar: Either::Right(*scalar),
+                product: product.iter_mut().map(Either::Right).collect_vec(),
             })
             .collect_vec(),
     );

@@ -15,8 +15,12 @@ use itertools::Itertools;
 use p3::util::log2_strict_usize;
 use rand::Rng;
 
-pub type MonomialTermsType<'a, E> =
+pub type MonomialTermsType<S, P> = Vec<Term<S, P>>;
+pub type MonomialTermsExpr<'a, E> =
     Vec<Term<Either<<E as ExtensionField>::BaseField, E>, Expression<E>>>;
+pub type MonomialTermsMLE<'a, E> = Vec<Term<E, MultilinearExtension<'a, E>>>;
+pub type EitherRefMLE<'a, E> =
+    Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub enum PolyMeta {
@@ -33,13 +37,7 @@ pub enum PolyMeta {
 #[derive(Default)]
 pub struct VirtualPolynomialsBuilder<'a, E: ExtensionField> {
     num_witin: WitnessId,
-    mles_storage: BTreeMap<
-        usize,
-        (
-            usize,
-            Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>,
-        ),
-    >,
+    mles_storage: BTreeMap<usize, (usize, EitherRefMLE<'a, E>)>,
     _phantom: PhantomData<E>,
 }
 
@@ -90,7 +88,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         virtual_polys.register_mles(mles_storage);
 
         // convert expression into monomial_terms and add to virtual_polys
-        for (_, expression) in expressions.iter().enumerate() {
+        for expression in expressions.iter() {
             let monomial_terms_expr = expression.get_monomial_terms();
             let monomial_terms = monomial_terms_expr
                 .into_iter()
@@ -141,15 +139,12 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     pub fn new_from_monimials(
         num_threads: usize,
         max_num_variables: usize,
-        monimials: Vec<(
-            Either<E::BaseField, E>,
-            Vec<Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>>,
-        )>,
+        monomials: MonomialTermsType<Either<E::BaseField, E>, EitherRefMLE<'a, E>>,
     ) -> Self {
-        assert!(!monimials.is_empty());
+        assert!(!monomials.is_empty());
 
         let mut poly = VirtualPolynomials::new(num_threads, max_num_variables);
-        for (scalar, product) in monimials {
+        for Term { scalar, product } in monomials {
             assert!(
                 product.iter().map(|mle| mle.num_vars()).all_equal(),
                 "all product must got same num_vars"
@@ -190,10 +185,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     ///
     /// the per-thread instances are registered locally and stored in `thread_based_mles_storage`
     /// using the MLE’s raw pointer as the key to ensure uniqueness and reference consistency.
-    pub fn register_mles(
-        &mut self,
-        mles: Vec<Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>>,
-    ) -> Vec<usize> {
+    pub fn register_mles(&mut self, mles: Vec<EitherRefMLE<'a, E>>) -> Vec<usize> {
         let log2_num_threads = log2_strict_usize(self.num_threads);
         let mut indexes = vec![];
         for mle in mles {
@@ -222,12 +214,12 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                     if mle.num_vars() > log2_num_threads {
                         mle.split_mle_into_chunks(self.num_threads)
                             .into_iter()
-                            .map(|mle| Arc::new(mle))
+                            .map(Arc::new)
                             .collect_vec()
                     } else {
                         vec![mle.as_owned(); self.num_threads]
                             .into_iter()
-                            .map(|mle| Arc::new(mle))
+                            .map(Arc::new)
                             .collect_vec()
                     }
                 }
@@ -249,7 +241,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
     }
 
     /// Adds a group of monomial terms to the current expression set.
-    fn add_monomial_terms(&mut self, monomial_terms: MonomialTermsType<'a, E>) {
+    fn add_monomial_terms(&mut self, monomial_terms: MonomialTermsExpr<'a, E>) {
         self.polys
             .iter_mut()
             .for_each(|poly| poly.add_monomial_terms(monomial_terms.clone()));
@@ -308,7 +300,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         num_multiplicands_range: (usize, usize),
         num_products: usize,
         rng: &mut R,
-    ) -> (Vec<(E, Vec<MultilinearExtension<'a, E>>)>, E) {
+    ) -> (MonomialTermsMLE<'a, E>, E) {
         let start = entered_span!("sample random virtual polynomial");
 
         let mut sum = E::ZERO;
@@ -321,7 +313,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 let (product, product_sum) =
                     MultilinearExtension::random_mle_list(*nv, num_multiplicands, rng);
                 let scalar = E::random(&mut *rng);
-                monimial_term.push((scalar, product));
+                monimial_term.push(Term { scalar, product });
                 // need to scale up for the smaller nv
                 sum += E::from_u64(1 << (max_num_variables - nv)) * product_sum * scalar;
             }

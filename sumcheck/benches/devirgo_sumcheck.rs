@@ -12,8 +12,8 @@ use rand::thread_rng;
 use sumcheck::structs::IOPProverState;
 
 use multilinear_extensions::{
-    mle::MultilinearExtension, op_mle, util::max_usable_threads, virtual_poly::VirtualPolynomial,
-    virtual_polys::VirtualPolynomials,
+    mle::MultilinearExtension, monomial::Term, op_mle, util::max_usable_threads,
+    virtual_poly::VirtualPolynomial, virtual_polys::VirtualPolynomials,
 };
 use transcript::BasicTranscript as Transcript;
 
@@ -122,10 +122,10 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                         let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
                             threads,
                             nv,
-                            vec![(
-                                Either::Right(E::ONE),
-                                fs.iter().map(|fs| Either::Left(fs)).collect_vec(),
-                            )],
+                            vec![Term {
+                                scalar: Either::Right(E::ONE),
+                                product: fs.iter().map(Either::Left).collect_vec(),
+                            }],
                         );
                         let instant = std::time::Instant::now();
                         let (_sumcheck_proof_v2, _) =
@@ -151,10 +151,10 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                         let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
                             threads,
                             nv,
-                            vec![(
-                                Either::Right(E::ONE),
-                                fs.iter_mut().map(|fs| Either::Right(fs)).collect_vec(),
-                            )],
+                            vec![Term {
+                                scalar: Either::Right(E::ONE),
+                                product: fs.iter_mut().map(Either::Right).collect_vec(),
+                            }],
                         );
                         let instant = std::time::Instant::now();
                         let (_sumcheck_proof_v2, _) =

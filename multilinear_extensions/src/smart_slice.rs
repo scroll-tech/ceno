@@ -42,7 +42,7 @@ impl<'a, T> SmartSlice<'a, T> {
                     _ => unreachable!(),
                 }
             }
-            SmartSlice::BorrowedMut(slice) => *slice,
+            SmartSlice::BorrowedMut(slice) => slice,
             SmartSlice::Owned(vec) => vec.as_mut_slice(),
         }
     }
@@ -51,7 +51,7 @@ impl<'a, T> SmartSlice<'a, T> {
     pub fn as_slice(&self) -> &[T] {
         match self {
             SmartSlice::Borrowed(slice) => slice,
-            SmartSlice::BorrowedMut(slice) => &**slice,
+            SmartSlice::BorrowedMut(slice) => slice,
             SmartSlice::Owned(vec) => vec.as_slice(),
         }
     }
@@ -146,7 +146,7 @@ impl<'a, T: Clone> Clone for SmartSlice<'a, T> {
     /// clones the slice (panics on BorrowedMut)
     fn clone(&self) -> Self {
         match self {
-            SmartSlice::Borrowed(slice) => SmartSlice::Borrowed(*slice),
+            SmartSlice::Borrowed(slice) => SmartSlice::Borrowed(slice),
             SmartSlice::BorrowedMut(_) => {
                 unimplemented!("clone not supported on mutable slice")
             }
@@ -173,7 +173,7 @@ impl<'a, T: Hash> Hash for SmartSlice<'a, T> {
 
 impl<'de, 'a, T> Deserialize<'de> for SmartSlice<'a, T>
 where
-    T: ?Sized + ToOwned,
+    T: ToOwned,
     T: Deserialize<'de>,
 {
     /// deserializes into owned Vec<T>
