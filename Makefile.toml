@@ -32,8 +32,6 @@ command = "cargo"
 workspace = false
 
 [tasks.cli]
-env = { "JEMALLOC_SYS_WITH_MALLOC_CONF" = "retain:true,metadata_thp:always,thp:always,dirty_decay_ms:-1,muzzy_decay_ms:-1,abort_conf:true" }
-command = "cargo"
 args = [
   "install",
   "--features",
@@ -41,6 +39,8 @@ args = [
   "--features",
   "nightly-features",
   "--path",
-  "./ceno_cli"
+  "./ceno_cli",
 ]
+command = "cargo"
+env = { "JEMALLOC_SYS_WITH_MALLOC_CONF" = "retain:true,metadata_thp:always,thp:always,dirty_decay_ms:-1,muzzy_decay_ms:-1,abort_conf:true" }
 workspace = false
