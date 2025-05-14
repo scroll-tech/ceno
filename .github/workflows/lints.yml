@@ -43,6 +43,7 @@ jobs:
       - name: Install cargo make
         run: |
           cargo make --version || cargo install cargo-make
+
       - name: Check code format
         run: cargo fmt --all --check
 
