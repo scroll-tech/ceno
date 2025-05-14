@@ -181,7 +181,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .into_iter()
             .map(|poly| {
                 let range_poly: ArcMultilinearExtension<E> =
-                    Arc::new(poly.as_view_subslice(self.num_threads, thread_id));
+                    Arc::new(poly.as_view_slice(self.num_threads, thread_id));
                 range_poly
             })
             .collect_vec()
@@ -214,7 +214,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                                     .remove(0)
                             } else {
                                 // polynomial is too small
-                                Arc::new(mle.as_view_subslice(1, 0))
+                                Arc::new(mle.as_view_slice(1, 0))
                             };
                             mle_thread_based
                         })
@@ -222,7 +222,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 }
                 Either::Right(mle) => {
                     if mle.num_vars() > log2_num_threads {
-                        mle.split_mle_into_chunks(self.num_threads)
+                        mle.as_view_chunks_mut(self.num_threads)
                             .into_iter()
                             .map(Arc::new)
                             .collect_vec()

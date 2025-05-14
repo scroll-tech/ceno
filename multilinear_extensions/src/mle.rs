@@ -365,29 +365,30 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
             // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,
             // b2,..bt, 1] in parallel
             match &mut self.evaluations {
-                FieldType::Base(evaluations) => {
-                    let evaluations_ext = evaluations
+                FieldType::Base(slice) => {
+                    let slice_ext = slice
                         .chunks(2)
                         .map(|buf| *point * (buf[1] - buf[0]) + buf[0])
                         .collect();
                     let _ = mem::replace(
                         &mut self.evaluations,
-                        FieldType::Ext(SmartSlice::Owned(evaluations_ext)),
+                        FieldType::Ext(SmartSlice::Owned(slice_ext)),
                     );
                 }
-                FieldType::Ext(evaluations) => {
-                    let buf = evaluations.to_mut();
-                    (0..buf.len())
-                        .step_by(2)
-                        .for_each(|b| buf[b >> 1] = buf[b] + (buf[b + 1] - buf[b]) * *point);
+                FieldType::Ext(slice) => {
+                    let slice_mut = slice.to_mut();
+                    (0..slice_mut.len()).step_by(2).for_each(|b| {
+                        slice_mut[b >> 1] =
+                            slice_mut[b] + (slice_mut[b + 1] - slice_mut[b]) * *point
+                    });
                 }
                 FieldType::Unreachable => unreachable!(),
             };
         }
         match &mut self.evaluations {
             FieldType::Base(_) => unreachable!(),
-            FieldType::Ext(evaluations) => {
-                evaluations.truncate_mut(1 << (nv - partial_point.len()));
+            FieldType::Ext(slice) => {
+                slice.truncate_mut(1 << (nv - partial_point.len()));
             }
             FieldType::Unreachable => unreachable!(),
         }
@@ -441,9 +442,9 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         for point in partial_point.iter().rev() {
             let half_size = current_eval_size >> 1;
             match &mut self.evaluations {
-                FieldType::Base(evaluations) => {
-                    let (lo, hi) = evaluations.split_at(half_size);
-                    let evaluations_ext = lo
+                FieldType::Base(slice) => {
+                    let (lo, hi) = slice.split_at(half_size);
+                    let slice_ext = lo
                         .par_iter()
                         .zip(hi)
                         .with_min_len(64)
@@ -451,12 +452,12 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
                         .collect();
                     let _ = mem::replace(
                         &mut self.evaluations,
-                        FieldType::Ext(SmartSlice::Owned(evaluations_ext)),
+                        FieldType::Ext(SmartSlice::Owned(slice_ext)),
                     );
                     current_eval_size = half_size;
                 }
-                FieldType::Ext(evaluations) => {
-                    let (lo, hi) = evaluations.to_mut().split_at_mut(half_size);
+                FieldType::Ext(slice) => {
+                    let (lo, hi) = slice.to_mut().split_at_mut(half_size);
                     lo.par_iter_mut()
                         .zip(hi)
                         .with_min_len(64)
@@ -468,8 +469,8 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         }
         match &mut self.evaluations {
             FieldType::Base(_) => {}
-            FieldType::Ext(evaluations) => {
-                evaluations.truncate_mut(current_eval_size);
+            FieldType::Ext(slice) => {
+                slice.truncate_mut(current_eval_size);
             }
             FieldType::Unreachable => unreachable!(),
         }
@@ -550,8 +551,8 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
             let max_log2_size = nv - i;
             // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
             match &mut self.evaluations {
-                FieldType::Base(evaluations) => {
-                    let evaluations_ext = evaluations
+                FieldType::Base(slice) => {
+                    let slice_ext = slice
                         .par_iter()
                         .chunks(2)
                         .with_min_len(64)
@@ -559,19 +560,20 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
                         .collect();
                     let _ = mem::replace(
                         &mut self.evaluations,
-                        FieldType::Ext(SmartSlice::Owned(evaluations_ext)),
+                        FieldType::Ext(SmartSlice::Owned(slice_ext)),
                     );
                 }
-                FieldType::Ext(evaluations) => {
-                    let buf = evaluations.to_mut();
-                    buf.par_iter_mut()
+                FieldType::Ext(slice) => {
+                    let slice_mut = slice.to_mut();
+                    slice_mut
+                        .par_iter_mut()
                         .chunks(2)
                         .with_min_len(64)
                         .for_each(|mut buf| *buf[0] = *buf[0] + (*buf[1] - *buf[0]) * *point);
 
                     // sequentially update buf[b1, b2,..bt] = buf[b1, b2,..bt, 0]
                     for index in 0..1 << (max_log2_size - 1) {
-                        buf[index] = buf[index << 1];
+                        slice_mut[index] = slice_mut[index << 1];
                     }
                 }
                 FieldType::Unreachable => unreachable!(),
@@ -579,8 +581,8 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         }
         match &mut self.evaluations {
             FieldType::Base(_) => unreachable!(),
-            FieldType::Ext(evaluations) => {
-                evaluations.truncate_mut(1 << (nv - partial_point.len()));
+            FieldType::Ext(slice) => {
+                slice.truncate_mut(1 << (nv - partial_point.len()));
             }
             FieldType::Unreachable => unreachable!(),
         }
@@ -596,12 +598,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         self.evaluations
     }
 
-    pub fn name(&self) -> &'static str {
-        "MultilinearExtension"
-    }
-
     pub fn merge(&mut self, rhs: MultilinearExtension<'a, E>) {
-        assert_eq!(rhs.name(), "MultilinearExtension");
         let rhs_num_vars = rhs.num_vars;
 
         // Take owned version of RHS evaluations
@@ -631,121 +628,110 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         }
     }
 
-    /// get mle with only subslice range
     pub fn as_view(&self) -> MultilinearExtension<'_, E> {
-        self.as_view_subslice(1, 0)
+        self.as_view_slice(1, 0)
     }
 
-    /// get mle with only subslice range
-    pub fn as_view_subslice(
+    /// get mle with arbitrary start end
+    pub fn as_view_slice(
         &self,
-        num_range: usize,
-        range_index: usize,
+        num_chunks: usize,
+        chunk_index: usize,
     ) -> MultilinearExtension<'_, E> {
-        assert!(num_range > 0);
         let total_len = self.evaluations.len();
-        let offset = total_len / num_range;
+        let chunk_size = total_len / num_chunks;
         assert!(
-            offset > 0,
-            "invalid: {num_range} > evaluation length {total_len}"
+            num_chunks > 0
+                && total_len % num_chunks == 0
+                && chunk_size > 0
+                && chunk_index < num_chunks,
+            "invalid num_chunks: {num_chunks} total_len: {total_len}, chunk_index {chunk_index} parameter set"
         );
-        let start = offset * range_index;
+        let start = chunk_size * chunk_index;
 
         let sub_evaluations = match &self.evaluations {
-            FieldType::Base(evals) => {
-                FieldType::Base(SmartSlice::Borrowed(&evals[start..start + offset]))
+            FieldType::Base(slice) => {
+                FieldType::Base(SmartSlice::Borrowed(&slice[start..][..chunk_size]))
             }
-            FieldType::Ext(evals) => {
-                FieldType::Ext(SmartSlice::Borrowed(&evals[start..start + offset]))
+            FieldType::Ext(slice) => {
+                FieldType::Ext(SmartSlice::Borrowed(&slice[start..][..chunk_size]))
             }
             FieldType::Unreachable => FieldType::Unreachable,
         };
 
         MultilinearExtension {
             evaluations: sub_evaluations,
-            num_vars: self.num_vars - num_range.trailing_zeros() as usize,
+            num_vars: self.num_vars - num_chunks.trailing_zeros() as usize,
         }
     }
 
-    /// get mut mle with only subslice range
-    pub fn as_mut_slice(&mut self) -> MultilinearExtension<'_, E> {
-        self.as_mut_subslice(1, 0)
+    /// get mutable view
+    pub fn as_view_mut(&mut self) -> MultilinearExtension<'_, E> {
+        self.as_view_slice_mut(1, 0)
     }
 
-    pub fn as_mut_subslice(
+    pub fn as_view_slice_mut(
         &mut self,
-        num_range: usize,
-        range_index: usize,
+        num_chunks: usize,
+        chunk_index: usize,
     ) -> MultilinearExtension<'_, E> {
-        assert!(num_range > 0);
         let total_len = self.evaluations.len();
-        let offset = total_len / num_range;
+        let chunk_size = total_len / num_chunks;
         assert!(
-            offset > 0,
-            "invalid: {num_range} > evaluation length {total_len}"
+            num_chunks > 0
+                && total_len % num_chunks == 0
+                && chunk_size > 0
+                && chunk_index < num_chunks,
+            "invalid num_chunks: {num_chunks} total_len: {total_len}, chunk_index {chunk_index} parameter set"
         );
-        let start = offset * range_index;
+        let start = chunk_size * chunk_index;
 
         let sub_evaluations = match &mut self.evaluations {
-            FieldType::Base(SmartSlice::BorrowedMut(evals)) => {
-                let slice = &mut evals[start..start + offset];
+            FieldType::Base(SmartSlice::BorrowedMut(slice)) => {
+                let slice = &mut slice[start..][..chunk_size];
                 FieldType::Base(SmartSlice::BorrowedMut(slice))
             }
-            FieldType::Ext(SmartSlice::BorrowedMut(evals)) => {
-                let slice = &mut evals[start..start + offset];
-                FieldType::Ext(SmartSlice::BorrowedMut(slice))
+            FieldType::Ext(SmartSlice::BorrowedMut(slice)) => {
+                FieldType::Ext(SmartSlice::BorrowedMut(&mut slice[start..][..chunk_size]))
             }
-            FieldType::Base(SmartSlice::Owned(vec)) => {
-                let slice = &mut vec[start..start + offset];
-                FieldType::Base(SmartSlice::BorrowedMut(slice))
+            FieldType::Base(SmartSlice::Owned(slice)) => {
+                FieldType::Base(SmartSlice::BorrowedMut(&mut slice[start..][..chunk_size]))
             }
-            FieldType::Ext(SmartSlice::Owned(vec)) => {
-                let slice = &mut vec[start..start + offset];
-                FieldType::Ext(SmartSlice::BorrowedMut(slice))
+            FieldType::Ext(SmartSlice::Owned(slice)) => {
+                FieldType::Ext(SmartSlice::BorrowedMut(&mut slice[start..][..chunk_size]))
             }
-            _ => unimplemented!("Unsupported variant for as_view_mut_subslice"),
+            _ => unimplemented!("Unsupported variant"),
         };
 
         MultilinearExtension {
             evaluations: sub_evaluations,
-            num_vars: self.num_vars - num_range.trailing_zeros() as usize,
+            num_vars: self.num_vars - num_chunks.trailing_zeros() as usize,
         }
     }
 
     pub fn get_ext_field_vec(&self) -> &[E] {
         match &self.evaluations() {
-            FieldType::Ext(evaluations) => evaluations.as_ref(),
+            FieldType::Ext(slice) => slice.as_ref(),
             _ => panic!("evaluation not in extension field"),
         }
     }
 
     pub fn get_base_field_vec(&self) -> &[E::BaseField] {
         match &self.evaluations() {
-            FieldType::Base(evaluations) => evaluations.as_ref(),
+            FieldType::Base(slice) => slice.as_ref(),
             _ => panic!("evaluation not in base field"),
         }
     }
 
     /// splits the MLE into `num_chunks` parts, where each part contains disjoint mutable pointers
     /// to the original data (either borrowed mutably or owned).
-    ///
-    /// # panics
-    /// panics if:
-    /// - `num_chunks` is zero,
-    /// - the data length is not divisible by `num_chunks`,
-    /// - or the underlying data is neither owned nor mutably borrowed.
-    pub fn split_mle_into_chunks(
-        &'a mut self,
-        num_chunks: usize,
-    ) -> Vec<MultilinearExtension<'a, E>> {
-        assert!(num_chunks > 0, "num_chunks must be > 0");
-        let len = self.evaluations.len();
-        assert_eq!(
-            len % num_chunks,
-            0,
-            "Evaluation length must be divisible by num_chunks"
+    pub fn as_view_chunks_mut(&'a mut self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
+        let total_len = self.evaluations.len();
+        let chunk_size = total_len / num_chunks;
+        assert!(
+            num_chunks > 0 && total_len % num_chunks == 0 && chunk_size > 0,
+            "invalid num_chunks: {num_chunks} total_len: {total_len} parameter set"
         );
-        let chunk_size = len / num_chunks;
         let num_vars_per_chunk = self.num_vars - ceil_log2(num_chunks);
 
         macro_rules! split_eval_chunks {
@@ -784,8 +770,8 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
 
     pub fn as_owned(&self) -> Self {
         let owned_eval = match &self.evaluations {
-            FieldType::Base(data) => FieldType::Base(SmartSlice::Owned(data.to_vec())),
-            FieldType::Ext(data) => FieldType::Ext(SmartSlice::Owned(data.to_vec())),
+            FieldType::Base(slice) => FieldType::Base(SmartSlice::Owned(slice.to_vec())),
+            FieldType::Ext(slice) => FieldType::Ext(SmartSlice::Owned(slice.to_vec())),
             FieldType::Unreachable => FieldType::Unreachable,
         };
         MultilinearExtension {
