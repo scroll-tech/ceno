@@ -34,14 +34,25 @@ pub enum PolyMeta {
 ///
 /// this struct manages witness identifiers and multilinear extensions (mles),
 /// enabling reuse and deduplication of polynomial
-#[derive(Default)]
 pub struct VirtualPolynomialsBuilder<'a, E: ExtensionField> {
     num_witin: WitnessId,
     mles_storage: BTreeMap<usize, (usize, EitherRefMLE<'a, E>)>,
+    num_threads: usize,
+    max_num_variables: usize,
     _phantom: PhantomData<E>,
 }
 
 impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
+    /// create a new `VirtualPolynomialsBuilder` with the given number and max number of vars
+    pub fn new(num_threads: usize, max_num_variables: usize) -> Self {
+        Self {
+            num_witin: WitnessId::default(),
+            mles_storage: BTreeMap::new(),
+            num_threads,
+            max_num_variables,
+            _phantom: PhantomData,
+        }
+    }
     /// lifts a reference to a `MultilinearExtension` into an `Expression::WitIn`
     ///
     /// assigns a unique witness index based on pointer identity, reusing the same index
@@ -73,8 +84,6 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
 
     pub fn to_virtual_polys(
         self,
-        num_threads: usize,
-        max_num_variables: usize,
         expressions: &[Expression<E>],
         challenges: &[E],
     ) -> VirtualPolynomials<'a, E> {
@@ -87,7 +96,8 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
             .map(|(_, mle)| mle) // extract &ArcMultilinearExtension
             .collect::<Vec<_>>();
 
-        let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, max_num_variables);
+        let mut virtual_polys =
+            VirtualPolynomials::<E>::new(self.num_threads, self.max_num_variables);
         // register mles to assure index matching the arc_poly order
         virtual_polys.register_mles(mles_storage);
 

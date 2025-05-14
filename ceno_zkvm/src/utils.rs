@@ -323,7 +323,7 @@ mod tests {
             .map(|_| vec![F::from_u64(1)].into_mle().into())
             .collect();
 
-        let mut expr_builder = VirtualPolynomialsBuilder::default();
+        let mut expr_builder = VirtualPolynomialsBuilder::new(1, 0);
         let mut exprs = vec![];
 
         // 3xy + 2y
@@ -341,13 +341,13 @@ mod tests {
         assert!(distrinct_zerocheck_terms_set.len() == 2);
         assert!(
             expr_builder
-                .to_virtual_polys(1, 0, &[exprs.into_iter().sum::<Expression<E>>()], &[])
+                .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>()], &[])
                 .degree()
                 == 2
         );
 
         // 3x^3
-        let mut expr_builder = VirtualPolynomialsBuilder::default();
+        let mut expr_builder = VirtualPolynomialsBuilder::new(1, 0);
         let mut exprs = vec![];
         let expr: Expression<E> = 3 * x.expr() * x.expr() * x.expr();
         let distrinct_zerocheck_terms_set = add_mle_list_by_expr(
@@ -362,7 +362,7 @@ mod tests {
         assert!(distrinct_zerocheck_terms_set.len() == 1);
         assert!(
             expr_builder
-                .to_virtual_polys(1, 0, &[exprs.into_iter().sum::<Expression<E>>()], &[])
+                .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>()], &[])
                 .degree()
                 == 3
         );

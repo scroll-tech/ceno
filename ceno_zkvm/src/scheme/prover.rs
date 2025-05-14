@@ -615,7 +615,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         );
 
         let mut exprs = vec![];
-        let mut expr_builder = VirtualPolynomialsBuilder::default();
+        let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, log2_num_instances);
         let (
             sel_r,
             r_records_combined,
@@ -700,12 +700,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         tracing::debug!("main sel sumcheck start");
         let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(
-            expr_builder.to_virtual_polys(
-                num_threads,
-                log2_num_instances,
-                &[exprs.into_iter().sum()],
-                &[],
-            ),
+            expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
             transcript,
         );
         tracing::debug!("main sel sumcheck end");
@@ -1076,7 +1071,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 let mut eq_rw: Vec<_> = eq.drain(..cs.r_table_expressions.len()).collect();
                 let mut eq_lk: Vec<_> = std::mem::take(&mut eq); // drain the rest
 
-                let mut expr_builder = VirtualPolynomialsBuilder::default();
+                let mut expr_builder =
+                    VirtualPolynomialsBuilder::new(num_threads, max_log2_num_instance);
                 let mut exprs =
                     Vec::<Expression<E>>::with_capacity(r_set_wit.len() + lk_n_wit.len());
                 let mut witness_rw_expr = Vec::<Expression<E>>::with_capacity(r_set_wit.len() * 2);
@@ -1119,12 +1115,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 }
 
                 let (same_r_sumcheck_proofs, state) = IOPProverState::prove(
-                    expr_builder.to_virtual_polys(
-                        num_threads,
-                        max_log2_num_instance,
-                        &[exprs.into_iter().sum()],
-                        &[],
-                    ),
+                    expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
                     transcript,
                 );
                 let evals = state.get_mle_flatten_final_evaluations();
@@ -1305,7 +1296,7 @@ impl TowerProver {
             // in first few round we just run on single thread
             let num_threads = optimal_sumcheck_threads(out_rt.len());
             let mut exprs = Vec::<Expression<E>>::with_capacity(prod_specs_len + logup_specs_len);
-            let mut expr_builder = VirtualPolynomialsBuilder::default();
+            let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
             let mut witness_prod_expr = vec![vec![]; prod_specs_len];
             let mut witness_lk_expr = vec![vec![]; logup_specs_len];
 
@@ -1381,12 +1372,7 @@ impl TowerProver {
 
             let wrap_batch_span = entered_span!("wrap_batch");
             let (sumcheck_proofs, state) = IOPProverState::prove(
-                expr_builder.to_virtual_polys(
-                    num_threads,
-                    out_rt.len(),
-                    &[exprs.into_iter().sum()],
-                    &[],
-                ),
+                expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
                 transcript,
             );
             exit_span!(wrap_batch_span);

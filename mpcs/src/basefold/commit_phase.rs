@@ -214,7 +214,7 @@ where
     let num_threads = optimal_sumcheck_threads(max_num_vars);
     let log2_num_threads = log2_strict_usize(num_threads);
 
-    let mut expr_builder = VirtualPolynomialsBuilder::default();
+    let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, max_num_vars);
     let eq_expr = eq
         .iter_mut()
         .map(|eq| expr_builder.lift(Either::Right(eq)))
@@ -224,8 +224,6 @@ where
         .map(|initial_rlc_evals| expr_builder.lift(Either::Right(initial_rlc_evals)))
         .collect_vec();
     let polys = expr_builder.to_virtual_polys(
-        num_threads,
-        max_num_vars,
         // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
         &[eq_expr
             .into_iter()
