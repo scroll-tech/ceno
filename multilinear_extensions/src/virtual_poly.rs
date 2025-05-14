@@ -478,23 +478,9 @@ mod tests {
             let r = (0..num_vars)
                 .map(|_| GoldilocksExt2::random(&mut rng))
                 .collect::<Vec<GoldilocksExt2>>();
-
-            let seq_start = std::time::Instant::now();
             let eq_r_seq = build_eq_x_r_vec_sequential(&r);
-            let seq_time = seq_start.elapsed();
-
-            let par_start = std::time::Instant::now();
             let eq_r_par = build_eq_x_r_vec(&r);
-            let par_time = par_start.elapsed();
-
             assert_eq!(eq_r_par, eq_r_seq);
-            log::info!(
-                "nv = {}, par_time: {:?}, seq_time: {:?}, speedup: {}",
-                num_vars,
-                par_time,
-                seq_time,
-                (seq_time.as_micros() as f64) / (par_time.as_micros() as f64)
-            );
         }
     }
 }
