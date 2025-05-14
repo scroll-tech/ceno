@@ -751,56 +751,54 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         match &mut self.evaluations {
             // handle splitting a mutable borrowed slice into disjoint mutable slices
             FieldType::Base(SmartSlice::BorrowedMut(slice)) => {
-                let mut result = Vec::with_capacity(num_chunks);
                 let ptr = slice.as_mut_ptr();
-                for i in 0..num_chunks {
-                    let start = i * chunk_size;
-                    let chunk =
-                        unsafe { std::slice::from_raw_parts_mut(ptr.add(start), chunk_size) };
-                    result.push(MultilinearExtension {
-                        evaluations: FieldType::Base(SmartSlice::BorrowedMut(chunk)),
-                        num_vars: num_vars_per_chunk,
-                    });
-                }
-                result
+                (0..num_chunks)
+                    .scan(ptr, |current_ptr, _| {
+                        unsafe {
+                            let chunk = std::slice::from_raw_parts_mut(*current_ptr, chunk_size);
+                            // advance the pointer by chunk_size elements
+                            *current_ptr = current_ptr.add(chunk_size);
+                            Some(MultilinearExtension {
+                                evaluations: FieldType::Base(SmartSlice::BorrowedMut(chunk)),
+                                num_vars: num_vars_per_chunk,
+                            })
+                        }
+                    })
+                    .collect::<Vec<_>>()
             }
 
             FieldType::Ext(SmartSlice::BorrowedMut(slice)) => {
-                let mut result = Vec::with_capacity(num_chunks);
                 let ptr = slice.as_mut_ptr();
-                for i in 0..num_chunks {
-                    let start = i * chunk_size;
-                    let chunk =
-                        unsafe { std::slice::from_raw_parts_mut(ptr.add(start), chunk_size) };
-                    result.push(MultilinearExtension {
-                        evaluations: FieldType::Ext(SmartSlice::BorrowedMut(chunk)),
-                        num_vars: num_vars_per_chunk,
-                    });
-                }
-                result
+                (0..num_chunks)
+                    .scan(ptr, |current_ptr, _| {
+                        unsafe {
+                            let chunk = std::slice::from_raw_parts_mut(*current_ptr, chunk_size);
+                            // advance the pointer by chunk_size elements
+                            *current_ptr = current_ptr.add(chunk_size);
+                            Some(MultilinearExtension {
+                                evaluations: FieldType::Ext(SmartSlice::BorrowedMut(chunk)),
+                                num_vars: num_vars_per_chunk,
+                            })
+                        }
+                    })
+                    .collect::<Vec<_>>()
             }
 
-            FieldType::Base(SmartSlice::Owned(vec)) => {
-                let mut result = Vec::with_capacity(num_chunks);
-                for chunk in vec.chunks_mut(chunk_size) {
-                    result.push(MultilinearExtension {
-                        evaluations: FieldType::Base(SmartSlice::BorrowedMut(chunk)),
-                        num_vars: num_vars_per_chunk,
-                    });
-                }
-                result
-            }
+            FieldType::Base(SmartSlice::Owned(slice)) => slice
+                .chunks_mut(chunk_size)
+                .map(|chunk| MultilinearExtension {
+                    evaluations: FieldType::Base(SmartSlice::BorrowedMut(chunk)),
+                    num_vars: num_vars_per_chunk,
+                })
+                .collect::<Vec<_>>(),
 
-            FieldType::Ext(SmartSlice::Owned(vec)) => {
-                let mut result = Vec::with_capacity(num_chunks);
-                for chunk in vec.chunks_mut(chunk_size) {
-                    result.push(MultilinearExtension {
-                        evaluations: FieldType::Ext(SmartSlice::BorrowedMut(chunk)),
-                        num_vars: num_vars_per_chunk,
-                    });
-                }
-                result
-            }
+            FieldType::Ext(SmartSlice::Owned(slice)) => slice
+                .chunks_mut(chunk_size)
+                .map(|chunk| MultilinearExtension {
+                    evaluations: FieldType::Ext(SmartSlice::BorrowedMut(chunk)),
+                    num_vars: num_vars_per_chunk,
+                })
+                .collect::<Vec<_>>(),
 
             e => {
                 panic!(

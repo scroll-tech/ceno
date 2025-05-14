@@ -31,8 +31,7 @@ impl<'a, T> Default for SmartSlice<'a, T> {
 impl<'a, T> SmartSlice<'a, T> {
     /// ensures the data is owned and returns a mutable slice.
     ///
-    /// if the data is borrowed (either immutable or mutable), it will be cloned into owned memory
-    /// to allow mutable access.
+    /// Panic if the data is reference borrowed
     pub fn to_mut(&mut self) -> &mut [T]
     where
         T: Clone,
