@@ -777,7 +777,7 @@ Hints:
         cs: &ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
-        pi: &PublicValues<u32>,
+        pi: &PublicValues,
         program: &Program,
     ) where
         E: LkMultiplicityKey,

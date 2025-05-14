@@ -60,7 +60,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     pub fn create_proof(
         &self,
         witnesses: ZKVMWitnesses<E>,
-        pi: PublicValues<u32>,
+        pi: PublicValues,
         mut transcript: impl Transcript<E>,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let raw_pi = pi.to_vec::<E>();
