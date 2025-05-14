@@ -748,61 +748,34 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         let chunk_size = len / num_chunks;
         let num_vars_per_chunk = self.num_vars - ceil_log2(num_chunks);
 
+        macro_rules! split_eval_chunks {
+            ($variant:ident, $slice:expr, $chunk_size:expr, $num_vars:expr) => {
+                $slice
+                    .chunks_mut($chunk_size)
+                    .map(|chunk| MultilinearExtension {
+                        evaluations: FieldType::$variant(SmartSlice::BorrowedMut(chunk)),
+                        num_vars: $num_vars,
+                    })
+                    .collect::<Vec<_>>()
+            };
+        }
+
         match &mut self.evaluations {
-            // handle splitting a mutable borrowed slice into disjoint mutable slices
             FieldType::Base(SmartSlice::BorrowedMut(slice)) => {
-                let ptr = slice.as_mut_ptr();
-                (0..num_chunks)
-                    .scan(ptr, |current_ptr, _| {
-                        unsafe {
-                            let chunk = std::slice::from_raw_parts_mut(*current_ptr, chunk_size);
-                            // advance the pointer by chunk_size elements
-                            *current_ptr = current_ptr.add(chunk_size);
-                            Some(MultilinearExtension {
-                                evaluations: FieldType::Base(SmartSlice::BorrowedMut(chunk)),
-                                num_vars: num_vars_per_chunk,
-                            })
-                        }
-                    })
-                    .collect::<Vec<_>>()
+                split_eval_chunks!(Base, slice, chunk_size, num_vars_per_chunk)
             }
-
             FieldType::Ext(SmartSlice::BorrowedMut(slice)) => {
-                let ptr = slice.as_mut_ptr();
-                (0..num_chunks)
-                    .scan(ptr, |current_ptr, _| {
-                        unsafe {
-                            let chunk = std::slice::from_raw_parts_mut(*current_ptr, chunk_size);
-                            // advance the pointer by chunk_size elements
-                            *current_ptr = current_ptr.add(chunk_size);
-                            Some(MultilinearExtension {
-                                evaluations: FieldType::Ext(SmartSlice::BorrowedMut(chunk)),
-                                num_vars: num_vars_per_chunk,
-                            })
-                        }
-                    })
-                    .collect::<Vec<_>>()
+                split_eval_chunks!(Ext, slice, chunk_size, num_vars_per_chunk)
             }
-
-            FieldType::Base(SmartSlice::Owned(slice)) => slice
-                .chunks_mut(chunk_size)
-                .map(|chunk| MultilinearExtension {
-                    evaluations: FieldType::Base(SmartSlice::BorrowedMut(chunk)),
-                    num_vars: num_vars_per_chunk,
-                })
-                .collect::<Vec<_>>(),
-
-            FieldType::Ext(SmartSlice::Owned(slice)) => slice
-                .chunks_mut(chunk_size)
-                .map(|chunk| MultilinearExtension {
-                    evaluations: FieldType::Ext(SmartSlice::BorrowedMut(chunk)),
-                    num_vars: num_vars_per_chunk,
-                })
-                .collect::<Vec<_>>(),
-
+            FieldType::Base(SmartSlice::Owned(slice)) => {
+                split_eval_chunks!(Base, slice, chunk_size, num_vars_per_chunk)
+            }
+            FieldType::Ext(SmartSlice::Owned(slice)) => {
+                split_eval_chunks!(Ext, slice, chunk_size, num_vars_per_chunk)
+            }
             e => {
                 panic!(
-                    "unsupport {:?}. can only split when evaluation are mutably borrowed",
+                    "unsupported {:?}. can only split when evaluations are mutably borrowed",
                     e
                 );
             }
