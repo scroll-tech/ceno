@@ -186,8 +186,17 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// Construct a new polynomial from a list of evaluations where the index
     /// represents a point in {0,1}^`num_vars` in little endian form. For
     /// example, `0b1011` represents `P(1,1,0,1)`
-    pub fn from_evaluations_slice(num_vars: usize, evaluations: &[E::BaseField]) -> Self {
-        Self::from_evaluations_vec(num_vars, evaluations.to_vec())
+    pub fn from_evaluations_slice(num_vars: usize, evaluations: &'a [E::BaseField]) -> Self {
+        assert_eq!(
+            evaluations.len(),
+            1 << num_vars,
+            "The size of evaluations should be 2^num_vars."
+        );
+
+        Self {
+            num_vars,
+            evaluations: FieldType::Base(SmartSlice::Borrowed(evaluations)),
+        }
     }
 
     /// Construct a new polynomial from a list of evaluations where the index
@@ -195,7 +204,6 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// example, `0b1011` represents `P(1,1,0,1)`
     pub fn from_evaluations_vec(num_vars: usize, evaluations: Vec<E::BaseField>) -> Self {
         // assert that the number of variables matches the size of evaluations
-        // TODO: return error.
         assert_eq!(
             evaluations.len(),
             1 << num_vars,
@@ -210,15 +218,23 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
 
     /// Identical to [`from_evaluations_slice`], with and exception that evaluation vector is in
     /// extension field
-    pub fn from_evaluations_ext_slice(num_vars: usize, evaluations: &[E]) -> Self {
-        Self::from_evaluations_ext_vec(num_vars, evaluations.to_vec())
+    pub fn from_evaluations_ext_slice(num_vars: usize, evaluations: &'a [E]) -> Self {
+        assert_eq!(
+            evaluations.len(),
+            1 << num_vars,
+            "The size of evaluations should be 2^num_vars."
+        );
+
+        Self {
+            num_vars,
+            evaluations: FieldType::Ext(SmartSlice::Borrowed(evaluations)),
+        }
     }
 
     /// Identical to [`from_evaluations_vec`], with and exception that evaluation vector is in
     /// extension field
     pub fn from_evaluations_ext_vec(num_vars: usize, evaluations: Vec<E>) -> Self {
         // assert that the number of variables matches the size of evaluations
-        // TODO: return error.
         assert_eq!(
             evaluations.len(),
             1 << num_vars,
