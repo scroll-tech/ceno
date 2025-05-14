@@ -23,8 +23,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           targets: riscv32im-unknown-none-elf
-          # TODO(Matthias): see whether we can keep this in sync with rust-toolchain.toml automatically?
-          toolchain: nightly-2025-01-06
+          # TODO: figure out way to keep this in sync with rust-toolchain.toml automatically
+          toolchain: nightly-2025-03-25
       - name: Cargo cache
         uses: actions/cache@v4
         with:
