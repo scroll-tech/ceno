@@ -348,3 +348,27 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             .unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ff_ext::GoldilocksExt2;
+
+    #[test]
+    fn test_register_mles() {
+        use super::*;
+        use rand::thread_rng;
+
+        type E = GoldilocksExt2;
+
+        let mut rng = thread_rng();
+        let num_threads = 4;
+        let max_num_variables = 8;
+        let mut virtual_polys = VirtualPolynomials::<E>::new(num_threads, max_num_variables);
+        let mle = MultilinearExtension::random(max_num_variables, &mut rng);
+        let mles = vec![EitherRefMLE::Left(&mle), EitherRefMLE::Left(&mle)];
+
+        let indices = virtual_polys.register_mles(mles);
+
+        assert_eq!(indices.len(), 1, "indices.len() = {}", indices.len());
+    }
+}
