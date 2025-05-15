@@ -4,7 +4,7 @@ use crate::{
     Expression, WitnessId,
     expression::monomial::Term,
     macros::{entered_span, exit_span},
-    mle::{ArcMultilinearExtension, MultilinearExtension, Point},
+    mle::{MultilinearExtension, Point},
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
     virtual_poly::{MonomialTerms, VirtualPolynomial},
@@ -36,7 +36,7 @@ pub enum PolyMeta {
 /// enabling reuse and deduplication of polynomial
 pub struct VirtualPolynomialsBuilder<'a, E: ExtensionField> {
     num_witin: WitnessId,
-    mles_storage: BTreeMap<usize, (usize, EitherRefMLE<'a, E>)>,
+    mle_ptr_registry: BTreeMap<usize, (usize, EitherRefMLE<'a, E>)>,
     num_threads: usize,
     max_num_variables: usize,
     _phantom: PhantomData<E>,
@@ -47,7 +47,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
     pub fn new(num_threads: usize, max_num_variables: usize) -> Self {
         Self {
             num_witin: WitnessId::default(),
-            mles_storage: BTreeMap::new(),
+            mle_ptr_registry: BTreeMap::new(),
             num_threads,
             max_num_variables,
             _phantom: PhantomData,
@@ -55,15 +55,15 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
     }
     /// lifts a reference to a `MultilinearExtension` into an `Expression::WitIn`
     ///
-    /// assigns a unique witness index based on pointer identity, reusing the same index
+    /// assigns a unique witness index based on pointer address, reusing the same index
     /// if the MLE was already lifted. supports both shared and mutable references.
     pub fn lift(
         &mut self,
         mle: Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>,
     ) -> Expression<E> {
         mle.map_left(|mle| {
-            let mle_ptr = mle as *const MultilinearExtension<E> as *const () as usize;
-            let (witin_id, _) = self.mles_storage.entry(mle_ptr).or_insert_with(|| {
+            let mle_ptr = mle as *const MultilinearExtension<E> as usize;
+            let (witin_id, _) = self.mle_ptr_registry.entry(mle_ptr).or_insert_with(|| {
                 let witin_id = self.num_witin;
                 self.num_witin = self.num_witin.strict_add(1);
                 (witin_id as usize, Either::Left(mle))
@@ -71,8 +71,8 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
             Expression::WitIn(*witin_id as u16)
         })
         .map_right(|mle| {
-            let mle_ptr = mle as *const MultilinearExtension<E> as *const () as usize;
-            let (witin_id, _) = self.mles_storage.entry(mle_ptr).or_insert_with(|| {
+            let mle_ptr = mle as *const MultilinearExtension<E> as usize;
+            let (witin_id, _) = self.mle_ptr_registry.entry(mle_ptr).or_insert_with(|| {
                 let witin_id = self.num_witin;
                 self.num_witin = self.num_witin.strict_add(1);
                 (witin_id as usize, Either::Right(mle))
@@ -87,8 +87,8 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         expressions: &[Expression<E>],
         challenges: &[E],
     ) -> VirtualPolynomials<'a, E> {
-        let mles_storage = self
-            .mles_storage
+        let mles = self
+            .mle_ptr_registry
             .into_values()
             .collect::<Vec<_>>() // collect into Vec<&(usize, &ArcMultilinearExtension)>
             .into_iter()
@@ -99,7 +99,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         let mut virtual_polys =
             VirtualPolynomials::<E>::new(self.num_threads, self.max_num_variables);
         // register mles to assure index matching the arc_poly order
-        virtual_polys.register_mles(mles_storage);
+        virtual_polys.register_mles(mles);
 
         // convert expression into monomial_terms and add to virtual_polys
         for expression in expressions {
@@ -169,34 +169,20 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
         poly
     }
 
-    fn get_subslice_polys_by_thread_id<'b>(
-        &self,
-        thread_id: usize,
-        polys: Vec<&'b MultilinearExtension<'a, E>>,
-    ) -> Vec<ArcMultilinearExtension<'a, E>>
-    where
-        'b: 'a,
-    {
-        polys
-            .into_iter()
-            .map(|poly| {
-                let range_poly: ArcMultilinearExtension<E> =
-                    Arc::new(poly.as_view_slice(self.num_threads, thread_id));
-                range_poly
-            })
-            .collect_vec()
-    }
-
-    /// registers a batch of multilinear extensions (MLEs) reference across all threads,
-    /// distributing each based on num_vars.
+    /// registers a batch of multilinear extensions (MLEs) to be accessible across all threads.
     ///
-    /// for each input `mle`, if it is large enough (i.e., has more variables than `log2(num_threads)`),
-    /// it is split and assigned to the corresponding thread using `get_range_polys_by_thread_id`.
-    /// otherwise, the full polynomial is duplicated across all threads.
+    /// each input `mle` is either duplicated or split depending on its size:
+    /// - if the MLE's number of variables is greater than `log2(num_threads)`, it is considered *large*
+    ///   and is split per thread using `as_view_slice`.
+    /// - otherwise, it is considered *small* and is duplicated identically across all threads.
     ///
-    /// the per-thread instances are registered locally and stored in `thread_based_mles_storage`
-    /// using the MLE’s raw pointer as the key to ensure uniqueness and reference consistency.
-    pub fn register_mles(&mut self, mles: Vec<EitherRefMLE<'a, E>>) -> Vec<usize> {
+    /// per-thread MLEs are registered in each thread’s `poly` instance. The function ensures:
+    /// - a unique `index` is returned per registered MLE group (same across threads).
+    /// -  `poly_meta` map tracks whether each MLE is `Normal` (large/split) or `Phase2Only` (small/duplicated)
+    ///
+    /// Returns:
+    /// indices, each corresponding to one registered MLE batch
+    fn register_mles(&mut self, mles: Vec<EitherRefMLE<'a, E>>) -> Vec<usize> {
         let log2_num_threads = log2_strict_usize(self.num_threads);
         let mut indexes = vec![];
         for mle in mles {
@@ -207,33 +193,23 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             };
             let mles = match mle {
                 Either::Left(mle) => {
-                    (0..self.num_threads)
-                        .map(|thread_id| {
-                            let mle_thread_based = if mle.num_vars() > log2_num_threads {
-                                self.get_subslice_polys_by_thread_id(thread_id, vec![mle])
-                                    .remove(0)
-                            } else {
-                                // polynomial is too small
-                                Arc::new(mle.as_view_slice(1, 0))
-                            };
-                            mle_thread_based
-                        })
-                        .collect_vec()
+                    if mle.num_vars() > log2_num_threads {
+                        mle.as_view_chunks(self.num_threads).into_iter()
+                    } else {
+                        vec![mle.as_view(); self.num_threads].into_iter()
+                    }
                 }
                 Either::Right(mle) => {
                     if mle.num_vars() > log2_num_threads {
-                        mle.as_view_chunks_mut(self.num_threads)
-                            .into_iter()
-                            .map(Arc::new)
-                            .collect_vec()
+                        mle.as_view_chunks_mut(self.num_threads).into_iter()
                     } else {
-                        vec![mle.as_owned(); self.num_threads]
-                            .into_iter()
-                            .map(Arc::new)
-                            .collect_vec()
+                        vec![mle.as_owned(); self.num_threads].into_iter()
                     }
                 }
-            };
+            }
+            .map(Arc::new)
+            .collect_vec();
+
             let index = self
                 .polys
                 .iter_mut()

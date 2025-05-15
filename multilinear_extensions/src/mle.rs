@@ -145,6 +145,18 @@ fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
     unsafe { Vec::from_raw_parts(new_ptr, length, capacity) }
 }
 
+macro_rules! split_eval_chunks {
+    ($chunk_fn:ident, $smart_variant:ident, $variant:ident, $slice:expr, $chunk_size:expr, $num_vars:expr) => {
+        $slice
+            .$chunk_fn($chunk_size)
+            .map(|chunk| MultilinearExtension {
+                evaluations: FieldType::$variant(SmartSlice::$smart_variant(chunk)),
+                num_vars: $num_vars,
+            })
+            .collect::<Vec<_>>()
+    };
+}
+
 impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     /// returns true if the evaluations are either mutably borrowed or owned (i.e., mutable access is possible)
     pub fn is_mut(&self) -> bool {
@@ -653,30 +665,105 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         );
         let num_vars_per_chunk = self.num_vars - ceil_log2(num_chunks);
 
-        macro_rules! split_eval_chunks {
-            ($variant:ident, $slice:expr, $chunk_size:expr, $num_vars:expr) => {
-                $slice
-                    .chunks_mut($chunk_size)
-                    .map(|chunk| MultilinearExtension {
-                        evaluations: FieldType::$variant(SmartSlice::BorrowedMut(chunk)),
-                        num_vars: $num_vars,
-                    })
-                    .collect::<Vec<_>>()
-            };
-        }
-
         match &mut self.evaluations {
             FieldType::Base(SmartSlice::BorrowedMut(slice)) => {
-                split_eval_chunks!(Base, slice, chunk_size, num_vars_per_chunk)
+                split_eval_chunks!(
+                    chunks_mut,
+                    BorrowedMut,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
             }
             FieldType::Ext(SmartSlice::BorrowedMut(slice)) => {
-                split_eval_chunks!(Ext, slice, chunk_size, num_vars_per_chunk)
+                split_eval_chunks!(
+                    chunks_mut,
+                    BorrowedMut,
+                    Ext,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
             }
             FieldType::Base(SmartSlice::Owned(slice)) => {
-                split_eval_chunks!(Base, slice, chunk_size, num_vars_per_chunk)
+                split_eval_chunks!(
+                    chunks_mut,
+                    BorrowedMut,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
             }
             FieldType::Ext(SmartSlice::Owned(slice)) => {
-                split_eval_chunks!(Ext, slice, chunk_size, num_vars_per_chunk)
+                split_eval_chunks!(
+                    chunks_mut,
+                    BorrowedMut,
+                    Ext,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            e => {
+                panic!(
+                    "unsupported {:?}. can only split when evaluations are mutably borrowed",
+                    e
+                );
+            }
+        }
+    }
+
+    /// immutable counterpart to [`as_view_chunks_mut`]
+    pub fn as_view_chunks(&'a self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
+        let total_len = self.evaluations.len();
+        let chunk_size = total_len / num_chunks;
+        assert!(
+            num_chunks > 0 && total_len % num_chunks == 0 && chunk_size > 0,
+            "invalid num_chunks: {num_chunks} total_len: {total_len} parameter set"
+        );
+        let num_vars_per_chunk = self.num_vars - ceil_log2(num_chunks);
+
+        match &self.evaluations {
+            FieldType::Base(SmartSlice::Borrowed(slice)) => {
+                split_eval_chunks!(
+                    chunks,
+                    Borrowed,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            FieldType::Ext(SmartSlice::Borrowed(slice)) => {
+                split_eval_chunks!(chunks, Borrowed, Ext, slice, chunk_size, num_vars_per_chunk)
+            }
+            FieldType::Base(SmartSlice::BorrowedMut(slice)) => {
+                split_eval_chunks!(
+                    chunks,
+                    Borrowed,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            FieldType::Ext(SmartSlice::BorrowedMut(slice)) => {
+                split_eval_chunks!(chunks, Borrowed, Ext, slice, chunk_size, num_vars_per_chunk)
+            }
+            FieldType::Base(SmartSlice::Owned(slice)) => {
+                split_eval_chunks!(
+                    chunks,
+                    Borrowed,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            FieldType::Ext(SmartSlice::Owned(slice)) => {
+                split_eval_chunks!(chunks, Borrowed, Ext, slice, chunk_size, num_vars_per_chunk)
             }
             e => {
                 panic!(
