@@ -5,6 +5,7 @@ use mpcs::{
 };
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 use rand::{distributions::Standard, prelude::Distribution, thread_rng};
+use std::collections::BTreeMap;
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
 
@@ -66,7 +67,8 @@ where
         let mut transcript = BasicTranscript::new(b"BaseFold");
         let rmm = RowMajorMatrix::<E::BaseField>::rand(&mut test_rng, 1 << num_vars, 1);
         let poly: ArcMultilinearExtension<E> = rmm.to_mles().remove(0).into();
-        let comm = Pcs::commit_and_write(&pp, rmm, &mut transcript).unwrap();
+        let comm =
+            Pcs::batch_commit_and_write(&pp, BTreeMap::from([(0, rmm)]), &mut transcript).unwrap();
 
         let point = get_point_from_challenge(num_vars, &mut transcript);
         let eval = poly.evaluate(point.as_slice());
