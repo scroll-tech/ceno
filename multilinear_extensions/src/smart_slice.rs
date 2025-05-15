@@ -37,7 +37,7 @@ impl<'a, T> SmartSlice<'a, T> {
         T: Clone,
     {
         match self {
-            SmartSlice::Borrowed(_) => unimplemented!("calling to_mut on immutable slice"),
+            SmartSlice::Borrowed(_) => panic!("calling to_mut on immutable slice"),
             SmartSlice::BorrowedMut(slice) => slice,
             SmartSlice::Owned(vec) => vec.as_mut_slice(),
         }
@@ -88,7 +88,7 @@ impl<'a, T> SmartSlice<'a, T> {
                 let len = slice.len().min(new_len);
                 SmartSlice::BorrowedMut(&mut slice[..len])
             }
-            SmartSlice::Borrowed(_) => unimplemented!("truncate on immutable slice"),
+            SmartSlice::Borrowed(_) => panic!("truncate on immutable slice"),
         };
         *self = new_self;
     }
@@ -129,7 +129,7 @@ impl<'a, T: Clone> Clone for SmartSlice<'a, T> {
         match self {
             SmartSlice::Borrowed(slice) => SmartSlice::Borrowed(slice),
             SmartSlice::BorrowedMut(_) => {
-                unimplemented!("clone not supported on mutable slice")
+                panic!("clone not supported on mutable slice")
             }
             SmartSlice::Owned(vec) => SmartSlice::Owned(vec.clone()),
         }

@@ -363,7 +363,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         // evaluate single variable of partial point from left to right
         for point in partial_point.iter() {
             // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,
-            // b2,..bt, 1] in parallel
+            // b2,..bt, 1]
             match &mut self.evaluations {
                 FieldType::Base(slice) => {
                     let slice_ext = slice
@@ -394,87 +394,6 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         }
 
         self.num_vars = nv - partial_point.len();
-    }
-
-    /// Reduce the number of variables of `self` by fixing the
-    /// `partial_point.len()` variables at `partial_point` from high position
-    pub fn fix_high_variables(&self, partial_point: &[E]) -> Self {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
-        let current_eval_size = self.evaluations.len();
-        let mut poly = Cow::Borrowed(self);
-        // `Cow` type here to skip first evaluation vector copy
-        for point in partial_point.iter().rev() {
-            match &mut poly {
-                poly @ Cow::Borrowed(_) => {
-                    let half_size = current_eval_size >> 1;
-                    *poly = op_mle!(self, |evaluations| Cow::Owned(
-                        MultilinearExtension::from_evaluations_ext_vec(self.num_vars() - 1, {
-                            let (lo, hi) = evaluations.split_at(half_size);
-                            lo.par_iter()
-                                .zip(hi)
-                                .with_min_len(64)
-                                .map(|(lo, hi)| *point * (*hi - *lo) + *lo)
-                                .collect()
-                        })
-                    ));
-                }
-                Cow::Owned(poly) => poly.fix_high_variables_in_place(&[*point]),
-            }
-        }
-        assert!(poly.num_vars == self.num_vars() - partial_point.len(),);
-        poly.into_owned()
-    }
-
-    /// Reduce the number of variables of `self` by fixing the
-    /// `partial_point.len()` variables at `partial_point` from high position in place
-    pub fn fix_high_variables_in_place(&mut self, partial_point: &[E]) {
-        assert!(self.is_mut());
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
-        let nv = self.num_vars();
-        let mut current_eval_size = self.evaluations.len();
-        for point in partial_point.iter().rev() {
-            let half_size = current_eval_size >> 1;
-            match &mut self.evaluations {
-                FieldType::Base(slice) => {
-                    let (lo, hi) = slice.split_at(half_size);
-                    let slice_ext = lo
-                        .par_iter()
-                        .zip(hi)
-                        .with_min_len(64)
-                        .map(|(lo, hi)| *point * (*hi - *lo) + *lo)
-                        .collect();
-                    let _ = mem::replace(
-                        &mut self.evaluations,
-                        FieldType::Ext(SmartSlice::Owned(slice_ext)),
-                    );
-                    current_eval_size = half_size;
-                }
-                FieldType::Ext(slice) => {
-                    let (lo, hi) = slice.to_mut().split_at_mut(half_size);
-                    lo.par_iter_mut()
-                        .zip(hi)
-                        .with_min_len(64)
-                        .for_each(|(lo, hi)| *lo += (*hi - *lo) * *point);
-                    current_eval_size = half_size;
-                }
-                FieldType::Unreachable => unreachable!(),
-            };
-        }
-        match &mut self.evaluations {
-            FieldType::Base(_) => {}
-            FieldType::Ext(slice) => {
-                slice.truncate_mut(current_eval_size);
-            }
-            FieldType::Unreachable => unreachable!(),
-        }
-        self.num_vars = nv - partial_point.len()
     }
 
     /// Evaluate the MLE at a give point.
