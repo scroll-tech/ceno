@@ -1,11 +1,11 @@
 use crate::{
     circuit_builder::{ConstraintSystem, NameSpace},
-    expression::Expression,
     structs::{ZKVMConstraintSystem, ZKVMWitnesses},
     utils,
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use multilinear_extensions::Expression;
 use prettytable::{Table, row};
 use serde_json::json;
 use std::{

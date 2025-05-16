@@ -360,7 +360,7 @@ where
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
-    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+    use multilinear_extensions::mle::MultilinearExtension;
     use p3::field::{Field, PrimeCharacteristicRing, TwoAdicField};
 
     use crate::{
@@ -381,7 +381,7 @@ mod tests {
         let folding_factor = 3; // We fold in 8
         let folding_factor_exp = 1 << folding_factor;
 
-        let poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let poly = MultilinearExtension::from_evaluations_ext_vec(
             num_variables,
             (0..num_coeffs).map(F::from_u64).collect::<Vec<_>>(),
         );
@@ -433,7 +433,7 @@ mod tests {
         let folding_factor = 3; // We fold in 8
         let folding_factor_exp = 1 << folding_factor;
 
-        let poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let poly = MultilinearExtension::from_evaluations_ext_vec(
             num_variables,
             (0..num_coeffs).map(F::from_u64).collect::<Vec<_>>(),
         );
@@ -477,7 +477,7 @@ mod tests {
 
             let mut processed_evals = processed[span.clone()].to_vec();
             evaluate_over_hypercube(&mut processed_evals);
-            let answer_processed = DenseMultilinearExtension::from_evaluations_ext_vec(
+            let answer_processed = MultilinearExtension::from_evaluations_ext_vec(
                 p3::util::log2_strict_usize(processed_evals.len()),
                 processed_evals.to_vec(),
             )

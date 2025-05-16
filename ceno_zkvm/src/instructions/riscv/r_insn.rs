@@ -5,11 +5,11 @@ use crate::{
     chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::ToExpr,
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut, WriteRD},
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
+use multilinear_extensions::ToExpr;
 
 /// This config handles the common part of R-type instructions:
 /// - PC, cycle, fetch.

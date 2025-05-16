@@ -182,10 +182,9 @@ where
 
         // Update
         self.num_variables -= 1;
-        self.evaluation_of_p =
-            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
+        self.evaluation_of_p = MultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
         self.evaluation_of_equality =
-            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
+            MultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
         self.sum = combination_randomness * sumcheck_poly.evaluate_at_point(folding_randomness);
     }
 
@@ -234,7 +233,7 @@ where
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
-    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+    use multilinear_extensions::mle::MultilinearExtension;
     use p3::field::PrimeCharacteristicRing;
 
     use super::SumcheckBatched;
@@ -268,7 +267,7 @@ mod tests {
             .iter()
             .zip(&eval_points)
             .map(|(poly, point)| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(2, poly.clone()).evaluate(point)
+                MultilinearExtension::from_evaluations_ext_vec(2, poly.clone()).evaluate(point)
             })
             .collect();
         let mut claimed_value: F = evals

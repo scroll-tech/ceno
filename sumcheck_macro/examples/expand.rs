@@ -36,7 +36,7 @@ impl<E: ExtensionField> Container<'_, E> {
 
     pub fn new() -> Self {
         Self {
-            poly: VirtualPolynomial::random(3, (4, 5), 2, &mut OsRng).0,
+            poly: VirtualPolynomial::random(&[3], (4, 5), 2, &mut OsRng).0,
             is_main_worker: true,
             phase2_numvar: Some(1),
         }

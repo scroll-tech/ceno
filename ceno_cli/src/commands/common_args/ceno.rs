@@ -19,11 +19,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use super::CompilationOptions;
+
 /// Ceno options
 #[derive(Clone, Args)]
 pub struct CenoOptions {
     /// The preset configuration to use.
-    #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
+    #[arg(long, value_enum, default_value_t = Preset::Ceno)]
     pub platform: Preset,
 
     /// The polynomial commitment scheme to use.
@@ -169,37 +171,56 @@ impl CenoOptions {
     }
 
     /// Run keygen the ceno elf file with given options
-    pub fn keygen<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
+    pub fn keygen<P: AsRef<Path>>(
+        &self,
+        compilation_options: &CompilationOptions,
+        elf_path: P,
+    ) -> anyhow::Result<()> {
         self.try_setup_logger();
         match (self.pcs, self.field) {
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 keygen_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
-                    self, elf_path,
+                    self,
+                    compilation_options,
+                    elf_path,
                 )
             }
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 keygen_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
-                    self, elf_path,
+                    self,
+                    compilation_options,
+                    elf_path,
                 )
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 keygen_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
-                    self, elf_path,
+                    self,
+                    compilation_options,
+                    elf_path,
                 )
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
-                keygen_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(self, elf_path)
+                keygen_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
+                    self,
+                    compilation_options,
+                    elf_path,
+                )
             }
         }
     }
 
     /// Run the ceno elf file with given options
-    pub fn run<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
+    pub fn run<P: AsRef<Path>>(
+        &self,
+        compilation_options: &CompilationOptions,
+        elf_path: P,
+    ) -> anyhow::Result<()> {
         self.try_setup_logger();
         match (self.pcs, self.field) {
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 run_elf_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
                 )?;
@@ -207,6 +228,7 @@ impl CenoOptions {
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 run_elf_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
                 )?;
@@ -214,6 +236,7 @@ impl CenoOptions {
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 run_elf_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
                 )?;
@@ -221,6 +244,7 @@ impl CenoOptions {
             (PcsKind::Whir, FieldType::BabyBear) => {
                 run_elf_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
                 )?;
@@ -230,12 +254,17 @@ impl CenoOptions {
     }
 
     /// Run and prove the ceno elf file with given options
-    pub fn prove<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
+    pub fn prove<P: AsRef<Path>>(
+        &self,
+        compilation_options: &CompilationOptions,
+        elf_path: P,
+    ) -> anyhow::Result<()> {
         self.try_setup_logger();
         match (self.pcs, self.field) {
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 prove_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::Complete,
                 )
@@ -243,6 +272,7 @@ impl CenoOptions {
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 prove_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
                 )
@@ -250,6 +280,7 @@ impl CenoOptions {
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 prove_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
                 )
@@ -257,6 +288,7 @@ impl CenoOptions {
             (PcsKind::Whir, FieldType::BabyBear) => {
                 prove_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
                 )
@@ -271,6 +303,7 @@ fn run_elf_inner<
     P: AsRef<Path>,
 >(
     options: &CenoOptions,
+    compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
 ) -> anyhow::Result<E2ECheckpointResult<E, PCS>> {
@@ -288,13 +321,23 @@ fn run_elf_inner<
         .next_power_of_two()
         .max(16);
 
-    let platform = setup_platform(
-        options.platform,
-        &program,
-        options.stack_size(),
-        options.heap_size(),
-        pub_io_size,
-    );
+    let platform = if compilation_options.release {
+        setup_platform(
+            options.platform,
+            &program,
+            options.stack_size(),
+            options.heap_size(),
+            pub_io_size,
+        )
+    } else {
+        setup_platform_debug(
+            options.platform,
+            &program,
+            options.stack_size(),
+            options.heap_size(),
+            pub_io_size,
+        )
+    };
     tracing::info!("Running on platform {:?} {}", options.platform, platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",
@@ -312,8 +355,8 @@ fn run_elf_inner<
     Ok(run_e2e_with_checkpoint::<E, PCS>(
         program,
         platform,
-        hints,
-        public_io,
+        &hints,
+        &public_io,
         options.max_steps,
         options.max_num_variables,
         options.security_level,
@@ -327,9 +370,15 @@ fn keygen_inner<
     P: AsRef<Path>,
 >(
     args: &CenoOptions,
+    compilation_options: &CompilationOptions,
     elf_path: P,
 ) -> anyhow::Result<()> {
-    let result = run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::PrepE2EProving)?;
+    let result = run_elf_inner::<E, PCS, P>(
+        args,
+        compilation_options,
+        elf_path,
+        Checkpoint::PrepE2EProving,
+    )?;
     let vk = result.vk.expect("Keygen should yield vk.");
     if let Some(out_vk) = args.out_vk.as_ref() {
         let path = canonicalize_allow_nx(out_vk)?;
@@ -347,10 +396,11 @@ fn prove_inner<
     P: AsRef<Path>,
 >(
     args: &CenoOptions,
+    compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
 ) -> anyhow::Result<()> {
-    let result = run_elf_inner::<E, PCS, P>(args, elf_path, checkpoint)?;
+    let result = run_elf_inner::<E, PCS, P>(args, compilation_options, elf_path, checkpoint)?;
     let zkvm_proof = result.proof.expect("PrepSanityCheck should yield proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 

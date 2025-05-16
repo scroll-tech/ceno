@@ -10,14 +10,13 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
-
 ff_ext = { path = "../ff_ext" }
+multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 p3.workspace = true
+rand.workspace = true
 rayon.workspace = true
 serde.workspace = true
-
-rand.workspace = true
+tracing.workspace = true
 
 [features]
 nightly-features = [

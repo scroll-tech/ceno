@@ -69,13 +69,13 @@ pub fn expand_from_coeff<F: TwoAdicField>(coeffs: &[F], expansion: usize) -> Vec
 }
 
 pub fn expand_from_coeff_rmm<F: TwoAdicField + Ord>(
-    mut coeffs: RowMajorMatrix<F>,
+    coeffs: RowMajorMatrix<F>,
     expansion: usize,
 ) -> RowMajorMatrix<F> {
-    let expanded_size = coeffs.height() * expansion;
-    coeffs.set_num_rows_to_height(expanded_size, F::ZERO);
     let dft = Radix2DitParallel::<F>::default();
-    let m = coeffs.into_default_padded_p3_rmm().to_row_major_matrix();
+    let m = coeffs
+        .into_default_padded_p3_rmm(Some(expansion))
+        .to_row_major_matrix();
     RowMajorMatrix::new_by_inner_matrix(
         dft.dft_batch(m).to_row_major_matrix(),
         InstancePaddingStrategy::Default,

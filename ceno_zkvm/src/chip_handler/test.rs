@@ -1,6 +1,7 @@
 use ff_ext::ExtensionField;
 
-use crate::{circuit_builder::CircuitBuilder, expression::Expression};
+use crate::circuit_builder::CircuitBuilder;
+use multilinear_extensions::Expression;
 
 pub enum DebugIndex {
     RdWrite = 0,

@@ -138,21 +138,40 @@ pub struct MemPadder {
 }
 
 impl MemPadder {
+    /// Create memory records with uninitialized values.
+    pub fn new_mem_records_uninit(
+        address_range: Range<Addr>,
+        padded_len: usize,
+    ) -> Vec<MemInitRecord> {
+        Self::new(address_range).padded_sorted(padded_len, vec![])
+    }
+
     /// Create initial memory records.
     /// Store `values` at the start of `address_range`, in order.
     /// Pad with zero values up to `padded_len`.
     ///
     /// Require: `values.len() <= padded_len <= address_range.len()`
-    pub fn init_mem(
+    pub fn new_mem_records(
         address_range: Range<Addr>,
         padded_len: usize,
         values: &[Word],
     ) -> Vec<MemInitRecord> {
-        let mut records = Self::new(address_range).padded_sorted(padded_len, vec![]);
+        let mut records = Self::new_mem_records_uninit(address_range, padded_len);
         for (record, &value) in zip(&mut records, values) {
             record.value = value;
         }
         records
+    }
+
+    /// Initialize memory records created `new_mem_records_uninit` with values.
+    ///
+    /// Require: `values.len() <= padded_len <= address_range.len()`
+    ///
+    /// See `new_mem_records` for more details.
+    pub fn init_mem_records(records: &mut Vec<MemInitRecord>, values: &[Word]) {
+        for (record, &value) in zip(records, values) {
+            record.value = value;
+        }
     }
 
     pub fn new(valid_addresses: Range<Addr>) -> Self {

@@ -7,7 +7,6 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::Expression,
     gadgets::{IsEqualConfig, IsLtConfig, SignedLtConfig},
     instructions::{
         Instruction,
@@ -19,6 +18,7 @@ use crate::{
     },
     witness::LkMultiplicity,
 };
+use multilinear_extensions::Expression;
 pub use p3::field::PrimeCharacteristicRing;
 
 pub struct BranchCircuit<E, I>(PhantomData<(E, I)>);

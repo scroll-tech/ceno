@@ -16,10 +16,7 @@ use crate::{
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::zip_eq;
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, MultilinearExtension},
-    virtual_poly::eq_eval,
-};
+use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::eq_eval};
 use p3::{commit::Mmcs, util::log2_strict_usize};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::macros::{entered_span, exit_span};
@@ -343,7 +340,7 @@ where
         let internal_timer = entered_span!("Final check");
         if prev_sumcheck_poly_eval
             != evaluation_of_v_poly
-                * DenseMultilinearExtension::from_evaluations_ext_vec(
+                * MultilinearExtension::from_evaluations_ext_vec(
                     p3::util::log2_strict_usize(parsed.final_evaluations.len()),
                     parsed.final_evaluations,
                 )

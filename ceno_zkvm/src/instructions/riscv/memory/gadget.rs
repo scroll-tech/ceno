@@ -2,7 +2,6 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     instructions::riscv::{constants::UInt, insn_base::MemAddr},
     set_val,
     witness::LkMultiplicity,
@@ -10,6 +9,7 @@ use crate::{
 use ceno_emul::StepRecord;
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, PrimeCharacteristicRing};
 
 pub struct MemWordChange<const N_ZEROS: usize> {

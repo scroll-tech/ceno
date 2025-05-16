@@ -3,7 +3,6 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::{
         Instruction,
@@ -15,6 +14,7 @@ use crate::{
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::marker::PhantomData;
 
 pub struct ShiftImmConfig<E: ExtensionField> {

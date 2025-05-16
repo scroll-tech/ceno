@@ -92,13 +92,17 @@ impl ProveCmd {
 
 impl CmdInner {
     fn run(self, toolchain: Option<String>, kind: RunKind) -> anyhow::Result<()> {
+        let workspace_root = search_workspace_root(current_dir()?)?;
         let manifest_path = match self.manifest_options.manifest_path.clone() {
             Some(path) => path,
-            None => search_cargo_manifest_path(current_dir()?)?,
+            None => search_cargo_manifest(current_dir()?)?,
         };
-        let target_selection = self
-            .target_selection
-            .canonicalize(manifest_path, &self.package_selection)?;
+        println!("Using manifest {}", manifest_path.display());
+        let target_selection = self.target_selection.canonicalize(
+            &workspace_root,
+            &manifest_path,
+            &self.package_selection,
+        )?;
 
         let build = BuildCmd {
             cargo_options: self.cargo_options.clone(),
@@ -110,18 +114,22 @@ impl CmdInner {
         };
         build.run(toolchain.clone())?;
 
-        let target_elf = target_selection.get_target_path(&self.compilation_options);
+        let target_elf =
+            target_selection.get_target_path(&workspace_root, &self.compilation_options);
         assert!(target_elf.exists(), "{}", target_elf.display());
 
         match kind {
             RunKind::Keygen => {
-                self.ceno_options.keygen(target_elf)?;
+                self.ceno_options
+                    .keygen(&self.compilation_options, target_elf)?;
             }
             RunKind::Run => {
-                self.ceno_options.run(target_elf)?;
+                self.ceno_options
+                    .run(&self.compilation_options, target_elf)?;
             }
             RunKind::Prove => {
-                self.ceno_options.prove(target_elf)?;
+                self.ceno_options
+                    .prove(&self.compilation_options, target_elf)?;
             }
         }
 

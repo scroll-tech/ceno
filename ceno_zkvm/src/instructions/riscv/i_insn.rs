@@ -5,11 +5,11 @@ use crate::{
     chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr},
     instructions::riscv::insn_base::{ReadRS1, StateInOut, WriteRD},
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
+use multilinear_extensions::{Expression, ToExpr};
 
 /// This config handles the common part of I-type instructions:
 /// - PC, cycle, fetch.

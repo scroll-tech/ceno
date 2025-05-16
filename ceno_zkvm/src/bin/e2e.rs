@@ -2,7 +2,8 @@ use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::{
-        Checkpoint, FieldType, PcsKind, Preset, run_e2e_with_checkpoint, setup_platform, verify,
+        Checkpoint, FieldType, PcsKind, Preset, run_e2e_with_checkpoint, setup_platform,
+        setup_platform_debug, verify,
     },
     scheme::{
         ZKVMProof, constants::MAX_NUM_VARIABLES, mock_prover::LkMultiplicityKey,
@@ -55,7 +56,7 @@ struct Args {
     profiling: Option<usize>,
 
     /// The preset configuration to use.
-    #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
+    #[arg(long, value_enum, default_value_t = Preset::Ceno)]
     platform: Preset,
 
     /// The polynomial commitment scheme to use.
@@ -162,13 +163,23 @@ fn main() {
     tracing::info!("Loading ELF file: {}", args.elf.display());
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
-    let platform = setup_platform(
-        args.platform,
-        &program,
-        args.stack_size,
-        args.heap_size,
-        pub_io_size,
-    );
+    let platform = if cfg!(debug_assertions) {
+        setup_platform_debug(
+            args.platform,
+            &program,
+            args.stack_size,
+            args.heap_size,
+            pub_io_size,
+        )
+    } else {
+        setup_platform(
+            args.platform,
+            &program,
+            args.stack_size,
+            args.heap_size,
+            pub_io_size,
+        )
+    };
     tracing::info!("Running on platform {:?} {}", args.platform, platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",
@@ -209,8 +220,8 @@ fn main() {
             run_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>>(
                 program,
                 platform,
-                hints,
-                public_io,
+                &hints,
+                &public_io,
                 max_steps,
                 args.max_num_variables,
                 args.proof_file,
@@ -223,8 +234,8 @@ fn main() {
             run_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>>(
                 program,
                 platform,
-                hints,
-                public_io,
+                &hints,
+                &public_io,
                 max_steps,
                 args.max_num_variables,
                 args.proof_file,
@@ -237,8 +248,8 @@ fn main() {
             run_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>>(
                 program,
                 platform,
-                hints,
-                public_io,
+                &hints,
+                &public_io,
                 max_steps,
                 args.max_num_variables,
                 args.proof_file,
@@ -251,8 +262,8 @@ fn main() {
             run_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>>(
                 program,
                 platform,
-                hints,
-                public_io,
+                &hints,
+                &public_io,
                 max_steps,
                 args.max_num_variables,
                 args.proof_file,
@@ -271,8 +282,8 @@ fn run_inner<
 >(
     program: Program,
     platform: Platform,
-    hints: Vec<u32>,
-    public_io: Vec<u32>,
+    hints: &[u32],
+    public_io: &[u32],
     max_steps: usize,
     max_num_variables: usize,
     proof_file: PathBuf,

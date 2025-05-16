@@ -38,7 +38,7 @@ where
 #[cfg(test)]
 mod tests {
     use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
-    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+    use multilinear_extensions::mle::MultilinearExtension;
     use p3::field::PrimeCharacteristicRing;
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
@@ -89,7 +89,7 @@ mod tests {
 
         let params = WhirConfig::<E>::new(mv_params, whir_params);
 
-        let polynomial = DenseMultilinearExtension::from_evaluations_vec(
+        let polynomial = MultilinearExtension::from_evaluations_vec(
             num_variables,
             vec![<E as ExtensionField>::BaseField::from_u64(1); num_coeffs],
         );

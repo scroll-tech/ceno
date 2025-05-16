@@ -1,11 +1,9 @@
 use ff_ext::ExtensionField;
 
 use crate::{
-    error::ZKVMError,
-    expression::{Expression, ToExpr},
-    gadgets::AssertLtConfig,
-    instructions::riscv::constants::UINT_LIMBS,
+    error::ZKVMError, gadgets::AssertLtConfig, instructions::riscv::constants::UINT_LIMBS,
 };
+use multilinear_extensions::{Expression, ToExpr};
 
 pub mod general;
 pub mod global_state;

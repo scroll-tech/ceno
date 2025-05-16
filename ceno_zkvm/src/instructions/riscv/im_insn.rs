@@ -2,13 +2,14 @@ use crate::{
     chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr},
     instructions::riscv::insn_base::{ReadMEM, ReadRS1, StateInOut, WriteRD},
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
+
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
+use multilinear_extensions::{Expression, ToExpr};
 
 /// This config handle the common part of I-type Instruction (memory variant)
 /// - PC, cycle, fetch

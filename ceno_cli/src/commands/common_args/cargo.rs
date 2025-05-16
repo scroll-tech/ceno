@@ -205,11 +205,19 @@ impl TargetSelection {
     /// # Panics
     ///
     /// Panics if neither `bin` nor `example` is set.
-    pub fn get_target_path(&self, compilation_options: &CompilationOptions) -> PathBuf {
-        let prefix = compilation_options
-            .target_dir
-            .as_deref()
-            .unwrap_or_else(|| Path::new("target"))
+    pub fn get_target_path<P: AsRef<Path>>(
+        &self,
+        workspace_root: P,
+        compilation_options: &CompilationOptions,
+    ) -> PathBuf {
+        let workspace_root = workspace_root.as_ref();
+        let prefix = workspace_root
+            .join(
+                compilation_options
+                    .target_dir
+                    .as_deref()
+                    .unwrap_or_else(|| Path::new("target")),
+            )
             .join(RUSTC_TARGET)
             .join(compilation_options.get_profile());
         if let Some(bin) = self.bin.as_ref() {
@@ -221,17 +229,21 @@ impl TargetSelection {
         }
     }
 
-    pub fn canonicalize<P: Into<PathBuf>>(
+    pub fn canonicalize<P: AsRef<Path>>(
         self,
+        workspace_root: P,
         manifest_path: P,
         package_selection: &PackageSelection,
     ) -> anyhow::Result<TargetSelection> {
         if self.is_set() {
             return Ok(self);
         }
+        let workspace_root = workspace_root.as_ref().canonicalize()?;
+        let root_manifest_path = workspace_root.join("Cargo.toml");
+        let manifest_path = manifest_path.as_ref().canonicalize()?;
 
         let metadata = MetadataCommand::new()
-            .manifest_path(manifest_path)
+            .manifest_path(&manifest_path)
             .no_deps()
             .exec()?;
         let mut packages = vec![];
@@ -249,6 +261,10 @@ impl TargetSelection {
 
         let mut binary_targets = vec![];
         for package in packages {
+            let package_manifest_path = package.manifest_path.canonicalize()?;
+            if manifest_path != root_manifest_path && package_manifest_path != manifest_path {
+                continue;
+            }
             if let Some(default_run) = package.default_run.as_ref() {
                 binary_targets.push((true, default_run));
                 continue;
@@ -274,7 +290,14 @@ impl TargetSelection {
         }
 
         if binary_targets.len() > 1 {
-            bail!("multiple binaries found, please specify one with `--bin` or `--example`")
+            bail!(format!(
+                "multiple binaries found, please specify one with `--bin` or `--example`. possible binaries: {}",
+                binary_targets
+                    .iter()
+                    .map(|(_, name)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
         }
 
         let (is_example, name) = binary_targets.pop().unwrap();

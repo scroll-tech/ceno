@@ -9,13 +9,13 @@ use crate::{
     chip_handler::utils::power_sequence,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     instructions::riscv::constants::{UINT_LIMBS, UInt},
     set_val,
     utils::i64_to_base,
     witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 
 use super::SignedExtendConfig;
 

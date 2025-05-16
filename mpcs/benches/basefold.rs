@@ -10,7 +10,6 @@ use mpcs::{
 };
 use std::collections::BTreeMap;
 
-use multilinear_extensions::mle::MultilinearExtension;
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
 

@@ -58,8 +58,8 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                         let result = run_e2e_with_checkpoint::<E, Pcs>(
                             program.clone(),
                             platform.clone(),
-                            hints.clone(),
-                            vec![],
+                            &hints,
+                            &[],
                             max_steps,
                             MAX_NUM_VARIABLES,
                             SecurityLevel::default(),

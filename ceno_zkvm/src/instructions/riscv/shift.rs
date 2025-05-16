@@ -6,12 +6,12 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::Instruction,
     set_val,
 };
 use ff_ext::FieldInto;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 

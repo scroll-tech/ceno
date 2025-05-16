@@ -2,7 +2,6 @@ use crate::{
     chip_handler::RegisterChipOperations,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
     gadgets::AssertLtConfig,
     instructions::{
         Instruction,
@@ -16,6 +15,7 @@ use crate::{
 };
 use ceno_emul::{StepRecord, Tracer};
 use ff_ext::{ExtensionField, FieldInto};
+use multilinear_extensions::{ToExpr, WitIn};
 use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 

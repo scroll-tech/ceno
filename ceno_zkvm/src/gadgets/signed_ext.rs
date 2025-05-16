@@ -1,12 +1,12 @@
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     instructions::riscv::constants::{LIMB_BITS, UInt},
     set_val,
     witness::LkMultiplicity,
 };
 use ff_ext::{ExtensionField, FieldInto};
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 
