@@ -3,10 +3,7 @@ use crate::{
     utils::{evaluate_as_multilinear_coeffs, evaluate_as_univariate},
 };
 use ff_ext::{ExtensionField, PoseidonField};
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, MultilinearExtension},
-    virtual_poly::eq_eval,
-};
+use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::eq_eval};
 use p3::{
     commit::Mmcs,
     field::{Field, PrimeCharacteristicRing},
@@ -673,7 +670,7 @@ where
         let evaluation_of_v_poly = self.compute_v_poly(parsed_commitment, statement, &parsed);
 
         let expected_sumcheck_poly_eval = evaluation_of_v_poly
-            * DenseMultilinearExtension::from_evaluations_ext_vec(
+            * MultilinearExtension::from_evaluations_ext_vec(
                 p3::util::log2_strict_usize(parsed.final_evaluations.len()),
                 parsed.final_evaluations,
             )

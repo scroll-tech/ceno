@@ -311,7 +311,7 @@ pub use basefold::{
 };
 extern crate whir as whir_external;
 mod whir;
-use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+use multilinear_extensions::mle::ArcMultilinearExtension;
 pub use whir::{Whir, WhirDefault, WhirDefaultSpec};
 
 // TODO: Need to use some functions here in the integration benchmarks. But
@@ -328,10 +328,6 @@ pub mod test_util {
 
     use itertools::Itertools;
 
-    #[cfg(test)]
-    use multilinear_extensions::{
-        mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension,
-    };
     #[cfg(test)]
     use rand::rngs::OsRng;
     #[cfg(test)]
@@ -384,6 +380,8 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
         Standard: Distribution<E::BaseField>,
     {
+        use multilinear_extensions::mle::ArcMultilinearExtension;
+
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
@@ -436,6 +434,8 @@ pub mod test_util {
         Standard: Distribution<E::BaseField>,
     {
         use std::collections::BTreeMap;
+
+        use multilinear_extensions::mle::ArcMultilinearExtension;
 
         let mut rng = rand::thread_rng();
         for num_vars in num_vars_start..num_vars_end {

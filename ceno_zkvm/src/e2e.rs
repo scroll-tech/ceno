@@ -89,7 +89,7 @@ pub struct EmulationResult {
     pub exit_code: Option<u32>,
     pub all_records: Vec<StepRecord>,
     pub final_mem_state: FinalMemState,
-    pub pi: PublicValues<u32>,
+    pub pi: PublicValues,
 }
 
 pub fn emulate_program(
@@ -144,14 +144,14 @@ pub fn emulate_program(
         .map(|rs2| rs2.value);
 
     let final_access = vm.tracer().final_accesses();
-    let end_cycle: u32 = vm.tracer().cycle().try_into().unwrap();
+    let end_cycle = vm.tracer().cycle();
     let insts = vm.tracer().executed_insts();
     tracing::debug!("program executed {insts} instructions in {end_cycle} cycles");
 
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),
         vm.program().entry,
-        Tracer::SUBCYCLES_PER_INSN as u32,
+        Tracer::SUBCYCLES_PER_INSN,
         vm.get_pc().into(),
         end_cycle,
         io_init.iter().map(|rec| rec.value).collect_vec(),

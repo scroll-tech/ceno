@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 
 use crate::{utils::base_decomposition, whir::fold::LagrangePolynomialIterator};
 
@@ -17,8 +17,8 @@ impl<F: ExtensionField> SumcheckCore<F> {
     // and initialises the table of the initial polynomial
     // v(X_1, ..., X_n) = p(X_1, ... X_n) * (epsilon_1 eq_z_1(X) + epsilon_2 eq_z_2(X) ...)
     pub fn new(
-        coeffs: DenseMultilinearExtension<F>, // multilinear polynomial in n variables
-        points: &[Vec<F>],                    // list of points, each of length n.
+        coeffs: MultilinearExtension<F>, // multilinear polynomial in n variables
+        points: &[Vec<F>],               // list of points, each of length n.
         combination_randomness: &[F],
     ) -> Self {
         assert_eq!(points.len(), combination_randomness.len());
@@ -27,7 +27,7 @@ impl<F: ExtensionField> SumcheckCore<F> {
         let mut prover = SumcheckCore {
             evaluation_of_p: match coeffs.evaluations() {
                 FieldType::Base(evals) => evals.iter().map(|e| F::from_base(e)).collect::<Vec<_>>(),
-                FieldType::Ext(evals) => evals.clone(),
+                FieldType::Ext(evals) => evals.to_vec(),
                 _ => panic!("Invalid field type"),
             }, // transform coefficient form -> evaluation form
             evaluation_of_equality: vec![F::ZERO; 1 << num_variables],
@@ -76,11 +76,11 @@ impl<F: ExtensionField> SumcheckCore<F> {
                 .map(|beta_suffix| suffix_len * beta_prefix + beta_suffix)
                 .collect();
             // left_poly = self.evaluation_of_p[suffix_len * beta_prefix .. suffix_len * (beta_prefix + 1)].to_vec()
-            let left_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+            let left_poly = MultilinearExtension::from_evaluations_ext_vec(
                 folding_factor,
                 indexes.iter().map(|&i| self.evaluation_of_p[i]).collect(),
             );
-            let right_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+            let right_poly = MultilinearExtension::from_evaluations_ext_vec(
                 folding_factor,
                 indexes
                     .iter()
@@ -128,11 +128,11 @@ impl<F: ExtensionField> SumcheckCore<F> {
                 .map(|beta_suffix| suffix_len * beta_prefix + beta_suffix)
                 .collect();
 
-            let left_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+            let left_poly = MultilinearExtension::from_evaluations_ext_vec(
                 folding_factor,
                 indexes.iter().map(|&i| self.evaluation_of_p[i]).collect(),
             );
-            let right_poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+            let right_poly = MultilinearExtension::from_evaluations_ext_vec(
                 folding_factor,
                 indexes
                     .iter()

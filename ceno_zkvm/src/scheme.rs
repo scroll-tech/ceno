@@ -46,22 +46,22 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 
 /// each field will be interpret to (constant) polynomial
 #[derive(Default, Clone, Debug)]
-pub struct PublicValues<T: Default + Clone + Debug> {
-    exit_code: T,
-    init_pc: T,
-    init_cycle: T,
-    end_pc: T,
-    end_cycle: T,
-    public_io: Vec<T>,
+pub struct PublicValues {
+    exit_code: u32,
+    init_pc: u32,
+    init_cycle: u64,
+    end_pc: u32,
+    end_cycle: u64,
+    public_io: Vec<u32>,
 }
 
-impl PublicValues<u32> {
+impl PublicValues {
     pub fn new(
         exit_code: u32,
         init_pc: u32,
-        init_cycle: u32,
+        init_cycle: u64,
         end_pc: u32,
-        end_cycle: u32,
+        end_cycle: u64,
         public_io: Vec<u32>,
     ) -> Self {
         Self {
@@ -75,17 +75,15 @@ impl PublicValues<u32> {
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
         vec![
-            vec![E::BaseField::from_u64((self.exit_code & 0xffff) as u64)],
-            vec![E::BaseField::from_u64(
-                ((self.exit_code >> 16) & 0xffff) as u64,
-            )],
-            vec![E::BaseField::from_u64(self.init_pc as u64)],
-            vec![E::BaseField::from_u64(self.init_cycle as u64)],
-            vec![E::BaseField::from_u64(self.end_pc as u64)],
-            vec![E::BaseField::from_u64(self.end_cycle as u64)],
+            vec![E::BaseField::from_u32(self.exit_code & 0xffff)],
+            vec![E::BaseField::from_u32((self.exit_code >> 16) & 0xffff)],
+            vec![E::BaseField::from_u32(self.init_pc)],
+            vec![E::BaseField::from_u64(self.init_cycle)],
+            vec![E::BaseField::from_u32(self.end_pc)],
+            vec![E::BaseField::from_u64(self.end_cycle)],
             self.public_io
                 .iter()
-                .map(|e| E::BaseField::from_u64(*e as u64))
+                .map(|e| E::BaseField::from_u32(*e))
                 .collect(),
         ]
     }
