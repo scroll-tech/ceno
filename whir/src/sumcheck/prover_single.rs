@@ -196,10 +196,9 @@ where
 
         // Update
         self.num_variables -= 1;
-        self.evaluation_of_p =
-            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
+        self.evaluation_of_p = MultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
         self.evaluation_of_equality =
-            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
+            MultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
         self.sum = combination_randomness * sumcheck_poly.evaluate_at_point(folding_randomness);
     }
 
@@ -240,7 +239,7 @@ where
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
-    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+    use multilinear_extensions::mle::MultilinearExtension;
     use p3::field::PrimeCharacteristicRing;
 
     use super::SumcheckSingle;
@@ -257,11 +256,10 @@ mod tests {
             E::from_u64(14),
         ];
 
-        let claimed_value =
-            DenseMultilinearExtension::from_evaluations_ext_vec(2, polynomial.clone())
-                .evaluate(&eval_point);
+        let claimed_value = MultilinearExtension::from_evaluations_ext_vec(2, polynomial.clone())
+            .evaluate(&eval_point);
 
-        let eval = DenseMultilinearExtension::from_evaluations_ext_vec(2, polynomial.clone())
+        let eval = MultilinearExtension::from_evaluations_ext_vec(2, polynomial.clone())
             .evaluate(&eval_point);
         let mut prover = SumcheckSingle::new(polynomial, &[eval_point], &[E::from_u64(1)], &[eval]);
 

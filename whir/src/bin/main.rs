@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+use multilinear_extensions::mle::MultilinearExtension;
 use p3::field::PrimeCharacteristicRing;
 use transcript::BasicTranscript;
 use whir::{
@@ -126,7 +126,7 @@ fn run_whir_as_ldt(args: Args, hash_params: Poseidon2MerkleMmcs<E>) {
         println!("WARN: more PoW bits required than what specified.");
     }
 
-    let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+    let polynomial = MultilinearExtension::from_evaluations_ext_vec(
         num_variables,
         (0..num_coeffs).map(E::from_u64).collect(),
     );
@@ -216,7 +216,7 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2MerkleMmcs<E>) {
         println!("WARN: more PoW bits required than what specified.");
     }
 
-    let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+    let polynomial = MultilinearExtension::from_evaluations_ext_vec(
         num_variables,
         (0..num_coeffs).map(E::from_u64).collect(),
     );

@@ -14,8 +14,7 @@ use p3::{
 use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 use sumcheck::structs::IOPProverMessage;
 
-use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
-
+use multilinear_extensions::mle::ArcMultilinearExtension;
 use std::{collections::BTreeMap, marker::PhantomData};
 
 pub type Digest<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment;
