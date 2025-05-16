@@ -33,9 +33,9 @@ pub trait SumcheckLayer<E: ExtensionField> {
 
     fn verify(
         &self,
+        max_num_variables: usize,
         proof: SumcheckLayerProof<E>,
         sigma: &E,
-        max_num_variables: usize,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>>;
@@ -67,9 +67,9 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
 
     fn verify(
         &self,
+        max_num_variables: usize,
         proof: SumcheckLayerProof<E>,
         sigma: &E,
-        max_num_variables: usize,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>> {

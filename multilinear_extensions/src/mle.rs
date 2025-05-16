@@ -19,6 +19,13 @@ use std::fmt::Debug;
 /// A point is a vector of num_var length
 pub type Point<F> = Vec<F>;
 
+/// A point and the evaluation of this point.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct PointAndEval<F> {
+    pub point: Point<F>,
+    pub eval: F,
+}
+
 impl<E: ExtensionField> Debug for MultilinearExtension<'_, E> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:?}", self.evaluations())

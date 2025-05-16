@@ -68,12 +68,7 @@ pub enum RAMType {
 
 impl_expr_from_unsigned!(RAMType);
 
-/// A point and the evaluation of this point.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PointAndEval<F> {
-    pub point: Point<F>,
-    pub eval: F,
-}
+pub type PointAndEval<F> = multilinear_extensions::mle::PointAndEval<F>;
 
 impl<E: ExtensionField> Default for PointAndEval<E> {
     fn default() -> Self {

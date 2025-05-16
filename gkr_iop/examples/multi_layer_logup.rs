@@ -4,7 +4,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
-    evaluation::{EvalExpression, PointAndEval},
+    evaluation::EvalExpression,
     gkr::{
         GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
