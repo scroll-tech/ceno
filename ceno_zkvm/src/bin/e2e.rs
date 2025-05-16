@@ -1,5 +1,7 @@
 use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
         Checkpoint, FieldType, PcsKind, Preset, run_e2e_with_checkpoint, setup_platform,
@@ -25,6 +27,11 @@ use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 use transcript::BasicTranscript as Transcript;
+
+// Use jemalloc as global allocator for performance
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
     parse_size::Config::new()
@@ -272,6 +279,11 @@ fn main() {
                 Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
+    };
+
+    #[cfg(all(feature = "jemalloc", unix, not(test)))]
+    {
+        print_allocated_bytes();
     }
 }
 

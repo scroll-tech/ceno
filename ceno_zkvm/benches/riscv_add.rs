@@ -6,6 +6,7 @@ use ceno_zkvm::{
     scheme::prover::ZKVMProver,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
+mod alloc;
 use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;

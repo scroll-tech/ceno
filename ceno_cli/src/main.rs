@@ -1,9 +1,16 @@
 use crate::{commands::*, utils::*};
 use anyhow::Context;
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+use ceno_zkvm::print_allocated_bytes;
 use clap::{Args, Parser, Subcommand};
 
 mod commands;
 mod utils;
+
+// Use jemalloc as global allocator for performance
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 const CENO_VERSION: &str = env!("CENO_VERSION");
 
@@ -85,5 +92,9 @@ fn main() {
     if let Err(e) = result {
         print_error(e);
         std::process::exit(1);
+    }
+    #[cfg(all(feature = "jemalloc", unix, not(test)))]
+    {
+        print_allocated_bytes();
     }
 }
