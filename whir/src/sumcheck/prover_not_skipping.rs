@@ -72,7 +72,7 @@ mod tests {
     use crate::whir::fold::expand_from_univariate;
     use ff_ext::GoldilocksExt2;
     use multilinear_extensions::{
-        mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
+        mle::{FieldType, MultilinearExtension},
         virtual_poly::eq_eval,
     };
     use p3::{field::PrimeCharacteristicRing, util::log2_strict_usize};
@@ -87,13 +87,13 @@ mod tests {
     type T = BasicTranscript<F>;
 
     fn fix_variables(evals: &[F], folding_randomness: &[F]) -> Vec<F> {
-        let mut poly = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let mut poly = MultilinearExtension::from_evaluations_ext_vec(
             log2_strict_usize(evals.len()),
             evals.to_vec(),
         );
         poly.fix_variables_in_place(folding_randomness);
         match poly.evaluations() {
-            FieldType::Ext(poly) => poly.clone(),
+            FieldType::Ext(poly) => poly.to_vec(),
             _ => panic!("Expected FieldType::Ext"),
         }
     }
@@ -118,16 +118,10 @@ mod tests {
             &[ood_point.clone(), statement_point.clone()],
             &[epsilon_1, epsilon_2],
             &[
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    num_variables,
-                    polynomial.clone(),
-                )
-                .evaluate(&ood_point),
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    num_variables,
-                    polynomial.clone(),
-                )
-                .evaluate(&statement_point),
+                MultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
+                    .evaluate(&ood_point),
+                MultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
+                    .evaluate(&statement_point),
             ],
         );
 
@@ -142,10 +136,10 @@ mod tests {
         let folded_poly_1 = fix_variables(&polynomial, &folding_randomness_1);
 
         let ood_answer =
-            DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
+            MultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
                 .evaluate(&ood_point);
         let statement_answer =
-            DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
+            MultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
                 .evaluate(&statement_point);
 
         // Verifier part
@@ -212,16 +206,10 @@ mod tests {
             &[ood_point.clone(), statement_point.clone()],
             &[epsilon_1, epsilon_2],
             &[
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    num_variables,
-                    polynomial.clone(),
-                )
-                .evaluate(&ood_point),
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    num_variables,
-                    polynomial.clone(),
-                )
-                .evaluate(&statement_point),
+                MultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
+                    .evaluate(&ood_point),
+                MultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
+                    .evaluate(&statement_point),
             ],
         );
 
@@ -233,7 +221,7 @@ mod tests {
         )?;
 
         let folded_poly_1 = fix_variables(&polynomial, &folding_randomness_1);
-        let fold_eval = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let fold_eval = MultilinearExtension::from_evaluations_ext_vec(
             log2_strict_usize(folded_poly_1.len()),
             folded_poly_1,
         )
@@ -251,12 +239,12 @@ mod tests {
         let folded_poly_2 = fix_variables(&folded_poly_1, &folding_randomness_2);
 
         let ood_answer =
-            DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
+            MultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
                 .evaluate(&ood_point);
         let statement_answer =
-            DenseMultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
+            MultilinearExtension::from_evaluations_ext_vec(num_variables, polynomial.clone())
                 .evaluate(&statement_point);
-        let fold_answer = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let fold_answer = MultilinearExtension::from_evaluations_ext_vec(
             log2_strict_usize(folded_poly_1.len()),
             folded_poly_1,
         )

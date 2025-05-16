@@ -17,9 +17,8 @@ use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, fmt,
-    mle::IntoMLEs,
+    mle::{ArcMultilinearExtension, IntoMLEs},
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
-    virtual_poly::ArcMultilinearExtension,
 };
 use p3::field::PrimeCharacteristicRing;
 use rand::thread_rng;
@@ -777,7 +776,7 @@ Hints:
         cs: &ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
-        pi: &PublicValues<u32>,
+        pi: &PublicValues,
         program: &Program,
     ) where
         E: LkMultiplicityKey,

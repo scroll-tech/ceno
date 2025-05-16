@@ -1,4 +1,4 @@
-use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
+use multilinear_extensions::mle::{IntoMLE, MultilinearExtension};
 use p3::{
     field::{Field, PrimeCharacteristicRing},
     matrix::Matrix,
@@ -200,9 +200,9 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
 }
 
 impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
-    pub fn to_mles<E: ff_ext::ExtensionField<BaseField = F>>(
+    pub fn to_mles<'a, E: ff_ext::ExtensionField<BaseField = F>>(
         &self,
-    ) -> Vec<DenseMultilinearExtension<E>> {
+    ) -> Vec<MultilinearExtension<'a, E>> {
         debug_assert!(self.is_padded);
         let n_column = self.inner.width;
         (0..n_column)

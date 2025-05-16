@@ -347,7 +347,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             extrapolation_aux,
             poly_meta: poly_meta.unwrap_or_else(|| vec![PolyMeta::Normal; num_polys]),
             phase2_numvar,
-            poly_index_fixvar_in_place: vec![false; num_polys],
         }
     }
 
@@ -404,7 +403,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let span = entered_span!("build_uni_poly");
         let AdditiveVec(uni_polys) = self.poly.products.iter().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-            |mut uni_polys, (_half_eq_opt, MonomialTerms { terms })| {
+            |mut uni_polys, MonomialTerms { terms }| {
                 for Term {
                     scalar,
                     product: prod,
@@ -486,30 +485,21 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// fix_var
     pub fn fix_var(&mut self, r: E) {
         let expected_numvars_at_round = self.expected_numvars_at_round();
-        self.poly_index_fixvar_in_place
+        self.poly
+            .flattened_ml_extensions
             .iter_mut()
-            .zip_eq(self.poly.flattened_ml_extensions.iter_mut())
             .zip_eq(&self.poly_meta)
-            .for_each(|((can_fixvar_in_place, poly), poly_type)| {
+            .for_each(|(poly, poly_type)| {
                 debug_assert!(poly.num_vars() > 0);
-                if *can_fixvar_in_place {
-                    // in place
-                    let poly = Arc::get_mut(poly);
-                    if let Some(f) = poly {
-                        debug_assert!(f.num_vars() <= expected_numvars_at_round);
-                        if f.num_vars() > 0 {
-                            f.fix_variables_in_place(&[r])
-                        }
-                    };
-                } else if poly.num_vars() > 0 {
-                    if expected_numvars_at_round == poly.num_vars()
-                        && matches!(poly_type, PolyMeta::Normal)
-                    {
+                if expected_numvars_at_round == poly.num_vars()
+                    && matches!(poly_type, PolyMeta::Normal)
+                {
+                    if !poly.is_mut() {
                         *poly = Arc::new(poly.fix_variables(&[r]));
-                        *can_fixvar_in_place = true;
+                    } else {
+                        let poly = Arc::get_mut(poly).unwrap();
+                        poly.fix_variables_in_place(&[r])
                     }
-                } else {
-                    panic!("calling sumcheck on constant")
                 }
             });
     }
@@ -615,7 +605,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 .collect(),
             poly_meta,
             phase2_numvar: None,
-            poly_index_fixvar_in_place: vec![false; num_polys],
         };
 
         exit_span!(start);
@@ -659,7 +648,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             let chal = challenge.unwrap();
             self.challenges.push(chal);
             let r = self.challenges[self.round - 1];
-            self.fix_var(r.elements);
+            self.fix_var_parallel(r.elements);
         }
         exit_span!(span);
         // exit_span!fix_argument);
@@ -675,7 +664,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             .par_iter()
             .fold_with(
                 AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-                |mut uni_polys, (_half_eq_opt, MonomialTerms { terms })| {
+                |mut uni_polys, MonomialTerms { terms }| {
                     for Term {
                         scalar,
                         product: prod,
@@ -728,25 +717,18 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// fix_var
     pub fn fix_var_parallel(&mut self, r: E) {
         let expected_numvars_at_round = self.expected_numvars_at_round();
-        self.poly_index_fixvar_in_place
+        self.poly
+            .flattened_ml_extensions
             .par_iter_mut()
-            .zip_eq(self.poly.flattened_ml_extensions.par_iter_mut())
-            .for_each(|(can_fixvar_in_place, poly)| {
-                if *can_fixvar_in_place {
-                    // in place
-                    let poly = Arc::get_mut(poly);
-                    if let Some(f) = poly {
-                        if f.num_vars() > 0 {
-                            f.fix_variables_in_place_parallel(&[r])
-                        }
-                    };
-                } else if poly.num_vars() > 0 {
-                    if expected_numvars_at_round == poly.num_vars() {
+            .for_each(|poly| {
+                assert!(poly.num_vars() > 0);
+                if expected_numvars_at_round == poly.num_vars() {
+                    if !poly.is_mut() {
                         *poly = Arc::new(poly.fix_variables_parallel(&[r]));
-                        *can_fixvar_in_place = true;
+                    } else {
+                        let poly = Arc::get_mut(poly).unwrap();
+                        poly.fix_variables_in_place_parallel(&[r])
                     }
-                } else {
-                    panic!("calling sumcheck on constant")
                 }
             });
     }
