@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly::build_eq_x_r_vec_sequential;
@@ -70,7 +68,7 @@ impl EvalExpression {
                 let eval = izip!(parts, &eq).fold(E::ZERO, |acc, (part, eq)| acc + part.eval * *eq);
 
                 PointAndEval {
-                    point: Arc::new(new_point),
+                    point: new_point,
                     eval,
                 }
             }

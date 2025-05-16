@@ -250,7 +250,7 @@ fn main() {
 
         #[cfg(debug_assertions)]
         {
-            let last = gkr_witness.layers[0].exts.clone();
+            let last = gkr_witness.layers[0].bases.clone();
             MockProver::check(
                 gkr_circuit.clone(),
                 &gkr_witness,
@@ -264,7 +264,7 @@ fn main() {
         }
 
         let out_evals = {
-            let last = gkr_witness.layers[0].exts.clone();
+            let last = gkr_witness.layers[0].bases.clone();
             let point = Arc::new(vec![]);
             assert_eq!(last[0].len(), 1);
             vec![

@@ -24,8 +24,8 @@ pub struct GKRCircuit {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct GKRCircuitWitness<E: ExtensionField> {
-    pub layers: Vec<LayerWitness<E>>,
+pub struct GKRCircuitWitness<'a, E: ExtensionField> {
+    pub layers: Vec<LayerWitness<'a, E>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

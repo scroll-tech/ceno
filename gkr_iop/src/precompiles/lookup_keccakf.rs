@@ -768,7 +768,7 @@ where
         let mut layer_wits = vec![
             LayerWitness {
                 bases: vec![],
-                exts: vec![],
+                bases: vec![],
                 num_vars: 1
             };
             n_layers

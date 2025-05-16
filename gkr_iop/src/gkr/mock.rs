@@ -101,10 +101,10 @@ impl<E: ExtensionField> MockProver<E> {
                     }
                 }
             }
-            for (in_pos, base) in izip!(&layer.in_bases, &layer_wit.bases) {
+            for (in_pos, base) in izip!(&layer.in_eval_expr, &layer_wit.bases) {
                 *(in_pos.entry_mut(&mut evaluations)) = VectorType::Base(base.clone());
             }
-            for (in_pos, ext) in izip!(&layer.in_exts, &layer_wit.exts) {
+            for (in_pos, ext) in izip!(&layer.in_eval_expr, &layer_wit.exts) {
                 *(in_pos.entry_mut(&mut evaluations)) = VectorType::Ext(ext.clone());
             }
         }

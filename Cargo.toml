@@ -74,6 +74,7 @@ secp = "0.4.1"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 strum = "0.26"
+thiserror = "1" # do we need this?
 strum_macros = "0.26"
 subprotocols = { path = "subprotocols" }
 substrate-bn = { version = "0.6.0" }

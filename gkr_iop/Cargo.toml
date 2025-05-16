@@ -21,8 +21,10 @@ rand.workspace = true
 rayon.workspace = true
 serde.workspace = true
 subprotocols = { path = "../subprotocols" }
-thiserror = "1"
+sumcheck.workspace = true
+thiserror.workspace = true
 tiny-keccak.workspace = true
+either.workspace = true
 transcript = { path = "../transcript" }
 witness = { path = "../witness" }
 
