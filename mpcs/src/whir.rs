@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use super::PolynomialCommitmentScheme;
 use crate::{PCSFriParam, Point, SecurityLevel};
 use ff_ext::{ExtensionField, PoseidonField};
-use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
+use multilinear_extensions::mle::ArcMultilinearExtension;
 use p3::{commit::Mmcs, util::log2_strict_usize};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
@@ -178,7 +178,7 @@ where
 
     fn simple_batch_open(
         _pp: &Self::ProverParam,
-        polys: &[multilinear_extensions::virtual_poly::ArcMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         evals: &[E],

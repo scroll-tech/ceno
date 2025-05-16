@@ -10,7 +10,7 @@ mod tests {
 
     use ff_ext::{ExtensionField, GoldilocksExt2};
     use multilinear_extensions::{
-        mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
+        mle::{FieldType, MultilinearExtension},
         virtual_poly::eq_eval,
     };
     use p3::field::PrimeCharacteristicRing;
@@ -25,7 +25,7 @@ mod tests {
     fn test_sumcheck_folding_factor_1() {
         let folding_factor = 1;
         let eval_point = vec![F::from_u64(10), F::from_u64(11)];
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let polynomial = MultilinearExtension::from_evaluations_ext_vec(
             2,
             vec![
                 F::from_u64(1),
@@ -61,7 +61,7 @@ mod tests {
     fn test_single_folding() {
         let num_variables = 2;
         let folding_factor = 2;
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let polynomial = MultilinearExtension::from_evaluations_ext_vec(
             2,
             vec![
                 F::from_u64(1),
@@ -110,7 +110,7 @@ mod tests {
         let num_variables = 6;
         let folding_factor = 2;
         let eval_point = vec![F::from_u64(97); num_variables];
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let polynomial = MultilinearExtension::from_evaluations_ext_vec(
             num_variables,
             (0..1 << num_variables).map(F::from_u64).collect(),
         );
@@ -161,7 +161,7 @@ mod tests {
     fn test_e2e() {
         let num_variables = 4;
         let folding_factor = 2;
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let polynomial = MultilinearExtension::from_evaluations_ext_vec(
             num_variables,
             (0..1 << num_variables).map(F::from_u64).collect(),
         );
@@ -240,7 +240,7 @@ mod tests {
     fn test_e2e_larger() {
         let num_variables = 6;
         let folding_factor = 2;
-        let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+        let polynomial = MultilinearExtension::from_evaluations_ext_vec(
             num_variables,
             (0..1 << num_variables).map(F::from_u64).collect(),
         );
