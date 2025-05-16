@@ -11,10 +11,7 @@ use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::{gkr::GKRCircuitWitness, precompiles::KeccakLayout};
 use itertools::{Either, Itertools};
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{
-    Expression, impl_expr_from_unsigned, mle::DenseMultilinearExtension,
-    virtual_poly::ArcMultilinearExtension,
-};
+use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::MultilinearExtension};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
@@ -43,7 +40,7 @@ pub struct TowerProofs<E: ExtensionField> {
 }
 
 pub struct TowerProverSpec<'a, E: ExtensionField> {
-    pub witness: Vec<Vec<ArcMultilinearExtension<'a, E>>>,
+    pub witness: Vec<Vec<MultilinearExtension<'a, E>>>,
 }
 
 #[derive(

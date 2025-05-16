@@ -20,7 +20,7 @@ use crate::{
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::zip_eq;
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 use p3::{commit::Mmcs, matrix::dense::RowMajorMatrix};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
@@ -186,7 +186,7 @@ where
                 round: 0,
                 sumcheck_prover,
                 folding_randomness,
-                evaluations: DenseMultilinearExtension::from_evaluations_ext_vec(
+                evaluations: MultilinearExtension::from_evaluations_ext_vec(
                     p3::util::log2_strict_usize(polynomial.len()),
                     polynomial,
                 ),
@@ -261,7 +261,7 @@ where
                     .sumcheck_prover
                     .unwrap_or_else(|| {
                         SumcheckProverNotSkipping::new(
-                            folded_evaluations_evals.clone(),
+                            folded_evaluations_evals.to_vec(),
                             &[],
                             &[],
                             &[],
@@ -279,7 +279,7 @@ where
                 sumcheck_poly_evals: sumcheck_poly_evals.clone(),
                 merkle_roots: merkle_roots.clone(),
                 ood_answers: ood_answers.clone(),
-                final_poly: folded_evaluations_evals.clone(),
+                final_poly: folded_evaluations_evals.to_vec(),
                 folded_evals: Vec::new(),
             });
         }
@@ -289,7 +289,7 @@ where
         // Fold the coefficients, and compute fft of polynomial (and commit)
         let new_domain = round_state.domain.scale(2);
         let expansion = new_domain.size() / folded_evaluations_evals.len();
-        let mut folded_coefficients_coeffs = folded_evaluations_evals.clone();
+        let mut folded_coefficients_coeffs = folded_evaluations_evals.to_vec();
         interpolate_over_boolean_hypercube(&mut folded_coefficients_coeffs);
         let evals = expand_from_coeff(&folded_coefficients_coeffs, expansion);
         // TODO: `stack_evaluations` and `restructure_evaluations` are really in-place algorithms.
@@ -397,7 +397,7 @@ where
                 stir_evaluations.extend(batched_answers.iter().map(|batched_answers| {
                     let mut batched_answers_coeffs = batched_answers.to_vec();
                     evaluate_over_hypercube(&mut batched_answers_coeffs);
-                    DenseMultilinearExtension::from_evaluations_ext_vec(
+                    MultilinearExtension::from_evaluations_ext_vec(
                         p3::util::log2_strict_usize(batched_answers_coeffs.len()),
                         batched_answers_coeffs.to_vec(),
                     )

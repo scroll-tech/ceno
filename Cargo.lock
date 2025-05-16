@@ -339,6 +339,7 @@ dependencies = [
  "clap",
  "console",
  "ff_ext",
+ "get_dir",
  "mpcs",
  "parse-size",
  "serde",
@@ -1056,6 +1057,12 @@ checksum = "28ccff179d8070317671db09aee6d20affc26e88c5394714553b04f509b43a60"
 dependencies = [
  "once_cell",
 ]
+
+[[package]]
+name = "get_dir"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f4f860e1edc7cb887dc8c0089e2e437fadb6ab1b2756664e4e3d3983913b6e0"
 
 [[package]]
 name = "getrandom"

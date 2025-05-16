@@ -23,13 +23,6 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_paddin
 use itertools::{Itertools, izip};
 use serde::{Serialize, de::DeserializeOwned};
 
-use multilinear_extensions::mle::{FieldType, MultilinearExtension};
-
-use rayon::{
-    iter::IntoParallelIterator,
-    prelude::{IntoParallelRefIterator, ParallelIterator},
-};
-
 mod structure;
 pub use structure::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
@@ -38,66 +31,12 @@ pub use structure::{
 mod commit_phase;
 use commit_phase::batch_commit_phase;
 mod encoding;
-use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
+use multilinear_extensions::mle::ArcMultilinearExtension;
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
 mod query_phase;
-
-impl<E: ExtensionField, Spec: BasefoldSpec<E>> Basefold<E, Spec>
-where
-    E: Serialize + DeserializeOwned,
-    E::BaseField: Serialize + DeserializeOwned,
-{
-    /// Transpose a matrix of field elements, generic over the type of field element
-    pub fn transpose_field_type<T: Send + Sync + Copy>(
-        matrix: &[FieldType<E>],
-    ) -> Result<Vec<FieldType<E>>, Error> {
-        let transpose_fn = match matrix[0] {
-            FieldType::Ext(_) => Self::get_column_ext,
-            FieldType::Base(_) => Self::get_column_base,
-            FieldType::Unreachable => unreachable!(),
-        };
-
-        let len = matrix[0].len();
-        (0..len)
-            .into_par_iter()
-            .map(|i| (transpose_fn)(matrix, i))
-            .collect()
-    }
-
-    fn get_column_base(
-        matrix: &[FieldType<E>],
-        column_index: usize,
-    ) -> Result<FieldType<E>, Error> {
-        Ok(FieldType::Base(
-            matrix
-                .par_iter()
-                .map(|row| match row {
-                    FieldType::Base(content) => Ok(content[column_index]),
-                    _ => Err(Error::InvalidPcsParam(
-                        "expected base field type".to_string(),
-                    )),
-                })
-                .collect::<Result<Vec<E::BaseField>, Error>>()?,
-        ))
-    }
-
-    fn get_column_ext(matrix: &[FieldType<E>], column_index: usize) -> Result<FieldType<E>, Error> {
-        Ok(FieldType::Ext(
-            matrix
-                .par_iter()
-                .map(|row| match row {
-                    FieldType::Ext(content) => Ok(content[column_index]),
-                    _ => Err(Error::InvalidPcsParam(
-                        "expected ext field type".to_string(),
-                    )),
-                })
-                .collect::<Result<Vec<E>, Error>>()?,
-        ))
-    }
-}
 
 /// Implement the Polynomial Commitment Scheme present in the BaseFold paper
 /// https://eprint.iacr.org/2023/1705
