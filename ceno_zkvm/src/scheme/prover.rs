@@ -546,7 +546,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         let mut alpha_offset = 0;
         // r_records_combined is \sum_i alpha^i * (r_records[i][j]-padding) where padding = 1
-        let r_records_combined: MultilinearExtension<E> = linear_combine_mles(
+        let mut r_records_combined: MultilinearExtension<E> = linear_combine_mles(
             &alpha_pow[alpha_offset..alpha_offset + r_counts_per_instance],
             r_records_wit,
             E::ONE.neg(),
@@ -554,7 +554,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         alpha_offset += r_counts_per_instance;
 
         // w_records_combined is \sum_i alpha^i * (w_records[i][j]-padding) where padding = 1
-        let w_records_combined: MultilinearExtension<E> = linear_combine_mles(
+        let mut w_records_combined: MultilinearExtension<E> = linear_combine_mles(
             &alpha_pow[alpha_offset..(alpha_offset + w_counts_per_instance)],
             w_records_wit,
             E::ONE.neg(),
@@ -563,7 +563,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         // lk_records_combined is \sum_i alpha^i * (lk_records[i][j]-padding)
         //  where padding = chip_record_alpha
-        let lk_records_combined: MultilinearExtension<E> = linear_combine_mles(
+        let mut lk_records_combined: MultilinearExtension<E> = linear_combine_mles(
             &alpha_pow[alpha_offset..(alpha_offset + lk_counts_per_instance)],
             lk_records_wit,
             chip_record_alpha.neg(),

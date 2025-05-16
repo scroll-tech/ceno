@@ -7,6 +7,7 @@ use std::{
 };
 
 use either::Either;
+use multilinear_extensions::mle::MultilinearExtension;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -214,7 +215,7 @@ where
 pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
     expr_builder: &mut VirtualPolynomialsBuilder<'a, E>,
     exprs: &mut Vec<Expression<E>>,
-    selector: Option<&'a ArcMultilinearExtension<'a, E>>,
+    selector: Option<&'a MultilinearExtension<'a, E>>,
     wit_ins: Vec<&'a ArcMultilinearExtension<'a, E>>,
     expr: &Expression<E>,
     challenges: &[E],
