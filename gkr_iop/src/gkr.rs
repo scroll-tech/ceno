@@ -1,9 +1,8 @@
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
-use layer::{Layer, LayerWitness};
+use layer::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
 use multilinear_extensions::mle::{Point, PointAndEval};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use subprotocols::sumcheck::SumcheckProof;
 use transcript::Transcript;
 
 use crate::{error::BackendError, evaluation::EvalExpression};
@@ -18,8 +17,7 @@ pub struct GKRCircuit<E: ExtensionField> {
 
     pub n_challenges: usize,
     pub n_evaluations: usize,
-    pub base_openings: Vec<(usize, EvalExpression<E>)>,
-    pub ext_openings: Vec<(usize, EvalExpression<E>)>,
+    pub openings: Vec<(usize, EvalExpression<E>)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -42,7 +40,7 @@ pub struct GKRProverOutput<E: ExtensionField, Evaluation> {
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct GKRProof<E: ExtensionField>(pub Vec<SumcheckProof<E>>);
+pub struct GKRProof<E: ExtensionField>(pub Vec<SumcheckLayerProof<E>>);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -108,7 +106,13 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         for (layer, layer_proof) in izip!(&self.layers, sumcheck_proofs) {
-            layer.verify(layer_proof, &mut evaluations, &mut challenges, transcript)?;
+            layer.verify(
+                max_num_variables,
+                layer_proof,
+                &mut evaluations,
+                &mut challenges,
+                transcript,
+            )?;
         }
 
         Ok(GKRClaims(
@@ -121,7 +125,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         evaluations: &[PointAndEval<E>],
         challenges: &[E],
     ) -> Vec<Evaluation<E>> {
-        chain!(&self.base_openings, &self.ext_openings)
+        chain!(&self.openings, &self.openings)
             .map(|(poly, eval)| {
                 let poly = *poly;
                 let PointAndEval { point, eval: value } = eval.evaluate(evaluations, challenges);

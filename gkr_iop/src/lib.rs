@@ -12,13 +12,13 @@ pub mod gkr;
 pub mod precompiles;
 pub mod utils;
 
-pub trait ProtocolBuilder: Sized {
+pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     type Params;
 
     fn init(params: Self::Params) -> Self;
 
     /// Build the protocol for GKR IOP.
-    fn build(params: Self::Params) -> (Self, Chip) {
+    fn build(params: Self::Params) -> (Self, Chip<E>) {
         let mut chip_spec = Self::init(params);
         let mut chip = Chip::default();
         chip_spec.build_commit_phase(&mut chip);
@@ -29,11 +29,11 @@ pub trait ProtocolBuilder: Sized {
 
     /// Specify the polynomials and challenges to be committed and generated in
     /// Phase 1.
-    fn build_commit_phase(&mut self, spec: &mut Chip);
+    fn build_commit_phase(&mut self, spec: &mut Chip<E>);
     /// Create the GKR layers in the reverse order. For each layer, specify the
     /// polynomial expressions, evaluation expressions of outputs and evaluation
     /// positions of the inputs.
-    fn build_gkr_phase(&mut self, spec: &mut Chip);
+    fn build_gkr_phase(&mut self, spec: &mut Chip<E>);
 }
 
 pub trait ProtocolWitnessGenerator<E>

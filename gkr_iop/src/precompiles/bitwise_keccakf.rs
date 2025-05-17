@@ -3,7 +3,7 @@ use std::{array::from_fn, marker::PhantomData, sync::Arc};
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
-    evaluation::{EvalExpression, PointAndEval},
+    evaluation::EvalExpression,
     gkr::{
         GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
@@ -11,10 +11,11 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct};
+use multilinear_extensions::{Expression, ToExpr};
 use p3_field::{Field, PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 
-use subprotocols::expression::{Constant, Expression, Witness};
+use subprotocols::expression::{Constant, Witness};
 use tiny_keccak::keccakf;
 use transcript::BasicTranscript;
 
@@ -53,24 +54,24 @@ fn xor<F: Field>(a: F, b: F) -> F {
     a + b - a * b - a * b
 }
 
-fn and_expr(a: Expression, b: Expression) -> Expression {
+fn and_expr(a: Expression<E>, b: Expression<E>) -> Expression<E> {
     a.clone() * b.clone()
 }
 
-fn not_expr(a: Expression) -> Expression {
+fn not_expr(a: Expression<E>) -> Expression<E> {
     one_expr() - a
 }
 
-fn xor_expr(a: Expression, b: Expression) -> Expression {
-    a.clone() + b.clone() - Expression::Const(Constant::Base(2)) * a * b
+fn xor_expr<E: ExtensionField>(a: Expression<E>, b: Expression<E>) -> Expression<E> {
+    a.clone() + b.clone() - E::BaseField::from_u32(2).expr() * a * b
 }
 
-fn zero_expr() -> Expression {
-    Expression::Const(Constant::Base(0))
+fn zero_expr<E: ExtensionField>() -> Expression<E> {
+    E::BaseField::ZERO.expr()
 }
 
-fn one_expr() -> Expression {
-    Expression::Const(Constant::Base(1))
+fn one_expr<E: ExtensionField>() -> Expression<E> {
+    E::BaseField::ONE.expr()
 }
 
 fn c<F: Field>(x: usize, z: usize, bits: &[F]) -> F {
@@ -95,7 +96,7 @@ fn d<F: Field>(x: usize, z: usize, c_vals: &[F]) -> F {
     xor(c_vals[lhs], c_vals[rhs])
 }
 
-fn d_expr(x: usize, z: usize, c_wits: &[Witness]) -> Expression {
+fn d_expr<E: ExtensionField>(x: usize, z: usize, c_wits: &[Witness]) -> Expression<E> {
     let lhs = from_xz((x + 5 - 1) % 5, z);
     let rhs = from_xz((x + 1) % 5, (z + 64 - 1) % 64);
     xor_expr(c_wits[lhs].into(), c_wits[rhs].into())
@@ -212,7 +213,7 @@ fn iota_expr(bits: &[Witness], index: usize, round_value: u64) -> Expression {
     }
 }
 
-fn chi_expr(i: usize, bits: &[Witness]) -> Expression {
+fn chi_expr<E: ExtensionField>(i: usize, bits: &[Witness]) -> Expression<E> {
     assert_eq!(bits.len(), STATE_SIZE);
 
     let (x, y, z) = to_xyz(i);
@@ -223,7 +224,7 @@ fn chi_expr(i: usize, bits: &[Witness]) -> Expression {
     xor_expr((bits[i]).into(), rhs)
 }
 
-impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
+impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     type Params = KeccakParams;
 
     fn init(params: Self::Params) -> Self {

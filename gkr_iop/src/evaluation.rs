@@ -78,14 +78,14 @@ impl<E: ExtensionField> EvalExpression<E> {
     pub fn entry<'a, T>(&self, evals: &'a [T]) -> &'a T {
         match self {
             EvalExpression::Single(i) => &evals[*i],
-            _ => unreachable!(),
+            _ => panic!("invalid operation"),
         }
     }
 
     pub fn entry_mut<'a, T>(&self, evals: &'a mut [T]) -> &'a mut T {
         match self {
             EvalExpression::Single(i) => &mut evals[*i],
-            _ => unreachable!(),
+            _ => panic!("invalid operation"),
         }
     }
 }

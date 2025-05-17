@@ -102,7 +102,7 @@ impl<E: ExtensionField> Layer<E> {
         transcript: &mut T,
     ) -> SumcheckLayerProof<E> {
         self.update_challenges(challenges, transcript);
-        let (sigmas, out_points) = self.sigmas_and_points(claims, challenges);
+        let (_, out_points) = self.extract_claim_and_point(claims, challenges);
 
         let sumcheck_layer_proof = match self.ty {
             LayerType::Sumcheck => <Layer<E> as SumcheckLayer<E>>::prove(
@@ -146,7 +146,7 @@ impl<E: ExtensionField> Layer<E> {
         transcript: &mut Trans,
     ) -> Result<(), BackendError<E>> {
         self.update_challenges(challenges, transcript);
-        let (sigmas, points) = self.sigmas_and_points(claims, challenges);
+        let (sigmas, points) = self.extract_claim_and_point(claims, challenges);
 
         let LayerClaims { in_point, evals } = match self.ty {
             LayerType::Sumcheck => <Layer<_> as SumcheckLayer<E>>::verify(
@@ -179,7 +179,7 @@ impl<E: ExtensionField> Layer<E> {
         Ok(())
     }
 
-    fn sigmas_and_points(
+    fn extract_claim_and_point(
         &self,
         claims: &[PointAndEval<E>],
         challenges: &[E],
@@ -187,21 +187,24 @@ impl<E: ExtensionField> Layer<E> {
         self.outs
             .iter()
             .map(|out| {
-                let tmp = out.evaluate(claims, challenges);
-                (tmp.eval, tmp.point)
+                let PointAndEval { point, eval } = out.evaluate(claims, challenges);
+                (eval, point)
             })
             .unzip()
     }
 
+    // generate layer challenge, if have, and set to respective challenge_id index
+    // optional resize raw challenges vector to adapt new challenge
     fn update_challenges(&self, challenges: &mut Vec<E>, transcript: &mut impl Transcript<E>) {
         for challenge in &self.challenges {
             let value = transcript.sample_and_append_challenge(b"layer challenge");
             match challenge {
-                Constant::Challenge(i) => {
-                    if challenges.len() <= *i {
-                        challenges.resize(*i + 1, E::ZERO);
+                Expression::Challenge(challange_id, ..) => {
+                    let challange_id = *challange_id as usize;
+                    if challenges.len() <= challange_id as usize {
+                        challenges.resize(challange_id + 1, E::default());
                     }
-                    challenges[*i] = value.elements;
+                    challenges[challange_id] = value.elements;
                 }
                 _ => unreachable!(),
             }

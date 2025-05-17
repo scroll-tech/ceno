@@ -1,12 +1,12 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{mle::Point, utils::eval_by_expr_with_instance};
-use sumcheck::structs::VerifierError;
+use sumcheck::structs::{IOPProof, VerifierError};
 use transcript::Transcript;
 
 use crate::error::BackendError;
 
-use super::{Layer, LayerWitness};
+use super::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
 
 pub struct LinearLayerProof<E> {
     evals: Vec<E>,
@@ -23,11 +23,11 @@ pub trait LinearLayer<E: ExtensionField> {
         wit: LayerWitness<E>,
         out_point: &Point<E>,
         transcript: &mut impl Transcript<E>,
-    ) -> LinearLayerProof<E>;
+    ) -> SumcheckLayerProof<E>;
 
     fn verify(
         &self,
-        proof: LinearLayerProof<E>,
+        proof: SumcheckLayerProof<E>,
         sigmas: &[E],
         out_point: &Point<E>,
         challenges: &[E],
@@ -41,7 +41,7 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
         wit: LayerWitness<E>,
         out_point: &Point<E>,
         transcript: &mut impl Transcript<E>,
-    ) -> LinearLayerProof<E> {
+    ) -> SumcheckLayerProof<E> {
         let evals = wit
             .bases
             .iter()
@@ -50,22 +50,24 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
 
         transcript.append_field_element_exts(&evals);
 
-        LinearLayerProof {
+        SumcheckLayerProof {
             evals,
-            point: out_point.clone(),
+            proof: IOPProof {
+                point: out_point.clone(),
+                proofs: vec![],
+            },
         }
     }
 
     fn verify(
         &self,
-        proof: LinearLayerProof<E>,
+        proof: SumcheckLayerProof<E>,
         sigmas: &[E],
         out_point: &Point<E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>> {
-        let LinearLayerProof { evals, .. } = proof;
-
+        let SumcheckLayerProof { evals, .. } = proof;
         transcript.append_field_element_exts(&evals);
 
         for ((sigma, expr), expr_name) in sigmas.iter().zip_eq(&self.exprs).zip_eq(&self.expr_names)

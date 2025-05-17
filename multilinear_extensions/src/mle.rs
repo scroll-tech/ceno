@@ -106,6 +106,18 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
         }
     }
 
+    pub fn as_borrowed_view(&self) -> Self {
+        match self {
+            FieldType::Base(SmartSlice::Borrowed(slice)) => {
+                FieldType::Base(SmartSlice::Borrowed(slice))
+            }
+            FieldType::Ext(SmartSlice::Borrowed(slice)) => {
+                FieldType::Ext(SmartSlice::Borrowed(slice))
+            }
+            _ => panic!("invalid type"),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         match self {
             FieldType::Base(content) => content.is_empty(),
@@ -199,6 +211,14 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         Self {
             num_vars,
             evaluations: field_type,
+        }
+    }
+
+    /// Create vector from field type
+    pub fn from_field_type_borrowed(num_vars: usize, field_type: &FieldType<'a, E>) -> Self {
+        Self {
+            num_vars,
+            evaluations: field_type.as_borrowed_view(),
         }
     }
 
@@ -530,6 +550,10 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
 
     pub fn evaluations(&self) -> &FieldType<E> {
         &self.evaluations
+    }
+
+    pub fn as_evaluations_view(&self) -> FieldType<E> {
+        self.evaluations.as_borrowed_view()
     }
 
     pub fn evaluations_to_owned(self) -> FieldType<'a, E> {

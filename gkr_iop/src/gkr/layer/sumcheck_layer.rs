@@ -7,6 +7,7 @@ use multilinear_extensions::{
     utils::eval_by_expr_with_instance, virtual_poly::VPAuxInfo,
     virtual_polys::VirtualPolynomialsBuilder,
 };
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck::structs::{
     IOPProof, IOPProverState, IOPVerifierState, SumCheckSubClaim, VerifierError,
 };
@@ -16,6 +17,11 @@ use crate::error::BackendError;
 
 use super::{Layer, LayerWitness, linear_layer::LayerClaims};
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct SumcheckLayerProof<E: ExtensionField> {
     pub proof: IOPProof<E>,
     pub evals: Vec<E>,
