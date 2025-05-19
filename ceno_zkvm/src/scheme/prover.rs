@@ -324,9 +324,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let log2_num_instances = ceil_log2(next_pow2_instances);
         let chip_record_alpha = challenges[0];
 
+        // opcode must have at least one read/write/lookup
         let is_opcode_circuit = !cs.lk_expressions.is_empty()
             || !cs.r_expressions.is_empty()
             || !cs.w_expressions.is_empty();
+        // table must have at least one read/write/lookup
+        let is_table_circuit = !cs.lk_table_expressions.is_empty()
+            || !cs.r_table_expressions.is_empty()
+            || !cs.w_table_expressions.is_empty();
 
         // sanity check
         assert_eq!(witnesses.len(), cs.num_witin as usize);
@@ -343,17 +348,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .iter()
                 .all(|v| { v.evaluations().len().is_power_of_two() })
         );
-        assert!(
-            // opcode must have at least one read/write/lookup
-            !(cs.r_expressions.is_empty()
-                && cs.w_expressions.is_empty()
-                && cs.lk_expressions.is_empty())
-            ||
-                // table must have at least one read/write/lookup
-                !(cs.r_table_expressions.is_empty()
-                    && cs.w_table_expressions.is_empty()
-                    && cs.lk_table_expressions.is_empty())
-        );
+        assert!(is_table_circuit || is_opcode_circuit);
         assert!(
             cs.r_table_expressions
                 .iter()
