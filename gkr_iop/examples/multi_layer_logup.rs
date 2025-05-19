@@ -6,11 +6,12 @@ use gkr_iop::{
     chip::Chip,
     evaluation::{EvalExpression, PointAndEval},
     gkr::{
-        GKRCircuitWitness, GKRProverOutput,
+        GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
     },
 };
 use itertools::{Itertools, izip};
+use multilinear_extensions::util::ceil_log2;
 use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 use rand::{Rng, rngs::OsRng};
@@ -22,6 +23,7 @@ use gkr_iop::gkr::mock::MockProver;
 
 #[cfg(debug_assertions)]
 use subprotocols::expression::VectorType;
+use witness::RowMajorMatrix;
 
 type E = BinomialExtensionField<Goldilocks, 2>;
 
@@ -149,8 +151,7 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
 }
 
 pub struct TowerChipTrace {
-    pub table: Vec<u64>,
-    pub multiplicity: Vec<u64>,
+    pub table_with_multiplicity: Vec<(u64, u64)>,
 }
 
 impl<E> ProtocolWitnessGenerator<E> for TowerChipLayout<E>
@@ -159,22 +160,20 @@ where
 {
     type Trace = TowerChipTrace;
 
-    fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>> {
-        let mut res = vec![vec![]; 2];
-        res[self.committed_table_id] = phase1
-            .table
-            .into_iter()
-            .map(E::BaseField::from_u64)
-            .collect();
-        res[self.committed_count_id] = phase1
-            .multiplicity
-            .into_iter()
-            .map(E::BaseField::from_u64)
-            .collect();
-        res
+    fn phase1_witness(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField> {
+        let wits = phase1
+            .table_with_multiplicity
+            .iter()
+            .flat_map(|(x, y)| vec![E::BaseField::from_u64(*x), E::BaseField::from_u64(*y)])
+            .collect_vec();
+        RowMajorMatrix::new_by_values(wits, 2, witness::InstancePaddingStrategy::RepeatLast)
     }
 
-    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E> {
+    fn gkr_witness(
+        &self,
+        phase1: &RowMajorMatrix<E::BaseField>,
+        challenges: &[E],
+    ) -> (GKRCircuitWitness<E>, GKRCircuitOutput<E>) {
         // Generate witnesses.
         let table = &phase1[self.committed_table_id];
         let count = &phase1[self.committed_count_id];
@@ -183,7 +182,7 @@ where
         // Compute table + beta.
         let n_layers = self.params.height + 1;
         let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(n_layers);
-        layer_wits.push(LayerWitness::new(vec![table.clone()], vec![]));
+        layer_wits.push(LayerWitness::new(vec![table.to_vec()], vec![]));
 
         // Compute den_0, den_1, num_0, num_1 for each layer.
         let updated_table = table.iter().cloned().map(|x| beta + x).collect_vec();
@@ -211,8 +210,16 @@ where
             LayerWitness::new(vec![], vec![den_0, den_1, num_0, num_1])
         }));
         layer_wits.reverse();
+        let num_vars = ceil_log2(last_den.len());
 
-        GKRCircuitWitness { layers: layer_wits }
+        (
+            GKRCircuitWitness { layers: layer_wits },
+            GKRCircuitOutput(LayerWitness {
+                bases: vec![],
+                exts: vec![last_den, last_num],
+                num_vars,
+            }),
+        )
     }
 }
 
@@ -223,15 +230,16 @@ fn main() {
     let gkr_circuit = chip.gkr_circuit();
 
     let (out_evals, gkr_proof) = {
-        let table = (0..1 << log_size)
-            .map(|_| OsRng.gen_range(0..1 << log_size as u64))
-            .collect_vec();
-        let count = (0..1 << log_size)
-            .map(|_| OsRng.gen_range(0..1 << log_size as u64))
+        let table_with_multiplicity = (0..1 << log_size)
+            .map(|_| {
+                (
+                    OsRng.gen_range(0..1 << log_size as u64),
+                    OsRng.gen_range(0..1 << log_size as u64),
+                )
+            })
             .collect_vec();
         let phase1_witness = layout.phase1_witness(TowerChipTrace {
-            table,
-            multiplicity: count,
+            table_with_multiplicity,
         });
 
         let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
@@ -243,7 +251,7 @@ fn main() {
                 .sample_and_append_challenge(b"lookup challenge")
                 .elements,
         ];
-        let gkr_witness = layout.gkr_witness(&phase1_witness, &challenges);
+        let (gkr_witness, _) = layout.gkr_witness(&phase1_witness, &challenges);
 
         #[cfg(debug_assertions)]
         {

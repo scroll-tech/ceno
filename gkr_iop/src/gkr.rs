@@ -28,6 +28,9 @@ pub struct GKRCircuitWitness<E: ExtensionField> {
     pub layers: Vec<LayerWitness<E>>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct GKRCircuitOutput<E: ExtensionField>(pub LayerWitness<E>);
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize, Evaluation: Serialize",

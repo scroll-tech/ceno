@@ -5,7 +5,7 @@ use crate::{
     chip::Chip,
     evaluation::{EvalExpression, PointAndEval},
     gkr::{
-        GKRCircuitWitness, GKRProverOutput,
+        GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
     },
 };
@@ -17,6 +17,7 @@ use p3_goldilocks::Goldilocks;
 use subprotocols::expression::{Constant, Expression, Witness};
 use tiny_keccak::keccakf;
 use transcript::BasicTranscript;
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 type E = BinomialExtensionField<Goldilocks, 2>;
 #[derive(Clone, Debug, Default)]
@@ -358,7 +359,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
 }
 
 pub struct KeccakTrace {
-    pub bits: [bool; STATE_SIZE],
+    pub bits: Vec<[bool; STATE_SIZE]>,
 }
 
 impl<E> ProtocolWitnessGenerator<E> for KeccakLayout<E>
@@ -367,18 +368,25 @@ where
 {
     type Trace = KeccakTrace;
 
-    fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>> {
-        let mut res = vec![vec![]; 1];
-        res[0] = phase1
+    fn phase1_witness(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField> {
+        let values = phase1
             .bits
             .into_iter()
-            .map(|b| E::BaseField::from_u64(b as u64))
+            .flat_map(|b| {
+                b.into_iter()
+                    .map(|b| E::BaseField::from_u64(b as u64))
+                    .collect_vec()
+            })
             .collect();
-        res
+        RowMajorMatrix::new_by_values(values, STATE_SIZE, InstancePaddingStrategy::RepeatLast)
     }
 
-    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], _challenges: &[E]) -> GKRCircuitWitness<E> {
-        let mut bits = phase1[self.committed_bits_id].clone();
+    fn gkr_witness(
+        &self,
+        phase1: &RowMajorMatrix<E::BaseField>,
+        _challenges: &[E],
+    ) -> (GKRCircuitWitness<E>, GKRCircuitOutput<E>) {
+        let mut bits = phase1.values().to_vec();
 
         let n_layers = 100;
         let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(n_layers + 1);
@@ -432,22 +440,24 @@ where
                 vec![],
             ));
 
-            if round < 23 {
-                bits = iota(&bits, RC[round]);
-                layer_wits.push(LayerWitness::new(
-                    bits.clone().into_iter().map(|b| vec![b]).collect_vec(),
-                    vec![],
-                ));
-            }
+            bits = iota(&bits, RC[round]);
+            layer_wits.push(LayerWitness::new(
+                bits.clone().into_iter().map(|b| vec![b]).collect_vec(),
+                vec![],
+            ));
         }
 
+        let last_witness = layer_wits.pop().unwrap();
         // Assumes one input instance
         let total_witness_size: usize = layer_wits.iter().map(|layer| layer.bases.len()).sum();
         dbg!(total_witness_size);
 
         layer_wits.reverse();
 
-        GKRCircuitWitness { layers: layer_wits }
+        (
+            GKRCircuitWitness { layers: layer_wits },
+            GKRCircuitOutput(last_witness),
+        )
     }
 }
 
@@ -495,15 +505,13 @@ pub fn run_keccakf(state: [u64; 25], verify: bool, test: bool) {
     let (layout, chip) = KeccakLayout::build(params);
     let gkr_circuit = chip.gkr_circuit();
 
-    let bits = u64s_to_bools(&state);
+    let bits = vec![u64s_to_bools(&state).try_into().unwrap()];
 
-    let phase1_witness = layout.phase1_witness(KeccakTrace {
-        bits: bits.try_into().unwrap(),
-    });
+    let phase1_witness = layout.phase1_witness(KeccakTrace { bits });
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
     // Omit the commit phase1 and phase2.
-    let gkr_witness = layout.gkr_witness(&phase1_witness, &[]);
+    let (gkr_witness, _) = layout.gkr_witness(&phase1_witness, &[]);
 
     let out_evals = {
         let point = Arc::new(vec![]);
