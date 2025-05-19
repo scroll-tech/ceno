@@ -7,11 +7,12 @@ use std::{
 };
 
 use either::Either;
-use multilinear_extensions::mle::MultilinearExtension;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
+    Expression,
+    mle::{ArcMultilinearExtension, MultilinearExtension},
+    virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::Field;
 use transcript::Transcript;

@@ -22,7 +22,7 @@ use multilinear_extensions::Expression;
 
 // first computes the masked mle'[j] = mle[j] if j < num_instance, else default
 // then split it into `num_parts` smaller mles
-pub(crate) fn masked_mle_split_to_parts<'a, E: ExtensionField>(
+pub(crate) fn masked_mle_split_to_chunks<'a, E: ExtensionField>(
     mle: &ArcMultilinearExtension<'a, E>,
     num_instance: usize,
     num_parts: usize,
@@ -58,9 +58,11 @@ pub(crate) fn masked_mle_split_to_parts<'a, E: ExtensionField>(
         })
         .collect::<Vec<_>>()
 }
+
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
 /// output [[1,3,5,7,0,0,0,0],[2,4,6,8,0,0,0,0]]
+#[allow(unused)]
 pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
     mles: &[ArcMultilinearExtension<E>],
     num_instances: usize,
