@@ -471,7 +471,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
 
         if cfg!(test) {
             // sanity check
-            assert_eq!(r_wit_layers.len(), cs.r_table_expressions.len());
+            assert_eq!(r_wit_layers.len(), num_reads);
             assert!(
                 r_wit_layers
                     .iter()
@@ -486,7 +486,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 })
             }));
 
-            assert_eq!(w_wit_layers.len(), cs.w_table_expressions.len());
+            assert_eq!(w_wit_layers.len(), num_writes);
             assert!(
                 w_wit_layers
                     .iter()
@@ -501,7 +501,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 })
             }));
 
-            assert_eq!(lk_wit_layers.len(), cs.lk_table_expressions.len());
+            assert_eq!(
+                lk_wit_layers.len(),
+                cs.lk_table_expressions.len() + cs.lk_expressions.len()
+            );
             assert!(
                 lk_wit_layers
                     .iter()
