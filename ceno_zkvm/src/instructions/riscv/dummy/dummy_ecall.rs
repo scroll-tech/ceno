@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use ceno_emul::{Change, InsnKind, KeccakSpec, StepRecord, SyscallSpec};
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, zip_eq};
+use witness::RowMajorMatrix;
 
 use super::{super::insn_base::WriteMEM, dummy_circuit::DummyConfig};
 use crate::{
@@ -193,7 +194,7 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
     fn phase1_witness_from_steps(
         layout: &Self::Layout,
         steps: &[StepRecord],
-    ) -> Vec<Vec<<E as ExtensionField>::BaseField>> {
+    ) -> RowMajorMatrix<E::BaseField> {
         let instances = steps
             .iter()
             .map(|step| {

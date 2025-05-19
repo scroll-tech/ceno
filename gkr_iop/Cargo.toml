@@ -24,6 +24,7 @@ subprotocols = { path = "../subprotocols" }
 thiserror = "1"
 tiny-keccak.workspace = true
 transcript = { path = "../transcript" }
+whir = { path = "../whir" }
 witness = { path = "../witness" }
 
 [dev-dependencies]

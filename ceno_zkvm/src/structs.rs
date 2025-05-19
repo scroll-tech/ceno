@@ -7,9 +7,12 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
-use ff_ext::{ExtensionField, SmallField};
-use gkr_iop::{gkr::GKRCircuitWitness, precompiles::KeccakLayout};
-use itertools::{Either, Itertools};
+use ff_ext::ExtensionField;
+use gkr_iop::{
+    gkr::{GKRCircuitOutput, GKRCircuitWitness},
+    precompiles::KeccakLayout,
+};
+use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::MultilinearExtension};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -346,6 +349,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
     pub keccak_gkr_wit: GKRCircuitWitness<E>,
+    pub keccak_gkr_out: GKRCircuitOutput<E>,
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
@@ -374,7 +378,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = css
             .get_cs(&LargeEcallDummy::<E, KeccakSpec>::name())
             .unwrap();
-        let (witness, gkr_witness, logup_multiplicity) =
+        let (witness, gkr_witness, gkr_output, logup_multiplicity) =
             LargeEcallDummy::<E, KeccakSpec>::assign_instances_with_gkr_iop(
                 config,
                 cs.num_witin as usize,
@@ -382,6 +386,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 &css.keccak_gkr_iop.layout,
             )?;
         self.keccak_gkr_wit = gkr_witness;
+        self.keccak_gkr_out = gkr_output;
 
         assert!(
             self.witnesses_opcodes

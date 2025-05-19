@@ -769,19 +769,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(main_sel_span);
         exit_span!(sumcheck_span);
 
-        let span = entered_span!("witin::evals", profiling_3 = true);
-        let wits_in_evals: Vec<E> = witnesses
-            .par_iter()
-            .map(|poly| poly.evaluate(&input_open_point))
-            .collect();
-        exit_span!(span);
-
         let gkr_span = entered_span!("gkr", profiling_3 = true);
-        let input_open_point = Arc::new(input_open_point);
-        let (gkr_opcode_proof, mut opening_evaluations) =
+        let (gkr_opcode_proof, input_open_point, wits_in_evals) =
             if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
-                let gkr_iop_pk = gkr_iop_pk.clone();
-
+                let input_open_point = Arc::new(input_open_point);
                 let out_evals = gkr_wit
                     .layers
                     .last()
@@ -805,15 +796,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     opening_evaluations,
                 } = prover_output;
 
+                let (mut points, evaluations): (Vec<Arc<Point<E>>>, Vec<E>) = opening_evaluations
+                    .into_iter()
+                    .map(|open| (open.point, open.value))
+                    .unzip();
+
                 (
-                    Some(GKROpcodeProof {
-                        proof,
-                        _marker: PhantomData,
-                    }),
-                    opening_evaluations,
+                    Some(GKROpcodeProof(proof)),
+                    Arc::try_unwrap(points.pop().unwrap()).unwrap(),
+                    evaluations,
                 )
             } else {
-                (None, vec![])
+                let span = entered_span!("witin::evals", profiling_3 = true);
+                let wits_in_evals: Vec<E> = witnesses
+                    .par_iter()
+                    .map(|poly| poly.evaluate(&input_open_point))
+                    .collect();
+                exit_span!(span);
+                (None, input_open_point, wits_in_evals)
             };
         exit_span!(gkr_span);
 
@@ -858,7 +858,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 wits_in_evals,
                 gkr_opcode_proof,
             },
-            Arc::try_unwrap(input_open_point).unwrap(),
+            input_open_point,
         ))
     }
 
@@ -1510,33 +1510,4 @@ impl TowerProver {
         let next_rt = out_rt;
         (next_rt, proofs)
     }
-}
-
-fn process_evaluations<E: ExtensionField>(
-    evaluations: Vec<gkr_iop::gkr::Evaluation<E>>,
-) -> (Vec<Vec<E>>, Vec<mpcs::Evaluation<E>>) {
-    let mut point_map: HashMap<Vec<E>, usize> = HashMap::new();
-    let mut point_vec: Vec<Vec<E>> = Vec::new();
-    let mut result: Vec<mpcs::Evaluation<E>> = Vec::new();
-
-    for eval in evaluations {
-        let point: &Vec<E> = &eval.point; // Arc<Vec<E>> -> &Vec<E>
-
-        let index = if let Some(&idx) = point_map.get(point) {
-            idx
-        } else {
-            let new_index = point_vec.len();
-            point_vec.push(point.clone()); // Clone Vec<E> (not Arc)
-            point_map.insert(point.clone(), new_index);
-            new_index
-        };
-
-        result.push(mpcs::Evaluation {
-            poly: eval.poly,
-            point: index,
-            value: eval.value,
-        });
-    }
-
-    (point_vec, result)
 }

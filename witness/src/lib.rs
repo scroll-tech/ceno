@@ -133,6 +133,17 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         }
     }
 
+    pub fn new_by_values(
+        values: Vec<T>,
+        num_cols: usize,
+        padding_strategy: InstancePaddingStrategy,
+    ) -> Self {
+        RowMajorMatrix::new_by_inner_matrix(
+            p3::matrix::dense::RowMajorMatrix::new(values, num_cols),
+            padding_strategy,
+        )
+    }
+
     pub fn num_padding_instances(&self) -> usize {
         next_pow2_instance_padding(self.num_instances()) - self.num_instances()
     }
@@ -188,14 +199,16 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         self.inner
     }
 
-    pub fn pad_to_height(&mut self, new_height: usize, fill: T) {
-        let (cur_height, n_cols) = (self.height(), self.n_col());
-        assert!(new_height >= cur_height);
-        self.values.par_extend(
-            (0..(new_height - cur_height) * n_cols)
-                .into_par_iter()
-                .map(|_| fill),
-        );
+    pub fn values(&self) -> &[T] {
+        &self.inner.values
+    }
+
+    pub fn num_rows(&self) -> usize {
+        self.num_rows
+    }
+
+    pub fn num_cols(&self) -> usize {
+        self.inner.width
     }
 }
 

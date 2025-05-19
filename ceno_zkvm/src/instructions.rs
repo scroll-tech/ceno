@@ -1,6 +1,6 @@
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
-use gkr_iop::{ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuitWitness};
+use gkr_iop::{gkr::{GKRCircuitOutput, GKRCircuitWitness}, ProtocolBuilder, ProtocolWitnessGenerator};
 use itertools::Itertools;
 use multilinear_extensions::util::max_usable_threads;
 use rayon::{
@@ -108,7 +108,7 @@ where
     fn phase1_witness_from_steps(
         layout: &Self::Layout,
         steps: &[StepRecord],
-    ) -> Vec<Vec<E::BaseField>>;
+    ) -> RowMajorMatrix<E::BaseField>;
 
     /// Similar to Instruction::assign_instance, but with access to GKR lookups and wits
     fn assign_instance_with_gkr_iop(
@@ -131,6 +131,7 @@ where
         (
             RowMajorMatrix<E::BaseField>,
             GKRCircuitWitness<E>,
+            GKRCircuitOutput<E>,
             LkMultiplicity,
         ),
         ZKVMError,
@@ -147,7 +148,7 @@ where
             RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
-        let gkr_witness =
+        let (gkr_witness, gkr_output) =
             gkr_layout.gkr_witness(&Self::phase1_witness_from_steps(gkr_layout, &steps), &[]);
 
         let (lookups, aux_wits) = {
@@ -216,7 +217,7 @@ where
             .collect::<Result<(), ZKVMError>>()?;
 
         raw_witin.padding_by_strategy();
-        Ok((raw_witin, gkr_witness, lk_multiplicity))
+        Ok((raw_witin, gkr_witness, gkr_output, lk_multiplicity))
     }
 
     /// Lookup and witness counts used by GKR proof

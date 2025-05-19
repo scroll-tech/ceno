@@ -2,8 +2,9 @@ use std::marker::PhantomData;
 
 use chip::Chip;
 use ff_ext::ExtensionField;
-use gkr::GKRCircuitWitness;
+use gkr::{GKRCircuitOutput, GKRCircuitWitness};
 use transcript::Transcript;
+use witness::RowMajorMatrix;
 
 pub mod chip;
 pub mod error;
@@ -43,10 +44,14 @@ where
     type Trace;
 
     /// The vectors to be committed in the phase1.
-    fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>>;
+    fn phase1_witness(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField>;
 
     /// GKR witness.
-    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E>;
+    fn gkr_witness(
+        &self,
+        phase1: &RowMajorMatrix<E::BaseField>,
+        challenges: &[E],
+    ) -> (GKRCircuitWitness<E>, GKRCircuitOutput<E>);
 }
 
 // TODO: the following trait consists of `commit_phase1`, `commit_phase2`,
