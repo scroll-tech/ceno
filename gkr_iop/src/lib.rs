@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use chip::Chip;
 use ff_ext::ExtensionField;
 use gkr::GKRCircuitWitness;
+use multilinear_extensions::mle::MultilinearExtension;
 use transcript::Transcript;
 
 pub mod chip;
@@ -11,6 +12,8 @@ pub mod evaluation;
 pub mod gkr;
 pub mod precompiles;
 pub mod utils;
+
+pub type Phase1WitnessGroup<'a, E> = Vec<Vec<MultilinearExtension<'a, E>>>;
 
 pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     type Params;
@@ -36,17 +39,21 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     fn build_gkr_phase(&mut self, spec: &mut Chip<E>);
 }
 
-pub trait ProtocolWitnessGenerator<E>
+pub trait ProtocolWitnessGenerator<'a, E>
 where
     E: ExtensionField,
 {
     type Trace;
 
     /// The vectors to be committed in the phase1.
-    fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>>;
+    fn phase1_witness_group(&self, phase1: Self::Trace) -> Phase1WitnessGroup<'a, E>;
 
     /// GKR witness.
-    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E>;
+    fn gkr_witness(
+        &self,
+        phase1_witness_group: Phase1WitnessGroup<'a, E>,
+        challenges: &[E],
+    ) -> GKRCircuitWitness<E>;
 }
 
 // TODO: the following trait consists of `commit_phase1`, `commit_phase2`,
