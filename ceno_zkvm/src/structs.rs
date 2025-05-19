@@ -1,20 +1,17 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    expression::Expression,
     instructions::{GKRIOPInstruction, Instruction, riscv::dummy::LargeEcallDummy},
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::{gkr::GKRCircuitWitness, precompiles::KeccakLayout};
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{
-    mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
-};
+use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::MultilinearExtension};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
@@ -43,11 +40,8 @@ pub struct TowerProofs<E: ExtensionField> {
 }
 
 pub struct TowerProverSpec<'a, E: ExtensionField> {
-    pub witness: Vec<Vec<ArcMultilinearExtension<'a, E>>>,
+    pub witness: Vec<Vec<MultilinearExtension<'a, E>>>,
 }
-
-pub type WitnessId = u32;
-pub type ChallengeId = u16;
 
 #[derive(
     Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
@@ -71,6 +65,8 @@ pub enum RAMType {
     Register,
     Memory,
 }
+
+impl_expr_from_unsigned!(RAMType);
 
 /// A point and the evaluation of this point.
 #[derive(Clone, Debug, PartialEq)]

@@ -11,6 +11,7 @@ version.workspace = true
 
 [dependencies]
 crossbeam-channel.workspace = true
+either.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }

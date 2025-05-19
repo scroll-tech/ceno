@@ -414,9 +414,11 @@ mod test {
     fn test_sumcheck_multi_points() {
         let challenges = vec![E::from_u64(2)];
 
-        let points = [field_vec![E, 2, 3], field_vec![E, 5, 7], field_vec![
-            E, 2, 5
-        ]];
+        let points = [
+            field_vec![E, 2, 3],
+            field_vec![E, 5, 7],
+            field_vec![E, 2, 5],
+        ];
         let point_refs = points.iter().map(|v| v.as_slice()).collect_vec();
 
         let eqs = eq_vecs(point_refs.clone().into_iter(), &vec![E::ONE; points.len()]);

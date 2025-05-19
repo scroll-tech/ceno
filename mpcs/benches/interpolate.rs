@@ -6,7 +6,7 @@ use ff_ext::{FromUniformBytes, GoldilocksExt2};
 use itertools::Itertools;
 use mpcs::util::arithmetic::interpolate_field_type_over_boolean_hypercube;
 
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType};
+use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 use rand::{SeedableRng, rngs::OsRng};
 use rand_chacha::ChaCha8Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -33,9 +33,9 @@ fn bench_encoding(c: &mut Criterion, is_base: bool) {
             let polys = (0..batch_size)
                 .map(|_| {
                     if is_base {
-                        DenseMultilinearExtension::random(num_vars, &mut rng.clone())
+                        MultilinearExtension::random(num_vars, &mut rng.clone())
                     } else {
-                        DenseMultilinearExtension::from_evaluations_ext_vec(
+                        MultilinearExtension::from_evaluations_ext_vec(
                             num_vars,
                             (0..1 << num_vars).map(|_| E::random(&mut OsRng)).collect(),
                         )

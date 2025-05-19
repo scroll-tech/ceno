@@ -339,6 +339,7 @@ dependencies = [
  "clap",
  "console",
  "ff_ext",
+ "get_dir",
  "mpcs",
  "parse-size",
  "serde",
@@ -403,7 +404,9 @@ dependencies = [
  "anyhow",
  "ceno_rt",
  "elf",
+ "ff_ext",
  "itertools 0.13.0",
+ "multilinear_extensions",
  "num-bigint",
  "num-derive",
  "num-traits",
@@ -450,6 +453,7 @@ dependencies = [
  "cfg-if",
  "clap",
  "criterion",
+ "either",
  "ff_ext",
  "generic_static",
  "gkr_iop",
@@ -897,6 +901,9 @@ name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "elf"
@@ -1050,6 +1057,12 @@ checksum = "28ccff179d8070317671db09aee6d20affc26e88c5394714553b04f509b43a60"
 dependencies = [
  "once_cell",
 ]
+
+[[package]]
+name = "get_dir"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f4f860e1edc7cb887dc8c0089e2e437fadb6ab1b2756664e4e3d3983913b6e0"
 
 [[package]]
 name = "getrandom"
@@ -1650,6 +1663,7 @@ dependencies = [
 name = "multilinear_extensions"
 version = "0.1.0"
 dependencies = [
+ "either",
  "env_logger",
  "ff_ext",
  "itertools 0.13.0",
@@ -2857,6 +2871,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "crossbeam-channel",
+ "either",
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
@@ -3618,6 +3633,7 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
+ "tracing",
 ]
 
 [[package]]
