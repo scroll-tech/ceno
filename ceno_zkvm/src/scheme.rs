@@ -48,14 +48,7 @@ pub struct ZKVMOpcodeProof<E: ExtensionField> {
 
     pub wits_in_evals: Vec<E>,
 
-    pub gkr_opcode_proof: Option<GKROpcodeProof<E, PCS>>,
-}
-
-#[derive(Clone, Serialize)]
-// WARN/TODO: depends on serde's `arc` feature which might not behave correctly
-pub struct GKROpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    proof: GKRProof<E>,
-    _marker: PhantomData<PCS>,
+    pub gkr_opcode_proof: Option<GKROpcodeProof<E>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -64,11 +57,7 @@ pub struct GKROpcodeProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 // WARN/TODO: depends on serde's `arc` feature which might not behave correctly
-pub struct GKROpcodeProof<E: ExtensionField> {
-    output_evals: Vec<E>,
-    prover_output: GKRProverOutput<E, Evaluation<E>>,
-    circuit: GKRCircuit,
-}
+pub struct GKROpcodeProof<E: ExtensionField>(pub GKRProof<E>);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(

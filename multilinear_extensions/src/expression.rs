@@ -928,9 +928,9 @@ impl_from_via_ToExpr!(&WitIn, &Fixed, &StructuralWitIn, &Instance);
 macro_rules! impl_expr_from_unsigned {
     ($($t:ty),*) => {
         $(
-            impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
+            impl<F: ff_ext::SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
-                    Expression::Constant(Either::Left(F::from_u64(value as u64)))
+                    Expression::Constant(itertools::Either::Left(F::from_u64(value as u64)))
                 }
             }
         )*

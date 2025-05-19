@@ -1,5 +1,17 @@
 use std::{array, cmp::Ordering, marker::PhantomData, sync::Arc};
 
+use ff_ext::{ExtensionField, SmallField};
+use itertools::{Itertools, chain, iproduct, zip_eq};
+use ndarray::{ArrayView, Ix2, Ix3, s};
+use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
+use p3_goldilocks::Goldilocks;
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use serde::{Deserialize, Serialize};
+use subprotocols::expression::{Constant, Expression, Witness};
+use tiny_keccak::keccakf;
+use transcript::BasicTranscript;
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
+
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
@@ -8,26 +20,10 @@ use crate::{
         GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
     },
-    precompiles::utils::{MaskRepresentation, nest, not8_expr, zero_expr},
+    precompiles::utils::{MaskRepresentation, not8_expr, zero_expr},
 };
-use multilinear_extensions::util::ceil_log2;
-use ndarray::{ArrayView, Ix2, Ix3, s};
-use serde::{Deserialize, Serialize};
-use whir::ntt::transpose;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use super::utils::{CenoLookup, u64s_to_felts, zero_eval};
-use ff_ext::{ExtensionField, SmallField};
-use itertools::{Itertools, chain, iproduct, zip_eq};
-use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
-use p3_goldilocks::Goldilocks;
-use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::ParallelSlice,
-};
-use subprotocols::expression::{Constant, Expression, Witness};
-use tiny_keccak::keccakf;
-use transcript::BasicTranscript;
 
 type E = BinomialExtensionField<Goldilocks, 2>;
 
@@ -432,8 +428,6 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
         ]
         .map(|many| final_outputs_iter.by_ref().take(many).collect_vec());
 
-        let keccak_output32 = keccak_output32.to_vec();
-        let keccak_input32 = keccak_input32.to_vec();
         let lookup_outputs = lookup_outputs.to_vec();
 
         let (bases, []) = chip.allocate_wits_in_layer::<KECCAK_WIT_SIZE, 0>();
@@ -674,15 +668,14 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
             .enumerate()
         {
             expressions.push(lookup);
-            let (idx, round) = if i < 3 * AND_LOOKUPS_PER_ROUND {
-                let round = i / AND_LOOKUPS_PER_ROUND;
+            let (idx, round) = if i < 3 * AND_LOOKUPS {
+                let round = i / AND_LOOKUPS;
                 (&mut global_and_lookup, round)
-            } else if i < 3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND {
-                let round = (i - 3 * AND_LOOKUPS_PER_ROUND) / XOR_LOOKUPS_PER_ROUND;
+            } else if i < 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS {
+                let round = (i - 3 * AND_LOOKUPS) / XOR_LOOKUPS;
                 (&mut global_xor_lookup, round)
             } else {
-                let round = (i - 3 * AND_LOOKUPS_PER_ROUND - 3 * XOR_LOOKUPS_PER_ROUND)
-                    / RANGE_LOOKUPS_PER_ROUND;
+                let round = (i - 3 * AND_LOOKUPS - 3 * XOR_LOOKUPS) / RANGE_LOOKUPS;
                 (&mut global_range_lookup, round)
             };
             expr_names.push(format!("round {round}: {i}th lookup felt"));
@@ -696,6 +689,8 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
 
         let keccak_input8: ArrayView<(Witness, EvalExpression), Ix3> =
             ArrayView::from_shape((5, 5, 8), keccak_input8).unwrap();
+        let keccak_input32 = keccak_input32.to_vec();
+        let mut keccak_input32_iter = keccak_input32.iter().cloned();
 
         for x in 0..5 {
             for y in 0..5 {
@@ -710,14 +705,16 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                             .as_slice(),
                     );
                     expressions.push(expr);
-                    evals.push(keccak_input32[evals.len()].clone());
+                    evals.push(keccak_input32_iter.next().unwrap().clone());
                     expr_names.push(format!("build 32-bit input: {x}, {y}, {k}"));
                 }
             }
         }
 
+        let keccak_output32 = keccak_output32.to_vec();
         let keccak_output8: ArrayView<(Witness, EvalExpression), Ix3> =
             ArrayView::from_shape((5, 5, 8), keccak_output8).unwrap();
+        let mut keccak_output32_iter = keccak_output32.iter().cloned();
 
         for x in 0..5 {
             for y in 0..5 {
@@ -731,7 +728,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                             .collect_vec(),
                     );
                     expressions.push(expr);
-                    evals.push(keccak_output32[evals.len()].clone());
+                    evals.push(keccak_output32_iter.next().unwrap().clone());
                     expr_names.push(format!("build 32-bit output: {x}, {y}, {k}"));
                 }
             }
@@ -786,7 +783,7 @@ where
 
                 zip_eq(iproduct!(0..5, 0..5), state32.iter().tuples())
                     .map(|((x, y), (&lo, &hi))| {
-                        state64[x][y] = (lo as u64) | ((hi as u64) << 32);
+                        state64[x][y] = lo | (hi << 32);
                     })
                     .count();
 
@@ -937,7 +934,7 @@ where
                 wits
             })
             .collect();
-        RowMajorMatrix::new_by_values(wits, KECCAK_WIT_SIZE, InstancePaddingStrategy::RepeatLast)
+        RowMajorMatrix::new_by_values(wits, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default)
     }
 
     fn gkr_witness(
@@ -951,10 +948,12 @@ where
             .par_iter()
             .map(|wit| wit.to_canonical_u64())
             .collect::<Vec<_>>();
-        let num_instances = phase1.num_rows();
-        let num_cols = phase1.num_cols();
+        let num_instances = phase1.num_vars();
+        let num_cols = phase1.n_col();
+        assert_eq!(num_cols, KECCAK_WIT_SIZE);
 
         let to_5x5x8_array = |input: &[u64]| -> [[[u64; 8]; 5]; 5] {
+            assert_eq!(input.len(), 5 * 5 * 8);
             input
                 .chunks(40)
                 .map(|chunk| {
@@ -1028,7 +1027,7 @@ where
                         keccak_input32[x][y] = u8_slice_to_u32_slice(&state8[x][y]);
                     }
                 }
-                let offset = KECCAK_LAYER_BYTE_SIZE;
+                let mut offset = KECCAK_LAYER_BYTE_SIZE;
                 #[allow(clippy::needless_range_loop)]
                 for round in 0..ROUNDS {
                     let (
@@ -1057,6 +1056,7 @@ where
                         8,
                         200
                     );
+                    offset += KECCAK_WIT_SIZE_PER_ROUND;
                     let c_aux8 = to_5x5x8_array(&c_aux8);
 
                     for i in 0..5 {
@@ -1134,7 +1134,6 @@ where
                         }
                     }
 
-                    let chi_output8 = to_5x5x8_array(&chi_output8);
                     for x in 0..5 {
                         for y in 0..5 {
                             for k in 0..8 {
@@ -1144,9 +1143,10 @@ where
                     }
 
                     // Iota step
+                    let chi_output8: [u64; 8] = chi_output8.try_into().unwrap(); // only save chi_output8[0][0];
                     let iota_output8 = to_5x5x8_array(&iota_output8);
                     for k in 0..8 {
-                        add_xor(chi_output8[0][0][k], (RC[round] >> (k * 8)) & 0xFF, round);
+                        add_xor(chi_output8[k], (RC[round] >> (k * 8)) & 0xFF, round);
                     }
 
                     state8 = iota_output8;
@@ -1176,8 +1176,8 @@ where
                 .into_iter()
                 .map(E::BaseField::from_u64)
                 .collect(),
-            KECCAK_OUTPUT_SIZE,
-            InstancePaddingStrategy::RepeatLast,
+            KECCAK_OUT_EVAL_SIZE,
+            InstancePaddingStrategy::Default,
         )
         .to_cols_base::<E>();
 
@@ -1274,10 +1274,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bo
             })
             .collect_vec();
 
-        assert_eq!(
-            out_evals.len(),
-            KECCAK_INPUT_SIZE + KECCAK_OUTPUT_SIZE + LOOKUP_FELTS_PER_ROUND * ROUNDS
-        );
+        assert_eq!(out_evals.len(), KECCAK_OUT_EVAL_SIZE);
 
         out_evals
     };
@@ -1308,37 +1305,44 @@ mod tests {
 
     #[test]
     fn test_keccakf() {
-        for _ in 0..3 {
-            // let random_u64: u64 = rand::random();
-            // Use seeded rng for debugging convenience
-            let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        std::thread::Builder::new()
+            .name("keccak_test".into())
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-            let num_instances = 8;
-            let mut states: Vec<[u64; 25]> = vec![];
+                let num_instances = 8;
+                let mut states: Vec<[u64; 25]> = vec![];
+                for _ in 0..num_instances {
+                    states.push(std::array::from_fn(|_| rng.gen()));
+                }
 
-            for _ in 0..num_instances {
-                states.push(std::array::from_fn(|_| rng.gen()))
-            }
-            run_faster_keccakf(states, true, true);
-        }
+                run_faster_keccakf(states, true, true);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
-    // TODO: make it pass
     #[ignore]
     #[test]
     fn test_keccakf_nonpow2() {
-        for _ in 0..3 {
-            // let random_u64: u64 = rand::random();
-            // Use seeded rng for debugging convenienceq
-            let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        std::thread::Builder::new()
+            .name("keccak_test".into())
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-            let num_instances = 3;
-            let mut states: Vec<[u64; 25]> = vec![];
+                let num_instances = 5;
+                let mut states: Vec<[u64; 25]> = vec![];
+                for _ in 0..num_instances {
+                    states.push(std::array::from_fn(|_| rng.gen()));
+                }
 
-            for _ in 0..num_instances {
-                states.push(std::array::from_fn(|_| rng.gen()))
-            }
-            run_faster_keccakf(states, true, true);
-        }
+                run_faster_keccakf(states, true, true);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

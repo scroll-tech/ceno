@@ -202,14 +202,6 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     pub fn values(&self) -> &[T] {
         &self.inner.values
     }
-
-    pub fn num_rows(&self) -> usize {
-        self.num_rows
-    }
-
-    pub fn num_cols(&self) -> usize {
-        self.inner.width
-    }
 }
 
 impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {

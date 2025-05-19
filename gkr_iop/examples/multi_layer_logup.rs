@@ -89,20 +89,17 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
                     num_1.0.into(),
                 ];
                 let (in_bases, in_exts) = if i == height - 1 {
-                    (
-                        vec![num_0.1.clone(), num_1.1.clone()],
-                        vec![den_0.1.clone(), den_1.1.clone()],
-                    )
+                    (vec![num_0.1.clone(), num_1.1.clone()], vec![
+                        den_0.1.clone(),
+                        den_1.1.clone(),
+                    ])
                 } else {
-                    (
-                        vec![],
-                        vec![
-                            den_0.1.clone(),
-                            den_1.1.clone(),
-                            num_0.1.clone(),
-                            num_1.1.clone(),
-                        ],
-                    )
+                    (vec![], vec![
+                        den_0.1.clone(),
+                        den_1.1.clone(),
+                        num_0.1.clone(),
+                        num_1.1.clone(),
+                    ])
                 };
                 chip.add_layer(Layer::new(
                     format!("Tower_layer_{}", i),
@@ -169,7 +166,7 @@ where
             .iter()
             .flat_map(|(x, y)| vec![E::BaseField::from_u64(*x), E::BaseField::from_u64(*y)])
             .collect_vec();
-        RowMajorMatrix::new_by_values(wits, 2, witness::InstancePaddingStrategy::RepeatLast)
+        RowMajorMatrix::new_by_values(wits, 2, witness::InstancePaddingStrategy::Default)
     }
 
     fn gkr_witness(

@@ -1,3 +1,8 @@
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
+};
+
 use ceno_emul::KeccakSpec;
 use either::Either;
 use ff_ext::ExtensionField;
@@ -5,13 +10,7 @@ use gkr_iop::{
     evaluation::PointAndEval,
     gkr::{GKRCircuitWitness, GKRProverOutput},
 };
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    marker::PhantomData,
-    sync::Arc,
-};
-
-use itertools::{Either, Itertools, enumerate, izip};
+use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression,
@@ -22,7 +21,6 @@ use multilinear_extensions::{
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{iter::Iterator, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -37,7 +35,10 @@ use crate::{
     scheme::{
         GKROpcodeProof, TowerProofs,
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
-        utils::wit_infer_by_expr,
+        utils::{
+            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+            wit_infer_by_expr,
+        },
     },
     structs::{
         GKRIOPProvingKey, KeccakGKRIOP, ProvingKey, TowerProver, TowerProverSpec, ZKVMProvingKey,
@@ -817,33 +818,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             };
         exit_span!(gkr_span);
 
-        let pcs_open_span = entered_span!("pcs_open", profiling_3 = true);
-
-        let opening_dur = std::time::Instant::now();
-        tracing::debug!(
-            "[opcode {}]: build opening proof for {} polys",
-            name,
-            witnesses.len()
-        );
-
-        let wits_opening_proof = PCS::simple_batch_open(
-            pp,
-            &witnesses,
-            &wits_commit,
-            &input_open_point,
-            wits_in_evals.as_slice(),
-            transcript,
-        ).map_err(ZKVMError::PCSError)?;
-
-        tracing::info!(
-            "[opcode {}] build opening proof took {:?}",
-            name,
-            opening_dur.elapsed(),
-        );
-        exit_span!(pcs_open_span);
-
-        let wits_commit = PCS::get_pure_commitment(&wits_commit);
-
         // extend with Optio(gkr evals (not combined))
         Ok((
             ZKVMOpcodeProof {
@@ -1099,10 +1073,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .into_iter()
                 .zip(w_wit_layers)
                 .flat_map(|(r, w)| {
-                    vec![
-                        TowerProverSpec { witness: r },
-                        TowerProverSpec { witness: w },
-                    ]
+                    vec![TowerProverSpec { witness: r }, TowerProverSpec {
+                        witness: w,
+                    }]
                 })
                 .collect_vec(),
             lk_wit_layers
