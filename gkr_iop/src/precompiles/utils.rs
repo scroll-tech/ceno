@@ -1,5 +1,6 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+use multilinear_extensions::ToExpr;
 use p3_field::PrimeCharacteristicRing;
 use subprotocols::expression::{Constant, Expression};
 
@@ -13,8 +14,12 @@ pub fn not8_expr(expr: Expression) -> Expression {
     Expression::Const(Constant::Base(0xFF)) - expr
 }
 
-pub fn zero_eval() -> EvalExpression {
-    EvalExpression::Linear(0, Constant::Base(0), Constant::Base(0))
+pub fn zero_eval<E: ExtensionField>() -> EvalExpression<E> {
+    EvalExpression::Linear(
+        0,
+        Box::new(E::BaseField::ZERO.expr()),
+        Box::new(E::BaseField::ZERO.expr()),
+    )
 }
 
 pub fn nest<E: ExtensionField>(v: &[E::BaseField]) -> Vec<Vec<E::BaseField>> {

@@ -18,6 +18,7 @@ use multilinear_extensions::{
 };
 use p3::field::Field;
 use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
+use transcript::Transcript;
 
 use crate::structs::IOPProverState;
 
@@ -324,6 +325,20 @@ pub fn optimal_sumcheck_threads(num_vars: usize) -> usize {
     } else {
         (1 << (num_vars - min_numvar_per_thread)).min(expected_max_threads)
     }
+}
+
+/// Derive challenge from transcript and return all power results of the challenge.
+pub fn get_challenge_pows<E: ExtensionField>(
+    size: usize,
+    transcript: &mut impl Transcript<E>,
+) -> Vec<E> {
+    let alpha = transcript
+        .sample_and_append_challenge(b"combine subset evals")
+        .elements;
+
+    std::iter::successors(Some(E::ONE), move |prev| Some(*prev * alpha))
+        .take(size)
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -1,31 +1,28 @@
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
-use layer::{Layer, LayerWitness};
+use layer::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
+use multilinear_extensions::mle::{Point, PointAndEval};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use subprotocols::{expression::Point, sumcheck::SumcheckProof};
 use transcript::Transcript;
 
-use crate::{
-    error::BackendError,
-    evaluation::{EvalExpression, PointAndEval},
-};
+use crate::{error::BackendError, evaluation::EvalExpression};
 
 pub mod layer;
 pub mod mock;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GKRCircuit {
-    pub layers: Vec<Layer>,
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
+pub struct GKRCircuit<E: ExtensionField> {
+    pub layers: Vec<Layer<E>>,
 
     pub n_challenges: usize,
     pub n_evaluations: usize,
-    pub base_openings: Vec<(usize, EvalExpression)>,
-    pub ext_openings: Vec<(usize, EvalExpression)>,
+    pub openings: Vec<(usize, EvalExpression<E>)>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct GKRCircuitWitness<E: ExtensionField> {
-    pub layers: Vec<LayerWitness<E>>,
+pub struct GKRCircuitWitness<'a, E: ExtensionField> {
+    pub layers: Vec<LayerWitness<'a, E>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -43,7 +40,7 @@ pub struct GKRProverOutput<E: ExtensionField, Evaluation> {
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct GKRProof<E: ExtensionField>(pub Vec<SumcheckProof<E>>);
+pub struct GKRProof<E: ExtensionField>(pub Vec<SumcheckLayerProof<E>>);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -58,23 +55,29 @@ pub struct Evaluation<E: ExtensionField> {
 
 pub struct GKRClaims<Evaluation>(pub Vec<Evaluation>);
 
-impl GKRCircuit {
-    pub fn prove<E>(
+impl<E: ExtensionField> GKRCircuit<E> {
+    pub fn prove(
         &self,
+        num_threads: usize,
+        max_num_variables: usize,
         circuit_wit: GKRCircuitWitness<E>,
         out_evals: &[PointAndEval<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<GKRProverOutput<E, Evaluation<E>>, BackendError<E>>
-    where
-        E: ExtensionField,
-    {
+    ) -> Result<GKRProverOutput<E, Evaluation<E>>, BackendError<E>> {
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         let mut challenges = challenges.to_vec();
         let sumcheck_proofs = izip!(&self.layers, circuit_wit.layers)
             .map(|(layer, layer_wit)| {
-                layer.prove(layer_wit, &mut evaluations, &mut challenges, transcript)
+                layer.prove(
+                    num_threads,
+                    max_num_variables,
+                    layer_wit,
+                    &mut evaluations,
+                    &mut challenges,
+                    transcript,
+                )
             })
             .collect_vec();
 
@@ -86,8 +89,9 @@ impl GKRCircuit {
         })
     }
 
-    pub fn verify<E>(
+    pub fn verify(
         &self,
+        max_num_variables: usize,
         gkr_proof: GKRProof<E>,
         out_evals: &[PointAndEval<E>],
         challenges: &[E],
@@ -102,7 +106,13 @@ impl GKRCircuit {
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         for (layer, layer_proof) in izip!(&self.layers, sumcheck_proofs) {
-            layer.verify(layer_proof, &mut evaluations, &mut challenges, transcript)?;
+            layer.verify(
+                max_num_variables,
+                layer_proof,
+                &mut evaluations,
+                &mut challenges,
+                transcript,
+            )?;
         }
 
         Ok(GKRClaims(
@@ -110,12 +120,12 @@ impl GKRCircuit {
         ))
     }
 
-    fn opening_evaluations<E: ExtensionField>(
+    fn opening_evaluations(
         &self,
         evaluations: &[PointAndEval<E>],
         challenges: &[E],
     ) -> Vec<Evaluation<E>> {
-        chain!(&self.base_openings, &self.ext_openings)
+        chain!(&self.openings, &self.openings)
             .map(|(poly, eval)| {
                 let poly = *poly;
                 let PointAndEval { point, eval: value } = eval.evaluate(evaluations, challenges);

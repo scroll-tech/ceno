@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use chip::Chip;
 use ff_ext::ExtensionField;
 use gkr::GKRCircuitWitness;
+use multilinear_extensions::mle::MultilinearExtension;
 use transcript::Transcript;
 
 pub mod chip;
@@ -12,13 +13,15 @@ pub mod gkr;
 pub mod precompiles;
 pub mod utils;
 
-pub trait ProtocolBuilder: Sized {
+pub type Phase1WitnessGroup<'a, E> = Vec<Vec<MultilinearExtension<'a, E>>>;
+
+pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     type Params;
 
     fn init(params: Self::Params) -> Self;
 
     /// Build the protocol for GKR IOP.
-    fn build(params: Self::Params) -> (Self, Chip) {
+    fn build(params: Self::Params) -> (Self, Chip<E>) {
         let mut chip_spec = Self::init(params);
         let mut chip = Chip::default();
         chip_spec.build_commit_phase(&mut chip);
@@ -29,24 +32,28 @@ pub trait ProtocolBuilder: Sized {
 
     /// Specify the polynomials and challenges to be committed and generated in
     /// Phase 1.
-    fn build_commit_phase(&mut self, spec: &mut Chip);
+    fn build_commit_phase(&mut self, spec: &mut Chip<E>);
     /// Create the GKR layers in the reverse order. For each layer, specify the
     /// polynomial expressions, evaluation expressions of outputs and evaluation
     /// positions of the inputs.
-    fn build_gkr_phase(&mut self, spec: &mut Chip);
+    fn build_gkr_phase(&mut self, spec: &mut Chip<E>);
 }
 
-pub trait ProtocolWitnessGenerator<E>
+pub trait ProtocolWitnessGenerator<'a, E>
 where
     E: ExtensionField,
 {
     type Trace;
 
     /// The vectors to be committed in the phase1.
-    fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>>;
+    fn phase1_witness_group(&self, phase1: Self::Trace) -> Phase1WitnessGroup<'a, E>;
 
     /// GKR witness.
-    fn gkr_witness(&self, phase1: &[Vec<E::BaseField>], challenges: &[E]) -> GKRCircuitWitness<E>;
+    fn gkr_witness(
+        &self,
+        phase1_witness_group: Phase1WitnessGroup<'a, E>,
+        challenges: &[E],
+    ) -> GKRCircuitWitness<E>;
 }
 
 // TODO: the following trait consists of `commit_phase1`, `commit_phase2`,

@@ -1112,6 +1112,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "criterion",
+ "either",
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
@@ -1122,6 +1123,7 @@ dependencies = [
  "rayon",
  "serde",
  "subprotocols",
+ "sumcheck",
  "thiserror 1.0.69",
  "tiny-keccak",
  "transcript",
@@ -2882,6 +2884,7 @@ dependencies = [
  "rayon",
  "serde",
  "sumcheck_macro",
+ "thiserror 1.0.69",
  "tracing",
  "transcript",
 ]

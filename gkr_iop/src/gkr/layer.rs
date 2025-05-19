@@ -1,21 +1,17 @@
 use ark_std::log2;
 use ff_ext::ExtensionField;
-use itertools::{chain, izip};
-use linear_layer::LinearLayer;
-use serde::{Deserialize, Serialize};
-use subprotocols::{
-    expression::{Constant, Expression, Point},
-    sumcheck::{SumcheckClaims, SumcheckProof, SumcheckProverOutput},
+use itertools::{Itertools, chain, izip};
+use linear_layer::{LayerClaims, LinearLayer};
+use multilinear_extensions::{
+    Expression,
+    mle::{MultilinearExtension, Point, PointAndEval},
 };
-use sumcheck_layer::SumcheckLayer;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use sumcheck_layer::{SumcheckLayer, SumcheckLayerProof};
 use transcript::Transcript;
 use zerocheck_layer::ZerocheckLayer;
 
-use crate::{
-    error::BackendError,
-    evaluation::{EvalExpression, PointAndEval},
-    utils::SliceVector,
-};
+use crate::{error::BackendError, evaluation::EvalExpression};
 
 pub mod linear_layer;
 pub mod sumcheck_layer;
@@ -29,48 +25,51 @@ pub enum LayerType {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Layer {
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct Layer<E: ExtensionField> {
     pub name: String,
     pub ty: LayerType,
     /// Challenges generated at the beginning of the layer protocol.
-    pub challenges: Vec<Constant>,
+    pub challenges: Vec<Expression<E>>,
     /// Expressions to prove in this layer. For zerocheck and linear layers,
     /// each expression corresponds to an output. While in sumcheck, there
     /// is only 1 expression, which corresponds to the sum of all outputs.
     /// This design is for the convenience when building the following
-    /// expression:     `e_0 + beta * e_1 = sum_x (eq(p_0, x) + beta *
-    /// eq(p_1, x)) expr(x)`. where `vec![e_0, beta * e_1]` will be the
-    /// output evaluation expressions.
-    pub exprs: Vec<Expression>,
+    /// expression: `e_0 + beta * e_1
+    ///    = \sum_x (r^0 eq_0(X) \cdot expr_0(x) + r^1 eq_1(X) \cdot expr_1(x) + ...)`.
+    /// where `vec![e_0, beta * e_1]` will be the output evaluation expressions.
+    pub exprs: Vec<Expression<E>>,
+    /// eq expression for zero checks. Length should match with `exprs`
+    pub eqs: Vec<Expression<E>>,
     /// Positions to place the evaluations of the base inputs of this layer.
-    pub in_bases: Vec<EvalExpression>,
-    /// Positions to place the evaluations of the ext inputs of this layer.
-    pub in_exts: Vec<EvalExpression>,
+    pub in_eval_expr: Vec<EvalExpression<E>>,
     /// The expressions of the evaluations from the succeeding layers, which are
     /// connected to the outputs of this layer.
-    pub outs: Vec<EvalExpression>,
+    pub outs: Vec<EvalExpression<E>>,
 
     // For debugging purposes
     pub expr_names: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct LayerWitness<E: ExtensionField> {
-    pub bases: Vec<Vec<E::BaseField>>,
-    pub exts: Vec<Vec<E>>,
+pub struct LayerWitness<'a, E: ExtensionField> {
+    pub bases: Vec<MultilinearExtension<'a, E>>,
     pub num_vars: usize,
 }
 
-impl Layer {
+impl<E: ExtensionField> Layer<E> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         ty: LayerType,
-        exprs: Vec<Expression>,
-        challenges: Vec<Constant>,
-        in_bases: Vec<EvalExpression>,
-        in_exts: Vec<EvalExpression>,
-        outs: Vec<EvalExpression>,
+        exprs: Vec<Expression<E>>,
+        eqs: Vec<Expression<E>>,
+        challenges: Vec<Expression<E>>,
+        in_eval_expr: Vec<EvalExpression<E>>,
+        outs: Vec<EvalExpression<E>>,
         expr_names: Vec<String>,
     ) -> Self {
         let mut expr_names = expr_names;
@@ -85,104 +84,102 @@ impl Layer {
             ty,
             challenges,
             exprs,
-            in_bases,
-            in_exts,
+            eqs,
+            in_eval_expr,
             outs,
             expr_names,
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn prove<E: ExtensionField, Trans: Transcript<E>>(
+    pub fn prove<T: Transcript<E>>(
         &self,
+        num_threads: usize,
+        max_num_variables: usize,
         wit: LayerWitness<E>,
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
-        transcript: &mut Trans,
-    ) -> SumcheckProof<E> {
+        transcript: &mut T,
+    ) -> SumcheckLayerProof<E> {
         self.update_challenges(challenges, transcript);
-        #[allow(unused)]
-        let (sigmas, out_points) = self.sigmas_and_points(claims, challenges);
+        let (_, out_points) = self.extract_claim_and_point(claims, challenges);
 
-        let SumcheckProverOutput {
-            point: in_point,
-            proof,
-        } = match self.ty {
-            LayerType::Sumcheck => <Layer as SumcheckLayer<E>>::prove(
+        let sumcheck_layer_proof = match self.ty {
+            LayerType::Sumcheck => <Layer<E> as SumcheckLayer<E>>::prove(
                 self,
+                num_threads,
+                max_num_variables,
                 wit,
-                &out_points.slice_vector(),
                 challenges,
                 transcript,
             ),
-            LayerType::Zerocheck => <Layer as ZerocheckLayer<E>>::prove(
+            LayerType::Zerocheck => <Layer<E> as ZerocheckLayer<E>>::prove(
                 self,
+                num_threads,
+                max_num_variables,
                 wit,
-                &out_points.slice_vector(),
+                &out_points,
                 challenges,
                 transcript,
             ),
             LayerType::Linear => {
-                assert!(out_points.iter().all(|point| point == &out_points[0]));
-                <Layer as LinearLayer<E>>::prove(self, wit, &out_points[0], transcript)
+                assert!(out_points.iter().all_equal());
+                <Layer<E> as LinearLayer<E>>::prove(self, wit, &out_points[0], transcript)
             }
         };
 
         self.update_claims(
             claims,
-            &proof.base_mle_evals,
-            &proof.ext_mle_evals,
-            &in_point,
+            &sumcheck_layer_proof.evals,
+            &sumcheck_layer_proof.proof.point,
         );
 
-        proof
+        sumcheck_layer_proof
     }
 
-    pub fn verify<E: ExtensionField, Trans: Transcript<E>>(
+    pub fn verify<Trans: Transcript<E>>(
         &self,
-        proof: SumcheckProof<E>,
+        max_num_variables: usize,
+        proof: SumcheckLayerProof<E>,
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
     ) -> Result<(), BackendError<E>> {
         self.update_challenges(challenges, transcript);
-        let (sigmas, points) = self.sigmas_and_points(claims, challenges);
+        let (sigmas, points) = self.extract_claim_and_point(claims, challenges);
 
-        let SumcheckClaims {
-            in_point,
-            base_mle_evals,
-            ext_mle_evals,
-        } = match self.ty {
-            LayerType::Sumcheck => <Layer as SumcheckLayer<E>>::verify(
+        let LayerClaims { in_point, evals } = match self.ty {
+            LayerType::Sumcheck => <Layer<_> as SumcheckLayer<E>>::verify(
                 self,
+                max_num_variables,
                 proof,
                 &sigmas.iter().cloned().sum(),
-                points.slice_vector(),
                 challenges,
                 transcript,
             )?,
-            LayerType::Zerocheck => <Layer as ZerocheckLayer<E>>::verify(
+            LayerType::Zerocheck => <Layer<_> as ZerocheckLayer<E>>::verify(
                 self,
+                max_num_variables,
                 proof,
                 sigmas,
-                points.slice_vector(),
+                &points,
                 challenges,
                 transcript,
             )?,
             LayerType::Linear => {
                 assert!(points.iter().all(|point| point == &points[0]));
-                <Layer as LinearLayer<E>>::verify(
+                <Layer<_> as LinearLayer<E>>::verify(
                     self, proof, &sigmas, &points[0], challenges, transcript,
                 )?
             }
         };
 
-        self.update_claims(claims, &base_mle_evals, &ext_mle_evals, &in_point);
+        self.update_claims(claims, &evals, &in_point);
 
         Ok(())
     }
 
-    fn sigmas_and_points<E: ExtensionField>(
+    fn extract_claim_and_point(
         &self,
         claims: &[PointAndEval<E>],
         challenges: &[E],
@@ -190,42 +187,32 @@ impl Layer {
         self.outs
             .iter()
             .map(|out| {
-                let tmp = out.evaluate(claims, challenges);
-                (tmp.eval, tmp.point)
+                let PointAndEval { point, eval } = out.evaluate(claims, challenges);
+                (eval, point)
             })
             .unzip()
     }
 
-    fn update_challenges<E: ExtensionField>(
-        &self,
-        challenges: &mut Vec<E>,
-        transcript: &mut impl Transcript<E>,
-    ) {
+    // generate layer challenge, if have, and set to respective challenge_id index
+    // optional resize raw challenges vector to adapt new challenge
+    fn update_challenges(&self, challenges: &mut Vec<E>, transcript: &mut impl Transcript<E>) {
         for challenge in &self.challenges {
-            let value = transcript.sample_and_append_challenge(b"linear layer challenge");
+            let value = transcript.sample_and_append_challenge(b"layer challenge");
             match challenge {
-                Constant::Challenge(i) => {
-                    if challenges.len() <= *i {
-                        challenges.resize(*i + 1, E::ZERO);
+                Expression::Challenge(challange_id, ..) => {
+                    let challange_id = *challange_id as usize;
+                    if challenges.len() <= challange_id as usize {
+                        challenges.resize(challange_id + 1, E::default());
                     }
-                    challenges[*i] = value.elements;
+                    challenges[challange_id] = value.elements;
                 }
                 _ => unreachable!(),
             }
         }
     }
 
-    fn update_claims<E: ExtensionField>(
-        &self,
-        claims: &mut [PointAndEval<E>],
-        base_mle_evals: &[E],
-        ext_mle_evals: &[E],
-        point: &Point<E>,
-    ) {
-        for (value, pos) in izip!(
-            chain![base_mle_evals, ext_mle_evals],
-            chain![&self.in_bases, &self.in_exts]
-        ) {
+    fn update_claims(&self, claims: &mut [PointAndEval<E>], evals: &[E], point: &Point<E>) {
+        for (value, pos) in izip!(chain![evals], chain![&self.in_eval_expr]) {
             *(pos.entry_mut(claims)) = PointAndEval {
                 point: point.clone(),
                 eval: *value,
@@ -234,20 +221,15 @@ impl Layer {
     }
 }
 
-impl<E: ExtensionField> LayerWitness<E> {
-    pub fn new(bases: Vec<Vec<E::BaseField>>, exts: Vec<Vec<E>>) -> Self {
-        assert!(!bases.is_empty() || !exts.is_empty());
+impl<'a, E: ExtensionField> LayerWitness<'a, E> {
+    pub fn new(bases: Vec<MultilinearExtension<'a, E>>) -> Self {
+        assert!(!bases.is_empty() || !bases.is_empty());
         let num_vars = if bases.is_empty() {
-            log2(exts[0].len())
+            log2(bases[0].evaluations().len())
         } else {
-            log2(bases[0].len())
+            log2(bases[0].evaluations().len())
         } as usize;
-        assert!(bases.iter().all(|b| b.len() == 1 << num_vars));
-        assert!(exts.iter().all(|e| e.len() == 1 << num_vars));
-        Self {
-            bases,
-            exts,
-            num_vars,
-        }
+        assert!(bases.iter().all(|b| b.evaluations().len() == 1 << num_vars));
+        Self { bases, num_vars }
     }
 }

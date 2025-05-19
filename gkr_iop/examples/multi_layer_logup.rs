@@ -4,7 +4,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
-    evaluation::{EvalExpression, PointAndEval},
+    evaluation::EvalExpression,
     gkr::{
         GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
@@ -56,7 +56,7 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
     }
 
     fn build_commit_phase(&mut self, chip: &mut Chip) {
-        [self.committed_table_id, self.committed_count_id] = chip.allocate_committed_base();
+        [self.committed_table_id, self.committed_count_id] = chip.allocate_committed();
         [self.lookup_challenge] = chip.allocate_challenges();
     }
 
@@ -146,8 +146,8 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
             vec![],
         ));
 
-        chip.allocate_base_opening(self.committed_table_id, table.1);
-        chip.allocate_base_opening(self.committed_count_id, count);
+        chip.allocate_opening(self.committed_table_id, table.1);
+        chip.allocate_opening(self.committed_count_id, count);
     }
 }
 
@@ -162,7 +162,7 @@ where
 {
     type Trace = TowerChipTrace;
 
-    fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>> {
+    fn phase1_witness_group(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>> {
         let mut res = vec![vec![]; 2];
         res[self.committed_table_id] = phase1
             .table
@@ -232,7 +232,7 @@ fn main() {
         let count = (0..1 << log_size)
             .map(|_| OsRng.gen_range(0..1 << log_size as u64))
             .collect_vec();
-        let phase1_witness = layout.phase1_witness(TowerChipTrace {
+        let phase1_witness = layout.phase1_witness_group(TowerChipTrace {
             table,
             multiplicity: count,
         });
@@ -250,7 +250,7 @@ fn main() {
 
         #[cfg(debug_assertions)]
         {
-            let last = gkr_witness.layers[0].exts.clone();
+            let last = gkr_witness.layers[0].bases.clone();
             MockProver::check(
                 gkr_circuit.clone(),
                 &gkr_witness,
@@ -264,7 +264,7 @@ fn main() {
         }
 
         let out_evals = {
-            let last = gkr_witness.layers[0].exts.clone();
+            let last = gkr_witness.layers[0].bases.clone();
             let point = Arc::new(vec![]);
             assert_eq!(last[0].len(), 1);
             vec![
