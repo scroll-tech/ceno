@@ -2,7 +2,7 @@ use std::array;
 
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use subprotocols::expression::{Constant, Witness};
+use multilinear_extensions::{ChallengeId, Expression, WitIn, WitnessId};
 
 use crate::{
     evaluation::EvalExpression,
@@ -13,15 +13,10 @@ use super::Chip;
 
 impl<E: ExtensionField> Chip<E> {
     /// Allocate indices for committing base field polynomials.
-    pub fn allocate_committed_base<const N: usize>(&mut self) -> [usize; N] {
-        self.n_committed_bases += N;
-        array::from_fn(|i| i + self.n_committed_bases - N)
-    }
-
-    /// Allocate indices for committing extension field polynomials.
-    pub fn allocate_committed_ext<const N: usize>(&mut self) -> [usize; N] {
-        self.n_committed_exts += N;
-        array::from_fn(|i| i + self.n_committed_exts - N)
+    pub fn allocate_committed<const N: usize>(&mut self) -> [usize; N] {
+        let committed = array::from_fn(|i| i + self.n_committed);
+        self.n_committed += N;
+        committed
     }
 
     /// Allocate `Witness` and `EvalExpression` for the input polynomials in a
@@ -30,10 +25,12 @@ impl<E: ExtensionField> Chip<E> {
     /// processing the layer prover for each polynomial. This should be
     /// called at most once for each layer!
     #[allow(clippy::type_complexity)]
-    pub fn allocate_wits_in_layer<const N: usize>(&mut self) -> [(Witness, EvalExpression<E>); N] {
+    pub fn allocate_wits_in_layer<const N: usize>(&mut self) -> [(WitIn, EvalExpression<E>); N] {
         let bases = array::from_fn(|i| {
             (
-                Witness::BasePoly(i),
+                WitIn {
+                    id: (i + self.n_evaluations) as WitnessId,
+                },
                 EvalExpression::Single(i + self.n_evaluations),
             )
         });
@@ -45,24 +42,28 @@ impl<E: ExtensionField> Chip<E> {
     pub fn allocate_output_evals<const N: usize>(&mut self) -> Vec<EvalExpression<E>>
 // -> [EvalExpression; N]
     {
-        self.n_evaluations += N;
         // array::from_fn(|i| EvalExpression::Single(i + self.n_evaluations - N))
         // TODO: hotfix to avoid stack overflow, fix later
-        (0..N)
-            .map(|i| EvalExpression::Single(i + self.n_evaluations - N))
-            .collect_vec()
+        let output_evals = (0..N)
+            .map(|i| EvalExpression::Single(i + self.n_evaluations))
+            .collect_vec();
+        self.n_evaluations += N;
+        output_evals
     }
 
     /// Allocate challenges.
-    pub fn allocate_challenges<const N: usize>(&mut self) -> [Constant; N] {
+    pub fn allocate_challenges<const N: usize>(&mut self) -> [Expression<E>; N] {
+        let challanges = array::from_fn(|i| {
+            Expression::Challenge((i + self.n_challenges) as ChallengeId, 1, E::ONE, E::ZERO)
+        });
         self.n_challenges += N;
-        array::from_fn(|i| Constant::Challenge(i + self.n_challenges - N))
+        challanges
     }
 
     /// Allocate a PCS opening action to a base polynomial with index
     /// `wit_index`. The `EvalExpression` represents the expression to
     /// compute the evaluation.
-    pub fn allocate_base_opening(&mut self, wit_index: usize, eval: EvalExpression<E>) {
+    pub fn allocate_opening(&mut self, wit_index: usize, eval: EvalExpression<E>) {
         self.openings.push((wit_index, eval));
     }
 

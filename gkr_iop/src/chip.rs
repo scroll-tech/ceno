@@ -10,9 +10,7 @@ pub mod protocol;
 #[derive(Clone, Debug, Default)]
 pub struct Chip<E: ExtensionField> {
     /// The number of base inputs committed in the whole protocol.
-    pub n_committed_bases: usize,
-    /// The number of ext inputs committed in the whole protocol.
-    pub n_committed_exts: usize,
+    pub n_committed: usize,
 
     /// The number of challenges generated through the whole protocols
     /// (except the ones inside sumcheck protocols).

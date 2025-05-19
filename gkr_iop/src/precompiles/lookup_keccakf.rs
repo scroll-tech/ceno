@@ -333,7 +333,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
     }
 
     fn build_commit_phase(&mut self, chip: &mut Chip) {
-        let _ = chip.allocate_committed_base::<{ 50 + 40144 }>();
+        let _ = chip.allocate_committed::<{ 50 + 40144 }>();
     }
 
     fn build_gkr_phase(&mut self, chip: &mut Chip) {
@@ -441,7 +441,7 @@ impl<E: ExtensionField> ProtocolBuilder for KeccakLayout<E> {
                 .collect_vec();
 
                 for wit in &bases {
-                    chip.allocate_base_opening(openings, wit.clone().1);
+                    chip.allocate_opening(openings, wit.clone().1);
                     openings += 1;
                 }
 
@@ -752,7 +752,7 @@ where
 {
     type Trace = KeccakTrace;
 
-    fn phase1_witness(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>> {
+    fn phase1_witness_group(&self, phase1: Self::Trace) -> Vec<Vec<E::BaseField>> {
         let mut poly = vec![vec![]; KECCAK_INPUT_SIZE];
         for instance in phase1.instances {
             let felts = u64s_to_felts::<E>(instance.into_iter().map(|e| e as u64).collect_vec());
@@ -1078,7 +1078,7 @@ pub fn run_faster_keccakf(states: Vec<[u64; 25]>, verify: bool, test_outputs: bo
     }
 
     let num_instances = instances.len();
-    let phase1_witness = layout.phase1_witness(KeccakTrace {
+    let phase1_witness = layout.phase1_witness_group(KeccakTrace {
         instances: instances.clone(),
     });
 
