@@ -144,10 +144,12 @@ fn test_rw_lk_expression_combination() {
         ];
 
         let (proof, _) = prover
-            .create_opcode_proof(
+            .create_chip_proof(
                 name.as_str(),
                 prover.pk.circuit_pks.get(&name).unwrap(),
+                vec![],
                 wits_in,
+                vec![],
                 &[],
                 num_instances,
                 &mut transcript,

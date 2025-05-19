@@ -238,7 +238,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     let (structural_witness, _) = structural_wits
                         .remove(circuit_name)
                         .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?;
-                    assert!(witness_mle.len() != 0);
+                    assert!(!witness_mle.is_empty());
                     let num_vars = witness_mle[0].num_vars();
                     let (table_proof, pi_in_evals) = self.create_chip_proof(
                         circuit_name,
@@ -397,7 +397,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let r_set_wit: Vec<_> = remains.drain(..num_reads).collect();
         let w_set_wit: Vec<_> = remains.drain(..num_writes).collect();
         let lk_n_wit: Vec<_> = remains.drain(..cs.lk_table_expressions.len()).collect();
-        let lk_d_wit: Vec<_> = if cs.lk_table_expressions.len() > 0 {
+        let lk_d_wit: Vec<_> = if !cs.lk_table_expressions.is_empty() {
             remains.drain(..cs.lk_table_expressions.len()).collect()
         } else {
             remains.drain(..cs.lk_expressions.len()).collect()
