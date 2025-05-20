@@ -11,9 +11,7 @@ use multilinear_extensions::{
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
-use rayon::iter::{
-    IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
-};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -897,10 +895,12 @@ impl TowerProver {
                                 .iter()
                                 .all(|f| { f.evaluations().len() == 1 << (log_num_fanin * round) })
                         );
+
                         let layer_polys = layer_polys
                             .iter_mut()
-                            .map(|layer_poly| expr_builder.lift(Either::Right(layer_poly)))
+                            .map(|layer_poly| expr_builder.lift(layer_poly.to_either()))
                             .collect_vec();
+
                         witness_prod_expr[*i].extend(layer_polys.clone());
                         let layer_polys_product =
                             layer_polys.into_iter().product::<Expression<E>>();
@@ -930,10 +930,10 @@ impl TowerProver {
                         let (q1, q2) = rest.split_at_mut(1);
 
                         let (p1, p2, q1, q2) = (
-                            expr_builder.lift(Either::Right(&mut p1[0])),
-                            expr_builder.lift(Either::Right(&mut p2[0])),
-                            expr_builder.lift(Either::Right(&mut q1[0])),
-                            expr_builder.lift(Either::Right(&mut q2[0])),
+                            expr_builder.lift(p1[0].to_either()),
+                            expr_builder.lift(p2[0].to_either()),
+                            expr_builder.lift(q1[0].to_either()),
+                            expr_builder.lift(q2[0].to_either()),
                         );
                         witness_lk_expr[*i].extend(vec![
                             p1.clone(),

@@ -7,6 +7,7 @@ use crate::{
     util::ceil_log2,
 };
 use core::hash::Hash;
+use either::Either;
 use ff_ext::{ExtensionField, FromUniformBytes};
 use p3::field::{Field, PrimeCharacteristicRing};
 use rand::Rng;
@@ -158,6 +159,15 @@ macro_rules! split_eval_chunks {
 }
 
 impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
+    /// Returns `Right(&mut self)` if mutable access is possible, otherwise `Left(&self)`
+    pub fn to_either(&mut self) -> Either<&Self, &mut Self> {
+        if self.is_mut() {
+            Either::Right(self)
+        } else {
+            Either::Left(self)
+        }
+    }
+
     /// returns true if the evaluations are either mutably borrowed or owned (i.e., mutable access is possible)
     pub fn is_mut(&self) -> bool {
         match &self.evaluations {
