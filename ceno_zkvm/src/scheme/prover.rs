@@ -11,7 +11,9 @@ use multilinear_extensions::{
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -405,38 +407,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_last_layer");
         let mut r_set_last_layer = r_set_wit
-            .iter()
-            .chain(w_set_wit.iter())
+            .par_iter()
+            .chain(w_set_wit.par_iter())
             .map(|wit| masked_mle_split_to_chunks(wit, num_instances, NUM_FANIN, E::ONE))
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
 
-        let lk_numerator_last_layer = lk_n_wit
-            .iter()
-            .map(|wit| {
-                masked_mle_split_to_chunks(
-                    wit,
-                    num_instances,
-                    NUM_FANIN_LOGUP,
+        let mut lk_numerator_last_layer = lk_n_wit
+            .par_iter()
+            .chain(lk_d_wit.par_iter())
+            .enumerate()
+            .map(|(i, wit)| {
+                let default = if i < lk_n_wit.len() {
                     // For table circuit, the last layer's length is always two's power
-                    // so the padding is not needed, therefore we can use any value here.
-                    E::ONE,
-                )
+                    // so the padding will not happen, therefore we can use any value here.
+                    E::ONE
+                } else {
+                    chip_record_alpha
+                };
+                masked_mle_split_to_chunks(wit, num_instances, NUM_FANIN_LOGUP, default)
             })
             .collect::<Vec<_>>();
-        let lk_denominator_last_layer = lk_d_wit
-            .iter()
-            .map(|wit| {
-                let res = masked_mle_split_to_chunks(
-                    wit,
-                    num_instances,
-                    NUM_FANIN_LOGUP,
-                    chip_record_alpha,
-                );
-                assert_eq!(res.len(), NUM_FANIN_LOGUP);
-                res
-            })
-            .collect::<Vec<_>>();
+        let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
         exit_span!(span);
 
         let span = entered_span!("tower_tower_witness");
