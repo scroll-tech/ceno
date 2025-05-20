@@ -12,7 +12,7 @@ use multilinear_extensions::{
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+    IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
 use std::iter::Iterator;
 use sumcheck::{
@@ -408,15 +408,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_last_layer");
         let mut r_set_last_layer = r_set_wit
-            .par_iter()
-            .chain(w_set_wit.par_iter())
+            .iter()
+            .chain(w_set_wit.iter())
             .map(|wit| masked_mle_split_to_chunks(wit, num_instances, NUM_FANIN, E::ONE))
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
 
         let mut lk_numerator_last_layer = lk_n_wit
-            .par_iter()
-            .chain(lk_d_wit.par_iter())
+            .iter()
+            .chain(lk_d_wit.iter())
             .enumerate()
             .map(|(i, wit)| {
                 let default = if i < lk_n_wit.len() {

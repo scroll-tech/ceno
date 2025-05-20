@@ -38,6 +38,8 @@ pub(crate) fn masked_mle_split_to_chunks<'a, E: ExtensionField>(
 
             match mle.evaluations() {
                 FieldType::Ext(evals) => (part_idx * n..(part_idx + 1) * n)
+                    .into_par_iter()
+                    .with_min_len(64)
                     .map(|i| if i < num_instance { evals[i] } else { default })
                     .collect::<Vec<_>>()
                     .into_mle(),
