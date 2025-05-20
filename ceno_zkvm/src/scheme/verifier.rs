@@ -185,7 +185,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let name = circuit_names[*index];
             if let Some(opcode_proof) = vm_proof.opcode_proofs.get(index) {
                 transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
-                self.verify_opcode_proof(
+                let input_opening_point = self.verify_opcode_proof(
                     name,
                     circuit_vk,
                     opcode_proof,
@@ -196,8 +196,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     &point_eval,
                     &challenges,
                 )?;
-                // we already checked the validity of opcode_proof.input_opening_point
-                rt_points.push(opcode_proof.input_opening_point.clone());
+                rt_points.push(input_opening_point);
                 evaluations.push(opcode_proof.wits_in_evals.clone());
                 tracing::info!("verified proof for opcode {}", name);
 
@@ -230,7 +229,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             } else if let Some(table_proof) = vm_proof.table_proofs.get(index) {
                 transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
 
-                self.verify_table_proof(
+                let input_opening_point = self.verify_table_proof(
                     name,
                     circuit_vk,
                     table_proof,
@@ -242,7 +241,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     &point_eval,
                     &challenges,
                 )?;
-                rt_points.push(table_proof.input_opening_point.clone());
+                rt_points.push(input_opening_point);
                 evaluations.push(table_proof.wits_in_evals.clone());
                 if circuit_vk.cs.num_fixed > 0 {
                     evaluations.push(table_proof.fixed_in_evals.clone());
@@ -340,7 +339,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     #[allow(clippy::too_many_arguments)]
     pub fn verify_opcode_proof(
         &self,
-        name: &str,
+        _name: &str,
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMChipProof<E>,
         num_instances: usize,
@@ -349,7 +348,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<Point<E>, ZKVMError> {
         let cs = circuit_vk.get_cs();
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len(),
@@ -506,13 +505,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         .copied()
         .sum::<E>();
 
-        if proof.input_opening_point != input_opening_point {
-            return Err(ZKVMError::VerifyError(format!(
-                "opcode {name} input opening point mismatch {:?} != {input_opening_point:?}",
-                proof.input_opening_point,
-            )));
-        }
-
         if computed_evals != expected_evaluation {
             return Err(ZKVMError::VerifyError(
                 "main + sel evaluation verify failed".into(),
@@ -529,7 +521,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             return Err(ZKVMError::VerifyError("zero expression != 0".into()));
         }
 
-        Ok(())
+        Ok(input_opening_point)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -545,7 +537,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         num_logup_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2],
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<Point<E>, ZKVMError> {
         let cs = circuit_vk.get_cs();
         debug_assert!(
             cs.r_table_expressions
@@ -662,7 +654,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             eval_wellform_address_vec(
                                 *offset as u64,
                                 *multi_factor as u64,
-                                &proof.input_opening_point,
+                                &rt_tower,
                                 *descending,
                             )
                         },
@@ -696,7 +688,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         })
         .collect_vec();
 
-        if is_skip_same_point_sumcheck {
+        let input_opening_point = if is_skip_same_point_sumcheck {
             for (expected_eval, eval) in expected_evals.iter().zip(
                 prod_point_and_eval
                     .into_iter()
@@ -716,12 +708,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     )));
                 }
             }
-            if proof.input_opening_point != rt_tower {
-                return Err(ZKVMError::VerifyError(format!(
-                    "table {name} input opening point mismatch {:?} != {rt_tower:?}",
-                    proof.input_opening_point,
-                )));
-            }
+            rt_tower
         } else {
             assert!(proof.main_sumcheck_proofs.is_some());
 
@@ -764,13 +751,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 sel_subclaim.expected_evaluation,
             );
 
-            if input_opening_point != proof.input_opening_point {
-                return Err(ZKVMError::VerifyError(format!(
-                    "table {name} input opening point mismatch {:?} != {input_opening_point:?}",
-                    proof.input_opening_point,
-                )));
-            }
-
             let computed_evals = [
                 // r, w
                 prod_point_and_eval
@@ -808,12 +788,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     "sel evaluation verify failed".into(),
                 ));
             }
+            input_opening_point
         };
 
         // assume public io is tiny vector, so we evaluate it directly without PCS
         for &Instance(idx) in cs.instance_name_map.keys() {
             let poly = raw_pi[idx].to_vec().into_mle();
-            let expected_eval = poly.evaluate(&proof.input_opening_point[..poly.num_vars()]);
+            let expected_eval = poly.evaluate(&input_opening_point[..poly.num_vars()]);
             let eval = pi[idx];
             if expected_eval != eval {
                 return Err(ZKVMError::VerifyError(format!(
@@ -822,11 +803,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
             tracing::debug!(
                 "[table {name}] verified public inputs on index {idx} with point {:?}",
-                proof.input_opening_point
+                input_opening_point
             );
         }
 
-        Ok(())
+        Ok(input_opening_point)
     }
 }
 

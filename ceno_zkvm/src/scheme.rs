@@ -39,7 +39,6 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 
     pub tower_proof: TowerProofs<E>,
 
-    pub input_opening_point: Vec<E>,
     pub fixed_in_evals: Vec<E>,
     pub wits_in_evals: Vec<E>,
 }
