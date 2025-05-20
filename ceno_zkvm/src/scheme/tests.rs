@@ -172,7 +172,7 @@ fn test_rw_lk_expression_combination() {
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
         }
-        let _rt_input = verifier
+        verifier
             .verify_opcode_proof(
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
