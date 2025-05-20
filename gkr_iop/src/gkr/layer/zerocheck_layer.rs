@@ -51,7 +51,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        mut wit: LayerWitness<E>,
+        wit: LayerWitness<E>,
         out_points: &[Point<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
@@ -59,7 +59,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         assert_eq!(self.exprs.len(), out_points.len());
 
         let span = entered_span!("build_out_points_eq");
-        let eqs = out_points
+        let mut eqs = out_points
             .par_iter()
             .map(|point| {
                 MultilinearExtension::from_evaluations_ext_vec(
@@ -74,8 +74,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             num_threads,
             max_num_variables,
             wit.bases
-                .iter_mut()
-                .map(|mle| Either::Right(mle))
+                .iter()
+                .map(|mle| Either::Left(mle.as_ref()))
                 // extend eqs to the end of wit
                 .chain(eqs.iter_mut().map(|eq| Either::Right(eq)))
                 .collect_vec(),
@@ -87,7 +87,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let expr = self
             .exprs
             .iter()
-            .zip_eq(self.eqs)
+            .zip_eq(&self.eqs)
             .zip_eq(alpha_pows)
             .map(|((expr, eq), alpha)| alpha * eq * expr)
             .sum::<Expression<E>>();

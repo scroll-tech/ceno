@@ -59,7 +59,10 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
         let builder = VirtualPolynomialsBuilder::new_with_mles(
             num_threads,
             max_num_variables,
-            wit.bases.iter().map(|mle| Either::Left(mle)).collect_vec(),
+            wit.bases
+                .iter()
+                .map(|mle| Either::Left(mle.as_ref()))
+                .collect_vec(),
         );
         let (proof, prover_state) = IOPProverState::prove(
             builder.to_virtual_polys(&[self.exprs[0].clone()], challenges),

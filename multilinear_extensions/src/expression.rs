@@ -1022,17 +1022,25 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
         },
         &|x, a, b| {
             op_mle_xa_b!(|x, a, b| {
-                assert_eq!(a.len(), 1);
-                assert_eq!(b.len(), 1);
-                let (a, b) = (a[0], b[0]);
-                MultilinearExtension::from_evaluation_vec_smart(
-                    ceil_log2(x.len()),
-                    x.par_iter()
-                        .with_min_len(MIN_PAR_SIZE)
-                        .map(|x| a * *x + b)
-                        .collect(),
-                )
-                .into()
+                match (x.len(), a.len(), b.len()) {
+                    (_, 1, 1) => MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(x.len()),
+                        x.par_iter()
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|x| a[0] * *x + b[0])
+                            .collect(),
+                    )
+                    .into(),
+                    (1, _, 1) => MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(a.len()),
+                        a.par_iter()
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|a| *a * x[0] + b[0])
+                            .collect(),
+                    )
+                    .into(),
+                    lefted => panic!("unknown combination {:?}", lefted),
+                }
             })
         },
     )

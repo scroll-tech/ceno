@@ -65,8 +65,9 @@ impl<E: ExtensionField> GKRCircuit<E> {
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> Result<GKRProverOutput<E, Evaluation<E>>, BackendError<E>> {
-        let mut evaluations = out_evals.to_vec();
-        evaluations.resize(self.n_evaluations, PointAndEval::default());
+        let mut running_evals = out_evals.to_vec();
+        // running evals is a global referable within chip
+        running_evals.resize(self.n_evaluations, PointAndEval::default());
         let mut challenges = challenges.to_vec();
         let sumcheck_proofs = izip!(&self.layers, circuit_wit.layers)
             .map(|(layer, layer_wit)| {
@@ -74,14 +75,14 @@ impl<E: ExtensionField> GKRCircuit<E> {
                     num_threads,
                     max_num_variables,
                     layer_wit,
-                    &mut evaluations,
+                    &mut running_evals,
                     &mut challenges,
                     transcript,
                 )
             })
             .collect_vec();
 
-        let opening_evaluations = self.opening_evaluations(&evaluations, &challenges);
+        let opening_evaluations = self.opening_evaluations(&running_evals, &challenges);
 
         Ok(GKRProverOutput {
             gkr_proof: GKRProof(sumcheck_proofs),

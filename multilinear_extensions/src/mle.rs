@@ -945,7 +945,7 @@ macro_rules! op_mle3_range {
     }};
 }
 
-/// deal with x * a + b
+/// deal with x * a + b or a * x + b
 #[macro_export]
 macro_rules! op_mle_xa_b {
     (|$x:ident, $a:ident, $b:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
@@ -970,6 +970,13 @@ macro_rules! op_mle_xa_b {
                 $crate::mle::FieldType::Ext(b_vec),
             ) => {
                 op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+            }
+            (
+                $crate::mle::FieldType::Ext(x_vec),
+                $crate::mle::FieldType::Base(a_vec),
+                $crate::mle::FieldType::Base(b_vec),
+            ) => {
+                op_mle3_range!($a, $x, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
             }
             (x, a, b) => unreachable!(
                 "unmatched pattern {:?} {:?} {:?}",

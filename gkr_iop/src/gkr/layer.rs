@@ -4,7 +4,7 @@ use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
     Expression,
-    mle::{MultilinearExtension, Point, PointAndEval},
+    mle::{ArcMultilinearExtension, Point, PointAndEval},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck_layer::{SumcheckLayer, SumcheckLayerProof};
@@ -56,7 +56,7 @@ pub struct Layer<E: ExtensionField> {
 
 #[derive(Clone, Debug, Default)]
 pub struct LayerWitness<'a, E: ExtensionField> {
-    pub bases: Vec<MultilinearExtension<'a, E>>,
+    pub bases: Vec<ArcMultilinearExtension<'a, E>>,
     pub num_vars: usize,
 }
 
@@ -222,7 +222,7 @@ impl<E: ExtensionField> Layer<E> {
 }
 
 impl<'a, E: ExtensionField> LayerWitness<'a, E> {
-    pub fn new(bases: Vec<MultilinearExtension<'a, E>>) -> Self {
+    pub fn new(bases: Vec<ArcMultilinearExtension<'a, E>>) -> Self {
         assert!(!bases.is_empty() || !bases.is_empty());
         let num_vars = if bases.is_empty() {
             log2(bases[0].evaluations().len())

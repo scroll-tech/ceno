@@ -26,6 +26,8 @@ thiserror.workspace = true
 tiny-keccak.workspace = true
 either.workspace = true
 transcript = { path = "../transcript" }
+tracing.workspace = true
+tracing-subscriber.workspace = true
 witness = { path = "../witness" }
 
 [dev-dependencies]

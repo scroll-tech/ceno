@@ -19,23 +19,44 @@ impl<E: ExtensionField> Chip<E> {
         committed
     }
 
+    /// refer to `allocate_wits_in_zero_layer`. allocate witness w/o eq
+    #[allow(clippy::type_complexity)]
+    pub fn allocate_wits_in_layer<const N: usize>(&mut self) -> [(WitIn, EvalExpression<E>); N] {
+        let (wits, _) = self.allocate_wits_in_zero_layer::<N, 0>();
+        wits
+    }
+
     /// Allocate `Witness` and `EvalExpression` for the input polynomials in a
     /// layer. Where `Witness` denotes the index and `EvalExpression`
     /// denotes the position to place the evaluation of the polynomial after
     /// processing the layer prover for each polynomial. This should be
-    /// called at most once for each layer!
+    /// called at most once for each layer
+    ///
+    /// id within EvalExpression is chip-unique
     #[allow(clippy::type_complexity)]
-    pub fn allocate_wits_in_layer<const N: usize>(&mut self) -> [(WitIn, EvalExpression<E>); N] {
+    pub fn allocate_wits_in_zero_layer<const N: usize, const Z: usize>(
+        &mut self,
+    ) -> (
+        [(WitIn, EvalExpression<E>); N],
+        [(WitIn, EvalExpression<E>); Z],
+    ) {
         let bases = array::from_fn(|i| {
             (
-                WitIn {
-                    id: (i + self.n_evaluations) as WitnessId,
-                },
+                WitIn { id: i as WitnessId },
                 EvalExpression::Single(i + self.n_evaluations),
             )
         });
         self.n_evaluations += N;
-        bases
+        let eqs = array::from_fn(|i| {
+            (
+                WitIn {
+                    id: (N + i) as WitnessId,
+                },
+                EvalExpression::Single(i + self.n_evaluations),
+            )
+        });
+        self.n_evaluations += Z;
+        (bases, eqs)
     }
 
     /// Generate the evaluation expression for each output.
