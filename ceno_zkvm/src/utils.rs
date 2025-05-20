@@ -6,10 +6,11 @@ use std::{
     panic::{self, PanicHookInfo},
 };
 
+use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
+    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::Field;
 use transcript::Transcript;
@@ -211,7 +212,8 @@ where
 /// add mle terms into virtual poly by expression
 /// return distinct witin in set
 pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
-    virtual_polys: &mut VirtualPolynomials<'a, E>,
+    expr_builder: &mut VirtualPolynomialsBuilder<'a, E>,
+    exprs: &mut Vec<Expression<E>>,
     selector: Option<&'a ArcMultilinearExtension<'a, E>>,
     wit_ins: Vec<&'a ArcMultilinearExtension<'a, E>>,
     expr: &Expression<E>,
@@ -272,13 +274,17 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
         if *constant != E::ZERO && monomial_term.is_empty() && selector.is_none() {
             todo!("make virtual poly support pure constant")
         }
-        let sel = selector.map(|sel| vec![sel]).unwrap_or_default();
+        let sel = selector.map(|sel| expr_builder.lift(Either::Left(sel)));
         let terms_polys = monomial_term
             .iter()
-            .map(|wit_id| wit_ins[*wit_id as usize])
+            .map(|wit_id| expr_builder.lift(Either::Left(wit_ins[*wit_id as usize])))
             .collect_vec();
-
-        virtual_polys.add_mle_list([sel, terms_polys].concat(), *constant * alpha);
+        exprs.push(
+            sel.into_iter()
+                .chain(terms_polys)
+                .product::<Expression<E>>()
+                * Expression::Constant(Either::Right(*constant * alpha)),
+        );
     }
 
     monomial_terms
@@ -305,8 +311,9 @@ mod tests {
     use ff_ext::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::{
-        Expression, ToExpr, mle::IntoMLE, virtual_poly::ArcMultilinearExtension,
-        virtual_polys::VirtualPolynomials,
+        Expression, ToExpr,
+        mle::{ArcMultilinearExtension, IntoMLE},
+        virtual_polys::VirtualPolynomialsBuilder,
     };
     use p3::field::PrimeCharacteristicRing;
 
@@ -329,13 +336,15 @@ mod tests {
             .map(|_| vec![F::from_u64(1)].into_mle().into())
             .collect();
 
-        let mut virtual_polys = VirtualPolynomials::new(1, 0);
+        let mut expr_builder = VirtualPolynomialsBuilder::new(1, 0);
+        let mut exprs = vec![];
 
         // 3xy + 2y
         let expr: Expression<E> = 3 * x.expr() * y.expr() + 2 * y.expr();
 
         let distrinct_zerocheck_terms_set = add_mle_list_by_expr(
-            &mut virtual_polys,
+            &mut expr_builder,
+            &mut exprs,
             None,
             wits_in.iter().collect_vec(),
             &expr,
@@ -343,12 +352,20 @@ mod tests {
             GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 2);
-        assert!(virtual_polys.degree() == 2);
+        assert!(
+            expr_builder
+                .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>()], &[])
+                .degree()
+                == 2
+        );
 
         // 3x^3
+        let mut expr_builder = VirtualPolynomialsBuilder::new(1, 0);
+        let mut exprs = vec![];
         let expr: Expression<E> = 3 * x.expr() * x.expr() * x.expr();
         let distrinct_zerocheck_terms_set = add_mle_list_by_expr(
-            &mut virtual_polys,
+            &mut expr_builder,
+            &mut exprs,
             None,
             wits_in.iter().collect_vec(),
             &expr,
@@ -356,6 +373,11 @@ mod tests {
             GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 1);
-        assert!(virtual_polys.degree() == 3);
+        assert!(
+            expr_builder
+                .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>()], &[])
+                .degree()
+                == 3
+        );
     }
 }

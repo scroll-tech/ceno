@@ -9,7 +9,7 @@ use mpcs::{
     test_util::{get_point_from_challenge, setup_pcs},
 };
 
-use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
+use multilinear_extensions::mle::ArcMultilinearExtension;
 use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
