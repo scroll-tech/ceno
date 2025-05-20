@@ -274,6 +274,19 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
         .collect::<BTreeSet<u32>>()
 }
 
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+pub fn print_allocated_bytes() {
+    use tikv_jemalloc_ctl::{epoch, stats};
+
+    // Advance the epoch to refresh the stats
+    let e = epoch::mib().unwrap();
+    e.advance().unwrap();
+
+    // Read allocated bytes
+    let allocated = stats::allocated::read().unwrap();
+    tracing::info!("jemalloc total allocated bytes: {}", allocated);
+}
+
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
