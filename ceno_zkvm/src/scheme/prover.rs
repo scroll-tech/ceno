@@ -305,9 +305,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    /// support batch prove for logup + product arguments each with different num_vars()
-    /// side effect: concurrency will be determine based on min(thread, num_vars()),
-    /// so suggest dont batch too small table (size < threads) with large table together
+    /// create proof for opcode and table circuits
+    ///
+    /// for each read/write/logup expression, we pack all records of that type
+    /// into a single tower tree, and then feed these trees into tower prover.
     #[tracing::instrument(skip_all, name = "create_chip_proof", fields(table_name=name, profiling_2), level="trace")]
     pub fn create_chip_proof(
         &self,

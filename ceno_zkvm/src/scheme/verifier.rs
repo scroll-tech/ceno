@@ -334,6 +334,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         Ok(true)
     }
 
+    // TODO: unify `verify_opcode_proof` and `verify_table_proof`
     /// verify proof and return input opening point
     #[allow(clippy::too_many_arguments)]
     pub fn verify_opcode_proof(
@@ -354,7 +355,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.w_expressions.len(),
             cs.lk_expressions.len(),
         );
-        let num_records = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
+        let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
         let (chip_record_alpha, _) = (challenges[0], challenges[1]);
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
@@ -372,7 +373,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .collect_vec(),
             proof.lk_out_evals.clone(),
             tower_proofs,
-            vec![log2_num_instances; num_records],
+            vec![log2_num_instances; num_batched],
             num_product_fanin,
             transcript,
         )?;
