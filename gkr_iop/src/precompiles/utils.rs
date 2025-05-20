@@ -1,18 +1,9 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use multilinear_extensions::ToExpr;
+use multilinear_extensions::{Expression, ToExpr};
 use p3_field::PrimeCharacteristicRing;
-use subprotocols::expression::{Constant, Expression};
 
 use crate::evaluation::EvalExpression;
-
-pub fn zero_expr() -> Expression {
-    Expression::Const(Constant::Base(0))
-}
-
-pub fn not8_expr(expr: Expression) -> Expression {
-    Expression::Const(Constant::Base(0xFF)) - expr
-}
 
 pub fn zero_eval<E: ExtensionField>() -> EvalExpression<E> {
     EvalExpression::Linear(
@@ -117,15 +108,15 @@ impl MaskRepresentation {
 }
 
 #[derive(Debug)]
-pub enum CenoLookup {
-    And(Expression, Expression, Expression),
-    Xor(Expression, Expression, Expression),
-    U16(Expression),
+pub enum CenoLookup<E: ExtensionField> {
+    And(Expression<E>, Expression<E>, Expression<E>),
+    Xor(Expression<E>, Expression<E>, Expression<E>),
+    U16(Expression<E>),
 }
 
-impl IntoIterator for CenoLookup {
-    type Item = Expression;
-    type IntoIter = std::vec::IntoIter<Expression>;
+impl<E: ExtensionField> IntoIterator for CenoLookup<E> {
+    type Item = Expression<E>;
+    type IntoIter = std::vec::IntoIter<Expression<E>>;
 
     fn into_iter(self) -> Self::IntoIter {
         match self {

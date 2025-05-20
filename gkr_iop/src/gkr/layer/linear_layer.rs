@@ -8,11 +8,6 @@ use crate::error::BackendError;
 
 use super::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
 
-pub struct LinearLayerProof<E> {
-    evals: Vec<E>,
-    point: Point<E>,
-}
-
 pub struct LayerClaims<E: ExtensionField> {
     pub in_point: Point<E>,
     pub evals: Vec<E>,

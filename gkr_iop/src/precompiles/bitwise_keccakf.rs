@@ -17,7 +17,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     wit_infer_by_expr,
 };
-use p3_field::{Field, PrimeCharacteristicRing, extension::BinomialExtensionField};
+use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 
 use sumcheck::util::optimal_sumcheck_threads;
@@ -368,14 +368,11 @@ where
             .enumerate()
             .fold(&mut layer_wits, |layer_wits, (i, layer)| {
                 tracing::info!("generating input {i} layer with layer name {}", layer.name);
-                let wit = {
-                    LayerWitness::new(infer_layer_witness(
-                        &layer,
-                        layer_wits.last().unwrap().bases.clone(),
-                        challenges,
-                    ))
-                };
-                layer_wits.push(wit);
+                layer_wits.push(LayerWitness::new(infer_layer_witness(
+                    &layer,
+                    layer_wits.last().unwrap().bases.clone(),
+                    challenges,
+                )));
                 layer_wits
             });
 
