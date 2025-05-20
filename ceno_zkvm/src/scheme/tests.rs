@@ -147,6 +147,7 @@ fn test_rw_lk_expression_combination() {
             .create_opcode_proof(
                 name.as_str(),
                 prover.pk.circuit_pks.get(&name).unwrap(),
+                None,
                 wits_in,
                 &[],
                 num_instances,
@@ -174,6 +175,7 @@ fn test_rw_lk_expression_combination() {
             .verify_opcode_proof(
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
+                None,
                 &proof,
                 num_instances,
                 &[],

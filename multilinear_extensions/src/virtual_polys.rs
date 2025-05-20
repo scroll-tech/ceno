@@ -68,7 +68,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                 self.num_witin = self.num_witin.strict_add(1);
                 (witin_id as usize, Either::Left(mle))
             });
-            Expression::WitIn(*witin_id as u16)
+            Expression::WitIn(*witin_id as WitnessId)
         })
         .map_right(|mle| {
             let mle_ptr = mle as *const MultilinearExtension<E> as usize;
@@ -77,7 +77,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                 self.num_witin = self.num_witin.strict_add(1);
                 (witin_id as usize, Either::Right(mle))
             });
-            Expression::WitIn(*witin_id as u16)
+            Expression::WitIn(*witin_id as WitnessId)
         })
         .into_inner()
     }
@@ -162,7 +162,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             );
             let product: Vec<Expression<E>> = product
                 .into_iter()
-                .map(|mle| Expression::WitIn(poly.register_mles(vec![mle])[0] as u16))
+                .map(|mle| Expression::WitIn(poly.register_mles(vec![mle])[0] as WitnessId))
                 .collect_vec();
             poly.add_monomial_terms(vec![Term { scalar, product }]);
         }

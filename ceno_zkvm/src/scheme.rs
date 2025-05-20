@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use p3::field::PrimeCharacteristicRing;
@@ -46,7 +47,17 @@ pub struct ZKVMOpcodeProof<E: ExtensionField> {
     pub main_sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
 
     pub wits_in_evals: Vec<E>,
+
+    pub gkr_opcode_proof: Option<GKROpcodeProof<E>>,
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+// WARN/TODO: depends on serde's `arc` feature which might not behave correctly
+pub struct GKROpcodeProof<E: ExtensionField>(pub GKRProof<E>);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(

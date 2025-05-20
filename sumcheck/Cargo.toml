@@ -10,21 +10,21 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+crossbeam-channel.workspace = true
 either.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
+multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
 p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
-tracing.workspace = true
-
-crossbeam-channel.workspace = true
-multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
 sumcheck_macro = { path = "../sumcheck_macro" }
+tracing.workspace = true
 transcript = { path = "../transcript" }
 
 [dev-dependencies]
 criterion.workspace = true
+p3-goldilocks.workspace = true
 poseidon.workspace = true
 rand.workspace = true
 
