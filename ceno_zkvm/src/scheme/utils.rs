@@ -25,16 +25,16 @@ use multilinear_extensions::Expression;
 pub(crate) fn masked_mle_split_to_chunks<'a, E: ExtensionField>(
     mle: &ArcMultilinearExtension<'a, E>,
     num_instance: usize,
-    num_parts: usize,
+    num_chunks: usize,
     default: E,
 ) -> Vec<MultilinearExtension<'a, E>> {
-    assert!(num_parts.is_power_of_two());
+    assert!(num_chunks.is_power_of_two());
     assert!(num_instance <= mle.evaluations().len());
 
-    (0..num_parts)
+    (0..num_chunks)
         .into_par_iter()
         .map(|part_idx| {
-            let n = mle.evaluations().len() / num_parts;
+            let n = mle.evaluations().len() / num_chunks;
 
             match mle.evaluations() {
                 FieldType::Ext(evals) => (part_idx * n..(part_idx + 1) * n)
