@@ -185,7 +185,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let name = circuit_names[*index];
             if let Some(opcode_proof) = vm_proof.opcode_proofs.get(index) {
                 transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
-                rt_points.push(self.verify_opcode_proof(
+                self.verify_opcode_proof(
                     name,
                     circuit_vk,
                     opcode_proof,
@@ -195,7 +195,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     NUM_FANIN,
                     &point_eval,
                     &challenges,
-                )?);
+                )?;
+                rt_points.push(opcode_proof.input_opening_point.clone());
                 evaluations.push(opcode_proof.wits_in_evals.clone());
                 tracing::info!("verified proof for opcode {}", name);
 
@@ -337,7 +338,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     #[allow(clippy::too_many_arguments)]
     pub fn verify_opcode_proof(
         &self,
-        _name: &str,
+        name: &str,
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMChipProof<E>,
         num_instances: usize,
@@ -346,7 +347,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
-    ) -> Result<Point<E>, ZKVMError> {
+    ) -> Result<(), ZKVMError> {
         let cs = circuit_vk.get_cs();
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len(),
@@ -503,6 +504,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         .copied()
         .sum::<E>();
 
+        if proof.input_opening_point != input_opening_point {
+            return Err(ZKVMError::VerifyError(format!(
+                "opcode {name} input opening point mismatch {:?} != {input_opening_point:?}",
+                proof.input_opening_point,
+            )));
+        }
+
         if computed_evals != expected_evaluation {
             return Err(ZKVMError::VerifyError(
                 "main + sel evaluation verify failed".into(),
@@ -519,7 +527,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             return Err(ZKVMError::VerifyError("zero expression != 0".into()));
         }
 
-        Ok(input_opening_point)
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
