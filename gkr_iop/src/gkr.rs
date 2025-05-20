@@ -70,7 +70,9 @@ impl<E: ExtensionField> GKRCircuit<E> {
         running_evals.resize(self.n_evaluations, PointAndEval::default());
         let mut challenges = challenges.to_vec();
         let sumcheck_proofs = izip!(&self.layers, circuit_wit.layers)
-            .map(|(layer, layer_wit)| {
+            .enumerate()
+            .map(|(i, (layer, layer_wit))| {
+                tracing::info!("prove layer {i} layer with layer name {}", layer.name);
                 layer.prove(
                     num_threads,
                     max_num_variables,

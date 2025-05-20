@@ -11,7 +11,7 @@ use multilinear_extensions::{
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3_field::dot_product;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverState, IOPVerifierState, SumCheckSubClaim, VerifierError},
@@ -56,11 +56,17 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> SumcheckLayerProof<E> {
+        assert!(
+            out_points.iter().all_equal(),
+            "output points not all equals len() {}",
+            out_points.len()
+        );
         assert_eq!(self.exprs.len(), out_points.len());
 
         let span = entered_span!("build_out_points_eq");
         let mut eqs = out_points
             .par_iter()
+            .take(1)
             .map(|point| {
                 MultilinearExtension::from_evaluations_ext_vec(
                     point.len(),
@@ -84,15 +90,16 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .into_iter()
             .map(|r| Expression::Constant(Either::Right(r)))
             .collect_vec();
-        let expr = self
+        let zerocheck_expr = self
             .exprs
             .iter()
-            .zip_eq(&self.eqs)
             .zip_eq(alpha_pows)
-            .map(|((expr, eq), alpha)| alpha * eq * expr)
+            .map(|(expr, alpha)| alpha * expr)
             .sum::<Expression<E>>();
-        let (proof, prover_state) =
-            IOPProverState::prove(builder.to_virtual_polys(&[expr], challenges), transcript);
+        let (proof, prover_state) = IOPProverState::prove(
+            builder.to_virtual_polys(&[self.eqs[0].clone() * zerocheck_expr], challenges),
+            transcript,
+        );
         SumcheckLayerProof {
             proof,
             evals: prover_state.get_mle_flatten_final_evaluations(),

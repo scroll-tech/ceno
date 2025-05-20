@@ -72,6 +72,7 @@ impl<E: ExtensionField> Layer<E> {
         outs: Vec<EvalExpression<E>>,
         expr_names: Vec<String>,
     ) -> Self {
+        assert!(eqs.len() == 1);
         let mut expr_names = expr_names;
         if expr_names.len() < exprs.len() {
             expr_names.extend(vec![
