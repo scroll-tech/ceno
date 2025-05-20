@@ -196,6 +196,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     &point_eval,
                     &challenges,
                 )?;
+                // we already checked the validity of opcode_proof.input_opening_point
                 rt_points.push(opcode_proof.input_opening_point.clone());
                 evaluations.push(opcode_proof.wits_in_evals.clone());
                 tracing::info!("verified proof for opcode {}", name);
