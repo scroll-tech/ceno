@@ -5,21 +5,22 @@ use crate::{
     chip::Chip,
     evaluation::EvalExpression,
     gkr::{
-        GKRCircuit, GKRCircuitWitness, GKRProverOutput,
-        layer::{Layer, LayerType, LayerWitness},
+        GKRCircuit, GKRProverOutput,
+        layer::{Layer, LayerType},
     },
 };
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct};
 use multilinear_extensions::{
     Expression, ToExpr,
-    mle::{ArcMultilinearExtension, MultilinearExtension, Point, PointAndEval},
+    mle::{MultilinearExtension, Point, PointAndEval},
     util::ceil_log2,
-    wit_infer_by_expr,
 };
 use p3_field::PrimeCharacteristicRing;
-
-use sumcheck::util::optimal_sumcheck_threads;
+use sumcheck::{
+    macros::{entered_span, exit_span},
+    util::optimal_sumcheck_threads,
+};
 use tiny_keccak::keccakf;
 use transcript::{BasicTranscript, Transcript};
 
@@ -326,103 +327,13 @@ pub struct KeccakTrace<'a, E: ExtensionField> {
     pub bits: [MultilinearExtension<'a, E>; STATE_SIZE],
 }
 
-pub fn infer_layer_witness<'a, E>(
-    layer: &Layer<E>,
-    layer_wits: &[ArcMultilinearExtension<'a, E>],
-    challenges: &[E],
-) -> Vec<ArcMultilinearExtension<'a, E>>
-where
-    E: ExtensionField,
-{
-    layer
-        .exprs
-        .iter()
-        .map(|expr| wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr))
-        .collect_vec()
-}
-
 impl<'a, E> ProtocolWitnessGenerator<'a, E> for KeccakLayout<E>
 where
     E: ExtensionField,
 {
     type Trace = KeccakTrace<'a, E>;
-
     fn phase1_witness_group(&self, phase1: Self::Trace) -> Phase1WitnessGroup<'a, E> {
-        vec![phase1.bits.into_iter().map(Arc::new).collect_vec()]
-    }
-
-    fn gkr_witness(
-        &self,
-        circuit: &GKRCircuit<E>,
-        phase1_witness_group: Phase1WitnessGroup<'a, E>,
-        challenges: &[E],
-    ) -> GKRCircuitWitness<'a, E> {
-        let input_bits: Vec<ArcMultilinearExtension<E>> =
-            phase1_witness_group[self.committed_bits_id].clone();
-
-        if cfg!(debug_assertions) {
-            // phase 1 input must all in base field
-            input_bits.iter().for_each(|mle| {
-                let _ = mle.get_base_field_vec();
-            });
-        }
-
-        // layer order from output to input
-        let n_layers = 100;
-        let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(n_layers + 1);
-
-        layer_wits.push(LayerWitness::new(input_bits.clone()));
-        let mut witness_mle_flattern = vec![None; circuit.n_evaluations];
-
-        // set input to witness_mle_flattern via first layer in_eval_expr
-        circuit.layers.last().map(|first_layer| {
-            first_layer
-                .in_eval_expr
-                .iter()
-                .enumerate()
-                .for_each(|(index, eval_expr)| match eval_expr {
-                    EvalExpression::Single(witin) => {
-                        witness_mle_flattern[*witin] = Some(input_bits[index].clone());
-                    }
-                    other => unimplemented!("{:?}", other),
-                })
-        });
-
-        // generate all layer witness from input to output
-        for (i, layer) in circuit.layers.iter().rev().enumerate() {
-            tracing::info!("generating input {i} layer with layer name {}", layer.name);
-            // process in_evals to prepare layer witness
-            let current_layer_wits = layer
-                .in_eval_expr
-                .iter()
-                .map(|eval| match eval {
-                    EvalExpression::Single(witin) => witness_mle_flattern[*witin]
-                        .clone()
-                        .expect("witness must exist"),
-                    other => unimplemented!("{:?}", other),
-                })
-                .collect_vec();
-            let current_layer_output = infer_layer_witness(&layer, &current_layer_wits, challenges);
-            layer_wits.push(LayerWitness::new(current_layer_wits));
-
-            // process out to prepare output witness
-            layer
-                .outs
-                .iter()
-                .map(|(_, out_eval)| out_eval)
-                .flatten()
-                .zip_eq(&current_layer_output)
-                .for_each(|(out_eval, out_mle)| match out_eval {
-                    EvalExpression::Single(out) => {
-                        witness_mle_flattern[*out] = Some(out_mle.clone())
-                    }
-                    other => unimplemented!("{:?}", other),
-                });
-        }
-
-        layer_wits.reverse();
-
-        GKRCircuitWitness { layers: layer_wits }
+        phase1.bits.into_iter().map(Arc::new).collect_vec()
     }
 }
 
@@ -481,13 +392,18 @@ pub fn run_keccakf<E: ExtensionField>(
     let log2_num_instances = ceil_log2(num_instances);
     let num_threads = optimal_sumcheck_threads(log2_num_instances);
 
+    let span = entered_span!("keccak_witness", profiling_1 = true);
     let bits = keccak_witness(&states);
-    // get the view only phase 1 witness, since it need to be commit thus can't be in-place change
+    exit_span!(span);
+    let span = entered_span!("phase1_witness_group", profiling_1 = true);
     let phase1_witness = layout.phase1_witness_group(KeccakTrace { bits });
+    exit_span!(span);
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
     // Omit the commit phase1 and phase2.
+    let span = entered_span!("gkr_witness", profiling_1 = true);
     let gkr_witness = layout.gkr_witness(&gkr_circuit, phase1_witness, &[]);
+    exit_span!(span);
 
     let out_evals = {
         let mut point = Point::new();
@@ -530,6 +446,7 @@ pub fn run_keccakf<E: ExtensionField>(
             .collect_vec()
     };
 
+    let span = entered_span!("prove", profiling_1 = true);
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove(
             num_threads,
@@ -540,6 +457,7 @@ pub fn run_keccakf<E: ExtensionField>(
             &mut prover_transcript,
         )
         .expect("Failed to prove phase");
+    exit_span!(span);
 
     if verify {
         {
@@ -579,6 +497,6 @@ mod tests {
         let states: Vec<[u64; 25]> = (0..num_instance)
             .map(|_| std::array::from_fn(|_| rng.gen()))
             .collect_vec();
-        run_keccakf::<E>(setup_gkr_circuit(), states, false, false);
+        run_keccakf::<E>(setup_gkr_circuit(), states, false, true);
     }
 }

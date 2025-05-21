@@ -686,7 +686,9 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                 .to_vec(),
                             5 => sumcheck_code_gen!(5, true, |i| &f[prod[i]], || get_poly_meta())
                                 .to_vec(),
-                            _ => unimplemented!("do not support degree {} > 5", prod.len()),
+                            6 => sumcheck_code_gen!(5, true, |i| &f[prod[i]], || get_poly_meta())
+                                .to_vec(),
+                            _ => unimplemented!("do not support degree {} > 6", prod.len()),
                         };
                         sum.iter_mut()
                             .for_each(|sum| either::for_both!(*scalar, scalar => *sum *= scalar));

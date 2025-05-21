@@ -3,6 +3,7 @@ use itertools::{Itertools, chain, izip};
 use layer::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
 use multilinear_extensions::mle::{Point, PointAndEval};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
 use crate::{error::BackendError, evaluation::EvalExpression};
@@ -69,20 +70,25 @@ impl<E: ExtensionField> GKRCircuit<E> {
         // running evals is a global referable within chip
         running_evals.resize(self.n_evaluations, PointAndEval::default());
         let mut challenges = challenges.to_vec();
+        let span = entered_span!("layer_proof", profiling_2 = true);
         let sumcheck_proofs = izip!(&self.layers, circuit_wit.layers)
             .enumerate()
             .map(|(i, (layer, layer_wit))| {
                 tracing::info!("prove layer {i} layer with layer name {}", layer.name);
-                layer.prove(
+                let span = entered_span!("per_layer_proof", profiling_3 = true);
+                let res = layer.prove(
                     num_threads,
                     max_num_variables,
                     layer_wit,
                     &mut running_evals,
                     &mut challenges,
                     transcript,
-                )
+                );
+                exit_span!(span);
+                res
             })
             .collect_vec();
+        exit_span!(span);
 
         let opening_evaluations = self.opening_evaluations(&running_evals, &challenges);
 

@@ -10,6 +10,8 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+clap.workspace = true
+tracing-forest.workspace = true
 ark-std = { version = "0.5" }
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true

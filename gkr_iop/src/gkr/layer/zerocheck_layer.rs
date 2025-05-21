@@ -72,6 +72,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .collect_vec();
         let mut alpha_pows_iter = alpha_pows.iter();
 
+        let span = entered_span!("gen_expr", profiling_4 = true);
         for (eq_expr, out_evals) in self.outs.iter() {
             let group_length = out_evals.len();
             let zero_check_expr = expr_iter
@@ -83,8 +84,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .sum::<Expression<E>>();
             zero_check_exprs.push(eq_expr.clone().unwrap() * zero_check_expr);
         }
+        exit_span!(span);
         assert!(expr_iter.next().is_none() && alpha_pows_iter.next().is_none());
-        let span = entered_span!("build_out_points_eq");
+
+        let span = entered_span!("build_out_points_eq", profiling_4 = true);
         let mut eqs = out_points
             .par_iter()
             .map(|point| {
@@ -106,10 +109,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .chain(eqs.iter_mut().map(|eq| Either::Right(eq)))
                 .collect_vec(),
         );
+        let span = entered_span!("IOPProverState::prove", profiling_4 = true);
         let (proof, prover_state) = IOPProverState::prove(
             builder.to_virtual_polys(&[zero_check_exprs.into_iter().sum()], challenges),
             transcript,
         );
+        exit_span!(span);
         SumcheckLayerProof {
             proof,
             evals: prover_state.get_mle_flatten_final_evaluations(),

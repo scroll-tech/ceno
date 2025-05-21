@@ -1111,6 +1111,7 @@ name = "gkr_iop"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "clap",
  "criterion",
  "either",
  "ff_ext",
@@ -1127,6 +1128,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tiny-keccak",
  "tracing",
+ "tracing-forest",
  "tracing-subscriber",
  "transcript",
  "witness",
