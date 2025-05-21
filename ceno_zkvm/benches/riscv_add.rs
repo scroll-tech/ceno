@@ -92,10 +92,12 @@ fn bench_add(c: &mut Criterion) {
                         ];
 
                         let _ = prover
-                            .create_opcode_proof(
+                            .create_chip_proof(
                                 "ADD",
                                 circuit_pk,
+                                vec![],
                                 polys,
+                                vec![],
                                 &[],
                                 num_instances,
                                 &mut transcript,

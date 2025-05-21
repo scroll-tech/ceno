@@ -10,7 +10,9 @@ use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
+    Expression,
+    mle::{ArcMultilinearExtension, MultilinearExtension},
+    virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::Field;
 use transcript::Transcript;
@@ -214,7 +216,7 @@ where
 pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
     expr_builder: &mut VirtualPolynomialsBuilder<'a, E>,
     exprs: &mut Vec<Expression<E>>,
-    selector: Option<&'a ArcMultilinearExtension<'a, E>>,
+    selector: Option<&'a MultilinearExtension<'a, E>>,
     wit_ins: Vec<&'a ArcMultilinearExtension<'a, E>>,
     expr: &Expression<E>,
     challenges: &[E],
