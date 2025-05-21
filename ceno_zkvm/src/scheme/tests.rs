@@ -143,7 +143,7 @@ fn test_rw_lk_expression_combination() {
             transcript.read_challenge().elements,
         ];
 
-        let (proof, _) = prover
+        let (proof, _, _) = prover
             .create_chip_proof(
                 name.as_str(),
                 prover.pk.circuit_pks.get(&name).unwrap(),

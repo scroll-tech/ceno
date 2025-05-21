@@ -386,12 +386,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
 
-        assert!(
-            record_evals
-                .iter()
-                .map(|e| &e.point)
-                .all(|point| point == &record_evals[0].point)
-        );
+        assert!(record_evals.iter().map(|e| &e.point).all_equal());
 
         // verify zero statement (degree > 1) + sel sumcheck
         let rt = record_evals[0].point.clone();
