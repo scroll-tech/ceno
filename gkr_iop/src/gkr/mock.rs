@@ -94,6 +94,8 @@ impl<E: ExtensionField> MockProver<E> {
             let expects = layer
                 .outs
                 .iter()
+                .map(|(_, out)| out)
+                .flatten()
                 .map(|out| out.mock_evaluate(&evaluations, &challenges, 1 << num_vars))
                 .collect_vec();
             match layer.ty {
@@ -117,7 +119,7 @@ impl<E: ExtensionField> MockProver<E> {
                     {
                         if expect != got {
                             return Err(MockProverError::ZerocheckExpressionNotMatch(
-                                out.clone(),
+                                out.1[0].clone(),
                                 expr.clone(),
                                 expect,
                                 got,
@@ -130,7 +132,7 @@ impl<E: ExtensionField> MockProver<E> {
                     {
                         if expect != got {
                             return Err(MockProverError::LinearExpressionNotMatch(
-                                out.clone(),
+                                out.1[0].clone(),
                                 expr.clone(),
                                 expect,
                                 got,

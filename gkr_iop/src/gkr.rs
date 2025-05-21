@@ -108,7 +108,8 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let mut challenges = challenges.to_vec();
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
-        for (layer, layer_proof) in izip!(&self.layers, sumcheck_proofs) {
+        for (i, (layer, layer_proof)) in izip!(&self.layers, sumcheck_proofs).enumerate() {
+            tracing::info!("verifier layer {i} layer with layer name {}", layer.name);
             layer.verify(
                 max_num_variables,
                 layer_proof,

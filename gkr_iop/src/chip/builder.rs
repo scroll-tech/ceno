@@ -90,7 +90,16 @@ impl<E: ExtensionField> Chip<E> {
 
     /// Add a layer to the circuit.
     pub fn add_layer(&mut self, layer: Layer<E>) {
-        assert_eq!(layer.outs.len(), layer.exprs.len());
+        assert_eq!(
+            layer
+                .outs
+                .iter()
+                .map(|(_, outs)| outs)
+                .flatten()
+                .collect_vec()
+                .len(),
+            layer.exprs.len()
+        );
         match layer.ty {
             LayerType::Linear => {
                 assert!(layer.exprs.iter().all(|expr| expr.degree() == 1));

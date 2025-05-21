@@ -11,10 +11,10 @@ use gkr_iop::{
     },
 };
 use itertools::{Itertools, izip};
+use multilinear_extensions::Expression;
 use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 use rand::{Rng, rngs::OsRng};
-use subprotocols::expression::{Constant, Expression};
 use transcript::{BasicTranscript, Transcript};
 
 #[cfg(debug_assertions)]
@@ -31,21 +31,21 @@ struct TowerParams {
 }
 
 #[derive(Clone, Debug, Default)]
-struct TowerChipLayout<E> {
+struct TowerChipLayout<E: ExtensionField> {
     params: TowerParams,
 
     // Committed poly indices.
     committed_table_id: usize,
     committed_count_id: usize,
 
-    lookup_challenge: Constant,
+    lookup_challenge: Expression<E>,
 
-    output_cumulative_sum: [EvalExpression; 2],
+    output_cumulative_sum: [EvalExpression<E>; 2],
 
     _field: PhantomData<E>,
 }
 
-impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
+impl<E: ExtensionField> ProtocolBuilder<E> for TowerChipLayout<E> {
     type Params = TowerParams;
 
     fn init(params: Self::Params) -> Self {
@@ -55,12 +55,12 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
         }
     }
 
-    fn build_commit_phase(&mut self, chip: &mut Chip) {
+    fn build_commit_phase(&mut self, chip: &mut Chip<E>) {
         [self.committed_table_id, self.committed_count_id] = chip.allocate_committed();
         [self.lookup_challenge] = chip.allocate_challenges();
     }
 
-    fn build_gkr_phase(&mut self, chip: &mut Chip) {
+    fn build_gkr_phase(&mut self, chip: &mut Chip<E>) {
         let height = self.params.height;
         let lookup_challenge = Expression::Const(self.lookup_challenge.clone());
 

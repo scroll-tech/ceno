@@ -11,7 +11,7 @@ use multilinear_extensions::{
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3_field::dot_product;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverState, IOPVerifierState, SumCheckSubClaim, VerifierError},
@@ -39,8 +39,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         &self,
         max_num_variables: usize,
         proof: SumcheckLayerProof<E>,
-        sigmas: Vec<E>,
-        out_points: &[Point<E>],
+        eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>>;
@@ -56,17 +55,38 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> SumcheckLayerProof<E> {
-        assert!(
-            out_points.iter().all_equal(),
-            "output points not all equals len() {}",
-            out_points.len()
+        assert_eq!(
+            self.outs.len(),
+            out_points.len(),
+            "out eval length {} != with distinct out_point {}",
+            self.outs.len(),
+            out_points.len(),
         );
-        assert_eq!(self.exprs.len(), out_points.len());
 
+        let mut expr_iter = self.exprs.iter();
+        let mut zero_check_exprs = Vec::with_capacity(self.outs.len());
+
+        let alpha_pows = get_challenge_pows(self.exprs.len(), transcript)
+            .into_iter()
+            .map(|r| Expression::Constant(Either::Right(r)))
+            .collect_vec();
+        let mut alpha_pows_iter = alpha_pows.iter();
+
+        for (eq_expr, out_evals) in self.outs.iter() {
+            let group_length = out_evals.len();
+            let zero_check_expr = expr_iter
+                .by_ref()
+                .take(group_length)
+                .cloned()
+                .zip_eq(alpha_pows_iter.by_ref().take(group_length))
+                .map(|(expr, alpha)| alpha * expr)
+                .sum::<Expression<E>>();
+            zero_check_exprs.push(eq_expr.clone().unwrap() * zero_check_expr);
+        }
+        assert!(expr_iter.next().is_none() && alpha_pows_iter.next().is_none());
         let span = entered_span!("build_out_points_eq");
         let mut eqs = out_points
             .par_iter()
-            .take(1)
             .map(|point| {
                 MultilinearExtension::from_evaluations_ext_vec(
                     point.len(),
@@ -86,18 +106,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .chain(eqs.iter_mut().map(|eq| Either::Right(eq)))
                 .collect_vec(),
         );
-        let alpha_pows = get_challenge_pows(self.exprs.len(), transcript)
-            .into_iter()
-            .map(|r| Expression::Constant(Either::Right(r)))
-            .collect_vec();
-        let zerocheck_expr = self
-            .exprs
-            .iter()
-            .zip_eq(alpha_pows)
-            .map(|(expr, alpha)| alpha * expr)
-            .sum::<Expression<E>>();
         let (proof, prover_state) = IOPProverState::prove(
-            builder.to_virtual_polys(&[self.eqs[0].clone() * zerocheck_expr], challenges),
+            builder.to_virtual_polys(&[zero_check_exprs.into_iter().sum()], challenges),
             transcript,
         );
         SumcheckLayerProof {
@@ -110,12 +120,17 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         &self,
         max_num_variables: usize,
         proof: SumcheckLayerProof<E>,
-        sigmas: Vec<E>,
-        out_points: &[Point<E>],
+        eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>> {
-        assert_eq!(sigmas.len(), out_points.len());
+        assert_eq!(
+            self.outs.len(),
+            eval_and_dedup_points.len(),
+            "out eval length {} != with eval_and_dedup_points {}",
+            self.outs.len(),
+            eval_and_dedup_points.len(),
+        );
         let SumcheckLayerProof {
             proof: IOPProof { proofs, .. },
             mut evals,
@@ -123,7 +138,14 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
 
         let alpha_pows = get_challenge_pows(self.exprs.len(), transcript);
 
-        let sigma: E = dot_product(alpha_pows.iter().cloned(), sigmas.iter().cloned());
+        let sigma: E = dot_product(
+            alpha_pows.iter().copied(),
+            eval_and_dedup_points
+                .iter()
+                .map(|(sigmas, _)| sigmas)
+                .flatten()
+                .copied(),
+        );
 
         let SumCheckSubClaim {
             point: in_point,
@@ -135,7 +157,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 proofs,
             },
             &VPAuxInfo {
-                max_degree: self.exprs[0].degree(),
+                max_degree: self.max_expr_degree + 1, // +1 due to eq
                 max_num_variables,
                 phantom: PhantomData,
             },
@@ -144,12 +166,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
         // eval eq and set to respective witin
-        out_points
+        eval_and_dedup_points
             .iter()
-            .map(|out_point| eq_eval(out_point, &in_point))
-            .zip(&self.eqs)
-            .for_each(|(eval, eq_expr)| match eq_expr {
-                Expression::WitIn(witin_id) => evals[*witin_id as usize] = eval,
+            .map(|(_, out_point)| eq_eval(out_point.as_ref().unwrap(), &in_point))
+            .zip(&self.outs)
+            .for_each(|(eval, (eq_expr, _))| match eq_expr {
+                Some(Expression::WitIn(witin_id)) => evals[*witin_id as usize] = eval,
                 _ => unreachable!(),
             });
 
@@ -157,9 +179,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let got_claim = self
             .exprs
             .iter()
-            .zip_eq(&self.eqs)
+            .zip(&self.outs)
             .zip_eq(alpha_pows)
-            .map(|((expr, eq_expr), alpha)| {
+            .map(|((expr, (eq_expr, _)), alpha)| {
                 alpha
                     * eval_by_expr_with_instance(
                         &[],
@@ -167,7 +189,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                         &[],
                         &[],
                         challenges,
-                        &(expr * eq_expr),
+                        &(expr * eq_expr.clone().unwrap()),
                     )
                     .right()
                     .unwrap()
