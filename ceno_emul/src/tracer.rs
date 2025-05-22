@@ -435,14 +435,19 @@ impl Tracer {
         if let Some((_, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
+            // find the MMIO region whose start address is less than or equal to the target address
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
         {
+            // skip if the target address is not within the range tracked by this MMIO region
+            // this condition ensures the address is within the MMIO region's end address
             if addr < *end_addr {
+                // expand the max bound if the address exceeds the current max
                 if addr >= *max_addr {
-                    *max_addr = addr + WordAddr::from(WORD_SIZE as u32); // end exclusive
+                    *max_addr = addr + WordAddr::from(WORD_SIZE as u32); // end is exclusive
                 }
+                // shrink the min bound if the address is below the current min
                 if addr < *min_addr {
-                    *min_addr = addr; // start inclusive
+                    *min_addr = addr; // start is inclusive
                 }
             }
         }

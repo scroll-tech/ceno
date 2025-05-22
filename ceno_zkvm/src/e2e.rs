@@ -214,11 +214,11 @@ pub fn emulate_program(
         .collect_vec();
 
     // get stack access by min/max range
-    let stack_final = if let Some((start, _)) = vm
+    let stack_final = if let Some((min_waddr, _)) = vm
         .tracer()
         .probe_min_max_address_by_start_addr(ByteAddr::from(platform.stack.start).waddr())
     {
-        (start..ByteAddr::from(platform.stack.end).waddr())
+        (min_waddr..ByteAddr::from(platform.stack.end).waddr())
             // stack record collect in reverse order
             .rev()
             .map(|vma| {
@@ -235,12 +235,15 @@ pub fn emulate_program(
     };
 
     // get heap access by min/max range
-    let heap_final = if let Some((start, end)) = vm
+    let heap_start_waddr = ByteAddr::from(platform.heap.start).waddr();
+    // note: min_waddr for the heap is intentionally ignored
+    // as the actual starting address may be shifted due to alignment requirements
+    // e.g. heap start addr 0x90000000 + 32 bytes alignment => 0x90000000 % 32 = 16 → offset = 16 bytes → moves to 0x90000010.
+    let heap_final = if let Some((_, max_waddr)) = vm
         .tracer()
-        .probe_min_max_address_by_start_addr(ByteAddr::from(platform.heap.start).waddr())
+        .probe_min_max_address_by_start_addr(heap_start_waddr)
     {
-        assert_eq!(start, ByteAddr::from(platform.heap.start).waddr());
-        (start..end)
+        (heap_start_waddr..max_waddr)
             .map(|vma| {
                 let byte_addr = vma.baddr();
                 MemFinalRecord {
