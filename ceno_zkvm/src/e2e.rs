@@ -827,11 +827,11 @@ fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState,
         .map(|rec| ByteAddr(rec.addr))
         .collect::<HashSet<_>>();
 
-    tracing::debug!(
+    tracing::trace!(
         "Memory range (accessed): {:?}",
         format_segments(vm.platform(), accessed_addrs.iter().copied())
     );
-    tracing::debug!(
+    tracing::trace!(
         "Memory range (handled):  {:?}",
         format_segments(vm.platform(), handled_addrs.iter().copied())
     );
@@ -876,7 +876,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
     tracing::info!("e2e proof stat: {}", zkvm_proof);
     #[cfg(debug_assertions)]
     {
-        tracing::info!(
+        tracing::debug!(
             "instrumented metrics\n{}",
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
             )

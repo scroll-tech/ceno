@@ -184,7 +184,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-        tracing::debug!("challenges in prover: {:?}", challenges);
+        tracing::trace!("challenges in prover: {:?}", challenges);
 
         let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
@@ -206,7 +206,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     && cs.w_table_expressions.is_empty();
 
                 if is_opcode_circuit {
-                    tracing::debug!(
+                    tracing::trace!(
                         "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
                         circuit_name,
                         cs.num_witin,
@@ -225,7 +225,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                         &mut transcript,
                         &challenges,
                     )?;
-                    tracing::info!(
+                    tracing::trace!(
                         "generated proof for opcode {} with num_instances={}",
                         circuit_name,
                         num_instances
@@ -709,12 +709,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     ));
                 }
             }
-            tracing::debug!("main sel sumcheck start");
+            tracing::trace!("main sel sumcheck start");
             let (main_sel_sumcheck_proofs, _) = IOPProverState::prove(
                 expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
                 transcript,
             );
-            tracing::debug!("main sel sumcheck end");
+            tracing::trace!("main sel sumcheck end");
             exit_span!(main_sel_span);
 
             (
@@ -750,7 +750,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         }
         exit_span!(span);
 
-        tracing::debug!(
+        tracing::trace!(
             "[table {}] build opening proof for {} polys",
             name,
             witnesses.len(),
