@@ -146,7 +146,7 @@ pub fn emulate_program(
     let final_access = vm.tracer().final_accesses();
     let end_cycle = vm.tracer().cycle();
     let insts = vm.tracer().executed_insts();
-    tracing::debug!("program executed {insts} instructions in {end_cycle} cycles");
+    tracing::info!("program executed {insts} instructions in {end_cycle} cycles");
 
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),

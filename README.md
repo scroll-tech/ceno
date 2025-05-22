@@ -38,7 +38,7 @@ RUST_LOG=info cargo run --package ceno_zkvm --bin e2e -- \
     --platform=ceno \
     --hints=<hint value> \
     --public-io=<pub io> \
-    examples/target/riscv32im-ceno-zkvm-elf/release/examples/<example name>
+    examples/target/riscv32im-ceno-zkvm-elf/debug/examples/<example name>
 ```
 
 The example will be automatically compiled before execution
