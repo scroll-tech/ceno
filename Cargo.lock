@@ -955,6 +955,7 @@ dependencies = [
  "rand",
  "rkyv",
  "substrate-bn",
+ "tiny-keccak",
 ]
 
 [[package]]
