@@ -173,7 +173,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-        tracing::debug!("challenges in verifier: {:?}", challenges);
+        tracing::trace!("challenges in verifier: {:?}", challenges);
 
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
@@ -198,7 +198,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 )?;
                 rt_points.push(input_opening_point);
                 evaluations.push(opcode_proof.wits_in_evals.clone());
-                tracing::info!("verified proof for opcode {}", name);
+                tracing::trace!("verified proof for opcode {}", name);
 
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks = circuit_vk.get_cs().lk_expressions.len();
@@ -246,7 +246,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 if circuit_vk.cs.num_fixed > 0 {
                     evaluations.push(table_proof.fixed_in_evals.clone());
                 }
-                tracing::info!("verified proof for table {}", name);
+                tracing::trace!("verified proof for table {}", name);
 
                 logup_sum = table_proof
                     .lk_out_evals
@@ -796,7 +796,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     "pub input on index {idx} mismatch  {expected_eval:?} != {eval:?}"
                 )));
             }
-            tracing::debug!(
+            tracing::trace!(
                 "[table {name}] verified public inputs on index {idx} with point {:?}",
                 input_opening_point
             );

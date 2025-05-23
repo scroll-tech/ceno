@@ -209,13 +209,20 @@ fn main() {
         })
         .or_else(|| {
             args.hints.and_then(|hint| {
-                hint.iter()
-                    .try_fold(CenoStdin::default(), |mut std_in, hint| {
-                        std_in.write(hint)?;
-                        Ok::<CenoStdin, rkyv::rancor::Error>(std_in)
-                    })
-                    .ok()
-                    .map(|std_in| Into::<Vec<u32>>::into(&std_in))
+                // if the hint vector contains only one element, write it as a raw `u32`
+                // otherwise, write the entire vector
+                // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
+                if hint.len() == 1 {
+                    CenoStdin::default()
+                        .write(&hint[0])
+                        .ok()
+                        .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+                } else {
+                    CenoStdin::default()
+                        .write(&hint)
+                        .ok()
+                        .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+                }
             })
         })
         .unwrap_or_default();
