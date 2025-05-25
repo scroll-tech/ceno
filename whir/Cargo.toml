@@ -20,6 +20,8 @@ clap = { version = "4.4.17", features = ["derive"] }
 derivative = { version = "2", features = ["use_core"] }
 ff_ext = { path = "../ff_ext" }
 lazy_static = "1.4"
+nimue = { git = "https://github.com/arkworks-rs/nimue", features = ["ark"], rev="3a83250" }
+nimue-pow = { git = "https://github.com/arkworks-rs/nimue", rev="3a83250" }
 multilinear_extensions = { path = "../multilinear_extensions" }
 p3.workspace = true
 poseidon = { path = "../poseidon" }
