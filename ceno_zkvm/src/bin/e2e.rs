@@ -205,6 +205,7 @@ fn main() {
 
     let verifier = ZKVMVerifier::new(vk);
     verify(&zkvm_proof, &verifier).expect("Verification failed");
+
     // FIXME: it is a bit wired, let us move it else where later.
     // soundness_test(zkvm_proof, &verifier);
 }
