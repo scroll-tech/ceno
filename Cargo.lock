@@ -955,6 +955,7 @@ dependencies = [
  "rand",
  "rkyv",
  "substrate-bn",
+ "tiny-keccak",
 ]
 
 [[package]]
@@ -1621,6 +1622,7 @@ dependencies = [
 name = "multilinear_extensions"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "either",
  "env_logger",
  "ff_ext",
