@@ -151,14 +151,20 @@ fn main() {
     let public_io = args
         .public_io
         .and_then(|public_io| {
-            public_io
-                .iter()
-                .try_fold(CenoStdin::default(), |mut std_in, public_io| {
-                    std_in.write(public_io)?;
-                    Ok::<CenoStdin, rkyv::rancor::Error>(std_in)
-                })
-                .ok()
-                .map(|std_in| Into::<Vec<u32>>::into(&std_in))
+            // if the vector contains only one element, write it as a raw `u32`
+            // otherwise, write the entire vector
+            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
+            if public_io.len() == 1 {
+                CenoStdin::default()
+                    .write(&public_io[0])
+                    .ok()
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+            } else {
+                CenoStdin::default()
+                    .write(&public_io)
+                    .ok()
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+            }
         })
         .unwrap_or_default();
 
@@ -209,7 +215,7 @@ fn main() {
         })
         .or_else(|| {
             args.hints.and_then(|hint| {
-                // if the hint vector contains only one element, write it as a raw `u32`
+                // if the vector contains only one element, write it as a raw `u32`
                 // otherwise, write the entire vector
                 // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
                 if hint.len() == 1 {
