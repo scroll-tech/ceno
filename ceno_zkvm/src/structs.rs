@@ -7,6 +7,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
+use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     gkr::{GKRCircuitOutput, GKRCircuitWitness},
@@ -72,32 +73,6 @@ pub enum RAMType {
 impl_expr_from_unsigned!(RAMType);
 
 pub type PointAndEval<F> = multilinear_extensions::mle::PointAndEval<F>;
-
-impl<E: ExtensionField> Default for PointAndEval<E> {
-    fn default() -> Self {
-        Self {
-            point: vec![],
-            eval: E::ZERO,
-        }
-    }
-}
-
-impl<F: Clone> PointAndEval<F> {
-    /// Construct a new pair of point and eval.
-    /// Caller gives up ownership
-    pub fn new(point: Point<F>, eval: F) -> Self {
-        Self { point, eval }
-    }
-
-    /// Construct a new pair of point and eval.
-    /// Performs deep copy.
-    pub fn new_from_ref(point: &Point<F>, eval: &F) -> Self {
-        Self {
-            point: (*point).clone(),
-            eval: eval.clone(),
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct ProvingKey<E: ExtensionField> {

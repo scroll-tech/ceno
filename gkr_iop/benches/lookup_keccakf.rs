@@ -1,39 +1,39 @@
-// use std::time::Duration;
+use std::time::Duration;
 
-// use criterion::*;
-// use gkr_iop::precompiles::run_faster_keccakf;
+use criterion::*;
+use gkr_iop::precompiles::run_faster_keccakf;
 
-// use rand::{Rng, SeedableRng};
-// criterion_group!(benches, keccak_f_fn);
-// criterion_main!(benches);
+use rand::{Rng, SeedableRng};
+criterion_group!(benches, keccak_f_fn);
+criterion_main!(benches);
 
-// const NUM_SAMPLES: usize = 10;
+const NUM_SAMPLES: usize = 10;
 
-// fn keccak_f_fn(c: &mut Criterion) {
-//     // expand more input size once runtime is acceptable
-//     let mut group = c.benchmark_group("keccakf");
-//     group.sample_size(NUM_SAMPLES);
+fn keccak_f_fn(c: &mut Criterion) {
+    // expand more input size once runtime is acceptable
+    let mut group = c.benchmark_group("keccakf");
+    group.sample_size(NUM_SAMPLES);
 
-//     // Benchmark the proving time
-//     group.bench_function(BenchmarkId::new("keccakf", "keccakf"), |b| {
-//         b.iter_custom(|iters| {
-//             let mut time = Duration::new(0, 0);
-//             for _ in 0..iters {
-//                 // Use seeded rng for debugging convenience
-//                 let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-//                 let state1: [u64; 25] = std::array::from_fn(|_| rng.gen());
-//                 let state2: [u64; 25] = std::array::from_fn(|_| rng.gen());
+    // Benchmark the proving time
+    group.bench_function(BenchmarkId::new("keccakf", "keccakf"), |b| {
+        b.iter_custom(|iters| {
+            let mut time = Duration::new(0, 0);
+            for _ in 0..iters {
+                // Use seeded rng for debugging convenience
+                let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+                let state1: [u64; 25] = std::array::from_fn(|_| rng.gen());
+                let state2: [u64; 25] = std::array::from_fn(|_| rng.gen());
 
-//                 let instant = std::time::Instant::now();
-//                 #[allow(clippy::unit_arg)]
-//                 black_box(run_faster_keccakf(vec![state1, state2], false, false));
-//                 let elapsed = instant.elapsed();
-//                 time += elapsed;
-//             }
+                let instant = std::time::Instant::now();
+                #[allow(clippy::unit_arg)]
+                black_box(run_faster_keccakf(vec![state1, state2], false, false));
+                let elapsed = instant.elapsed();
+                time += elapsed;
+            }
 
-//             time
-//         });
-//     });
+            time
+        });
+    });
 
-//     group.finish();
-// }
+    group.finish();
+}

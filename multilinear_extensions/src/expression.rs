@@ -915,6 +915,13 @@ impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     }
 }
 
+impl<E: ExtensionField> ToExpr<E> for Expression<E> {
+    type Output = Expression<E>;
+    fn expr(&self) -> Self::Output {
+        self.clone()
+    }
+}
+
 pub fn wit_infer_by_expr<'a, E: ExtensionField>(
     fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
@@ -1067,7 +1074,7 @@ macro_rules! impl_expr_from_unsigned {
         $(
             impl<F: ff_ext::SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
-                    Expression::Constant(itertools::Either::Left(F::from_u64(value as u64)))
+                    Expression::Constant(Either::Left(F::from_u64(value as u64)))
                 }
             }
         )*
