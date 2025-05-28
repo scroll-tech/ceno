@@ -91,7 +91,7 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(crate) commit: Digest<E>,
-    pub(crate) codeword: MerkleTree<E::BaseField>,
+    pub codeword: MerkleTree<E::BaseField>,
 
     pub(crate) log2_max_codeword_size: usize,
     // for small polynomials, the prover commits the entire polynomial as merkle leaves without encoding to codeword
@@ -316,9 +316,9 @@ pub struct BasefoldCommitPhaseProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) sumcheck_messages: Vec<IOPProverMessage<E>>,
-    pub(crate) commits: Vec<Digest<E>>,
-    pub(crate) final_message: Vec<Vec<E>>,
+    pub sumcheck_messages: Vec<IOPProverMessage<E>>,
+    pub commits: Vec<Digest<E>>,
+    pub final_message: Vec<Vec<E>>,
 }
 
 #[derive(Clone, Default)]

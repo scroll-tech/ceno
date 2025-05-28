@@ -359,6 +359,168 @@ where
     )
 }
 
+
+
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn batch_commit_phase_prepare<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    fixed_comms: Option<&BasefoldCommitmentWithWitness<E>>,
+    witin_commitment_with_witness: &MerkleTree<E::BaseField>,
+    witin_polys_and_meta: Vec<(
+        &Point<E>,
+        (usize, &Vec<ArcMultilinearExtension<'static, E>>),
+    )>,
+    transcript: &mut impl Transcript<E>,
+    max_num_vars: usize,
+    num_rounds: usize,
+    circuit_num_polys: &[(usize, usize)],
+) -> (Vec<usize>, Vec<E>, Vec<DenseMatrix<E>>)
+where
+    E::BaseField: Serialize + DeserializeOwned,
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
+    let prepare_span = entered_span!("Prepare");
+
+    let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
+    let mmcs = poseidon2_merkle_tree::<E>();
+    let mut trees: Vec<MerkleTreeExt<E>> = Vec::with_capacity(max_num_vars);
+
+    // concat witin mle with fixed mle under same circuit index
+    let witin_concat_with_fixed_polys: Vec<Vec<ArcMultilinearExtension<E>>> = witin_polys_and_meta
+        .iter()
+        .map(|(_, (circuit_index, witin_polys))| {
+            let fixed_iter = fixed_comms
+                .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
+                .into_iter()
+                .flatten()
+                .cloned();
+            witin_polys.iter().cloned().chain(fixed_iter).collect()
+        })
+        .collect::<Vec<Vec<_>>>();
+    let batch_group_size = witin_concat_with_fixed_polys
+        .iter()
+        .map(|v| v.len())
+        .collect_vec();
+    let total_num_polys = batch_group_size.iter().sum();
+
+    let batch_coeffs =
+        &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
+    // split batch coeffs to match with batch group for easier handling
+    let batch_coeffs_splitted = split_by_sizes(batch_coeffs, &batch_group_size);
+
+    // prepare
+    // - codeword oracle => for FRI
+    // - evals => for sumcheck
+    let witins_codeword = mmcs.get_matrices(witin_commitment_with_witness);
+    let fixed_codeword = fixed_comms
+        .map(|fixed_comms| mmcs.get_matrices(&fixed_comms.codeword))
+        .unwrap_or_default();
+
+    let batch_codeword_span = entered_span!("batch_codeword");
+    // we random linear combination of rmm under same circuit into single codeword, as they shared same height
+    let batched_codewords: Vec<DenseMatrix<E>> = witins_codeword
+        .iter()
+        .zip_eq(&batch_coeffs_splitted)
+        .zip_eq(&witin_polys_and_meta)
+        .map(
+            |((witin_codewords, batch_coeffs), (_, (circuit_index, _)))| {
+                let (expected_witins_num_poly, expected_fixed_num_poly) =
+                    circuit_num_polys[*circuit_index];
+                // batch_coeffs concat witin follow by fixed, where fixed is optional
+                let witin_fixed_concated_codeword: Vec<(_, usize)> =
+                    std::iter::once((witin_codewords, expected_witins_num_poly))
+                        .chain(
+                            fixed_comms
+                                .and_then(|fixed_comms| {
+                                    fixed_comms.circuit_codeword_index.get(circuit_index)
+                                })
+                                .and_then(|idx| {
+                                    fixed_codeword
+                                        .get(*idx)
+                                        .map(|rmm| (rmm, expected_fixed_num_poly))
+                                }),
+                        )
+                        .collect_vec();
+                // final poly size is 2 * height because we commit left: poly[j] and right: poly[j + ni] under same mk path (due to bit-reverse)
+                let size = witin_fixed_concated_codeword[0].0.height() * 2;
+                RowMajorMatrix::new(
+                    (0..size)
+                        .into_par_iter()
+                        .map(|j| {
+                            witin_fixed_concated_codeword
+                                .iter()
+                                .scan(0, |start_index, (rmm, num_polys)| {
+                                    let batch_coeffs = batch_coeffs
+                                        [*start_index..*start_index + num_polys]
+                                        .iter()
+                                        .copied();
+                                    *start_index += num_polys;
+                                    Some(dot_product(
+                                        batch_coeffs,
+                                        rmm.values[j * num_polys..(j + 1) * num_polys]
+                                            .iter()
+                                            .copied(),
+                                    ))
+                                })
+                                .sum::<E>()
+                        })
+                        .collect::<Vec<_>>(),
+                    2,
+                )
+            },
+        )
+        .collect_vec();
+    assert!(
+        [witin_polys_and_meta.len(), batched_codewords.len(),]
+            .iter()
+            .all_equal()
+    );
+
+    // witins_codeword, fixed_codeword, 
+    (batch_group_size, batch_coeffs.clone(), batched_codewords)
+
+    // // sorted batch codewords by height in descending order
+    // let mut batched_codewords = VecDeque::from(
+    //     batched_codewords
+    //         .into_iter()
+    //         .sorted_by_key(|codeword| std::cmp::Reverse(codeword.height()))
+    //         .collect_vec(),
+    // );
+    // exit_span!(batch_codeword_span);
+
+    // let batched_evals = entered_span!("batched_evals");
+    // let mut initial_rlc_evals: Vec<MultilinearExtension<E>> = witin_concat_with_fixed_polys
+    //     .par_iter()
+    //     .zip_eq(batch_coeffs_splitted.par_iter())
+    //     .map(|(witin_fixed_mle, batch_coeffs)| {
+    //         assert_eq!(witin_fixed_mle.len(), batch_coeffs.len());
+    //         let num_vars = witin_fixed_mle[0].num_vars();
+    //         let mle_base_vec = witin_fixed_mle
+    //             .iter()
+    //             .map(|mle| mle.get_base_field_vec())
+    //             .collect_vec();
+    //         let running_evals: MultilinearExtension<_> =
+    //             MultilinearExtension::from_evaluation_vec_smart(
+    //                 num_vars,
+    //                 (0..witin_fixed_mle[0].evaluations().len())
+    //                     .into_par_iter()
+    //                     .map(|j| {
+    //                         dot_product(
+    //                             batch_coeffs.iter().copied(),
+    //                             mle_base_vec.iter().map(|mle| mle[j]),
+    //                         )
+    //                     })
+    //                     .collect::<Vec<E>>(),
+    //             );
+    //         running_evals
+    //     })
+    //     .collect::<Vec<_>>();
+    // exit_span!(batched_evals);
+    // exit_span!(prepare_span);
+}
+
 /// basefold fri round to fold codewords
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(

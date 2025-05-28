@@ -23,14 +23,14 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_paddin
 use itertools::{Itertools, izip};
 use serde::{Serialize, de::DeserializeOwned};
 
-mod structure;
+pub mod structure;
 pub use structure::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
     BasefoldProverParams, BasefoldRSParams, BasefoldVerifierParams,
 };
-mod commit_phase;
+pub mod commit_phase;
 use commit_phase::batch_commit_phase;
-mod encoding;
+pub mod encoding;
 use multilinear_extensions::mle::ArcMultilinearExtension;
 
 #[cfg(debug_assertions)]
