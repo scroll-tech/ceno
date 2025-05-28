@@ -16,6 +16,8 @@ use crate::{
 };
 
 pub mod constants;
+mod cpu;
+pub mod hal;
 pub mod prover;
 pub mod utils;
 pub mod verifier;

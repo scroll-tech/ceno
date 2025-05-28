@@ -2,6 +2,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     instructions::Instruction,
+    scheme::hal::ProverBackend,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
@@ -14,7 +15,7 @@ use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::Multiline
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
-use sumcheck::structs::IOPProverMessage;
+use sumcheck::{structs::IOPProverMessage, util::ceil_log2};
 use witness::RowMajorMatrix;
 
 pub struct TowerProver;
@@ -38,9 +39,8 @@ pub struct TowerProofs<E: ExtensionField> {
     pub logup_specs_points: Vec<Vec<Point<E>>>,
 }
 
-pub struct TowerProverSpec<'a, E: ExtensionField> {
-    pub witness: Vec<Vec<MultilinearExtension<'a, E>>>,
-}
+pub type WitnessId = u16;
+pub type ChallengeId = u16;
 
 #[derive(
     Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
@@ -63,6 +63,19 @@ pub enum RAMType {
     GlobalState,
     Register,
     Memory,
+}
+
+pub struct ProofInput<PB: ProverBackend> {
+    pub witness: Vec<PB::MultilinearPoly>,
+    pub public_input: Vec<PB::MultilinearPoly>,
+    pub num_instances: usize,
+}
+
+impl<PB: ProverBackend> ProofInput<PB> {
+    #[inline]
+    pub fn log2_num_instances(&self) -> usize {
+        ceil_log2(self.num_instances)
+    }
 }
 
 impl_expr_from_unsigned!(RAMType);
