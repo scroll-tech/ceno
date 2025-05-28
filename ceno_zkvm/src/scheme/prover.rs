@@ -1,10 +1,16 @@
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
+};
+
 use ceno_emul::KeccakSpec;
 use either::Either;
 use ff_ext::ExtensionField;
-use gkr_iop::{evaluation::PointAndEval, gkr::GKRCircuitWitness};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-
-use itertools::{Either, Itertools, enumerate, izip};
+use gkr_iop::{
+    evaluation::PointAndEval,
+    gkr::{GKRCircuitWitness, GKRProverOutput},
+};
+use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression,
@@ -15,7 +21,6 @@ use multilinear_extensions::{
 };
 use p3::field::{PrimeCharacteristicRing, dot_product};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{iter::Iterator, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -30,7 +35,10 @@ use crate::{
     scheme::{
         GKROpcodeProof, TowerProofs,
         constants::{MAINCONSTRAIN_SUMCHECK_BATCH_SIZE, NUM_FANIN, NUM_FANIN_LOGUP},
-        utils::wit_infer_by_expr,
+        utils::{
+            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+            wit_infer_by_expr,
+        },
     },
     structs::{
         GKRIOPProvingKey, KeccakGKRIOP, ProvingKey, TowerProver, TowerProverSpec, ZKVMProvingKey,
@@ -762,61 +770,53 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         exit_span!(main_sel_span);
         exit_span!(sumcheck_span);
 
-        let span = entered_span!("witin::evals", profiling_3 = true);
-        let wits_in_evals: Vec<E> = witnesses
-            .par_iter()
-            .map(|poly| poly.evaluate(&input_open_point))
-            .collect();
-        exit_span!(span);
+        let gkr_span = entered_span!("gkr", profiling_3 = true);
+        let (gkr_opcode_proof, input_open_point, wits_in_evals) =
+            if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
+                let input_open_point = Arc::new(input_open_point);
+                let out_evals = gkr_wit
+                    .layers
+                    .last()
+                    .unwrap()
+                    .bases
+                    .iter()
+                    .map(|base| PointAndEval {
+                        point: input_open_point.clone(),
+                        eval: subprotocols::utils::evaluate_mle_ext(base, &input_open_point),
+                    })
+                    .collect_vec();
 
-        let pcs_open_span = entered_span!("pcs_open", profiling_3 = true);
-        let opening_dur = std::time::Instant::now();
-        tracing::debug!(
-            "[opcode {}]: build opening proof for {} polys",
-            name,
-            witnesses.len()
-        );
-        tracing::info!(
-            "[opcode {}] build opening proof took {:?}",
-            name,
-            opening_dur.elapsed(),
-        );
-        exit_span!(pcs_open_span);
+                let gkr_circuit = gkr_iop_pk.vk.get_state().chip.gkr_circuit();
+                let prover_output = gkr_circuit
+                    .prove(gkr_wit, &out_evals, &[], transcript)
+                    .expect("Failed to prove phase");
+                // unimplemented!("cannot fully handle GKRIOP component yet")
 
-        let input_open_point = Arc::new(input_open_point);
-        let gkr_opcode_proof = if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
-            let gkr_circuit = gkr_iop_pk.vk.get_state().chip.gkr_circuit();
+                let GKRProverOutput {
+                    gkr_proof: proof,
+                    opening_evaluations,
+                } = prover_output;
 
-            let out_evals = gkr_wit
-                .layers
-                .last()
-                .unwrap()
-                .bases
-                .iter()
-                .map(|base| PointAndEval {
-                    point: input_open_point.clone(),
-                    eval: subprotocols::utils::evaluate_mle_ext(base, &input_open_point),
-                })
-                .collect_vec();
+                let (mut points, evaluations): (Vec<Arc<Point<E>>>, Vec<E>) = opening_evaluations
+                    .into_iter()
+                    .map(|open| (open.point, open.value))
+                    .unzip();
 
-            let prover_output = gkr_circuit
-                .prove(gkr_wit, &out_evals, &[], transcript)
-                .expect("Failed to prove phase");
-            // unimplemented!("cannot fully handle GKRIOP component yet")
-
-            let _gkr_open_point = prover_output.opening_evaluations[0].point.clone();
-            // TODO: open polynomials for GKR proof
-
-            let output_evals = out_evals.into_iter().map(|pae| pae.eval).collect_vec();
-
-            Some(GKROpcodeProof {
-                output_evals,
-                prover_output,
-                circuit: gkr_circuit,
-            })
-        } else {
-            None
-        };
+                (
+                    Some(GKROpcodeProof(proof)),
+                    Arc::try_unwrap(points.pop().unwrap()).unwrap(),
+                    evaluations,
+                )
+            } else {
+                let span = entered_span!("witin::evals", profiling_3 = true);
+                let wits_in_evals: Vec<E> = witnesses
+                    .par_iter()
+                    .map(|poly| poly.evaluate(&input_open_point))
+                    .collect();
+                exit_span!(span);
+                (None, input_open_point, wits_in_evals)
+            };
+        exit_span!(gkr_span);
 
         // extend with Optio(gkr evals (not combined))
         Ok((
@@ -832,7 +832,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 wits_in_evals,
                 gkr_opcode_proof,
             },
-            Arc::try_unwrap(input_open_point).unwrap(),
+            input_open_point,
         ))
     }
 
@@ -1073,10 +1073,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .into_iter()
                 .zip(w_wit_layers)
                 .flat_map(|(r, w)| {
-                    vec![
-                        TowerProverSpec { witness: r },
-                        TowerProverSpec { witness: w },
-                    ]
+                    vec![TowerProverSpec { witness: r }, TowerProverSpec {
+                        witness: w,
+                    }]
                 })
                 .collect_vec(),
             lk_wit_layers

@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use gkr_iop::gkr::{Evaluation, GKRCircuit, GKRProverOutput};
+use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use p3::field::PrimeCharacteristicRing;
@@ -57,11 +57,7 @@ pub struct ZKVMOpcodeProof<E: ExtensionField> {
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 // WARN/TODO: depends on serde's `arc` feature which might not behave correctly
-pub struct GKROpcodeProof<E: ExtensionField> {
-    output_evals: Vec<E>,
-    prover_output: GKRProverOutput<E, Evaluation<E>>,
-    circuit: GKRCircuit,
-}
+pub struct GKROpcodeProof<E: ExtensionField>(pub GKRProof<E>);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(

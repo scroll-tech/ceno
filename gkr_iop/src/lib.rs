@@ -1,14 +1,15 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use chip::Chip;
 use evaluation::EvalExpression;
 use ff_ext::ExtensionField;
-use gkr::{GKRCircuit, GKRCircuitWitness, layer::LayerWitness};
+use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
 use itertools::Itertools;
 use multilinear_extensions::mle::ArcMultilinearExtension;
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use utils::infer_layer_witness;
+use witness::RowMajorMatrix;
 
 pub mod chip;
 pub mod error;
@@ -50,25 +51,23 @@ where
     type Trace;
 
     /// The vectors to be committed in the phase1.
-    fn phase1_witness_group(&self, phase1: Self::Trace) -> Phase1WitnessGroup<'a, E>;
+    fn phase1_witness_group(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField>;
 
     /// GKR witness.
     fn gkr_witness(
         &self,
         circuit: &GKRCircuit<E>,
-        phase1_witness_group: Phase1WitnessGroup<'a, E>,
+        phase1_witness_group: &RowMajorMatrix<E::BaseField>,
         challenges: &[E],
     ) -> GKRCircuitWitness<'a, E> {
-        if cfg!(debug_assertions) {
-            // phase 1 input must all in base field
-            phase1_witness_group.iter().for_each(|mle| {
-                let _ = mle.get_base_field_vec();
-            });
-        }
-
         // layer order from output to input
         let n_layers = 100;
         let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(n_layers + 1);
+        let phase1_witness_group = phase1_witness_group
+            .to_mles()
+            .into_iter()
+            .map(Arc::new)
+            .collect_vec();
 
         layer_wits.push(LayerWitness::new(phase1_witness_group.clone()));
         let mut witness_mle_flattern = vec![None; circuit.n_evaluations];

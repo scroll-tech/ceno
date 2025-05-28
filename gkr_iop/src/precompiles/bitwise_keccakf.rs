@@ -1,7 +1,7 @@
-use std::{array::from_fn, marker::PhantomData, sync::Arc};
+use std::{array::from_fn, marker::PhantomData};
 
 use crate::{
-    Phase1WitnessGroup, ProtocolBuilder, ProtocolWitnessGenerator,
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     evaluation::EvalExpression,
     gkr::{
@@ -23,6 +23,7 @@ use sumcheck::{
 };
 use tiny_keccak::keccakf;
 use transcript::{BasicTranscript, Transcript};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 #[derive(Clone, Debug, Default)]
 pub struct KeccakParams {}
@@ -90,32 +91,22 @@ fn d_expr<E: ExtensionField>(x: usize, z: usize, c_wits: &[Expression<E>]) -> Ex
     xor_expr(c_wits[lhs].clone(), c_wits[rhs].clone())
 }
 
-fn keccak_witness<'a, E: ExtensionField>(
-    states: &[[u64; 25]],
-) -> [MultilinearExtension<'a, E>; STATE_SIZE] {
+fn keccak_witness<E: ExtensionField>(states: &[[u64; 25]]) -> RowMajorMatrix<E::BaseField> {
     let num_states = states.len();
     assert!(num_states.is_power_of_two());
-    let log_num_states = ceil_log2(num_states);
-    let mut bits = from_fn(|_| vec![false; num_states]);
+    let mut values = vec![E::BaseField::ONE; STATE_SIZE * num_states];
 
     for (state_idx, state) in states.iter().enumerate() {
         for (word_idx, &word) in state.iter().enumerate() {
             for bit_idx in 0..64 {
                 let bit = ((word >> bit_idx) & 1) == 1;
-                bits[word_idx * 64 + bit_idx][state_idx] = bit;
+                values[state_idx * STATE_SIZE + word_idx * 64 + bit_idx] =
+                    E::BaseField::from_bool(bit);
             }
         }
     }
 
-    bits.map(|bit_column| {
-        MultilinearExtension::from_evaluation_vec_smart(
-            log_num_states,
-            bit_column
-                .into_iter()
-                .map(|b| E::BaseField::from_bool(b))
-                .collect::<Vec<_>>(),
-        )
-    })
+    RowMajorMatrix::new_by_values(values, STATE_SIZE, InstancePaddingStrategy::RepeatLast)
 }
 
 const ROUNDS: usize = 24;
@@ -323,17 +314,17 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     }
 }
 
-pub struct KeccakTrace<'a, E: ExtensionField> {
-    pub bits: [MultilinearExtension<'a, E>; STATE_SIZE],
+pub struct KeccakTrace<E: ExtensionField> {
+    pub bits: RowMajorMatrix<E::BaseField>,
 }
 
 impl<'a, E> ProtocolWitnessGenerator<'a, E> for KeccakLayout<E>
 where
     E: ExtensionField,
 {
-    type Trace = KeccakTrace<'a, E>;
-    fn phase1_witness_group(&self, phase1: Self::Trace) -> Phase1WitnessGroup<'a, E> {
-        phase1.bits.into_iter().map(Arc::new).collect_vec()
+    type Trace = KeccakTrace<E>;
+    fn phase1_witness_group(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField> {
+        phase1.bits
     }
 }
 
@@ -393,7 +384,7 @@ pub fn run_keccakf<E: ExtensionField>(
     let num_threads = optimal_sumcheck_threads(log2_num_instances);
 
     let span = entered_span!("keccak_witness", profiling_1 = true);
-    let bits = keccak_witness(&states);
+    let bits = keccak_witness::<E>(&states);
     exit_span!(span);
     let span = entered_span!("phase1_witness_group", profiling_1 = true);
     let phase1_witness = layout.phase1_witness_group(KeccakTrace { bits });
@@ -402,7 +393,7 @@ pub fn run_keccakf<E: ExtensionField>(
 
     // Omit the commit phase1 and phase2.
     let span = entered_span!("gkr_witness", profiling_1 = true);
-    let gkr_witness = layout.gkr_witness(&gkr_circuit, phase1_witness, &[]);
+    let gkr_witness = layout.gkr_witness(&gkr_circuit, &phase1_witness, &[]);
     exit_span!(span);
 
     let out_evals = {
@@ -428,7 +419,8 @@ pub fn run_keccakf<E: ExtensionField>(
 
             // TODO test this
             assert_eq!(
-                keccak_witness(&state) // result from tiny keccak
+                keccak_witness::<E>(&state) // result from tiny keccak
+                    .to_mles()
                     .into_iter()
                     .map(|b: MultilinearExtension<'_, E>| b.get_base_field_vec()[0])
                     .collect_vec(),

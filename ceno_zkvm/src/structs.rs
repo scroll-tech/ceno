@@ -7,9 +7,12 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
-use ff_ext::{ExtensionField, SmallField};
-use gkr_iop::{gkr::GKRCircuitWitness, precompiles::KeccakLayout};
-use itertools::{Either, Itertools};
+use ff_ext::ExtensionField;
+use gkr_iop::{
+    gkr::{GKRCircuitOutput, GKRCircuitWitness},
+    precompiles::KeccakLayout,
+};
+use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::MultilinearExtension};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -121,7 +124,6 @@ impl<E: ExtensionField> VerifyingKey<E> {
 
 #[derive(Clone)]
 pub struct GKRIOPProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State> {
-    pub fixed_traces: Option<Vec<DenseMultilinearExtension<E>>>,
     pub fixed_commit_wd: Option<PCS::CommitmentWithWitness>,
     pub vk: GKRIOPVerifyingKey<E, PCS, State>,
 }
@@ -131,14 +133,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State: Default> Defa
 {
     fn default() -> Self {
         Self {
-            fixed_traces: None,
             fixed_commit_wd: None,
             vk: GKRIOPVerifyingKey::default(),
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GKRIOPVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State> {
     pub(crate) state: State,
     pub fixed_commit: Option<PCS::Commitment>,
@@ -163,7 +164,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State>
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct KeccakGKRIOP<E> {
     pub chip: gkr_iop::chip::Chip,
     pub layout: KeccakLayout<E>,
@@ -175,14 +176,10 @@ impl<E: ExtensionField> KeccakGKRIOP<E> {
         pp: &PCS::ProverParam,
         fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
     ) -> GKRIOPProvingKey<E, PCS, KeccakGKRIOP<E>> {
-        // transpose from row-major to column-major
-        let fixed_traces_polys = fixed_traces.as_ref().map(|rmm| rmm.to_mles());
-
         let fixed_commit_wd = fixed_traces.map(|traces| PCS::commit(pp, traces).unwrap());
         let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
 
         GKRIOPProvingKey {
-            fixed_traces: fixed_traces_polys,
             fixed_commit_wd,
             vk: GKRIOPVerifyingKey {
                 state: self,
@@ -341,6 +338,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
     pub keccak_gkr_wit: GKRCircuitWitness<E>,
+    pub keccak_gkr_out: GKRCircuitOutput<E>,
     witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
@@ -369,7 +367,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = css
             .get_cs(&LargeEcallDummy::<E, KeccakSpec>::name())
             .unwrap();
-        let (witness, gkr_witness, logup_multiplicity) =
+        let (witness, gkr_witness, gkr_output, logup_multiplicity) =
             LargeEcallDummy::<E, KeccakSpec>::assign_instances_with_gkr_iop(
                 config,
                 cs.num_witin as usize,
@@ -377,6 +375,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 &css.keccak_gkr_iop.layout,
             )?;
         self.keccak_gkr_wit = gkr_witness;
+        self.keccak_gkr_out = gkr_output;
 
         assert!(
             self.witnesses_opcodes
@@ -547,6 +546,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .iter()
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
+            keccak_vk: self.keccak_pk.vk.clone(),
             fixed_commit: self.fixed_commit.clone(),
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
@@ -560,12 +560,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-#[serde(bound = "E: ExtensionField + DeserializeOwned")]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize, GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned, GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>: DeserializeOwned",
+))]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,
     // vk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
+    pub keccak_vk: GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,

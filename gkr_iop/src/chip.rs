@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{evaluation::EvalExpression, gkr::layer::Layer};
 
@@ -7,7 +8,11 @@ pub mod protocol;
 
 /// Chip stores all information required in the GKR protocol, including the
 /// commit phases, the GKR phase and the opening phase.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct Chip<E: ExtensionField> {
     /// The number of base inputs committed in the whole protocol.
     pub n_committed: usize,
