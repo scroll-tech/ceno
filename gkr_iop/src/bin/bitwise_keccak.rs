@@ -19,10 +19,7 @@ struct Args {
 }
 
 fn main() {
-    let args = {
-        let mut args = Args::parse();
-        args
-    };
+    let args = Args::parse();
     type E = GoldilocksExt2;
 
     // default filter
