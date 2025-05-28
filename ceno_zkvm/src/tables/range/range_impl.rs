@@ -8,10 +8,10 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
-    expression::{StructuralWitIn, ToExpr, WitIn},
     set_val,
     structs::ROMType,
 };
+use multilinear_extensions::{StructuralWitIn, ToExpr, WitIn};
 
 #[derive(Clone, Debug)]
 pub struct RangeTableConfig {

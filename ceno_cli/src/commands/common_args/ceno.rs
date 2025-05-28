@@ -10,18 +10,22 @@ use ceno_zkvm::{
 };
 use clap::Args;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, Whir, WhirDefaultSpec};
+use mpcs::{
+    Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
+};
 use serde::Serialize;
 use std::{
     fs::File,
     path::{Path, PathBuf},
 };
 
+use super::CompilationOptions;
+
 /// Ceno options
 #[derive(Clone, Args)]
 pub struct CenoOptions {
     /// The preset configuration to use.
-    #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
+    #[arg(long, value_enum, default_value_t = Preset::Ceno)]
     pub platform: Preset,
 
     /// The polynomial commitment scheme to use.
@@ -50,6 +54,10 @@ pub struct CenoOptions {
     /// Public constrained input.
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
+
+    /// The preset configuration to use.
+    #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
+    security_level: SecurityLevel,
 
     /// Stack size in bytes.
     #[arg(long, default_value = "2M", value_parser = parse_size)]
@@ -135,13 +143,23 @@ impl CenoOptions {
 
     /// Read the public io into ceno stdin
     pub fn read_public_io(&self) -> anyhow::Result<Vec<u32>> {
-        let mut stdin = CenoStdin::default();
         if let Some(public_io) = &self.public_io {
-            for word in public_io.iter() {
-                stdin.write(word)?;
+            // if vector contains only one element, write it as a raw `u32`
+            // otherwise, write the entire vector
+            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
+            if public_io.len() == 1 {
+                CenoStdin::default()
+                    .write(&public_io[0])
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+            } else {
+                CenoStdin::default()
+                    .write(public_io)
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
             }
+            .context("failed to get public_io".to_string())
+        } else {
+            Ok(vec![])
         }
-        Ok((&stdin).into())
     }
 
     /// Read the hints
@@ -152,109 +170,152 @@ impl CenoOptions {
             memory_from_file(file_path).context(format!("failed to read {}", file_path.display()))
         } else if self.hints.is_some() {
             let hints = self.hints.as_ref().unwrap();
-            let mut stdin = CenoStdin::default();
-            for hint in hints.iter() {
-                stdin.write(hint)?;
+            // if the vector contains only one element, write it as a raw `u32`
+            // otherwise, write the entire vector
+            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
+            if hints.len() == 1 {
+                CenoStdin::default()
+                    .write(&hints[0])
+                    .ok()
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+            } else {
+                CenoStdin::default()
+                    .write(hints)
+                    .ok()
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
             }
-            Ok((&stdin).into())
+            .context("failed to get hints".to_string())
         } else {
             Ok(vec![])
         }
     }
 
     /// Run keygen the ceno elf file with given options
-    pub fn keygen<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
+    pub fn keygen<P: AsRef<Path>>(
+        &self,
+        compilation_options: &CompilationOptions,
+        elf_path: P,
+    ) -> anyhow::Result<()> {
         self.try_setup_logger();
         match (self.pcs, self.field) {
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 keygen_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
-                    self, elf_path,
+                    self,
+                    compilation_options,
+                    elf_path,
                 )
             }
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 keygen_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
-                    self, elf_path,
+                    self,
+                    compilation_options,
+                    elf_path,
                 )
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 keygen_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
-                    self, elf_path,
+                    self,
+                    compilation_options,
+                    elf_path,
                 )
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
-                keygen_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(self, elf_path)
+                keygen_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
+                    self,
+                    compilation_options,
+                    elf_path,
+                )
             }
         }
     }
 
     /// Run the ceno elf file with given options
-    pub fn run<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
+    pub fn run<P: AsRef<Path>>(
+        &self,
+        compilation_options: &CompilationOptions,
+        elf_path: P,
+    ) -> anyhow::Result<()> {
         self.try_setup_logger();
-        let runner = match (self.pcs, self.field) {
+        match (self.pcs, self.field) {
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 run_elf_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                )?
-                .1
+                )?;
             }
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 run_elf_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                )?
-                .1
+                )?;
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 run_elf_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                )?
-                .1
+                )?;
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
                 run_elf_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
                     self,
+                    compilation_options,
                     elf_path,
                     Checkpoint::PrepWitnessGen,
-                )?
-                .1
+                )?;
             }
         };
-        runner();
         Ok(())
     }
 
     /// Run and prove the ceno elf file with given options
-    pub fn prove<P: AsRef<Path>>(&self, elf_path: P) -> anyhow::Result<()> {
+    pub fn prove<P: AsRef<Path>>(
+        &self,
+        compilation_options: &CompilationOptions,
+        elf_path: P,
+    ) -> anyhow::Result<()> {
         self.try_setup_logger();
         match (self.pcs, self.field) {
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 prove_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
-                    self, elf_path,
+                    self,
+                    compilation_options,
+                    elf_path,
+                    Checkpoint::Complete,
                 )
             }
             (PcsKind::Basefold, FieldType::BabyBear) => {
                 prove_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
-                    self, elf_path,
+                    self,
+                    compilation_options,
+                    elf_path,
+                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
                 )
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
                 prove_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
-                    self, elf_path,
+                    self,
+                    compilation_options,
+                    elf_path,
+                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
                 )
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
-                prove_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(self, elf_path)
+                prove_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
+                    self,
+                    compilation_options,
+                    elf_path,
+                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+                )
             }
         }
     }
 }
-
-type E2EResult<E, PCS> = (IntermediateState<E, PCS>, Box<dyn FnOnce()>);
 
 fn run_elf_inner<
     E: ExtensionField + LkMultiplicityKey,
@@ -262,9 +323,10 @@ fn run_elf_inner<
     P: AsRef<Path>,
 >(
     options: &CenoOptions,
+    compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<E2EResult<E, PCS>> {
+) -> anyhow::Result<E2ECheckpointResult<E, PCS>> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
@@ -279,13 +341,23 @@ fn run_elf_inner<
         .next_power_of_two()
         .max(16);
 
-    let platform = setup_platform(
-        options.platform,
-        &program,
-        options.stack_size(),
-        options.heap_size(),
-        pub_io_size,
-    );
+    let platform = if compilation_options.release {
+        setup_platform(
+            options.platform,
+            &program,
+            options.stack_size(),
+            options.heap_size(),
+            pub_io_size,
+        )
+    } else {
+        setup_platform_debug(
+            options.platform,
+            &program,
+            options.stack_size(),
+            options.heap_size(),
+            pub_io_size,
+        )
+    };
     tracing::info!("Running on platform {:?} {}", options.platform, platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",
@@ -303,10 +375,11 @@ fn run_elf_inner<
     Ok(run_e2e_with_checkpoint::<E, PCS>(
         program,
         platform,
-        hints,
-        public_io,
+        &hints,
+        &public_io,
         options.max_steps,
         options.max_num_variables,
+        options.security_level,
         checkpoint,
     ))
 }
@@ -317,10 +390,16 @@ fn keygen_inner<
     P: AsRef<Path>,
 >(
     args: &CenoOptions,
+    compilation_options: &CompilationOptions,
     elf_path: P,
 ) -> anyhow::Result<()> {
-    let ((_, vk), _) = run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::Keygen)?;
-    let vk = vk.expect("Keygen should yield vk.");
+    let result = run_elf_inner::<E, PCS, P>(
+        args,
+        compilation_options,
+        elf_path,
+        Checkpoint::PrepE2EProving,
+    )?;
+    let vk = result.vk.expect("Keygen should yield vk.");
     if let Some(out_vk) = args.out_vk.as_ref() {
         let path = canonicalize_allow_nx(out_vk)?;
         print_cargo_message("Writing", format_args!("vk to {}", path.display()));
@@ -337,12 +416,13 @@ fn prove_inner<
     P: AsRef<Path>,
 >(
     args: &CenoOptions,
+    compilation_options: &CompilationOptions,
     elf_path: P,
+    checkpoint: Checkpoint,
 ) -> anyhow::Result<()> {
-    let ((zkvm_proof, vk), _) =
-        run_elf_inner::<E, PCS, P>(args, elf_path, Checkpoint::PrepSanityCheck)?;
-    let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield proof.");
-    let vk = vk.expect("PrepSanityCheck should yield vk.");
+    let result = run_elf_inner::<E, PCS, P>(args, compilation_options, elf_path, checkpoint)?;
+    let zkvm_proof = result.proof.expect("PrepSanityCheck should yield proof.");
+    let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk);

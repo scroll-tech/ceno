@@ -9,7 +9,6 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{constants::UInt, insn_base::WriteRD},
@@ -18,6 +17,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
+use multilinear_extensions::{ToExpr, WitIn};
 
 /// LargeEcallDummy can handle any instruction and produce its effects,
 /// including multiple memory operations.

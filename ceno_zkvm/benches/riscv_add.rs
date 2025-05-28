@@ -6,11 +6,12 @@ use ceno_zkvm::{
     scheme::prover::ZKVMProver,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
+mod alloc;
 use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
-use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
+use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
 
 use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
@@ -43,7 +44,7 @@ fn bench_add(c: &mut Criterion) {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
 
-    let param = Pcs::setup(1 << MAX_NUM_VARIABLES).unwrap();
+    let param = Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).unwrap();
     let (pp, vp) = Pcs::trim(param, 1 << MAX_NUM_VARIABLES).unwrap();
 
     let pk = zkvm_cs
@@ -91,10 +92,12 @@ fn bench_add(c: &mut Criterion) {
                         ];
 
                         let _ = prover
-                            .create_opcode_proof(
+                            .create_chip_proof(
                                 "ADD",
                                 circuit_pk,
+                                vec![],
                                 polys,
+                                vec![],
                                 &[],
                                 num_instances,
                                 &mut transcript,

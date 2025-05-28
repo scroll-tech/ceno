@@ -35,7 +35,7 @@ impl RSCodeSpec for RSCodeDefaultSpec {
     // $$
     // If we take $\lambda=100$ and $\rho=1/2$, then the number of queries is $200$.
     fn get_number_queries() -> usize {
-        200
+        100
     }
 
     fn get_rate_log() -> usize {
@@ -195,9 +195,9 @@ where
             return Err(Error::PolynomialTooLarge(num_vars));
         }
 
-        // here 2 resize happend. first is padding to next pow2 height, second is extend to 2^get_rate_log times size
-        let mut m = rmm.into_default_padded_p3_rmm().to_row_major_matrix();
-        m.pad_to_height(m.height() * (1 << Spec::get_rate_log()), E::BaseField::ZERO);
+        let m = rmm
+            .into_default_padded_p3_rmm(Some(1 << Spec::get_rate_log()))
+            .to_row_major_matrix();
         let codeword = pp
             .dft
             .dft_batch(m)

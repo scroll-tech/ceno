@@ -15,6 +15,9 @@
 // limitations under the License.
 
 use anyhow::{Result, anyhow};
+use ff_ext::{ExtensionField, SmallField};
+use itertools::Either;
+use multilinear_extensions::{Expression, impl_expr_from_unsigned};
 use num_derive::ToPrimitive;
 use strum_macros::{Display, EnumIter};
 
@@ -198,6 +201,8 @@ pub enum InsnKind {
     ECALL,
 }
 use InsnKind::*;
+
+impl_expr_from_unsigned!(InsnKind);
 
 impl From<InsnKind> for InsnCategory {
     fn from(kind: InsnKind) -> Self {

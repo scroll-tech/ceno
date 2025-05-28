@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, marker::PhantomData};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
@@ -22,15 +21,14 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
+use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
 use itertools::Itertools;
-use mpcs::{PolynomialCommitmentScheme, WhirDefault};
-use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
-};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel, WhirDefault};
+use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
 use p3::field::PrimeCharacteristicRing;
 use rand::thread_rng;
 use transcript::{BasicTranscript, Transcript};
@@ -95,7 +93,7 @@ fn test_rw_lk_expression_combination() {
         type Pcs = WhirDefault<E>;
 
         // pcs setup
-        Pcs::setup(1 << 8).unwrap();
+        Pcs::setup(1 << 8, SecurityLevel::default()).unwrap();
         let (pp, vp) = Pcs::trim((), 1 << 8).unwrap();
 
         // configure
@@ -145,11 +143,13 @@ fn test_rw_lk_expression_combination() {
             transcript.read_challenge().elements,
         ];
 
-        let (proof, _) = prover
-            .create_opcode_proof(
+        let (proof, _, _) = prover
+            .create_chip_proof(
                 name.as_str(),
                 prover.pk.circuit_pks.get(&name).unwrap(),
+                vec![],
                 wits_in,
+                vec![],
                 &[],
                 num_instances,
                 &mut transcript,
@@ -172,7 +172,7 @@ fn test_rw_lk_expression_combination() {
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
         }
-        let _rt_input = verifier
+        verifier
             .verify_opcode_proof(
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
@@ -223,7 +223,7 @@ fn test_single_add_instance_e2e() {
         Default::default(),
     );
 
-    Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
@@ -335,18 +335,15 @@ fn test_tower_proof_various_prod_size() {
         let mut rng = thread_rng();
         type E = GoldilocksExt2;
         let mut transcript = BasicTranscript::new(b"test_tower_proof");
-        let leaf_layer: ArcMultilinearExtension<E> = (0..leaf_layer_size)
+        let leaf_layer: MultilinearExtension<E> = (0..leaf_layer_size)
             .map(|_| E::random(&mut rng))
             .collect_vec()
-            .into_mle()
-            .into();
+            .into_mle();
         let (first, second): (&[E], &[E]) = leaf_layer
             .get_ext_field_vec()
             .split_at(leaf_layer.evaluations().len() / 2);
-        let last_layer_splitted_fanin: Vec<ArcMultilinearExtension<E>> = vec![
-            first.to_vec().into_mle().into(),
-            second.to_vec().into_mle().into(),
-        ];
+        let last_layer_splitted_fanin: Vec<MultilinearExtension<E>> =
+            vec![first.to_vec().into_mle(), second.to_vec().into_mle()];
         let layers = infer_tower_product_witness(num_vars, last_layer_splitted_fanin, 2);
         let (rt_tower_p, tower_proof) = TowerProver::create_proof(
             vec![TowerProverSpec {

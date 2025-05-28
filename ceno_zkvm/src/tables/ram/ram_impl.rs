@@ -9,12 +9,12 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
-    expression::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn},
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     set_fixed_val, set_val,
     structs::ProgramParams,
 };
 use ff_ext::FieldInto;
+use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
 
 use super::{
     MemInitRecord,
@@ -408,7 +408,13 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .zip(final_mem)
             .enumerate()
             .for_each(|(i, ((row, structural_row), rec))| {
-                assert_eq!(rec.addr, DVRAM::addr(&self.params, i));
+                assert_eq!(
+                    rec.addr,
+                    DVRAM::addr(&self.params, i),
+                    "rec.addr {:x} != expected {:x}",
+                    rec.addr,
+                    DVRAM::addr(&self.params, i),
+                );
 
                 if self.final_v.len() == 1 {
                     // Assign value directly.
@@ -444,7 +450,7 @@ mod tests {
     use ceno_emul::WORD_SIZE;
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
-    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
+    use multilinear_extensions::mle::MultilinearExtension;
     use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks as F};
     use witness::next_pow2_instance_padding;
 
@@ -483,7 +489,7 @@ mod tests {
             .unwrap();
 
         structural_witness.padding_by_strategy();
-        let addr_padded_view: DenseMultilinearExtension<E> =
+        let addr_padded_view: MultilinearExtension<E> =
             structural_witness.to_mles()[addr_column].clone();
         // Expect addresses to proceed consecutively inside the padding as well
         let expected = successors(Some(addr_padded_view.get_base_field_vec()[0]), |idx| {

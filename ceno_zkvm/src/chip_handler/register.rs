@@ -1,13 +1,10 @@
 use ff_ext::ExtensionField;
 
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{Expression, ToExpr},
-    gadgets::AssertLtConfig,
-    instructions::riscv::constants::UINT_LIMBS,
-    structs::RAMType,
+    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::AssertLtConfig,
+    instructions::riscv::constants::UINT_LIMBS, structs::RAMType,
 };
+use multilinear_extensions::{Expression, ToExpr};
 
 use super::{RegisterChipOperations, RegisterExpr};
 

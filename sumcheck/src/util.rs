@@ -10,7 +10,7 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
     macros::{entered_span, exit_span},
-    mle::DenseMultilinearExtension,
+    mle::MultilinearExtension,
     op_mle,
     util::max_usable_threads,
     virtual_poly::VirtualPolynomial,
@@ -271,7 +271,7 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
         final_poly.aux_info.max_num_variables =
             final_poly.aux_info.max_num_variables.max(merged_num_vars);
         let ml_ext = match poly_meta {
-            PolyMeta::Normal => DenseMultilinearExtension::from_evaluations_ext_vec(
+            PolyMeta::Normal => MultilinearExtension::from_evaluations_ext_vec(
                 merged_num_vars,
                 virtual_polys
                     .iter()
@@ -284,14 +284,14 @@ pub fn merge_sumcheck_polys<'a, E: ExtensionField>(
             PolyMeta::Phase2Only => {
                 let poly = &virtual_polys[0].flattened_ml_extensions[i];
                 assert!(poly.num_vars() <= log2_poly_len);
-                let blow_factor = 1 << (merged_num_vars - poly.num_vars());
-                DenseMultilinearExtension::from_evaluations_ext_vec(
+                let blowup_factor = 1 << (merged_num_vars - poly.num_vars());
+                MultilinearExtension::from_evaluations_ext_vec(
                     merged_num_vars,
                     op_mle!(
                         poly,
                         |poly| {
                             poly.iter()
-                                .flat_map(|e| std::iter::repeat_n(*e, blow_factor))
+                                .flat_map(|e| std::iter::repeat_n(*e, blowup_factor))
                                 .collect_vec()
                         },
                         |base_poly| base_poly.iter().map(|e| E::from(*e)).collect_vec()

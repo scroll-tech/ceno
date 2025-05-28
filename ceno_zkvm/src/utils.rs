@@ -6,15 +6,16 @@ use std::{
     panic::{self, PanicHookInfo},
 };
 
+use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
+    Expression,
+    mle::{ArcMultilinearExtension, MultilinearExtension},
+    virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::Field;
 use transcript::Transcript;
-
-use crate::expression::Expression;
 
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {
     if x >= 0 {
@@ -213,8 +214,9 @@ where
 /// add mle terms into virtual poly by expression
 /// return distinct witin in set
 pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
-    virtual_polys: &mut VirtualPolynomials<'a, E>,
-    selector: Option<&'a ArcMultilinearExtension<'a, E>>,
+    expr_builder: &mut VirtualPolynomialsBuilder<'a, E>,
+    exprs: &mut Vec<Expression<E>>,
+    selector: Option<&'a MultilinearExtension<'a, E>>,
     wit_ins: Vec<&'a ArcMultilinearExtension<'a, E>>,
     expr: &Expression<E>,
     challenges: &[E],
@@ -226,7 +228,11 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
         &|_| unreachable!(),
         &|witness_id| vec![(E::ONE, { vec![witness_id] })],
         &|structural_witness_id, _, _, _| vec![(E::ONE, { vec![structural_witness_id] })],
-        &|scalar| vec![(E::from(scalar), { vec![] })],
+        &|scalar| {
+            vec![(scalar.map_either(E::from, |scalar| scalar).into_inner(), {
+                vec![]
+            })]
+        },
         &|challenge_id, pow, scalar, offset| {
             let challenge = challenges[challenge_id as usize];
             vec![(challenge.exp_u64(pow as u64) * scalar + offset, vec![])]
@@ -270,13 +276,17 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
         if *constant != E::ZERO && monomial_term.is_empty() && selector.is_none() {
             todo!("make virtual poly support pure constant")
         }
-        let sel = selector.map(|sel| vec![sel]).unwrap_or_default();
+        let sel = selector.map(|sel| expr_builder.lift(Either::Left(sel)));
         let terms_polys = monomial_term
             .iter()
-            .map(|wit_id| wit_ins[*wit_id as usize])
+            .map(|wit_id| expr_builder.lift(Either::Left(wit_ins[*wit_id as usize])))
             .collect_vec();
-
-        virtual_polys.add_mle_list([sel, terms_polys].concat(), *constant * alpha);
+        exprs.push(
+            sel.into_iter()
+                .chain(terms_polys)
+                .product::<Expression<E>>()
+                * Expression::Constant(Either::Right(*constant * alpha)),
+        );
     }
 
     monomial_terms
@@ -285,18 +295,32 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
         .collect::<BTreeSet<u16>>()
 }
 
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+pub fn print_allocated_bytes() {
+    use tikv_jemalloc_ctl::{epoch, stats};
+
+    // Advance the epoch to refresh the stats
+    let e = epoch::mib().unwrap();
+    e.advance().unwrap();
+
+    // Read allocated bytes
+    let allocated = stats::allocated::read().unwrap();
+    tracing::info!("jemalloc total allocated bytes: {}", allocated);
+}
+
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
     use itertools::Itertools;
     use multilinear_extensions::{
-        mle::IntoMLE, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
+        Expression, ToExpr,
+        mle::{ArcMultilinearExtension, IntoMLE},
+        virtual_polys::VirtualPolynomialsBuilder,
     };
     use p3::field::PrimeCharacteristicRing;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        expression::{Expression, ToExpr},
         utils::add_mle_list_by_expr,
     };
     use p3::goldilocks::Goldilocks;
@@ -314,13 +338,15 @@ mod tests {
             .map(|_| vec![F::from_u64(1)].into_mle().into())
             .collect();
 
-        let mut virtual_polys = VirtualPolynomials::new(1, 0);
+        let mut expr_builder = VirtualPolynomialsBuilder::new(1, 0);
+        let mut exprs = vec![];
 
         // 3xy + 2y
         let expr: Expression<E> = 3 * x.expr() * y.expr() + 2 * y.expr();
 
         let distrinct_zerocheck_terms_set = add_mle_list_by_expr(
-            &mut virtual_polys,
+            &mut expr_builder,
+            &mut exprs,
             None,
             wits_in.iter().collect_vec(),
             &expr,
@@ -328,12 +354,20 @@ mod tests {
             GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 2);
-        assert!(virtual_polys.degree() == 2);
+        assert!(
+            expr_builder
+                .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>()], &[])
+                .degree()
+                == 2
+        );
 
         // 3x^3
+        let mut expr_builder = VirtualPolynomialsBuilder::new(1, 0);
+        let mut exprs = vec![];
         let expr: Expression<E> = 3 * x.expr() * x.expr() * x.expr();
         let distrinct_zerocheck_terms_set = add_mle_list_by_expr(
-            &mut virtual_polys,
+            &mut expr_builder,
+            &mut exprs,
             None,
             wits_in.iter().collect_vec(),
             &expr,
@@ -341,6 +375,11 @@ mod tests {
             GoldilocksExt2::ONE,
         );
         assert!(distrinct_zerocheck_terms_set.len() == 1);
-        assert!(virtual_polys.degree() == 3);
+        assert!(
+            expr_builder
+                .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>()], &[])
+                .degree()
+                == 3
+        );
     }
 }

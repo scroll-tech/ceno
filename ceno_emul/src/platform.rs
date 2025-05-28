@@ -17,8 +17,11 @@ pub struct Platform {
     pub stack: Range<Addr>,
     pub heap: Range<Addr>,
     pub hints: Range<Addr>,
+
     /// If true, ecall instructions are no-op instead of trap. Testing only.
     pub unsafe_ecall_nop: bool,
+
+    pub is_debug: bool,
 }
 
 impl Display for Platform {
@@ -63,6 +66,7 @@ pub const CENO_PLATFORM: Platform = Platform {
     public_io: 0x3000_0000..0x3004_0000,
     hints: 0x4000_0000..0x5000_0000, // 256 MB
     unsafe_ecall_nop: false,
+    is_debug: false,
 };
 
 impl Platform {

@@ -20,6 +20,9 @@ quote = "1.0"
 rand.workspace = true
 syn = { version = "2.0", features = ["full"] }
 
+[features]
+nightly-features = ["p3/nightly-features"]
+
 [dev-dependencies]
 ff_ext = { path = "../ff_ext" }
 multilinear_extensions = { path = "../multilinear_extensions" }

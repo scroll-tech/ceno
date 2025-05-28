@@ -1,10 +1,6 @@
 // Test addition of two curve points. Assert result inside the guest
 extern crate ceno_rt;
-use ceno_rt::{
-    info_out,
-    syscalls::{syscall_bn254_add, syscall_bn254_double},
-};
-use std::slice;
+use ceno_rt::syscalls::{syscall_bn254_add, syscall_bn254_double};
 
 use substrate_bn::{AffineG1, Fr, G1, Group};
 fn bytes_to_words(bytes: [u8; 64]) -> [u32; 16] {
@@ -30,16 +26,6 @@ fn g1_to_words(elem: G1) -> [u32; 16] {
 }
 
 fn main() {
-    let log_flag = true;
-    let log_state = |state: &[u32]| {
-        if log_flag {
-            let out = unsafe {
-                slice::from_raw_parts(state.as_ptr() as *const u8, std::mem::size_of_val(state))
-            };
-            info_out().write_frame(out);
-        }
-    };
-
     let a = G1::one() * Fr::from_str("237").unwrap();
     let b = G1::one() * Fr::from_str("450").unwrap();
     let mut a = g1_to_words(a);
@@ -76,3 +62,14 @@ fn main() {
     // 2 * 343 + 1 == 237 + 450, one hopes
     assert_eq!(a, c);
 }
+
+#[cfg(debug_assertions)]
+fn log_state(state: &[u32]) {
+    use ceno_rt::info_out;
+    info_out().write_frame(unsafe {
+        core::slice::from_raw_parts(state.as_ptr() as *const u8, size_of_val(state))
+    });
+}
+
+#[cfg(not(debug_assertions))]
+fn log_state(_state: &[u32]) {}

@@ -1,10 +1,10 @@
 use crate::{
     circuit_builder::ConstraintSystem,
-    expression::Expression,
     structs::{ProofInput, TowerProofs},
 };
 use ff_ext::ExtensionField;
 use mpcs::Point;
+use multilinear_extensions::Expression;
 use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
@@ -44,10 +44,8 @@ pub trait TowerProver<PB: ProverBackend> {
     // and then build a complete binary tree to accumulate these records
     fn build_tower_witness(
         &self,
-        input: ProofInput<PB>,
-        read_exprs: &[Expression<PB::E>],
-        write_exprs: &[Expression<PB::E>],
-        lookup_exprs: &[Expression<PB::E>],
+        cs: &ConstraintSystem<PB::E>,
+        input: &ProofInput<PB>,
         challenge: &[PB::E; 2],
     ) -> (
         Vec<Vec<PB::MultilinearPoly>>,

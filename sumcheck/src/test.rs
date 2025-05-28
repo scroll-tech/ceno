@@ -2,8 +2,12 @@ use crate::{
     structs::{IOPProverState, IOPVerifierState},
     util::{ceil_log2, interpolate_uni_poly},
 };
+use either::Either;
 use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
+use itertools::Itertools;
 use multilinear_extensions::{
+    mle::Point,
+    monomial::Term,
     util::max_usable_threads,
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
@@ -30,41 +34,38 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
     let mut transcript = BasicTranscript::<E>::new(b"test");
 
     let max_num_variables = *nv.iter().max().unwrap();
-    let poly = VirtualPolynomials::new(num_threads, max_num_variables);
+    let (mut monimials, asserted_sum) = VirtualPolynomials::<E>::random_monimials(
+        nv,
+        num_multiplicands_range,
+        num_products,
+        &mut rng,
+    );
 
-    let input_polys = nv
-        .iter()
-        .map(|nv| {
-            VirtualPolynomial::<E>::random(*nv, num_multiplicands_range, num_products, &mut rng)
-        })
-        .collect::<Vec<_>>();
+    let poly = VirtualPolynomials::<E>::new_from_monimials(
+        num_threads,
+        max_num_variables,
+        monimials
+            .iter_mut()
+            .map(|Term { scalar, product }| Term {
+                scalar: Either::Right(*scalar),
+                product: product.iter_mut().map(Either::Right).collect_vec(),
+            })
+            .collect_vec(),
+    );
 
-    let (poly, asserted_sum) =
-        input_polys
-            .iter()
-            .fold((poly, E::ZERO), |(mut poly, sum), (new_poly, new_sum)| {
-                poly.merge(new_poly);
-                (
-                    poly,
-                    sum + E::from_u64(
-                        1 << (max_num_variables - new_poly.aux_info.max_num_variables),
-                    ) * *new_sum,
-                )
-            });
-
-    let (proof, _) = IOPProverState::<E>::prove(poly, &mut transcript);
+    let (proof, _) = IOPProverState::<E>::prove(poly.as_view(), &mut transcript);
     let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(
         asserted_sum,
         &proof,
         &VPAuxInfo {
-            max_degree: 2,
+            max_degree: degree,
             max_num_variables,
             ..Default::default()
         },
         &mut transcript,
     );
-    let r = subclaim
+    let r: Point<E> = subclaim
         .point
         .iter()
         .map(|c| c.elements)
@@ -72,13 +73,14 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
     assert_eq!(r.len(), max_num_variables);
     // r are right alignment
     assert!(
-        input_polys
-            .iter()
-            .map(|(poly, _)| { poly.evaluate(&r[r.len() - poly.aux_info.max_num_variables..]) })
-            .sum::<E>()
-            == subclaim.expected_evaluation,
+        poly.evaluate_slow(&r) == subclaim.expected_evaluation,
         "wrong subclaim"
     );
+
+    // test in-place work
+    let mut transcript = BasicTranscript::<E>::new(b"test");
+    let (proof_mut, _) = IOPProverState::<E>::prove(poly, &mut transcript);
+    assert_eq!(proof, proof_mut, "different proof");
 }
 
 fn test_sumcheck<E: ExtensionField>(
@@ -90,10 +92,10 @@ fn test_sumcheck<E: ExtensionField>(
     let mut transcript = BasicTranscript::new(b"test");
 
     let (poly, asserted_sum) =
-        VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
+        VirtualPolynomial::<E>::random(&[nv], num_multiplicands_range, num_products, &mut rng);
     let poly_info = poly.aux_info.clone();
     #[allow(deprecated)]
-    let (proof, _) = IOPProverState::<E>::prove_parallel(poly.clone(), &mut transcript);
+    let (proof, _) = IOPProverState::<E>::prove_parallel(poly.as_view(), &mut transcript);
 
     let mut transcript = BasicTranscript::new(b"test");
     let subclaim = IOPVerifierState::<E>::verify(asserted_sum, &proof, &poly_info, &mut transcript);
@@ -117,10 +119,10 @@ fn test_sumcheck_internal<E: ExtensionField>(
 ) {
     let mut rng = thread_rng();
     let (poly, asserted_sum) =
-        VirtualPolynomial::<E>::random(nv, num_multiplicands_range, num_products, &mut rng);
+        VirtualPolynomial::<E>::random(&[nv], num_multiplicands_range, num_products, &mut rng);
     let (poly_info, num_variables) = (poly.aux_info.clone(), poly.aux_info.max_num_variables);
     #[allow(deprecated)]
-    let mut prover_state = IOPProverState::prover_init_parallel(poly.clone());
+    let mut prover_state = IOPProverState::prover_init_parallel(poly.as_view());
     let mut verifier_state = IOPVerifierState::verifier_init(&poly_info);
     let mut challenge = None;
 
@@ -197,7 +199,7 @@ fn test_extract_sum() {
 fn test_extract_sum_helper<E: ExtensionField>() {
     let mut rng = thread_rng();
     let mut transcript = BasicTranscript::new(b"test");
-    let (poly, asserted_sum) = VirtualPolynomial::<E>::random(8, (2, 3), 3, &mut rng);
+    let (poly, asserted_sum) = VirtualPolynomial::<E>::random(&[8], (2, 3), 3, &mut rng);
     #[allow(deprecated)]
     let (proof, _) = IOPProverState::<E>::prove_parallel(poly, &mut transcript);
     assert_eq!(proof.extract_sum(), asserted_sum);

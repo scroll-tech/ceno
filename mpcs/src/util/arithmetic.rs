@@ -4,9 +4,7 @@ use num_integer::Integer;
 use p3::field::Field;
 use std::{borrow::Borrow, iter};
 
-mod bh;
 mod hypercube;
-pub use bh::BooleanHypercube;
 pub use hypercube::{
     interpolate_field_type_over_boolean_hypercube, interpolate_over_boolean_hypercube,
 };
@@ -16,8 +14,8 @@ use itertools::Itertools;
 
 pub fn horner_field_type<E: ExtensionField>(coeffs: &FieldType<E>, x: &E) -> E {
     match coeffs {
-        FieldType::Ext(coeffs) => horner(coeffs.as_slice(), x),
-        FieldType::Base(coeffs) => horner_base(coeffs.as_slice(), x),
+        FieldType::Ext(coeffs) => horner(coeffs.as_ref(), x),
+        FieldType::Base(coeffs) => horner_base(coeffs.as_ref(), x),
         _ => unreachable!(),
     }
 }

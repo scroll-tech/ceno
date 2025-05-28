@@ -1,7 +1,6 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    expression::Expression,
     instructions::Instruction,
     scheme::hal::ProverBackend,
     state::StateCircuit,
@@ -9,9 +8,10 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
-use ff_ext::ExtensionField;
-use itertools::Itertools;
+use ff_ext::{ExtensionField, SmallField};
+use itertools::{Either, Itertools};
 use mpcs::{Point, PolynomialCommitmentScheme};
+use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::MultilinearExtension};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
@@ -77,6 +77,8 @@ impl<PB: ProverBackend> ProofInput<PB> {
         ceil_log2(self.num_instances)
     }
 }
+
+impl_expr_from_unsigned!(RAMType);
 
 /// A point and the evaluation of this point.
 #[derive(Clone, Debug, PartialEq)]

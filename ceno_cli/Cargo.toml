@@ -13,8 +13,9 @@ version.workspace = true
 anyhow = { workspace = true, features = ["std", "backtrace"] }
 bincode.workspace = true
 cargo_metadata = "0.19"
-clap = { version = "4", features = ["derive"] }
+clap.workspace = true
 console = "0.15"
+get_dir = "0.4"
 parse-size = "1.1"
 serde.workspace = true
 tempfile = "3.19"
@@ -22,12 +23,23 @@ tracing.workspace = true
 tracing-forest.workspace = true
 tracing-subscriber.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+tikv-jemallocator = { version = "0.6", optional = true }
+
 ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
 ceno_zkvm = { path = "../ceno_zkvm" }
-
 ff_ext = { path = "../ff_ext" }
 mpcs = { path = "../mpcs" }
 
 [build-dependencies]
 vergen-git2 = { version = "1", features = ["build", "cargo", "rustc", "emit_and_set"] }
+
+[features]
+jemalloc = ["dep:tikv-jemallocator", "ceno_zkvm/jemalloc"]
+jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
+nightly-features = [
+  "ceno_zkvm/nightly-features",
+  "ff_ext/nightly-features",
+  "mpcs/nightly-features",
+]

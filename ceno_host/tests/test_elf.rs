@@ -10,7 +10,7 @@ use ceno_emul::{
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};
 use rand::{Rng, thread_rng};
-use tiny_keccak::keccakf;
+use tiny_keccak::{Hasher, Keccak, keccakf};
 
 #[test]
 fn test_ceno_rt_mini() -> Result<()> {
@@ -127,7 +127,7 @@ fn test_hints() -> Result<()> {
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
     }
-    assert_eq!(all_messages[0], "3992003");
+    assert_eq!(all_messages[3], "3992003");
     Ok(())
 }
 
@@ -576,6 +576,34 @@ fn test_fibonacci() -> Result<()> {
         CenoStdin::default().write(&10_u32)?,
         Some(CenoStdin::default().write(&4191_u32)?),
     );
+    Ok(())
+}
+
+#[test]
+fn test_keccak_no_syscall() -> Result<()> {
+    let pre_image = vec![0xdeadbeefu32, 0xdeadbeef, 0xdeadbeef];
+    let all_messages = messages_to_strings(&ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::keccak_no_syscall,
+        CenoStdin::default().write(&pre_image)?,
+        None,
+    ));
+
+    let pre_image: Vec<u8> = pre_image.iter().flat_map(|x| x.to_le_bytes()).collect();
+
+    let mut hasher = Keccak::v256();
+    let mut raw_output = [0u8; 32];
+    hasher.update(&pre_image);
+    hasher.finalize(&mut raw_output);
+    let output = raw_output
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+        .collect::<Vec<u32>>();
+
+    for (got, expect) in izip!(&all_messages, &output) {
+        let got = u32::from_str_radix(got, 16).expect("Invalid hex string");
+        assert_eq!(&got, expect);
+    }
     Ok(())
 }
 
