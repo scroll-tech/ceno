@@ -710,7 +710,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 }
             }
             tracing::trace!("main sel sumcheck start");
-            let (main_sel_sumcheck_proofs, _) = IOPProverState::prove(
+            let (main_sel_sumcheck_proofs, main_sel_sumcheck_prover_state) = IOPProverState::prove(
                 expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
                 transcript,
             );
@@ -718,7 +718,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
             exit_span!(main_sel_span);
 
             (
-                main_sel_sumcheck_proofs.point,
+                main_sel_sumcheck_prover_state.collect_raw_challenges(),
                 Some(main_sel_sumcheck_proofs.proofs),
             )
         } else {
@@ -963,7 +963,7 @@ impl TowerProver {
 
             // rt' = r_merge || rt
             let r_merge = transcript.sample_and_append_vec(b"merge", log_num_fanin);
-            let rt_prime = [sumcheck_proofs.point, r_merge].concat();
+            let rt_prime = [state.collect_raw_challenges(), r_merge].concat();
 
             // generate next round challenge
             let next_alpha_pows = get_challenge_pows(
