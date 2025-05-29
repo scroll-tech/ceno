@@ -2,11 +2,13 @@ use std::{array, cmp::Ordering, marker::PhantomData, sync::Arc};
 
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, chain, iproduct, zip_eq};
-use multilinear_extensions::{Expression, ToExpr, WitIn};
+use multilinear_extensions::{Expression, ToExpr, WitIn, util::ceil_log2};
 use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{
+    IntoParallelIterator, IntoParallelRefIterator, ParallelExtend, ParallelIterator,
+};
 use serde::{Deserialize, Serialize};
 use tiny_keccak::keccakf;
 use transcript::BasicTranscript;
@@ -806,7 +808,10 @@ where
                     }
                 }
 
-                let mut wits = Vec::with_capacity(KECCAK_WIT_SIZE_PER_ROUND);
+                // TODO take structural id information from circuit to do wits assignment
+                // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
+                let mut wits =
+                    Vec::with_capacity(KECCAK_WIT_SIZE_PER_ROUND * ROUNDS.next_power_of_two());
                 let mut push_instance = |new_wits: Vec<u64>| {
                     let felts = u64s_to_felts::<E>(new_wits);
                     wits.extend(felts);
@@ -944,10 +949,20 @@ where
                     state64 = iota_output64;
                 }
 
+                // padding to next_power_of_2 rounds for rotation
+                wits.par_extend(
+                    (0..(ROUNDS.next_power_of_two() - ROUNDS) * KECCAK_WIT_SIZE_PER_ROUND)
+                        .into_par_iter()
+                        .map(|_| E::BaseField::ZERO),
+                );
                 wits
             })
             .collect();
-        RowMajorMatrix::new_by_values(wits, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default)
+        RowMajorMatrix::new_by_values(
+            wits,
+            KECCAK_WIT_SIZE_PER_ROUND,
+            InstancePaddingStrategy::Default,
+        )
     }
 
     fn gkr_witness(
@@ -955,15 +970,15 @@ where
         phase1: &RowMajorMatrix<E::BaseField>,
         _challenges: &[E],
     ) -> (GKRCircuitWitness<E>, GKRCircuitOutput<E>) {
-        // TODO: Make it more efficient.
-        let instances = phase1
+        // TODO: fix efficient as here convert basefield back to u64
+        let instances_with_rotations = phase1
             .values
             .par_iter()
             .map(|wit| wit.to_canonical_u64())
             .collect::<Vec<_>>();
-        let num_instances = phase1.num_vars();
+        let num_instances_with_rotations = phase1.num_vars();
         let num_cols = phase1.n_col();
-        assert_eq!(num_cols, KECCAK_WIT_SIZE);
+        assert_eq!(num_cols, KECCAK_WIT_SIZE_PER_ROUND);
 
         let to_5x5x8_array = |input: &[u64]| -> [[[u64; 8]; 5]; 5] {
             assert_eq!(input.len(), 5 * 5 * 8);
@@ -1000,39 +1015,12 @@ where
                 .unwrap()
         };
 
-        let output_bases: Vec<u64> = (0..num_instances)
+        // process output bases
+        let output_bases: Vec<u64> = (0..num_instances_with_rotations)
             .into_par_iter()
             .flat_map(|instance_id| {
-                let mut and_lookups: Vec<Vec<u64>> = vec![vec![]; ROUNDS];
-                let mut xor_lookups: Vec<Vec<u64>> = vec![vec![]; ROUNDS];
-                let mut range_lookups: Vec<Vec<u64>> = vec![vec![]; ROUNDS];
-
-                let mut add_and = |a: u64, b: u64, round: usize| {
-                    let c = a & b;
-                    assert!(a < (1 << 8));
-                    assert!(b < (1 << 8));
-                    and_lookups[round].extend(vec![a, b, c]);
-                };
-
-                let mut add_xor = |a: u64, b: u64, round: usize| {
-                    let c = a ^ b;
-                    assert!(a < (1 << 8));
-                    assert!(b < (1 << 8));
-                    xor_lookups[round].extend(vec![a, b, c]);
-                };
-
-                let mut add_range = |value: u64, size: usize, round: usize| {
-                    assert!(size <= 16, "{size}");
-                    range_lookups[round].push(value);
-                    if size < 16 {
-                        range_lookups[round].push(value << (16 - size));
-                        assert!(value << (16 - size) < (1 << 16));
-                    }
-                };
-
                 let mut state8: [[[u64; 8]; 5]; 5] = to_5x5x8_array(
-                    &instances
-                        [instance_id * num_cols..instance_id * num_cols + KECCAK_LAYER_BYTE_SIZE],
+                    &instances_with_rotations[instance_id * num_cols..][..KECCAK_LAYER_BYTE_SIZE],
                 );
                 let mut keccak_input32 = [[[0u64; 2]; 5]; 5];
                 for x in 0..5 {
@@ -1043,6 +1031,34 @@ where
                 let mut offset = KECCAK_LAYER_BYTE_SIZE;
                 #[allow(clippy::needless_range_loop)]
                 for round in 0..ROUNDS {
+                    // TODO use with_capacity and retrive number of lookup from circuit
+                    let mut and_lookups: Vec<u64> = vec![];
+                    let mut xor_lookups: Vec<u64> = vec![];
+                    let mut range_lookups: Vec<u64> = vec![];
+
+                    let mut add_and = |a: u64, b: u64, round: usize| {
+                        let c = a & b;
+                        assert!(a < (1 << 8));
+                        assert!(b < (1 << 8));
+                        and_lookups.extend(vec![a, b, c]);
+                    };
+
+                    let mut add_xor = |a: u64, b: u64, round: usize| {
+                        let c = a ^ b;
+                        assert!(a < (1 << 8));
+                        assert!(b < (1 << 8));
+                        xor_lookups.extend(vec![a, b, c]);
+                    };
+
+                    let mut add_range = |value: u64, size: usize, round: usize| {
+                        assert!(size <= 16, "{size}");
+                        range_lookups.push(value);
+                        if size < 16 {
+                            range_lookups.push(value << (16 - size));
+                            assert!(value << (16 - size) < (1 << 16));
+                        }
+                    };
+
                     let (
                         c_aux8,
                         _c_temp,
@@ -1055,7 +1071,8 @@ where
                         chi_output8,
                         iota_output8,
                     ) = split_from_offset!(
-                        instances[instance_id * num_cols..(instance_id + 1) * num_cols],
+                        instances_with_rotations
+                            [instance_id * num_cols..(instance_id + 1) * num_cols],
                         offset,
                         KECCAK_WIT_SIZE_PER_ROUND,
                         200,
