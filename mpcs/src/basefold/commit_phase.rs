@@ -34,7 +34,7 @@ use sumcheck::{
     structs::{IOPProverMessage, IOPProverState},
     util::{AdditiveVec, merge_sumcheck_prover_state, optimal_sumcheck_threads},
 };
-use transcript::{Challenge, Transcript};
+use transcript::{BasicTranscript, Challenge, Transcript};
 
 use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
@@ -47,6 +47,7 @@ use rayon::{
 };
 
 use super::structure::BasefoldCommitmentWithWitness;
+use super::structure::Digest;
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -376,7 +377,7 @@ pub fn batch_commit_phase_prepare<E: ExtensionField, Spec: BasefoldSpec<E>>(
     max_num_vars: usize,
     num_rounds: usize,
     circuit_num_polys: &[(usize, usize)],
-) -> (Vec<usize>, Vec<E>, VecDeque<DenseMatrix<E>>)
+) -> (Vec<usize>, Vec<E>, VecDeque<DenseMatrix<E>>, Option<Challenge<E>>, Vec<Digest<E>>)
 where
     E::BaseField: Serialize + DeserializeOwned,
     <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
@@ -487,11 +488,34 @@ where
             .collect_vec(),
     );
     exit_span!(batch_codeword_span);
-
     exit_span!(prepare_span);
 
+
+    let num_threads = optimal_sumcheck_threads(max_num_vars);
+    let log2_num_threads = log2_strict_usize(num_threads);
+    let mut commits = Vec::with_capacity(num_rounds - 1);
+
+    let mut challenge = None;
+    let sumcheck_phase1 = entered_span!("sumcheck_phase1");
+    let phase1_rounds = num_rounds.min(max_num_vars - log2_num_threads);
+    println!("[ceno] phase1_rounds: {}", phase1_rounds);
+
+    let mut batched_codewords_round = batched_codewords.clone();
+    for i in 0..phase1_rounds {
+        challenge = basefold_one_round_fri_only::<E, Spec>(
+            pp,
+            &mut batched_codewords_round,
+            transcript,
+            &mut trees,
+            &mut commits,
+            &mmcs_ext,
+            i == num_rounds - 1,
+        );
+    }
+    exit_span!(sumcheck_phase1);
+
     // witins_codeword, fixed_codeword, 
-    (batch_group_size, batch_coeffs.clone(), batched_codewords)
+    (batch_group_size, batch_coeffs.clone(), batched_codewords, challenge, commits)
 }
 
 /// basefold fri round to fold codewords
@@ -679,7 +703,7 @@ where
 
 // do sumcheck interleaving with FRI step
 #[allow(clippy::too_many_arguments)]
-fn basefold_one_round_fri_only<E: ExtensionField, Spec: BasefoldSpec<E>>(
+pub fn basefold_one_round_fri_only<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
     codewords: &mut VecDeque<RowMajorMatrix<E>>,
     transcript: &mut impl Transcript<E>,
@@ -697,7 +721,10 @@ where
     <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
         IntoIterator<Item = E::BaseField> + PartialEq,
 {
-    let next_challenge = transcript.sample_and_append_challenge(b"commit round");
+    // TODO: use real transcript
+    // let next_challenge = transcript.sample_and_append_challenge(b"commit round");
+    let mut transcript_local = BasicTranscript::<E>::new(b"commit round");
+    let next_challenge = transcript_local.sample_and_append_challenge(b"commit round");
 
     // 2. fri part
     let fri_round_span = entered_span!("basefold::fri_one_round");
