@@ -393,7 +393,7 @@ pub fn run_keccakf<E: ExtensionField>(
 
     // Omit the commit phase1 and phase2.
     let span = entered_span!("gkr_witness", profiling_1 = true);
-    let gkr_witness = layout.gkr_witness(&gkr_circuit, &phase1_witness, &[]);
+    let (gkr_witness, _gkr_output) = layout.gkr_witness(&gkr_circuit, &phase1_witness, &[]);
     exit_span!(span);
 
     let out_evals = {

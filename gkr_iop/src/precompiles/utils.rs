@@ -5,6 +5,10 @@ use p3_field::PrimeCharacteristicRing;
 
 use crate::evaluation::EvalExpression;
 
+pub fn not8_expr<E: ExtensionField>(expr: Expression<E>) -> Expression<E> {
+    E::BaseField::from_u8(0xFF).expr() - expr
+}
+
 pub fn zero_eval<E: ExtensionField>() -> EvalExpression<E> {
     EvalExpression::Linear(
         0,

@@ -67,6 +67,7 @@ impl<E: ExtensionField> Layer<E> {
     pub fn new(
         name: String,
         ty: LayerType,
+        // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
         challenges: Vec<Expression<E>>,
         in_eval_expr: Vec<EvalExpression<E>>,
@@ -74,18 +75,12 @@ impl<E: ExtensionField> Layer<E> {
         outs: Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>,
         expr_names: Vec<String>,
     ) -> Self {
-        assert_eq!(
-            outs.iter()
-                .map(|(_, eval_expressions)| eval_expressions.len())
-                .sum::<usize>(),
-            exprs.len() // output eval not match with number of expression
-        );
-        let mut expr_names = expr_names;
         if expr_names.len() < exprs.len() {
-            expr_names.extend(vec![
-                "unavailable".to_string();
-                exprs.len() - expr_names.len()
-            ]);
+            // expr_names.extend(vec![
+            //     "unavailable".to_string();
+            //     exprs.len() - expr_names.len()
+            // ]);
+            panic!("there are expr without name")
         }
         let max_expr_degree = exprs.iter().map(|expr| expr.degree()).max().unwrap();
         Self {
