@@ -19,7 +19,7 @@ use crate::{
     chip::Chip,
     evaluation::EvalExpression,
     gkr::{
-        GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
+        GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
     },
     precompiles::utils::{MaskRepresentation, not8_expr},
@@ -336,7 +336,7 @@ pub const XOR_LOOKUPS: usize = ROUNDS * XOR_LOOKUPS_PER_ROUND;
 pub const RANGE_LOOKUPS: usize = ROUNDS * RANGE_LOOKUPS_PER_ROUND;
 
 pub const KECCAK_OUT_EVAL_SIZE: usize =
-    KECCAK_INPUT_SIZE + KECCAK_OUTPUT_SIZE + LOOKUP_FELTS_PER_ROUND * ROUNDS;
+    KECCAK_INPUT_SIZE + KECCAK_OUTPUT_SIZE + LOOKUP_FELTS_PER_ROUND;
 
 pub const KECCAK_WIT_SIZE_PER_ROUND: usize = 1264;
 pub const KECCAK_WIT_SIZE: usize = KECCAK_WIT_SIZE_PER_ROUND * ROUNDS + KECCAK_LAYER_BYTE_SIZE;
@@ -767,7 +767,7 @@ pub struct KeccakTrace {
     pub instances: Vec<[u32; KECCAK_INPUT_SIZE]>,
 }
 
-impl<E> ProtocolWitnessGenerator<E> for KeccakLayout<E>
+impl<'a, E> ProtocolWitnessGenerator<'a, E> for KeccakLayout<E>
 where
     E: ExtensionField,
 {
@@ -950,9 +950,8 @@ where
                 }
 
                 // padding to next_power_of_2 rounds for rotation
-                wits.par_extend(
+                wits.extend(
                     (0..(ROUNDS.next_power_of_two() - ROUNDS) * KECCAK_WIT_SIZE_PER_ROUND)
-                        .into_par_iter()
                         .map(|_| E::BaseField::ZERO),
                 );
                 wits
@@ -967,11 +966,12 @@ where
 
     fn gkr_witness(
         &self,
+        _circuit: &GKRCircuit<E>,
         phase1: &RowMajorMatrix<E::BaseField>,
         _challenges: &[E],
-    ) -> (GKRCircuitWitness<E>, GKRCircuitOutput<E>) {
-        // TODO: fix efficient as here convert basefield back to u64
-        let instances_with_rotations = phase1
+    ) -> (GKRCircuitWitness<'a, E>, GKRCircuitOutput<E>) {
+        // TODO: fix efficient as here as it convert felts back to u64
+        let instances_rounds = phase1
             .values
             .par_iter()
             .map(|wit| wit.to_canonical_u64())
@@ -1018,9 +1018,16 @@ where
         // process output bases
         let output_bases: Vec<u64> = (0..num_instances_with_rotations)
             .into_par_iter()
-            .flat_map(|instance_id| {
+            .flat_map(|instance_round_id| {
+                let round = instance_round_id % ROUNDS.next_power_of_two();
+
+                if round >= ROUNDS {
+                    // padding with zero
+                    return vec![0; KECCAK_OUT_EVAL_SIZE];
+                }
+
                 let mut state8: [[[u64; 8]; 5]; 5] = to_5x5x8_array(
-                    &instances_with_rotations[instance_id * num_cols..][..KECCAK_LAYER_BYTE_SIZE],
+                    &instances_rounds[instance_round_id * num_cols..][..KECCAK_LAYER_BYTE_SIZE],
                 );
                 let mut keccak_input32 = [[[0u64; 2]; 5]; 5];
                 for x in 0..5 {
@@ -1029,178 +1036,175 @@ where
                     }
                 }
                 let mut offset = KECCAK_LAYER_BYTE_SIZE;
-                #[allow(clippy::needless_range_loop)]
-                for round in 0..ROUNDS {
-                    // TODO use with_capacity and retrive number of lookup from circuit
-                    let mut and_lookups: Vec<u64> = vec![];
-                    let mut xor_lookups: Vec<u64> = vec![];
-                    let mut range_lookups: Vec<u64> = vec![];
+                // #[allow(clippy::needless_range_loop)]
+                // for round in 0..ROUNDS {
+                // TODO use with_capacity and retrive number of lookup from circuit
+                let mut and_lookups: Vec<u64> = vec![];
+                let mut xor_lookups: Vec<u64> = vec![];
+                let mut range_lookups: Vec<u64> = vec![];
 
-                    let mut add_and = |a: u64, b: u64, round: usize| {
-                        let c = a & b;
-                        assert!(a < (1 << 8));
-                        assert!(b < (1 << 8));
-                        and_lookups.extend(vec![a, b, c]);
-                    };
+                let mut add_and = |a: u64, b: u64| {
+                    let c = a & b;
+                    assert!(a < (1 << 8));
+                    assert!(b < (1 << 8));
+                    and_lookups.extend(vec![a, b, c]);
+                };
 
-                    let mut add_xor = |a: u64, b: u64, round: usize| {
-                        let c = a ^ b;
-                        assert!(a < (1 << 8));
-                        assert!(b < (1 << 8));
-                        xor_lookups.extend(vec![a, b, c]);
-                    };
+                let mut add_xor = |a: u64, b: u64| {
+                    let c = a ^ b;
+                    assert!(a < (1 << 8));
+                    assert!(b < (1 << 8));
+                    xor_lookups.extend(vec![a, b, c]);
+                };
 
-                    let mut add_range = |value: u64, size: usize, round: usize| {
-                        assert!(size <= 16, "{size}");
-                        range_lookups.push(value);
-                        if size < 16 {
-                            range_lookups.push(value << (16 - size));
-                            assert!(value << (16 - size) < (1 << 16));
-                        }
-                    };
-
-                    let (
-                        c_aux8,
-                        _c_temp,
-                        crot8,
-                        d8,
-                        theta_state8,
-                        _rotation_witness,
-                        rhopi_output8,
-                        nonlinear8,
-                        chi_output8,
-                        iota_output8,
-                    ) = split_from_offset!(
-                        instances_with_rotations
-                            [instance_id * num_cols..(instance_id + 1) * num_cols],
-                        offset,
-                        KECCAK_WIT_SIZE_PER_ROUND,
-                        200,
-                        30,
-                        40,
-                        40,
-                        200,
-                        146,
-                        200,
-                        200,
-                        8,
-                        200
-                    );
-                    offset += KECCAK_WIT_SIZE_PER_ROUND;
-                    let c_aux8 = to_5x5x8_array(&c_aux8);
-
-                    for i in 0..5 {
-                        for j in 1..5 {
-                            for k in 0..8 {
-                                add_xor(c_aux8[i][j - 1][k], state8[j][i][k], round);
-                            }
-                        }
+                let mut add_range = |value: u64, size: usize| {
+                    assert!(size <= 16, "{size}");
+                    range_lookups.push(value);
+                    if size < 16 {
+                        range_lookups.push(value << (16 - size));
+                        assert!(value << (16 - size) < (1 << 16));
                     }
+                };
 
-                    let mut c8 = [[0u64; 8]; 5];
-                    let mut c64 = [0u64; 5];
+                let (
+                    c_aux8,
+                    _c_temp,
+                    crot8,
+                    d8,
+                    theta_state8,
+                    _rotation_witness,
+                    rhopi_output8,
+                    nonlinear8,
+                    chi_output8,
+                    iota_output8,
+                ) = split_from_offset!(
+                    instances_rounds[instance_round_id * num_cols..][..num_cols],
+                    offset,
+                    KECCAK_WIT_SIZE_PER_ROUND,
+                    200,
+                    30,
+                    40,
+                    40,
+                    200,
+                    146,
+                    200,
+                    200,
+                    8,
+                    200
+                );
+                offset += KECCAK_WIT_SIZE_PER_ROUND;
+                let c_aux8 = to_5x5x8_array(&c_aux8);
 
-                    for x in 0..5 {
-                        c8[x] = c_aux8[x][4];
-                        c64[x] = u8_slice_to_u64(&c8[x]);
-                    }
-
-                    for i in 0..5 {
-                        let rep = MaskRepresentation::new(vec![(64, c64[i]).into()])
-                            .convert(vec![16, 15, 1, 16, 15, 1]);
-                        for mask in rep.rep {
-                            add_range(mask.value, mask.size, round);
-                        }
-                    }
-
-                    let crot8 = to_5x8_array(&crot8);
-                    let d8 = to_5x8_array(&d8);
-                    for x in 0..5 {
+                for i in 0..5 {
+                    for j in 1..5 {
                         for k in 0..8 {
-                            add_xor(c_aux8[(x + 4) % 5][4][k], crot8[(x + 1) % 5][k], round);
+                            add_xor(c_aux8[i][j - 1][k], state8[j][i][k]);
                         }
                     }
-
-                    let theta_state8 = to_5x5x8_array(&theta_state8);
-                    let mut theta_state64 = [[0u64; 5]; 5];
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            theta_state64[y][x] = u8_slice_to_u64(&theta_state8[y][x]);
-                        }
-                    }
-
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            for k in 0..8 {
-                                add_xor(state8[y][x][k], d8[x][k], round);
-                            }
-
-                            let (sizes, _) = rotation_split(ROTATION_CONSTANTS[y][x]);
-                            let rep =
-                                MaskRepresentation::new(vec![(64, theta_state64[y][x]).into()])
-                                    .convert(sizes);
-                            for mask in rep.rep.iter() {
-                                if mask.size != 32 {
-                                    add_range(mask.value, mask.size, round);
-                                }
-                            }
-                        }
-                    }
-
-                    // Rho and Pi steps
-                    let rhopi_output8 = to_5x5x8_array(&rhopi_output8);
-
-                    // Chi step
-                    let nonlinear8 = to_5x5x8_array(&nonlinear8);
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            for k in 0..8 {
-                                add_and(
-                                    0xFF - rhopi_output8[y][(x + 1) % 5][k],
-                                    rhopi_output8[y][(x + 2) % 5][k],
-                                    round,
-                                );
-                            }
-                        }
-                    }
-
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            for k in 0..8 {
-                                add_xor(rhopi_output8[y][x][k], nonlinear8[y][x][k], round)
-                            }
-                        }
-                    }
-
-                    // Iota step
-                    let chi_output8: [u64; 8] = chi_output8.try_into().unwrap(); // only save chi_output8[0][0];
-                    let iota_output8 = to_5x5x8_array(&iota_output8);
-                    for k in 0..8 {
-                        add_xor(chi_output8[k], (RC[round] >> (k * 8)) & 0xFF, round);
-                    }
-
-                    state8 = iota_output8;
                 }
+
+                let mut c8 = [[0u64; 8]; 5];
+                let mut c64 = [0u64; 5];
+
+                for x in 0..5 {
+                    c8[x] = c_aux8[x][4];
+                    c64[x] = u8_slice_to_u64(&c8[x]);
+                }
+
+                for i in 0..5 {
+                    let rep = MaskRepresentation::new(vec![(64, c64[i]).into()])
+                        .convert(vec![16, 15, 1, 16, 15, 1]);
+                    for mask in rep.rep {
+                        add_range(mask.value, mask.size);
+                    }
+                }
+
+                let crot8 = to_5x8_array(&crot8);
+                let d8 = to_5x8_array(&d8);
+                for x in 0..5 {
+                    for k in 0..8 {
+                        add_xor(c_aux8[(x + 4) % 5][4][k], crot8[(x + 1) % 5][k]);
+                    }
+                }
+
+                let theta_state8 = to_5x5x8_array(&theta_state8);
+                let mut theta_state64 = [[0u64; 5]; 5];
+                for x in 0..5 {
+                    for y in 0..5 {
+                        theta_state64[y][x] = u8_slice_to_u64(&theta_state8[y][x]);
+                    }
+                }
+
+                for x in 0..5 {
+                    for y in 0..5 {
+                        for k in 0..8 {
+                            add_xor(state8[y][x][k], d8[x][k]);
+                        }
+
+                        let (sizes, _) = rotation_split(ROTATION_CONSTANTS[y][x]);
+                        let rep = MaskRepresentation::new(vec![(64, theta_state64[y][x]).into()])
+                            .convert(sizes);
+                        for mask in rep.rep.iter() {
+                            if mask.size != 32 {
+                                add_range(mask.value, mask.size);
+                            }
+                        }
+                    }
+                }
+
+                // Rho and Pi steps
+                let rhopi_output8 = to_5x5x8_array(&rhopi_output8);
+
+                // Chi step
+                let nonlinear8 = to_5x5x8_array(&nonlinear8);
+                for x in 0..5 {
+                    for y in 0..5 {
+                        for k in 0..8 {
+                            add_and(
+                                0xFF - rhopi_output8[y][(x + 1) % 5][k],
+                                rhopi_output8[y][(x + 2) % 5][k],
+                            );
+                        }
+                    }
+                }
+
+                for x in 0..5 {
+                    for y in 0..5 {
+                        for k in 0..8 {
+                            add_xor(rhopi_output8[y][x][k], nonlinear8[y][x][k])
+                        }
+                    }
+                }
+
+                // Iota step
+                let chi_output8: [u64; 8] = chi_output8.try_into().unwrap(); // only save chi_output8[0][0];
+                let iota_output8 = to_5x5x8_array(&iota_output8);
+
+                for k in 0..8 {
+                    add_xor(chi_output8[k], (RC[round] >> (k * 8)) & 0xFF);
+                }
+
+                // }
 
                 let mut keccak_output32 = [[[0u64; 2]; 5]; 5];
                 for x in 0..5 {
                     for y in 0..5 {
-                        keccak_output32[x][y] = u8_slice_to_u32_slice(&state8[x][y]);
+                        keccak_output32[x][y] = u8_slice_to_u32_slice(&iota_output8[x][y]);
                     }
                 }
 
                 chain!(
                     keccak_output32.into_iter().flatten().flatten(),
                     keccak_input32.into_iter().flatten().flatten(),
-                    (0..ROUNDS).rev().flat_map(|i| and_lookups[i].clone()),
-                    (0..ROUNDS).rev().flat_map(|i| xor_lookups[i].clone()),
-                    (0..ROUNDS).rev().flat_map(|i| range_lookups[i].clone())
+                    and_lookups,
+                    xor_lookups,
+                    range_lookups
                 )
                 .collect_vec()
             })
             .collect();
 
-        let bases = phase1.to_cols_base::<E>();
+        let bases = phase1.to_mles().into_iter().map(Arc::new).collect_vec();
         let output_bases = RowMajorMatrix::new_by_values(
             output_bases
                 .into_iter()
@@ -1209,7 +1213,10 @@ where
             KECCAK_OUT_EVAL_SIZE,
             InstancePaddingStrategy::Default,
         )
-        .to_cols_base::<E>();
+        .to_mles()
+        .into_iter()
+        .map(Arc::new)
+        .collect_vec();
 
         (
             GKRCircuitWitness {

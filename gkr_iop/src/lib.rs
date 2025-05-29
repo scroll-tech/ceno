@@ -59,7 +59,7 @@ where
         circuit: &GKRCircuit<E>,
         phase1_witness_group: &RowMajorMatrix<E::BaseField>,
         challenges: &[E],
-    ) -> GKRCircuitWitness<'a, E> {
+    ) -> (GKRCircuitWitness<'a, E>, GKRCircuitOutput<E>) {
         // layer order from output to input
         let n_layers = 100;
         let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(n_layers + 1);
@@ -122,7 +122,8 @@ where
 
         layer_wits.reverse();
 
-        GKRCircuitWitness { layers: layer_wits }
+        GKRCircuitWitness { layers: layer_wits };
+        unimplemented!()
     }
 }
 
