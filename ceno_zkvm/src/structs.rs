@@ -67,6 +67,7 @@ pub enum RAMType {
 
 pub struct ProofInput<PB: ProverBackend> {
     pub witness: Vec<PB::MultilinearPoly>,
+    pub structural_witness: Vec<PB::MultilinearPoly>,
     pub public_input: Vec<PB::MultilinearPoly>,
     pub num_instances: usize,
 }

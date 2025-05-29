@@ -1,10 +1,11 @@
+use std::{collections::BTreeMap, sync::Arc};
+
 use crate::{
     circuit_builder::ConstraintSystem,
-    structs::{ProofInput, TowerProofs},
+    structs::{ProofInput, TowerProofs, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
-use mpcs::Point;
-use multilinear_extensions::Expression;
+use mpcs::{Point, PolynomialCommitmentScheme};
 use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
@@ -12,6 +13,7 @@ use witness::RowMajorMatrix;
 
 pub trait ProverBackend {
     type E: ExtensionField;
+    type Pcs: PolynomialCommitmentScheme<Self::E>;
     type PcsOpeningProof: Clone + Serialize + DeserializeOwned;
 
     type MultilinearPoly: Send + Sync;
@@ -44,10 +46,12 @@ pub trait TowerProver<PB: ProverBackend> {
     // and then build a complete binary tree to accumulate these records
     fn build_tower_witness(
         &self,
+        pk: &DeviceProvingKey<PB>,
         cs: &ConstraintSystem<PB::E>,
         input: &ProofInput<PB>,
         challenge: &[PB::E; 2],
     ) -> (
+        Vec<Vec<Vec<PB::E>>>,
         Vec<Vec<PB::MultilinearPoly>>,
         Vec<TowerProverSpec<PB>>,
         Vec<TowerProverSpec<PB>>,
@@ -81,7 +85,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
         cs: &ConstraintSystem<PB::E>,
         challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
-    ) -> (Point<PB::E>, Vec<IOPProverMessage<PB::E>>);
+    ) -> (Point<PB::E>, Option<Vec<IOPProverMessage<PB::E>>>);
 }
 
 pub trait OpeningProver<PB: ProverBackend> {
@@ -93,4 +97,16 @@ pub trait OpeningProver<PB: ProverBackend> {
         evals: Vec<PB::E>,
         transcript: &mut impl Transcript<PB::E>,
     ) -> PB::PcsOpeningProof;
+}
+
+pub struct DeviceProvingKey<PB: ProverBackend> {
+    pub fixed_polys: BTreeMap<String, Vec<PB::MultilinearPoly>>,
+    pub pcs_data: PB::PcsData,
+}
+
+pub trait DeviceProvingKeyTransporter<PB: ProverBackend> {
+    fn transport_proving_key(
+        &self,
+        proving_key: Arc<ZKVMProvingKey<PB::E, PB::Pcs>>,
+    ) -> DeviceProvingKey<PB>;
 }

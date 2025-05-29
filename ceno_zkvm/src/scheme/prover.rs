@@ -1,41 +1,28 @@
-use core::num;
 use ff_ext::ExtensionField;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Expression,
-    mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension},
+    mle::{ArcMultilinearExtension, IntoMLE},
     util::ceil_log2,
-    virtual_poly::build_eq_x_r_vec,
-    virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::PrimeCharacteristicRing;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::{IOPProverMessage, IOPProverState},
-    util::optimal_sumcheck_threads,
+    structs::IOPProverMessage,
 };
 use transcript::Transcript;
 use witness::{RowMajorMatrix, next_pow2_instance_padding};
 
 use crate::{
     error::ZKVMError,
-    scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP},
-        hal::TowerProverSpec,
-        utils::{
-            infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
-            wit_infer_by_expr,
-        },
-    },
-    structs::{ProofInput, ProvingKey, TowerProofs, TowerProver, ZKVMProvingKey, ZKVMWitnesses},
-    utils::{add_mle_list_by_expr, get_challenge_pows},
+    scheme::constants::NUM_FANIN_LOGUP,
+    structs::{ProofInput, ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
-use multilinear_extensions::{Instance, mle::FieldType};
+use multilinear_extensions::Instance;
 
 use super::{
     PublicValues, ZKVMChipProof, ZKVMProof,
@@ -356,8 +343,12 @@ impl<
             public_input: pi.to_vec(),
             num_instances,
         };
-        let (records, prod_specs, lookup_specs) =
+        let (out_evals, records, prod_specs, lookup_specs) =
             self.device.build_tower_witness(cs, &input, challenges);
+
+        let lk_out_evals = out_evals.pop().unwrap();
+        let w_out_evals = out_evals.pop().unwrap();
+        let r_out_evals = out_evals.pop().unwrap();
 
         let (rt_tower, tower_proof) =
             self.device
@@ -368,9 +359,10 @@ impl<
             log2_num_instances,
         );
 
-        let r_reads = records.drain(0..num_reads).collect_vec();
-        let w_records = records.drain(0..num_writes).collect_vec();
-        let lk_records = records;
+        let lk_records = records.pop().unwrap();
+        let r_records = records.pop().unwrap();
+        let w_records = records.pop().unwrap();
+        assert!(records.is_empty());
 
         let (input_opening_point, main_sumcheck_proofs) = self.device.prove_main_constraints(
             rt_tower,
