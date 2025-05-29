@@ -417,7 +417,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let main_sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {
-                point: vec![], // final claimed point will be derive from sumcheck protocol
                 proofs: proof.main_sumcheck_proofs.as_ref().unwrap().clone(),
             },
             &VPAuxInfo {
@@ -734,7 +733,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let sel_subclaim = IOPVerifierState::verify(
                 claim_sum,
                 &IOPProof {
-                    point: vec![], // final claimed point will be derived from sumcheck protocol
                     proofs: proof.main_sumcheck_proofs.clone().unwrap(),
                 },
                 &VPAuxInfo {
@@ -906,7 +904,6 @@ impl TowerVerify {
                 let sumcheck_claim = IOPVerifierState::verify(
                     *out_claim,
                     &IOPProof {
-                        point: vec![], // final claimed point will be derived from sumcheck protocol
                         proofs: tower_proofs.proofs[round].clone(),
                     },
                     &VPAuxInfo {

@@ -142,7 +142,7 @@ fn test_sumcheck_internal<E: ExtensionField>(
     }
     // pushing the last challenge point to the state
     if let Some(p) = challenge {
-        prover_state.challenges.push(p);
+        prover_state.push_challenges(vec![p]);
         // fix last challenge to collect final evaluation
         prover_state.fix_var(p.elements);
     };

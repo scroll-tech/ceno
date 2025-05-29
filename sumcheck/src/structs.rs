@@ -1,7 +1,5 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::{
-    mle::Point, virtual_poly::VirtualPolynomial, virtual_polys::PolyMeta,
-};
+use multilinear_extensions::{virtual_poly::VirtualPolynomial, virtual_polys::PolyMeta};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use transcript::Challenge;
 
@@ -14,7 +12,6 @@ use transcript::Challenge;
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct IOPProof<E: ExtensionField> {
-    pub point: Point<E>,
     pub proofs: Vec<IOPProverMessage<E>>,
 }
 impl<E: ExtensionField> IOPProof<E> {
