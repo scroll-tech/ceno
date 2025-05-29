@@ -254,6 +254,7 @@ where
     let mut challenge = None;
     let sumcheck_phase1 = entered_span!("sumcheck_phase1");
     let phase1_rounds = num_rounds.min(max_num_vars - log2_num_threads);
+    println!("[ceno] phase1_rounds: {}", phase1_rounds);
 
     for i in 0..phase1_rounds {
         challenge = basefold_one_round::<E, Spec>(
@@ -375,7 +376,7 @@ pub fn batch_commit_phase_prepare<E: ExtensionField, Spec: BasefoldSpec<E>>(
     max_num_vars: usize,
     num_rounds: usize,
     circuit_num_polys: &[(usize, usize)],
-) -> (Vec<usize>, Vec<E>, Vec<DenseMatrix<E>>)
+) -> (Vec<usize>, Vec<E>, VecDeque<DenseMatrix<E>>)
 where
     E::BaseField: Serialize + DeserializeOwned,
     <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
@@ -478,47 +479,19 @@ where
             .all_equal()
     );
 
+    // sorted batch codewords by height in descending order
+    let batched_codewords = VecDeque::from(
+        batched_codewords
+            .into_iter()
+            .sorted_by_key(|codeword| std::cmp::Reverse(codeword.height()))
+            .collect_vec(),
+    );
+    exit_span!(batch_codeword_span);
+
+    exit_span!(prepare_span);
+
     // witins_codeword, fixed_codeword, 
     (batch_group_size, batch_coeffs.clone(), batched_codewords)
-
-    // // sorted batch codewords by height in descending order
-    // let mut batched_codewords = VecDeque::from(
-    //     batched_codewords
-    //         .into_iter()
-    //         .sorted_by_key(|codeword| std::cmp::Reverse(codeword.height()))
-    //         .collect_vec(),
-    // );
-    // exit_span!(batch_codeword_span);
-
-    // let batched_evals = entered_span!("batched_evals");
-    // let mut initial_rlc_evals: Vec<MultilinearExtension<E>> = witin_concat_with_fixed_polys
-    //     .par_iter()
-    //     .zip_eq(batch_coeffs_splitted.par_iter())
-    //     .map(|(witin_fixed_mle, batch_coeffs)| {
-    //         assert_eq!(witin_fixed_mle.len(), batch_coeffs.len());
-    //         let num_vars = witin_fixed_mle[0].num_vars();
-    //         let mle_base_vec = witin_fixed_mle
-    //             .iter()
-    //             .map(|mle| mle.get_base_field_vec())
-    //             .collect_vec();
-    //         let running_evals: MultilinearExtension<_> =
-    //             MultilinearExtension::from_evaluation_vec_smart(
-    //                 num_vars,
-    //                 (0..witin_fixed_mle[0].evaluations().len())
-    //                     .into_par_iter()
-    //                     .map(|j| {
-    //                         dot_product(
-    //                             batch_coeffs.iter().copied(),
-    //                             mle_base_vec.iter().map(|mle| mle[j]),
-    //                         )
-    //                     })
-    //                     .collect::<Vec<E>>(),
-    //             );
-    //         running_evals
-    //     })
-    //     .collect::<Vec<_>>();
-    // exit_span!(batched_evals);
-    // exit_span!(prepare_span);
 }
 
 /// basefold fri round to fold codewords
@@ -574,6 +547,7 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
         == 1
         && codewords_next_level_matched.is_empty()
     {
+        println!("[ceno] single codeword match");
         RowMajorMatrix::new(
             running_codeword_opt
                 .or_else(|| codewords_matched.first().map(|m| m.as_view()))
@@ -586,6 +560,7 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
             2,
         )
     } else {
+        println!("[ceno] multiple codewords match");
         // aggregate codeword with same length
         let codeword_to_fold = (0..target_len)
             .into_par_iter()
@@ -683,6 +658,45 @@ where
     });
     exit_span!(sumcheck_round_span);
 
+    let next_challenge = transcript.sample_and_append_challenge(b"commit round");
+
+    // 2. fri part
+    let fri_round_span = entered_span!("basefold::fri_one_round");
+    basefold_fri_round::<E, Spec>(
+        pp,
+        codewords,
+        trees,
+        commits,
+        mmcs_ext,
+        next_challenge.elements,
+        is_last_round,
+        transcript,
+    );
+    exit_span!(fri_round_span);
+
+    Some(next_challenge)
+}
+
+// do sumcheck interleaving with FRI step
+#[allow(clippy::too_many_arguments)]
+fn basefold_one_round_fri_only<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    codewords: &mut VecDeque<RowMajorMatrix<E>>,
+    transcript: &mut impl Transcript<E>,
+    trees: &mut Vec<MerkleTreeExt<E>>,
+    commits: &mut Vec<<Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment>,
+    mmcs_ext: &ExtensionMmcs<
+        E::BaseField,
+        E,
+        <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
+    >,
+    is_last_round: bool,
+) -> Option<Challenge<E>>
+where
+    E::BaseField: Serialize + DeserializeOwned,
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
     let next_challenge = transcript.sample_and_append_challenge(b"commit round");
 
     // 2. fri part
