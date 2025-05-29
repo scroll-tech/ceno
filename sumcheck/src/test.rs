@@ -1,6 +1,6 @@
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
-    util::{ceil_log2, interpolate_uni_poly},
+    util::{ceil_log2, extrapolate_uni_poly},
 };
 use either::Either;
 use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
@@ -208,9 +208,9 @@ fn test_extract_sum_helper<E: ExtensionField>() {
 struct DensePolynomial(Vec<GoldilocksExt2>);
 
 impl DensePolynomial {
-    fn rand<R: Rng>(degree: usize, rng: &mut R) -> Self {
+    fn rand_coeffs<R: Rng>(degree: usize, rng: &mut R) -> Self {
         Self(
-            (0..degree)
+            (0..=degree)
                 .map(|_| GoldilocksExt2::random(&mut *rng))
                 .collect(),
         )
@@ -228,33 +228,19 @@ impl DensePolynomial {
 }
 
 #[test]
-fn test_interpolation() {
-    let mut prng = rand::thread_rng();
+fn test_extrapolation() {
+    fn run_extrapolation_test(degree: usize) {
+        let mut prng = rand::thread_rng();
+        let poly = DensePolynomial::rand_coeffs(degree, &mut prng);
+        let evals = (0..=degree)
+            .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
+            .collect::<Vec<_>>();
+        let query = GoldilocksExt2::random(&mut prng);
+        assert_eq!(poly.evaluate(&query), extrapolate_uni_poly(&evals, query));
+    }
 
-    // test a polynomial with 20 known points, i.e., with degree 19
-    let poly = DensePolynomial::rand(20 - 1, &mut prng);
-    let evals = (0..20)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
-        .collect::<Vec<GoldilocksExt2>>();
-    let query = GoldilocksExt2::random(&mut prng);
-
-    assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query));
-
-    // test a polynomial with 33 known points, i.e., with degree 32
-    let poly = DensePolynomial::rand(33 - 1, &mut prng);
-    let evals = (0..33)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
-        .collect::<Vec<GoldilocksExt2>>();
-    let query = GoldilocksExt2::random(&mut prng);
-
-    assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query));
-
-    // test a polynomial with 64 known points, i.e., with degree 63
-    let poly = DensePolynomial::rand(64 - 1, &mut prng);
-    let evals = (0..64)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
-        .collect::<Vec<GoldilocksExt2>>();
-    let query = GoldilocksExt2::random(&mut prng);
-
-    assert_eq!(poly.evaluate(&query), interpolate_uni_poly(&evals, query));
+    run_extrapolation_test(1);
+    run_extrapolation_test(2);
+    run_extrapolation_test(3);
+    run_extrapolation_test(4);
 }

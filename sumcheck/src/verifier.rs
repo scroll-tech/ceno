@@ -7,7 +7,7 @@ use transcript::{Challenge, Transcript};
 
 use crate::{
     structs::{IOPProof, IOPProverMessage, IOPVerifierState, SumCheckSubClaim},
-    util::interpolate_uni_poly,
+    util::extrapolate_uni_poly,
 };
 
 impl<E: ExtensionField> IOPVerifierState<E> {
@@ -134,7 +134,7 @@ impl<E: ExtensionField> IOPVerifierState<E> {
                         self.max_degree + 1
                     );
                 }
-                interpolate_uni_poly::<E>(evaluations, challenge.elements)
+                extrapolate_uni_poly::<E>(evaluations, challenge.elements)
             })
             .collect::<Vec<_>>();
 
