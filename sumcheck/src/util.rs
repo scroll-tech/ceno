@@ -140,15 +140,24 @@ fn inner_extrapolate<F: Field, const IS_PARALLEL: bool>(
 ///   evaluation at degree 1:
 ///   - Two inverses for the distances `d0 = x - x0`, `d1 = x - x1`
 ///   - One inverse for the final normalization term
+///
+/// barycentric weights `w` are for polynomial interpolation.
+/// for a fixed set of interpolation points {x_0, x_1, ..., x_n}, the barycentric weight w_j is defined as:
+/// w_j = 1 / ∏_{k ≠ j} (x_j - x_k)
+/// these weights are used in the barycentric form of Lagrange interpolation, which allows
+/// for efficient evaluation of the interpolating polynomial at any other point
+/// The weights depend only on the interpolation nodes and can be precomputed once
 fn extrapolate_uni_poly_deg_1<F: Field>(p_i: &[F; 2], eval_at: F) -> F {
     let x0 = F::ZERO;
     let x1 = F::ONE;
 
-    let w0 = F::ONE;
-    let w1 = -F::ONE;
+    // w0 = 1 / (0−1) = -1
+    // w1 = 1 / (1−0) =  1
+    let w0 = -F::ONE;
+    let w1 = F::ONE;
 
-    let d0 = eval_at - x0; // = eval_at
-    let d1 = eval_at - x1; // = eval_at - 1
+    let d0 = eval_at - x0;
+    let d1 = eval_at - x1;
 
     let inv_d0 = d0.inverse();
     let inv_d1 = d1.inverse();
@@ -167,9 +176,12 @@ fn extrapolate_uni_poly_deg_2<F: Field>(p_i: &[F; 3], eval_at: F) -> F {
     let x1 = F::from_u64(1);
     let x2 = F::from_u64(2);
 
-    let w0 = F::from_u64(1).div(F::from_u64(2)); // 1/2
+    // w0 = 1 / ((0−1)(0−2)) =  1/2
+    // w1 = 1 / ((1−0)(1−2)) = -1
+    // w2 = 1 / ((2−0)(2−1)) =  1/2
+    let w0 = F::from_u64(1).div(F::from_u64(2));
     let w1 = -F::ONE;
-    let w2 = F::from_u64(1).div(F::from_u64(2)); // 1/2
+    let w2 = F::from_u64(1).div(F::from_u64(2));
 
     let d0 = eval_at - x0;
     let d1 = eval_at - x1;
@@ -196,10 +208,14 @@ fn extrapolate_uni_poly_deg_3<F: Field>(p_i: &[F; 4], eval_at: F) -> F {
     let x2 = F::from_u64(2);
     let x3 = F::from_u64(3);
 
-    let w0 = -F::from_u64(1).div(F::from_u64(6)); // -1/6
-    let w1 = F::from_u64(1).div(F::from_u64(2)); // 1/2
-    let w2 = -F::from_u64(1).div(F::from_u64(2)); // -1/2
-    let w3 = F::from_u64(1).div(F::from_u64(6)); // 1/6
+    // w0 = 1 / ((0−1)(0−2)(0−3)) = -1/6
+    // w1 = 1 / ((1−0)(1−2)(1−3)) =  1/2
+    // w2 = 1 / ((2−0)(2−1)(2−3)) = -1/2
+    // w3 = 1 / ((3−0)(3−1)(3−2)) =  1/6
+    let w0 = -F::from_u64(1).div(F::from_u64(6));
+    let w1 = F::from_u64(1).div(F::from_u64(2));
+    let w2 = -F::from_u64(1).div(F::from_u64(2));
+    let w3 = F::from_u64(1).div(F::from_u64(6));
 
     let d0 = eval_at - x0;
     let d1 = eval_at - x1;
@@ -231,11 +247,16 @@ fn extrapolate_uni_poly_deg_4<F: Field>(p_i: &[F; 5], eval_at: F) -> F {
     let x3 = F::from_u64(3);
     let x4 = F::from_u64(4);
 
-    let w0 = F::from_u64(1).div(F::from_u64(24)); // 1/24
-    let w1 = -F::from_u64(1).div(F::from_u64(6)); // -1/6
-    let w2 = F::from_u64(1).div(F::from_u64(4)); // 1/4
-    let w3 = -F::from_u64(1).div(F::from_u64(6)); // -1/6
-    let w4 = F::from_u64(1).div(F::from_u64(24)); // 1/24
+    // w0 = 1 / ((0−1)(0−2)(0−3)(0−4)) =  1/24
+    // w1 = 1 / ((1−0)(1−2)(1−3)(1−4)) = -1/6
+    // w2 = 1 / ((2−0)(2−1)(2−3)(2−4)) =  1/4
+    // w3 = 1 / ((3−0)(3−1)(3−2)(3−4)) = -1/6
+    // w4 = 1 / ((4−0)(4−1)(4−2)(4−3)) =  1/24
+    let w0 = F::from_u64(1).div(F::from_u64(24));
+    let w1 = -F::from_u64(1).div(F::from_u64(6));
+    let w2 = F::from_u64(1).div(F::from_u64(4));
+    let w3 = -F::from_u64(1).div(F::from_u64(6));
+    let w4 = F::from_u64(1).div(F::from_u64(24));
 
     let d0 = eval_at - x0;
     let d1 = eval_at - x1;
