@@ -136,17 +136,6 @@ fn inner_extrapolate<F: Field, const IS_PARALLEL: bool>(
         * sum_inv
 }
 
-/// this implementation uses exactly 3 field inversions, which is optimal for barycentric
-///   evaluation at degree 1:
-///   - Two inverses for the distances `d0 = x - x0`, `d1 = x - x1`
-///   - One inverse for the final normalization term
-///
-/// barycentric weights `w` are for polynomial interpolation.
-/// for a fixed set of interpolation points {x_0, x_1, ..., x_n}, the barycentric weight w_j is defined as:
-/// w_j = 1 / ∏_{k ≠ j} (x_j - x_k)
-/// these weights are used in the barycentric form of Lagrange interpolation, which allows
-/// for efficient evaluation of the interpolating polynomial at any other point
-/// The weights depend only on the interpolation nodes and can be precomputed once
 fn extrapolate_uni_poly_deg_1<F: Field>(p_i: &[F; 2], eval_at: F) -> F {
     let x0 = F::ZERO;
     let x1 = F::ONE;
@@ -159,16 +148,14 @@ fn extrapolate_uni_poly_deg_1<F: Field>(p_i: &[F; 2], eval_at: F) -> F {
     let d0 = eval_at - x0;
     let d1 = eval_at - x1;
 
+    let l = d0 * d1;
     let inv_d0 = d0.inverse();
     let inv_d1 = d1.inverse();
 
     let t0 = w0 * p_i[0] * inv_d0;
     let t1 = w1 * p_i[1] * inv_d1;
 
-    let b0 = w0 * inv_d0;
-    let b1 = w1 * inv_d1;
-
-    (t0 + t1) * (b0 + b1).inverse()
+    l * (t0 + t1)
 }
 
 fn extrapolate_uni_poly_deg_2<F: Field>(p_i: &[F; 3], eval_at: F) -> F {
@@ -187,6 +174,8 @@ fn extrapolate_uni_poly_deg_2<F: Field>(p_i: &[F; 3], eval_at: F) -> F {
     let d1 = eval_at - x1;
     let d2 = eval_at - x2;
 
+    let l = d0 * d1 * d2;
+
     let inv_d0 = d0.inverse();
     let inv_d1 = d1.inverse();
     let inv_d2 = d2.inverse();
@@ -195,11 +184,7 @@ fn extrapolate_uni_poly_deg_2<F: Field>(p_i: &[F; 3], eval_at: F) -> F {
     let t1 = w1 * p_i[1] * inv_d1;
     let t2 = w2 * p_i[2] * inv_d2;
 
-    let b0 = w0 * inv_d0;
-    let b1 = w1 * inv_d1;
-    let b2 = w2 * inv_d2;
-
-    (t0 + t1 + t2) * (b0 + b1 + b2).inverse()
+    l * (t0 + t1 + t2)
 }
 
 fn extrapolate_uni_poly_deg_3<F: Field>(p_i: &[F; 4], eval_at: F) -> F {
@@ -222,6 +207,8 @@ fn extrapolate_uni_poly_deg_3<F: Field>(p_i: &[F; 4], eval_at: F) -> F {
     let d2 = eval_at - x2;
     let d3 = eval_at - x3;
 
+    let l = d0 * d1 * d2 * d3;
+
     let inv_d0 = d0.inverse();
     let inv_d1 = d1.inverse();
     let inv_d2 = d2.inverse();
@@ -232,12 +219,7 @@ fn extrapolate_uni_poly_deg_3<F: Field>(p_i: &[F; 4], eval_at: F) -> F {
     let t2 = w2 * p_i[2] * inv_d2;
     let t3 = w3 * p_i[3] * inv_d3;
 
-    let b0 = w0 * inv_d0;
-    let b1 = w1 * inv_d1;
-    let b2 = w2 * inv_d2;
-    let b3 = w3 * inv_d3;
-
-    (t0 + t1 + t2 + t3) * (b0 + b1 + b2 + b3).inverse()
+    l * (t0 + t1 + t2 + t3)
 }
 
 fn extrapolate_uni_poly_deg_4<F: Field>(p_i: &[F; 5], eval_at: F) -> F {
@@ -264,6 +246,8 @@ fn extrapolate_uni_poly_deg_4<F: Field>(p_i: &[F; 5], eval_at: F) -> F {
     let d3 = eval_at - x3;
     let d4 = eval_at - x4;
 
+    let l = d0 * d1 * d2 * d3 * d4;
+
     let inv_d0 = d0.inverse();
     let inv_d1 = d1.inverse();
     let inv_d2 = d2.inverse();
@@ -276,17 +260,19 @@ fn extrapolate_uni_poly_deg_4<F: Field>(p_i: &[F; 5], eval_at: F) -> F {
     let t3 = w3 * p_i[3] * inv_d3;
     let t4 = w4 * p_i[4] * inv_d4;
 
-    let b0 = w0 * inv_d0;
-    let b1 = w1 * inv_d1;
-    let b2 = w2 * inv_d2;
-    let b3 = w3 * inv_d3;
-    let b4 = w4 * inv_d4;
-
-    (t0 + t1 + t2 + t3 + t4) * (b0 + b1 + b2 + b3 + b4).inverse()
+    l * (t0 + t1 + t2 + t3 + t4)
 }
 
 /// Evaluate a univariate polynomial defined by its values `p_i` at integer points `0..p_i.len()-1`
 /// using Barycentric interpolation at the given `eval_at` point.
+///
+/// For overall idea, refer to https://people.maths.ox.ac.uk/trefethen/barycentric.pdf formula 3.3
+/// barycentric weights `w` are for polynomial interpolation.
+/// for a fixed set of interpolation points {x_0, x_1, ..., x_n}, the barycentric weight w_j is defined as:
+/// w_j = 1 / ∏_{k ≠ j} (x_j - x_k)
+/// these weights are used in the barycentric form of Lagrange interpolation, which allows
+/// for efficient evaluation of the interpolating polynomial at any other point
+/// the weights depend only on the interpolation nodes and can be treat as `constant` in loop-unroll + inline version
 ///
 /// This is a runtime-dispatched implementation optimized for small degrees
 /// with unrolled loops for performance
