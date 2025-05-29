@@ -24,7 +24,7 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
-    util::optimal_sumcheck_threads,
+    util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
 use witness::{RowMajorMatrix, next_pow2_instance_padding};
@@ -44,7 +44,7 @@ use crate::{
         GKRIOPProvingKey, KeccakGKRIOP, ProvingKey, TowerProver, TowerProverSpec, ZKVMProvingKey,
         ZKVMWitnesses,
     },
-    utils::{add_mle_list_by_expr, get_challenge_pows},
+    utils::add_mle_list_by_expr,
 };
 use multilinear_extensions::Instance;
 

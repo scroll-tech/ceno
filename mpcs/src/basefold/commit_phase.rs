@@ -242,7 +242,6 @@ where
             IOPProverState::prover_init_with_extrapolation_aux(
                 thread_id == 0, // set thread_id 0 to be main worker
                 poly,
-                vec![(vec![], vec![])],
                 Some(log2_num_threads),
                 Some(poly_meta.clone()),
             )
@@ -282,11 +281,7 @@ where
     let merge_sumcheck_prover_state_span = entered_span!("merge_sumcheck_prover_state");
     let poly = merge_sumcheck_prover_state(&prover_states);
     let mut prover_states = vec![IOPProverState::prover_init_with_extrapolation_aux(
-        true,
-        poly,
-        vec![(vec![], vec![])],
-        None,
-        None,
+        true, poly, None, None,
     )];
     exit_span!(merge_sumcheck_prover_state_span);
 

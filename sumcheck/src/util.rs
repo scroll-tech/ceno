@@ -1,6 +1,5 @@
 use std::{
     array,
-    cmp::max,
     iter::Sum,
     ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign},
     sync::Arc,
@@ -17,128 +16,42 @@ use multilinear_extensions::{
     virtual_polys::PolyMeta,
 };
 use p3::field::Field;
-use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
 use transcript::Transcript;
 
-use crate::structs::IOPProverState;
+use crate::{extrapolate::ExtrapolationCache, structs::IOPProverState};
 
-pub fn barycentric_weights<F: Field>(points: &[F]) -> Vec<F> {
-    let mut weights = points
-        .iter()
-        .enumerate()
-        .map(|(j, point_j)| {
-            points
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| (i != j))
-                .map(|(_, point_i)| *point_j - *point_i)
-                .reduce(|acc, value| acc * value)
-                .unwrap_or(F::ONE)
-        })
-        .collect::<Vec<_>>();
-    batch_inversion(&mut weights);
-    weights
-}
+/// extrapolates values of a univariate polynomial in-place using precomputed barycentric weights.
+///
+/// this function fills in the remaining entries of `uni_variate[start..]` assuming the first `start`
+/// values are evaluations of a univariate polynomial at `0, 1, ..., start - 1`.
+/// it uses a precomputed [`ExtrapolationTable`] from [`ExtrapolationCache`] to perform
+/// efficient barycentric extrapolation without requiring any inverse operations at runtime.
+///
+/// Note: this function is highly optimized without field inverse. see [`ExtrapolationTable`] for how to achieve it
+pub fn extrapolate_from_table<E: ExtensionField>(uni_variate: &mut [E], start: usize) {
+    let cur_degree = start - 1;
+    let table = ExtrapolationCache::<E>::get(cur_degree, uni_variate.len() - 1);
+    let target_len = uni_variate.len();
+    assert!(start > 0, "start must be > 0 to define a degree");
+    assert!(
+        target_len > start,
+        "no extrapolation needed if target_len <= start"
+    );
 
-// Computes the inverse of each field element in a vector {v_i} using a parallelized batch inversion.
-pub fn batch_inversion<F: Field>(v: &mut [F]) {
-    batch_inversion_and_mul(v, &F::ONE);
-}
+    let (known, to_extrapolate) = uni_variate.split_at_mut(start);
+    let weight_sets = &table.weights[0]; // since min_degree == cur_degree
 
-// Computes the inverse of each field element in a vector {v_i} sequentially (serial version).
-pub fn serial_batch_inversion<F: Field>(v: &mut [F]) {
-    serial_batch_inversion_and_mul(v, &F::ONE)
-}
+    for (offset, target) in to_extrapolate.iter_mut().enumerate() {
+        let weights = &weight_sets[offset];
+        assert_eq!(weights.len(), known.len());
 
-// Given a vector of field elements {v_i}, compute the vector {coeff * v_i^(-1)}
-pub fn batch_inversion_and_mul<F: Field>(v: &mut [F], coeff: &F) {
-    // Divide the vector v evenly between all available cores
-    let min_elements_per_thread = 1;
-    let num_cpus_available = rayon::current_num_threads();
-    let num_elems = v.len();
-    let num_elem_per_thread = max(num_elems / num_cpus_available, min_elements_per_thread);
+        let acc = weights
+            .iter()
+            .zip(known.iter())
+            .fold(E::ZERO, |acc, (w, x)| acc + (*w * *x));
 
-    // Batch invert in parallel, without copying the vector
-    v.par_chunks_mut(num_elem_per_thread).for_each(|chunk| {
-        serial_batch_inversion_and_mul(chunk, coeff);
-    });
-}
-
-/// Given a vector of field elements {v_i}, compute the vector {coeff * v_i^(-1)}.
-/// This method is explicitly single-threaded.
-fn serial_batch_inversion_and_mul<F: Field>(v: &mut [F], coeff: &F) {
-    // Montgomery’s Trick and Fast Implementation of Masked AES
-    // Genelle, Prouff and Quisquater
-    // Section 3.2
-    // but with an optimization to multiply every element in the returned vector by
-    // coeff
-
-    // First pass: compute [a, ab, abc, ...]
-    let mut prod = Vec::with_capacity(v.len());
-    let mut tmp = F::ONE;
-    for f in v.iter().filter(|f| !f.is_zero()) {
-        tmp.mul_assign(*f);
-        prod.push(tmp);
+        *target = acc;
     }
-
-    // Invert `tmp`.
-    tmp = tmp.try_inverse().unwrap(); // Guaranteed to be nonzero.
-
-    // Multiply product by coeff, so all inverses will be scaled by coeff
-    tmp *= *coeff;
-
-    // Second pass: iterate backwards to compute inverses
-    for (f, s) in v
-        .iter_mut()
-        // Backwards
-        .rev()
-        // Ignore normalized elements
-        .filter(|f| !f.is_zero())
-        // Backwards, skip last element, fill in one for last term.
-        .zip(prod.into_iter().rev().skip(1).chain(Some(F::ONE)))
-    {
-        // tmp := tmp * f; f := tmp * s = 1/f
-        let new_tmp = tmp * *f;
-        *f = tmp * s;
-        tmp = new_tmp;
-    }
-}
-
-pub(crate) fn extrapolate<F: Field>(points: &[F], weights: &[F], evals: &[F], at: &F) -> F {
-    inner_extrapolate::<F, true>(points, weights, evals, at)
-}
-
-pub(crate) fn serial_extrapolate<F: Field>(points: &[F], weights: &[F], evals: &[F], at: &F) -> F {
-    inner_extrapolate::<F, false>(points, weights, evals, at)
-}
-
-fn inner_extrapolate<F: Field, const IS_PARALLEL: bool>(
-    points: &[F],
-    weights: &[F],
-    evals: &[F],
-    at: &F,
-) -> F {
-    let (coeffs, sum_inv) = {
-        let mut coeffs = points.iter().map(|point| *at - *point).collect::<Vec<_>>();
-        if IS_PARALLEL {
-            batch_inversion(&mut coeffs);
-        } else {
-            serial_batch_inversion(&mut coeffs);
-        }
-        let mut sum = F::ZERO;
-        coeffs.iter_mut().zip(weights).for_each(|(coeff, weight)| {
-            *coeff *= *weight;
-            sum += *coeff
-        });
-        let sum_inv = sum.try_inverse().unwrap_or(F::ZERO);
-        (coeffs, sum_inv)
-    };
-    coeffs
-        .iter()
-        .zip(evals)
-        .map(|(coeff, eval)| *coeff * *eval)
-        .sum::<F>()
-        * sum_inv
 }
 
 /// Interpolate a uni-variate degree-`p_i.len()-1` polynomial and evaluate this
@@ -442,5 +355,38 @@ impl<F: MulAssign + Copy> Mul<F> for AdditiveVec<F> {
     fn mul(mut self, rhs: F) -> Self::Output {
         self *= rhs;
         self
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ff_ext::GoldilocksExt2;
+    use p3::field::PrimeCharacteristicRing;
+
+    #[test]
+    fn test_extrapolate_from_table() {
+        type E = GoldilocksExt2;
+        fn f(x: u64) -> E {
+            E::from_u64(2u64) * E::from_u64(x) + E::from_u64(3u64)
+        }
+        // Test a known linear polynomial: f(x) = 2x + 3
+
+        let degree = 1;
+        let target_len = 5; // Extrapolate up to x=4
+
+        // Known values at x=0 and x=1
+        let mut values: Vec<E> = (0..=degree as u64).map(f).collect();
+
+        // Allocate extra space for extrapolated values
+        values.resize(target_len, E::ZERO);
+
+        // Run extrapolation
+        extrapolate_from_table(&mut values, degree + 1);
+
+        // Verify values against f(x)
+        for (x, val) in values.iter().enumerate() {
+            let expected = f(x as u64);
+            assert_eq!(*val, expected, "Mismatch at x={}", x);
+        }
     }
 }
