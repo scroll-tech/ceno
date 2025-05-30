@@ -8,7 +8,12 @@ use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
-/// Prove the execution of a fixed RISC-V program.
+
+// Use jemalloc as global allocator for performance
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {

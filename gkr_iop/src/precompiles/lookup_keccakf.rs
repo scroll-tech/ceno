@@ -1300,7 +1300,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
             {
                 assert_eq!(
                     base.evaluations().len(),
-                    num_instances * ROUNDS.next_power_of_two()
+                    (num_instances * ROUNDS.next_power_of_two()).next_power_of_two()
                 );
                 for i in 0..num_instances {
                     instance_outputs[i].push(base.get_base_field_vec()[i]);
@@ -1386,45 +1386,29 @@ mod tests {
     #[test]
     fn test_keccakf() {
         type E = GoldilocksExt2;
-        std::thread::Builder::new()
-            .name("keccak_test".into())
-            .stack_size(64 * 1024 * 1024)
-            .spawn(|| {
-                let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-                let num_instances = 8;
-                let mut states: Vec<[u64; 25]> = Vec::with_capacity(num_instances);
-                for _ in 0..num_instances {
-                    states.push(std::array::from_fn(|_| rng.gen()));
-                }
-
-                run_faster_keccakf(setup_gkr_circuit::<E>(), states, false, true);
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        let num_instances = 8;
+        let mut states: Vec<[u64; 25]> = Vec::with_capacity(num_instances);
+        for _ in 0..num_instances {
+            states.push(std::array::from_fn(|_| rng.gen()));
+        }
+        let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, false, true);
     }
 
     #[ignore]
     #[test]
     fn test_keccakf_nonpow2() {
         type E = GoldilocksExt2;
-        std::thread::Builder::new()
-            .name("keccak_test".into())
-            .stack_size(64 * 1024 * 1024)
-            .spawn(|| {
-                let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-                let num_instances = 5;
-                let mut states: Vec<[u64; 25]> = Vec::with_capacity(num_instances);
-                for _ in 0..num_instances {
-                    states.push(std::array::from_fn(|_| rng.gen()));
-                }
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-                run_faster_keccakf(setup_gkr_circuit::<E>(), states, false, true);
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        let num_instances = 5;
+        let mut states: Vec<[u64; 25]> = Vec::with_capacity(num_instances);
+        for _ in 0..num_instances {
+            states.push(std::array::from_fn(|_| rng.gen()));
+        }
+
+        let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, false, true);
     }
 }

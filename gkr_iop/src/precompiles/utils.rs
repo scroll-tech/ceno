@@ -17,10 +17,6 @@ pub fn zero_eval<E: ExtensionField>() -> EvalExpression<E> {
     )
 }
 
-pub fn nest<E: ExtensionField>(v: &[E::BaseField]) -> Vec<Vec<E::BaseField>> {
-    v.iter().map(|e| vec![*e]).collect_vec()
-}
-
 pub fn u64s_to_felts<E: ExtensionField>(words: Vec<u64>) -> Vec<E::BaseField> {
     words.into_iter().map(E::BaseField::from_u64).collect()
 }
