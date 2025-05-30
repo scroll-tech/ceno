@@ -11,6 +11,7 @@ members = [
   "multilinear_extensions",
   "sumcheck_macro",
   "poseidon",
+  "subprotocols",
   "sumcheck",
   "transcript",
   "whir",

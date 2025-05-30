@@ -116,6 +116,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-std"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "246a225cc6131e9ee4f24619af0f19d67761fff15d7ccc22e42b80846e69449a"
+dependencies = [
+ "num-traits",
+ "rand",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2750,6 +2760,24 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 2.0.100",
+]
+
+[[package]]
+name = "subprotocols"
+version = "0.1.0"
+dependencies = [
+ "ark-std",
+ "criterion",
+ "ff_ext",
+ "itertools 0.13.0",
+ "multilinear_extensions",
+ "p3-field",
+ "p3-goldilocks",
+ "rand",
+ "rayon",
+ "serde",
+ "thiserror 1.0.69",
+ "transcript",
 ]
 
 [[package]]
