@@ -1,76 +1,130 @@
+use std::marker::PhantomData;
+
+use either::Either;
 use ff_ext::ExtensionField;
-use subprotocols::sumcheck::{
-    SumcheckClaims, SumcheckProof, SumcheckProverOutput, SumcheckProverState, SumcheckVerifierState,
+use itertools::Itertools;
+use multilinear_extensions::{
+    utils::eval_by_expr_with_instance, virtual_poly::VPAuxInfo,
+    virtual_polys::VirtualPolynomialsBuilder,
+};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use sumcheck::structs::{
+    IOPProof, IOPProverState, IOPVerifierState, SumCheckSubClaim, VerifierError,
 };
 use transcript::Transcript;
 
-use crate::{
-    error::BackendError,
-    utils::{SliceVector, SliceVectorMut},
-};
+use crate::error::BackendError;
 
-use super::{Layer, LayerWitness};
+use super::{Layer, LayerWitness, linear_layer::LayerClaims};
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct SumcheckLayerProof<E: ExtensionField> {
+    pub proof: IOPProof<E>,
+    pub evals: Vec<E>,
+}
 pub trait SumcheckLayer<E: ExtensionField> {
     #[allow(clippy::too_many_arguments)]
-    fn prove(
+    fn prove<'a>(
         &self,
-        wit: LayerWitness<E>,
-        out_points: &[&[E]],
+        num_threads: usize,
+        max_num_variables: usize,
+        wit: LayerWitness<'a, E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckProverOutput<E>;
+    ) -> SumcheckLayerProof<E>;
 
     fn verify(
         &self,
-        proof: SumcheckProof<E>,
+        max_num_variables: usize,
+        proof: SumcheckLayerProof<E>,
         sigma: &E,
-        out_points: Vec<&[E]>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<SumcheckClaims<E>, BackendError<E>>;
+    ) -> Result<LayerClaims<E>, BackendError<E>>;
 }
 
-impl<E: ExtensionField> SumcheckLayer<E> for Layer {
-    fn prove(
+impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
+    fn prove<'a>(
         &self,
-        mut wit: LayerWitness<E>,
-        out_points: &[&[E]],
+        num_threads: usize,
+        max_num_variables: usize,
+        wit: LayerWitness<'a, E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckProverOutput<E> {
-        let prover_state = SumcheckProverState::new(
-            self.exprs[0].clone(),
-            out_points,
-            wit.exts.slice_vector_mut(),
-            wit.bases.slice_vector(),
-            challenges,
+    ) -> SumcheckLayerProof<E> {
+        let builder = VirtualPolynomialsBuilder::new_with_mles(
+            num_threads,
+            max_num_variables,
+            wit.bases
+                .iter()
+                .map(|mle| Either::Left(mle.as_ref()))
+                .collect_vec(),
+        );
+        let (proof, prover_state) = IOPProverState::prove(
+            builder.to_virtual_polys(&[self.exprs[0].clone()], challenges),
             transcript,
         );
-
-        prover_state.prove()
+        SumcheckLayerProof {
+            proof,
+            evals: prover_state.get_mle_flatten_final_evaluations(),
+        }
     }
 
     fn verify(
         &self,
-        proof: SumcheckProof<E>,
+        max_num_variables: usize,
+        proof: SumcheckLayerProof<E>,
         sigma: &E,
-        out_points: Vec<&[E]>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<SumcheckClaims<E>, BackendError<E>> {
-        let verifier_state = SumcheckVerifierState::new(
+    ) -> Result<LayerClaims<E>, BackendError<E>> {
+        let SumcheckLayerProof {
+            proof: IOPProof { proofs, .. },
+            evals,
+        } = proof;
+
+        let SumCheckSubClaim {
+            point: in_point,
+            expected_evaluation,
+        } = IOPVerifierState::verify(
             *sigma,
-            self.exprs[0].clone(),
-            out_points,
-            proof,
-            challenges,
+            &IOPProof {
+                point: vec![], // final claimed point will be derived from sumcheck protocol
+                proofs,
+            },
+            &VPAuxInfo {
+                max_degree: self.exprs[0].degree(),
+                max_num_variables,
+                phantom: PhantomData,
+            },
             transcript,
-            vec![],
         );
 
-        verifier_state
-            .verify()
-            .map_err(|e| BackendError::LayerVerificationFailed(self.name.clone(), e))
+        // Check the final evaluations.
+        let got_claim =
+            eval_by_expr_with_instance(&[], &evals, &[], &[], challenges, &self.exprs[0])
+                .right()
+                .unwrap();
+
+        if got_claim != expected_evaluation {
+            return Err(BackendError::LayerVerificationFailed(
+                "sumcheck verify failed".to_string(),
+                VerifierError::ClaimNotMatch(
+                    self.exprs[0].clone(),
+                    expected_evaluation,
+                    got_claim,
+                    self.expr_names[0].clone(),
+                ),
+            ));
+        }
+
+        Ok(LayerClaims {
+            in_point: in_point.into_iter().map(|c| c.elements).collect_vec(),
+            evals,
+        })
     }
 }

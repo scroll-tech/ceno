@@ -530,7 +530,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             {
                 let right = -right.as_ref();
 
-                let left_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, left);
+                let left_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, &left);
                 let left_evaluated = left_evaluated.get_base_field_vec();
 
                 let right_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, &right);

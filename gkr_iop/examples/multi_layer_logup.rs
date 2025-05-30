@@ -4,18 +4,17 @@ use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
-    evaluation::{EvalExpression, PointAndEval},
+    evaluation::EvalExpression,
     gkr::{
         GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
     },
 };
 use itertools::{Itertools, izip};
-use multilinear_extensions::util::ceil_log2;
+use multilinear_extensions::{Expression, util::ceil_log2};
 use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 use rand::{Rng, rngs::OsRng};
-use subprotocols::expression::{Constant, Expression};
 use transcript::{BasicTranscript, Transcript};
 
 #[cfg(debug_assertions)]
@@ -33,21 +32,21 @@ struct TowerParams {
 }
 
 #[derive(Clone, Debug, Default)]
-struct TowerChipLayout<E> {
+struct TowerChipLayout<E: ExtensionField> {
     params: TowerParams,
 
     // Committed poly indices.
     committed_table_id: usize,
     committed_count_id: usize,
 
-    lookup_challenge: Constant,
+    lookup_challenge: Expression<E>,
 
-    output_cumulative_sum: [EvalExpression; 2],
+    output_cumulative_sum: [EvalExpression<E>; 2],
 
     _field: PhantomData<E>,
 }
 
-impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
+impl<E: ExtensionField> ProtocolBuilder<E> for TowerChipLayout<E> {
     type Params = TowerParams;
 
     fn init(params: Self::Params) -> Self {
@@ -57,12 +56,12 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
         }
     }
 
-    fn build_commit_phase(&mut self, chip: &mut Chip) {
-        [self.committed_table_id, self.committed_count_id] = chip.allocate_committed_base();
+    fn build_commit_phase(&mut self, chip: &mut Chip<E>) {
+        [self.committed_table_id, self.committed_count_id] = chip.allocate_committed();
         [self.lookup_challenge] = chip.allocate_challenges();
     }
 
-    fn build_gkr_phase(&mut self, chip: &mut Chip) {
+    fn build_gkr_phase(&mut self, chip: &mut Chip<E>) {
         let height = self.params.height;
         let lookup_challenge = Expression::Const(self.lookup_challenge.clone());
 
@@ -89,17 +88,20 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
                     num_1.0.into(),
                 ];
                 let (in_bases, in_exts) = if i == height - 1 {
-                    (vec![num_0.1.clone(), num_1.1.clone()], vec![
-                        den_0.1.clone(),
-                        den_1.1.clone(),
-                    ])
+                    (
+                        vec![num_0.1.clone(), num_1.1.clone()],
+                        vec![den_0.1.clone(), den_1.1.clone()],
+                    )
                 } else {
-                    (vec![], vec![
-                        den_0.1.clone(),
-                        den_1.1.clone(),
-                        num_0.1.clone(),
-                        num_1.1.clone(),
-                    ])
+                    (
+                        vec![],
+                        vec![
+                            den_0.1.clone(),
+                            den_1.1.clone(),
+                            num_0.1.clone(),
+                            num_1.1.clone(),
+                        ],
+                    )
                 };
                 chip.add_layer(Layer::new(
                     format!("Tower_layer_{}", i),
@@ -145,8 +147,8 @@ impl<E: ExtensionField> ProtocolBuilder for TowerChipLayout<E> {
             vec![],
         ));
 
-        chip.allocate_base_opening(self.committed_table_id, table.1);
-        chip.allocate_base_opening(self.committed_count_id, count);
+        chip.allocate_opening(self.committed_table_id, table.1);
+        chip.allocate_opening(self.committed_count_id, count);
     }
 }
 
@@ -160,7 +162,7 @@ where
 {
     type Trace = TowerChipTrace;
 
-    fn phase1_witness(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField> {
+    fn phase1_witness_group(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField> {
         let wits = phase1
             .table_with_multiplicity
             .iter()
@@ -238,7 +240,7 @@ fn main() {
                 )
             })
             .collect_vec();
-        let phase1_witness = layout.phase1_witness(TowerChipTrace {
+        let phase1_witness_group = layout.phase1_witness_group(TowerChipTrace {
             table_with_multiplicity,
         });
 
@@ -251,11 +253,11 @@ fn main() {
                 .sample_and_append_challenge(b"lookup challenge")
                 .elements,
         ];
-        let (gkr_witness, _) = layout.gkr_witness(&phase1_witness, &challenges);
+        let (gkr_witness, _) = layout.gkr_witness(&phase1_witness_group, &challenges);
 
         #[cfg(debug_assertions)]
         {
-            let last = gkr_witness.layers[0].exts.clone();
+            let last = gkr_witness.layers[0].bases.clone();
             MockProver::check(
                 gkr_circuit.clone(),
                 &gkr_witness,
@@ -269,7 +271,7 @@ fn main() {
         }
 
         let out_evals = {
-            let last = gkr_witness.layers[0].exts.clone();
+            let last = gkr_witness.layers[0].bases.clone();
             let point = Arc::new(vec![]);
             assert_eq!(last[0].len(), 1);
             vec![

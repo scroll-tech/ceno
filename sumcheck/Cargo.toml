@@ -19,6 +19,7 @@ p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
 sumcheck_macro = { path = "../sumcheck_macro" }
+thiserror.workspace = true
 tracing.workspace = true
 transcript = { path = "../transcript" }
 

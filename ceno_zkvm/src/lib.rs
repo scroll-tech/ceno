@@ -20,6 +20,8 @@ pub mod stats;
 pub mod structs;
 mod uint;
 mod utils;
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+pub use utils::print_allocated_bytes;
 mod witness;
 
 pub use structs::ROMType;

@@ -14,7 +14,10 @@ use multilinear_extensions::{
 };
 use p3::field::PrimeCharacteristicRing;
 use std::collections::HashSet;
-use sumcheck::structs::{IOPProof, IOPVerifierState};
+use sumcheck::{
+    structs::{IOPProof, IOPVerifierState},
+    util::get_challenge_pows,
+};
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
@@ -25,7 +28,7 @@ use crate::{
     structs::{
         GKRIOPVerifyingKey, KeccakGKRIOP, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey,
     },
-    utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows},
+    utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec},
 };
 use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with_instance};
 

@@ -1,5 +1,26 @@
 use std::sync::Arc;
 
+use ff_ext::ExtensionField;
+use multilinear_extensions::{mle::ArcMultilinearExtension, wit_infer_by_expr};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+use crate::gkr::layer::Layer;
+
+pub fn infer_layer_witness<'a, E>(
+    layer: &Layer<E>,
+    layer_wits: &[ArcMultilinearExtension<'a, E>],
+    challenges: &[E],
+) -> Vec<ArcMultilinearExtension<'a, E>>
+where
+    E: ExtensionField,
+{
+    layer
+        .exprs
+        .par_iter()
+        .map(|expr| wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr))
+        .collect::<Vec<_>>()
+}
+
 pub trait SliceVector<T> {
     fn slice_vector(&self) -> Vec<&[T]>;
 }

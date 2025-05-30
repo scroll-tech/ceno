@@ -58,3 +58,11 @@ jobs:
         env:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+
+      - name: Install cargo make
+        run: |
+          cargo make --version || cargo install cargo-make
+
+      - name: Test install Ceno cli
+        run: |
+          cargo make cli

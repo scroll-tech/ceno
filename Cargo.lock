@@ -344,6 +344,7 @@ dependencies = [
  "parse-size",
  "serde",
  "tempfile",
+ "tikv-jemallocator",
  "tracing",
  "tracing-forest",
  "tracing-subscriber",
@@ -477,10 +478,11 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros",
- "subprotocols",
  "sumcheck",
  "tempfile",
  "thread_local",
+ "tikv-jemalloc-ctl",
+ "tikv-jemallocator",
  "tiny-keccak",
  "tracing",
  "tracing-forest",
@@ -1111,7 +1113,10 @@ name = "gkr_iop"
 version = "0.1.0"
 dependencies = [
  "ark-std",
+ "bincode",
+ "clap",
  "criterion",
+ "either",
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
@@ -1121,11 +1126,15 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
- "subprotocols",
+ "sumcheck",
  "thiserror 1.0.69",
+ "tikv-jemalloc-ctl",
+ "tikv-jemallocator",
  "tiny-keccak",
+ "tracing",
+ "tracing-forest",
+ "tracing-subscriber",
  "transcript",
- "whir",
  "witness",
 ]
 
@@ -2830,24 +2839,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "subprotocols"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "criterion",
- "ff_ext",
- "itertools 0.13.0",
- "multilinear_extensions",
- "p3-field",
- "p3-goldilocks",
- "rand",
- "rayon",
- "serde",
- "thiserror 1.0.69",
- "transcript",
-]
-
-[[package]]
 name = "substrate-bn"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2883,6 +2874,7 @@ dependencies = [
  "rayon",
  "serde",
  "sumcheck_macro",
+ "thiserror 1.0.69",
  "tracing",
  "transcript",
 ]
@@ -3036,6 +3028,37 @@ checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
 dependencies = [
  "cfg-if",
  "once_cell",
+]
+
+[[package]]
+name = "tikv-jemalloc-ctl"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f21f216790c8df74ce3ab25b534e0718da5a1916719771d3fec23315c99e468b"
+dependencies = [
+ "libc",
+ "paste",
+ "tikv-jemalloc-sys",
+]
+
+[[package]]
+name = "tikv-jemalloc-sys"
+version = "0.6.0+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd3c60906412afa9c2b5b5a48ca6a5abe5736aec9eb48ad05037a677e52e4e2d"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "tikv-jemallocator"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cec5ff18518d81584f477e9bfdf957f5bb0979b0bac3af4ca30b5b3ae2d2865"
+dependencies = [
+ "libc",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]

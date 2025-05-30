@@ -24,7 +24,7 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
-    util::optimal_sumcheck_threads,
+    util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
 use witness::{RowMajorMatrix, next_pow2_instance_padding};
@@ -44,7 +44,7 @@ use crate::{
         GKRIOPProvingKey, KeccakGKRIOP, ProvingKey, TowerProver, TowerProverSpec, ZKVMProvingKey,
         ZKVMWitnesses,
     },
-    utils::{add_mle_list_by_expr, get_challenge_pows},
+    utils::add_mle_list_by_expr,
 };
 use multilinear_extensions::Instance;
 
@@ -782,7 +782,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .iter()
                     .map(|base| PointAndEval {
                         point: input_open_point.clone(),
-                        eval: subprotocols::utils::evaluate_mle_ext(base, &input_open_point),
+                        eval: base.evaluate(&input_open_point),
                     })
                     .collect_vec();
 
@@ -1073,9 +1073,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .into_iter()
                 .zip(w_wit_layers)
                 .flat_map(|(r, w)| {
-                    vec![TowerProverSpec { witness: r }, TowerProverSpec {
-                        witness: w,
-                    }]
+                    vec![
+                        TowerProverSpec { witness: r },
+                        TowerProverSpec { witness: w },
+                    ]
                 })
                 .collect_vec(),
             lk_wit_layers

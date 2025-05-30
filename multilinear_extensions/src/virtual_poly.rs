@@ -157,7 +157,7 @@ impl<'a, E: ExtensionField> VirtualPolynomial<'a, E> {
                                 Expression::WitIn(witin_id) => {
                                     self.flattened_ml_extensions[*witin_id as usize].num_vars()
                                 }
-                                _ => unimplemented!(),
+                                e => unimplemented!("unimplemented {:?}", e),
                             }
                         })
                         .all_equal()

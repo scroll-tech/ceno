@@ -7,6 +7,7 @@ use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
     scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
 };
+mod alloc;
 use criterion::*;
 
 use ff_ext::GoldilocksExt2;
@@ -31,7 +32,7 @@ fn setup() -> (Program, Platform) {
     let stack_size = 32768;
     let heap_size = 2097152;
     let pub_io_size = 16;
-    let program = Program::load_elf(ceno_examples::fibonacci, u32::MAX).unwrap();
+    let program = Program::load_elf(ceno_examples::guest_keccak, u32::MAX).unwrap();
     let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size, pub_io_size);
     (program, platform)
 }
