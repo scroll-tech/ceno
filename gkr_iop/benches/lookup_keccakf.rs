@@ -6,6 +6,7 @@ use gkr_iop::precompiles::{run_faster_keccakf, setup_keccak_lookup_circuit};
 
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
+mod alloc;
 criterion_group!(benches, keccak_f_fn);
 criterion_main!(benches);
 

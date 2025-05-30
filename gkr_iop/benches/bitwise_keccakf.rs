@@ -5,6 +5,7 @@ use ff_ext::GoldilocksExt2;
 use gkr_iop::precompiles::{run_keccakf, setup_keccak_bitwise_circuit};
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
+mod alloc;
 criterion_group!(benches, keccak_f_fn);
 criterion_main!(benches);
 

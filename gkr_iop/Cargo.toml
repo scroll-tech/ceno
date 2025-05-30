@@ -32,6 +32,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 witness = { path = "../witness" }
 
+[target.'cfg(unix)'.dependencies]
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
+tikv-jemallocator = { version = "0.6", optional = true }
+
 [dev-dependencies]
 criterion.workspace = true
 
@@ -42,3 +46,6 @@ name = "bitwise_keccakf"
 [[bench]]
 harness = false
 name = "lookup_keccakf"
+
+[features]
+jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]

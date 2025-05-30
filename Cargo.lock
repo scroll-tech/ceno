@@ -1129,6 +1129,8 @@ dependencies = [
  "subprotocols",
  "sumcheck",
  "thiserror 1.0.69",
+ "tikv-jemalloc-ctl",
+ "tikv-jemallocator",
  "tiny-keccak",
  "tracing",
  "tracing-forest",
