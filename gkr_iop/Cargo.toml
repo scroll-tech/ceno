@@ -10,9 +10,10 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-clap.workspace = true
-tracing-forest.workspace = true
 ark-std = { version = "0.5" }
+bincode.workspace = true
+clap.workspace = true
+either.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
@@ -25,10 +26,10 @@ serde.workspace = true
 sumcheck.workspace = true
 thiserror.workspace = true
 tiny-keccak.workspace = true
-either.workspace = true
-transcript = { path = "../transcript" }
 tracing.workspace = true
+tracing-forest.workspace = true
 tracing-subscriber.workspace = true
+transcript = { path = "../transcript" }
 witness = { path = "../witness" }
 
 [target.'cfg(unix)'.dependencies]

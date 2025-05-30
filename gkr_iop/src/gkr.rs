@@ -1,3 +1,5 @@
+use core::fmt;
+
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use layer::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
@@ -146,4 +148,22 @@ impl<E: ExtensionField> GKRCircuit<E> {
             })
             .collect_vec()
     }
+}
+
+impl<E: ExtensionField> fmt::Display for GKRProof<E> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // overall size
+        let overall_size = bincode::serialized_size(&self).expect("serialization error");
+
+        write!(
+            f,
+            "overall_size {:.2}mb. \n\
+            ",
+            byte_to_mb(overall_size),
+        )
+    }
+}
+
+fn byte_to_mb(byte_size: u64) -> f64 {
+    byte_size as f64 / (1024.0 * 1024.0)
 }

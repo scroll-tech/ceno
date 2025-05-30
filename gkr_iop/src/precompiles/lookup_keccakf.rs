@@ -14,9 +14,10 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
+    error::BackendError,
     evaluation::EvalExpression,
     gkr::{
-        GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
+        GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, GKRProof, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
     },
     precompiles::utils::{MaskRepresentation, not8_expr},
@@ -1247,7 +1248,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
     states: Vec<[u64; 25]>,
     verify: bool,
     test_outputs: bool,
-) {
+) -> Result<GKRProof<E>, BackendError<E>> {
     let num_instances = states.len();
     let num_instances_rounds = num_instances * ROUNDS.next_power_of_two();
     let log2_num_instance_rounds = ceil_log2(num_instances_rounds);
@@ -1363,7 +1364,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
             gkr_circuit
                 .verify(
                     log2_num_instance_rounds,
-                    gkr_proof,
+                    gkr_proof.clone(),
                     &out_evals,
                     &[],
                     &mut verifier_transcript,
@@ -1373,6 +1374,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
             // Omit the PCS opening phase.
         }
     }
+    Ok(gkr_proof)
 }
 
 #[cfg(test)]
