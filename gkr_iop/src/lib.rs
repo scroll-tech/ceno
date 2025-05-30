@@ -61,8 +61,7 @@ where
         challenges: &[E],
     ) -> (GKRCircuitWitness<'a, E>, GKRCircuitOutput<E>) {
         // layer order from output to input
-        let n_layers = 100;
-        let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(n_layers + 1);
+        let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(circuit.layers.len() + 1);
         let phase1_witness_group = phase1_witness_group
             .to_mles()
             .into_iter()
@@ -71,6 +70,10 @@ where
 
         layer_wits.push(LayerWitness::new(phase1_witness_group.clone()));
         let mut witness_mle_flattern = vec![None; circuit.n_evaluations];
+
+        // this is to record every witness layer out
+        // only last layer will be use as the whole gkr circuit out
+        let mut gkr_out_well_order = Vec::with_capacity(circuit.n_evaluations);
 
         // set input to witness_mle_flattern via first layer in_eval_expr
         circuit.layers.last().map(|first_layer| {
@@ -113,7 +116,14 @@ where
                 .zip_eq(&current_layer_output)
                 .for_each(|(out_eval, out_mle)| match out_eval {
                     EvalExpression::Single(out) => {
-                        witness_mle_flattern[*out] = Some(out_mle.clone())
+                        witness_mle_flattern[*out] = Some(out_mle.clone());
+                        // last layer we record gkr circuit output
+                        if i == circuit.layers.len() - 1 {
+                            gkr_out_well_order.push((*out, out_mle.clone()));
+                        }
+                    }
+                    EvalExpression::Linear(0, _, _) => { // zero expression
+                        // do nothing on zero expression
                     }
                     other => unimplemented!("{:?}", other),
                 });
@@ -122,8 +132,20 @@ where
 
         layer_wits.reverse();
 
-        GKRCircuitWitness { layers: layer_wits };
-        unimplemented!()
+        // process and sort by out_id
+        gkr_out_well_order.sort_by_key(|(i, _)| *i);
+        let gkr_out_well_order = gkr_out_well_order
+            .into_iter()
+            .map(|(_, val)| val)
+            .collect_vec();
+
+        (
+            GKRCircuitWitness { layers: layer_wits },
+            GKRCircuitOutput(LayerWitness {
+                bases: gkr_out_well_order,
+                ..Default::default()
+            }),
+        )
     }
 }
 
