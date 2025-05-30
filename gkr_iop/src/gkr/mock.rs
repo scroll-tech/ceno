@@ -11,7 +11,7 @@ use multilinear_extensions::{
 use rand::{rngs::OsRng, thread_rng};
 use thiserror::Error;
 
-use crate::{evaluation::EvalExpression, utils::SliceIterator};
+use crate::evaluation::EvalExpression;
 use multilinear_extensions::{
     Expression, mle::FieldType, smart_slice::SmartSlice, wit_infer_by_expr,
 };
