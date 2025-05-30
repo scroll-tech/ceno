@@ -14,7 +14,7 @@ const NUM_SAMPLES: usize = 10;
 
 fn keccak_f_fn(c: &mut Criterion) {
     // Benchmark the proving time
-    for log_instances in 10..12 {
+    for log_instances in 12..14 {
         let num_instance = 1 << log_instances;
         // expand more input size once runtime is acceptable
         let mut group = c.benchmark_group(format!("keccak_lookup_f_{}", num_instance));
