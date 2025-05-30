@@ -782,7 +782,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                     .iter()
                     .map(|base| PointAndEval {
                         point: input_open_point.clone(),
-                        eval: subprotocols::utils::evaluate_mle_ext(base, &input_open_point),
+                        eval: base.evaluate(&input_open_point),
                     })
                     .collect_vec();
 
@@ -1073,9 +1073,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                 .into_iter()
                 .zip(w_wit_layers)
                 .flat_map(|(r, w)| {
-                    vec![TowerProverSpec { witness: r }, TowerProverSpec {
-                        witness: w,
-                    }]
+                    vec![
+                        TowerProverSpec { witness: r },
+                        TowerProverSpec { witness: w },
+                    ]
                 })
                 .collect_vec(),
             lk_wit_layers

@@ -22,7 +22,6 @@ p3-goldilocks.workspace = true
 rand.workspace = true
 rayon.workspace = true
 serde.workspace = true
-subprotocols = { path = "../subprotocols" }
 sumcheck.workspace = true
 thiserror.workspace = true
 tiny-keccak.workspace = true

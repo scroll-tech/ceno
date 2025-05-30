@@ -478,7 +478,6 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros",
- "subprotocols",
  "sumcheck",
  "tempfile",
  "thread_local",
@@ -1126,7 +1125,6 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
- "subprotocols",
  "sumcheck",
  "thiserror 1.0.69",
  "tikv-jemalloc-ctl",
@@ -2837,24 +2835,6 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 2.0.101",
-]
-
-[[package]]
-name = "subprotocols"
-version = "0.1.0"
-dependencies = [
- "ark-std",
- "criterion",
- "ff_ext",
- "itertools 0.13.0",
- "multilinear_extensions",
- "p3-field",
- "p3-goldilocks",
- "rand",
- "rayon",
- "serde",
- "thiserror 1.0.69",
- "transcript",
 ]
 
 [[package]]
