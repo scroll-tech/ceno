@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
 use ff_ext::ExtensionField;
-use multilinear_extensions::{mle::ArcMultilinearExtension, wit_infer_by_expr};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use multilinear_extensions::{
+    mle::{ArcMultilinearExtension, MultilinearExtension},
+    wit_infer_by_expr,
+};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-use crate::gkr::layer::Layer;
+use crate::{evaluation::EvalExpression, gkr::layer::Layer};
 
 pub fn infer_layer_witness<'a, E>(
     layer: &Layer<E>,
@@ -14,10 +17,22 @@ pub fn infer_layer_witness<'a, E>(
 where
     E: ExtensionField,
 {
+    let out_evals: Vec<_> = layer
+        .outs
+        .iter()
+        .flat_map(|(_, out_eval)| out_eval.iter())
+        .collect();
     layer
         .exprs
         .par_iter()
-        .map(|expr| wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr))
+        .zip_eq(out_evals.par_iter())
+        .map(|(expr, out_eval)| match out_eval {
+            EvalExpression::Single(_) => {
+                wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr)
+            }
+            EvalExpression::Linear(0, _, _) => MultilinearExtension::default().into(), // this is zero mle
+            _ => unimplemented!(),
+        })
         .collect::<Vec<_>>()
 }
 

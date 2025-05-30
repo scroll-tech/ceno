@@ -6,15 +6,12 @@ use std::{
 use ceno_emul::KeccakSpec;
 use either::Either;
 use ff_ext::ExtensionField;
-use gkr_iop::{
-    evaluation::PointAndEval,
-    gkr::{GKRCircuitWitness, GKRProverOutput},
-};
+use gkr_iop::gkr::{GKRCircuitWitness, GKRProverOutput};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression,
-    mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension},
+    mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, PointAndEval},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
@@ -773,7 +770,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
         let gkr_span = entered_span!("gkr", profiling_3 = true);
         let (gkr_opcode_proof, input_open_point, wits_in_evals) =
             if let Some((gkr_iop_pk, gkr_wit)) = gkr_iop_pk {
-                let input_open_point = Arc::new(input_open_point);
                 let out_evals = gkr_wit
                     .layers
                     .last()
