@@ -1,5 +1,6 @@
 use std::{array, cmp::Ordering, marker::PhantomData};
 
+use crate::gkr::booleanhypercube::BooleanHypercube;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct, zip_eq};
 use multilinear_extensions::{Expression, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
@@ -293,6 +294,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 }
 
 const ROUNDS: usize = 24;
+const ROUNDS_CEIL_LOG2: usize = 5; // log_2(2^32)
 
 const RC: [u64; ROUNDS] = [
     1u64,
@@ -815,8 +817,6 @@ where
             .enumerate()
             .take(num_instances)
             .for_each(|(instance_id, wits)| {
-                let mut wits_start_index = 0;
-
                 let state_32_iter = instances[instance_id].iter().map(|&e| e as u64);
                 let mut state64 = [[0u64; 5]; 5];
                 zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
@@ -825,8 +825,13 @@ where
                     })
                     .count();
 
+                let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
+                let mut cyclic_group = bh.into_iter();
+
                 #[allow(clippy::needless_range_loop)]
                 for _round in 0..ROUNDS {
+                    let round_index = cyclic_group.next().unwrap();
+                    let mut wits_start_index = round_index as usize * KECCAK_WIT_SIZE;
                     let mut state8 = [[[0u64; 8]; 5]; 5];
                     for x in 0..5 {
                         for y in 0..5 {
