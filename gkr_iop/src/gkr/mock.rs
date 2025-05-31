@@ -102,21 +102,6 @@ impl<E: ExtensionField> MockProver<E> {
                 .map(|out| out.mock_evaluate(&evaluations, &challenges, 1 << num_vars))
                 .collect_vec();
             match layer.ty {
-                LayerType::Sumcheck => {
-                    if gots.len() != 1 {
-                        return Err(MockProverError::SumcheckExprLenError(gots.len()));
-                    }
-                    let got = gots.into_iter().next().unwrap();
-                    // let expect = expects.into_iter().reduce(|a, b| a + b).unwrap();
-                    // if expect != got {
-                    //     return Err(MockProverError::SumcheckExpressionNotMatch(
-                    //         layer.outs.clone(),
-                    //         layer.exprs[0].clone(),
-                    //         expect,
-                    //         got,
-                    //     ));
-                    // }
-                }
                 LayerType::Zerocheck => {
                     for (got, expect, expr, expr_name, out) in
                         izip!(gots, expects, &layer.exprs, &layer.expr_names, &layer.outs)

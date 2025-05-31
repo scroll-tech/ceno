@@ -7,7 +7,7 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, Point, PointAndEval},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sumcheck_layer::{SumcheckLayer, SumcheckLayerProof};
+use sumcheck_layer::SumcheckLayerProof;
 use transcript::Transcript;
 use zerocheck_layer::ZerocheckLayer;
 
@@ -19,7 +19,6 @@ pub mod zerocheck_layer;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerType {
-    Sumcheck,
     Zerocheck,
     Linear,
 }
@@ -76,10 +75,6 @@ impl<E: ExtensionField> Layer<E> {
         expr_names: Vec<String>,
     ) -> Self {
         if expr_names.len() < exprs.len() {
-            // expr_names.extend(vec![
-            //     "unavailable".to_string();
-            //     exprs.len() - expr_names.len()
-            // ]);
             panic!("there are expr without name")
         }
         let max_expr_degree = exprs.iter().map(|expr| expr.degree()).max().unwrap();
@@ -109,14 +104,6 @@ impl<E: ExtensionField> Layer<E> {
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
         let sumcheck_layer_proof = match self.ty {
-            LayerType::Sumcheck => <Layer<E> as SumcheckLayer<E>>::prove(
-                self,
-                num_threads,
-                max_num_variables,
-                wit,
-                challenges,
-                transcript,
-            ),
             LayerType::Zerocheck => {
                 let out_points = eval_and_dedup_points
                     .into_iter()
@@ -160,19 +147,6 @@ impl<E: ExtensionField> Layer<E> {
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
         let LayerClaims { in_point, evals } = match self.ty {
-            LayerType::Sumcheck => {
-                assert_eq!(eval_and_dedup_points.len(), 1);
-                let (sigmas, point) = eval_and_dedup_points.remove(0);
-                assert!(point.is_none());
-                <Layer<_> as SumcheckLayer<E>>::verify(
-                    self,
-                    max_num_variables,
-                    proof,
-                    &sigmas.iter().cloned().sum(),
-                    challenges,
-                    transcript,
-                )?
-            }
             LayerType::Zerocheck => <Layer<_> as ZerocheckLayer<E>>::verify(
                 self,
                 max_num_variables,
