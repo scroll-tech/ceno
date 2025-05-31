@@ -800,19 +800,12 @@ where
                     .collect_vec();
 
                 let mut state64 = [[0u64; 5]; 5];
-                let mut state8 = [[[0u64; 8]; 5]; 5];
 
                 zip_eq(iproduct!(0..5, 0..5), state32.iter().tuples())
                     .map(|((x, y), (&lo, &hi))| {
                         state64[x][y] = lo | (hi << 32);
                     })
                     .count();
-
-                for x in 0..5 {
-                    for y in 0..5 {
-                        state8[x][y] = conv64to8(state64[x][y]);
-                    }
-                }
 
                 // TODO take structural id information from circuit to do wits assignment
                 // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
@@ -823,12 +816,15 @@ where
                 };
 
                 #[allow(clippy::needless_range_loop)]
-                for round in 0..ROUNDS {
-                    if round == 0 {
-                        push_instance(state8.into_iter().flatten().flatten().collect_vec());
-                    } else {
-                        push_instance(vec![0u64; KECCAK_LAYER_BYTE_SIZE]);
+                for _round in 0..ROUNDS {
+                    let mut state8 = [[[0u64; 8]; 5]; 5];
+                    for x in 0..5 {
+                        for y in 0..5 {
+                            state8[x][y] = conv64to8(state64[x][y]);
+                        }
                     }
+
+                    push_instance(state8.into_iter().flatten().flatten().collect_vec());
 
                     let mut c_aux64 = [[0u64; 5]; 5];
                     let mut c_aux8 = [[[0u64; 8]; 5]; 5];

@@ -5,6 +5,7 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, MultilinearExtension},
     wit_infer_by_expr,
 };
+use p3_field::PrimeCharacteristicRing;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 use crate::{evaluation::EvalExpression, gkr::layer::Layer};
@@ -25,12 +26,33 @@ where
     layer
         .exprs
         .par_iter()
+        .zip_eq(layer.expr_names.par_iter())
         .zip_eq(out_evals.par_iter())
-        .map(|(expr, out_eval)| match out_eval {
+        .map(|((expr, expr_name), out_eval)| match out_eval {
             EvalExpression::Single(_) => {
                 wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr)
             }
-            EvalExpression::Linear(0, _, _) => MultilinearExtension::default().into(), // this is zero mle
+            EvalExpression::Linear(0, _, _) => {
+                if cfg!(debug_assertions) {
+                    let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
+                    let all_zero = match out_mle.evaluations() {
+                        multilinear_extensions::mle::FieldType::Base(smart_slice) => {
+                            smart_slice.iter().copied().all(|v| v == E::BaseField::ZERO)
+                        }
+                        multilinear_extensions::mle::FieldType::Ext(smart_slice) => {
+                            smart_slice.iter().copied().all(|v| v == E::ZERO)
+                        }
+                        multilinear_extensions::mle::FieldType::Unreachable => unreachable!(),
+                    };
+                    if !all_zero {
+                        panic!(
+                            "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
+                            layer.name
+                        );
+                    }
+                }
+                MultilinearExtension::default().into() // this is zero mle
+            }
             _ => unimplemented!(),
         })
         .collect::<Vec<_>>()

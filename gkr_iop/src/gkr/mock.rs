@@ -32,12 +32,15 @@ pub enum MockProverError<'a, E: ExtensionField> {
         FieldType<'a, E>,
         FieldType<'a, E>,
     ),
-    #[error("zerocheck expression not match, out: {0:?}, expr: {1:?}, expect: {2:?}. got: {3:?}")]
+    #[error(
+        "zerocheck expression not match, out: {0:?}, expr: {1:?}, expect: {2:?}. got: {3:?}, expr_name: {4:?}"
+    )]
     ZerocheckExpressionNotMatch(
         EvalExpression<E>,
         Expression<E>,
         FieldType<'a, E>,
         FieldType<'a, E>,
+        String,
     ),
     #[error("linear expression not match, out: {0:?}, expr: {1:?}, expect: {2:?}. got: {3:?}")]
     LinearExpressionNotMatch(
@@ -115,7 +118,8 @@ impl<E: ExtensionField> MockProver<E> {
                     // }
                 }
                 LayerType::Zerocheck => {
-                    for (got, expect, expr, out) in izip!(gots, expects, &layer.exprs, &layer.outs)
+                    for (got, expect, expr, expr_name, out) in
+                        izip!(gots, expects, &layer.exprs, &layer.expr_names, &layer.outs)
                     {
                         if expect != got {
                             return Err(MockProverError::ZerocheckExpressionNotMatch(
@@ -123,6 +127,7 @@ impl<E: ExtensionField> MockProver<E> {
                                 expr.clone(),
                                 expect,
                                 got,
+                                expr_name.to_string(),
                             ));
                         }
                     }

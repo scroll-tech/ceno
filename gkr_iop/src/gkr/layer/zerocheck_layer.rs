@@ -184,9 +184,11 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let got_claim = self
             .exprs
             .iter()
-            .zip(&self.outs)
+            .zip_eq(self.outs.iter().flat_map(|(eq_expr, evals)| {
+                std::iter::repeat(eq_expr.clone().unwrap()).take(evals.len())
+            }))
             .zip_eq(alpha_pows)
-            .map(|((expr, (eq_expr, _)), alpha)| {
+            .map(|((expr, eq_expr), alpha)| {
                 alpha
                     * eval_by_expr_with_instance(
                         &[],
@@ -194,7 +196,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                         &[],
                         &[],
                         challenges,
-                        &(expr * eq_expr.clone().unwrap()),
+                        &(expr * eq_expr),
                     )
                     .right()
                     .unwrap()
