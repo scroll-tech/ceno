@@ -5,14 +5,19 @@ use itertools::{Itertools, chain, iproduct, zip_eq};
 use multilinear_extensions::{Expression, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
 use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::PrimeCharacteristicRing;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::{
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use serde::{Deserialize, Serialize};
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{
+    CAPACITY_RESERVED_FACTOR, InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding,
+};
 
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
@@ -23,10 +28,12 @@ use crate::{
         GKRCircuit, GKRProof, GKRProverOutput,
         layer::{Layer, LayerType},
     },
-    precompiles::utils::{MaskRepresentation, not8_expr},
+    precompiles::utils::{
+        MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance,
+    },
 };
 
-use super::utils::{CenoLookup, u64s_to_felts, zero_eval};
+use super::utils::{CenoLookup, zero_eval};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeccakParams {}
@@ -783,37 +790,40 @@ where
         let instances = &phase1.instances;
         let num_instances = instances.len();
 
-        let wits: Vec<_> = (0..num_instances)
-            .into_par_iter()
-            .flat_map(|instance_id| {
-                fn conv64to8(input: u64) -> [u64; 8] {
-                    MaskRepresentation::new(vec![(64, input).into()])
-                        .convert(vec![8; 8])
-                        .values()
-                        .try_into()
-                        .unwrap()
-                }
+        fn conv64to8(input: u64) -> [u64; 8] {
+            MaskRepresentation::new(vec![(64, input).into()])
+                .convert(vec![8; 8])
+                .values()
+                .try_into()
+                .unwrap()
+        }
 
-                let state32 = instances[instance_id]
-                    .iter()
-                    .map(|&e| e as u64)
-                    .collect_vec();
+        // TODO take structural id information from circuit to do wits assignment
+        // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
+        let n_row_padding = next_pow2_instance_padding(num_instances * ROUNDS.next_power_of_two());
+        let mut wits =
+            Vec::with_capacity(n_row_padding * KECCAK_WIT_SIZE * CAPACITY_RESERVED_FACTOR);
+        wits.par_extend(
+            (0..n_row_padding * KECCAK_WIT_SIZE)
+                .into_par_iter()
+                .map(|_| E::BaseField::ZERO),
+        );
 
+        // keccak instance full rounds (24 rounds + 8 round padding) as chunk size
+        // we need to do assignment on respective 31 cyclic group index
+        wits.par_chunks_mut(KECCAK_WIT_SIZE * ROUNDS.next_power_of_two())
+            .enumerate()
+            .take(num_instances)
+            .for_each(|(instance_id, wits)| {
+                let mut wits_start_index = 0;
+
+                let state_32_iter = instances[instance_id].iter().map(|&e| e as u64);
                 let mut state64 = [[0u64; 5]; 5];
-
-                zip_eq(iproduct!(0..5, 0..5), state32.iter().tuples())
-                    .map(|((x, y), (&lo, &hi))| {
+                zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
+                    .map(|((x, y), (lo, hi))| {
                         state64[x][y] = lo | (hi << 32);
                     })
                     .count();
-
-                // TODO take structural id information from circuit to do wits assignment
-                // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
-                let mut wits = Vec::with_capacity(KECCAK_WIT_SIZE * ROUNDS.next_power_of_two());
-                let mut push_instance = |new_wits: Vec<u64>| {
-                    let felts = u64s_to_felts::<E>(new_wits);
-                    wits.extend(felts);
-                };
 
                 #[allow(clippy::needless_range_loop)]
                 for _round in 0..ROUNDS {
@@ -824,7 +834,11 @@ where
                         }
                     }
 
-                    push_instance(state8.into_iter().flatten().flatten().collect_vec());
+                    push_instance::<E, _>(
+                        wits,
+                        &mut wits_start_index,
+                        state8.into_iter().flatten().flatten(),
+                    );
 
                     let mut c_aux64 = [[0u64; 5]; 5];
                     let mut c_aux8 = [[[0u64; 8]; 5]; 5];
@@ -933,36 +947,24 @@ where
                         }
                     }
 
-                    let all_wits64 = [
-                        c_aux8.into_iter().flatten().flatten().collect_vec(),
-                        c_temp.into_iter().flatten().collect_vec(),
-                        crot8.into_iter().flatten().collect_vec(),
-                        d8.into_iter().flatten().collect_vec(),
-                        theta_state8.into_iter().flatten().flatten().collect_vec(),
-                        rotation_witness,
-                        rhopi_output8.into_iter().flatten().flatten().collect_vec(),
-                        nonlinear8.into_iter().flatten().flatten().collect_vec(),
-                        chi_output8[0][0].to_vec(),
-                        iota_output8.into_iter().flatten().flatten().collect_vec(),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect_vec();
+                    let all_wits64 = chain!(
+                        c_aux8.into_iter().flatten().flatten(),
+                        c_temp.into_iter().flatten(),
+                        crot8.into_iter().flatten(),
+                        d8.into_iter().flatten(),
+                        theta_state8.into_iter().flatten().flatten(),
+                        rotation_witness.into_iter(),
+                        rhopi_output8.into_iter().flatten().flatten(),
+                        nonlinear8.into_iter().flatten().flatten(),
+                        chi_output8[0][0].iter().copied(),
+                        iota_output8.into_iter().flatten().flatten(),
+                    );
 
-                    assert_eq!(all_wits64.len(), KECCAK_WIT_SIZE_PER_ROUND);
-                    push_instance(all_wits64);
+                    push_instance::<E, _>(wits, &mut wits_start_index, all_wits64);
 
                     state64 = iota_output64;
                 }
-
-                // padding to next_power_of_2 rounds for rotation
-                wits.extend(
-                    (0..(ROUNDS.next_power_of_two() - ROUNDS) * KECCAK_WIT_SIZE)
-                        .map(|_| E::BaseField::ZERO),
-                );
-                wits
-            })
-            .collect();
+            });
         RowMajorMatrix::new_by_values(wits, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default)
     }
 }

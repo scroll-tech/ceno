@@ -10,6 +10,7 @@ use transcript::Transcript;
 
 use crate::{error::BackendError, evaluation::EvalExpression};
 
+mod booleanhypercube;
 pub mod layer;
 pub mod mock;
 
