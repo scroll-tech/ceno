@@ -71,8 +71,10 @@ where
         layer_wits.push(LayerWitness::new(phase1_witness_group.clone()));
         let mut witness_mle_flattern = vec![None; circuit.n_evaluations];
 
-        // this is to record every witness layer out
-        // only last layer will be use as the whole gkr circuit out
+        // initialize a vector to store the final outputs of the GKR circuit.
+        // these outputs correspond to the evaluations at the last layer of the circuit.
+        // we preallocate the vector with exact capacity for efficiency, avoiding reallocations.
+        // the number of expected outputs is given by `circuit.n_evaluations`.
         let mut gkr_out_well_order = Vec::with_capacity(circuit.n_evaluations);
 
         // set input to witness_mle_flattern via first layer in_eval_expr
@@ -104,6 +106,8 @@ where
                     other => unimplemented!("{:?}", other),
                 })
                 .collect_vec();
+
+            // infer current layer output
             let current_layer_output = infer_layer_witness(&layer, &current_layer_wits, challenges);
             layer_wits.push(LayerWitness::new(current_layer_wits));
 
@@ -160,3 +164,22 @@ pub struct ProtocolProver<E: ExtensionField, Trans: Transcript<E>, PCS>(
 pub struct ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );
+
+#[derive(
+    Default,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Copy,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub enum Rotation {
+    #[default]
+    Current,
+    Next,
+}

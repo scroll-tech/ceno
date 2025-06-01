@@ -11,7 +11,7 @@ use sumcheck_layer::SumcheckLayerProof;
 use transcript::Transcript;
 use zerocheck_layer::ZerocheckLayer;
 
-use crate::{error::BackendError, evaluation::EvalExpression};
+use crate::{Rotation, error::BackendError, evaluation::EvalExpression};
 
 pub mod linear_layer;
 pub mod sumcheck_layer;
@@ -51,6 +51,12 @@ pub struct Layer<E: ExtensionField> {
     /// first tuple value is optional eq
     pub outs: Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>,
 
+    // format: (eq, vec[all rotations])
+    pub rotation_exprs: (
+        Option<Expression<E>>,
+        Vec<(Expression<E>, Rotation, Expression<E>)>,
+    ),
+
     // For debugging purposes
     pub expr_names: Vec<String>,
 }
@@ -72,6 +78,10 @@ impl<E: ExtensionField> Layer<E> {
         in_eval_expr: Vec<EvalExpression<E>>,
         // first tuple value is eq
         outs: Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>,
+        rotation_exprs: (
+            Option<Expression<E>>,
+            Vec<(Expression<E>, Rotation, Expression<E>)>,
+        ),
         expr_names: Vec<String>,
     ) -> Self {
         if expr_names.len() < exprs.len() {
@@ -86,6 +96,7 @@ impl<E: ExtensionField> Layer<E> {
             exprs,
             in_eval_expr,
             outs,
+            rotation_exprs,
             expr_names,
         }
     }

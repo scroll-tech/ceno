@@ -11,38 +11,38 @@ impl BooleanHypercube {
         match num_vars {
             5 => BooleanHypercube {
                 cyclic_group: vec![
-                    0b00001, // X^0  = (1, 0, 0, 0, 0)
-                    0b00010, // X^1  = (0, 1, 0, 0, 0) // assume this to be generator
-                    0b00100, // X^2  = (0, 0, 1, 0, 0)
-                    0b01000, // X^3  = (0, 0, 0, 1, 0)
-                    0b10000, // X^4  = (0, 0, 0, 0, 1)
-                    0b00101, // X^5  = X^2 + 1
-                    0b01010, // X^6  = X^3 + X
-                    0b10100, // X^7  = X^4 + X^2
-                    0b01101, // X^8  = X^3 + X^2 + 1
-                    0b11010, // X^9  = X^4 + X^3 + X
-                    0b10001, // X^10 = X^4 + 1
-                    0b00111, // X^11 = X^2 + X + 1
-                    0b01110, // X^12 = X^3 + X^2 + X
-                    0b11100, // X^13 = X^4 + X^3 + X^2
-                    0b11101, // X^14 = X^4 + X^3 + X^2 + 1
-                    0b11111, // X^15 = X^4 + X^3 + X^2 + X + 1
-                    0b11011, // X^16 = X^4 + X^3 + X + 1
-                    0b10011, // X^17 = X^4 + X + 1
-                    0b00011, // X^18 = X + 1
-                    0b00110, // X^19 = X^2 + X
-                    0b01100, // X^20 = X^3 + X^2
-                    0b11000, // X^21 = X^4 + X^3
-                    0b10101, // X^22 = X^4 + X^2 + 1
-                    0b01111, // X^23 = X^3 + X^2 + X + 1
-                    0b11110, // X^24 = X^4 + X^3 + X^2 + X
-                    0b10011, // X^25 = X^4 + X^3 + 1
-                    0b10111, // X^26 = X^4 + X^2 + X + 1
-                    0b01011, // X^27 = X^3 + X + 1
-                    0b01101, // X^28 = X^4 + X^2 + X
-                    0b01001, // X^29 = X^3 + 1
-                    0b10010, // X^30 = X^4 + X
-                    0b00001, // X^31 = 1 (cyclic repeat of X^0)
+                    0b00001, // 0 = decimal 1
+                    0b00010, // 1 = decimal 2
+                    0b00100, // 2 = decimal 4
+                    0b01000, // 3 = decimal 8
+                    0b10000, // 4 = decimal 16
+                    0b00101, // 5 = decimal 5
+                    0b01010, // 6 = decimal 10
+                    0b10100, // 7 = decimal 20
+                    0b01101, // 8 = decimal 13
+                    0b11010, // 9 = decimal 26
+                    0b10001, // 10 = decimal 17
+                    0b00111, // 11 = decimal 7
+                    0b01110, // 12 = decimal 14
+                    0b11100, // 13 = decimal 28
+                    0b11101, // 14 = decimal 29
+                    0b11111, // 15 = decimal 31
+                    0b11011, // 16 = decimal 27
+                    0b10011, // 17 = decimal 19
+                    0b00011, // 18 = decimal 3
+                    0b00110, // 19 = decimal 6
+                    0b01100, // 20 = decimal 12
+                    0b11000, // 21 = decimal 24
+                    0b10101, // 22 = decimal 21
+                    0b01111, // 23 = decimal 15
+                    0b11110, // 24 = decimal 30
+                    0b11001, // 25 = decimal 25
+                    0b10111, // 26 = decimal 23
+                    0b01011, // 27 = decimal 11
+                    0b10110, // 28 = decimal 22
+                    0b01001, // 29 = decimal 9
+                    0b10010, // 30 = decimal 18
+                    0b00001, // 31 = decimal 1
                 ],
             },
             _ => unimplemented!(),
@@ -74,6 +74,33 @@ impl<'a> Iterator for BooleanHypercubeIter<'a> {
             Some(val)
         } else {
             None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_generate_f_31_cyclic_group_element() {
+        let modulus = 0b100101; // X^5 + X^2 + 1
+        let _x = 0b00010; // generator x = X
+        let mut powers = Vec::with_capacity(31);
+        powers.push(1); // x^0 = 1
+
+        let mut current = 1u8;
+
+        for _ in 1..32 {
+            current = current << 1; // multiply by x (shift left)
+            if current & 0b100000 != 0 {
+                // degree 5 overflow
+                current ^= modulus; // reduce modulo polynomial
+            }
+            powers.push(current);
+        }
+
+        for (i, &val) in powers.iter().enumerate() {
+            println!("0b{:05b}, // {} = decimal {} ", val, i, val);
         }
     }
 }

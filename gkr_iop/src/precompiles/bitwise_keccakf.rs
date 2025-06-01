@@ -202,6 +202,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 vec![],
                 chi_output.iter().map(|e| e.1.clone()).collect_vec(),
                 vec![(Some(eq.0.expr()), round_output.to_vec())],
+                Default::default(),
                 vec![],
             ));
 
@@ -228,6 +229,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     Some(eq.0.expr()),
                     chi_output.iter().map(|e| e.1.clone()).collect_vec(),
                 )],
+                Default::default(),
                 vec![],
             ));
 
@@ -253,6 +255,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     Some(eq.0.expr()),
                     theta_output.iter().map(|e| e.1.clone()).collect_vec(),
                 )],
+                Default::default(),
                 vec![],
             ));
 
@@ -274,6 +277,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     Some(eq.0.expr()),
                     d.iter().map(|e| e.1.clone()).collect_vec(),
                 )],
+                Default::default(),
                 vec![],
             ));
 
@@ -304,6 +308,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                         state2.iter().map(|e| e.1.clone()).collect_vec(),
                     ),
                 ],
+                Default::default(),
                 vec![],
             ));
 

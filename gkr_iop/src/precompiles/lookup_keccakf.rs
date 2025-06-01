@@ -1,8 +1,8 @@
 use std::{array, cmp::Ordering, marker::PhantomData};
 
-use crate::gkr::booleanhypercube::BooleanHypercube;
+use crate::{Rotation, gkr::booleanhypercube::BooleanHypercube};
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain, iproduct, zip_eq};
+use itertools::{Itertools, chain, iproduct, izip, zip_eq};
 use multilinear_extensions::{Expression, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
 use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::PrimeCharacteristicRing;
@@ -457,7 +457,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // TODO it should be at least 2 group.
         // TODO   - group1: lookup one group (due to same tower prover length)
         // TODO   - group2: read/write another group
-        let (bases, [eq]) = chip.allocate_wits_in_zero_layer::<KECCAK_WIT_SIZE, 1>();
+        // NOTE: eq order must follow gkr prover/verifier backend concat eq order
+        let (bases, [eq_zero, eq_rotation]) =
+            chip.allocate_wits_in_zero_layer::<KECCAK_WIT_SIZE, 2>();
         for (openings, wit) in bases.iter().enumerate() {
             chip.allocate_opening(openings, wit.1.clone());
         }
@@ -765,13 +767,18 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             }
         }
 
+        // rotation constrain: rotation(keccak_input8).next() == keccak_output8
+        let rotations = izip!(keccak_input8, keccak_output8)
+            .map(|((input, _), (output, _))| (input.expr(), Rotation::Next, output.expr()))
+            .collect_vec();
         chip.add_layer(Layer::new(
             "Rounds".to_string(),
             LayerType::Zerocheck,
             expressions,
             vec![],
             bases.into_iter().map(|e| e.1).collect_vec(),
-            vec![(Some(eq.0.expr()), evals)],
+            vec![(Some(eq_zero.0.expr()), evals)],
+            (Some(eq_rotation.0.expr()), rotations),
             expr_names,
         ));
     }
