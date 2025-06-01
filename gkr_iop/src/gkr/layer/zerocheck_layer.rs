@@ -21,7 +21,6 @@ use sumcheck::{
 use transcript::Transcript;
 
 use crate::{
-    Rotation,
     error::BackendError,
     utils::{rotation_next_base_mle, rotation_selector},
 };
@@ -95,7 +94,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .rotation_exprs.1
                 .par_iter()
                 .map(|rotation_expr| match rotation_expr {
-                    (Expression::WitIn(source_wit_id), Rotation::Next, _) => {
+                    (Expression::WitIn(source_wit_id), _) => {
                         rotation_next_base_mle(&wit.bases[*source_wit_id as usize], 23, 5)
                     }
                     _ => unimplemented!("unimplemented rotation"),
@@ -122,7 +121,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 rotated_mles
                     .iter_mut()
                     .zip_eq(&self.rotation_exprs.1)
-                    .flat_map(|(mle, (_, _, expr))| match expr {
+                    .flat_map(|(mle, (_, expr))| match expr {
                         Expression::WitIn(wit_id) => {
                             vec![
                                 Either::Right(mle),
@@ -210,7 +209,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     .take(self.rotation_exprs.1.len() * ROTATION_OPENING_COUNT)
                     .tuples(),
             )
-            .map(|((rotate_expr, _, expr), (alpha1, alpha2))| {
+            .map(|((rotate_expr, expr), (alpha1, alpha2))| {
                 assert!(
                     matches!(rotate_expr, Expression::WitIn(_))
                         && matches!(expr, Expression::WitIn(_))

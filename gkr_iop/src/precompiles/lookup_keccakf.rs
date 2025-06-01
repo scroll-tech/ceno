@@ -1,13 +1,16 @@
 use std::{array, cmp::Ordering, marker::PhantomData};
 
-use crate::{Rotation, gkr::booleanhypercube::BooleanHypercube};
+use crate::gkr::booleanhypercube::BooleanHypercube;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct, izip, zip_eq};
 use multilinear_extensions::{Expression, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
 use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::PrimeCharacteristicRing;
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
+        ParallelIterator,
+    },
     slice::ParallelSliceMut,
 };
 use serde::{Deserialize, Serialize};
@@ -769,7 +772,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
         // rotation constrain: rotation(keccak_input8).next() == keccak_output8
         let rotations = izip!(keccak_input8, keccak_output8)
-            .map(|((input, _), (output, _))| (input.expr(), Rotation::Next, output.expr()))
+            .map(|((input, _), (output, _))| (input.expr(), output.expr()))
             .collect_vec();
         chip.add_layer(Layer::new(
             "Rounds".to_string(),
@@ -1083,7 +1086,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
         let out_evals = _gkr_output
             .0
             .bases
-            .iter()
+            .par_iter()
             .map(|base| PointAndEval {
                 point: point.clone(),
                 eval: if base.num_vars() == 0 {
@@ -1092,7 +1095,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
                     base.evaluate(&point)
                 },
             })
-            .collect_vec();
+            .collect::<Vec<_>>();
 
         assert_eq!(out_evals.len(), KECCAK_OUT_EVAL_SIZE);
 

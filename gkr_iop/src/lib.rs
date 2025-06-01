@@ -164,22 +164,3 @@ pub struct ProtocolProver<E: ExtensionField, Trans: Transcript<E>, PCS>(
 pub struct ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );
-
-#[derive(
-    Default,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Copy,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub enum Rotation {
-    #[default]
-    Current,
-    Next,
-}
