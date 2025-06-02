@@ -461,8 +461,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // TODO   - group1: lookup one group (due to same tower prover length)
         // TODO   - group2: read/write another group
         // NOTE: eq order must follow gkr prover/verifier backend concat eq order
-        let (bases, [eq_zero, eq_rotation]) =
-            chip.allocate_wits_in_zero_layer::<KECCAK_WIT_SIZE, 2>();
+        let (bases, [eq_zero, eq_rotation_left, eq_rotation_right, eq_rotation]) =
+            chip.allocate_wits_in_zero_layer::<KECCAK_WIT_SIZE, 4>();
         for (openings, wit) in bases.iter().enumerate() {
             chip.allocate_opening(openings, wit.1.clone());
         }
@@ -781,7 +781,14 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             vec![],
             bases.into_iter().map(|e| e.1).collect_vec(),
             vec![(Some(eq_zero.0.expr()), evals)],
-            (Some(eq_rotation.0.expr()), rotations),
+            (
+                Some([
+                    eq_rotation_left.0.expr(),
+                    eq_rotation_right.0.expr(),
+                    eq_rotation.0.expr(),
+                ]),
+                rotations,
+            ),
             expr_names,
         ));
     }

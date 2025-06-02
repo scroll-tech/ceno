@@ -17,6 +17,10 @@ pub mod linear_layer;
 pub mod sumcheck_layer;
 pub mod zerocheck_layer;
 
+// rotation contribute
+// left + right + target, overall 3
+const ROTATION_OPENING_COUNT: usize = 3;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerType {
     Zerocheck,
@@ -51,8 +55,13 @@ pub struct Layer<E: ExtensionField> {
     /// first tuple value is optional eq
     pub outs: Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>,
 
-    // format: (eq, Vec<(rotatition_expr, expr)>) such that rotation_expr - expr == 0
-    pub rotation_exprs: (Option<Expression<E>>, Vec<(Expression<E>, Expression<E>)>),
+    // format: ([eq0, eq1, eq2], Vec<(rotatition_expr, expr)>) such that rotation_expr - expr == 0
+    // there got 3 different eq for (left, right, target) during rotation argument
+    // refer https://hackmd.io/HAAj1JTQQiKfu0SIwOJDRw?view#Rotation
+    pub rotation_exprs: (
+        Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
+        Vec<(Expression<E>, Expression<E>)>,
+    ),
 
     // For debugging purposes
     pub expr_names: Vec<String>,
@@ -75,7 +84,10 @@ impl<E: ExtensionField> Layer<E> {
         in_eval_expr: Vec<EvalExpression<E>>,
         // first tuple value is eq
         outs: Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>,
-        rotation_exprs: (Option<Expression<E>>, Vec<(Expression<E>, Expression<E>)>),
+        rotation_exprs: (
+            Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
+            Vec<(Expression<E>, Expression<E>)>,
+        ),
         expr_names: Vec<String>,
     ) -> Self {
         if expr_names.len() < exprs.len() {

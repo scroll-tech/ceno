@@ -11,7 +11,10 @@ use multilinear_extensions::{
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3_field::dot_product;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::{
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    slice::ParallelSlice,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -22,14 +25,11 @@ use transcript::Transcript;
 
 use crate::{
     error::BackendError,
+    gkr::layer::ROTATION_OPENING_COUNT,
     utils::{rotation_next_base_mle, rotation_selector},
 };
 
 use super::{Layer, LayerWitness, linear_layer::LayerClaims, sumcheck_layer::SumcheckLayerProof};
-
-// rotation contribute
-// TODO FIXME from https://hackmd.io/HAAj1JTQQiKfu0SIwOJDRw?view it seems to be 3
-const ROTATION_OPENING_COUNT: usize = 2;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -81,8 +81,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             out_points.len(),
         );
 
-        // process rotation_exprs
-        let (rotation_proof, rotation_point) = if self.rotation_exprs.1.len() > 0 {
+        // 1st sumcheck: process rotation_exprs
+        let (rotation_eq, rotation_exprs) = &self.rotation_exprs;
+        let (rotation_proof, rotation_point) = if !rotation_exprs.is_empty() {
             let span = entered_span!("rotate_witin_selector", profiling_4 = true);
             let rt = out_points.first().unwrap();
             let mut eq =
@@ -90,8 +91,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             // rotated_mles is non-deterministic input, rotated from existing witness polynomial
             // we will reduce it to zero check, and finally reduce
             let (mut selector, mut rotated_mles) = {
-                let mut mles = self
-                .rotation_exprs.1
+                let mut mles = rotation_exprs
                 .par_iter()
                 .map(|rotation_expr| match rotation_expr {
                     (Expression::WitIn(source_wit_id), _) => {
@@ -108,7 +108,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 let selector = mles.pop().unwrap();
                 (selector, mles)
             };
-            let rotation_alpha_pows = get_challenge_pows(self.rotation_exprs.1.len(), transcript)
+            let rotation_alpha_pows = get_challenge_pows(rotation_exprs.len(), transcript)
                 .into_iter()
                 .map(|r| Expression::Constant(Either::Right(r)))
                 .collect_vec();
@@ -120,7 +120,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 // mles format [rotation_mle1, target_mle1, rotation_mle2, target_mle2, ....., selector, eq]
                 rotated_mles
                     .iter_mut()
-                    .zip_eq(&self.rotation_exprs.1)
+                    .zip_eq(rotation_exprs)
                     .flat_map(|(mle, (_, expr))| match expr {
                         Expression::WitIn(wit_id) => {
                             vec![
@@ -137,7 +137,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             // generate rotation expression
             let rotation_expr = (0..)
                 .tuples()
-                .take(self.rotation_exprs.1.len())
+                .take(rotation_exprs.len())
                 .zip_eq(&rotation_alpha_pows)
                 .map(|((rotate_wit_id, target_wit_id), alpha)| {
                     alpha * (Expression::WitIn(rotate_wit_id) - Expression::WitIn(target_wit_id))
@@ -145,12 +145,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .sum::<Expression<E>>();
             // last 2 is [selector, eq]
             let (selector_expr, eq_expr) = (
-                Expression::<E>::WitIn(
-                    (self.rotation_exprs.1.len() * ROTATION_OPENING_COUNT) as u32,
-                ),
-                Expression::<E>::WitIn(
-                    (self.rotation_exprs.1.len() * ROTATION_OPENING_COUNT + 1) as u32,
-                ),
+                Expression::<E>::WitIn((rotation_exprs.len() * 2) as u32),
+                Expression::<E>::WitIn((rotation_exprs.len() * 2 + 1) as u32),
             );
             let span = entered_span!("rotation IOPProverState::prove", profiling_4 = true);
             let (rotation_proof, prover_state) = IOPProverState::prove(
@@ -161,7 +157,46 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             let mut evals = prover_state.get_mle_flatten_final_evaluations();
             let point = rotation_proof.point.clone();
             // skip selector/eq as verifier can derived itself
-            evals.truncate(self.rotation_exprs.1.len() * ROTATION_OPENING_COUNT);
+            evals.truncate(rotation_exprs.len() * 2);
+
+            let span = entered_span!("rotation derived left/right eval", profiling_4 = true);
+            // post process: giving opening of rotated polys (point, evals), derive original opening before rotate
+            // final format: [
+            //    left_eval_0th,
+            //    right_eval_0th,
+            //    target_eval_0th,
+            //    left_eval_1st,
+            //    right_eval_1st,
+            //    target_eval_1st,
+            //    ...
+            // ]
+            let evals = evals
+                .par_chunks_exact(2)
+                .zip_eq(rotation_exprs.par_iter())
+                .flat_map(|(evals, (rotated_expr, _))| {
+                    let [rotated_eval, target_eval] = evals else {
+                        unreachable!()
+                    };
+                    let left_eval = match rotated_expr {
+                        Expression::WitIn(source_wit_id) => wit.bases[*source_wit_id as usize]
+                            .evaluate(
+                                // (0, r0, r1, r2, r3, r5, r6, ....)
+                                // skip r4
+                                &std::iter::once(E::ZERO)
+                                    .chain(point[..4].iter().copied())
+                                    .chain(point[5..].iter().copied())
+                                    .take(point.len())
+                                    .collect_vec(),
+                            ),
+                        _ => unreachable!(),
+                    };
+
+                    let right_eval = (left_eval * (E::ONE - point[4]) - *rotated_eval) / point[4];
+                    [left_eval, right_eval, *target_eval]
+                })
+                .collect::<Vec<E>>();
+            exit_span!(span);
+            // add evaluation of state in left
             (
                 Some(RotationProof {
                     proof: rotation_proof,
@@ -173,11 +208,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             (None, None)
         };
 
+        // 2th sumcheck: batch rotation with other constrains
         let mut expr_iter = self.exprs.iter();
         let mut zero_check_exprs = Vec::with_capacity(self.outs.len());
 
         let alpha_pows = get_challenge_pows(
-            self.exprs.len() + self.rotation_exprs.1.len() * ROTATION_OPENING_COUNT,
+            self.exprs.len() + rotation_exprs.len() * ROTATION_OPENING_COUNT,
             transcript,
         )
         .into_iter()
@@ -199,27 +235,45 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         }
 
         // prepare rotation expr
-        let rotation_expr = self
-            .rotation_exprs
-            .1
-            .iter()
-            .zip_eq(
-                alpha_pows_iter
-                    .by_ref()
-                    .take(self.rotation_exprs.1.len() * ROTATION_OPENING_COUNT)
-                    .tuples(),
-            )
-            .map(|((rotate_expr, expr), (alpha1, alpha2))| {
-                assert!(
-                    matches!(rotate_expr, Expression::WitIn(_))
-                        && matches!(expr, Expression::WitIn(_))
-                );
-                alpha1 * rotate_expr + alpha2 * expr
-            })
-            .sum::<Expression<E>>();
+        let (mut left_rotation_expr, mut right_rotation_expr, mut rotation_expr) = (
+            Vec::with_capacity(rotation_exprs.len()),
+            Vec::with_capacity(rotation_exprs.len()),
+            Vec::with_capacity(rotation_exprs.len()),
+        );
+        for ((rotate_expr, expr), (alpha1, alpha2, alpha3)) in rotation_exprs.iter().zip_eq(
+            alpha_pows_iter
+                .by_ref()
+                .take(rotation_exprs.len() * ROTATION_OPENING_COUNT)
+                .tuples(),
+        ) {
+            assert!(
+                matches!(rotate_expr, Expression::WitIn(_)) && matches!(expr, Expression::WitIn(_))
+            );
 
-        if let Some(rotation_eq_expr) = self.rotation_exprs.0.as_ref() {
-            zero_check_exprs.push(rotation_eq_expr.clone() * rotation_expr)
+            left_rotation_expr.push(alpha1 * rotate_expr.clone());
+            right_rotation_expr.push(alpha2 * rotate_expr.clone());
+            rotation_expr.push(alpha3 * expr.clone());
+        }
+
+        // push rotation expr to zerocheck expr
+        if let Some(
+            [
+                rotation_left_eq_expr,
+                rotation_right_eq_expr,
+                rotation_eq_expr,
+            ],
+        ) = rotation_eq.as_ref()
+        {
+            zero_check_exprs.push(
+                rotation_left_eq_expr.clone()
+                    * left_rotation_expr.into_iter().sum::<Expression<E>>(),
+            );
+            zero_check_exprs.push(
+                rotation_right_eq_expr.clone()
+                    * right_rotation_expr.into_iter().sum::<Expression<E>>(),
+            );
+            zero_check_exprs
+                .push(rotation_eq_expr.clone() * rotation_expr.into_iter().sum::<Expression<E>>());
         }
 
         exit_span!(span);
@@ -235,10 +289,41 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     build_eq_x_r_vec(&point),
                 )
             })
-            .chain(rotation_point.into_par_iter().map(|rotation_point| {
+            // for rotation left point
+            .chain(rotation_point.par_iter().map(|rotation_point| {
+                // (0, r0, r1, r2, r3, r5, r6, ....)
+                // skip r4
+                let rotation_left = std::iter::once(E::ZERO)
+                    .chain(rotation_point[..4].iter().copied())
+                    .chain(rotation_point[5..].iter().copied())
+                    .take(rotation_point.len())
+                    .collect_vec();
+                MultilinearExtension::from_evaluations_ext_vec(
+                    rotation_left.len(),
+                    build_eq_x_r_vec(&rotation_left),
+                )
+            }))
+            // for rotation right point
+            .chain(rotation_point.par_iter().map(|rotation_point| {
+                // (1, r0, 1-r1, r2, r3, r5, r6, ....)
+                // skip r4
+                let rotation_left = std::iter::once(E::ONE)
+                    .chain(std::iter::once(rotation_point[0]))
+                    .chain(std::iter::once(E::ONE - rotation_point[1]))
+                    .chain(rotation_point[2..4].iter().copied())
+                    .chain(rotation_point[5..].iter().copied())
+                    .take(rotation_point.len())
+                    .collect_vec();
+                MultilinearExtension::from_evaluations_ext_vec(
+                    rotation_left.len(),
+                    build_eq_x_r_vec(&rotation_left),
+                )
+            }))
+            // for rotation point
+            .chain(rotation_point.par_iter().map(|rotation_point| {
                 MultilinearExtension::from_evaluations_ext_vec(
                     rotation_point.len(),
-                    build_eq_x_r_vec(&rotation_point),
+                    build_eq_x_r_vec(rotation_point),
                 )
             }))
             .collect::<Vec<_>>();
