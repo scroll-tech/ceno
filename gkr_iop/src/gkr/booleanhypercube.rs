@@ -1,79 +1,61 @@
 const BH_MAX_NUM_VAR: usize = 5;
 
 pub struct BooleanHypercube {
-    cyclic_group: Vec<u64>,
+    num_vars: usize,
 }
+
+// 2^5-1 cyclic group
+const CYCLIC_POW2_5: [u64; 32] = [
+    0b00001, // 0 = decimal 1
+    0b00010, // 1 = decimal 2
+    0b00100, // 2 = decimal 4
+    0b01000, // 3 = decimal 8
+    0b10000, // 4 = decimal 16
+    0b00101, // 5 = decimal 5
+    0b01010, // 6 = decimal 10
+    0b10100, // 7 = decimal 20
+    0b01101, // 8 = decimal 13
+    0b11010, // 9 = decimal 26
+    0b10001, // 10 = decimal 17
+    0b00111, // 11 = decimal 7
+    0b01110, // 12 = decimal 14
+    0b11100, // 13 = decimal 28
+    0b11101, // 14 = decimal 29
+    0b11111, // 15 = decimal 31
+    0b11011, // 16 = decimal 27
+    0b10011, // 17 = decimal 19
+    0b00011, // 18 = decimal 3
+    0b00110, // 19 = decimal 6
+    0b01100, // 20 = decimal 12
+    0b11000, // 21 = decimal 24
+    0b10101, // 22 = decimal 21
+    0b01111, // 23 = decimal 15
+    0b11110, // 24 = decimal 30
+    0b11001, // 25 = decimal 25
+    0b10111, // 26 = decimal 23
+    0b01011, // 27 = decimal 11
+    0b10110, // 28 = decimal 22
+    0b01001, // 29 = decimal 9
+    0b10010, // 30 = decimal 18
+    0b00001, // 31 = decimal 1
+];
 
 impl BooleanHypercube {
     // giving num_vars, cyclic group size is 2^num_vars - 1, as excluding 0
     pub fn new(num_vars: usize) -> Self {
         assert!(num_vars <= BH_MAX_NUM_VAR);
-        match num_vars {
-            5 => BooleanHypercube {
-                cyclic_group: vec![
-                    0b00001, // 0 = decimal 1
-                    0b00010, // 1 = decimal 2
-                    0b00100, // 2 = decimal 4
-                    0b01000, // 3 = decimal 8
-                    0b10000, // 4 = decimal 16
-                    0b00101, // 5 = decimal 5
-                    0b01010, // 6 = decimal 10
-                    0b10100, // 7 = decimal 20
-                    0b01101, // 8 = decimal 13
-                    0b11010, // 9 = decimal 26
-                    0b10001, // 10 = decimal 17
-                    0b00111, // 11 = decimal 7
-                    0b01110, // 12 = decimal 14
-                    0b11100, // 13 = decimal 28
-                    0b11101, // 14 = decimal 29
-                    0b11111, // 15 = decimal 31
-                    0b11011, // 16 = decimal 27
-                    0b10011, // 17 = decimal 19
-                    0b00011, // 18 = decimal 3
-                    0b00110, // 19 = decimal 6
-                    0b01100, // 20 = decimal 12
-                    0b11000, // 21 = decimal 24
-                    0b10101, // 22 = decimal 21
-                    0b01111, // 23 = decimal 15
-                    0b11110, // 24 = decimal 30
-                    0b11001, // 25 = decimal 25
-                    0b10111, // 26 = decimal 23
-                    0b01011, // 27 = decimal 11
-                    0b10110, // 28 = decimal 22
-                    0b01001, // 29 = decimal 9
-                    0b10010, // 30 = decimal 18
-                    0b00001, // 31 = decimal 1
-                ],
-            },
-            _ => unimplemented!(),
-        }
+        Self { num_vars }
     }
-}
-
-pub struct BooleanHypercubeIter<'a> {
-    cube: &'a BooleanHypercube,
-    pos: usize,
 }
 
 impl<'a> IntoIterator for &'a BooleanHypercube {
     type Item = u64;
-    type IntoIter = BooleanHypercubeIter<'a>;
+    type IntoIter = std::array::IntoIter<u64, 32>;
 
     fn into_iter(self) -> Self::IntoIter {
-        BooleanHypercubeIter { cube: self, pos: 0 }
-    }
-}
-
-impl<'a> Iterator for BooleanHypercubeIter<'a> {
-    type Item = u64;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos < self.cube.cyclic_group.len() {
-            let val = self.cube.cyclic_group[self.pos];
-            self.pos += 1;
-            Some(val)
-        } else {
-            None
+        match self.num_vars {
+            5 => CYCLIC_POW2_5.into_iter(),
+            _ => unimplemented!(),
         }
     }
 }

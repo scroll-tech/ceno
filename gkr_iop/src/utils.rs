@@ -42,6 +42,7 @@ where
                 wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr)
             }
             EvalExpression::Linear(0, _, _) => {
+                // sanity check: zero mle
                 if cfg!(debug_assertions) {
                     let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
                     let all_zero = match out_mle.evaluations() {
@@ -60,7 +61,7 @@ where
                         );
                     }
                 }
-                MultilinearExtension::default().into() // this is zero mle
+                MultilinearExtension::default().into()
             }
             _ => unimplemented!(),
         })
@@ -127,6 +128,8 @@ pub fn rotation_selector<'a, E: ExtensionField>(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use ff_ext::GoldilocksExt2;
     use p3_goldilocks::Goldilocks;
 
