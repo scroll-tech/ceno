@@ -1,3 +1,7 @@
+use ff_ext::ExtensionField;
+use itertools::Itertools;
+use multilinear_extensions::mle::Point;
+
 const BH_MAX_NUM_VAR: usize = 5;
 
 pub struct BooleanHypercube {
@@ -39,12 +43,51 @@ const CYCLIC_POW2_5: [u64; 32] = [
     0b10010, // 30 = decimal 18
     0b00001, // 31 = decimal 1
 ];
+#[allow(dead_code)]
+const CYCLIC_POW2_5_MODULUS: u8 = 0b100101; // X^5 + X^2 + 1
 
 impl BooleanHypercube {
     // giving num_vars, cyclic group size is 2^num_vars - 1, as excluding 0
     pub fn new(num_vars: usize) -> Self {
         assert!(num_vars <= BH_MAX_NUM_VAR);
         Self { num_vars }
+    }
+
+    pub fn get_rotation_points<E: ExtensionField>(&self, point: &Point<E>) -> (Point<E>, Point<E>) {
+        match self.num_vars {
+            5 => (
+                // derive from CYCLIC_POW2_5_MODULUS
+                // left: (0, r0, r1, r2, r3, r5, r6, ....)
+                std::iter::once(E::ZERO)
+                    .chain(point[..4].iter().copied())
+                    .chain(point[5..].iter().copied())
+                    .take(point.len())
+                    .collect_vec(),
+                // right: (1, r0, 1-r1, r2, r3, r5, r6, ....)
+                std::iter::once(E::ONE)
+                    .chain(std::iter::once(point[0]))
+                    .chain(std::iter::once(E::ONE - point[1]))
+                    .chain(point[2..4].iter().copied())
+                    .chain(point[5..].iter().copied())
+                    .take(point.len())
+                    .collect_vec(),
+            ),
+            num_vars => unimplemented!("not support {num_vars}"),
+        }
+    }
+
+    pub fn get_rotation_right_eval_from_left<E: ExtensionField>(
+        &self,
+        rotated_eval: E,
+        left_eval: E,
+        point: &Point<E>,
+    ) -> E {
+        match self.num_vars {
+            // rotated_eval = (1-r4) * left_eval - r4 * right_eval
+            // right_eval = ((1-r4) * left_eval - rotated_eval) / r4
+            5 => ((E::ONE - point[4]) * left_eval - rotated_eval) / point[4],
+            num_vars => unimplemented!("not support {num_vars}"),
+        }
     }
 }
 
@@ -62,10 +105,10 @@ impl<'a> IntoIterator for &'a BooleanHypercube {
 
 #[cfg(test)]
 mod tests {
+    use crate::gkr::booleanhypercube::CYCLIC_POW2_5_MODULUS;
 
     #[test]
     fn test_generate_f_31_cyclic_group_element() {
-        let modulus = 0b100101; // X^5 + X^2 + 1
         let _x = 0b00010; // generator x = X
         let mut powers = Vec::with_capacity(31);
         powers.push(1); // x^0 = 1
@@ -76,7 +119,7 @@ mod tests {
             current = current << 1; // multiply by x (shift left)
             if current & 0b100000 != 0 {
                 // degree 5 overflow
-                current ^= modulus; // reduce modulo polynomial
+                current ^= CYCLIC_POW2_5_MODULUS; // reduce modulo polynomial
             }
             powers.push(current);
         }

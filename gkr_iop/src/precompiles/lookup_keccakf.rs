@@ -788,6 +788,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     eq_rotation.0.expr(),
                 ]),
                 rotations,
+                ROUNDS_CEIL_LOG2,
+                ROUNDS - 1,
             ),
             expr_names,
         ));

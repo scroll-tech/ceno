@@ -62,6 +62,8 @@ pub struct Layer<E: ExtensionField> {
         Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
         Vec<(Expression<E>, Expression<E>)>,
     ),
+    pub rotation_cyclic_group_log2: usize,
+    pub rotation_cyclic_subgroup_size: usize,
 
     // For debugging purposes
     pub expr_names: Vec<String>,
@@ -84,9 +86,11 @@ impl<E: ExtensionField> Layer<E> {
         in_eval_expr: Vec<EvalExpression<E>>,
         // first tuple value is eq
         outs: Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>,
-        rotation_exprs: (
+        (rotation_eq, rotation_exprs, rotation_cyclic_group_log2, rotation_cyclic_subgroup_size): (
             Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
             Vec<(Expression<E>, Expression<E>)>,
+            usize,
+            usize,
         ),
         expr_names: Vec<String>,
     ) -> Self {
@@ -102,7 +106,9 @@ impl<E: ExtensionField> Layer<E> {
             exprs,
             in_eval_expr,
             outs,
-            rotation_exprs,
+            rotation_exprs: (rotation_eq, rotation_exprs),
+            rotation_cyclic_group_log2,
+            rotation_cyclic_subgroup_size,
             expr_names,
         }
     }
