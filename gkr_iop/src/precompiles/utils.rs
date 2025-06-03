@@ -114,7 +114,7 @@ impl MaskRepresentation {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CenoLookup<E: ExtensionField> {
     And(Expression<E>, Expression<E>, Expression<E>),
     Xor(Expression<E>, Expression<E>, Expression<E>),

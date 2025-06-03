@@ -98,6 +98,7 @@ impl<E: ExtensionField> Layer<E> {
             panic!("there are expr without name")
         }
         let max_expr_degree = exprs.iter().map(|expr| expr.degree()).max().unwrap();
+
         Self {
             name,
             ty,

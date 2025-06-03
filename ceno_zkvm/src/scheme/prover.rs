@@ -461,7 +461,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProver<E, PCS> {
                         .all(|f| f.evaluations().len() == expected_size)
             }));
         }
-
         let sumcheck_span = entered_span!("SUMCHECK", profiling_3 = true);
         // product constraint tower sumcheck
         let tower_span = entered_span!("tower");

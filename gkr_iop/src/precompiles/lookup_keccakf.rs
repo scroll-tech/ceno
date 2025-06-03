@@ -122,6 +122,7 @@ fn rotation_split(delta: usize) -> (Vec<usize>, usize) {
     panic!();
 }
 
+#[derive(Default)]
 struct ConstraintSystem<E: ExtensionField> {
     // expressions include zero & non-zero expression, differentiate via evals
     // zero expr represented as Linear with all 0 value
@@ -129,6 +130,7 @@ struct ConstraintSystem<E: ExtensionField> {
     expressions: Vec<Expression<E>>,
     expr_names: Vec<String>,
     evals: Vec<EvalExpression<E>>,
+
     and_lookups: Vec<CenoLookup<E>>,
     xor_lookups: Vec<CenoLookup<E>>,
     range_lookups: Vec<CenoLookup<E>>,
@@ -136,19 +138,23 @@ struct ConstraintSystem<E: ExtensionField> {
 
 impl<E: ExtensionField> ConstraintSystem<E> {
     fn new() -> Self {
-        ConstraintSystem {
-            expressions: vec![],
-            evals: vec![],
-            expr_names: vec![],
-            and_lookups: vec![],
-            xor_lookups: vec![],
-            range_lookups: vec![],
-        }
+        ConstraintSystem::default()
     }
 
-    fn add_constraint(&mut self, expr: Expression<E>, name: String) {
+    fn add_zero_constraint(&mut self, expr: Expression<E>, name: String) {
         self.expressions.push(expr);
         self.evals.push(zero_eval());
+        self.expr_names.push(name);
+    }
+
+    fn add_non_zero_constraint(
+        &mut self,
+        expr: Expression<E>,
+        eval: EvalExpression<E>,
+        name: String,
+    ) {
+        self.expressions.push(expr);
+        self.evals.push(eval);
         self.expr_names.push(name);
     }
 
@@ -174,7 +180,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     }
 
     fn constrain_eq(&mut self, lhs: Expression<E>, rhs: Expression<E>, name: String) {
-        self.add_constraint(lhs - rhs, name);
+        self.add_zero_constraint(lhs - rhs, name);
     }
 
     // Constrains that lhs and rhs encode the same value of SIZE bits
@@ -186,7 +192,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         rhs: &[(usize, Expression<E>)],
         name: String,
     ) {
-        self.add_constraint(
+        self.add_zero_constraint(
             expansion_expr::<E, SIZE>(lhs) - expansion_expr::<E, SIZE>(rhs),
             name,
         );
@@ -684,67 +690,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             );
         }
 
-        // TODO add rotation constrain
-
-        let mut global_and_lookup = 0;
-        let mut global_xor_lookup = 3 * AND_LOOKUPS;
-        let mut global_range_lookup = 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS;
-
-        let ConstraintSystem {
-            mut expressions,
-            mut expr_names,
-            mut evals,
-            and_lookups,
-            xor_lookups,
-            range_lookups,
-            ..
-        } = system;
-
-        for (i, lookup) in chain!(and_lookups, xor_lookups, range_lookups)
-            .flatten()
-            .enumerate()
-        {
-            expressions.push(lookup);
-            let idx = if i < 3 * AND_LOOKUPS {
-                &mut global_and_lookup
-            } else if i < 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS {
-                &mut global_xor_lookup
-            } else {
-                &mut global_range_lookup
-            };
-            expr_names.push(format!("round 0th: {i}th lookup felt"));
-            evals.push(lookup_outputs[*idx].clone());
-            *idx += 1;
-        }
-
-        assert_eq!(global_and_lookup, 3 * AND_LOOKUPS);
-        assert_eq!(global_xor_lookup, 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS);
-        assert_eq!(global_range_lookup, LOOKUP_FELTS_PER_ROUND);
-
         let keccak_input8: ArrayView<(WitIn, EvalExpression<E>), Ix3> =
             ArrayView::from_shape((5, 5, 8), keccak_input8).unwrap();
         let keccak_input32 = keccak_input32.to_vec();
         let mut keccak_input32_iter = keccak_input32.iter().cloned();
-
-        // process keccak input
-        for x in 0..5 {
-            for y in 0..5 {
-                for k in 0..2 {
-                    // create an expression combining 4 elements of state8 into a single 32-bit felt
-                    let expr = expansion_expr::<E, 32>(
-                        keccak_input8
-                            .slice(s![x, y, 4 * k..4 * (k + 1)])
-                            .iter()
-                            .map(|e| (8, e.0.expr()))
-                            .collect_vec()
-                            .as_slice(),
-                    );
-                    expressions.push(expr);
-                    evals.push(keccak_input32_iter.next().unwrap().clone());
-                    expr_names.push(format!("build 32-bit input: {x}, {y}, {k}"));
-                }
-            }
-        }
 
         let keccak_output32 = keccak_output32.to_vec();
         let keccak_output8: ArrayView<(WitIn, EvalExpression<E>), Ix3> =
@@ -763,17 +712,80 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                             .map(|e| (8, e.0.expr()))
                             .collect_vec(),
                     );
-                    expressions.push(expr);
-                    evals.push(keccak_output32_iter.next().unwrap().clone());
-                    expr_names.push(format!("build 32-bit output: {x}, {y}, {k}"));
+                    system.add_non_zero_constraint(
+                        expr,
+                        keccak_output32_iter.next().unwrap().clone(),
+                        format!("build 32-bit output: {x}, {y}, {k}"),
+                    );
                 }
             }
         }
+
+        // process keccak input
+        for x in 0..5 {
+            for y in 0..5 {
+                for k in 0..2 {
+                    // create an expression combining 4 elements of state8 into a single 32-bit felt
+                    let expr = expansion_expr::<E, 32>(
+                        keccak_input8
+                            .slice(s![x, y, 4 * k..4 * (k + 1)])
+                            .iter()
+                            .map(|e| (8, e.0.expr()))
+                            .collect_vec()
+                            .as_slice(),
+                    );
+                    system.add_non_zero_constraint(
+                        expr,
+                        keccak_input32_iter.next().unwrap().clone(),
+                        format!("build 32-bit input: {x}, {y}, {k}"),
+                    );
+                }
+            }
+        }
+
+        let mut global_and_lookup = 0;
+        let mut global_xor_lookup = 3 * AND_LOOKUPS;
+        let mut global_range_lookup = 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS;
+
+        for (i, lookup) in chain!(
+            system.and_lookups.clone(),
+            system.xor_lookups.clone(),
+            system.range_lookups.clone()
+        )
+        .flatten()
+        .enumerate()
+        {
+            let idx = if i < 3 * AND_LOOKUPS {
+                &mut global_and_lookup
+            } else if i < 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS {
+                &mut global_xor_lookup
+            } else {
+                &mut global_range_lookup
+            };
+            system.add_non_zero_constraint(
+                lookup,
+                lookup_outputs[*idx].clone(),
+                format!("round 0th: {i}th lookup felt"),
+            );
+            *idx += 1;
+        }
+
+        assert_eq!(global_and_lookup, 3 * AND_LOOKUPS);
+        assert_eq!(global_xor_lookup, 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS);
+        assert_eq!(global_range_lookup, LOOKUP_FELTS_PER_ROUND);
 
         // rotation constrain: rotation(keccak_input8).next() == keccak_output8
         let rotations = izip!(keccak_input8, keccak_output8)
             .map(|((input, _), (output, _))| (input.expr(), output.expr()))
             .collect_vec();
+
+        let ConstraintSystem {
+            expressions,
+            expr_names,
+            evals,
+            ..
+        } = system;
+
         chip.add_layer(Layer::new(
             "Rounds".to_string(),
             LayerType::Zerocheck,

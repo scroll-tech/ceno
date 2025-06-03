@@ -217,7 +217,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     ) -> <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig {
         // Add GKR-IOP instance
         let params = gkr_iop::precompiles::KeccakParams {};
-        let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder>::build(params);
+        let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);
         self.keccak_gkr_iop = KeccakGKRIOP { layout, chip };
 
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", KeccakSpec::NAME));
