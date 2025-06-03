@@ -30,7 +30,6 @@ mod tests;
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-// WARN/TODO: depends on serde's `arc` feature which might not behave correctly
 pub struct GKROpcodeProof<E: ExtensionField>(pub GKRProof<E>);
 
 #[derive(Clone, Serialize, Deserialize)]
