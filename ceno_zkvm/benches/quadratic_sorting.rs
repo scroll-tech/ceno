@@ -7,6 +7,7 @@ use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
     scheme::constants::MAX_NUM_VARIABLES,
 };
+mod alloc;
 use criterion::*;
 use ff_ext::GoldilocksExt2;
 use mpcs::{BasefoldDefault, SecurityLevel};

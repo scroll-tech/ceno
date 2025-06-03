@@ -1,16 +1,17 @@
+use ff_ext::ExtensionField;
+
 use crate::gkr::GKRCircuit;
 
 use super::Chip;
 
-impl Chip {
+impl<E: ExtensionField> Chip<E> {
     /// Extract information from Chip that required in the GKR phase.
-    pub fn gkr_circuit(&self) -> GKRCircuit {
+    pub fn gkr_circuit(&self) -> GKRCircuit<E> {
         GKRCircuit {
             layers: self.layers.clone(),
             n_challenges: self.n_challenges,
             n_evaluations: self.n_evaluations,
-            base_openings: self.base_openings.clone(),
-            ext_openings: self.ext_openings.clone(),
+            openings: self.openings.clone(),
         }
     }
 }

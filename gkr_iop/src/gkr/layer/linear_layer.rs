@@ -1,93 +1,75 @@
 use ff_ext::ExtensionField;
-use itertools::{Itertools, izip};
-use subprotocols::{
-    error::VerifierError,
-    expression::Point,
-    sumcheck::{SumcheckClaims, SumcheckProof, SumcheckProverOutput},
-    utils::{evaluate_mle_ext, evaluate_mle_inplace},
-};
+use itertools::Itertools;
+use multilinear_extensions::{mle::Point, utils::eval_by_expr_with_instance};
+use sumcheck::structs::{IOPProof, VerifierError};
 use transcript::Transcript;
 
 use crate::error::BackendError;
 
-use super::{Layer, LayerWitness};
+use super::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
 
+pub struct LayerClaims<E: ExtensionField> {
+    pub in_point: Point<E>,
+    pub evals: Vec<E>,
+}
 pub trait LinearLayer<E: ExtensionField> {
     fn prove(
         &self,
         wit: LayerWitness<E>,
         out_point: &Point<E>,
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckProverOutput<E>;
+    ) -> SumcheckLayerProof<E>;
 
     fn verify(
         &self,
-        proof: SumcheckProof<E>,
+        proof: SumcheckLayerProof<E>,
         sigmas: &[E],
         out_point: &Point<E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<SumcheckClaims<E>, BackendError<E>>;
+    ) -> Result<LayerClaims<E>, BackendError<E>>;
 }
 
-impl<E: ExtensionField> LinearLayer<E> for Layer {
+impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
     fn prove(
         &self,
         wit: LayerWitness<E>,
         out_point: &Point<E>,
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckProverOutput<E> {
-        let base_mle_evals = wit
+    ) -> SumcheckLayerProof<E> {
+        let evals = wit
             .bases
             .iter()
-            .map(|base| evaluate_mle_ext(base, out_point))
+            .map(|base| base.evaluate(&out_point))
             .collect_vec();
 
-        transcript.append_field_element_exts(&base_mle_evals);
+        transcript.append_field_element_exts(&evals);
 
-        let ext_mle_evals = wit
-            .exts
-            .into_iter()
-            .map(|mut ext| evaluate_mle_inplace(&mut ext, out_point))
-            .collect_vec();
-
-        transcript.append_field_element_exts(&ext_mle_evals);
-
-        SumcheckProverOutput {
-            proof: SumcheckProof {
-                univariate_polys: vec![],
-                ext_mle_evals,
-                base_mle_evals,
+        SumcheckLayerProof {
+            evals,
+            proof: IOPProof {
+                point: out_point.clone(),
+                proofs: vec![],
             },
-            point: out_point.clone(),
         }
     }
 
     fn verify(
         &self,
-        proof: SumcheckProof<E>,
+        proof: SumcheckLayerProof<E>,
         sigmas: &[E],
         out_point: &Point<E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<SumcheckClaims<E>, BackendError<E>> {
-        let SumcheckProof {
-            univariate_polys: _,
-            ext_mle_evals,
-            base_mle_evals,
-        } = proof;
+    ) -> Result<LayerClaims<E>, BackendError<E>> {
+        let SumcheckLayerProof { evals, .. } = proof;
+        transcript.append_field_element_exts(&evals);
 
-        transcript.append_field_element_exts(&ext_mle_evals);
-        transcript.append_field_element_exts(&base_mle_evals);
-
-        for (sigma, expr, expr_name) in izip!(sigmas, &self.exprs, &self.expr_names) {
-            let got = expr.evaluate(
-                &ext_mle_evals,
-                &base_mle_evals,
-                &[out_point],
-                &[],
-                challenges,
-            );
+        for ((sigma, expr), expr_name) in sigmas.iter().zip_eq(&self.exprs).zip_eq(&self.expr_names)
+        {
+            let got = eval_by_expr_with_instance(&[], &evals, &[], &[], &challenges, &expr)
+                .right()
+                .unwrap();
             if *sigma != got {
                 return Err(BackendError::LayerVerificationFailed(
                     self.name.clone(),
@@ -96,9 +78,8 @@ impl<E: ExtensionField> LinearLayer<E> for Layer {
             }
         }
 
-        Ok(SumcheckClaims {
-            base_mle_evals,
-            ext_mle_evals,
+        Ok(LayerClaims {
+            evals,
             in_point: out_point.clone(),
         })
     }

@@ -209,7 +209,7 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
             })
             .collect_vec();
 
-        layout.phase1_witness(KeccakTrace { instances })
+        layout.phase1_witness_group(KeccakTrace { instances })
     }
 
     fn assign_instance_with_gkr_iop(

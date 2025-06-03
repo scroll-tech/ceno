@@ -11,6 +11,9 @@ version.workspace = true
 
 [dependencies]
 ark-std = { version = "0.5" }
+bincode.workspace = true
+clap.workspace = true
+either.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
@@ -20,12 +23,18 @@ p3-goldilocks.workspace = true
 rand.workspace = true
 rayon.workspace = true
 serde.workspace = true
-subprotocols = { path = "../subprotocols" }
-thiserror = "1"
+sumcheck.workspace = true
+thiserror.workspace = true
 tiny-keccak.workspace = true
+tracing.workspace = true
+tracing-forest.workspace = true
+tracing-subscriber.workspace = true
 transcript = { path = "../transcript" }
-whir = { path = "../whir" }
 witness = { path = "../witness" }
+
+[target.'cfg(unix)'.dependencies]
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
+tikv-jemallocator = { version = "0.6", optional = true }
 
 [dev-dependencies]
 criterion.workspace = true
@@ -37,3 +46,6 @@ name = "bitwise_keccakf"
 [[bench]]
 harness = false
 name = "lookup_keccakf"
+
+[features]
+jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
