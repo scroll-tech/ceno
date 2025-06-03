@@ -37,7 +37,7 @@ use crate::{
     },
 };
 
-use super::utils::{CenoLookup, zero_eval};
+use super::utils::CenoLookup;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeccakParams {}
@@ -143,7 +143,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
     fn add_zero_constraint(&mut self, expr: Expression<E>, name: String) {
         self.expressions.push(expr);
-        self.evals.push(zero_eval());
+        self.evals.push(EvalExpression::Zero);
         self.expr_names.push(name);
     }
 

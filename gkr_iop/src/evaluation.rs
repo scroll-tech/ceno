@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub enum EvalExpression<E: ExtensionField> {
+    Zero,
     /// Single entry in the evaluation vector.
     Single(usize),
     /// Linear expression of an entry with the scalar and offset.
@@ -40,6 +41,7 @@ fn evaluate<E: ExtensionField>(expr: &Expression<E>, challenges: &[E]) -> E {
 impl<E: ExtensionField> EvalExpression<E> {
     pub fn evaluate(&self, evals: &[PointAndEval<E>], challenges: &[E]) -> PointAndEval<E> {
         match self {
+            EvalExpression::Zero => PointAndEval::default(),
             EvalExpression::Single(i) => evals[*i].clone(),
             EvalExpression::Linear(i, c0, c1) => PointAndEval {
                 point: evals[*i].point.clone(),

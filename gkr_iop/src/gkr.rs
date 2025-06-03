@@ -1,7 +1,7 @@
 use core::fmt;
 
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain, izip};
+use itertools::{Itertools, izip};
 use layer::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
 use multilinear_extensions::mle::{Point, PointAndEval};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -141,7 +141,8 @@ impl<E: ExtensionField> GKRCircuit<E> {
         evaluations: &[PointAndEval<E>],
         challenges: &[E],
     ) -> Vec<Evaluation<E>> {
-        chain!(&self.openings, &self.openings)
+        self.openings
+            .iter()
             .map(|(poly, eval)| {
                 let poly = *poly;
                 let PointAndEval { point, eval: value } = eval.evaluate(evaluations, challenges);

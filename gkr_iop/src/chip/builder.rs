@@ -74,11 +74,11 @@ impl<E: ExtensionField> Chip<E> {
 
     /// Allocate challenges.
     pub fn allocate_challenges<const N: usize>(&mut self) -> [Expression<E>; N] {
-        let challanges = array::from_fn(|i| {
+        let challenges = array::from_fn(|i| {
             Expression::Challenge((i + self.n_challenges) as ChallengeId, 1, E::ONE, E::ZERO)
         });
         self.n_challenges += N;
-        challanges
+        challenges
     }
 
     /// Allocate a PCS opening action to a base polynomial with index

@@ -41,7 +41,7 @@ where
             EvalExpression::Single(_) => {
                 wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr)
             }
-            EvalExpression::Linear(0, _, _) => {
+            EvalExpression::Zero => {
                 // sanity check: zero mle
                 if cfg!(debug_assertions) {
                     let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
