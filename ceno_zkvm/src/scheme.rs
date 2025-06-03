@@ -30,32 +30,6 @@ mod tests;
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct ZKVMOpcodeProof<E: ExtensionField> {
-    // product constraints
-    pub record_r_out_evals: Vec<E>,
-    pub record_w_out_evals: Vec<E>,
-
-    // logup sum at layer 1
-    pub lk_p1_out_eval: E,
-    pub lk_p2_out_eval: E,
-    pub lk_q1_out_eval: E,
-    pub lk_q2_out_eval: E,
-
-    pub tower_proof: TowerProofs<E>,
-
-    // main constraint and select sumcheck proof
-    pub main_sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
-
-    pub wits_in_evals: Vec<E>,
-
-    pub gkr_opcode_proof: Option<GKROpcodeProof<E>>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
 // WARN/TODO: depends on serde's `arc` feature which might not behave correctly
 pub struct GKROpcodeProof<E: ExtensionField>(pub GKRProof<E>);
 
@@ -64,15 +38,13 @@ pub struct GKROpcodeProof<E: ExtensionField>(pub GKRProof<E>);
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct ZKVMTableProof<E: ExtensionField> {
+pub struct ZKVMChipProof<E: ExtensionField> {
     // tower evaluation at layer 1
-    pub r_out_evals: Vec<[E; 2]>,
-    pub w_out_evals: Vec<[E; 2]>,
-    pub lk_out_evals: Vec<[E; 4]>,
+    pub r_out_evals: Vec<Vec<E>>,
+    pub w_out_evals: Vec<Vec<E>>,
+    pub lk_out_evals: Vec<Vec<E>>,
 
-    pub same_r_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
-    pub rw_in_evals: Vec<E>,
-    pub lk_in_evals: Vec<E>,
+    pub main_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
 
     pub tower_proof: TowerProofs<E>,
 
@@ -141,8 +113,8 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pi_evals: Vec<E>,
     // circuit size -> instance mapping
     pub num_instances: Vec<(usize, usize)>,
-    opcode_proofs: BTreeMap<usize, ZKVMOpcodeProof<E>>,
-    table_proofs: BTreeMap<usize, ZKVMTableProof<E>>,
+    opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+    table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
     witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub fixed_witin_opening_proof: PCS::Proof,
 }
@@ -151,8 +123,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
         raw_pi: Vec<Vec<E::BaseField>>,
         pi_evals: Vec<E>,
-        opcode_proofs: BTreeMap<usize, ZKVMOpcodeProof<E>>,
-        table_proofs: BTreeMap<usize, ZKVMTableProof<E>>,
+        opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+        table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         fixed_witin_opening_proof: PCS::Proof,
         num_instances: Vec<(usize, usize)>,
@@ -249,7 +221,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             .opcode_proofs
             .iter()
             .map(|(circuit_index, proof)| {
-                let size = bincode::serialized_size(&proof.main_sel_sumcheck_proofs);
+                let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
                 size.inspect(|size| {
                     *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
@@ -277,7 +249,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             .table_proofs
             .iter()
             .map(|(circuit_index, proof)| {
-                let size = bincode::serialized_size(&proof.same_r_sumcheck_proofs);
+                let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
                 size.inspect(|size| {
                     *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })

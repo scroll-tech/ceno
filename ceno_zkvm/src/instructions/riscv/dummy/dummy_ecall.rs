@@ -124,7 +124,7 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
 }
 
 impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> {
-    type Layout = KeccakLayout<E>;
+    type Layout<'a> = KeccakLayout<E>;
 
     fn gkr_info() -> crate::instructions::GKRinfo {
         GKRinfo {
@@ -191,8 +191,8 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
         }
     }
 
-    fn phase1_witness_from_steps(
-        layout: &Self::Layout,
+    fn phase1_witness_from_steps<'a>(
+        layout: &Self::Layout<'a>,
         steps: &[StepRecord],
     ) -> RowMajorMatrix<E::BaseField> {
         let instances = steps

@@ -51,7 +51,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         out_points: &[Point<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E>;
+    ) -> (SumcheckLayerProof<E>, Point<E>);
 
     fn verify(
         &self,
@@ -72,7 +72,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         out_points: &[Point<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E> {
+    ) -> (SumcheckLayerProof<E>, Point<E>) {
         assert_eq!(
             self.outs.len(),
             out_points.len(),
@@ -228,11 +228,14 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             transcript,
         );
         exit_span!(span);
-        SumcheckLayerProof {
-            proof,
-            rotation_proof,
-            evals: prover_state.get_mle_flatten_final_evaluations(),
-        }
+        (
+            SumcheckLayerProof {
+                proof,
+                rotation_proof,
+                evals: prover_state.get_mle_flatten_final_evaluations(),
+            },
+            prover_state.collect_raw_challenges(),
+        )
     }
 
     fn verify(
@@ -273,10 +276,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             expected_evaluation,
         } = IOPVerifierState::verify(
             sigma,
-            &IOPProof {
-                point: vec![], // final claimed point will be derived from sumcheck protocol
-                proofs,
-            },
+            &IOPProof { proofs },
             &VPAuxInfo {
                 max_degree: self.max_expr_degree + 1, // +1 due to eq
                 max_num_variables,
@@ -418,7 +418,7 @@ pub fn prove_rotation<E: ExtensionField>(
     );
     exit_span!(span);
     let mut evals = prover_state.get_mle_flatten_final_evaluations();
-    let point = rotation_proof.point.clone();
+    let point = prover_state.collect_raw_challenges();
     // skip selector/eq as verifier can derived itself
     evals.truncate(rotation_exprs.len() * 2);
 

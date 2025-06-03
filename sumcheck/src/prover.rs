@@ -81,7 +81,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         transcript.append_message(&(num_variables + log2_max_thread_id).to_le_bytes());
         transcript.append_message(&max_degree.to_le_bytes());
-        let (phase1_point, mut prover_state, mut prover_msgs) = if num_variables > 0 {
+        let (mut prover_state, mut prover_msgs) = if num_variables > 0 {
             let span = entered_span!("phase1_sumcheck", profiling_6 = true);
             let (mut prover_states, prover_msgs) = Self::phase1_sumcheck(
                 max_thread_id,
@@ -96,32 +96,20 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 let prover_state = mem::take(&mut prover_states[0]);
                 return (
                     IOPProof {
-                        point: prover_state
-                            .challenges
-                            .iter()
-                            .map(|challenge| challenge.elements)
-                            .collect(),
                         proofs: prover_msgs,
                     },
                     prover_state,
                 );
             }
             let span = entered_span!("merged_poly", profiling_6 = true);
-            let point = prover_states[0]
-                .challenges
-                .iter()
-                .map(|c| c.elements)
-                .collect_vec();
             let poly = merge_sumcheck_prover_state(&prover_states);
+            let mut phase2_sumcheck_state =
+                Self::prover_init_with_extrapolation_aux(true, poly, None, None);
+            phase2_sumcheck_state.push_challenges(prover_states[0].challenges.clone());
             exit_span!(span);
-            (
-                point,
-                Self::prover_init_with_extrapolation_aux(true, poly, None, None),
-                prover_msgs,
-            )
+            (phase2_sumcheck_state, prover_msgs)
         } else {
             (
-                vec![],
                 Self::prover_init_with_extrapolation_aux(
                     true,
                     merge_sumcheck_polys(polys.iter().collect_vec(), Some(poly_meta)),
@@ -150,17 +138,13 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let span = entered_span!("after_rounds_prover_state_stage2");
         // pushing the last challenge point to the state
         if let Some(p) = challenge {
-            prover_state.challenges.push(p);
+            prover_state.push_challenges(vec![p]);
             // fix last challenge to collect final evaluation
             prover_state.fix_var(p.elements);
         };
         exit_span!(span);
         (
             IOPProof {
-                point: phase1_point
-                    .into_iter()
-                    .chain(prover_state.challenges.iter().map(|c| c.elements))
-                    .collect(),
                 proofs: prover_msgs,
             },
             prover_state,
@@ -215,7 +199,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     exit_span!(span);
                     // pushing the last challenge point to the state
                     if let Some(p) = challenge {
-                        prover_state.challenges.push(p);
+                        prover_state.push_challenges(vec![p]);
                         // fix last challenge to collect final evaluation
                         prover_state.fix_var(p.elements);
 
@@ -278,7 +262,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             exit_span!(main_thread_span);
             // pushing the last challenge point to the state
             if let Some(p) = challenge {
-                prover_state.challenges.push(p);
+                prover_state.push_challenges(vec![p]);
                 // fix last challenge to collect final evaluation
                 prover_state.fix_var(p.elements);
                 tx_prover_state
@@ -342,7 +326,10 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         Self {
             is_main_worker,
             max_num_variables: polynomial.aux_info.max_num_variables,
-            challenges: Vec::with_capacity(polynomial.aux_info.max_num_variables),
+            // preallocate space with 2x redundancy for challenges used in sumcheck.
+            // This accounts for multiple phases and potential continuation challenges,
+            // ensuring we avoid reallocations when the protocol spans multiple rounds
+            challenges: Vec::with_capacity(2 * polynomial.aux_info.max_num_variables),
             round: 0,
             poly: polynomial,
             poly_meta: poly_meta.unwrap_or_else(|| vec![PolyMeta::Normal; num_polys]),
@@ -380,9 +367,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         //
         // eval g over r_m, and mutate g to g(r_1, ... r_m,, x_{m+1}... x_n)
         let span = entered_span!("fix_variables");
-        if self.round == 0 {
-            assert!(challenge.is_none(), "first round should be prover first.");
-        } else {
+        if self.round > 0 {
             assert!(
                 challenge.is_some(),
                 "verifier message is empty in round {}",
@@ -390,7 +375,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
             );
             let chal = challenge.unwrap();
             self.challenges.push(chal);
-            let r = self.challenges[self.round - 1];
+            let r = self.challenges.last().unwrap();
             self.fix_var(r.elements);
         }
         exit_span!(span);
@@ -563,7 +548,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         let span = entered_span!("after_rounds_prover_state");
         // pushing the last challenge point to the state
         if let Some(p) = challenge {
-            prover_state.challenges.push(p);
+            prover_state.push_challenges(vec![p]);
             // fix last challenge to collect final evaluation
             prover_state.fix_var_parallel(p.elements);
         };
@@ -572,12 +557,6 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         exit_span!(start);
         (
             IOPProof {
-                // the point consists of the first elements in the challenge
-                point: prover_state
-                    .challenges
-                    .iter()
-                    .map(|challenge| challenge.elements)
-                    .collect(),
                 proofs: prover_msgs,
             },
             prover_state,
@@ -639,17 +618,14 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         //
         // eval g over r_m, and mutate g to g(r_1, ... r_m,, x_{m+1}... x_n)
         let span = entered_span!("fix_variables");
-        if self.round == 0 {
-            assert!(challenge.is_none(), "first round should be prover first.");
-        } else {
+        if self.round > 0 {
             assert!(challenge.is_some(), "verifier message is empty");
             let chal = challenge.unwrap();
             self.challenges.push(chal);
-            let r = self.challenges[self.round - 1];
+            let r = self.challenges.last().unwrap();
             self.fix_var_parallel(r.elements);
         }
         exit_span!(span);
-        // exit_span!fix_argument);
 
         self.round += 1;
 
@@ -732,5 +708,18 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     }
                 }
             });
+    }
+}
+
+impl<'a, E: ExtensionField> IOPProverState<'a, E> {
+    pub fn push_challenges(&mut self, challenge: Vec<Challenge<E>>) {
+        self.challenges.extend(challenge)
+    }
+
+    pub fn collect_raw_challenges(&self) -> Vec<E> {
+        self.challenges
+            .iter()
+            .map(|challenge| challenge.elements)
+            .collect()
     }
 }

@@ -127,7 +127,7 @@ impl<E: ExtensionField> Layer<E> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
-        let sumcheck_layer_proof = match self.ty {
+        let (sumcheck_layer_proof, point) = match self.ty {
             LayerType::Zerocheck => {
                 let out_points = eval_and_dedup_points
                     .into_iter()
@@ -146,15 +146,15 @@ impl<E: ExtensionField> Layer<E> {
             LayerType::Linear => {
                 assert_eq!(eval_and_dedup_points.len(), 1);
                 let (_, point) = eval_and_dedup_points.remove(0);
-                <Layer<E> as LinearLayer<E>>::prove(self, wit, point.as_ref().unwrap(), transcript)
+                let point = point.clone().unwrap();
+                (
+                    <Layer<E> as LinearLayer<E>>::prove(self, wit, &point, transcript),
+                    point,
+                )
             }
         };
 
-        self.update_claims(
-            claims,
-            &sumcheck_layer_proof.evals,
-            &sumcheck_layer_proof.proof.point,
-        );
+        self.update_claims(claims, &sumcheck_layer_proof.evals, &point);
 
         sumcheck_layer_proof
     }

@@ -143,13 +143,23 @@ impl CenoOptions {
 
     /// Read the public io into ceno stdin
     pub fn read_public_io(&self) -> anyhow::Result<Vec<u32>> {
-        let mut stdin = CenoStdin::default();
         if let Some(public_io) = &self.public_io {
-            for word in public_io.iter() {
-                stdin.write(word)?;
+            // if vector contains only one element, write it as a raw `u32`
+            // otherwise, write the entire vector
+            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
+            if public_io.len() == 1 {
+                CenoStdin::default()
+                    .write(&public_io[0])
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+            } else {
+                CenoStdin::default()
+                    .write(public_io)
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
             }
+            .context("failed to get public_io".to_string())
+        } else {
+            Ok(vec![])
         }
-        Ok((&stdin).into())
     }
 
     /// Read the hints
@@ -160,11 +170,21 @@ impl CenoOptions {
             memory_from_file(file_path).context(format!("failed to read {}", file_path.display()))
         } else if self.hints.is_some() {
             let hints = self.hints.as_ref().unwrap();
-            let mut stdin = CenoStdin::default();
-            for hint in hints.iter() {
-                stdin.write(hint)?;
+            // if the vector contains only one element, write it as a raw `u32`
+            // otherwise, write the entire vector
+            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
+            if hints.len() == 1 {
+                CenoStdin::default()
+                    .write(&hints[0])
+                    .ok()
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+            } else {
+                CenoStdin::default()
+                    .write(hints)
+                    .ok()
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
             }
-            Ok((&stdin).into())
+            .context("failed to get hints".to_string())
         } else {
             Ok(vec![])
         }
