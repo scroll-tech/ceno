@@ -150,6 +150,7 @@ impl<E: ExtensionField> EvalExpression<E> {
         challenges: &[E],
     ) -> FieldType<'a, E> {
         match self {
+            EvalExpression::Zero => FieldType::default(),
             EvalExpression::Single(i) => evals[*i].clone(),
             EvalExpression::Linear(i, c0, c1) => Arc::into_inner(wit_infer_by_expr(
                 &[],
