@@ -295,15 +295,9 @@ mod tests {
     };
     use p3::field::PrimeCharacteristicRing;
 
-    use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem},
-        scheme::utils::{
-            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
-        },
+    use crate::scheme::utils::{
+        infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
     };
-    use multilinear_extensions::{Expression, ToExpr};
-
-    use super::wit_infer_by_expr;
 
     #[test]
     fn test_infer_tower_witness() {

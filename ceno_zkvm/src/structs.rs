@@ -338,7 +338,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn assign_keccakf_circuit(
         &mut self,
         css: &ZKVMConstraintSystem<E>,
-        config: &<LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
+        _config: &<LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
         records: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
         let cs = css

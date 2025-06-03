@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem};
+use std::marker::PhantomData;
 
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::{
@@ -6,16 +6,12 @@ use gkr_iop::{
     chip::Chip,
     evaluation::EvalExpression,
     gkr::{
-        GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
-        layer::{Layer, LayerType, LayerWitness},
+        GKRProverOutput,
+        layer::{Layer, LayerType},
     },
 };
-use itertools::{Itertools, izip};
-use multilinear_extensions::{
-    Expression,
-    mle::{MultilinearExtension, PointAndEval},
-    util::{ceil_log2, max_usable_threads},
-};
+use itertools::Itertools;
+use multilinear_extensions::{Expression, ToExpr, mle::PointAndEval, util::max_usable_threads};
 use p3_field::PrimeCharacteristicRing;
 use rand::{Rng, rngs::OsRng};
 use transcript::{BasicTranscript, Transcript};
@@ -40,8 +36,6 @@ struct TowerChipLayout<E: ExtensionField> {
     committed_table_id: usize,
     committed_count_id: usize,
 
-    lookup_challenge: Expression<E>,
-
     output_cumulative_sum: [EvalExpression<E>; 2],
 
     _field: PhantomData<E>,
@@ -53,19 +47,19 @@ impl<E: ExtensionField> ProtocolBuilder<E> for TowerChipLayout<E> {
     fn init(params: Self::Params) -> Self {
         Self {
             params,
-            ..Default::default()
+            committed_table_id: 0,
+            committed_count_id: 0,
+            output_cumulative_sum: [EvalExpression::Zero, EvalExpression::Zero],
+            _field: PhantomData,
         }
     }
 
     fn build_commit_phase(&mut self, chip: &mut Chip<E>) {
         [self.committed_table_id, self.committed_count_id] = chip.allocate_committed();
-        [self.lookup_challenge] = chip.allocate_challenges();
     }
 
     fn build_gkr_phase(&mut self, chip: &mut Chip<E>) {
         let height = self.params.height;
-        let lookup_challenge = Expression::Con(self.lookup_challenge.clone());
-
         self.output_cumulative_sum = chip.allocate_output_evals::<2>().try_into().unwrap();
 
         // Tower layers
@@ -79,11 +73,11 @@ impl<E: ExtensionField> ProtocolBuilder<E> for TowerChipLayout<E> {
                     num_0.0.into(),
                     num_1.0.into(),
                 ];
-                let in_eval = vec![
-                    num_0.1.clone(),
-                    num_1.1.clone(),
+                let in_evals = vec![
                     den_0.1.clone(),
                     den_1.1.clone(),
+                    num_0.1.clone(),
+                    num_1.1.clone(),
                 ];
                 chip.add_layer(Layer::new(
                     format!("Tower_layer_{}", i),
@@ -93,21 +87,21 @@ impl<E: ExtensionField> ProtocolBuilder<E> for TowerChipLayout<E> {
                         den_expr_0 * num_expr_1 + den_expr_1 * num_expr_0,
                     ],
                     challenges,
-                    in_bases,
-                    in_exts,
-                    vec![den, num],
-                    vec![],
+                    in_evals,
+                    vec![(Some(eq.0.expr()), vec![den, num])],
+                    Default::default(),
+                    vec!["denominator".to_string(), "numerator".to_string()],
                 ));
                 let [challenge] = chip.allocate_challenges();
                 (
                     [
                         EvalExpression::Partition(
                             vec![Box::new(den_0.1), Box::new(den_1.1)],
-                            vec![(0, challenge.clone())],
+                            vec![(0, Box::new(challenge.clone()))],
                         ),
                         EvalExpression::Partition(
                             vec![Box::new(num_0.1), Box::new(num_1.1)],
-                            vec![(0, challenge.clone())],
+                            vec![(0, Box::new(challenge.clone()))],
                         ),
                     ],
                     vec![challenge],
@@ -121,12 +115,12 @@ impl<E: ExtensionField> ProtocolBuilder<E> for TowerChipLayout<E> {
         chip.add_layer(Layer::new(
             "Update_table".to_string(),
             LayerType::Linear,
-            vec![lookup_challenge + table.0.into()],
+            vec![table.0.into()],
             challenges,
             vec![table.1.clone()],
-            vec![],
-            vec![updated_table],
-            vec![],
+            vec![(None, vec![updated_table])],
+            Default::default(),
+            vec!["table".to_string()],
         ));
 
         chip.allocate_opening(self.committed_table_id, table.1);
@@ -183,7 +177,7 @@ fn main() {
                 .sample_and_append_challenge(b"lookup challenge")
                 .elements,
         ];
-        let (gkr_witness, _) = layout.gkr_witness(&phase1_witness_group, &challenges);
+        let (gkr_witness, _) = layout.gkr_witness(&gkr_circuit, &phase1_witness_group, &challenges);
 
         #[cfg(debug_assertions)]
         {
@@ -214,12 +208,12 @@ fn main() {
             vec![
                 PointAndEval {
                     point: point.clone(),
-                    eval: last[0].get_base_field_vec()[0] * last[1].get_base_field_vec()[0],
+                    eval: last[0].get_ext_field_vec()[0] * last[1].get_ext_field_vec()[0],
                 },
                 PointAndEval {
                     point,
-                    eval: last[0].get_base_field_vec()[0] * last[3].get_base_field_vec()[0]
-                        + last[1].get_base_field_vec()[0] * last[2].get_base_field_vec()[0],
+                    eval: last[0].get_ext_field_vec()[0] * last[3].get_ext_field_vec()[0]
+                        + last[1].get_ext_field_vec()[0] * last[2].get_ext_field_vec()[0],
                 },
             ]
         };

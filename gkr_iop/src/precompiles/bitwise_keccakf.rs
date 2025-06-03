@@ -106,7 +106,10 @@ fn keccak_witness<E: ExtensionField>(states: &[[u64; 25]]) -> RowMajorMatrix<E::
         }
     }
 
-    RowMajorMatrix::new_by_values(values, STATE_SIZE, InstancePaddingStrategy::RepeatLast)
+    let mut rmm =
+        RowMajorMatrix::new_by_values(values, STATE_SIZE, InstancePaddingStrategy::RepeatLast);
+    rmm.padding_by_strategy();
+    rmm
 }
 
 const ROUNDS: usize = 24;
@@ -195,6 +198,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 })
                 .collect_vec();
 
+            let exprs_len = exprs.len();
             chip.add_layer(Layer::new(
                 format!("Round {round}: Iota:: compute output"),
                 LayerType::Zerocheck,
@@ -203,7 +207,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 chi_output.iter().map(|e| e.1.clone()).collect_vec(),
                 vec![(Some(eq.0.expr()), round_output.to_vec())],
                 Default::default(),
-                vec![],
+                vec!["Iota:: compute output".to_string(); exprs_len],
             ));
 
             let (theta_output, [eq]) = chip.allocate_wits_in_zero_layer::<STATE_SIZE, 1>();
@@ -219,6 +223,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 .map(|i| chi_expr(i, &permuted))
                 .collect_vec();
 
+            let exprs_len = exprs.len();
             chip.add_layer(Layer::new(
                 format!("Round {round}: Chi:: apply rho, pi and chi"),
                 LayerType::Zerocheck,
@@ -230,7 +235,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     chi_output.iter().map(|e| e.1.clone()).collect_vec(),
                 )],
                 Default::default(),
-                vec![],
+                vec!["Chi:: apply rho, pi and chi".to_string(); exprs_len],
             ));
 
             let (d_and_state, [eq]) =
@@ -244,6 +249,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     xor_expr(state2[i].0.expr(), d[from_xz(x, z)].0.expr())
                 })
                 .collect_vec();
+            let exprs_len = exprs.len();
 
             chip.add_layer(Layer::new(
                 format!("Round {round}: Theta::compute output"),
@@ -256,7 +262,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     theta_output.iter().map(|e| e.1.clone()).collect_vec(),
                 )],
                 Default::default(),
-                vec![],
+                vec!["Theta::compute output".to_string(); exprs_len],
             ));
 
             let (c, [eq]) = chip.allocate_wits_in_zero_layer::<{ C_SIZE }, 1>();
@@ -267,6 +273,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 .map(|(x, z)| d_expr(x, z, &c_wits))
                 .collect_vec();
 
+            let exprs_len = d_exprs.len();
             chip.add_layer(Layer::new(
                 format!("Round {round}: Theta::compute D[x][z]"),
                 LayerType::Zerocheck,
@@ -278,7 +285,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     d.iter().map(|e| e.1.clone()).collect_vec(),
                 )],
                 Default::default(),
-                vec![],
+                vec!["Theta::compute D[x][z]".to_string(); exprs_len],
             ));
 
             let (state, [eq0, eq1]) = chip.allocate_wits_in_zero_layer::<STATE_SIZE, 2>();
@@ -292,6 +299,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             // Copy state
             let id_exprs = (0..STATE_SIZE).map(|i| state_wits[i].clone()).collect_vec();
 
+            let exprs_len = c_exprs.len() + id_exprs.len();
             chip.add_layer(Layer::new(
                 format!("Round {round}: Theta::compute C[x][z]"),
                 LayerType::Zerocheck,
@@ -309,7 +317,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     ),
                 ],
                 Default::default(),
-                vec![],
+                vec!["Theta::compute C[x][z]".to_string(); exprs_len],
             ));
 
             state.iter().map(|e| e.1.clone()).collect_vec()
@@ -494,6 +502,6 @@ mod tests {
         let states: Vec<[u64; 25]> = (0..num_instance)
             .map(|_| std::array::from_fn(|_| rng.gen()))
             .collect_vec();
-        run_keccakf::<E>(setup_gkr_circuit(), states, false, true);
+        run_keccakf::<E>(setup_gkr_circuit(), states, false, false);
     }
 }
