@@ -91,7 +91,7 @@ impl BooleanHypercube {
     }
 }
 
-impl<'a> IntoIterator for &'a BooleanHypercube {
+impl IntoIterator for &BooleanHypercube {
     type Item = u64;
     type IntoIter = std::array::IntoIter<u64, 32>;
 
@@ -116,7 +116,7 @@ mod tests {
         let mut current = 1u8;
 
         for _ in 1..32 {
-            current = current << 1; // multiply by x (shift left)
+            current <<= 1; // multiply by x (shift left)
             if current & 0b100000 != 0 {
                 // degree 5 overflow
                 current ^= CYCLIC_POW2_5_MODULUS; // reduce modulo polynomial

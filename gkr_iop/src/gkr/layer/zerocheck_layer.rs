@@ -181,7 +181,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .map(|point| {
                 MultilinearExtension::from_evaluations_ext_vec(
                     point.len(),
-                    build_eq_x_r_vec(&point),
+                    build_eq_x_r_vec(point),
                 )
             })
             // for rotation left point
@@ -219,7 +219,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .iter()
                 .map(|mle| Either::Left(mle.as_ref()))
                 // extend eqs to the end of wit
-                .chain(eqs.iter_mut().map(|eq| Either::Right(eq)))
+                .chain(eqs.iter_mut().map(Either::Right))
                 .collect_vec(),
         );
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
@@ -266,8 +266,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             alpha_pows.iter().copied(),
             eval_and_dedup_points
                 .iter()
-                .map(|(sigmas, _)| sigmas)
-                .flatten()
+                .flat_map(|(sigmas, _)| sigmas)
                 .copied(),
         );
 
@@ -301,7 +300,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .exprs
             .iter()
             .zip_eq(self.outs.iter().flat_map(|(eq_expr, evals)| {
-                std::iter::repeat(eq_expr.clone().unwrap()).take(evals.len())
+                std::iter::repeat_n(eq_expr.clone().unwrap(), evals.len())
             }))
             .zip_eq(alpha_pows)
             .map(|((expr, eq_expr), alpha)| {
@@ -457,7 +456,7 @@ pub fn prove_rotation<E: ExtensionField>(
     (
         RotationProof {
             proof: rotation_proof,
-            evals: evals,
+            evals,
         },
         point,
     )

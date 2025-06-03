@@ -515,7 +515,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
         // Input state of the round in 8-bit chunks
         let state8: ArrayView<(WitIn, EvalExpression<E>), Ix3> =
-            ArrayView::from_shape((5, 5, 8), &keccak_input8).unwrap();
+            ArrayView::from_shape((5, 5, 8), keccak_input8).unwrap();
 
         // The purpose is to compute the auxiliary array
         // c[i] = XOR (state[j][i]) for j in 0..5
@@ -1048,7 +1048,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
 
     let span = entered_span!("phase1_witness", profiling_2 = true);
     let phase1_witness = layout.phase1_witness_group(KeccakTrace {
-        instances: instances,
+        instances,
     });
     exit_span!(span);
 

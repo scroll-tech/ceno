@@ -233,7 +233,7 @@ impl<E: ExtensionField> Layer<E> {
             match challenge {
                 Expression::Challenge(challange_id, ..) => {
                     let challange_id = *challange_id as usize;
-                    if challenges.len() <= challange_id as usize {
+                    if challenges.len() <= challange_id {
                         challenges.resize(challange_id + 1, E::default());
                     }
                     challenges[challange_id] = value.elements;

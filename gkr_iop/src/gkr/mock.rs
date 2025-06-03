@@ -97,8 +97,7 @@ impl<E: ExtensionField> MockProver<E> {
             let expects = layer
                 .outs
                 .iter()
-                .map(|(_, out)| out)
-                .flatten()
+                .flat_map(|(_, out)| out)
                 .map(|out| out.mock_evaluate(&evaluations, &challenges, 1 << num_vars))
                 .collect_vec();
             match layer.ty {
@@ -162,7 +161,7 @@ impl<E: ExtensionField> EvalExpression<E> {
                     .collect_vec(),
                 &[],
                 &[],
-                &challenges,
+                challenges,
                 &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
             ))
             .unwrap()

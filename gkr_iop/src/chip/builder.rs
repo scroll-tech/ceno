@@ -94,17 +94,13 @@ impl<E: ExtensionField> Chip<E> {
             layer
                 .outs
                 .iter()
-                .map(|(_, outs)| outs)
-                .flatten()
+                .flat_map(|(_, outs)| outs)
                 .collect_vec()
                 .len(),
             layer.exprs.len()
         );
-        match layer.ty {
-            LayerType::Linear => {
-                assert!(layer.exprs.iter().all(|expr| expr.degree() == 1));
-            }
-            _ => {}
+        if let LayerType::Linear = layer.ty {
+            assert!(layer.exprs.iter().all(|expr| expr.degree() == 1));
         }
         self.layers.push(layer);
     }
