@@ -122,7 +122,7 @@ where
                             gkr_out_well_order.push((*out, out_mle.clone()));
                         }
                     }
-                    EvalExpression::Linear(0, _, _) => { // zero expression
+                    EvalExpression::Zero => { // zero expression
                         // do nothing on zero expression
                     }
                     other => unimplemented!("{:?}", other),

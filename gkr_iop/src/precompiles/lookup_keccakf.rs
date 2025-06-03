@@ -26,7 +26,7 @@ use crate::{
     precompiles::utils::{MaskRepresentation, not8_expr},
 };
 
-use super::utils::{CenoLookup, u64s_to_felts, zero_eval};
+use super::utils::{CenoLookup, u64s_to_felts};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeccakParams {}
@@ -137,7 +137,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
     fn add_constraint(&mut self, expr: Expression<E>, name: String) {
         self.expressions.push(expr);
-        self.evals.push(zero_eval());
+        self.evals.push(EvalExpression::Zero);
         self.expr_names.push(name);
     }
 

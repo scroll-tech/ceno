@@ -3,18 +3,8 @@ use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr};
 use p3_field::PrimeCharacteristicRing;
 
-use crate::evaluation::EvalExpression;
-
 pub fn not8_expr<E: ExtensionField>(expr: Expression<E>) -> Expression<E> {
     E::BaseField::from_u8(0xFF).expr() - expr
-}
-
-pub fn zero_eval<E: ExtensionField>() -> EvalExpression<E> {
-    EvalExpression::Linear(
-        0,
-        Box::new(E::BaseField::ZERO.expr()),
-        Box::new(E::BaseField::ZERO.expr()),
-    )
 }
 
 pub fn u64s_to_felts<E: ExtensionField>(words: Vec<u64>) -> Vec<E::BaseField> {

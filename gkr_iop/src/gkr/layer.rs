@@ -39,9 +39,9 @@ pub struct Layer<E: ExtensionField> {
     /// each expression corresponds to an output. While in sumcheck, there
     /// is only 1 expression, which corresponds to the sum of all outputs.
     /// This design is for the convenience when building the following
-    /// expression: `e_0 + beta * e_1
+    /// expression: `r^0 e_0 + r^1 * e_1 + ...
     ///    = \sum_x (r^0 eq_0(X) \cdot expr_0(x) + r^1 eq_1(X) \cdot expr_1(x) + ...)`.
-    /// where `vec![e_0, beta * e_1]` will be the output evaluation expressions.
+    /// where `vec![e_0, e_1, ...]` will be the output evaluation expressions.
     pub exprs: Vec<Expression<E>>,
 
     /// Positions to place the evaluations of the base inputs of this layer.
