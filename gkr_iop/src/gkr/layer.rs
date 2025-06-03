@@ -233,12 +233,12 @@ impl<E: ExtensionField> Layer<E> {
         for challenge in &self.challenges {
             let value = transcript.sample_and_append_challenge(b"layer challenge");
             match challenge {
-                Expression::Challenge(challange_id, ..) => {
-                    let challange_id = *challange_id as usize;
-                    if challenges.len() <= challange_id as usize {
-                        challenges.resize(challange_id + 1, E::default());
+                Expression::Challenge(challenge_id, ..) => {
+                    let challenge_id = *challenge_id as usize;
+                    if challenges.len() <= challenge_id as usize {
+                        challenges.resize(challenge_id + 1, E::default());
                     }
-                    challenges[challange_id] = value.elements;
+                    challenges[challenge_id] = value.elements;
                 }
                 _ => unreachable!(),
             }
