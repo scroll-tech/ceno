@@ -96,9 +96,10 @@ impl<E: ExtensionField> Layer<E> {
         ),
         expr_names: Vec<String>,
     ) -> Self {
-        if expr_names.len() < exprs.len() {
-            panic!("there are expr without name")
-        }
+        assert!(
+            expr_names.len() == exprs.len(),
+            "there are expr without name"
+        );
         let max_expr_degree = exprs.iter().map(|expr| expr.degree()).max().unwrap();
 
         Self {
