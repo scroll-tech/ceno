@@ -41,7 +41,13 @@ fn evaluate<E: ExtensionField>(expr: &Expression<E>, challenges: &[E]) -> E {
 impl<E: ExtensionField> EvalExpression<E> {
     pub fn evaluate(&self, evals: &[PointAndEval<E>], challenges: &[E]) -> PointAndEval<E> {
         match self {
-            EvalExpression::Zero => PointAndEval::default(),
+            // assume all point in evals are derived in random, thus pick arbirary one is ok
+            // here we pick first point as representative.
+            // for zero eval, eval is always zero
+            EvalExpression::Zero => PointAndEval {
+                point: evals[0].point.clone(),
+                eval: E::ZERO,
+            },
             EvalExpression::Single(i) => evals[*i].clone(),
             EvalExpression::Linear(i, c0, c1) => PointAndEval {
                 point: evals[*i].point.clone(),
