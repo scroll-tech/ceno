@@ -27,27 +27,27 @@ pub enum MockProverError<'a, E: ExtensionField> {
     SumcheckExprLenError(usize),
     #[error("sumcheck expression not match, out: {0:?}, expr: {1:?}, expect: {2:?}. got: {3:?}")]
     SumcheckExpressionNotMatch(
-        Vec<EvalExpression<E>>,
-        Expression<E>,
-        FieldType<'a, E>,
-        FieldType<'a, E>,
+        Box<Vec<EvalExpression<E>>>,
+        Box<Expression<E>>,
+        Box<FieldType<'a, E>>,
+        Box<FieldType<'a, E>>,
     ),
     #[error(
         "zerocheck expression not match, out: {0:?}, expr: {1:?}, expect: {2:?}. got: {3:?}, expr_name: {4:?}"
     )]
     ZerocheckExpressionNotMatch(
-        EvalExpression<E>,
-        Expression<E>,
-        FieldType<'a, E>,
-        FieldType<'a, E>,
+        Box<EvalExpression<E>>,
+        Box<Expression<E>>,
+        Box<FieldType<'a, E>>,
+        Box<FieldType<'a, E>>,
         String,
     ),
     #[error("linear expression not match, out: {0:?}, expr: {1:?}, expect: {2:?}. got: {3:?}")]
     LinearExpressionNotMatch(
-        EvalExpression<E>,
-        Expression<E>,
-        FieldType<'a, E>,
-        FieldType<'a, E>,
+        Box<EvalExpression<E>>,
+        Box<Expression<E>>,
+        Box<FieldType<'a, E>>,
+        Box<FieldType<'a, E>>,
     ),
 }
 
@@ -66,7 +66,7 @@ impl<E: ExtensionField> MockProver<E> {
         challenges.resize_with(circuit.n_challenges, || E::random(&mut rng));
         for (layer, layer_wit) in izip!(circuit.layers, &circuit_wit.layers) {
             let num_vars = layer_wit.num_vars;
-            let points = (0..layer.outs.len())
+            let points = (0..layer.expr_evals.len())
                 .map(|_| random_point::<E>(OsRng, num_vars))
                 .collect_vec();
             let eqs = eq_mles(points.clone(), &vec![E::ONE; points.len()])
@@ -95,36 +95,41 @@ impl<E: ExtensionField> MockProver<E> {
                 })
                 .collect_vec();
             let expects = layer
-                .outs
+                .expr_evals
                 .iter()
                 .flat_map(|(_, out)| out)
-                .map(|out| out.mock_evaluate(&evaluations, &challenges, 1 << num_vars))
+                .map(|out| out.mock_evaluate(&evaluations, &challenges))
                 .collect_vec();
             match layer.ty {
                 LayerType::Zerocheck => {
-                    for (got, expect, expr, expr_name, out) in
-                        izip!(gots, expects, &layer.exprs, &layer.expr_names, &layer.outs)
-                    {
+                    for (got, expect, expr, expr_name, out) in izip!(
+                        gots,
+                        expects,
+                        &layer.exprs,
+                        &layer.expr_names,
+                        &layer.expr_evals
+                    ) {
                         if expect != got {
                             return Err(MockProverError::ZerocheckExpressionNotMatch(
-                                out.1[0].clone(),
-                                expr.clone(),
-                                expect,
-                                got,
+                                Box::new(out.1[0].clone()),
+                                Box::new(expr.clone()),
+                                Box::new(expect),
+                                Box::new(got),
                                 expr_name.to_string(),
                             ));
                         }
                     }
                 }
                 LayerType::Linear => {
-                    for (got, expect, expr, out) in izip!(gots, expects, &layer.exprs, &layer.outs)
+                    for (got, expect, expr, out) in
+                        izip!(gots, expects, &layer.exprs, &layer.expr_evals)
                     {
                         if expect != got {
                             return Err(MockProverError::LinearExpressionNotMatch(
-                                out.1[0].clone(),
-                                expr.clone(),
-                                expect,
-                                got,
+                                Box::new(out.1[0].clone()),
+                                Box::new(expr.clone()),
+                                Box::new(expect),
+                                Box::new(got),
                             ));
                         }
                     }
@@ -143,7 +148,6 @@ impl<E: ExtensionField> EvalExpression<E> {
         &self,
         evals: &[FieldType<'a, E>],
         challenges: &[E],
-        len: usize,
     ) -> FieldType<'a, E> {
         match self {
             EvalExpression::Single(i) => evals[*i].clone(),
@@ -170,7 +174,7 @@ impl<E: ExtensionField> EvalExpression<E> {
                 assert_eq!(parts.len(), 1 << indices.len());
                 let parts = parts
                     .iter()
-                    .map(|part| part.mock_evaluate(evals, challenges, len))
+                    .map(|part| part.mock_evaluate(evals, challenges))
                     .collect_vec();
                 indices
                     .iter()

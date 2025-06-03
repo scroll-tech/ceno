@@ -92,7 +92,7 @@ impl<E: ExtensionField> Chip<E> {
     pub fn add_layer(&mut self, layer: Layer<E>) {
         assert_eq!(
             layer
-                .outs
+                .expr_evals
                 .iter()
                 .flat_map(|(_, outs)| outs)
                 .collect_vec()

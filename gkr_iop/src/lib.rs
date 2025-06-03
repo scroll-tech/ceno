@@ -111,7 +111,7 @@ where
 
             // process out to prepare output witness
             layer
-                .outs
+                .expr_evals
                 .iter()
                 .flat_map(|(_, out_eval)| out_eval)
                 .zip_eq(&current_layer_output)

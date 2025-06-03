@@ -156,12 +156,7 @@ impl<E: ExtensionField> fmt::Display for GKRProof<E> {
         // overall size
         let overall_size = bincode::serialized_size(&self).expect("serialization error");
 
-        write!(
-            f,
-            "overall_size {:.2}mb. \n\
-            ",
-            byte_to_mb(overall_size),
-        )
+        write!(f, "overall_size {:.2}mb.", byte_to_mb(overall_size),)
     }
 }
 

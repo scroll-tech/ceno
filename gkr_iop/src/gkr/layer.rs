@@ -17,6 +17,12 @@ pub mod linear_layer;
 pub mod sumcheck_layer;
 pub mod zerocheck_layer;
 
+pub type ExprEvalType<E> = Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>;
+pub type RotateExprs<E> = (
+    Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
+    Vec<(Expression<E>, Expression<E>)>,
+);
+
 // rotation contribute
 // left + right + target, overall 3
 const ROTATION_OPENING_COUNT: usize = 3;
@@ -53,15 +59,12 @@ pub struct Layer<E: ExtensionField> {
     /// connected to the outputs of this layer.
     /// It format indicated as different output group
     /// first tuple value is optional eq
-    pub outs: Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>,
+    pub expr_evals: ExprEvalType<E>,
 
     // format: ([eq0, eq1, eq2], Vec<(rotatition_expr, expr)>) such that rotation_expr - expr == 0
     // there got 3 different eq for (left, right, target) during rotation argument
     // refer https://hackmd.io/HAAj1JTQQiKfu0SIwOJDRw?view#Rotation
-    pub rotation_exprs: (
-        Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
-        Vec<(Expression<E>, Expression<E>)>,
-    ),
+    pub rotation_exprs: RotateExprs<E>,
     pub rotation_cyclic_group_log2: usize,
     pub rotation_cyclic_subgroup_size: usize,
 
@@ -85,10 +88,9 @@ impl<E: ExtensionField> Layer<E> {
         challenges: Vec<Expression<E>>,
         in_eval_expr: Vec<EvalExpression<E>>,
         // first tuple value is eq
-        outs: Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>,
-        (rotation_eq, rotation_exprs, rotation_cyclic_group_log2, rotation_cyclic_subgroup_size): (
-            Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
-            Vec<(Expression<E>, Expression<E>)>,
+        expr_evals: ExprEvalType<E>,
+        ((rotation_eq, rotation_exprs), rotation_cyclic_group_log2, rotation_cyclic_subgroup_size): (
+            RotateExprs<E>,
             usize,
             usize,
         ),
@@ -106,7 +108,7 @@ impl<E: ExtensionField> Layer<E> {
             challenges,
             exprs,
             in_eval_expr,
-            outs,
+            expr_evals,
             rotation_exprs: (rotation_eq, rotation_exprs),
             rotation_cyclic_group_log2,
             rotation_cyclic_subgroup_size,
@@ -204,7 +206,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &[PointAndEval<E>],
         challenges: &[E],
     ) -> Vec<(Vec<E>, Option<Point<E>>)> {
-        self.outs
+        self.expr_evals
             .iter()
             .map(|(_, out_evals)| {
                 let evals = out_evals
@@ -256,11 +258,7 @@ impl<E: ExtensionField> Layer<E> {
 impl<'a, E: ExtensionField> LayerWitness<'a, E> {
     pub fn new(bases: Vec<ArcMultilinearExtension<'a, E>>) -> Self {
         assert!(!bases.is_empty() || !bases.is_empty());
-        let num_vars = if bases.is_empty() {
-            log2(bases[0].evaluations().len())
-        } else {
-            log2(bases[0].evaluations().len())
-        } as usize;
+        let num_vars = log2(bases[0].evaluations().len()) as usize;
         assert!(bases.iter().all(|b| b.evaluations().len() == 1 << num_vars));
         Self { bases, num_vars }
     }

@@ -28,7 +28,7 @@ where
     E: ExtensionField,
 {
     let out_evals: Vec<_> = layer
-        .outs
+        .expr_evals
         .iter()
         .flat_map(|(_, out_eval)| out_eval.iter())
         .collect();

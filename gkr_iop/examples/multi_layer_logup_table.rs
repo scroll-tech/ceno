@@ -1,37 +1,38 @@
-use std::{marker::PhantomData, mem, sync::Arc};
+use std::{marker::PhantomData, mem};
 
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     evaluation::EvalExpression,
     gkr::{
-        GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
+        GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, GKRProverOutput,
         layer::{Layer, LayerType, LayerWitness},
     },
 };
 use itertools::{Itertools, izip};
-use multilinear_extensions::{Expression, util::ceil_log2};
-use p3_field::{PrimeCharacteristicRing, extension::BinomialExtensionField};
-use p3_goldilocks::Goldilocks;
+use multilinear_extensions::{
+    Expression,
+    mle::{MultilinearExtension, PointAndEval},
+    util::{ceil_log2, max_usable_threads},
+};
+use p3_field::PrimeCharacteristicRing;
 use rand::{Rng, rngs::OsRng};
 use transcript::{BasicTranscript, Transcript};
 
 #[cfg(debug_assertions)]
 use gkr_iop::gkr::mock::MockProver;
 
-#[cfg(debug_assertions)]
-use subprotocols::expression::VectorType;
 use witness::RowMajorMatrix;
 
-type E = BinomialExtensionField<Goldilocks, 2>;
+type E = GoldilocksExt2;
 
 #[derive(Clone, Debug, Default)]
 struct TowerParams {
     height: usize,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct TowerChipLayout<E: ExtensionField> {
     params: TowerParams,
 
@@ -63,7 +64,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for TowerChipLayout<E> {
 
     fn build_gkr_phase(&mut self, chip: &mut Chip<E>) {
         let height = self.params.height;
-        let lookup_challenge = Expression::Const(self.lookup_challenge.clone());
+        let lookup_challenge = Expression::Con(self.lookup_challenge.clone());
 
         self.output_cumulative_sum = chip.allocate_output_evals::<2>().try_into().unwrap();
 
@@ -71,38 +72,19 @@ impl<E: ExtensionField> ProtocolBuilder<E> for TowerChipLayout<E> {
         let ([updated_table, count], challenges) = (0..height).fold(
             (self.output_cumulative_sum.clone(), vec![]),
             |([den, num], challenges), i| {
-                let [den_0, den_1, num_0, num_1] = if i == height - 1 {
-                    // Allocate witnesses in the extension field, except numerator inputs in the
-                    // base field.
-                    let ([num_0, num_1], [den_0, den_1]) = chip.allocate_wits_in_layer();
-                    [den_0, den_1, num_0, num_1]
-                } else {
-                    let ([], [den_0, den_1, num_0, num_1]) = chip.allocate_wits_in_layer();
-                    [den_0, den_1, num_0, num_1]
-                };
-
-                let [den_expr_0, den_expr_1, num_expr_0, num_expr_1]: [Expression; 4] = [
+                let ([den_0, den_1, num_0, num_1], [eq]) = chip.allocate_wits_in_zero_layer();
+                let [den_expr_0, den_expr_1, num_expr_0, num_expr_1]: [Expression<E>; 4] = [
                     den_0.0.into(),
                     den_1.0.into(),
                     num_0.0.into(),
                     num_1.0.into(),
                 ];
-                let (in_bases, in_exts) = if i == height - 1 {
-                    (
-                        vec![num_0.1.clone(), num_1.1.clone()],
-                        vec![den_0.1.clone(), den_1.1.clone()],
-                    )
-                } else {
-                    (
-                        vec![],
-                        vec![
-                            den_0.1.clone(),
-                            den_1.1.clone(),
-                            num_0.1.clone(),
-                            num_1.1.clone(),
-                        ],
-                    )
-                };
+                let in_eval = vec![
+                    num_0.1.clone(),
+                    num_1.1.clone(),
+                    den_0.1.clone(),
+                    den_1.1.clone(),
+                ];
                 chip.add_layer(Layer::new(
                     format!("Tower_layer_{}", i),
                     LayerType::Zerocheck,
@@ -134,7 +116,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for TowerChipLayout<E> {
         );
 
         // Preprocessing layer, compute table + challenge
-        let ([table], []) = chip.allocate_wits_in_layer();
+        let [table] = chip.allocate_wits_in_layer();
 
         chip.add_layer(Layer::new(
             "Update_table".to_string(),
@@ -156,7 +138,7 @@ pub struct TowerChipTrace {
     pub table_with_multiplicity: Vec<(u64, u64)>,
 }
 
-impl<E> ProtocolWitnessGenerator<E> for TowerChipLayout<E>
+impl<'a, E> ProtocolWitnessGenerator<'a, E> for TowerChipLayout<E>
 where
     E: ExtensionField,
 {
@@ -170,73 +152,21 @@ where
             .collect_vec();
         RowMajorMatrix::new_by_values(wits, 2, witness::InstancePaddingStrategy::Default)
     }
-
-    fn gkr_witness(
-        &self,
-        phase1: &RowMajorMatrix<E::BaseField>,
-        challenges: &[E],
-    ) -> (GKRCircuitWitness<E>, GKRCircuitOutput<E>) {
-        // Generate witnesses.
-        let table = &phase1[self.committed_table_id];
-        let count = &phase1[self.committed_count_id];
-        let beta = self.lookup_challenge.entry(challenges);
-
-        // Compute table + beta.
-        let n_layers = self.params.height + 1;
-        let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(n_layers);
-        layer_wits.push(LayerWitness::new(vec![table.to_vec()], vec![]));
-
-        // Compute den_0, den_1, num_0, num_1 for each layer.
-        let updated_table = table.iter().cloned().map(|x| beta + x).collect_vec();
-
-        let (num_0, num_1): (Vec<E::BaseField>, Vec<E::BaseField>) = count.iter().tuples().unzip();
-        let (den_0, den_1): (Vec<E>, Vec<E>) = updated_table.into_iter().tuples().unzip();
-        let (mut last_den, mut last_num): (Vec<_>, Vec<_>) = izip!(&den_0, &den_1, &num_0, &num_1)
-            .map(|(&den_0, &den_1, &num_0, &num_1)| (den_0 * den_1, den_0 * num_1 + den_1 * num_0))
-            .unzip();
-
-        layer_wits.push(LayerWitness::new(vec![num_0, num_1], vec![den_0, den_1]));
-
-        layer_wits.extend((1..self.params.height).map(|_i| {
-            let (den_0, den_1): (Vec<E>, Vec<E>) =
-                mem::take(&mut last_den).into_iter().tuples().unzip();
-            let (num_0, num_1): (Vec<E>, Vec<E>) =
-                mem::take(&mut last_num).into_iter().tuples().unzip();
-
-            (last_den, last_num) = izip!(&den_0, &den_1, &num_0, &num_1)
-                .map(|(&den_0, &den_1, &num_0, &num_1)| {
-                    (den_0 * den_1, den_0 * num_1 + den_1 * num_0)
-                })
-                .unzip();
-
-            LayerWitness::new(vec![], vec![den_0, den_1, num_0, num_1])
-        }));
-        layer_wits.reverse();
-        let num_vars = ceil_log2(last_den.len());
-
-        (
-            GKRCircuitWitness { layers: layer_wits },
-            GKRCircuitOutput(LayerWitness {
-                bases: vec![],
-                exts: vec![last_den, last_num],
-                num_vars,
-            }),
-        )
-    }
 }
 
 fn main() {
-    let log_size = 3;
-    let params = TowerParams { height: log_size };
+    let num_threads = max_usable_threads();
+    let num_vars = 3;
+    let params = TowerParams { height: num_vars };
     let (layout, chip) = TowerChipLayout::build(params);
     let gkr_circuit = chip.gkr_circuit();
 
     let (out_evals, gkr_proof) = {
-        let table_with_multiplicity = (0..1 << log_size)
+        let table_with_multiplicity = (0..1 << num_vars)
             .map(|_| {
                 (
-                    OsRng.gen_range(0..1 << log_size as u64),
-                    OsRng.gen_range(0..1 << log_size as u64),
+                    OsRng.gen_range(0..1 << num_vars as u64),
+                    OsRng.gen_range(0..1 << num_vars as u64),
                 )
             })
             .collect_vec();
@@ -257,13 +187,20 @@ fn main() {
 
         #[cfg(debug_assertions)]
         {
+            use multilinear_extensions::{mle::FieldType, smart_slice::SmartSlice};
+
             let last = gkr_witness.layers[0].bases.clone();
             MockProver::check(
                 gkr_circuit.clone(),
                 &gkr_witness,
                 vec![
-                    VectorType::Ext(vec![last[0][0] * last[1][0]]),
-                    VectorType::Ext(vec![last[0][0] * last[3][0] + last[1][0] * last[2][0]]),
+                    FieldType::Ext(SmartSlice::Owned(vec![
+                        last[0].get_ext_field_vec()[0] * last[1].get_ext_field_vec()[0],
+                    ])),
+                    FieldType::Ext(SmartSlice::Owned(vec![
+                        last[0].get_ext_field_vec()[0] * last[3].get_ext_field_vec()[0]
+                            + last[1].get_ext_field_vec()[0] * last[2].get_ext_field_vec()[0],
+                    ])),
                 ],
                 challenges.clone(),
             )
@@ -272,21 +209,29 @@ fn main() {
 
         let out_evals = {
             let last = gkr_witness.layers[0].bases.clone();
-            let point = Arc::new(vec![]);
-            assert_eq!(last[0].len(), 1);
+            let point = vec![];
+            assert_eq!(last[0].evaluations().len(), 1);
             vec![
                 PointAndEval {
                     point: point.clone(),
-                    eval: last[0][0] * last[1][0],
+                    eval: last[0].get_base_field_vec()[0] * last[1].get_base_field_vec()[0],
                 },
                 PointAndEval {
                     point,
-                    eval: last[0][0] * last[3][0] + last[1][0] * last[2][0],
+                    eval: last[0].get_base_field_vec()[0] * last[3].get_base_field_vec()[0]
+                        + last[1].get_base_field_vec()[0] * last[2].get_base_field_vec()[0],
                 },
             ]
         };
         let GKRProverOutput { gkr_proof, .. } = gkr_circuit
-            .prove(gkr_witness, &out_evals, &challenges, &mut prover_transcript)
+            .prove(
+                num_threads,
+                num_vars,
+                gkr_witness,
+                &out_evals,
+                &challenges,
+                &mut prover_transcript,
+            )
             .expect("Failed to prove phase");
 
         // Omit the PCS opening phase.
@@ -305,7 +250,13 @@ fn main() {
         ];
 
         gkr_circuit
-            .verify(gkr_proof, &out_evals, &challenges, &mut verifier_transcript)
+            .verify(
+                num_vars,
+                gkr_proof,
+                &out_evals,
+                &challenges,
+                &mut verifier_transcript,
+            )
             .expect("GKR verify failed");
 
         // Omit the PCS opening phase.

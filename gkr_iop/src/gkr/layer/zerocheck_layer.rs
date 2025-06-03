@@ -74,10 +74,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         transcript: &mut impl Transcript<E>,
     ) -> (SumcheckLayerProof<E>, Point<E>) {
         assert_eq!(
-            self.outs.len(),
+            self.expr_evals.len(),
             out_points.len(),
             "out eval length {} != with distinct out_point {}",
-            self.outs.len(),
+            self.expr_evals.len(),
             out_points.len(),
         );
 
@@ -103,7 +103,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
 
         // 2th sumcheck: batch rotation with other constrains
         let mut expr_iter = self.exprs.iter();
-        let mut zero_check_exprs = Vec::with_capacity(self.outs.len());
+        let mut zero_check_exprs = Vec::with_capacity(self.expr_evals.len());
 
         let alpha_pows = get_challenge_pows(
             self.exprs.len() + rotation_exprs.len() * ROTATION_OPENING_COUNT,
@@ -115,7 +115,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let mut alpha_pows_iter = alpha_pows.iter();
 
         let span = entered_span!("gen_expr", profiling_4 = true);
-        for (eq_expr, out_evals) in self.outs.iter() {
+        for (eq_expr, out_evals) in self.expr_evals.iter() {
             let group_length = out_evals.len();
             let zero_check_expr = expr_iter
                 .by_ref()
@@ -179,10 +179,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let mut eqs = out_points
             .par_iter()
             .map(|point| {
-                MultilinearExtension::from_evaluations_ext_vec(
-                    point.len(),
-                    build_eq_x_r_vec(point),
-                )
+                MultilinearExtension::from_evaluations_ext_vec(point.len(), build_eq_x_r_vec(point))
             })
             // for rotation left point
             .chain(rotation_point.par_iter().map(|rotation_point| {
@@ -247,10 +244,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>> {
         assert_eq!(
-            self.outs.len(),
+            self.expr_evals.len(),
             eval_and_dedup_points.len(),
             "out eval length {} != with eval_and_dedup_points {}",
-            self.outs.len(),
+            self.expr_evals.len(),
             eval_and_dedup_points.len(),
         );
         let SumcheckLayerProof {
@@ -289,7 +286,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         eval_and_dedup_points
             .iter()
             .map(|(_, out_point)| eq_eval(out_point.as_ref().unwrap(), &in_point))
-            .zip(&self.outs)
+            .zip(&self.expr_evals)
             .for_each(|(eval, (eq_expr, _))| match eq_expr {
                 Some(Expression::WitIn(witin_id)) => evals[*witin_id as usize] = eval,
                 _ => unreachable!(),
@@ -299,7 +296,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let got_claim = self
             .exprs
             .iter()
-            .zip_eq(self.outs.iter().flat_map(|(eq_expr, evals)| {
+            .zip_eq(self.expr_evals.iter().flat_map(|(eq_expr, evals)| {
                 std::iter::repeat_n(eq_expr.clone().unwrap(), evals.len())
             }))
             .zip_eq(alpha_pows)
