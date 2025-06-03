@@ -67,16 +67,16 @@ pub trait TowerProver<PB: ProverBackend> {
     // infer read/write/logup records from the read/write/logup expressions and then
     // build multiple complete binary trees (tower tree) to accumulate these records
     // either in product or fractional sum form.
-    fn build_tower_witness<'a>(
+    fn build_tower_witness<'a, 'b>(
         &self,
         cs: &ConstraintSystem<PB::E>,
-        input: &ProofInput<PB>,
+        input: &'b ProofInput<'a, PB>,
         challenge: &[PB::E; 2],
     ) -> (
         Vec<Vec<Vec<PB::E>>>,
-        Vec<PB::MultilinearPoly<'a>>,
-        Vec<TowerProverSpec<'a, PB>>,
-        Vec<TowerProverSpec<'a, PB>>,
+        Vec<PB::MultilinearPoly<'b>>,
+        Vec<TowerProverSpec<'b, PB>>,
+        Vec<TowerProverSpec<'b, PB>>,
     );
 
     // the validity of value of first layer in the tower tree is reduced to
@@ -96,12 +96,12 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
     //    the validity of read/write/logup records through sumchecks;
     // 2. multiple multiplication relations between witness multilinear polynomials
     //    achieved via zerochecks.
-    fn prove_main_constraints<'a>(
+    fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<PB::E>,
         tower_proof: &TowerProofs<PB::E>,
-        records: Vec<PB::MultilinearPoly<'a>>,
-        input: ProofInput<'a, PB>,
+        records: Vec<PB::MultilinearPoly<'b>>,
+        input: &'b ProofInput<'a, PB>,
         cs: &ConstraintSystem<PB::E>,
         challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,

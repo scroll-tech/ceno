@@ -55,7 +55,7 @@ impl<
 impl<
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
-    PB: ProverBackend<E = E, Pcs = PCS>,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     PD: ProverDevice<PB>,
 > ZKVMProver<E, PCS, PB, PD>
 {
@@ -353,7 +353,7 @@ impl<
             rt_tower,
             &tower_proof,
             records,
-            input,
+            &input,
             cs,
             challenges,
             transcript,

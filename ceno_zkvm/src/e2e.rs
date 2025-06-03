@@ -754,7 +754,10 @@ pub fn run_e2e_with_checkpoint<
 
 // Runs program emulation + witness generation + proving
 #[allow(clippy::too_many_arguments)]
-pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_e2e_proof<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+>(
     ctx: &E2EProgramCtx<E>,
     init_full_mem: &InitMemState,
     pk: ZKVMProvingKey<E, PCS>,

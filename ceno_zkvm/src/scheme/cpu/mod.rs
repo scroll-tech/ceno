@@ -88,16 +88,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
-    fn build_tower_witness<'a>(
+    fn build_tower_witness<'a, 'b>(
         &self,
         cs: &ConstraintSystem<E>,
-        input: &'a ProofInput<'a, CpuBackend<E, PCS>>,
+        input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
         challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
-        Vec<MultilinearExtension<'a, E>>,
-        Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
-        Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
+        Vec<MultilinearExtension<'b, E>>,
+        Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
+        Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
     ) {
         let num_instances = input.num_instances;
         let next_pow2_instances = next_pow2_instance_padding(input.num_instances);
@@ -545,12 +545,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
-    fn prove_main_constraints<'a>(
+    fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
         _tower_proof: &TowerProofs<E>,
-        records: Vec<MultilinearExtension<'a, E>>,
-        input: ProofInput<CpuBackend<E, PCS>>,
+        records: Vec<MultilinearExtension<'b, E>>,
+        input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
         cs: &ConstraintSystem<E>,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
