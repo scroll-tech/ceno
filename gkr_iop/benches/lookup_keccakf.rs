@@ -44,7 +44,8 @@ fn keccak_f_fn(c: &mut Criterion) {
                             black_box(states),
                             false,
                             false,
-                        );
+                        )
+                        .expect("unable to get proof");
                         let elapsed = instant.elapsed();
                         println!(
                             "keccak_f::create_proof, instances = {}, time = {}",
