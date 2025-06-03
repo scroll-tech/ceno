@@ -19,7 +19,7 @@ use std::{
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
-pub type WitnessId = u32;
+pub type WitnessId = u16;
 pub type ChallengeId = u16;
 pub const MIN_PAR_SIZE: usize = 64;
 

@@ -4,7 +4,7 @@ use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression,
+    Expression, WitnessId,
     mle::{MultilinearExtension, Point},
     utils::eval_by_expr_with_instance,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec, eq_eval},
@@ -404,8 +404,8 @@ pub fn prove_rotation<E: ExtensionField>(
         .sum::<Expression<E>>();
     // last 2 is [selector, eq]
     let (selector_expr, eq_expr) = (
-        Expression::<E>::WitIn((rotation_exprs.len() * 2) as u32),
-        Expression::<E>::WitIn((rotation_exprs.len() * 2 + 1) as u32),
+        Expression::<E>::WitIn((rotation_exprs.len() * 2) as WitnessId),
+        Expression::<E>::WitIn((rotation_exprs.len() * 2 + 1) as WitnessId),
     );
     let span = entered_span!("rotation IOPProverState::prove", profiling_4 = true);
     let (rotation_proof, prover_state) = IOPProverState::prove(
