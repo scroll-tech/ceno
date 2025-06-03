@@ -961,7 +961,7 @@ impl<E: ExtensionField> Display for Expression<E> {
 }
 
 pub mod fmt {
-    use crate::mle::ArcMultilinearExtension;
+    use crate::mle::{ArcMultilinearExtension, MultilinearExtension};
 
     use super::*;
     use std::fmt::Write;
@@ -1079,7 +1079,7 @@ pub mod fmt {
 
     pub fn wtns<E: ExtensionField>(
         wtns: &[WitnessId],
-        wits_in: &[ArcMultilinearExtension<E>],
+        wits_in: &[MultilinearExtension<E>],
         inst_id: usize,
         wits_in_name: &[String],
     ) -> String {

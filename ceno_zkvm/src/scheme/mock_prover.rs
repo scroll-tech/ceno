@@ -17,7 +17,7 @@ use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, fmt,
-    mle::{ArcMultilinearExtension, IntoMLEs},
+    mle::{ArcMultilinearExtension, IntoMLEs, MultilinearExtension},
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
 use p3::field::PrimeCharacteristicRing;
@@ -197,7 +197,7 @@ impl<E: ExtensionField, K: LkMultiplicityKey> PartialEq for MockProverError<E, K
 }
 
 impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
-    fn print(&self, wits_in: &[ArcMultilinearExtension<E>], wits_in_name: &[String]) {
+    fn print(&self, wits_in: &[MultilinearExtension<E>], wits_in_name: &[String]) {
         let mut wtns = vec![];
 
         match self {
@@ -460,7 +460,7 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
 impl<'a, E: ExtensionField + Hash> MockProver<E> {
     pub fn run_with_challenge(
         cb: &CircuitBuilder<E>,
-        wits_in: &[ArcMultilinearExtension<'a, E>],
+        wits_in: &[MultilinearExtension<'a, E>],
         challenge: [E; 2],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
@@ -469,7 +469,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
     pub fn run(
         cb: &CircuitBuilder<E>,
-        wits_in: &[ArcMultilinearExtension<'a, E>],
+        wits_in: &[MultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
@@ -478,9 +478,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
-        wits_in: &[ArcMultilinearExtension<'a, E>],
+        wits_in: &[MultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
-        pi: &[ArcMultilinearExtension<'a, E>],
+        pi: &[MultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
@@ -495,8 +495,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     fn run_maybe_challenge_with_table(
         cs: &ConstraintSystem<E>,
         table: &HashSet<Vec<u64>>,
-        wits_in: &[ArcMultilinearExtension<'a, E>],
-        pi: &[ArcMultilinearExtension<'a, E>],
+        wits_in: &[MultilinearExtension<'a, E>],
+        pi: &[MultilinearExtension<'a, E>],
         num_instances: usize,
         challenge: [E; 2],
         expected_lkm: Option<LkMultiplicity>,
@@ -705,7 +705,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     /// (Expecting no errors is a valid expectation.)
     pub fn assert_with_expected_errors(
         cb: &CircuitBuilder<E>,
-        wits_in: &[ArcMultilinearExtension<'a, E>],
+        wits_in: &[MultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         constraint_names: &[&str],
         challenge: Option<[E; 2]>,
@@ -764,7 +764,7 @@ Hints:
 
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
-        wits_in: &[ArcMultilinearExtension<'a, E>],
+        wits_in: &[MultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
@@ -1228,7 +1228,7 @@ where
 
 fn print_errors<E: ExtensionField, K: LkMultiplicityKey>(
     errors: &[MockProverError<E, K>],
-    wits_in: &[ArcMultilinearExtension<E>],
+    wits_in: &[MultilinearExtension<E>],
     wits_in_name: &[String],
     panic_on_error: bool,
 ) {

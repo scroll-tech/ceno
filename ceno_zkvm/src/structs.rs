@@ -2,7 +2,6 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     instructions::Instruction,
-    scheme::hal::ProverBackend,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
@@ -11,11 +10,11 @@ use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Either, Itertools};
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::MultilinearExtension};
+use multilinear_extensions::{Expression, impl_expr_from_unsigned};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{BTreeMap, HashMap};
 use strum_macros::EnumIter;
-use sumcheck::{structs::IOPProverMessage, util::ceil_log2};
+use sumcheck::structs::IOPProverMessage;
 use witness::RowMajorMatrix;
 
 pub struct TowerProver;
@@ -63,20 +62,6 @@ pub enum RAMType {
     GlobalState,
     Register,
     Memory,
-}
-
-pub struct ProofInput<PB: ProverBackend> {
-    pub witness: Vec<PB::MultilinearPoly>,
-    pub structural_witness: Vec<PB::MultilinearPoly>,
-    pub public_input: Vec<PB::MultilinearPoly>,
-    pub num_instances: usize,
-}
-
-impl<PB: ProverBackend> ProofInput<PB> {
-    #[inline]
-    pub fn log2_num_instances(&self) -> usize {
-        ceil_log2(self.num_instances)
-    }
 }
 
 impl_expr_from_unsigned!(RAMType);

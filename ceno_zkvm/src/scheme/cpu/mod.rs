@@ -1,15 +1,18 @@
-use super::hal::{DeviceProvingKey, MainSumcheckProver, OpeningProver, ProverBackend, TraceCommitter};
+use super::hal::{
+    DeviceTransporter, MainSumcheckProver, OpeningProver, ProverBackend, ProverDevice,
+    TraceCommitter,
+};
 use crate::{
     circuit_builder::ConstraintSystem,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP},
-        hal::{TowerProver, TowerProverSpec},
+        hal::{ProofInput, TowerProver, TowerProverSpec},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
             wit_infer_by_expr,
         },
     },
-    structs::{ProofInput, TowerProofs},
+    structs::TowerProofs,
     utils::{add_mle_list_by_expr, get_challenge_pows},
 };
 use either::Either;
@@ -18,13 +21,16 @@ use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression,
-    mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
+    mle::{FieldType, IntoMLE, MultilinearExtension},
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use p3::field::{PrimeCharacteristicRing, dot_product};
+use p3::{field::dot_product, matrix::dense::RowMajorMatrix};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::collections::BTreeSet;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -32,50 +38,66 @@ use sumcheck::{
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
-struct CpuBackend<E, PCS> {
+
+pub struct CpuBackend<E, PCS> {
     _marker: std::marker::PhantomData<(E, PCS)>,
 }
 
-impl<'a, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for CpuBackend<E, PCS> {
+impl<E, PCS> CpuBackend<E, PCS> {
+    pub fn new() -> Self {
+        Self {
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for CpuBackend<E, PCS> {
     type E = E;
     type Pcs = PCS;
-    type PcsOpeningProof = PCS::Proof;
-    type MultilinearPoly = ArcMultilinearExtension<E>;
-    type Matrix = p3::matrix::dense::RowMajorMatrix<E::BaseField>;
+    type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
+    type Matrix = RowMajorMatrix<E::BaseField>;
     type PcsData = PCS::CommitmentWithWitness;
 }
 
 /// CPU prover for CPU backend
-struct CpuProver {}
+pub struct CpuProver<PB> {
+    backend: PB,
+}
+
+impl<PB> CpuProver<PB> {
+    pub fn new(backend: PB) -> Self {
+        Self { backend }
+    }
+}
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBackend<E, PCS>>
-    for CpuProver
+    for CpuProver<CpuBackend<E, PCS>>
 {
-    fn commit_trace(
+    fn commit_traces<'a>(
         &self,
-        _traces: Vec<witness::RowMajorMatrix<E>>,
+        _traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
-        Vec<Vec<ArcMultilinearExtension<E>>>,
+        Vec<MultilinearExtension<'a, E>>,
         PCS::CommitmentWithWitness,
+        PCS::Commitment,
     ) {
         todo!()
     }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBackend<E, PCS>>
-    for CpuProver
+    for CpuProver<CpuBackend<E, PCS>>
 {
-    fn build_tower_witness(
+    fn build_tower_witness<'a>(
         &self,
-        pk: &DeviceProvingKey<CpuBackend<E, PCS>>,
         cs: &ConstraintSystem<E>,
-        input: &ProofInput<CpuBackend<E, PCS>>,
+        input: &'a ProofInput<'a, CpuBackend<E, PCS>>,
         challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
-        Vec<Vec<ArcMultilinearExtension<E>>>,
-        Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
-        Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
+        Vec<MultilinearExtension<'a, E>>,
+        Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
+        Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
     ) {
         let num_instances = input.num_instances;
         let next_pow2_instances = next_pow2_instance_padding(input.num_instances);
@@ -93,19 +115,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 
         // sanity check
         assert_eq!(input.witness.len(), cs.num_witin as usize);
-        assert_eq!(input.structural_witness.len(), cs.num_structural_witin as usize);
-        assert_eq!(pk.fixed_polys.len(), cs.num_fixed);
+        assert_eq!(
+            input.structural_witness.len(),
+            cs.num_structural_witin as usize
+        );
+        assert_eq!(input.fixed.len(), cs.num_fixed);
         // check all witness size are power of 2
         assert!(
             input
                 .witness
                 .iter()
-                .all(|v| { v.evaluations().len().is_power_of_two() })
+                .all(|v| { v.evaluations().len() == 1 << log2_num_instances })
         );
         assert!(
-            input.structural_witness
+            input
+                .structural_witness
                 .iter()
-                .all(|v| { v.evaluations().len().is_power_of_two() })
+                .all(|v| { v.evaluations().len() == 1 << log2_num_instances })
         );
         assert!(is_table_circuit || is_opcode_circuit);
         assert!(
@@ -118,7 +144,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let wit_inference_span = entered_span!("wit_inference");
         // main constraint: lookup denominator and numerator record witness inference
         let record_span = entered_span!("record");
-        let records_wit: Vec<ArcMultilinearExtension<'_, E>> = cs
+        let records: Vec<MultilinearExtension<'_, E>> = cs
             .r_table_expressions
             .par_iter()
             .map(|r| &r.expr)
@@ -135,7 +161,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
                 wit_infer_by_expr(
-                    &pk.fixed_polys,
+                    &input.fixed,
                     &input.witness,
                     &input.structural_witness,
                     &input.public_input,
@@ -147,25 +173,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 
         let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
         let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
-        let mut remains = records_wit;
-        let r_set_wit: Vec<_> = remains.drain(..num_reads).collect();
-        let w_set_wit: Vec<_> = remains.drain(..num_writes).collect();
-        let lk_n_wit: Vec<_> = remains.drain(..cs.lk_table_expressions.len()).collect();
-        let lk_d_wit: Vec<_> = if !cs.lk_table_expressions.is_empty() {
-            remains.drain(..cs.lk_table_expressions.len()).collect()
+        let mut offset = 0;
+        let r_set_wit = &records[offset..][..num_reads];
+        offset += num_reads;
+        let w_set_wit = &records[offset..][..num_writes];
+        offset += num_writes;
+        let lk_n_wit = &records[offset..][..cs.lk_table_expressions.len()];
+        offset += cs.lk_table_expressions.len();
+        let lk_d_wit = if !cs.lk_table_expressions.is_empty() {
+            &records[offset..][..cs.lk_expressions.len()]
         } else {
-            remains.drain(..cs.lk_expressions.len()).collect()
+            &records[offset..][..cs.lk_expressions.len()]
         };
-
-        assert!(remains.is_empty());
 
         exit_span!(record_span);
 
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_last_layer");
         let mut r_set_last_layer = r_set_wit
-            .iter()
-            .chain(w_set_wit.iter())
+            .into_iter()
+            .chain(w_set_wit.into_iter())
             .map(|wit| masked_mle_split_to_chunks(wit, num_instances, NUM_FANIN, E::ONE))
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
@@ -191,9 +218,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let span = entered_span!("tower_tower_witness");
         let r_wit_layers = r_set_last_layer
             .into_iter()
-            .zip(r_set_wit.iter())
-            .map(|(last_layer, origin_mle)| {
-                infer_tower_product_witness(origin_mle.num_vars(), last_layer, NUM_FANIN)
+            .map(|last_layer| {
+                infer_tower_product_witness(log2_num_instances, last_layer, NUM_FANIN)
             })
             .collect_vec();
         let w_wit_layers = w_set_last_layer
@@ -224,7 +250,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             assert!(
                 r_wit_layers
                     .iter()
-                    .zip(r_set_wit.iter()) // depth equals to num_vars
+                    .zip(r_set_wit.into_iter()) // depth equals to num_vars
                     .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
             );
             assert!(r_wit_layers.iter().all(|layers| {
@@ -301,7 +327,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             })
             .collect_vec();
 
-        let records = vec![r_set_wit, w_set_wit, lk_n_wit, lk_d_wit];
         let prod_specs = r_wit_layers
             .into_iter()
             .chain(w_wit_layers.into_iter())
@@ -317,17 +342,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         (out_evals, records, prod_specs, lookup_specs)
     }
 
-    fn prove_tower_relation(
+    fn prove_tower_relation<'a>(
         &self,
-        prod_specs: Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
-        logup_specs: Vec<TowerProverSpec<CpuBackend<E, PCS>>>,
+        prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
+        logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
     ) -> (Point<E>, TowerProofs<E>) {
         #[derive(Debug, Clone)]
         enum GroupedMLE<'a, E: ExtensionField> {
             Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
-            Logup((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in logup_specs
+            Logup((usize, Vec<MultilinearExtension<'a, E>>)), /* usize is the index in logup_specs */
         }
 
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
@@ -359,11 +384,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let mut layer_witness: Vec<Vec<GroupedMLE<'a, E>>> = vec![Vec::new(); max_round_index + 1];
 
         #[allow(clippy::type_complexity)]
-        fn merge_spec_witness<'a, E: ExtensionField>(
-            merged: &mut [Vec<GroupedMLE<'a, E>>],
-            spec: TowerProverSpec<E>,
+        fn merge_spec_witness<'b, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+            merged: &mut [Vec<GroupedMLE<'b, E>>],
+            spec: TowerProverSpec<'b, CpuBackend<E, PCS>>,
             index: usize,
-            group_ctor: fn((usize, Vec<MultilinearExtension<'a, E>>)) -> GroupedMLE<'a, E>,
+            group_ctor: fn((usize, Vec<MultilinearExtension<'b, E>>)) -> GroupedMLE<'b, E>,
         ) {
             for (round_idx, round_vec) in spec.witness.into_iter().enumerate() {
                 merged[round_idx].push(group_ctor((index, round_vec)));
@@ -518,17 +543,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<CpuBackend<E, PCS>>
-    for CpuProver
+    for CpuProver<CpuBackend<E, PCS>>
 {
-    fn prove_main_constraints(
+    fn prove_main_constraints<'a>(
         &self,
         rt_tower: Vec<E>,
-        tower_proof: &TowerProofs<E>,
-        r_records: Vec<ArcMultilinearExtension<E>>,
-        w_records: Vec<ArcMultilinearExtension<E>>,
-        lk_records: Vec<ArcMultilinearExtension<E>>,
+        _tower_proof: &TowerProofs<E>,
+        records: Vec<MultilinearExtension<'a, E>>,
         input: ProofInput<CpuBackend<E, PCS>>,
-        cs: ConstraintSystem<E>,
+        cs: &ConstraintSystem<E>,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> (Point<E>, Option<Vec<IOPProverMessage<E>>>) {
@@ -569,7 +592,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
 
             // for each j, computes \sum_i coeffs[i] * (mles[i][j] + shifting)
             let linear_combine_mles =
-                |coeffs: &[E], mles: &[ArcMultilinearExtension<E>], shifting: E| {
+                |coeffs: &[E], mles: &[MultilinearExtension<E>], shifting: E| {
                     assert!(!mles.is_empty());
                     assert_eq!(coeffs.len(), mles.len());
 
@@ -608,7 +631,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             // r_records_combined is \sum_i alpha^i * (r_records[i][j]-padding) where padding = 1
             let mut r_records_combined: MultilinearExtension<E> = linear_combine_mles(
                 &alpha_pow[alpha_offset..alpha_offset + num_reads],
-                &r_records,
+                &records[..num_reads],
                 E::ONE.neg(),
             );
             alpha_offset += num_reads;
@@ -616,7 +639,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             // w_records_combined is \sum_i alpha^i * (w_records[i][j]-padding) where padding = 1
             let mut w_records_combined: MultilinearExtension<E> = linear_combine_mles(
                 &alpha_pow[alpha_offset..(alpha_offset + num_writes)],
-                &w_records,
+                &&records[num_reads..(num_reads + num_writes)],
                 E::ONE.neg(),
             );
             alpha_offset += num_writes;
@@ -625,7 +648,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             //  where padding = chip_record_alpha
             let mut lk_records_combined: MultilinearExtension<E> = linear_combine_mles(
                 &alpha_pow[alpha_offset..(alpha_offset + cs.lk_expressions.len())],
-                &lk_records,
+                &records[(num_reads + num_writes)..],
                 chip_record_alpha.neg(),
             );
             alpha_offset += cs.lk_expressions.len();
@@ -661,13 +684,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                             challenges,
                             expr,
                         );
-                        let top_100_errors = expected_zero_poly
-                            .get_base_field_vec()
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, v)| **v != E::BaseField::ZERO)
-                            .take(100)
-                            .collect_vec();
+                        // let top_100_errors = expected_zero_poly
+                        //     .get_base_field_vec()
+                        //     .iter()
+                        //     .enumerate()
+                        //     .filter(|(_, v)| **v != E::BaseField::ZERO)
+                        //     .take(100)
+                        //     .collect_vec();
                         // if !top_100_errors.is_empty() {
                         //     return Err(ZKVMError::InvalidWitness(format!(
                         //         "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
@@ -713,16 +736,47 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBackend<E, PCS>>
-    for CpuProver
+    for CpuProver<CpuBackend<E, PCS>>
 {
     fn open(
         &self,
         _witness_data: PCS::CommitmentWithWitness,
         _fixed_data: Option<PCS::CommitmentWithWitness>,
         _points: Vec<Point<E>>,
-        _evals: Vec<E>,
+        circuit_num_polys: &[(usize, usize)],
+        num_instances: &[(usize, usize)],
         _transcript: &mut impl Transcript<E>,
-    ) -> PCS::Proof {
+    ) -> (BTreeMap<usize, Vec<E>>, PCS::Proof) {
         todo!()
     }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<CpuBackend<E, PCS>>
+    for CpuProver<CpuBackend<E, PCS>>
+{
+    fn transport_proving_key(
+        &self,
+        proving_key: Arc<
+            crate::structs::ZKVMProvingKey<
+                <CpuBackend<E, PCS> as ProverBackend>::E,
+                <CpuBackend<E, PCS> as ProverBackend>::Pcs,
+            >,
+        >,
+    ) -> super::hal::DeviceProvingKey<CpuBackend<E, PCS>> {
+        todo!()
+    }
+
+    fn transport_mles<'a>(
+        &self,
+        mles: Vec<MultilinearExtension<'a, <CpuBackend<E, PCS> as ProverBackend>::E>>,
+    ) -> Vec<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>> {
+        todo!()
+    }
+}
+
+impl<E, PCS> ProverDevice<CpuBackend<E, PCS>> for CpuProver<CpuBackend<E, PCS>>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
 }

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -22,45 +20,42 @@ use multilinear_extensions::Expression;
 
 // first computes the masked mle'[j] = mle[j] if j < num_instance, else default
 // then split it into `num_parts` smaller mles
-pub(crate) fn masked_mle_split_to_chunks<'a, E: ExtensionField>(
-    mle: &'a ArcMultilinearExtension<'a, E>,
+pub(crate) fn masked_mle_split_to_chunks<'a, 'b, E: ExtensionField>(
+    mle: &'a MultilinearExtension<'a, E>,
     num_instance: usize,
     num_chunks: usize,
     default: E,
-) -> Vec<MultilinearExtension<'a, E>> {
+) -> Vec<MultilinearExtension<'b, E>> {
     assert!(num_chunks.is_power_of_two());
     assert!(num_instance <= mle.evaluations().len());
 
-    if num_instance == mle.evaluations().len() {
-        mle.as_view_chunks(num_chunks)
-    } else {
-        (0..num_chunks)
-            .into_par_iter()
-            .map(|part_idx| {
-                let n = mle.evaluations().len() / num_chunks;
+    // TODO: when mle.len() is two's power, we should avoid the clone
+    (0..num_chunks)
+        .into_par_iter()
+        .map(|part_idx| {
+            let n = mle.evaluations().len() / num_chunks;
 
-                match mle.evaluations() {
-                    FieldType::Ext(evals) => (part_idx * n..(part_idx + 1) * n)
-                        .into_par_iter()
-                        .with_min_len(64)
-                        .map(|i| if i < num_instance { evals[i] } else { default })
-                        .collect::<Vec<_>>()
-                        .into_mle(),
-                    FieldType::Base(evals) => (part_idx * n..(part_idx + 1) * n)
-                        .map(|i| {
-                            if i < num_instance {
-                                E::from(evals[i])
-                            } else {
-                                default
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .into_mle(),
-                    _ => unreachable!(),
-                }
-            })
-            .collect::<Vec<_>>()
-    }
+            match mle.evaluations() {
+                FieldType::Ext(evals) => (part_idx * n..(part_idx + 1) * n)
+                    .into_par_iter()
+                    .with_min_len(64)
+                    .map(|i| if i < num_instance { evals[i] } else { default })
+                    .collect::<Vec<_>>()
+                    .into_mle(),
+                FieldType::Base(evals) => (part_idx * n..(part_idx + 1) * n)
+                    .map(|i| {
+                        if i < num_instance {
+                            E::from(evals[i])
+                        } else {
+                            default
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .into_mle(),
+                _ => unreachable!(),
+            }
+        })
+        .collect::<Vec<_>>()
 }
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
@@ -287,101 +282,93 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
 }
 
 pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
-    fixed: &[ArcMultilinearExtension<'a, E>],
-    witnesses: &[ArcMultilinearExtension<'a, E>],
-    structual_witnesses: &[ArcMultilinearExtension<'a, E>],
-    instance: &[ArcMultilinearExtension<'a, E>],
+    fixed: &'a [MultilinearExtension<'a, E>],
+    witnesses: &'a [MultilinearExtension<'a, E>],
+    structual_witnesses: &'a [MultilinearExtension<'a, E>],
+    instance: &'a [MultilinearExtension<'a, E>],
     challenges: &[E; N],
     expr: &Expression<E>,
-) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
-        &|f| fixed[f.0].clone(),
-        &|witness_id| witnesses[witness_id as usize].clone(),
-        &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
-        &|i| instance[i.0].clone(),
+) -> MultilinearExtension<'a, E> {
+    expr.evaluate_with_instance::<MultilinearExtension<'a, E>>(
+        &|f| fixed[f.0].as_view(),
+        &|witness_id| witnesses[witness_id as usize].as_view(),
+        &|witness_id, _, _, _| structual_witnesses[witness_id as usize].as_view(),
+        &|i| instance[i.0].as_view(),
         &|scalar| {
-            let scalar: ArcMultilinearExtension<E> =
-                Arc::new(MultilinearExtension::from_evaluations_vec(
-                    0,
-                    vec![scalar.left().expect("do not support extension field")],
-                ));
+            let scalar: MultilinearExtension<E> = MultilinearExtension::from_evaluations_vec(
+                0,
+                vec![scalar.left().expect("do not support extension field")],
+            );
             scalar
         },
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
-            let challenge: ArcMultilinearExtension<E> =
-                Arc::new(MultilinearExtension::from_evaluations_ext_vec(
-                    0,
-                    vec![challenge.exp_u64(pow as u64) * scalar + offset],
-                ));
+            let challenge: MultilinearExtension<E> = MultilinearExtension::from_evaluations_ext_vec(
+                0,
+                vec![challenge.exp_u64(pow as u64) * scalar + offset],
+            );
             challenge
         },
         &|a, b| {
             commutative_op_mle_pair!(|a, b| {
                 match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] + b[0]],
-                    )),
-                    (1, _) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
+                    (1, 1) => MultilinearExtension::from_evaluation_vec_smart(0, vec![a[0] + b[0]]),
+                    (1, _) => MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(b.len()),
                         b.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|b| a[0] + *b)
                             .collect(),
-                    )),
-                    (_, 1) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
+                    ),
+                    (_, 1) => MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(a.len()),
                         a.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|a| *a + b[0])
                             .collect(),
-                    )),
-                    (_, _) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
+                    ),
+                    (_, _) => MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(a.len()),
                         a.par_iter()
                             .zip(b.par_iter())
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|(a, b)| *a + *b)
                             .collect(),
-                    )),
+                    ),
                 }
             })
         },
         &|a, b| {
             commutative_op_mle_pair!(|a, b| {
                 match (a.len(), b.len()) {
-                    (1, 1) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
-                        0,
-                        vec![a[0] * b[0]],
-                    )),
-                    (1, _) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
+                    (1, 1) => MultilinearExtension::from_evaluation_vec_smart(0, vec![a[0] * b[0]]),
+                    (1, _) => MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(b.len()),
                         b.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|b| a[0] * *b)
                             .collect(),
-                    )),
-                    (_, 1) => Arc::new(MultilinearExtension::from_evaluation_vec_smart(
+                    ),
+                    (_, 1) => MultilinearExtension::from_evaluation_vec_smart(
                         ceil_log2(a.len()),
                         a.par_iter()
                             .with_min_len(MIN_PAR_SIZE)
                             .map(|a| *a * b[0])
                             .collect(),
-                    )),
+                    ),
                     (_, _) => {
                         assert_eq!(a.len(), b.len());
                         // we do the pointwise evaluation multiplication here without involving FFT
                         // the evaluations outside of range will be checked via sumcheck + identity polynomial
-                        Arc::new(MultilinearExtension::from_evaluation_vec_smart(
+                        MultilinearExtension::from_evaluation_vec_smart(
                             ceil_log2(a.len()),
                             a.par_iter()
                                 .zip(b.par_iter())
                                 .with_min_len(MIN_PAR_SIZE)
                                 .map(|(a, b)| *a * *b)
                                 .collect(),
-                        ))
+                        )
                     }
                 }
             })
@@ -391,13 +378,13 @@ pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
                 assert_eq!(a.len(), 1);
                 assert_eq!(b.len(), 1);
                 let (a, b) = (a[0], b[0]);
-                Arc::new(MultilinearExtension::from_evaluation_vec_smart(
+                MultilinearExtension::from_evaluation_vec_smart(
                     ceil_log2(x.len()),
                     x.par_iter()
                         .with_min_len(MIN_PAR_SIZE)
                         .map(|x| a * *x + b)
                         .collect(),
-                ))
+                )
             })
         },
     )
@@ -700,18 +687,12 @@ mod tests {
 
         let expr: Expression<E> = a.expr() + b.expr() + a.expr() * b.expr() + (c.expr() * 3 + 2);
 
-        let res = wit_infer_by_expr(
-            &[],
-            &[
-                vec![B::from_u64(1)].into_mle().into(),
-                vec![B::from_u64(2)].into_mle().into(),
-                vec![B::from_u64(3)].into_mle().into(),
-            ],
-            &[],
-            &[],
-            &[],
-            &expr,
-        );
+        let witnesses = vec![
+            vec![B::from_u64(1)].into_mle(),
+            vec![B::from_u64(2)].into_mle(),
+            vec![B::from_u64(3)].into_mle(),
+        ];
+        let res = wit_infer_by_expr(&[], &witnesses, &[], &[], &[], &expr);
         res.get_base_field_vec();
     }
 
@@ -731,18 +712,12 @@ mod tests {
             + (c.expr() * 3 + 2)
             + Expression::Challenge(0, 1, E::ONE, E::ONE);
 
-        let res = wit_infer_by_expr(
-            &[],
-            &[
-                vec![B::from_u64(1)].into_mle().into(),
-                vec![B::from_u64(2)].into_mle().into(),
-                vec![B::from_u64(3)].into_mle().into(),
-            ],
-            &[],
-            &[],
-            &[E::ONE],
-            &expr,
-        );
+        let witnesses = vec![
+            vec![B::from_u64(1)].into_mle(),
+            vec![B::from_u64(2)].into_mle(),
+            vec![B::from_u64(3)].into_mle(),
+        ];
+        let res = wit_infer_by_expr(&[], &witnesses, &[], &[], &[E::ONE], &expr);
         res.get_ext_field_vec();
     }
 }

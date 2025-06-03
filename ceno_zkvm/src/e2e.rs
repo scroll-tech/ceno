@@ -3,6 +3,7 @@ use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
+        cpu::{CpuBackend, CpuProver},
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
         verifier::ZKVMVerifier,
@@ -20,6 +21,8 @@ use ceno_emul::{
 };
 use clap::ValueEnum;
 use ff_ext::ExtensionField;
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use std::{
@@ -27,9 +30,6 @@ use std::{
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
-
-#[cfg(debug_assertions)]
-use ff_ext::{Instrumented, PoseidonField};
 
 /// The polynomial commitment scheme kind
 #[derive(
@@ -705,7 +705,9 @@ pub fn run_e2e_with_checkpoint<
     );
 
     // proving
-    let prover = ZKVMProver::new(pk);
+    let backend: CpuBackend<E, PCS> = CpuBackend::new();
+    let device: CpuProver<CpuBackend<E, PCS>> = CpuProver::new(backend);
+    let prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {
         MockProver::assert_satisfied_full(
@@ -774,7 +776,9 @@ pub fn run_e2e_proof<E: ExtensionField + LkMultiplicityKey, PCS: PolynomialCommi
     );
 
     // proving
-    let prover = ZKVMProver::new(pk);
+    let backend: CpuBackend<E, PCS> = CpuBackend::new();
+    let device: CpuProver<CpuBackend<E, PCS>> = CpuProver::new(backend);
+    let prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {
         MockProver::assert_satisfied_full(
