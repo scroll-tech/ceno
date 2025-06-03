@@ -203,7 +203,7 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
     challenges: &[E],
     // sumcheck batch challenge
     alpha: E,
-) -> BTreeSet<u32> {
+) -> BTreeSet<u16> {
     assert!(expr.is_monomial_form());
     let monomial_terms = expr.evaluate(
         &|_| unreachable!(),
@@ -273,7 +273,7 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
     monomial_terms
         .into_iter()
         .flat_map(|(_, monomial_term)| monomial_term.into_iter().collect_vec())
-        .collect::<BTreeSet<u32>>()
+        .collect::<BTreeSet<u16>>()
 }
 
 #[cfg(all(feature = "jemalloc", unix, not(test)))]
