@@ -78,7 +78,8 @@ where
         let mut gkr_out_well_order = Vec::with_capacity(circuit.n_evaluations);
 
         // set input to witness_mle_flattern via first layer in_eval_expr
-        if let Some(first_layer) = circuit.layers.last() { first_layer
+        if let Some(first_layer) = circuit.layers.last() {
+            first_layer
                 .in_eval_expr
                 .iter()
                 .enumerate()
@@ -87,7 +88,8 @@ where
                         witness_mle_flattern[*witin] = Some(phase1_witness_group[index].clone());
                     }
                     other => unimplemented!("{:?}", other),
-                }) }
+                })
+        }
 
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
