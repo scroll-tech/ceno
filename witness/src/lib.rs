@@ -15,7 +15,7 @@ use std::{
 };
 
 // for witness we reserve some space for value vector to extend to avoid allocated + full clone
-const CAPACITY_RESERVED_FACTOR: usize = 2;
+pub const CAPACITY_RESERVED_FACTOR: usize = 2;
 
 /// get next power of 2 instance with minimal size 2
 pub fn next_pow2_instance_padding(num_instance: usize) -> usize {

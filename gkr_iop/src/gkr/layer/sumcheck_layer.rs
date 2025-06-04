@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use crate::gkr::layer::zerocheck_layer::RotationProof;
 use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -24,6 +25,7 @@ use super::{Layer, LayerWitness, linear_layer::LayerClaims};
 ))]
 pub struct SumcheckLayerProof<E: ExtensionField> {
     pub proof: IOPProof<E>,
+    pub rotation_proof: Option<RotationProof<E>>,
     pub evals: Vec<E>,
 }
 pub trait SumcheckLayer<E: ExtensionField> {
@@ -70,6 +72,7 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
         );
         SumcheckLayerProof {
             proof,
+            rotation_proof: None,
             evals: prover_state.get_mle_flatten_final_evaluations(),
         }
     }
@@ -85,6 +88,7 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
         let SumcheckLayerProof {
             proof: IOPProof { proofs, .. },
             evals,
+            ..
         } = proof;
 
         let SumCheckSubClaim {

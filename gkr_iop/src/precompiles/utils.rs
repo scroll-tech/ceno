@@ -7,8 +7,15 @@ pub fn not8_expr<E: ExtensionField>(expr: Expression<E>) -> Expression<E> {
     E::BaseField::from_u8(0xFF).expr() - expr
 }
 
-pub fn u64s_to_felts<E: ExtensionField>(words: Vec<u64>) -> Vec<E::BaseField> {
-    words.into_iter().map(E::BaseField::from_u64).collect()
+pub fn set_slice_felts_from_u64<E, I>(dst: &mut [E::BaseField], start_index: &mut usize, iter: I)
+where
+    E: ExtensionField,
+    I: IntoIterator<Item = u64>,
+{
+    for word in iter {
+        dst[*start_index] = E::BaseField::from_u64(word);
+        *start_index += 1;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +104,7 @@ impl MaskRepresentation {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CenoLookup<E: ExtensionField> {
     And(Expression<E>, Expression<E>, Expression<E>),
     Xor(Expression<E>, Expression<E>, Expression<E>),

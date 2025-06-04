@@ -47,6 +47,7 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
 
         SumcheckLayerProof {
             evals,
+            rotation_proof: None,
             proof: IOPProof {
                 point: out_point.clone(),
                 proofs: vec![],

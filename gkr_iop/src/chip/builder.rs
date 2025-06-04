@@ -104,9 +104,6 @@ impl<E: ExtensionField> Chip<E> {
             LayerType::Linear => {
                 assert!(layer.exprs.iter().all(|expr| expr.degree() == 1));
             }
-            LayerType::Sumcheck => {
-                assert_eq!(layer.exprs.len(), 1);
-            }
             _ => {}
         }
         self.layers.push(layer);

@@ -1,18 +1,27 @@
 use std::{array, cmp::Ordering, marker::PhantomData};
 
+use crate::gkr::booleanhypercube::BooleanHypercube;
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain, iproduct, zip_eq};
+use itertools::{Itertools, chain, iproduct, izip, zip_eq};
 use multilinear_extensions::{Expression, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
 use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::PrimeCharacteristicRing;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::{
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
+        ParallelIterator,
+    },
+    slice::ParallelSliceMut,
+};
 use serde::{Deserialize, Serialize};
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{
+    CAPACITY_RESERVED_FACTOR, InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding,
+};
 
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
@@ -23,10 +32,12 @@ use crate::{
         GKRCircuit, GKRProof, GKRProverOutput,
         layer::{Layer, LayerType},
     },
-    precompiles::utils::{MaskRepresentation, not8_expr},
+    precompiles::utils::{
+        MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance,
+    },
 };
 
-use super::utils::{CenoLookup, u64s_to_felts};
+use super::utils::CenoLookup;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeccakParams {}
@@ -111,6 +122,7 @@ fn rotation_split(delta: usize) -> (Vec<usize>, usize) {
     panic!();
 }
 
+#[derive(Default)]
 struct ConstraintSystem<E: ExtensionField> {
     // expressions include zero & non-zero expression, differentiate via evals
     // zero expr represented as Linear with all 0 value
@@ -118,6 +130,7 @@ struct ConstraintSystem<E: ExtensionField> {
     expressions: Vec<Expression<E>>,
     expr_names: Vec<String>,
     evals: Vec<EvalExpression<E>>,
+
     and_lookups: Vec<CenoLookup<E>>,
     xor_lookups: Vec<CenoLookup<E>>,
     range_lookups: Vec<CenoLookup<E>>,
@@ -125,19 +138,23 @@ struct ConstraintSystem<E: ExtensionField> {
 
 impl<E: ExtensionField> ConstraintSystem<E> {
     fn new() -> Self {
-        ConstraintSystem {
-            expressions: vec![],
-            evals: vec![],
-            expr_names: vec![],
-            and_lookups: vec![],
-            xor_lookups: vec![],
-            range_lookups: vec![],
-        }
+        ConstraintSystem::default()
     }
 
-    fn add_constraint(&mut self, expr: Expression<E>, name: String) {
+    fn add_zero_constraint(&mut self, expr: Expression<E>, name: String) {
         self.expressions.push(expr);
         self.evals.push(EvalExpression::Zero);
+        self.expr_names.push(name);
+    }
+
+    fn add_non_zero_constraint(
+        &mut self,
+        expr: Expression<E>,
+        eval: EvalExpression<E>,
+        name: String,
+    ) {
+        self.expressions.push(expr);
+        self.evals.push(eval);
         self.expr_names.push(name);
     }
 
@@ -163,7 +180,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     }
 
     fn constrain_eq(&mut self, lhs: Expression<E>, rhs: Expression<E>, name: String) {
-        self.add_constraint(lhs - rhs, name);
+        self.add_zero_constraint(lhs - rhs, name);
     }
 
     // Constrains that lhs and rhs encode the same value of SIZE bits
@@ -175,7 +192,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         rhs: &[(usize, Expression<E>)],
         name: String,
     ) {
-        self.add_constraint(
+        self.add_zero_constraint(
             expansion_expr::<E, SIZE>(lhs) - expansion_expr::<E, SIZE>(rhs),
             name,
         );
@@ -286,6 +303,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 }
 
 const ROUNDS: usize = 24;
+const ROUNDS_CEIL_LOG2: usize = 5; // log_2(2^32)
 
 const RC: [u64; ROUNDS] = [
     1u64,
@@ -448,7 +466,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // TODO it should be at least 2 group.
         // TODO   - group1: lookup one group (due to same tower prover length)
         // TODO   - group2: read/write another group
-        let (bases, [eq]) = chip.allocate_wits_in_zero_layer::<KECCAK_WIT_SIZE, 1>();
+        // NOTE: eq order must follow gkr prover/verifier backend concat eq order
+        let (bases, [eq_zero, eq_rotation_left, eq_rotation_right, eq_rotation]) =
+            chip.allocate_wits_in_zero_layer::<KECCAK_WIT_SIZE, 4>();
         for (openings, wit) in bases.iter().enumerate() {
             chip.allocate_opening(openings, wit.1.clone());
         }
@@ -670,67 +690,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             );
         }
 
-        // TODO add rotation constrain
-
-        let mut global_and_lookup = 0;
-        let mut global_xor_lookup = 3 * AND_LOOKUPS;
-        let mut global_range_lookup = 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS;
-
-        let ConstraintSystem {
-            mut expressions,
-            mut expr_names,
-            mut evals,
-            and_lookups,
-            xor_lookups,
-            range_lookups,
-            ..
-        } = system;
-
-        for (i, lookup) in chain!(and_lookups, xor_lookups, range_lookups)
-            .flatten()
-            .enumerate()
-        {
-            expressions.push(lookup);
-            let idx = if i < 3 * AND_LOOKUPS {
-                &mut global_and_lookup
-            } else if i < 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS {
-                &mut global_xor_lookup
-            } else {
-                &mut global_range_lookup
-            };
-            expr_names.push(format!("round 0th: {i}th lookup felt"));
-            evals.push(lookup_outputs[*idx].clone());
-            *idx += 1;
-        }
-
-        assert_eq!(global_and_lookup, 3 * AND_LOOKUPS);
-        assert_eq!(global_xor_lookup, 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS);
-        assert_eq!(global_range_lookup, LOOKUP_FELTS_PER_ROUND);
-
         let keccak_input8: ArrayView<(WitIn, EvalExpression<E>), Ix3> =
             ArrayView::from_shape((5, 5, 8), keccak_input8).unwrap();
         let keccak_input32 = keccak_input32.to_vec();
         let mut keccak_input32_iter = keccak_input32.iter().cloned();
-
-        // process keccak input
-        for x in 0..5 {
-            for y in 0..5 {
-                for k in 0..2 {
-                    // create an expression combining 4 elements of state8 into a single 32-bit felt
-                    let expr = expansion_expr::<E, 32>(
-                        keccak_input8
-                            .slice(s![x, y, 4 * k..4 * (k + 1)])
-                            .iter()
-                            .map(|e| (8, e.0.expr()))
-                            .collect_vec()
-                            .as_slice(),
-                    );
-                    expressions.push(expr);
-                    evals.push(keccak_input32_iter.next().unwrap().clone());
-                    expr_names.push(format!("build 32-bit input: {x}, {y}, {k}"));
-                }
-            }
-        }
 
         let keccak_output32 = keccak_output32.to_vec();
         let keccak_output8: ArrayView<(WitIn, EvalExpression<E>), Ix3> =
@@ -749,12 +712,79 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                             .map(|e| (8, e.0.expr()))
                             .collect_vec(),
                     );
-                    expressions.push(expr);
-                    evals.push(keccak_output32_iter.next().unwrap().clone());
-                    expr_names.push(format!("build 32-bit output: {x}, {y}, {k}"));
+                    system.add_non_zero_constraint(
+                        expr,
+                        keccak_output32_iter.next().unwrap().clone(),
+                        format!("build 32-bit output: {x}, {y}, {k}"),
+                    );
                 }
             }
         }
+
+        // process keccak input
+        for x in 0..5 {
+            for y in 0..5 {
+                for k in 0..2 {
+                    // create an expression combining 4 elements of state8 into a single 32-bit felt
+                    let expr = expansion_expr::<E, 32>(
+                        keccak_input8
+                            .slice(s![x, y, 4 * k..4 * (k + 1)])
+                            .iter()
+                            .map(|e| (8, e.0.expr()))
+                            .collect_vec()
+                            .as_slice(),
+                    );
+                    system.add_non_zero_constraint(
+                        expr,
+                        keccak_input32_iter.next().unwrap().clone(),
+                        format!("build 32-bit input: {x}, {y}, {k}"),
+                    );
+                }
+            }
+        }
+
+        let mut global_and_lookup = 0;
+        let mut global_xor_lookup = 3 * AND_LOOKUPS;
+        let mut global_range_lookup = 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS;
+
+        for (i, lookup) in chain!(
+            system.and_lookups.clone(),
+            system.xor_lookups.clone(),
+            system.range_lookups.clone()
+        )
+        .flatten()
+        .enumerate()
+        {
+            let idx = if i < 3 * AND_LOOKUPS {
+                &mut global_and_lookup
+            } else if i < 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS {
+                &mut global_xor_lookup
+            } else {
+                &mut global_range_lookup
+            };
+            system.add_non_zero_constraint(
+                lookup,
+                lookup_outputs[*idx].clone(),
+                format!("round 0th: {i}th lookup felt"),
+            );
+            *idx += 1;
+        }
+
+        assert_eq!(global_and_lookup, 3 * AND_LOOKUPS);
+        assert_eq!(global_xor_lookup, 3 * AND_LOOKUPS + 3 * XOR_LOOKUPS);
+        assert_eq!(global_range_lookup, LOOKUP_FELTS_PER_ROUND);
+
+        // rotation constrain: rotation(keccak_input8).next() == keccak_output8
+        let rotations = izip!(keccak_input8, keccak_output8)
+            .map(|((input, _), (output, _))| (input.expr(), output.expr()))
+            .collect_vec();
+
+        let ConstraintSystem {
+            expressions,
+            expr_names,
+            evals,
+            ..
+        } = system;
 
         chip.add_layer(Layer::new(
             "Rounds".to_string(),
@@ -762,7 +792,17 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             expressions,
             vec![],
             bases.into_iter().map(|e| e.1).collect_vec(),
-            vec![(Some(eq.0.expr()), evals)],
+            vec![(Some(eq_zero.0.expr()), evals)],
+            (
+                Some([
+                    eq_rotation_left.0.expr(),
+                    eq_rotation_right.0.expr(),
+                    eq_rotation.0.expr(),
+                ]),
+                rotations,
+                ROUNDS_CEIL_LOG2,
+                ROUNDS - 1,
+            ),
             expr_names,
         ));
     }
@@ -783,52 +823,58 @@ where
         let instances = &phase1.instances;
         let num_instances = instances.len();
 
-        let wits: Vec<_> = (0..num_instances)
-            .into_par_iter()
-            .flat_map(|instance_id| {
-                fn conv64to8(input: u64) -> [u64; 8] {
-                    MaskRepresentation::new(vec![(64, input).into()])
-                        .convert(vec![8; 8])
-                        .values()
-                        .try_into()
-                        .unwrap()
-                }
+        fn conv64to8(input: u64) -> [u64; 8] {
+            MaskRepresentation::new(vec![(64, input).into()])
+                .convert(vec![8; 8])
+                .values()
+                .try_into()
+                .unwrap()
+        }
 
-                let state32 = instances[instance_id]
-                    .iter()
-                    .map(|&e| e as u64)
-                    .collect_vec();
+        // TODO take structural id information from circuit to do wits assignment
+        // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
+        let n_row_padding = next_pow2_instance_padding(num_instances * ROUNDS.next_power_of_two());
+        let mut wits =
+            Vec::with_capacity(n_row_padding * KECCAK_WIT_SIZE * CAPACITY_RESERVED_FACTOR);
+        wits.par_extend(
+            (0..n_row_padding * KECCAK_WIT_SIZE)
+                .into_par_iter()
+                .map(|_| E::BaseField::ZERO),
+        );
 
+        // keccak instance full rounds (24 rounds + 8 round padding) as chunk size
+        // we need to do assignment on respective 31 cyclic group index
+        wits.par_chunks_mut(KECCAK_WIT_SIZE * ROUNDS.next_power_of_two())
+            .enumerate()
+            .take(num_instances)
+            .for_each(|(instance_id, wits)| {
+                let state_32_iter = instances[instance_id].iter().map(|&e| e as u64);
                 let mut state64 = [[0u64; 5]; 5];
-                let mut state8 = [[[0u64; 8]; 5]; 5];
-
-                zip_eq(iproduct!(0..5, 0..5), state32.iter().tuples())
-                    .map(|((x, y), (&lo, &hi))| {
+                zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
+                    .map(|((x, y), (lo, hi))| {
                         state64[x][y] = lo | (hi << 32);
                     })
                     .count();
 
-                for x in 0..5 {
-                    for y in 0..5 {
-                        state8[x][y] = conv64to8(state64[x][y]);
-                    }
-                }
-
-                // TODO take structural id information from circuit to do wits assignment
-                // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
-                let mut wits = Vec::with_capacity(KECCAK_WIT_SIZE * ROUNDS.next_power_of_two());
-                let mut push_instance = |new_wits: Vec<u64>| {
-                    let felts = u64s_to_felts::<E>(new_wits);
-                    wits.extend(felts);
-                };
+                let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
+                let mut cyclic_group = bh.into_iter();
 
                 #[allow(clippy::needless_range_loop)]
-                for round in 0..ROUNDS {
-                    if round == 0 {
-                        push_instance(state8.into_iter().flatten().flatten().collect_vec());
-                    } else {
-                        push_instance(vec![0u64; KECCAK_LAYER_BYTE_SIZE]);
+                for _round in 0..ROUNDS {
+                    let round_index = cyclic_group.next().unwrap();
+                    let mut wits_start_index = round_index as usize * KECCAK_WIT_SIZE;
+                    let mut state8 = [[[0u64; 8]; 5]; 5];
+                    for x in 0..5 {
+                        for y in 0..5 {
+                            state8[x][y] = conv64to8(state64[x][y]);
+                        }
                     }
+
+                    push_instance::<E, _>(
+                        wits,
+                        &mut wits_start_index,
+                        state8.into_iter().flatten().flatten(),
+                    );
 
                     let mut c_aux64 = [[0u64; 5]; 5];
                     let mut c_aux8 = [[[0u64; 8]; 5]; 5];
@@ -937,36 +983,24 @@ where
                         }
                     }
 
-                    let all_wits64 = [
-                        c_aux8.into_iter().flatten().flatten().collect_vec(),
-                        c_temp.into_iter().flatten().collect_vec(),
-                        crot8.into_iter().flatten().collect_vec(),
-                        d8.into_iter().flatten().collect_vec(),
-                        theta_state8.into_iter().flatten().flatten().collect_vec(),
-                        rotation_witness,
-                        rhopi_output8.into_iter().flatten().flatten().collect_vec(),
-                        nonlinear8.into_iter().flatten().flatten().collect_vec(),
-                        chi_output8[0][0].to_vec(),
-                        iota_output8.into_iter().flatten().flatten().collect_vec(),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect_vec();
+                    let all_wits64 = chain!(
+                        c_aux8.into_iter().flatten().flatten(),
+                        c_temp.into_iter().flatten(),
+                        crot8.into_iter().flatten(),
+                        d8.into_iter().flatten(),
+                        theta_state8.into_iter().flatten().flatten(),
+                        rotation_witness.into_iter(),
+                        rhopi_output8.into_iter().flatten().flatten(),
+                        nonlinear8.into_iter().flatten().flatten(),
+                        chi_output8[0][0].iter().copied(),
+                        iota_output8.into_iter().flatten().flatten(),
+                    );
 
-                    assert_eq!(all_wits64.len(), KECCAK_WIT_SIZE_PER_ROUND);
-                    push_instance(all_wits64);
+                    push_instance::<E, _>(wits, &mut wits_start_index, all_wits64);
 
                     state64 = iota_output64;
                 }
-
-                // padding to next_power_of_2 rounds for rotation
-                wits.extend(
-                    (0..(ROUNDS.next_power_of_two() - ROUNDS) * KECCAK_WIT_SIZE)
-                        .map(|_| E::BaseField::ZERO),
-                );
-                wits
-            })
-            .collect();
+            });
         RowMajorMatrix::new_by_values(wits, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default)
     }
 }
@@ -1073,7 +1107,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
         let out_evals = _gkr_output
             .0
             .bases
-            .iter()
+            .par_iter()
             .map(|base| PointAndEval {
                 point: point.clone(),
                 eval: if base.num_vars() == 0 {
@@ -1082,7 +1116,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
                     base.evaluate(&point)
                 },
             })
-            .collect_vec();
+            .collect::<Vec<_>>();
 
         assert_eq!(out_evals.len(), KECCAK_OUT_EVAL_SIZE);
 

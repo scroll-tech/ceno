@@ -39,12 +39,13 @@ fn keccak_f_fn(c: &mut Criterion) {
 
                         let circuit = setup_keccak_lookup_circuit();
                         #[allow(clippy::unit_arg)]
-                        run_faster_keccakf::<GoldilocksExt2>(
+                        let _ = run_faster_keccakf::<GoldilocksExt2>(
                             circuit,
                             black_box(states),
                             false,
                             false,
-                        );
+                        )
+                        .expect("unable to get proof");
                         let elapsed = instant.elapsed();
                         println!(
                             "keccak_f::create_proof, instances = {}, time = {}",
