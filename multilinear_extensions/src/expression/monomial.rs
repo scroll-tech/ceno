@@ -27,14 +27,15 @@ impl<E: ExtensionField> Expression<E> {
 
     fn distribute(&self) -> Vec<Term<Expression<E>, Expression<E>>> {
         match self {
-            Constant(_) => {
+            // only contribute to scalar terms
+            Constant(_) | Challenge(..) | Instance(_) => {
                 vec![Term {
                     scalar: self.clone(),
                     product: vec![],
                 }]
             }
 
-            Fixed(_) | WitIn(_) | StructuralWitIn(..) | Instance(_) | Challenge(..) => {
+            Fixed(_) | WitIn(_) | StructuralWitIn(..) => {
                 vec![Term {
                     scalar: Expression::ONE,
                     product: vec![self.clone()],

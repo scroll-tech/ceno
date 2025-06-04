@@ -469,4 +469,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
         Ok((is_eq, diff_inverse))
     }
+
+    pub(crate) fn finalize(&mut self) {
+        self.cs.finalize_backend_monomial_expression();
+    }
 }

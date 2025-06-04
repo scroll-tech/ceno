@@ -1,12 +1,11 @@
 use ff_ext::ExtensionField;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
     sync::Arc,
 };
 
-use crate::scheme::hal::MultilinearPolynomial;
+use crate::scheme::hal::{MainSumcheckEvals, MultilinearPolynomial};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -342,19 +341,13 @@ impl<
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
-        let (input_opening_point, main_sumcheck_proofs) = self
+        let (input_opening_point, evals, main_sumcheck_proofs) = self
             .device
             .prove_main_constraints(rt_tower, records, &input, cs, challenges, transcript)?;
-
-        let span = entered_span!("fixed::evals + witin::evals");
-        let mut evals = input
-            .witness
-            .par_iter()
-            .chain(input.fixed.par_iter())
-            .map(|poly| poly.eval(input_opening_point[..poly.num_vars()].to_vec()))
-            .collect::<Vec<_>>();
-        let fixed_in_evals = evals.split_off(input.witness.len());
-        let wits_in_evals = evals;
+        let MainSumcheckEvals {
+            wits_in_evals,
+            fixed_in_evals,
+        } = evals;
 
         // evaluate pi if there is instance query
         let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
@@ -369,7 +362,6 @@ impl<
             }
             exit_span!(span);
         }
-        exit_span!(span);
 
         Ok((
             ZKVMChipProof {
