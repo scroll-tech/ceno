@@ -707,7 +707,7 @@ pub fn run_e2e_with_checkpoint<
     // proving
     let backend: CpuBackend<E, PCS> = CpuBackend::new();
     let device: CpuProver<CpuBackend<E, PCS>> = CpuProver::new(backend);
-    let prover = ZKVMProver::new(pk, device);
+    let mut prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {
         MockProver::assert_satisfied_full(
@@ -781,7 +781,7 @@ pub fn run_e2e_proof<
     // proving
     let backend: CpuBackend<E, PCS> = CpuBackend::new();
     let device: CpuProver<CpuBackend<E, PCS>> = CpuProver::new(backend);
-    let prover = ZKVMProver::new(pk, device);
+    let mut prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {
         MockProver::assert_satisfied_full(

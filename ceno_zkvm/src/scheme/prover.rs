@@ -1,9 +1,15 @@
 use ff_ext::ExtensionField;
-use std::{collections::BTreeMap, sync::Arc};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
+use crate::scheme::hal::MultilinearPolynomial;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
+    Instance,
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
@@ -27,7 +33,7 @@ use super::{
     hal::{ProverBackend, ProverDevice},
 };
 
-type CreateTableProof<E> = (ZKVMChipProof<E>, Point<E>);
+type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
 
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB, PD> {
     pub pk: Arc<ZKVMProvingKey<E, PCS>>,
@@ -67,7 +73,7 @@ impl<
         level = "trace"
     )]
     pub fn create_proof(
-        &self,
+        &mut self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
         mut transcript: impl Transcript<E>,
@@ -203,7 +209,7 @@ impl<
                         cs.w_expressions.len(),
                         cs.lk_expressions.len(),
                     );
-                    let (opcode_proof, input_opening_point) = self.create_chip_proof(
+                    let (opcode_proof, _, input_opening_point) = self.create_chip_proof(
                         circuit_name,
                         pk,
                         vec![],
@@ -223,7 +229,7 @@ impl<
                     evaluations.push(opcode_proof.wits_in_evals.clone());
                     opcode_proofs.insert(index, opcode_proof);
                 } else {
-                    let fixed_mle = fixed_mles.remove(circuit_name).unwrap_or(vec![]);
+                    let fixed_mle = fixed_mles.drain(..cs.num_fixed).collect_vec();
                     let structural_witness = self.device.transport_mles(
                         structural_wits
                             .remove(circuit_name)
@@ -231,8 +237,7 @@ impl<
                             .0,
                     );
                     assert!(!witness_mle.is_empty());
-                    assert!(num_instances.is_power_of_two());
-                    let (table_proof, input_opening_point) = self.create_chip_proof(
+                    let (table_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
                         circuit_name,
                         pk,
                         fixed_mle,
@@ -249,9 +254,9 @@ impl<
                         evaluations.push(table_proof.fixed_in_evals.clone());
                     }
                     table_proofs.insert(index, table_proof);
-                    // for (idx, eval) in pi_in_evals {
-                    //     pi_evals[idx] = eval;
-                    // }
+                    for (idx, eval) in pi_in_evals {
+                        pi_evals[idx] = eval;
+                    }
                 };
                 Ok((points, evaluations))
             },
@@ -266,10 +271,11 @@ impl<
             .map(|pk| (pk.get_cs().num_witin as usize, pk.get_cs().num_fixed))
             .collect_vec();
         let pcs_opening = entered_span!("pcs_opening");
-        let (evaluations, mpcs_opening_proof) = self.device.open(
+        let mpcs_opening_proof = self.device.open(
             witness_data,
             Some(device_pk.pcs_data),
             points,
+            evaluations,
             &circuit_num_polys,
             &num_instances,
             &mut transcript,
@@ -340,6 +346,12 @@ impl<
         let w_out_evals = out_evals.pop().unwrap();
         let r_out_evals = out_evals.pop().unwrap();
 
+        assert!(
+            prod_specs.len() + lookup_specs.len() > 0,
+            "{name} {} prod_specs + lookup_specs = {}",
+            num_instances,
+            prod_specs.len() + lookup_specs.len()
+        );
         let (rt_tower, tower_proof) =
             self.device
                 .prove_tower_relation(prod_specs, lookup_specs, NUM_FANIN_LOGUP, transcript);
@@ -349,15 +361,40 @@ impl<
             log2_num_instances,
         );
 
-        let (input_opening_point, main_sumcheck_proofs) = self.device.prove_main_constraints(
-            rt_tower,
-            &tower_proof,
-            records,
-            &input,
-            cs,
-            challenges,
-            transcript,
+        let (input_opening_point, main_sumcheck_proofs) = self
+            .device
+            .prove_main_constraints(rt_tower, records, &input, cs, challenges, transcript);
+        assert!(
+            input_opening_point.len() >= 1,
+            "{name} {} input opening point len = {}",
+            num_instances,
+            input_opening_point.len()
         );
+
+        let span = entered_span!("fixed::evals + witin::evals");
+        let mut evals = input
+            .witness
+            .par_iter()
+            .chain(input.fixed.par_iter())
+            .map(|poly| poly.eval(input_opening_point[..poly.num_vars()].to_vec()))
+            .collect::<Vec<_>>();
+        let fixed_in_evals = evals.split_off(input.witness.len());
+        let wits_in_evals = evals;
+
+        // evaluate pi if there is instance query
+        let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
+        if !cs.instance_name_map.is_empty() {
+            let span = entered_span!("pi::evals");
+            for &Instance(idx) in cs.instance_name_map.keys() {
+                let poly = &input.public_input[idx];
+                pi_in_evals.insert(
+                    idx,
+                    poly.eval(input_opening_point[..poly.num_vars()].to_vec()),
+                );
+            }
+            exit_span!(span);
+        }
+        exit_span!(span);
 
         Ok((
             ZKVMChipProof {
@@ -366,9 +403,10 @@ impl<
                 lk_out_evals,
                 main_sumcheck_proofs,
                 tower_proof,
-                fixed_in_evals: vec![],
-                wits_in_evals: vec![],
+                fixed_in_evals,
+                wits_in_evals,
             },
+            pi_in_evals,
             input_opening_point,
         ))
     }

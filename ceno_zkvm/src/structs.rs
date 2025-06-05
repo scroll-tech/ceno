@@ -12,7 +12,10 @@ use itertools::{Either, Itertools};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, impl_expr_from_unsigned};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 use strum_macros::EnumIter;
 use sumcheck::structs::IOPProverMessage;
 use witness::RowMajorMatrix;
@@ -356,7 +359,7 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub vp: PCS::VerifierParam,
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
-    pub fixed_commit_wd: Option<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>,
+    pub fixed_commit_wd: Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
 
     // expression for global state in/out
@@ -385,7 +388,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             let fixed_commit_wd =
                 PCS::batch_commit(&self.pp, fixed_traces).map_err(ZKVMError::PCSError)?;
             let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
-            self.fixed_commit_wd = Some(fixed_commit_wd);
+            self.fixed_commit_wd = Some(Arc::new(fixed_commit_wd));
             self.fixed_commit = Some(fixed_commit);
         } else {
             self.fixed_commit_wd = None;

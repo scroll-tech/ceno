@@ -10,11 +10,16 @@ use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
 
+pub trait MultilinearPolynomial<E: ExtensionField> {
+    fn num_vars(&self) -> usize;
+    fn eval(&self, point: Point<E>) -> E;
+}
+
 pub trait ProverBackend {
     type E: ExtensionField;
     type Pcs: PolynomialCommitmentScheme<Self::E>;
 
-    type MultilinearPoly<'a>: Send + Sync + Clone; // TODO: remove lifetime bound
+    type MultilinearPoly<'a>: Send + Sync + Clone + MultilinearPolynomial<Self::E>; // TODO: remove lifetime bound
     type Matrix: Send + Sync + Clone;
     type PcsData;
 }
@@ -54,7 +59,7 @@ pub trait TraceCommitter<PB: ProverBackend> {
     // commit to the traces using merkle tree and return
     // the traces in the form of multilinear polynomials
     fn commit_traces<'a>(
-        &self,
+        &mut self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<<PB::E as ExtensionField>::BaseField>>,
     ) -> (
         Vec<PB::MultilinearPoly<'a>>,
@@ -99,7 +104,6 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<PB::E>,
-        tower_proof: &TowerProofs<PB::E>,
         records: Vec<PB::MultilinearPoly<'b>>,
         input: &'b ProofInput<'a, PB>,
         cs: &ConstraintSystem<PB::E>,
@@ -112,21 +116,18 @@ pub trait OpeningProver<PB: ProverBackend> {
     fn open(
         &self,
         witness_data: PB::PcsData,
-        fixed_data: Option<PB::PcsData>,
+        fixed_data: Option<Arc<PB::PcsData>>,
         points: Vec<Point<PB::E>>,
-        // evals: Vec<PB::E>,
+        evals: Vec<Vec<PB::E>>,
         circuit_num_polys: &[(usize, usize)],
         num_instances: &[(usize, usize)],
         transcript: &mut impl Transcript<PB::E>,
-    ) -> (
-        BTreeMap<usize, Vec<PB::E>>,
-        <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Proof,
-    );
+    ) -> <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Proof;
 }
 
 pub struct DeviceProvingKey<'a, PB: ProverBackend> {
-    pub fixed_mles: BTreeMap<String, Vec<PB::MultilinearPoly<'a>>>,
-    pub pcs_data: PB::PcsData,
+    pub fixed_mles: Vec<PB::MultilinearPoly<'a>>,
+    pub pcs_data: Arc<PB::PcsData>,
 }
 
 pub trait DeviceTransporter<PB: ProverBackend> {
