@@ -9,17 +9,23 @@ use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
+use witness::next_pow2_instance_padding;
 
 pub trait MultilinearPolynomial<E: ExtensionField> {
     fn num_vars(&self) -> usize;
     fn eval(&self, point: Point<E>) -> E;
 }
 
+/// Defines basic types like field, pcs that we support in the prover backend
+/// And also defines the device-specific types that are used in the prover device.
 pub trait ProverBackend {
+    /// types that are common across all devices
     type E: ExtensionField;
     type Pcs: PolynomialCommitmentScheme<Self::E>;
 
-    type MultilinearPoly<'a>: Send + Sync + Clone + MultilinearPolynomial<Self::E>; // TODO: remove lifetime bound
+    /// device-specific types
+    // TODO: remove lifetime bound
+    type MultilinearPoly<'a>: Send + Sync + Clone + MultilinearPolynomial<Self::E>;
     type Matrix: Send + Sync + Clone;
     type PcsData;
 }
@@ -47,7 +53,7 @@ pub struct ProofInput<'a, PB: ProverBackend> {
 impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
     #[inline]
     pub fn log2_num_instances(&self) -> usize {
-        ceil_log2(self.num_instances)
+        ceil_log2(next_pow2_instance_padding(self.num_instances))
     }
 }
 

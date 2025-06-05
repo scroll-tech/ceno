@@ -2,6 +2,7 @@ use ff_ext::ExtensionField;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::{BTreeMap, HashMap},
+    marker::PhantomData,
     sync::Arc,
 };
 
@@ -11,16 +12,15 @@ use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Instance,
     mle::{IntoMLE, MultilinearExtension},
-    util::ceil_log2,
 };
-use p3::{commit::Pcs, field::PrimeCharacteristicRing};
+use p3::field::PrimeCharacteristicRing;
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverMessage,
 };
 use transcript::Transcript;
-use witness::{RowMajorMatrix, next_pow2_instance_padding};
+use witness::RowMajorMatrix;
 
 use crate::{
     error::ZKVMError,
@@ -38,7 +38,7 @@ type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB, PD> {
     pub pk: Arc<ZKVMProvingKey<E, PCS>>,
     device: PD,
-    _marker: std::marker::PhantomData<PB>,
+    _marker: PhantomData<PB>,
 }
 
 impl<
@@ -53,7 +53,7 @@ impl<
         ZKVMProver {
             pk,
             device,
-            _marker: std::marker::PhantomData,
+            _marker: PhantomData,
         }
     }
 }
@@ -100,7 +100,7 @@ impl<
         }
         exit_span!(span);
 
-        // commit to main traces
+        // keep track of circuit name to index mapping
         let circuit_name_index_mapping = self
             .pk
             .circuit_pks
@@ -108,10 +108,7 @@ impl<
             .enumerate()
             .map(|(k, v)| (v, k))
             .collect::<BTreeMap<_, _>>();
-        let mut wits_instances = BTreeMap::new();
-        let mut wits_rmms = BTreeMap::new();
-        let mut structural_wits = BTreeMap::new();
-
+        // only keep track of circuits that have non-zero instances
         let mut num_instances = Vec::with_capacity(self.pk.circuit_pks.len());
         for (index, (circuit_name, _)) in self.pk.circuit_pks.iter().enumerate() {
             if let Some(num_instance) = witnesses
@@ -134,13 +131,17 @@ impl<
             }
         }
 
-        // write (circuit_size, num_var) to transcript
-        for (circuit_size, num_var) in &num_instances {
-            transcript.append_message(&circuit_size.to_le_bytes());
+        // write (circuit_idx, num_var) to transcript
+        for (circuit_idx, num_var) in &num_instances {
+            transcript.append_message(&circuit_idx.to_le_bytes());
             transcript.append_message(&num_var.to_le_bytes());
         }
 
-        let commit_to_traces_span = entered_span!("commit_to_traces", profiling_1 = true);
+        let commit_to_traces_span = entered_span!("batch commit to traces", profiling_2 = true);
+        let mut wits_instances = BTreeMap::new();
+        let mut wits_rmms = BTreeMap::new();
+        let mut structural_wits = BTreeMap::new();
+
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, mut rmm) in witnesses.into_iter_sorted() {
             let witness_rmm = rmm.remove(0);
@@ -163,12 +164,9 @@ impl<
 
         debug_assert_eq!(num_instances.len(), wits_rmms.len());
 
-        // batch commit witness
-        let span = entered_span!("batch commit to witness", profiling_2 = true);
+        // commit to witness traces in batch
         let (mut witness_mles, witness_data, witin_commit) = self.device.commit_traces(wits_rmms);
-        PCS::write_commitment(&witin_commit, &mut transcript)
-            .map_err(ZKVMError::PCSError)?;
-        exit_span!(span);
+        PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         exit_span!(commit_to_traces_span);
 
         // transfer pk to device
@@ -180,7 +178,7 @@ impl<
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-        tracing::trace!("challenges in prover: {:?}", challenges);
+        tracing::debug!("global challenges in prover: {:?}", challenges);
 
         let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
@@ -197,11 +195,24 @@ impl<
                 // TODO: add an enum for circuit type either in constraint_system or vk
                 let cs = pk.get_cs();
                 let witness_mle = witness_mles.drain(..cs.num_witin as usize).collect_vec();
+                let structural_witness = self.device.transport_mles(
+                    structural_wits
+                        .remove(circuit_name)
+                        .map(|(sw, _)| sw)
+                        .unwrap_or(vec![]),
+                );
+                let public_input = self.device.transport_mles(pi.clone());
+                let input = ProofInput {
+                    witness: witness_mle,
+                    fixed: fixed_mles.drain(..cs.num_fixed).collect_vec(),
+                    structural_witness,
+                    public_input,
+                    num_instances,
+                };
+
                 let is_opcode_circuit = cs.lk_table_expressions.is_empty()
                     && cs.r_table_expressions.is_empty()
                     && cs.w_table_expressions.is_empty();
-
-                let public_inputs = self.device.transport_mles(pi.clone());
                 if is_opcode_circuit {
                     tracing::trace!(
                         "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
@@ -211,14 +222,11 @@ impl<
                         cs.w_expressions.len(),
                         cs.lk_expressions.len(),
                     );
+
                     let (opcode_proof, _, input_opening_point) = self.create_chip_proof(
                         circuit_name,
                         pk,
-                        vec![],
-                        witness_mle,
-                        vec![],
-                        public_inputs,
-                        num_instances,
+                        input,
                         &mut transcript,
                         &challenges,
                     )?;
@@ -231,22 +239,10 @@ impl<
                     evaluations.push(opcode_proof.wits_in_evals.clone());
                     opcode_proofs.insert(index, opcode_proof);
                 } else {
-                    let fixed_mle = fixed_mles.drain(..cs.num_fixed).collect_vec();
-                    let structural_witness = self.device.transport_mles(
-                        structural_wits
-                            .remove(circuit_name)
-                            .ok_or(ZKVMError::WitnessNotFound(circuit_name.clone()))?
-                            .0,
-                    );
-                    assert!(!witness_mle.is_empty());
                     let (table_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
                         circuit_name,
                         pk,
-                        fixed_mle,
-                        witness_mle,
-                        structural_witness,
-                        public_inputs,
-                        num_instances,
+                        input,
                         &mut transcript,
                         &challenges,
                     )?;
@@ -310,37 +306,14 @@ impl<
         &self,
         name: &str,
         circuit_pk: &ProvingKey<E>,
-        fixed: Vec<PB::MultilinearPoly<'a>>,
-        witness: Vec<PB::MultilinearPoly<'a>>,
-        structural_witness: Vec<PB::MultilinearPoly<'a>>,
-        public_input: Vec<PB::MultilinearPoly<'a>>,
-        num_instances: usize,
+        input: ProofInput<'a, PB>,
         transcript: &mut impl Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<CreateTableProof<E>, ZKVMError> {
         let cs = circuit_pk.get_cs();
-        let next_pow2_instances = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instances);
-        let chip_record_alpha = challenges[0];
-        let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
-        let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+        let log2_num_instances = input.log2_num_instances();
 
-        // opcode must have at least one read/write/lookup
-        let is_opcode_circuit = !cs.lk_expressions.is_empty()
-            || !cs.r_expressions.is_empty()
-            || !cs.w_expressions.is_empty();
-        // table must have at least one read/write/lookup
-        let is_table_circuit = !cs.lk_table_expressions.is_empty()
-            || !cs.r_table_expressions.is_empty()
-            || !cs.w_table_expressions.is_empty();
-
-        let input = ProofInput {
-            witness,
-            fixed,
-            structural_witness,
-            public_input,
-            num_instances,
-        };
+        // build tower witness
         let (mut out_evals, records, prod_specs, lookup_specs) =
             self.device.build_tower_witness(cs, &input, challenges);
 
@@ -348,12 +321,7 @@ impl<
         let w_out_evals = out_evals.pop().unwrap();
         let r_out_evals = out_evals.pop().unwrap();
 
-        assert!(
-            prod_specs.len() + lookup_specs.len() > 0,
-            "{name} {} prod_specs + lookup_specs = {}",
-            num_instances,
-            prod_specs.len() + lookup_specs.len()
-        );
+        // prove the product and logup sum relation between layers in tower
         let (rt_tower, tower_proof) =
             self.device
                 .prove_tower_relation(prod_specs, lookup_specs, NUM_FANIN_LOGUP, transcript);
@@ -363,15 +331,11 @@ impl<
             log2_num_instances,
         );
 
+        // 1. prove the main constraints among witness polynomials
+        // 2. prove the relation between last layer in the tower and read/write/logup records
         let (input_opening_point, main_sumcheck_proofs) = self
             .device
             .prove_main_constraints(rt_tower, records, &input, cs, challenges, transcript);
-        assert!(
-            input_opening_point.len() >= 1,
-            "{name} {} input opening point len = {}",
-            num_instances,
-            input_opening_point.len()
-        );
 
         let span = entered_span!("fixed::evals + witin::evals");
         let mut evals = input

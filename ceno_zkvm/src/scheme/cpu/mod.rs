@@ -146,8 +146,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
     ) {
         let num_instances = input.num_instances;
-        let next_pow2_instances = next_pow2_instance_padding(input.num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instances);
+        let log2_num_instances = input.log2_num_instances();
         let chip_record_alpha = challenges[0];
 
         // opcode must have at least one read/write/lookup
