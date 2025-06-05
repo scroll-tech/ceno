@@ -961,7 +961,7 @@ impl<E: ExtensionField> Display for Expression<E> {
 }
 
 pub mod fmt {
-    use crate::mle::{ArcMultilinearExtension, MultilinearExtension};
+    use crate::mle::{ MultilinearExtension};
 
     use super::*;
     use std::fmt::Write;

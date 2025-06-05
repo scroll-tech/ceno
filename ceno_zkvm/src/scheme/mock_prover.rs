@@ -17,7 +17,7 @@ use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, fmt,
-    mle::{ArcMultilinearExtension, IntoMLEs, MultilinearExtension},
+    mle::{IntoMLEs, MultilinearExtension},
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
 use p3::field::PrimeCharacteristicRing;

@@ -18,7 +18,7 @@ use crate::{
 use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use mpcs::{Point, PolynomialCommitmentScheme, RSCodeDefaultSpec, SecurityLevel};
+use mpcs::{Point, PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::{
     Expression,
     mle::{FieldType, IntoMLE, MultilinearExtension},
@@ -27,7 +27,7 @@ use multilinear_extensions::{
 };
 use p3::{
     field::{TwoAdicField, dot_product},
-    matrix::{Matrix, dense::RowMajorMatrix},
+    matrix::dense::RowMajorMatrix,
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{
@@ -716,7 +716,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             // degree > 1 zero expression sumcheck
             if !cs.assert_zero_sumcheck_expressions.is_empty() {
                 // \sum_t sel(rt, t) * \sum_j alpha_{j} * all_monomial_terms(t)
-                for ((expr, name), alpha) in cs
+                for ((expr, _name), alpha) in cs
                     .assert_zero_sumcheck_expressions
                     .iter()
                     .zip_eq(cs.assert_zero_sumcheck_expressions_namespace_map.iter())

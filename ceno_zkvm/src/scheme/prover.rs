@@ -13,7 +13,7 @@ use multilinear_extensions::{
     mle::{IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::{commit::Pcs, field::PrimeCharacteristicRing};
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -166,6 +166,8 @@ impl<
         // batch commit witness
         let span = entered_span!("batch commit to witness", profiling_2 = true);
         let (mut witness_mles, witness_data, witin_commit) = self.device.commit_traces(wits_rmms);
+        PCS::write_commitment(&witin_commit, &mut transcript)
+            .map_err(ZKVMError::PCSError)?;
         exit_span!(span);
         exit_span!(commit_to_traces_span);
 
