@@ -1,13 +1,13 @@
 use super::hal::{
     DeviceTransporter, MainSumcheckProver, MultilinearPolynomial, OpeningProver, ProverBackend,
-    ProverDevice, TraceCommitter,
+    ProverDevice, TowerProver, TraceCommitter,
 };
 use crate::{
     circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP},
-        hal::{DeviceProvingKey, ProofInput, TowerProver, TowerProverSpec},
+        hal::{DeviceProvingKey, ProofInput, TowerProverSpec},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
             wit_infer_by_expr,
@@ -94,6 +94,207 @@ impl<PB: ProverBackend> CpuProver<PB> {
     }
 }
 
+pub struct CpuTowerProver;
+
+impl CpuTowerProver {
+    pub fn create_proof<'a, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+        prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
+        logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
+        num_fanin: usize,
+        transcript: &mut impl Transcript<E>,
+    ) -> (Point<E>, TowerProofs<E>) {
+        #[derive(Debug, Clone)]
+        enum GroupedMLE<'a, E: ExtensionField> {
+            Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
+            Logup((usize, Vec<MultilinearExtension<'a, E>>)), /* usize is the index in logup_specs */
+        }
+
+        // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
+        // TODO mayber give a better naming?
+        assert_eq!(num_fanin, 2);
+
+        let (prod_specs_len, logup_specs_len) = (prod_specs.len(), logup_specs.len());
+        let mut proofs = TowerProofs::new(prod_specs_len, logup_specs_len);
+        let log_num_fanin = ceil_log2(num_fanin);
+        // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
+        let max_round_index = prod_specs
+            .iter()
+            .chain(logup_specs.iter())
+            .map(|m| m.witness.len())
+            .max()
+            .unwrap()
+            - 1; // index start from 0
+
+        // generate alpha challenge
+        let alpha_pows = get_challenge_pows(
+            prod_specs_len +
+            // logup occupy 2 sumcheck: numerator and denominator
+            logup_specs_len * 2,
+            transcript,
+        );
+        let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
+        let (mut out_rt, mut alpha_pows) = (initial_rt, alpha_pows);
+
+        let mut layer_witness: Vec<Vec<GroupedMLE<'a, E>>> = vec![Vec::new(); max_round_index + 1];
+
+        #[allow(clippy::type_complexity)]
+        fn merge_spec_witness<'b, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+            merged: &mut [Vec<GroupedMLE<'b, E>>],
+            spec: TowerProverSpec<'b, CpuBackend<E, PCS>>,
+            index: usize,
+            group_ctor: fn((usize, Vec<MultilinearExtension<'b, E>>)) -> GroupedMLE<'b, E>,
+        ) {
+            for (round_idx, round_vec) in spec.witness.into_iter().enumerate() {
+                merged[round_idx].push(group_ctor((index, round_vec)));
+            }
+        }
+
+        // merge prod_specs
+        for (i, spec) in prod_specs.into_iter().enumerate() {
+            merge_spec_witness(&mut layer_witness, spec, i, GroupedMLE::Prod);
+        }
+
+        // merge logup_specs
+        for (i, spec) in logup_specs.into_iter().enumerate() {
+            merge_spec_witness(&mut layer_witness, spec, i, GroupedMLE::Logup);
+        }
+
+        // skip(1) for output layer
+        for (round, mut layer_witness) in layer_witness.into_iter().enumerate().skip(1) {
+            // in first few round we just run on single thread
+            let num_threads = optimal_sumcheck_threads(out_rt.len());
+            let mut exprs = Vec::<Expression<E>>::with_capacity(prod_specs_len + logup_specs_len);
+            let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
+            let mut witness_prod_expr = vec![vec![]; prod_specs_len];
+            let mut witness_lk_expr = vec![vec![]; logup_specs_len];
+
+            let mut eq: MultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle();
+            let eq_expr = expr_builder.lift(Either::Right(&mut eq));
+
+            // processing exprs
+            for group_witness in layer_witness.iter_mut() {
+                match group_witness {
+                    GroupedMLE::Prod((i, layer_polys)) => {
+                        let alpha_expr = Expression::Constant(Either::Right(alpha_pows[*i]));
+                        // sanity check
+                        assert_eq!(layer_polys.len(), num_fanin);
+                        assert!(
+                            layer_polys
+                                .iter()
+                                .all(|f| { f.evaluations().len() == 1 << (log_num_fanin * round) })
+                        );
+
+                        let layer_polys = layer_polys
+                            .iter_mut()
+                            .map(|layer_poly| expr_builder.lift(layer_poly.to_either()))
+                            .collect_vec();
+
+                        witness_prod_expr[*i].extend(layer_polys.clone());
+                        let layer_polys_product =
+                            layer_polys.into_iter().product::<Expression<E>>();
+                        // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
+                        exprs.push(eq_expr.clone() * alpha_expr * layer_polys_product);
+                    }
+                    GroupedMLE::Logup((i, layer_polys)) => {
+                        // sanity check
+                        assert_eq!(layer_polys.len(), 2 * num_fanin); // p1, p2, q1, q2
+                        assert!(
+                            layer_polys
+                                .iter()
+                                .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
+                        );
+
+                        let (alpha_numerator, alpha_denominator) = (
+                            Expression::Constant(Either::Right(
+                                alpha_pows[prod_specs_len + *i * 2], // numerator and denominator
+                            )),
+                            Expression::Constant(Either::Right(
+                                alpha_pows[prod_specs_len + *i * 2 + 1],
+                            )),
+                        );
+
+                        let (p1, rest) = layer_polys.split_at_mut(1);
+                        let (p2, rest) = rest.split_at_mut(1);
+                        let (q1, q2) = rest.split_at_mut(1);
+
+                        let (p1, p2, q1, q2) = (
+                            expr_builder.lift(p1[0].to_either()),
+                            expr_builder.lift(p2[0].to_either()),
+                            expr_builder.lift(q1[0].to_either()),
+                            expr_builder.lift(q2[0].to_either()),
+                        );
+                        witness_lk_expr[*i].extend(vec![
+                            p1.clone(),
+                            p2.clone(),
+                            q1.clone(),
+                            q2.clone(),
+                        ]);
+
+                        // \sum_s eq(rt, s) * (alpha_numerator^{i} * (p1 * q2 + p2 * q1) + alpha_denominator^{i} * q1 * q2)
+                        exprs.push(
+                            eq_expr.clone()
+                                * (alpha_numerator * (p1 * q2.clone() + p2 * q1.clone())
+                                    + alpha_denominator * q1 * q2),
+                        );
+                    }
+                }
+            }
+
+            let wrap_batch_span = entered_span!("wrap_batch");
+            let (sumcheck_proofs, state) = IOPProverState::prove(
+                expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
+                transcript,
+            );
+            exit_span!(wrap_batch_span);
+
+            proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
+
+            // rt' = r_merge || rt
+            let r_merge = transcript.sample_and_append_vec(b"merge", log_num_fanin);
+            let rt_prime = [state.collect_raw_challenges(), r_merge].concat();
+
+            // generate next round challenge
+            let next_alpha_pows = get_challenge_pows(
+                prod_specs_len + logup_specs_len * 2, /* logup occupy 2 sumcheck: numerator and denominator */
+                transcript,
+            );
+            let evals = state.get_mle_flatten_final_evaluations();
+            // retrieve final evaluation to proof
+            for (i, witness_prod_expr) in witness_prod_expr.iter().enumerate().take(prod_specs_len)
+            {
+                let evals = witness_prod_expr
+                    .iter()
+                    .map(|expr| match expr {
+                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
+                        _ => unreachable!(),
+                    })
+                    .collect_vec();
+                if !evals.is_empty() {
+                    assert_eq!(evals.len(), num_fanin);
+                    proofs.push_prod_evals_and_point(i, evals, rt_prime.clone());
+                }
+            }
+            for (i, witness_lk_expr) in witness_lk_expr.iter().enumerate().take(logup_specs_len) {
+                let evals = witness_lk_expr
+                    .iter()
+                    .map(|expr| match expr {
+                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
+                        _ => unreachable!(),
+                    })
+                    .collect_vec();
+                if !evals.is_empty() {
+                    assert_eq!(evals.len(), 4); // p1, p2, q1, q2
+                    proofs.push_logup_evals_and_point(i, evals, rt_prime.clone());
+                }
+            }
+            out_rt = rt_prime;
+            alpha_pows = next_alpha_pows;
+        }
+        let next_rt = out_rt;
+
+        (next_rt, proofs)
+    }
+}
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
@@ -397,196 +598,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
     ) -> (Point<E>, TowerProofs<E>) {
-        #[derive(Debug, Clone)]
-        enum GroupedMLE<'a, E: ExtensionField> {
-            Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
-            Logup((usize, Vec<MultilinearExtension<'a, E>>)), /* usize is the index in logup_specs */
-        }
-
-        // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
-        // TODO mayber give a better naming?
-        assert_eq!(num_fanin, 2);
-
-        let (prod_specs_len, logup_specs_len) = (prod_specs.len(), logup_specs.len());
-        let mut proofs = TowerProofs::new(prod_specs_len, logup_specs_len);
-        let log_num_fanin = ceil_log2(num_fanin);
-        // -1 for sliding windows size 2: (cur_layer, next_layer) w.r.t total size
-        let max_round_index = prod_specs
-            .iter()
-            .chain(logup_specs.iter())
-            .map(|m| m.witness.len())
-            .max()
-            .unwrap()
-            - 1; // index start from 0
-
-        // generate alpha challenge
-        let alpha_pows = get_challenge_pows(
-            prod_specs_len +
-            // logup occupy 2 sumcheck: numerator and denominator
-            logup_specs_len * 2,
-            transcript,
-        );
-        let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
-        let (mut out_rt, mut alpha_pows) = (initial_rt, alpha_pows);
-
-        let mut layer_witness: Vec<Vec<GroupedMLE<'a, E>>> = vec![Vec::new(); max_round_index + 1];
-
-        #[allow(clippy::type_complexity)]
-        fn merge_spec_witness<'b, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-            merged: &mut [Vec<GroupedMLE<'b, E>>],
-            spec: TowerProverSpec<'b, CpuBackend<E, PCS>>,
-            index: usize,
-            group_ctor: fn((usize, Vec<MultilinearExtension<'b, E>>)) -> GroupedMLE<'b, E>,
-        ) {
-            for (round_idx, round_vec) in spec.witness.into_iter().enumerate() {
-                merged[round_idx].push(group_ctor((index, round_vec)));
-            }
-        }
-
-        // merge prod_specs
-        for (i, spec) in prod_specs.into_iter().enumerate() {
-            merge_spec_witness(&mut layer_witness, spec, i, GroupedMLE::Prod);
-        }
-
-        // merge logup_specs
-        for (i, spec) in logup_specs.into_iter().enumerate() {
-            merge_spec_witness(&mut layer_witness, spec, i, GroupedMLE::Logup);
-        }
-
-        // skip(1) for output layer
-        for (round, mut layer_witness) in layer_witness.into_iter().enumerate().skip(1) {
-            // in first few round we just run on single thread
-            let num_threads = optimal_sumcheck_threads(out_rt.len());
-            let mut exprs = Vec::<Expression<E>>::with_capacity(prod_specs_len + logup_specs_len);
-            let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
-            let mut witness_prod_expr = vec![vec![]; prod_specs_len];
-            let mut witness_lk_expr = vec![vec![]; logup_specs_len];
-
-            let mut eq: MultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle();
-            let eq_expr = expr_builder.lift(Either::Right(&mut eq));
-
-            // processing exprs
-            for group_witness in layer_witness.iter_mut() {
-                match group_witness {
-                    GroupedMLE::Prod((i, layer_polys)) => {
-                        let alpha_expr = Expression::Constant(Either::Right(alpha_pows[*i]));
-                        // sanity check
-                        assert_eq!(layer_polys.len(), num_fanin);
-                        assert!(
-                            layer_polys
-                                .iter()
-                                .all(|f| { f.evaluations().len() == 1 << (log_num_fanin * round) })
-                        );
-
-                        let layer_polys = layer_polys
-                            .iter_mut()
-                            .map(|layer_poly| expr_builder.lift(layer_poly.to_either()))
-                            .collect_vec();
-
-                        witness_prod_expr[*i].extend(layer_polys.clone());
-                        let layer_polys_product =
-                            layer_polys.into_iter().product::<Expression<E>>();
-                        // \sum_s eq(rt, s) * alpha^{i} * ([in_i0[s] * in_i1[s] * .... in_i{num_product_fanin}[s]])
-                        exprs.push(eq_expr.clone() * alpha_expr * layer_polys_product);
-                    }
-                    GroupedMLE::Logup((i, layer_polys)) => {
-                        // sanity check
-                        assert_eq!(layer_polys.len(), 2 * num_fanin); // p1, p2, q1, q2
-                        assert!(
-                            layer_polys
-                                .iter()
-                                .all(|f| f.evaluations().len() == 1 << (log_num_fanin * round)),
-                        );
-
-                        let (alpha_numerator, alpha_denominator) = (
-                            Expression::Constant(Either::Right(
-                                alpha_pows[prod_specs_len + *i * 2], // numerator and denominator
-                            )),
-                            Expression::Constant(Either::Right(
-                                alpha_pows[prod_specs_len + *i * 2 + 1],
-                            )),
-                        );
-
-                        let (p1, rest) = layer_polys.split_at_mut(1);
-                        let (p2, rest) = rest.split_at_mut(1);
-                        let (q1, q2) = rest.split_at_mut(1);
-
-                        let (p1, p2, q1, q2) = (
-                            expr_builder.lift(p1[0].to_either()),
-                            expr_builder.lift(p2[0].to_either()),
-                            expr_builder.lift(q1[0].to_either()),
-                            expr_builder.lift(q2[0].to_either()),
-                        );
-                        witness_lk_expr[*i].extend(vec![
-                            p1.clone(),
-                            p2.clone(),
-                            q1.clone(),
-                            q2.clone(),
-                        ]);
-
-                        // \sum_s eq(rt, s) * (alpha_numerator^{i} * (p1 * q2 + p2 * q1) + alpha_denominator^{i} * q1 * q2)
-                        exprs.push(
-                            eq_expr.clone()
-                                * (alpha_numerator * (p1 * q2.clone() + p2 * q1.clone())
-                                    + alpha_denominator * q1 * q2),
-                        );
-                    }
-                }
-            }
-
-            let wrap_batch_span = entered_span!("wrap_batch");
-            let (sumcheck_proofs, state) = IOPProverState::prove(
-                expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
-                transcript,
-            );
-            exit_span!(wrap_batch_span);
-
-            proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
-
-            // rt' = r_merge || rt
-            let r_merge = transcript.sample_and_append_vec(b"merge", log_num_fanin);
-            let rt_prime = [state.collect_raw_challenges(), r_merge].concat();
-
-            // generate next round challenge
-            let next_alpha_pows = get_challenge_pows(
-                prod_specs_len + logup_specs_len * 2, /* logup occupy 2 sumcheck: numerator and denominator */
-                transcript,
-            );
-            let evals = state.get_mle_flatten_final_evaluations();
-            // retrieve final evaluation to proof
-            for (i, witness_prod_expr) in witness_prod_expr.iter().enumerate().take(prod_specs_len)
-            {
-                let evals = witness_prod_expr
-                    .iter()
-                    .map(|expr| match expr {
-                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
-                        _ => unreachable!(),
-                    })
-                    .collect_vec();
-                if !evals.is_empty() {
-                    assert_eq!(evals.len(), num_fanin);
-                    proofs.push_prod_evals_and_point(i, evals, rt_prime.clone());
-                }
-            }
-            for (i, witness_lk_expr) in witness_lk_expr.iter().enumerate().take(logup_specs_len) {
-                let evals = witness_lk_expr
-                    .iter()
-                    .map(|expr| match expr {
-                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
-                        _ => unreachable!(),
-                    })
-                    .collect_vec();
-                if !evals.is_empty() {
-                    assert_eq!(evals.len(), 4); // p1, p2, q1, q2
-                    proofs.push_logup_evals_and_point(i, evals, rt_prime.clone());
-                }
-            }
-            out_rt = rt_prime;
-            alpha_pows = next_alpha_pows;
-        }
-        let next_rt = out_rt;
-
-        (next_rt, proofs)
+        CpuTowerProver::create_proof(prod_specs, logup_specs, num_fanin, transcript)
     }
 }
 

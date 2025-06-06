@@ -20,8 +20,6 @@ use strum_macros::EnumIter;
 use sumcheck::structs::IOPProverMessage;
 use witness::RowMajorMatrix;
 
-pub struct TowerProver;
-
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",

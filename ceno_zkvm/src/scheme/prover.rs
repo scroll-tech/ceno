@@ -30,10 +30,14 @@ use crate::{
 
 use super::{
     PublicValues, ZKVMChipProof, ZKVMProof,
+    cpu::{CpuBackend, CpuProver},
     hal::{ProverBackend, ProverDevice},
 };
 
 type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
+
+pub type ZkVMCpuProver<E, PCS> =
+    ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
 
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB, PD> {
     pub pk: Arc<ZKVMProvingKey<E, PCS>>,

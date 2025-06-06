@@ -293,7 +293,7 @@ mod tests {
     use itertools::Itertools;
     use multilinear_extensions::{
         Expression, ToExpr,
-        mle::{ArcMultilinearExtension, IntoMLE},
+        mle::{IntoMLE, MultilinearExtension},
         virtual_polys::VirtualPolynomialsBuilder,
     };
     use p3::field::PrimeCharacteristicRing;
@@ -313,8 +313,8 @@ mod tests {
         let x = cb.create_witin(|| "x");
         let y = cb.create_witin(|| "y");
 
-        let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
-            .map(|_| vec![F::from_u64(1)].into_mle().into())
+        let wits_in: Vec<MultilinearExtension<E>> = (0..cs.num_witin as usize)
+            .map(|_| vec![F::from_u64(1)].into_mle())
             .collect();
 
         let mut expr_builder = VirtualPolynomialsBuilder::new(1, 0);
