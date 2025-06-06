@@ -1,7 +1,7 @@
 target
 .vscode
 *.log
-log.txt
+*.txt
 logs/
 report.txt
 report.json
