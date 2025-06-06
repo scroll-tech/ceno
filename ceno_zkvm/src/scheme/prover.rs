@@ -202,7 +202,7 @@ impl<
                         .unwrap_or(vec![]),
                 );
                 let public_input = self.device.transport_mles(pi.clone());
-                let input = ProofInput {
+                let mut input = ProofInput {
                     witness: witness_mle,
                     fixed: fixed_mles.drain(..cs.num_fixed).collect_vec(),
                     structural_witness,
@@ -239,6 +239,8 @@ impl<
                     evaluations.push(opcode_proof.wits_in_evals.clone());
                     opcode_proofs.insert(index, opcode_proof);
                 } else {
+                    // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
+                    input.num_instances = 1 << input.log2_num_instances();
                     let (table_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
                         circuit_name,
                         pk,
@@ -296,7 +298,6 @@ impl<
         Ok(vm_proof)
     }
 
-    #[allow(clippy::too_many_arguments)]
     /// create proof for opcode and table circuits
     ///
     /// for each read/write/logup expression, we pack all records of that type
@@ -335,7 +336,7 @@ impl<
         // 2. prove the relation between last layer in the tower and read/write/logup records
         let (input_opening_point, main_sumcheck_proofs) = self
             .device
-            .prove_main_constraints(rt_tower, records, &input, cs, challenges, transcript);
+            .prove_main_constraints(rt_tower, records, &input, cs, challenges, transcript)?;
 
         let span = entered_span!("fixed::evals + witin::evals");
         let mut evals = input

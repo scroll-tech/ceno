@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     circuit_builder::ConstraintSystem,
+    error::ZKVMError,
     structs::{TowerProofs, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
@@ -115,7 +116,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
         cs: &ConstraintSystem<PB::E>,
         challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
-    ) -> (Point<PB::E>, Option<Vec<IOPProverMessage<PB::E>>>);
+    ) -> Result<(Point<PB::E>, Option<Vec<IOPProverMessage<PB::E>>>), ZKVMError>;
 }
 
 pub trait OpeningProver<PB: ProverBackend> {

@@ -198,7 +198,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 )?;
                 rt_points.push(input_opening_point);
                 evaluations.push(opcode_proof.wits_in_evals.clone());
-                tracing::trace!("verified proof for opcode {}", name);
+                println!("verified proof for opcode {}", name);
 
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks = circuit_vk.get_cs().lk_expressions.len();
@@ -246,7 +246,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 if circuit_vk.cs.num_fixed > 0 {
                     evaluations.push(table_proof.fixed_in_evals.clone());
                 }
-                tracing::trace!("verified proof for table {}", name);
+                println!("verified proof for table {}", name);
 
                 logup_sum = table_proof
                     .lk_out_evals
@@ -684,22 +684,30 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         .collect_vec();
 
         let input_opening_point = if is_skip_same_point_sumcheck {
-            for (expected_eval, eval) in expected_evals.iter().zip(
-                prod_point_and_eval
-                    .into_iter()
-                    .chain(
-                        logup_p_point_and_eval
-                            .into_iter()
-                            .zip_eq(logup_q_point_and_eval)
-                            .flat_map(|(p_point_and_eval, q_point_and_eval)| {
-                                [p_point_and_eval, q_point_and_eval]
-                            }),
-                    )
-                    .map(|point_and_eval| point_and_eval.eval),
-            ) {
+            for (i, (expected_eval, eval)) in expected_evals
+                .iter()
+                .zip(
+                    prod_point_and_eval
+                        .into_iter()
+                        .chain(
+                            logup_p_point_and_eval
+                                .into_iter()
+                                .zip_eq(logup_q_point_and_eval)
+                                .flat_map(|(p_point_and_eval, q_point_and_eval)| {
+                                    [p_point_and_eval, q_point_and_eval]
+                                }),
+                        )
+                        .map(|point_and_eval| point_and_eval.eval),
+                )
+                .enumerate()
+            {
                 if expected_eval != &eval {
+                    println!(
+                        "cs.lk_table_expressions[0] = {:?}",
+                        cs.lk_table_expressions[0]
+                    );
                     return Err(ZKVMError::VerifyError(format!(
-                        "table {name} evaluation mismatch {expected_eval:?} != {eval:?}"
+                        "table {name} evaluation at {i} mismatch {expected_eval:?} != {eval:?}"
                     )));
                 }
             }

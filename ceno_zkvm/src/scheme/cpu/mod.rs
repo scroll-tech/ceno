@@ -4,6 +4,7 @@ use super::hal::{
 };
 use crate::{
     circuit_builder::ConstraintSystem,
+    error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP},
         hal::{DeviceProvingKey, ProofInput, TowerProver, TowerProverSpec},
@@ -26,7 +27,7 @@ use multilinear_extensions::{
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::{
-    field::{TwoAdicField, dot_product},
+    field::{PrimeCharacteristicRing, TwoAdicField, dot_product},
     matrix::dense::RowMajorMatrix,
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -600,7 +601,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         cs: &ConstraintSystem<E>,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
-    ) -> (Point<E>, Option<Vec<IOPProverMessage<E>>>) {
+    ) -> Result<(Point<E>, Option<Vec<IOPProverMessage<E>>>), ZKVMError> {
         let num_instances = input.num_instances;
         let next_pow2_instances = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instances);
@@ -715,7 +716,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             // degree > 1 zero expression sumcheck
             if !cs.assert_zero_sumcheck_expressions.is_empty() {
                 // \sum_t sel(rt, t) * \sum_j alpha_{j} * all_monomial_terms(t)
-                for ((expr, _name), alpha) in cs
+                for ((expr, name), alpha) in cs
                     .assert_zero_sumcheck_expressions
                     .iter()
                     .zip_eq(cs.assert_zero_sumcheck_expressions_namespace_map.iter())
@@ -731,19 +732,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                             challenges,
                             expr,
                         );
-                        // let top_100_errors = expected_zero_poly
-                        //     .get_base_field_vec()
-                        //     .iter()
-                        //     .enumerate()
-                        //     .filter(|(_, v)| **v != E::BaseField::ZERO)
-                        //     .take(100)
-                        //     .collect_vec();
-                        // if !top_100_errors.is_empty() {
-                        //     return Err(ZKVMError::InvalidWitness(format!(
-                        //         "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
-                        //         top_100_errors.into_iter().map(|(i, _)| i).join(",")
-                        //     )));
-                        // }
+                        let top_100_errors = expected_zero_poly
+                            .get_base_field_vec()
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, v)| **v != E::BaseField::ZERO)
+                            .take(100)
+                            .collect_vec();
+                        if !top_100_errors.is_empty() {
+                            return Err(ZKVMError::InvalidWitness(format!(
+                                "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
+                                top_100_errors.into_iter().map(|(i, _)| i).join(",")
+                            )));
+                        }
                     }
 
                     distrinct_zerocheck_terms_set.extend(add_mle_list_by_expr(
@@ -778,7 +779,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
 
         exit_span!(sumcheck_span);
 
-        (input_opening_point, main_sumcheck_proofs)
+        Ok((input_opening_point, main_sumcheck_proofs))
     }
 }
 
