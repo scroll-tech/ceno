@@ -19,7 +19,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverMessage,
-    util::interpolate_uni_poly,
+    util::extrapolate_uni_poly,
 };
 use transcript::Transcript;
 
@@ -393,13 +393,13 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     // 2. check every round of sumcheck match with prev claims
     for i in 0..fold_challenges.len() - 1 {
         assert_eq!(
-            interpolate_uni_poly(&sumcheck_messages[i].evaluations, fold_challenges[i]),
+            extrapolate_uni_poly(&sumcheck_messages[i].evaluations, fold_challenges[i]),
             { sumcheck_messages[i + 1].evaluations[0] + sumcheck_messages[i + 1].evaluations[1] }
         );
     }
     // 3. check final evaluation are correct
     assert_eq!(
-        interpolate_uni_poly(
+        extrapolate_uni_poly(
             &sumcheck_messages[fold_challenges.len() - 1].evaluations,
             fold_challenges[fold_challenges.len() - 1]
         ),

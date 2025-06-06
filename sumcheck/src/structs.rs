@@ -12,7 +12,6 @@ use transcript::Challenge;
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct IOPProof<E: ExtensionField> {
-    pub point: Vec<E>,
     pub proofs: Vec<IOPProverMessage<E>>,
 }
 impl<E: ExtensionField> IOPProof<E> {
@@ -42,9 +41,6 @@ pub struct IOPProverState<'a, E: ExtensionField> {
     pub(crate) round: usize,
     /// pointer to the virtual polynomial
     pub(crate) poly: VirtualPolynomial<'a, E>,
-    /// points with precomputed barycentric weights for extrapolating smaller
-    /// degree uni-polys to `max_degree + 1` evaluations.
-    pub(crate) extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
     pub(crate) max_num_variables: usize,
     pub(crate) poly_meta: Vec<PolyMeta>,
     /// phase 1 and phase 2 sumcheck we share similar implementation

@@ -14,7 +14,7 @@ use crate::{
         },
     },
     structs::TowerProofs,
-    utils::{add_mle_list_by_expr, get_challenge_pows},
+    utils::add_mle_list_by_expr,
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -38,7 +38,7 @@ use std::{
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
-    util::{ceil_log2, optimal_sumcheck_threads},
+    util::{ceil_log2, get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
@@ -545,7 +545,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 
             // rt' = r_merge || rt
             let r_merge = transcript.sample_and_append_vec(b"merge", log_num_fanin);
-            let rt_prime = [sumcheck_proofs.point, r_merge].concat();
+            let rt_prime = [state.collect_raw_challenges(), r_merge].concat();
 
             // generate next round challenge
             let next_alpha_pows = get_challenge_pows(
@@ -759,7 +759,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 }
             }
             tracing::trace!("main sel sumcheck start");
-            let (main_sel_sumcheck_proofs, _) = IOPProverState::prove(
+            let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(
                 expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
                 transcript,
             );
@@ -767,7 +767,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             exit_span!(main_sel_span);
 
             (
-                main_sel_sumcheck_proofs.point,
+                state.collect_raw_challenges(),
                 Some(main_sel_sumcheck_proofs.proofs),
             )
         } else {

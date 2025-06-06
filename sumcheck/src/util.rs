@@ -1,6 +1,5 @@
 use std::{
     array,
-    cmp::max,
     iter::Sum,
     ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign},
     sync::Arc,
@@ -9,204 +8,203 @@ use std::{
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    macros::{entered_span, exit_span},
-    mle::MultilinearExtension,
-    op_mle,
-    util::max_usable_threads,
-    virtual_poly::VirtualPolynomial,
+    mle::MultilinearExtension, op_mle, util::max_usable_threads, virtual_poly::VirtualPolynomial,
     virtual_polys::PolyMeta,
 };
 use p3::field::Field;
-use rayon::{prelude::ParallelIterator, slice::ParallelSliceMut};
+use transcript::Transcript;
 
-use crate::structs::IOPProverState;
+use crate::{extrapolate::ExtrapolationCache, structs::IOPProverState};
 
-pub fn barycentric_weights<F: Field>(points: &[F]) -> Vec<F> {
-    let mut weights = points
-        .iter()
-        .enumerate()
-        .map(|(j, point_j)| {
-            points
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| (i != j))
-                .map(|(_, point_i)| *point_j - *point_i)
-                .reduce(|acc, value| acc * value)
-                .unwrap_or(F::ONE)
-        })
-        .collect::<Vec<_>>();
-    batch_inversion(&mut weights);
-    weights
-}
-
-// Computes the inverse of each field element in a vector {v_i} using a parallelized batch inversion.
-pub fn batch_inversion<F: Field>(v: &mut [F]) {
-    batch_inversion_and_mul(v, &F::ONE);
-}
-
-// Computes the inverse of each field element in a vector {v_i} sequentially (serial version).
-pub fn serial_batch_inversion<F: Field>(v: &mut [F]) {
-    serial_batch_inversion_and_mul(v, &F::ONE)
-}
-
-// Given a vector of field elements {v_i}, compute the vector {coeff * v_i^(-1)}
-pub fn batch_inversion_and_mul<F: Field>(v: &mut [F], coeff: &F) {
-    // Divide the vector v evenly between all available cores
-    let min_elements_per_thread = 1;
-    let num_cpus_available = rayon::current_num_threads();
-    let num_elems = v.len();
-    let num_elem_per_thread = max(num_elems / num_cpus_available, min_elements_per_thread);
-
-    // Batch invert in parallel, without copying the vector
-    v.par_chunks_mut(num_elem_per_thread).for_each(|chunk| {
-        serial_batch_inversion_and_mul(chunk, coeff);
-    });
-}
-
-/// Given a vector of field elements {v_i}, compute the vector {coeff * v_i^(-1)}.
-/// This method is explicitly single-threaded.
-fn serial_batch_inversion_and_mul<F: Field>(v: &mut [F], coeff: &F) {
-    // Montgomery’s Trick and Fast Implementation of Masked AES
-    // Genelle, Prouff and Quisquater
-    // Section 3.2
-    // but with an optimization to multiply every element in the returned vector by
-    // coeff
-
-    // First pass: compute [a, ab, abc, ...]
-    let mut prod = Vec::with_capacity(v.len());
-    let mut tmp = F::ONE;
-    for f in v.iter().filter(|f| !f.is_zero()) {
-        tmp.mul_assign(*f);
-        prod.push(tmp);
-    }
-
-    // Invert `tmp`.
-    tmp = tmp.try_inverse().unwrap(); // Guaranteed to be nonzero.
-
-    // Multiply product by coeff, so all inverses will be scaled by coeff
-    tmp *= *coeff;
-
-    // Second pass: iterate backwards to compute inverses
-    for (f, s) in v
-        .iter_mut()
-        // Backwards
-        .rev()
-        // Ignore normalized elements
-        .filter(|f| !f.is_zero())
-        // Backwards, skip last element, fill in one for last term.
-        .zip(prod.into_iter().rev().skip(1).chain(Some(F::ONE)))
-    {
-        // tmp := tmp * f; f := tmp * s = 1/f
-        let new_tmp = tmp * *f;
-        *f = tmp * s;
-        tmp = new_tmp;
-    }
-}
-
-pub(crate) fn extrapolate<F: Field>(points: &[F], weights: &[F], evals: &[F], at: &F) -> F {
-    inner_extrapolate::<F, true>(points, weights, evals, at)
-}
-
-pub(crate) fn serial_extrapolate<F: Field>(points: &[F], weights: &[F], evals: &[F], at: &F) -> F {
-    inner_extrapolate::<F, false>(points, weights, evals, at)
-}
-
-fn inner_extrapolate<F: Field, const IS_PARALLEL: bool>(
-    points: &[F],
-    weights: &[F],
-    evals: &[F],
-    at: &F,
-) -> F {
-    let (coeffs, sum_inv) = {
-        let mut coeffs = points.iter().map(|point| *at - *point).collect::<Vec<_>>();
-        if IS_PARALLEL {
-            batch_inversion(&mut coeffs);
-        } else {
-            serial_batch_inversion(&mut coeffs);
-        }
-        let mut sum = F::ZERO;
-        coeffs.iter_mut().zip(weights).for_each(|(coeff, weight)| {
-            *coeff *= *weight;
-            sum += *coeff
-        });
-        let sum_inv = sum.try_inverse().unwrap_or(F::ZERO);
-        (coeffs, sum_inv)
-    };
-    coeffs
-        .iter()
-        .zip(evals)
-        .map(|(coeff, eval)| *coeff * *eval)
-        .sum::<F>()
-        * sum_inv
-}
-
-/// Interpolate a uni-variate degree-`p_i.len()-1` polynomial and evaluate this
-/// polynomial at `eval_at`:
+/// extrapolates values of a univariate polynomial in-place using precomputed barycentric weights.
 ///
-///   \sum_{i=0}^len p_i * (\prod_{j!=i} (eval_at - j)/(i-j) )
+/// this function fills in the remaining entries of `uni_variate[start..]` assuming the first `start`
+/// values are evaluations of a univariate polynomial at `0, 1, ..., start - 1`.
+/// it uses a precomputed [`ExtrapolationTable`] from [`ExtrapolationCache`] to perform
+/// efficient barycentric extrapolation without requiring any inverse operations at runtime.
 ///
-/// This implementation is linear in number of inputs in terms of field
-/// operations. It also has a quadratic term in primitive operations which is
-/// negligible compared to field operations.
-/// TODO: The quadratic term can be removed by precomputing the lagrange
-/// coefficients.
-pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
-    let start = entered_span!("sum check interpolate uni poly opt");
+/// Note: this function is highly optimized without field inverse. see [`ExtrapolationTable`] for how to achieve it
+pub fn extrapolate_from_table<E: ExtensionField>(uni_variate: &mut [E], start: usize) {
+    let cur_degree = start - 1;
+    let table = ExtrapolationCache::<E>::get(cur_degree, uni_variate.len() - 1);
+    let target_len = uni_variate.len();
+    assert!(start > 0, "start must be > 0 to define a degree");
+    assert!(
+        target_len > start,
+        "no extrapolation needed if target_len <= start"
+    );
 
-    let len = p_i.len();
-    let mut evals = vec![];
-    let mut prod = eval_at;
-    evals.push(eval_at);
+    let (known, to_extrapolate) = uni_variate.split_at_mut(start);
+    let weight_sets = &table.weights[0]; // since min_degree == cur_degree
 
-    // `prod = \prod_{j} (eval_at - j)`
-    for e in 1..len {
-        let tmp = eval_at - F::from_u64(e as u64);
-        evals.push(tmp);
-        prod *= tmp;
+    for (offset, target) in to_extrapolate.iter_mut().enumerate() {
+        let weights = &weight_sets[offset];
+        assert_eq!(weights.len(), known.len());
+
+        let acc = weights
+            .iter()
+            .zip(known.iter())
+            .fold(E::ZERO, |acc, (w, x)| acc + (*w * *x));
+
+        *target = acc;
     }
-    let mut res = F::ZERO;
-    // we want to compute \prod (j!=i) (i-j) for a given i
-    //
-    // we start from the last step, which is
-    //  denom[len-1] = (len-1) * (len-2) *... * 2 * 1
-    // the step before that is
-    //  denom[len-2] = (len-2) * (len-3) * ... * 2 * 1 * -1
-    // and the step before that is
-    //  denom[len-3] = (len-3) * (len-4) * ... * 2 * 1 * -1 * -2
-    //
-    // i.e., for any i, the one before this will be derived from
-    //  denom[i-1] = denom[i] * (len-i) / i
-    //
-    // that is, we only need to store
-    // - the last denom for i = len-1, and
-    // - the ratio between current step and fhe last step, which is the product of (len-i) / i from
-    //   all previous steps and we store this product as a fraction number to reduce field
-    //   divisions.
-
-    let mut denom_up = field_factorial::<F>(len - 1);
-    let mut denom_down = F::ONE;
-
-    for i in (0..len).rev() {
-        res += p_i[i] * prod * denom_down * (denom_up * evals[i]).inverse();
-
-        // compute denom for the next step is current_denom * (len-i)/i
-        if i != 0 {
-            denom_up *= -F::from_u64((len - i) as u64);
-            denom_down *= F::from_u64(i as u64);
-        }
-    }
-    exit_span!(start);
-    res
 }
 
-/// compute the factorial(a) = 1 * 2 * ... * a
-#[inline]
-fn field_factorial<F: Field>(a: usize) -> F {
-    let mut res = F::ONE;
-    for i in 2..=a {
-        res *= F::from_u64(i as u64);
+fn extrapolate_uni_poly_deg_1<F: Field>(p_i: &[F; 2], eval_at: F) -> F {
+    let x0 = F::ZERO;
+    let x1 = F::ONE;
+
+    // w0 = 1 / (0−1) = -1
+    // w1 = 1 / (1−0) =  1
+    let w0 = -F::ONE;
+    let w1 = F::ONE;
+
+    let d0 = eval_at - x0;
+    let d1 = eval_at - x1;
+
+    let l = d0 * d1;
+    let inv_d0 = d0.inverse();
+    let inv_d1 = d1.inverse();
+
+    let t0 = w0 * p_i[0] * inv_d0;
+    let t1 = w1 * p_i[1] * inv_d1;
+
+    l * (t0 + t1)
+}
+
+fn extrapolate_uni_poly_deg_2<F: Field>(p_i: &[F; 3], eval_at: F) -> F {
+    let x0 = F::from_u64(0);
+    let x1 = F::from_u64(1);
+    let x2 = F::from_u64(2);
+
+    // w0 = 1 / ((0−1)(0−2)) =  1/2
+    // w1 = 1 / ((1−0)(1−2)) = -1
+    // w2 = 1 / ((2−0)(2−1)) =  1/2
+    let w0 = F::from_u64(1).div(F::from_u64(2));
+    let w1 = -F::ONE;
+    let w2 = F::from_u64(1).div(F::from_u64(2));
+
+    let d0 = eval_at - x0;
+    let d1 = eval_at - x1;
+    let d2 = eval_at - x2;
+
+    let l = d0 * d1 * d2;
+
+    let inv_d0 = d0.inverse();
+    let inv_d1 = d1.inverse();
+    let inv_d2 = d2.inverse();
+
+    let t0 = w0 * p_i[0] * inv_d0;
+    let t1 = w1 * p_i[1] * inv_d1;
+    let t2 = w2 * p_i[2] * inv_d2;
+
+    l * (t0 + t1 + t2)
+}
+
+fn extrapolate_uni_poly_deg_3<F: Field>(p_i: &[F; 4], eval_at: F) -> F {
+    let x0 = F::from_u64(0);
+    let x1 = F::from_u64(1);
+    let x2 = F::from_u64(2);
+    let x3 = F::from_u64(3);
+
+    // w0 = 1 / ((0−1)(0−2)(0−3)) = -1/6
+    // w1 = 1 / ((1−0)(1−2)(1−3)) =  1/2
+    // w2 = 1 / ((2−0)(2−1)(2−3)) = -1/2
+    // w3 = 1 / ((3−0)(3−1)(3−2)) =  1/6
+    let w0 = -F::from_u64(1).div(F::from_u64(6));
+    let w1 = F::from_u64(1).div(F::from_u64(2));
+    let w2 = -F::from_u64(1).div(F::from_u64(2));
+    let w3 = F::from_u64(1).div(F::from_u64(6));
+
+    let d0 = eval_at - x0;
+    let d1 = eval_at - x1;
+    let d2 = eval_at - x2;
+    let d3 = eval_at - x3;
+
+    let l = d0 * d1 * d2 * d3;
+
+    let inv_d0 = d0.inverse();
+    let inv_d1 = d1.inverse();
+    let inv_d2 = d2.inverse();
+    let inv_d3 = d3.inverse();
+
+    let t0 = w0 * p_i[0] * inv_d0;
+    let t1 = w1 * p_i[1] * inv_d1;
+    let t2 = w2 * p_i[2] * inv_d2;
+    let t3 = w3 * p_i[3] * inv_d3;
+
+    l * (t0 + t1 + t2 + t3)
+}
+
+fn extrapolate_uni_poly_deg_4<F: Field>(p_i: &[F; 5], eval_at: F) -> F {
+    let x0 = F::from_u64(0);
+    let x1 = F::from_u64(1);
+    let x2 = F::from_u64(2);
+    let x3 = F::from_u64(3);
+    let x4 = F::from_u64(4);
+
+    // w0 = 1 / ((0−1)(0−2)(0−3)(0−4)) =  1/24
+    // w1 = 1 / ((1−0)(1−2)(1−3)(1−4)) = -1/6
+    // w2 = 1 / ((2−0)(2−1)(2−3)(2−4)) =  1/4
+    // w3 = 1 / ((3−0)(3−1)(3−2)(3−4)) = -1/6
+    // w4 = 1 / ((4−0)(4−1)(4−2)(4−3)) =  1/24
+    let w0 = F::from_u64(1).div(F::from_u64(24));
+    let w1 = -F::from_u64(1).div(F::from_u64(6));
+    let w2 = F::from_u64(1).div(F::from_u64(4));
+    let w3 = -F::from_u64(1).div(F::from_u64(6));
+    let w4 = F::from_u64(1).div(F::from_u64(24));
+
+    let d0 = eval_at - x0;
+    let d1 = eval_at - x1;
+    let d2 = eval_at - x2;
+    let d3 = eval_at - x3;
+    let d4 = eval_at - x4;
+
+    let l = d0 * d1 * d2 * d3 * d4;
+
+    let inv_d0 = d0.inverse();
+    let inv_d1 = d1.inverse();
+    let inv_d2 = d2.inverse();
+    let inv_d3 = d3.inverse();
+    let inv_d4 = d4.inverse();
+
+    let t0 = w0 * p_i[0] * inv_d0;
+    let t1 = w1 * p_i[1] * inv_d1;
+    let t2 = w2 * p_i[2] * inv_d2;
+    let t3 = w3 * p_i[3] * inv_d3;
+    let t4 = w4 * p_i[4] * inv_d4;
+
+    l * (t0 + t1 + t2 + t3 + t4)
+}
+
+/// Evaluate a univariate polynomial defined by its values `p_i` at integer points `0..p_i.len()-1`
+/// using Barycentric interpolation at the given `eval_at` point.
+///
+/// For overall idea, refer to https://people.maths.ox.ac.uk/trefethen/barycentric.pdf formula 3.3
+/// barycentric weights `w` are for polynomial interpolation.
+/// for a fixed set of interpolation points {x_0, x_1, ..., x_n}, the barycentric weight w_j is defined as:
+/// w_j = 1 / ∏_{k ≠ j} (x_j - x_k)
+/// these weights are used in the barycentric form of Lagrange interpolation, which allows
+/// for efficient evaluation of the interpolating polynomial at any other point
+/// the weights depend only on the interpolation nodes and can be treat as `constant` in loop-unroll + inline version
+///
+/// This is a runtime-dispatched implementation optimized for small degrees
+/// with unrolled loops for performance
+///
+/// # Arguments
+/// * `p_i` - Values of the polynomial at consecutive integer points.
+/// * `eval_at` - The point at which to evaluate the interpolated polynomial.
+///
+/// # Returns
+/// The value of the polynomial `eval_at`.
+pub fn extrapolate_uni_poly<F: Field>(p: &[F], eval_at: F) -> F {
+    match p.len() {
+        2 => extrapolate_uni_poly_deg_1(p.try_into().unwrap(), eval_at),
+        3 => extrapolate_uni_poly_deg_2(p.try_into().unwrap(), eval_at),
+        4 => extrapolate_uni_poly_deg_3(p.try_into().unwrap(), eval_at),
+        5 => extrapolate_uni_poly_deg_4(p.try_into().unwrap(), eval_at),
+        _ => unimplemented!("Extrapolation for degree {} not implemented", p.len() - 1),
     }
-    res
 }
 
 /// log2 ceil of x
@@ -326,6 +324,20 @@ pub fn optimal_sumcheck_threads(num_vars: usize) -> usize {
     }
 }
 
+/// Derive challenge from transcript and return all power results of the challenge.
+pub fn get_challenge_pows<E: ExtensionField>(
+    size: usize,
+    transcript: &mut impl Transcript<E>,
+) -> Vec<E> {
+    let alpha = transcript
+        .sample_and_append_challenge(b"combine subset evals")
+        .elements;
+
+    std::iter::successors(Some(E::ONE), move |prev| Some(*prev * alpha))
+        .take(size)
+        .collect()
+}
+
 #[derive(Clone, Copy, Debug)]
 /// util collection to support fundamental operation
 pub struct AdditiveArray<F, const N: usize>(pub [F; N]);
@@ -427,5 +439,38 @@ impl<F: MulAssign + Copy> Mul<F> for AdditiveVec<F> {
     fn mul(mut self, rhs: F) -> Self::Output {
         self *= rhs;
         self
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ff_ext::GoldilocksExt2;
+    use p3::field::PrimeCharacteristicRing;
+
+    #[test]
+    fn test_extrapolate_from_table() {
+        type E = GoldilocksExt2;
+        fn f(x: u64) -> E {
+            E::from_u64(2u64) * E::from_u64(x) + E::from_u64(3u64)
+        }
+        // Test a known linear polynomial: f(x) = 2x + 3
+
+        let degree = 1;
+        let target_len = 5; // Extrapolate up to x=4
+
+        // Known values at x=0 and x=1
+        let mut values: Vec<E> = (0..=degree as u64).map(f).collect();
+
+        // Allocate extra space for extrapolated values
+        values.resize(target_len, E::ZERO);
+
+        // Run extrapolation
+        extrapolate_from_table(&mut values, degree + 1);
+
+        // Verify values against f(x)
+        for (x, val) in values.iter().enumerate() {
+            let expected = f(x as u64);
+            assert_eq!(*val, expected, "Mismatch at x={}", x);
+        }
     }
 }

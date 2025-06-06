@@ -13,7 +13,6 @@ use multilinear_extensions::{
     Expression, mle::MultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::Field;
-use transcript::Transcript;
 
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {
     if x >= 0 {
@@ -59,24 +58,6 @@ pub(crate) fn add_one_to_big_num<F: Field>(limb_modulo: F, limbs: &[F]) -> Vec<F
     }
 
     result
-}
-
-/// derive challenge from transcript and return all pows result
-pub fn get_challenge_pows<E: ExtensionField>(
-    size: usize,
-    transcript: &mut impl Transcript<E>,
-) -> Vec<E> {
-    // println!("alpha_pow");
-    let alpha = transcript
-        .sample_and_append_challenge(b"combine subset evals")
-        .elements;
-    (0..size)
-        .scan(E::ONE, |state, _| {
-            let res = *state;
-            *state *= alpha;
-            Some(res)
-        })
-        .collect_vec()
 }
 
 // split single u64 value into W slices, each slice got C bits.

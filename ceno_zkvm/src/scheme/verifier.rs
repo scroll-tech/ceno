@@ -14,7 +14,10 @@ use multilinear_extensions::{
 };
 use p3::field::PrimeCharacteristicRing;
 use std::collections::HashSet;
-use sumcheck::structs::{IOPProof, IOPVerifierState};
+use sumcheck::{
+    structs::{IOPProof, IOPVerifierState},
+    util::get_challenge_pows,
+};
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
@@ -22,7 +25,7 @@ use crate::{
     error::ZKVMError,
     scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
     structs::{PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec, get_challenge_pows},
+    utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec},
 };
 use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with_instance};
 
@@ -414,7 +417,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let main_sel_subclaim = IOPVerifierState::verify(
             claim_sum,
             &IOPProof {
-                point: vec![], // final claimed point will be derive from sumcheck protocol
                 proofs: proof.main_sumcheck_proofs.as_ref().unwrap().clone(),
             },
             &VPAuxInfo {
@@ -739,7 +741,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let sel_subclaim = IOPVerifierState::verify(
                 claim_sum,
                 &IOPProof {
-                    point: vec![], // final claimed point will be derived from sumcheck protocol
                     proofs: proof.main_sumcheck_proofs.clone().unwrap(),
                 },
                 &VPAuxInfo {
@@ -911,7 +912,6 @@ impl TowerVerify {
                 let sumcheck_claim = IOPVerifierState::verify(
                     *out_claim,
                     &IOPProof {
-                        point: vec![], // final claimed point will be derived from sumcheck protocol
                         proofs: tower_proofs.proofs[round].clone(),
                     },
                     &VPAuxInfo {
