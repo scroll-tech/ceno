@@ -20,6 +20,19 @@ use std::fmt::Debug;
 /// A point is a vector of num_var length
 pub type Point<F> = Vec<F>;
 
+/// A point and the evaluation of this point.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct PointAndEval<F> {
+    pub point: Point<F>,
+    pub eval: F,
+}
+
+impl<F> PointAndEval<F> {
+    pub fn new(point: Point<F>, eval: F) -> Self {
+        Self { point, eval }
+    }
+}
+
 impl<E: ExtensionField> Debug for MultilinearExtension<'_, E> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:?}", self.evaluations())
@@ -97,6 +110,18 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
             FieldType::Base(content) => content.len(),
             FieldType::Ext(content) => content.len(),
             FieldType::Unreachable => 0,
+        }
+    }
+
+    pub fn as_borrowed_view(&self) -> Self {
+        match self {
+            FieldType::Base(SmartSlice::Borrowed(slice)) => {
+                FieldType::Base(SmartSlice::Borrowed(slice))
+            }
+            FieldType::Ext(SmartSlice::Borrowed(slice)) => {
+                FieldType::Ext(SmartSlice::Borrowed(slice))
+            }
+            _ => panic!("invalid type"),
         }
     }
 
@@ -202,6 +227,14 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         Self {
             num_vars,
             evaluations: field_type,
+        }
+    }
+
+    /// Create vector from field type
+    pub fn from_field_type_borrowed(num_vars: usize, field_type: &FieldType<'a, E>) -> Self {
+        Self {
+            num_vars,
+            evaluations: field_type.as_borrowed_view(),
         }
     }
 
@@ -533,6 +566,10 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
 
     pub fn evaluations(&self) -> &FieldType<E> {
         &self.evaluations
+    }
+
+    pub fn as_evaluations_view(&self) -> FieldType<E> {
+        self.evaluations.as_borrowed_view()
     }
 
     pub fn evaluations_to_owned(self) -> FieldType<'a, E> {
@@ -924,7 +961,7 @@ macro_rules! op_mle3_range {
     }};
 }
 
-/// deal with x * a + b
+/// deal with x * a + b or a * x + b
 #[macro_export]
 macro_rules! op_mle_xa_b {
     (|$x:ident, $a:ident, $b:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
@@ -949,6 +986,13 @@ macro_rules! op_mle_xa_b {
                 $crate::mle::FieldType::Ext(b_vec),
             ) => {
                 op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+            }
+            (
+                $crate::mle::FieldType::Ext(x_vec),
+                $crate::mle::FieldType::Base(a_vec),
+                $crate::mle::FieldType::Base(b_vec),
+            ) => {
+                op_mle3_range!($a, $x, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
             }
             (x, a, b) => unreachable!(
                 "unmatched pattern {:?} {:?} {:?}",
