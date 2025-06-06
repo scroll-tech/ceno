@@ -17,8 +17,8 @@ pub trait MultilinearPolynomial<E: ExtensionField> {
     fn eval(&self, point: Point<E>) -> E;
 }
 
-/// Defines basic types like field, pcs that we support in the prover backend
-/// And also defines the device-specific types that are used in the prover device.
+/// Defines basic types like field, pcs that are common among all devices
+/// and also defines the types that are specific to device.
 pub trait ProverBackend {
     /// types that are common across all devices
     type E: ExtensionField;
