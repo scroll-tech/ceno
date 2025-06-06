@@ -40,7 +40,7 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
         let evals = wit
             .bases
             .iter()
-            .map(|base| base.evaluate(&out_point))
+            .map(|base| base.evaluate(out_point))
             .collect_vec();
 
         transcript.append_field_element_exts(&evals);
@@ -48,10 +48,7 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
         SumcheckLayerProof {
             evals,
             rotation_proof: None,
-            proof: IOPProof {
-                point: out_point.clone(),
-                proofs: vec![],
-            },
+            proof: IOPProof { proofs: vec![] },
         }
     }
 
@@ -68,7 +65,7 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
 
         for ((sigma, expr), expr_name) in sigmas.iter().zip_eq(&self.exprs).zip_eq(&self.expr_names)
         {
-            let got = eval_by_expr_with_instance(&[], &evals, &[], &[], &challenges, &expr)
+            let got = eval_by_expr_with_instance(&[], &evals, &[], &[], challenges, expr)
                 .right()
                 .unwrap();
             if *sigma != got {

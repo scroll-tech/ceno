@@ -4,7 +4,7 @@ use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression,
+    Expression, WitnessId,
     mle::{MultilinearExtension, Point},
     utils::eval_by_expr_with_instance,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec, eq_eval},
@@ -51,7 +51,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         out_points: &[Point<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E>;
+    ) -> (SumcheckLayerProof<E>, Point<E>);
 
     fn verify(
         &self,
@@ -72,12 +72,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         out_points: &[Point<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E> {
+    ) -> (SumcheckLayerProof<E>, Point<E>) {
         assert_eq!(
-            self.outs.len(),
+            self.expr_evals.len(),
             out_points.len(),
             "out eval length {} != with distinct out_point {}",
-            self.outs.len(),
+            self.expr_evals.len(),
             out_points.len(),
         );
 
@@ -103,7 +103,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
 
         // 2th sumcheck: batch rotation with other constrains
         let mut expr_iter = self.exprs.iter();
-        let mut zero_check_exprs = Vec::with_capacity(self.outs.len());
+        let mut zero_check_exprs = Vec::with_capacity(self.expr_evals.len());
 
         let alpha_pows = get_challenge_pows(
             self.exprs.len() + rotation_exprs.len() * ROTATION_OPENING_COUNT,
@@ -115,7 +115,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let mut alpha_pows_iter = alpha_pows.iter();
 
         let span = entered_span!("gen_expr", profiling_4 = true);
-        for (eq_expr, out_evals) in self.outs.iter() {
+        for (eq_expr, out_evals) in self.expr_evals.iter() {
             let group_length = out_evals.len();
             let zero_check_expr = expr_iter
                 .by_ref()
@@ -179,10 +179,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let mut eqs = out_points
             .par_iter()
             .map(|point| {
-                MultilinearExtension::from_evaluations_ext_vec(
-                    point.len(),
-                    build_eq_x_r_vec(&point),
-                )
+                MultilinearExtension::from_evaluations_ext_vec(point.len(), build_eq_x_r_vec(point))
             })
             // for rotation left point
             .chain(rotation_point.par_iter().map(|rotation_point| {
@@ -219,7 +216,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .iter()
                 .map(|mle| Either::Left(mle.as_ref()))
                 // extend eqs to the end of wit
-                .chain(eqs.iter_mut().map(|eq| Either::Right(eq)))
+                .chain(eqs.iter_mut().map(Either::Right))
                 .collect_vec(),
         );
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
@@ -228,11 +225,14 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             transcript,
         );
         exit_span!(span);
-        SumcheckLayerProof {
-            proof,
-            rotation_proof,
-            evals: prover_state.get_mle_flatten_final_evaluations(),
-        }
+        (
+            SumcheckLayerProof {
+                proof,
+                rotation_proof,
+                evals: prover_state.get_mle_flatten_final_evaluations(),
+            },
+            prover_state.collect_raw_challenges(),
+        )
     }
 
     fn verify(
@@ -244,10 +244,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>> {
         assert_eq!(
-            self.outs.len(),
+            self.expr_evals.len(),
             eval_and_dedup_points.len(),
             "out eval length {} != with eval_and_dedup_points {}",
-            self.outs.len(),
+            self.expr_evals.len(),
             eval_and_dedup_points.len(),
         );
         let SumcheckLayerProof {
@@ -263,8 +263,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             alpha_pows.iter().copied(),
             eval_and_dedup_points
                 .iter()
-                .map(|(sigmas, _)| sigmas)
-                .flatten()
+                .flat_map(|(sigmas, _)| sigmas)
                 .copied(),
         );
 
@@ -273,10 +272,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             expected_evaluation,
         } = IOPVerifierState::verify(
             sigma,
-            &IOPProof {
-                point: vec![], // final claimed point will be derived from sumcheck protocol
-                proofs,
-            },
+            &IOPProof { proofs },
             &VPAuxInfo {
                 max_degree: self.max_expr_degree + 1, // +1 due to eq
                 max_num_variables,
@@ -290,7 +286,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         eval_and_dedup_points
             .iter()
             .map(|(_, out_point)| eq_eval(out_point.as_ref().unwrap(), &in_point))
-            .zip(&self.outs)
+            .zip(&self.expr_evals)
             .for_each(|(eval, (eq_expr, _))| match eq_expr {
                 Some(Expression::WitIn(witin_id)) => evals[*witin_id as usize] = eval,
                 _ => unreachable!(),
@@ -300,8 +296,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let got_claim = self
             .exprs
             .iter()
-            .zip_eq(self.outs.iter().flat_map(|(eq_expr, evals)| {
-                std::iter::repeat(eq_expr.clone().unwrap()).take(evals.len())
+            .zip_eq(self.expr_evals.iter().flat_map(|(eq_expr, evals)| {
+                std::iter::repeat_n(eq_expr.clone().unwrap(), evals.len())
             }))
             .zip_eq(alpha_pows)
             .map(|((expr, eq_expr), alpha)| {
@@ -408,8 +404,8 @@ pub fn prove_rotation<E: ExtensionField>(
         .sum::<Expression<E>>();
     // last 2 is [selector, eq]
     let (selector_expr, eq_expr) = (
-        Expression::<E>::WitIn((rotation_exprs.len() * 2) as u32),
-        Expression::<E>::WitIn((rotation_exprs.len() * 2 + 1) as u32),
+        Expression::<E>::WitIn((rotation_exprs.len() * 2) as WitnessId),
+        Expression::<E>::WitIn((rotation_exprs.len() * 2 + 1) as WitnessId),
     );
     let span = entered_span!("rotation IOPProverState::prove", profiling_4 = true);
     let (rotation_proof, prover_state) = IOPProverState::prove(
@@ -418,7 +414,7 @@ pub fn prove_rotation<E: ExtensionField>(
     );
     exit_span!(span);
     let mut evals = prover_state.get_mle_flatten_final_evaluations();
-    let point = rotation_proof.point.clone();
+    let point = prover_state.collect_raw_challenges();
     // skip selector/eq as verifier can derived itself
     evals.truncate(rotation_exprs.len() * 2);
 
@@ -457,7 +453,7 @@ pub fn prove_rotation<E: ExtensionField>(
     (
         RotationProof {
             proof: rotation_proof,
-            evals: evals,
+            evals,
         },
         point,
     )

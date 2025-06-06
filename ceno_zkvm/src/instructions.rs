@@ -1,7 +1,9 @@
 use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
-use gkr_iop::{gkr::{GKRCircuitOutput, GKRCircuitWitness}, ProtocolBuilder, ProtocolWitnessGenerator};
-use itertools::Itertools;
+use gkr_iop::{
+    ProtocolBuilder, ProtocolWitnessGenerator,
+    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
+};
 use multilinear_extensions::util::max_usable_threads;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
@@ -78,6 +80,7 @@ pub struct GKRinfo {
 }
 
 impl GKRinfo {
+    #[allow(dead_code)]
     fn lookup_total(&self) -> usize {
         self.and_lookups + self.xor_lookups + self.range_lookups
     }
@@ -92,7 +95,7 @@ pub trait GKRIOPInstruction<E: ExtensionField>
 where
     Self: Instruction<E>,
 {
-    type Layout: ProtocolWitnessGenerator<E> + ProtocolBuilder;
+    type Layout<'a>: ProtocolWitnessGenerator<'a, E> + ProtocolBuilder<E>;
 
     /// Similar to Instruction::construct_circuit; generally
     /// meant to extend InstructionConfig with GKR-specific
@@ -105,8 +108,8 @@ where
     }
 
     /// Should generate phase1 witness for GKR from step records
-    fn phase1_witness_from_steps(
-        layout: &Self::Layout,
+    fn phase1_witness_from_steps<'a>(
+        layout: &Self::Layout<'a>,
         steps: &[StepRecord],
     ) -> RowMajorMatrix<E::BaseField>;
 
@@ -122,102 +125,108 @@ where
 
     /// Similar to Instruction::assign_instances, but with access to the GKR layout.
     #[allow(clippy::type_complexity)]
-    fn assign_instances_with_gkr_iop(
-        config: &Self::InstructionConfig,
-        num_witin: usize,
-        steps: Vec<StepRecord>,
-        gkr_layout: &Self::Layout,
+    fn assign_instances_with_gkr_iop<'a>(
+        _config: &Self::InstructionConfig,
+        _num_witin: usize,
+        _steps: Vec<StepRecord>,
+        _gkr_circuit: &GKRCircuit<E>,
+        _gkr_layout: &Self::Layout<'a>,
     ) -> Result<
         (
             RowMajorMatrix<E::BaseField>,
-            GKRCircuitWitness<E>,
-            GKRCircuitOutput<E>,
+            GKRCircuitWitness<'a, E>,
+            GKRCircuitOutput<'a, E>,
             LkMultiplicity,
         ),
         ZKVMError,
     > {
-        let nthreads = max_usable_threads();
-        let num_instance_per_batch = if steps.len() > 256 {
-            steps.len().div_ceil(nthreads)
-        } else {
-            steps.len()
-        }
-        .max(1);
-        let lk_multiplicity = LkMultiplicity::default();
-        let mut raw_witin =
-            RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
-        let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
+        todo!()
+        // let nthreads = max_usable_threads();
+        // let num_instance_per_batch = if steps.len() > 256 {
+        //     steps.len().div_ceil(nthreads)
+        // } else {
+        //     steps.len()
+        // }
+        // .max(1);
+        // let lk_multiplicity = LkMultiplicity::default();
+        // let mut raw_witin =
+        //     RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
 
-        let (gkr_witness, gkr_output) =
-            gkr_layout.gkr_witness(&Self::phase1_witness_from_steps(gkr_layout, &steps), &[]);
+        // let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
-        let (lookups, aux_wits) = {
-            // Extract lookups and auxiliary witnesses from GKR protocol
-            // Here we assume that the gkr_witness's last layer is a convenience layer which holds
-            // the output records for all instances; further, we assume that the last ```Self::lookup_count()```
-            // elements of this layer are the lookup arguments.
-            let mut lookups = vec![vec![]; steps.len()];
-            let mut aux_wits: Vec<Vec<E::BaseField>> = vec![vec![]; steps.len()];
-            let last_layer = gkr_witness.layers.last().unwrap().bases.clone();
-            let len = last_layer.len();
-            let lookup_total = Self::gkr_info().lookup_total();
+        // let (gkr_witness, gkr_output) = gkr_layout.gkr_witness(
+        //     gkr_circuit,
+        //     &Self::phase1_witness_from_steps(gkr_layout, &steps),
+        //     &[],
+        // );
 
-            let non_lookups = if len == 0 {
-                0
-            } else {
-                assert!(len >= lookup_total);
-                len - lookup_total
-            };
+        // let (lookups, aux_wits) = {
+        //     // Extract lookups and auxiliary witnesses from GKR protocol
+        //     // Here we assume that the gkr_witness's last layer is a convenience layer which holds
+        //     // the output records for all instances; further, we assume that the last ```Self::lookup_count()```
+        //     // elements of this layer are the lookup arguments.
+        //     let mut lookups = vec![vec![]; steps.len()];
+        //     let mut aux_wits: Vec<Vec<E::BaseField>> = vec![vec![]; steps.len()];
+        //     let last_layer = gkr_witness.layers.last().unwrap().bases.clone();
+        //     let len = last_layer.len();
+        //     let lookup_total = Self::gkr_info().lookup_total();
 
-            for witness in last_layer.iter().skip(non_lookups) {
-                for i in 0..witness.len() {
-                    lookups[i].push(witness[i]);
-                }
-            }
+        //     let non_lookups = if len == 0 {
+        //         0
+        //     } else {
+        //         assert!(len >= lookup_total);
+        //         len - lookup_total
+        //     };
 
-            let n_layers = gkr_witness.layers.len();
+        //     for witness in last_layer.iter().skip(non_lookups) {
+        //         for i in 0..witness.len() {
+        //             lookups[i].push(witness[i]);
+        //         }
+        //     }
 
-            for i in 0..steps.len() {
-                // Omit last layer, which stores outputs and not real witnesses
-                for layer in gkr_witness.layers[..n_layers - 1].iter() {
-                    for base in layer.bases.iter() {
-                        aux_wits[i].push(base[i]);
-                    }
-                }
-            }
+        //     let n_layers = gkr_witness.layers.len();
 
-            (lookups, aux_wits)
-        };
+        //     for i in 0..steps.len() {
+        //         // Omit last layer, which stores outputs and not real witnesses
+        //         for layer in gkr_witness.layers[..n_layers - 1].iter() {
+        //             for base in layer.bases.iter() {
+        //                 aux_wits[i].push(base[i]);
+        //             }
+        //         }
+        //     }
 
-        raw_witin_iter
-            .zip(
-                steps
-                    .iter()
-                    .enumerate()
-                    .collect_vec()
-                    .par_chunks(num_instance_per_batch),
-            )
-            .flat_map(|(instances, steps)| {
-                let mut lk_multiplicity = lk_multiplicity.clone();
-                instances
-                    .chunks_mut(num_witin)
-                    .zip(steps)
-                    .map(|(instance, (i, step))| {
-                        Self::assign_instance_with_gkr_iop(
-                            config,
-                            instance,
-                            &mut lk_multiplicity,
-                            step,
-                            &lookups[*i],
-                            &aux_wits[*i],
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Result<(), ZKVMError>>()?;
+        //     (lookups, aux_wits)
+        // };
 
-        raw_witin.padding_by_strategy();
-        Ok((raw_witin, gkr_witness, gkr_output, lk_multiplicity))
+        // raw_witin_iter
+        //     .zip(
+        //         steps
+        //             .iter()
+        //             .enumerate()
+        //             .collect_vec()
+        //             .par_chunks(num_instance_per_batch),
+        //     )
+        //     .flat_map(|(instances, steps)| {
+        //         let mut lk_multiplicity = lk_multiplicity.clone();
+        //         instances
+        //             .chunks_mut(num_witin)
+        //             .zip(steps)
+        //             .map(|(instance, (i, step))| {
+        //                 Self::assign_instance_with_gkr_iop(
+        //                     config,
+        //                     instance,
+        //                     &mut lk_multiplicity,
+        //                     step,
+        //                     &lookups[*i],
+        //                     &aux_wits[*i],
+        //                 )
+        //             })
+        //             .collect::<Vec<_>>()
+        //     })
+        //     .collect::<Result<(), ZKVMError>>()?;
+
+        // raw_witin.padding_by_strategy();
+        // Ok((raw_witin, gkr_witness, gkr_output, lk_multiplicity))
     }
 
     /// Lookup and witness counts used by GKR proof

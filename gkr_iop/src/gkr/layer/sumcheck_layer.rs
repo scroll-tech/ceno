@@ -96,10 +96,7 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
             expected_evaluation,
         } = IOPVerifierState::verify(
             *sigma,
-            &IOPProof {
-                point: vec![], // final claimed point will be derived from sumcheck protocol
-                proofs,
-            },
+            &IOPProof { proofs },
             &VPAuxInfo {
                 max_degree: self.exprs[0].degree(),
                 max_num_variables,

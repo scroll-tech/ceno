@@ -1,12 +1,8 @@
-use std::sync::Arc;
-
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 pub use multilinear_extensions::wit_infer_by_expr;
 use multilinear_extensions::{
-    commutative_op_mle_pair,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
-    op_mle_xa_b, op_mle3_range,
     util::ceil_log2,
 };
 use rayon::{
@@ -19,11 +15,54 @@ use rayon::{
 use witness::next_pow2_instance_padding;
 
 use crate::scheme::constants::MIN_PAR_SIZE;
-use multilinear_extensions::Expression;
+
+// first computes the masked mle'[j] = mle[j] if j < num_instance, else default
+// then split it into `num_parts` smaller mles
+pub(crate) fn masked_mle_split_to_chunks<'a, E: ExtensionField>(
+    mle: &'a ArcMultilinearExtension<'a, E>,
+    num_instance: usize,
+    num_chunks: usize,
+    default: E,
+) -> Vec<MultilinearExtension<'a, E>> {
+    assert!(num_chunks.is_power_of_two());
+    assert!(num_instance <= mle.evaluations().len());
+
+    if num_instance == mle.evaluations().len() {
+        mle.as_view_chunks(num_chunks)
+    } else {
+        (0..num_chunks)
+            .into_par_iter()
+            .map(|part_idx| {
+                let n = mle.evaluations().len() / num_chunks;
+
+                match mle.evaluations() {
+                    FieldType::Ext(evals) => (part_idx * n..(part_idx + 1) * n)
+                        .into_par_iter()
+                        .with_min_len(64)
+                        .map(|i| if i < num_instance { evals[i] } else { default })
+                        .collect::<Vec<_>>()
+                        .into_mle(),
+                    FieldType::Base(evals) => (part_idx * n..(part_idx + 1) * n)
+                        .map(|i| {
+                            if i < num_instance {
+                                E::from(evals[i])
+                            } else {
+                                default
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .into_mle(),
+                    _ => unreachable!(),
+                }
+            })
+            .collect::<Vec<_>>()
+    }
+}
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
 /// output [[1,3,5,7,0,0,0,0],[2,4,6,8,0,0,0,0]]
+#[allow(unused)]
 pub(crate) fn interleaving_mles_to_mles<'a, E: ExtensionField>(
     mles: &[ArcMultilinearExtension<E>],
     num_instances: usize,
@@ -256,15 +295,9 @@ mod tests {
     };
     use p3::field::PrimeCharacteristicRing;
 
-    use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem},
-        scheme::utils::{
-            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
-        },
+    use crate::scheme::utils::{
+        infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
     };
-    use multilinear_extensions::{Expression, ToExpr};
-
-    use super::wit_infer_by_expr;
 
     #[test]
     fn test_infer_tower_witness() {

@@ -8,11 +8,7 @@ use std::{
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    macros::{entered_span, exit_span},
-    mle::MultilinearExtension,
-    op_mle,
-    util::max_usable_threads,
-    virtual_poly::VirtualPolynomial,
+    mle::MultilinearExtension, op_mle, util::max_usable_threads, virtual_poly::VirtualPolynomial,
     virtual_polys::PolyMeta,
 };
 use p3::field::Field;
@@ -54,73 +50,161 @@ pub fn extrapolate_from_table<E: ExtensionField>(uni_variate: &mut [E], start: u
     }
 }
 
-/// Interpolate a uni-variate degree-`p_i.len()-1` polynomial and evaluate this
-/// polynomial at `eval_at`:
-///
-///   \sum_{i=0}^len p_i * (\prod_{j!=i} (eval_at - j)/(i-j) )
-///
-/// This implementation is linear in number of inputs in terms of field
-/// operations. It also has a quadratic term in primitive operations which is
-/// negligible compared to field operations.
-/// TODO: The quadratic term can be removed by precomputing the lagrange
-/// coefficients.
-pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
-    let start = entered_span!("sum check interpolate uni poly opt");
+fn extrapolate_uni_poly_deg_1<F: Field>(p_i: &[F; 2], eval_at: F) -> F {
+    let x0 = F::ZERO;
+    let x1 = F::ONE;
 
-    let len = p_i.len();
-    let mut evals = vec![];
-    let mut prod = eval_at;
-    evals.push(eval_at);
+    // w0 = 1 / (0−1) = -1
+    // w1 = 1 / (1−0) =  1
+    let w0 = -F::ONE;
+    let w1 = F::ONE;
 
-    // `prod = \prod_{j} (eval_at - j)`
-    for e in 1..len {
-        let tmp = eval_at - F::from_u64(e as u64);
-        evals.push(tmp);
-        prod *= tmp;
-    }
-    let mut res = F::ZERO;
-    // we want to compute \prod (j!=i) (i-j) for a given i
-    //
-    // we start from the last step, which is
-    //  denom[len-1] = (len-1) * (len-2) *... * 2 * 1
-    // the step before that is
-    //  denom[len-2] = (len-2) * (len-3) * ... * 2 * 1 * -1
-    // and the step before that is
-    //  denom[len-3] = (len-3) * (len-4) * ... * 2 * 1 * -1 * -2
-    //
-    // i.e., for any i, the one before this will be derived from
-    //  denom[i-1] = denom[i] * (len-i) / i
-    //
-    // that is, we only need to store
-    // - the last denom for i = len-1, and
-    // - the ratio between current step and fhe last step, which is the product of (len-i) / i from
-    //   all previous steps and we store this product as a fraction number to reduce field
-    //   divisions.
+    let d0 = eval_at - x0;
+    let d1 = eval_at - x1;
 
-    let mut denom_up = field_factorial::<F>(len - 1);
-    let mut denom_down = F::ONE;
+    let l = d0 * d1;
+    let inv_d0 = d0.inverse();
+    let inv_d1 = d1.inverse();
 
-    for i in (0..len).rev() {
-        res += p_i[i] * prod * denom_down * (denom_up * evals[i]).inverse();
+    let t0 = w0 * p_i[0] * inv_d0;
+    let t1 = w1 * p_i[1] * inv_d1;
 
-        // compute denom for the next step is current_denom * (len-i)/i
-        if i != 0 {
-            denom_up *= -F::from_u64((len - i) as u64);
-            denom_down *= F::from_u64(i as u64);
-        }
-    }
-    exit_span!(start);
-    res
+    l * (t0 + t1)
 }
 
-/// compute the factorial(a) = 1 * 2 * ... * a
-#[inline]
-fn field_factorial<F: Field>(a: usize) -> F {
-    let mut res = F::ONE;
-    for i in 2..=a {
-        res *= F::from_u64(i as u64);
+fn extrapolate_uni_poly_deg_2<F: Field>(p_i: &[F; 3], eval_at: F) -> F {
+    let x0 = F::from_u64(0);
+    let x1 = F::from_u64(1);
+    let x2 = F::from_u64(2);
+
+    // w0 = 1 / ((0−1)(0−2)) =  1/2
+    // w1 = 1 / ((1−0)(1−2)) = -1
+    // w2 = 1 / ((2−0)(2−1)) =  1/2
+    let w0 = F::from_u64(1).div(F::from_u64(2));
+    let w1 = -F::ONE;
+    let w2 = F::from_u64(1).div(F::from_u64(2));
+
+    let d0 = eval_at - x0;
+    let d1 = eval_at - x1;
+    let d2 = eval_at - x2;
+
+    let l = d0 * d1 * d2;
+
+    let inv_d0 = d0.inverse();
+    let inv_d1 = d1.inverse();
+    let inv_d2 = d2.inverse();
+
+    let t0 = w0 * p_i[0] * inv_d0;
+    let t1 = w1 * p_i[1] * inv_d1;
+    let t2 = w2 * p_i[2] * inv_d2;
+
+    l * (t0 + t1 + t2)
+}
+
+fn extrapolate_uni_poly_deg_3<F: Field>(p_i: &[F; 4], eval_at: F) -> F {
+    let x0 = F::from_u64(0);
+    let x1 = F::from_u64(1);
+    let x2 = F::from_u64(2);
+    let x3 = F::from_u64(3);
+
+    // w0 = 1 / ((0−1)(0−2)(0−3)) = -1/6
+    // w1 = 1 / ((1−0)(1−2)(1−3)) =  1/2
+    // w2 = 1 / ((2−0)(2−1)(2−3)) = -1/2
+    // w3 = 1 / ((3−0)(3−1)(3−2)) =  1/6
+    let w0 = -F::from_u64(1).div(F::from_u64(6));
+    let w1 = F::from_u64(1).div(F::from_u64(2));
+    let w2 = -F::from_u64(1).div(F::from_u64(2));
+    let w3 = F::from_u64(1).div(F::from_u64(6));
+
+    let d0 = eval_at - x0;
+    let d1 = eval_at - x1;
+    let d2 = eval_at - x2;
+    let d3 = eval_at - x3;
+
+    let l = d0 * d1 * d2 * d3;
+
+    let inv_d0 = d0.inverse();
+    let inv_d1 = d1.inverse();
+    let inv_d2 = d2.inverse();
+    let inv_d3 = d3.inverse();
+
+    let t0 = w0 * p_i[0] * inv_d0;
+    let t1 = w1 * p_i[1] * inv_d1;
+    let t2 = w2 * p_i[2] * inv_d2;
+    let t3 = w3 * p_i[3] * inv_d3;
+
+    l * (t0 + t1 + t2 + t3)
+}
+
+fn extrapolate_uni_poly_deg_4<F: Field>(p_i: &[F; 5], eval_at: F) -> F {
+    let x0 = F::from_u64(0);
+    let x1 = F::from_u64(1);
+    let x2 = F::from_u64(2);
+    let x3 = F::from_u64(3);
+    let x4 = F::from_u64(4);
+
+    // w0 = 1 / ((0−1)(0−2)(0−3)(0−4)) =  1/24
+    // w1 = 1 / ((1−0)(1−2)(1−3)(1−4)) = -1/6
+    // w2 = 1 / ((2−0)(2−1)(2−3)(2−4)) =  1/4
+    // w3 = 1 / ((3−0)(3−1)(3−2)(3−4)) = -1/6
+    // w4 = 1 / ((4−0)(4−1)(4−2)(4−3)) =  1/24
+    let w0 = F::from_u64(1).div(F::from_u64(24));
+    let w1 = -F::from_u64(1).div(F::from_u64(6));
+    let w2 = F::from_u64(1).div(F::from_u64(4));
+    let w3 = -F::from_u64(1).div(F::from_u64(6));
+    let w4 = F::from_u64(1).div(F::from_u64(24));
+
+    let d0 = eval_at - x0;
+    let d1 = eval_at - x1;
+    let d2 = eval_at - x2;
+    let d3 = eval_at - x3;
+    let d4 = eval_at - x4;
+
+    let l = d0 * d1 * d2 * d3 * d4;
+
+    let inv_d0 = d0.inverse();
+    let inv_d1 = d1.inverse();
+    let inv_d2 = d2.inverse();
+    let inv_d3 = d3.inverse();
+    let inv_d4 = d4.inverse();
+
+    let t0 = w0 * p_i[0] * inv_d0;
+    let t1 = w1 * p_i[1] * inv_d1;
+    let t2 = w2 * p_i[2] * inv_d2;
+    let t3 = w3 * p_i[3] * inv_d3;
+    let t4 = w4 * p_i[4] * inv_d4;
+
+    l * (t0 + t1 + t2 + t3 + t4)
+}
+
+/// Evaluate a univariate polynomial defined by its values `p_i` at integer points `0..p_i.len()-1`
+/// using Barycentric interpolation at the given `eval_at` point.
+///
+/// For overall idea, refer to https://people.maths.ox.ac.uk/trefethen/barycentric.pdf formula 3.3
+/// barycentric weights `w` are for polynomial interpolation.
+/// for a fixed set of interpolation points {x_0, x_1, ..., x_n}, the barycentric weight w_j is defined as:
+/// w_j = 1 / ∏_{k ≠ j} (x_j - x_k)
+/// these weights are used in the barycentric form of Lagrange interpolation, which allows
+/// for efficient evaluation of the interpolating polynomial at any other point
+/// the weights depend only on the interpolation nodes and can be treat as `constant` in loop-unroll + inline version
+///
+/// This is a runtime-dispatched implementation optimized for small degrees
+/// with unrolled loops for performance
+///
+/// # Arguments
+/// * `p_i` - Values of the polynomial at consecutive integer points.
+/// * `eval_at` - The point at which to evaluate the interpolated polynomial.
+///
+/// # Returns
+/// The value of the polynomial `eval_at`.
+pub fn extrapolate_uni_poly<F: Field>(p: &[F], eval_at: F) -> F {
+    match p.len() {
+        2 => extrapolate_uni_poly_deg_1(p.try_into().unwrap(), eval_at),
+        3 => extrapolate_uni_poly_deg_2(p.try_into().unwrap(), eval_at),
+        4 => extrapolate_uni_poly_deg_3(p.try_into().unwrap(), eval_at),
+        5 => extrapolate_uni_poly_deg_4(p.try_into().unwrap(), eval_at),
+        _ => unimplemented!("Extrapolation for degree {} not implemented", p.len() - 1),
     }
-    res
 }
 
 /// log2 ceil of x

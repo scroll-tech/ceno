@@ -35,7 +35,12 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
 
         // TODO: get keccak cs manually
         // assert_eq!(keccak_cs.num_fixed, 0);
-        vm_pk.keccak_pk = self.keccak_gkr_iop.key_gen(&vm_pk.pp, None);
+        // vm_pk.keccak_pk = self
+        //     .keccak_gkr_iop
+        //     .as_ref()
+        //     .unwrap()
+        //     .key_gen(&vm_pk.pp, None);
+
         vm_pk.commit_fixed(fixed_traces)?;
 
         vm_pk.initial_global_state_expr = self.initial_global_state_expr;

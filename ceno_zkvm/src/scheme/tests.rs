@@ -143,12 +143,13 @@ fn test_rw_lk_expression_combination() {
             transcript.read_challenge().elements,
         ];
 
-        let (proof, _) = prover
-            .create_opcode_proof(
+        let (proof, _, _) = prover
+            .create_chip_proof(
                 name.as_str(),
                 prover.pk.circuit_pks.get(&name).unwrap(),
-                None,
+                vec![],
                 wits_in,
+                vec![],
                 &[],
                 num_instances,
                 &mut transcript,
@@ -171,11 +172,10 @@ fn test_rw_lk_expression_combination() {
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
         }
-        let _rt_input = verifier
+        verifier
             .verify_opcode_proof(
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
-                None,
                 &proof,
                 num_instances,
                 &[],

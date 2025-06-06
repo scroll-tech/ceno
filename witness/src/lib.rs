@@ -202,6 +202,16 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     pub fn values(&self) -> &[T] {
         &self.inner.values
     }
+
+    pub fn pad_to_height(&mut self, new_height: usize, fill: T) {
+        let (cur_height, n_cols) = (self.height(), self.n_col());
+        assert!(new_height >= cur_height);
+        self.values.par_extend(
+            (0..(new_height - cur_height) * n_cols)
+                .into_par_iter()
+                .map(|_| fill),
+        );
+    }
 }
 
 impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
