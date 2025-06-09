@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use p3::field::PrimeCharacteristicRing;
@@ -25,6 +26,13 @@ pub mod verifier;
 pub mod mock_prover;
 #[cfg(test)]
 mod tests;
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct GKROpcodeProof<E: ExtensionField>(pub GKRProof<E>);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(

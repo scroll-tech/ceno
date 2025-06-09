@@ -1,6 +1,17 @@
 pub mod monomial;
 pub mod utils;
 
+use crate::{
+    commutative_op_mle_pair,
+    mle::{ArcMultilinearExtension, MultilinearExtension},
+    op_mle_xa_b, op_mle3_range,
+    util::ceil_log2,
+};
+use ff_ext::{ExtensionField, SmallField};
+use itertools::Either;
+use p3::field::PrimeCharacteristicRing;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use serde::de::DeserializeOwned;
 use std::{
     cmp::max,
     fmt::Display,
@@ -8,14 +19,9 @@ use std::{
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
-use serde::de::DeserializeOwned;
-
-use ff_ext::{ExtensionField, SmallField};
-use itertools::Either;
-use p3::field::PrimeCharacteristicRing;
-
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
+pub const MIN_PAR_SIZE: usize = 64;
 
 #[derive(
     Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -909,6 +915,122 @@ impl<F: SmallField, E: ExtensionField<BaseField = F>> ToExpr<E> for F {
     }
 }
 
+impl<E: ExtensionField> ToExpr<E> for Expression<E> {
+    type Output = Expression<E>;
+    fn expr(&self) -> Self::Output {
+        self.clone()
+    }
+}
+
+pub fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
+    fixed: &'a [MultilinearExtension<'a, E>],
+    witnesses: &'a [MultilinearExtension<'a, E>],
+    structual_witnesses: &'a [MultilinearExtension<'a, E>],
+    instance: &'a [MultilinearExtension<'a, E>],
+    challenges: &[E; N],
+    expr: &Expression<E>,
+) -> MultilinearExtension<'a, E> {
+    expr.evaluate_with_instance::<MultilinearExtension<'a, E>>(
+        &|f| fixed[f.0].as_view(),
+        &|witness_id| witnesses[witness_id as usize].as_view(),
+        &|witness_id, _, _, _| structual_witnesses[witness_id as usize].as_view(),
+        &|i| instance[i.0].as_view(),
+        &|scalar| {
+            let scalar: MultilinearExtension<E> = MultilinearExtension::from_evaluations_vec(
+                0,
+                vec![scalar.left().expect("do not support extension field")],
+            );
+            scalar
+        },
+        &|challenge_id, pow, scalar, offset| {
+            // TODO cache challenge power to be acquired once for each power
+            let challenge = challenges[challenge_id as usize];
+            let challenge: MultilinearExtension<E> = MultilinearExtension::from_evaluations_ext_vec(
+                0,
+                vec![challenge.exp_u64(pow as u64) * scalar + offset],
+            );
+            challenge
+        },
+        &|a, b| {
+            commutative_op_mle_pair!(|a, b| {
+                match (a.len(), b.len()) {
+                    (1, 1) => MultilinearExtension::from_evaluation_vec_smart(0, vec![a[0] + b[0]]),
+                    (1, _) => MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(b.len()),
+                        b.par_iter()
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|b| a[0] + *b)
+                            .collect(),
+                    ),
+                    (_, 1) => MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(a.len()),
+                        a.par_iter()
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|a| *a + b[0])
+                            .collect(),
+                    ),
+                    (_, _) => MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(a.len()),
+                        a.par_iter()
+                            .zip(b.par_iter())
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|(a, b)| *a + *b)
+                            .collect(),
+                    ),
+                }
+            })
+        },
+        &|a, b| {
+            commutative_op_mle_pair!(|a, b| {
+                match (a.len(), b.len()) {
+                    (1, 1) => MultilinearExtension::from_evaluation_vec_smart(0, vec![a[0] * b[0]]),
+                    (1, _) => MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(b.len()),
+                        b.par_iter()
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|b| a[0] * *b)
+                            .collect(),
+                    ),
+                    (_, 1) => MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(a.len()),
+                        a.par_iter()
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|a| *a * b[0])
+                            .collect(),
+                    ),
+                    (_, _) => {
+                        assert_eq!(a.len(), b.len());
+                        // we do the pointwise evaluation multiplication here without involving FFT
+                        // the evaluations outside of range will be checked via sumcheck + identity polynomial
+                        MultilinearExtension::from_evaluation_vec_smart(
+                            ceil_log2(a.len()),
+                            a.par_iter()
+                                .zip(b.par_iter())
+                                .with_min_len(MIN_PAR_SIZE)
+                                .map(|(a, b)| *a * *b)
+                                .collect(),
+                        )
+                    }
+                }
+            })
+        },
+        &|x, a, b| {
+            op_mle_xa_b!(|x, a, b| {
+                assert_eq!(a.len(), 1);
+                assert_eq!(b.len(), 1);
+                let (a, b) = (a[0], b[0]);
+                MultilinearExtension::from_evaluation_vec_smart(
+                    ceil_log2(x.len()),
+                    x.par_iter()
+                        .with_min_len(MIN_PAR_SIZE)
+                        .map(|x| a * *x + b)
+                        .collect(),
+                )
+            })
+        },
+    )
+}
+
 macro_rules! impl_from_via_ToExpr {
     ($($t:ty),*) => {
         $(
@@ -928,7 +1050,7 @@ impl_from_via_ToExpr!(&WitIn, &Fixed, &StructuralWitIn, &Instance);
 macro_rules! impl_expr_from_unsigned {
     ($($t:ty),*) => {
         $(
-            impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
+            impl<F: ff_ext::SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
                     Expression::Constant(Either::Left(F::from_u64(value as u64)))
                 }
@@ -1105,9 +1227,8 @@ pub mod fmt {
 #[cfg(test)]
 mod tests {
 
-    use crate::expression::WitIn;
-
     use super::{Expression, ToExpr, fmt};
+    use crate::{expression::WitIn, mle::IntoMLE, wit_infer_by_expr};
     use either::Either;
     use ff_ext::{FieldInto, GoldilocksExt2};
     use p3::field::PrimeCharacteristicRing;
@@ -1256,5 +1377,59 @@ mod tests {
         let s = fmt::expr(&expr, &mut wtns_acc, false);
         assert_eq!(s, "WitIn(0)");
         assert_eq!(wtns_acc, vec![0]);
+    }
+
+    #[test]
+    fn test_wit_infer_by_expr_base_field() {
+        type E = ff_ext::GoldilocksExt2;
+        type B = p3::goldilocks::Goldilocks;
+        let a = WitIn { id: 0 };
+        let b = WitIn { id: 1 };
+        let c = WitIn { id: 2 };
+
+        let expr: Expression<E> = a.expr() + b.expr() + a.expr() * b.expr() + (c.expr() * 3 + 2);
+
+        let res = wit_infer_by_expr(
+            &[],
+            &[
+                vec![B::from_u64(1)].into_mle().into(),
+                vec![B::from_u64(2)].into_mle().into(),
+                vec![B::from_u64(3)].into_mle().into(),
+            ],
+            &[],
+            &[],
+            &[],
+            &expr,
+        );
+        res.get_base_field_vec();
+    }
+
+    #[test]
+    fn test_wit_infer_by_expr_ext_field() {
+        type E = ff_ext::GoldilocksExt2;
+        type B = p3::goldilocks::Goldilocks;
+        let a = WitIn { id: 0 };
+        let b = WitIn { id: 1 };
+        let c = WitIn { id: 2 };
+
+        let expr: Expression<E> = a.expr()
+            + b.expr()
+            + a.expr() * b.expr()
+            + (c.expr() * 3 + 2)
+            + Expression::Challenge(0, 1, E::ONE, E::ONE);
+
+        let res = wit_infer_by_expr(
+            &[],
+            &[
+                vec![B::from_u64(1)].into_mle().into(),
+                vec![B::from_u64(2)].into_mle().into(),
+                vec![B::from_u64(3)].into_mle().into(),
+            ],
+            &[],
+            &[],
+            &[E::ONE],
+            &expr,
+        );
+        res.get_ext_field_vec();
     }
 }

@@ -1,6 +1,9 @@
 use ff_ext::ExtensionField;
-use multilinear_extensions::{virtual_poly::VirtualPolynomial, virtual_polys::PolyMeta};
+use multilinear_extensions::{
+    Expression, virtual_poly::VirtualPolynomial, virtual_polys::PolyMeta,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use thiserror::Error;
 use transcript::Challenge;
 
 /// An IOP proof is a collections of
@@ -70,4 +73,10 @@ pub struct SumCheckSubClaim<E: ExtensionField> {
     pub point: Vec<Challenge<E>>,
     /// the expected evaluation
     pub expected_evaluation: E,
+}
+
+#[derive(Clone, Debug, Error)]
+pub enum VerifierError<E: ExtensionField> {
+    #[error("Claim not match: expr: {0:?}\n (expr name: {3:?})\n expect: {1:?}, got: {2:?}")]
+    ClaimNotMatch(Expression<E>, E, E, String),
 }

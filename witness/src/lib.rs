@@ -15,7 +15,7 @@ use std::{
 };
 
 // for witness we reserve some space for value vector to extend to avoid allocated + full clone
-const CAPACITY_RESERVED_FACTOR: usize = 2;
+pub const CAPACITY_RESERVED_FACTOR: usize = 2;
 
 /// get next power of 2 instance with minimal size 2
 pub fn next_pow2_instance_padding(num_instance: usize) -> usize {
@@ -133,6 +133,17 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
         }
     }
 
+    pub fn new_by_values(
+        values: Vec<T>,
+        num_cols: usize,
+        padding_strategy: InstancePaddingStrategy,
+    ) -> Self {
+        RowMajorMatrix::new_by_inner_matrix(
+            p3::matrix::dense::RowMajorMatrix::new(values, num_cols),
+            padding_strategy,
+        )
+    }
+
     pub fn num_padding_instances(&self) -> usize {
         next_pow2_instance_padding(self.num_instances()) - self.num_instances()
     }
@@ -186,6 +197,10 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
 
     pub fn into_inner(self) -> p3::matrix::dense::RowMajorMatrix<T> {
         self.inner
+    }
+
+    pub fn values(&self) -> &[T] {
+        &self.inner.values
     }
 
     pub fn pad_to_height(&mut self, new_height: usize, fill: T) {

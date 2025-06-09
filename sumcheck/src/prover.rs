@@ -409,7 +409,9 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                             .to_vec(),
                         5 => sumcheck_code_gen!(5, false, |i| &f[prod[i]], || get_poly_meta())
                             .to_vec(),
-                        _ => unimplemented!("do not support degree {} > 5", prod.len()),
+                        6 => sumcheck_code_gen!(6, false, |i| &f[prod[i]], || get_poly_meta())
+                            .to_vec(),
+                        _ => unimplemented!("do not support degree {} > 6", prod.len()),
                     };
 
                     uni_variate
@@ -658,7 +660,9 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                                 .to_vec(),
                             5 => sumcheck_code_gen!(5, true, |i| &f[prod[i]], || get_poly_meta())
                                 .to_vec(),
-                            _ => unimplemented!("do not support degree {} > 5", prod.len()),
+                            6 => sumcheck_code_gen!(6, true, |i| &f[prod[i]], || get_poly_meta())
+                                .to_vec(),
+                            _ => unimplemented!("do not support degree {} > 6", prod.len()),
                         };
                         uni_variate
                             .iter_mut()

@@ -53,6 +53,20 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
             _phantom: PhantomData,
         }
     }
+
+    /// create a new `VirtualPolynomialsBuilder` with the given number and max number of vars
+    pub fn new_with_mles(
+        num_threads: usize,
+        max_num_variables: usize,
+        mles: Vec<Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>>,
+    ) -> Self {
+        let mut builder = Self::new(num_threads, max_num_variables);
+        mles.into_iter().for_each(|mle| {
+            let _ = builder.lift(mle);
+        });
+        builder
+    }
+
     /// lifts a reference to a `MultilinearExtension` into an `Expression::WitIn`
     ///
     /// assigns a unique witness index based on pointer address, reusing the same index
@@ -68,7 +82,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                 self.num_witin = self.num_witin.strict_add(1);
                 (witin_id as usize, Either::Left(mle))
             });
-            Expression::WitIn(*witin_id as u16)
+            Expression::WitIn(*witin_id as WitnessId)
         })
         .map_right(|mle| {
             let mle_ptr = mle as *const MultilinearExtension<E> as usize;
@@ -77,7 +91,7 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
                 self.num_witin = self.num_witin.strict_add(1);
                 (witin_id as usize, Either::Right(mle))
             });
-            Expression::WitIn(*witin_id as u16)
+            Expression::WitIn(*witin_id as WitnessId)
         })
         .into_inner()
     }
@@ -162,7 +176,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
             );
             let product: Vec<Expression<E>> = product
                 .into_iter()
-                .map(|mle| Expression::WitIn(poly.register_mles(vec![mle])[0] as u16))
+                .map(|mle| Expression::WitIn(poly.register_mles(vec![mle])[0] as WitnessId))
                 .collect_vec();
             poly.add_monomial_terms(vec![Term { scalar, product }]);
         }

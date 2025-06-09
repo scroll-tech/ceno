@@ -1,9 +1,8 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
+pub use multilinear_extensions::wit_infer_by_expr;
 use multilinear_extensions::{
-    commutative_op_mle_pair,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
-    op_mle_xa_b, op_mle3_range,
     util::ceil_log2,
 };
 use rayon::{
@@ -16,7 +15,6 @@ use rayon::{
 use witness::next_pow2_instance_padding;
 
 use crate::scheme::constants::MIN_PAR_SIZE;
-use multilinear_extensions::Expression;
 
 // first computes the masked mle'[j] = mle[j] if j < num_instance, else default
 // then split it into `num_parts` smaller mles
@@ -281,114 +279,6 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     wit_layers
 }
 
-pub(crate) fn wit_infer_by_expr<'a, E: ExtensionField, const N: usize>(
-    fixed: &'a [MultilinearExtension<'a, E>],
-    witnesses: &'a [MultilinearExtension<'a, E>],
-    structual_witnesses: &'a [MultilinearExtension<'a, E>],
-    instance: &'a [MultilinearExtension<'a, E>],
-    challenges: &[E; N],
-    expr: &Expression<E>,
-) -> MultilinearExtension<'a, E> {
-    expr.evaluate_with_instance::<MultilinearExtension<'a, E>>(
-        &|f| fixed[f.0].as_view(),
-        &|witness_id| witnesses[witness_id as usize].as_view(),
-        &|witness_id, _, _, _| structual_witnesses[witness_id as usize].as_view(),
-        &|i| instance[i.0].as_view(),
-        &|scalar| {
-            let scalar: MultilinearExtension<E> = MultilinearExtension::from_evaluations_vec(
-                0,
-                vec![scalar.left().expect("do not support extension field")],
-            );
-            scalar
-        },
-        &|challenge_id, pow, scalar, offset| {
-            // TODO cache challenge power to be acquired once for each power
-            let challenge = challenges[challenge_id as usize];
-            let challenge: MultilinearExtension<E> = MultilinearExtension::from_evaluations_ext_vec(
-                0,
-                vec![challenge.exp_u64(pow as u64) * scalar + offset],
-            );
-            challenge
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => MultilinearExtension::from_evaluation_vec_smart(0, vec![a[0] + b[0]]),
-                    (1, _) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] + *b)
-                            .collect(),
-                    ),
-                    (_, 1) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a + b[0])
-                            .collect(),
-                    ),
-                    (_, _) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .zip(b.par_iter())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|(a, b)| *a + *b)
-                            .collect(),
-                    ),
-                }
-            })
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => MultilinearExtension::from_evaluation_vec_smart(0, vec![a[0] * b[0]]),
-                    (1, _) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] * *b)
-                            .collect(),
-                    ),
-                    (_, 1) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a * b[0])
-                            .collect(),
-                    ),
-                    (_, _) => {
-                        assert_eq!(a.len(), b.len());
-                        // we do the pointwise evaluation multiplication here without involving FFT
-                        // the evaluations outside of range will be checked via sumcheck + identity polynomial
-                        MultilinearExtension::from_evaluation_vec_smart(
-                            ceil_log2(a.len()),
-                            a.par_iter()
-                                .zip(b.par_iter())
-                                .with_min_len(MIN_PAR_SIZE)
-                                .map(|(a, b)| *a * *b)
-                                .collect(),
-                        )
-                    }
-                }
-            })
-        },
-        &|x, a, b| {
-            op_mle_xa_b!(|x, a, b| {
-                assert_eq!(a.len(), 1);
-                assert_eq!(b.len(), 1);
-                let (a, b) = (a[0], b[0]);
-                MultilinearExtension::from_evaluation_vec_smart(
-                    ceil_log2(x.len()),
-                    x.par_iter()
-                        .with_min_len(MIN_PAR_SIZE)
-                        .map(|x| a * *x + b)
-                        .collect(),
-                )
-            })
-        },
-    )
-}
 
 #[cfg(test)]
 mod tests {
@@ -403,15 +293,9 @@ mod tests {
     };
     use p3::field::PrimeCharacteristicRing;
 
-    use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem},
-        scheme::utils::{
-            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
-        },
+    use crate::scheme::utils::{
+        infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
     };
-    use multilinear_extensions::{Expression, ToExpr};
-
-    use super::wit_infer_by_expr;
 
     #[test]
     fn test_infer_tower_witness() {
@@ -673,51 +557,5 @@ mod tests {
                     .sum::<E>(),
             ]))
         );
-    }
-
-    #[test]
-    fn test_wit_infer_by_expr_base_field() {
-        type E = ff_ext::GoldilocksExt2;
-        type B = p3::goldilocks::Goldilocks;
-        let mut cs = ConstraintSystem::<E>::new(|| "test");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let a = cb.create_witin(|| "a");
-        let b = cb.create_witin(|| "b");
-        let c = cb.create_witin(|| "c");
-
-        let expr: Expression<E> = a.expr() + b.expr() + a.expr() * b.expr() + (c.expr() * 3 + 2);
-
-        let witnesses = vec![
-            vec![B::from_u64(1)].into_mle(),
-            vec![B::from_u64(2)].into_mle(),
-            vec![B::from_u64(3)].into_mle(),
-        ];
-        let res = wit_infer_by_expr(&[], &witnesses, &[], &[], &[], &expr);
-        res.get_base_field_vec();
-    }
-
-    #[test]
-    fn test_wit_infer_by_expr_ext_field() {
-        type E = ff_ext::GoldilocksExt2;
-        type B = p3::goldilocks::Goldilocks;
-        let mut cs = ConstraintSystem::<E>::new(|| "test");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let a = cb.create_witin(|| "a");
-        let b = cb.create_witin(|| "b");
-        let c = cb.create_witin(|| "c");
-
-        let expr: Expression<E> = a.expr()
-            + b.expr()
-            + a.expr() * b.expr()
-            + (c.expr() * 3 + 2)
-            + Expression::Challenge(0, 1, E::ONE, E::ONE);
-
-        let witnesses = vec![
-            vec![B::from_u64(1)].into_mle(),
-            vec![B::from_u64(2)].into_mle(),
-            vec![B::from_u64(3)].into_mle(),
-        ];
-        let res = wit_infer_by_expr(&[], &witnesses, &[], &[], &[E::ONE], &expr);
-        res.get_ext_field_vec();
     }
 }
