@@ -36,7 +36,7 @@ use multilinear_extensions::mle::ArcMultilinearExtension;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-mod query_phase;
+pub mod query_phase;
 
 /// Implement the Polynomial Commitment Scheme present in the BaseFold paper
 /// https://eprint.iacr.org/2023/1705

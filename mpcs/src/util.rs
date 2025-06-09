@@ -87,7 +87,7 @@ where
 }
 
 #[inline(always)]
-pub(crate) fn codeword_fold_with_challenge<E: ExtensionField>(
+pub fn codeword_fold_with_challenge<E: ExtensionField>(
     codeword: &[E],
     challenge: E,
     coeff: E::BaseField,
