@@ -279,7 +279,6 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     wit_layers
 }
 
-
 #[cfg(test)]
 mod tests {
 

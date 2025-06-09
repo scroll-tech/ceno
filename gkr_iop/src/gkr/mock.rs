@@ -73,18 +73,19 @@ impl<E: ExtensionField> MockProver<E> {
                 .into_iter()
                 .map(Arc::new)
                 .collect_vec();
+            let witnesses = layer_wit
+                .bases
+                .iter()
+                .map(|mle| mle.clone())
+                .chain(eqs.clone())
+                .collect_vec();
             let gots = layer
                 .exprs
                 .iter()
                 .map(|expr| {
                     Arc::into_inner(wit_infer_by_expr(
                         &[],
-                        &layer_wit
-                            .bases
-                            .iter()
-                            .map(|mle| mle.as_view().into())
-                            .chain(eqs.clone())
-                            .collect_vec(),
+                        &witnesses,
                         &[],
                         &[],
                         &challenges,
