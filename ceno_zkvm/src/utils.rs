@@ -10,7 +10,9 @@ use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression, mle::MultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
+    Expression,
+    mle::{ArcMultilinearExtension, MultilinearExtension},
+    virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::Field;
 
@@ -196,7 +198,7 @@ pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
     expr_builder: &mut VirtualPolynomialsBuilder<'a, E>,
     exprs: &mut Vec<Expression<E>>,
     selector: Option<&'a MultilinearExtension<'a, E>>,
-    wit_ins: Vec<&'a MultilinearExtension<'a, E>>,
+    wit_ins: Vec<&'a ArcMultilinearExtension<'a, E>>,
     expr: &Expression<E>,
     challenges: &[E],
     // sumcheck batch challenge
@@ -293,7 +295,7 @@ mod tests {
     use itertools::Itertools;
     use multilinear_extensions::{
         Expression, ToExpr,
-        mle::{IntoMLE, MultilinearExtension},
+        mle::{ArcMultilinearExtension, IntoMLE},
         virtual_polys::VirtualPolynomialsBuilder,
     };
     use p3::field::PrimeCharacteristicRing;
@@ -313,8 +315,8 @@ mod tests {
         let x = cb.create_witin(|| "x");
         let y = cb.create_witin(|| "y");
 
-        let wits_in: Vec<MultilinearExtension<E>> = (0..cs.num_witin as usize)
-            .map(|_| vec![F::from_u64(1)].into_mle())
+        let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
+            .map(|_| vec![F::from_u64(1)].into_mle().into())
             .collect();
 
         let mut expr_builder = VirtualPolynomialsBuilder::new(1, 0);

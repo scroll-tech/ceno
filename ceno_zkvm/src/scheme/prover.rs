@@ -198,17 +198,24 @@ impl<
                 transcript.append_field_element(&E::BaseField::from_u64(index as u64));
                 // TODO: add an enum for circuit type either in constraint_system or vk
                 let cs = pk.get_cs();
-                let witness_mle = witness_mles.drain(..cs.num_witin as usize).collect_vec();
+                let witness_mle = witness_mles
+                    .drain(..cs.num_witin as usize)
+                    .map(|mle| mle.into())
+                    .collect_vec();
                 let structural_witness = self.device.transport_mles(
                     structural_wits
                         .remove(circuit_name)
-                        .map(|(sw, _)| sw)
+                        .map(|(sw, _)| sw.into_iter().map(|mle| mle.into()).collect_vec())
                         .unwrap_or(vec![]),
                 );
+                let fixed = fixed_mles
+                    .drain(..cs.num_fixed)
+                    .map(|mle| mle.into())
+                    .collect_vec();
                 let public_input = self.device.transport_mles(pi.clone());
                 let mut input = ProofInput {
                     witness: witness_mle,
-                    fixed: fixed_mles.drain(..cs.num_fixed).collect_vec(),
+                    fixed,
                     structural_witness,
                     public_input,
                     num_instances,

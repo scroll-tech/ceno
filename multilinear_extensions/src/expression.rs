@@ -17,7 +17,6 @@ use std::{
     fmt::Display,
     iter::{Product, Sum},
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
-    sync::Arc,
 };
 
 pub type WitnessId = u16;
@@ -924,10 +923,10 @@ impl<E: ExtensionField> ToExpr<E> for Expression<E> {
 }
 
 pub fn wit_infer_by_expr<'a, E: ExtensionField>(
-    fixed: &'a [ArcMultilinearExtension<'a, E>],
-    witnesses: &'a [ArcMultilinearExtension<'a, E>],
-    structual_witnesses: &'a [ArcMultilinearExtension<'a, E>],
-    instance: &'a [ArcMultilinearExtension<'a, E>],
+    fixed: &[ArcMultilinearExtension<'a, E>],
+    witnesses: &[ArcMultilinearExtension<'a, E>],
+    structual_witnesses: &[ArcMultilinearExtension<'a, E>],
+    instance: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E],
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
@@ -1030,16 +1029,25 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
         },
         &|x, a, b| {
             op_mle_xa_b!(|x, a, b| {
-                assert_eq!(a.len(), 1);
-                assert_eq!(b.len(), 1);
-                let (a, b) = (a[0], b[0]);
-                Arc::new(MultilinearExtension::from_evaluation_vec_smart(
-                    ceil_log2(x.len()),
-                    x.par_iter()
-                        .with_min_len(MIN_PAR_SIZE)
-                        .map(|x| a * *x + b)
-                        .collect(),
-                ))
+                match (x.len(), a.len(), b.len()) {
+                    (_, 1, 1) => MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(x.len()),
+                        x.par_iter()
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|x| a[0] * *x + b[0])
+                            .collect(),
+                    )
+                    .into(),
+                    (1, _, 1) => MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(a.len()),
+                        a.par_iter()
+                            .with_min_len(MIN_PAR_SIZE)
+                            .map(|a| *a * x[0] + b[0])
+                            .collect(),
+                    )
+                    .into(),
+                    lefted => panic!("unknown combination {:?}", lefted),
+                }
             })
         },
     )
@@ -1097,8 +1105,6 @@ impl<E: ExtensionField> Display for Expression<E> {
 }
 
 pub mod fmt {
-    use crate::mle::MultilinearExtension;
-
     use super::*;
     use std::fmt::Write;
 
@@ -1215,7 +1221,7 @@ pub mod fmt {
 
     pub fn wtns<E: ExtensionField>(
         wtns: &[WitnessId],
-        wits_in: &[MultilinearExtension<E>],
+        wits_in: &[ArcMultilinearExtension<E>],
         inst_id: usize,
         wits_in_name: &[String],
     ) -> String {

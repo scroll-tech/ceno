@@ -687,25 +687,26 @@ mod tests {
         };
         use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
-        use multilinear_extensions::mle::MultilinearExtension;
+        use multilinear_extensions::mle::{ArcMultilinearExtension, MultilinearExtension};
         use p3::field::PrimeCharacteristicRing;
 
         type E = GoldilocksExt2; // 18446744069414584321
 
         trait ValueToArcMle<E: ExtensionField> {
             #[allow(clippy::wrong_self_convention)]
-            fn into_mle<'a>(&self) -> Vec<MultilinearExtension<'a, E>>;
+            fn into_arc_mle<'a>(&self) -> Vec<ArcMultilinearExtension<'a, E>>;
         }
 
         impl<E: ExtensionField> ValueToArcMle<E> for Vec<u64> {
-            fn into_mle<'a>(&self) -> Vec<MultilinearExtension<'a, E>> {
+            fn into_arc_mle<'a>(&self) -> Vec<ArcMultilinearExtension<'a, E>> {
                 self.iter()
                     .map(|a| {
-                        let mle: MultilinearExtension<E> =
+                        let mle: ArcMultilinearExtension<E> =
                             MultilinearExtension::from_evaluation_vec_smart(
                                 0,
                                 vec![E::BaseField::from_u64(*a)],
-                            );
+                            )
+                            .into();
                         mle
                     })
                     .collect_vec()
@@ -727,7 +728,7 @@ mod tests {
         }
         #[test]
         fn test_add_mul() {
-            let witness_values: Vec<MultilinearExtension<E>> = [
+            let witness_values: Vec<ArcMultilinearExtension<E>> = [
                 vec![1, 1, 0, 0],
                 // alloc b = 2 + 1 * 2^16
                 vec![2, 1, 0, 0],
@@ -746,7 +747,7 @@ mod tests {
                 vec![3, 2, 0, 0],
             ]
             .concat()
-            .into_mle();
+            .into_arc_mle();
 
             let mut cs = ConstraintSystem::new(|| "test_add_mul");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
@@ -768,7 +769,7 @@ mod tests {
 
         #[test]
         fn test_add_mul2() {
-            let witness_values: Vec<MultilinearExtension<E>> = vec![
+            let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
                 // alloc a = 1 + 1 * 2^16
                 vec![1, 1, 0, 0],
                 // alloc b = 2 + 1 * 2^16
@@ -794,7 +795,7 @@ mod tests {
                 vec![3, 2, 0, 0],
             ]
             .concat()
-            .into_mle();
+            .into_arc_mle();
 
             let mut cs = ConstraintSystem::new(|| "test_add_mul2");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
@@ -818,7 +819,7 @@ mod tests {
 
         #[test]
         fn test_mul_add() {
-            let witness_values: Vec<MultilinearExtension<E>> = [
+            let witness_values: Vec<ArcMultilinearExtension<E>> = [
                 vec![1, 1, 0, 0],
                 // alloc b = 2 + 1 * 2^16
                 vec![2, 1, 0, 0],
@@ -834,7 +835,7 @@ mod tests {
                 vec![0; 3],
             ]
             .concat()
-            .into_mle();
+            .into_arc_mle();
 
             let mut cs = ConstraintSystem::new(|| "test_mul_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
@@ -857,7 +858,7 @@ mod tests {
 
         #[test]
         fn test_mul_add2() {
-            let witness_values: Vec<MultilinearExtension<E>> = [
+            let witness_values: Vec<ArcMultilinearExtension<E>> = [
                 vec![1, 1, 0, 0],
                 // alloc b = 2 + 1 * 2^16
                 vec![2, 1, 0, 0],
@@ -874,7 +875,7 @@ mod tests {
                 vec![0; 3],
             ]
             .concat()
-            .into_mle();
+            .into_arc_mle();
 
             let mut cs = ConstraintSystem::new(|| "test_mul_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
@@ -899,7 +900,7 @@ mod tests {
             let a = Value::<'_, u32>::new_unchecked(u32::MAX);
             let b = Value::<'_, u32>::new_unchecked(u32::MAX);
             let ret = a.mul(&b, &mut LkMultiplicity::default(), true);
-            let witness_values: Vec<MultilinearExtension<E>> = [
+            let witness_values: Vec<ArcMultilinearExtension<E>> = [
                 vec![u16::MAX as u64, u16::MAX as u64],
                 // alloc b = 2^16 + (2^16 - 1) * 2^16
                 vec![u16::MAX as u64, u16::MAX as u64],
@@ -912,7 +913,7 @@ mod tests {
                 calculate_carry_diff::<32, 16>(ret.carries.to_vec()),
             ]
             .concat()
-            .into_mle();
+            .into_arc_mle();
 
             let mut cs = ConstraintSystem::new(|| "test_mul_add");
             let mut cb = CircuitBuilder::<E>::new(&mut cs);

@@ -22,7 +22,7 @@ use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::{
     Expression,
-    mle::{FieldType, IntoMLE, MultilinearExtension},
+    mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
@@ -343,7 +343,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
-        Vec<MultilinearExtension<'b, E>>,
+        Vec<ArcMultilinearExtension<'b, E>>,
         Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
         Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
     ) {
@@ -391,7 +391,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let wit_inference_span = entered_span!("wit_inference");
         // main constraint: lookup denominator and numerator record witness inference
         let record_span = entered_span!("record");
-        let records: Vec<MultilinearExtension<'_, E>> = cs
+        let records: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_table_expressions
             .par_iter()
             .map(|r| &r.expr)
@@ -608,7 +608,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
-        records: Vec<MultilinearExtension<'b, E>>,
+        records: Vec<ArcMultilinearExtension<'b, E>>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
         cs: &ConstraintSystem<E>,
         challenges: &[E; 2],
@@ -652,7 +652,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
 
             // for each j, computes \sum_i coeffs[i] * (mles[i][j] + shifting)
             let linear_combine_mles =
-                |coeffs: &[E], mles: &[MultilinearExtension<E>], shifting: E| {
+                |coeffs: &[E], mles: &[ArcMultilinearExtension<E>], shifting: E| {
                     assert!(!mles.is_empty());
                     assert_eq!(coeffs.len(), mles.len());
 
@@ -674,6 +674,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         })
                         .collect::<Vec<_>>()
                         .into_mle()
+                        .into()
                 };
 
             // The relation between the last layer of tower binary tree and read/write/logup records is
@@ -850,8 +851,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
     fn transport_mles<'a>(
         &self,
         mles: Vec<MultilinearExtension<'a, E>>,
-    ) -> Vec<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>> {
-        mles
+    ) -> Vec<ArcMultilinearExtension<'a, E>> {
+        mles.into_iter().map(|mle| mle.into()).collect_vec()
     }
 }
 

@@ -44,10 +44,10 @@ where
 
 // TODO: remove the lifetime bound
 pub struct ProofInput<'a, PB: ProverBackend> {
-    pub witness: Vec<PB::MultilinearPoly<'a>>,
-    pub structural_witness: Vec<PB::MultilinearPoly<'a>>,
-    pub fixed: Vec<PB::MultilinearPoly<'a>>,
-    pub public_input: Vec<PB::MultilinearPoly<'a>>,
+    pub witness: Vec<Arc<PB::MultilinearPoly<'a>>>,
+    pub structural_witness: Vec<Arc<PB::MultilinearPoly<'a>>>,
+    pub fixed: Vec<Arc<PB::MultilinearPoly<'a>>>,
+    pub public_input: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub num_instances: usize,
 }
 
@@ -86,7 +86,7 @@ pub trait TowerProver<PB: ProverBackend> {
         challenge: &[PB::E; 2],
     ) -> (
         Vec<Vec<Vec<PB::E>>>,
-        Vec<PB::MultilinearPoly<'b>>,
+        Vec<Arc<PB::MultilinearPoly<'b>>>,
         Vec<TowerProverSpec<'b, PB>>,
         Vec<TowerProverSpec<'b, PB>>,
     );
@@ -111,7 +111,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<PB::E>,
-        records: Vec<PB::MultilinearPoly<'b>>,
+        records: Vec<Arc<PB::MultilinearPoly<'b>>>,
         input: &'b ProofInput<'a, PB>,
         cs: &ConstraintSystem<PB::E>,
         challenges: &[PB::E; 2],
@@ -146,5 +146,5 @@ pub trait DeviceTransporter<PB: ProverBackend> {
     fn transport_mles<'a>(
         &self,
         mles: Vec<MultilinearExtension<'a, PB::E>>,
-    ) -> Vec<PB::MultilinearPoly<'a>>;
+    ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
