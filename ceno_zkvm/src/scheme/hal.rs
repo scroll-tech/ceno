@@ -65,6 +65,7 @@ pub struct TowerProverSpec<'a, PB: ProverBackend> {
 pub trait TraceCommitter<PB: ProverBackend> {
     // commit to the traces using merkle tree and return
     // the traces in the form of multilinear polynomials
+    #[allow(clippy::type_complexity)]
     fn commit_traces<'a>(
         &mut self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<<PB::E as ExtensionField>::BaseField>>,
@@ -79,6 +80,7 @@ pub trait TowerProver<PB: ProverBackend> {
     // infer read/write/logup records from the read/write/logup expressions and then
     // build multiple complete binary trees (tower tree) to accumulate these records
     // either in product or fractional sum form.
+    #[allow(clippy::type_complexity)]
     fn build_tower_witness<'a, 'b>(
         &self,
         cs: &ConstraintSystem<PB::E>,
@@ -108,6 +110,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
     //    the validity of read/write/logup records through sumchecks;
     // 2. multiple multiplication relations between witness multilinear polynomials
     //    achieved via zerochecks.
+    #[allow(clippy::type_complexity)]
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<PB::E>,
@@ -120,6 +123,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
 }
 
 pub trait OpeningProver<PB: ProverBackend> {
+    #[allow(clippy::too_many_arguments)]
     fn open(
         &self,
         witness_data: PB::PcsData,

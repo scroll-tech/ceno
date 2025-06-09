@@ -48,6 +48,12 @@ pub struct CpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     _marker: std::marker::PhantomData<E>,
 }
 
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for CpuBackend<E, PCS> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> CpuBackend<E, PCS> {
     pub fn new() -> Self {
         let param =
@@ -440,8 +446,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_last_layer");
         let mut r_set_last_layer = r_set_wit
-            .into_iter()
-            .chain(w_set_wit.into_iter())
+            .iter()
+            .chain(w_set_wit.iter())
             .map(|wit| masked_mle_split_to_chunks(wit, num_instances, NUM_FANIN, E::ONE))
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
@@ -499,7 +505,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             assert!(
                 r_wit_layers
                     .iter()
-                    .zip(r_set_wit.into_iter()) // depth equals to num_vars
+                    .zip(r_set_wit.iter()) // depth equals to num_vars
                     .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
             );
             assert!(r_wit_layers.iter().all(|layers| {
@@ -578,7 +584,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 
         let prod_specs = r_wit_layers
             .into_iter()
-            .chain(w_wit_layers.into_iter())
+            .chain(w_wit_layers)
             .map(|witness| TowerProverSpec { witness })
             .collect_vec();
         let lookup_specs = lk_wit_layers
@@ -674,7 +680,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         })
                         .collect::<Vec<_>>()
                         .into_mle()
-                        .into()
                 };
 
             // The relation between the last layer of tower binary tree and read/write/logup records is
@@ -700,7 +705,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             // w_records_combined is \sum_i alpha^i * (w_records[i][j]-padding) where padding = 1
             let mut w_records_combined: MultilinearExtension<E> = linear_combine_mles(
                 &alpha_pow[alpha_offset..(alpha_offset + num_writes)],
-                &&records[num_reads..(num_reads + num_writes)],
+                &records[num_reads..(num_reads + num_writes)],
                 E::ONE.neg(),
             );
             alpha_offset += num_writes;

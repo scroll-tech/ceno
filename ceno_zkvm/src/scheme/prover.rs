@@ -205,7 +205,7 @@ impl<
                 let structural_witness = self.device.transport_mles(
                     structural_wits
                         .remove(circuit_name)
-                        .map(|(sw, _)| sw.into_iter().map(|mle| mle.into()).collect_vec())
+                        .map(|(sw, _)| sw)
                         .unwrap_or(vec![]),
                 );
                 let fixed = fixed_mles
