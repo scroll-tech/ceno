@@ -930,7 +930,7 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
     challenges: &[E],
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
+    expr.evaluate_with_instance::<ArcMultilinearExtension<'a, E>>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
         &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
@@ -1105,8 +1105,6 @@ impl<E: ExtensionField> Display for Expression<E> {
 }
 
 pub mod fmt {
-    use crate::mle::ArcMultilinearExtension;
-
     use super::*;
     use std::fmt::Write;
 
