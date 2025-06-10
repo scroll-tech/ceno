@@ -137,7 +137,7 @@ pub trait OpeningProver<PB: ProverBackend> {
 }
 
 pub struct DeviceProvingKey<'a, PB: ProverBackend> {
-    pub fixed_mles: Vec<PB::MultilinearPoly<'a>>,
+    pub fixed_mles: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub pcs_data: Arc<PB::PcsData>,
 }
 

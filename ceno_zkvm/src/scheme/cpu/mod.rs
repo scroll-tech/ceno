@@ -730,7 +730,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
 
             exprs.push(sel_expr * (r_records_combined + w_records_combined + lk_records_combined));
 
-            let mut distrinct_zerocheck_terms_set = BTreeSet::new();
+            let mut distinct_zerocheck_terms_set = BTreeSet::new();
             // degree > 1 zero expression sumcheck
             if !cs.assert_zero_sumcheck_expressions.is_empty() {
                 // \sum_t sel(rt, t) * \sum_j alpha_{j} * all_monomial_terms(t)
@@ -765,7 +765,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         }
                     }
 
-                    distrinct_zerocheck_terms_set.extend(add_mle_list_by_expr(
+                    distinct_zerocheck_terms_set.extend(add_mle_list_by_expr(
                         &mut expr_builder,
                         &mut exprs,
                         Some(&sel),
@@ -842,10 +842,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
     ) -> DeviceProvingKey<CpuBackend<E, PCS>> {
         let pcs_data = pk.fixed_commit_wd.clone().unwrap();
         let fixed_mles =
-            PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap())
-                .into_iter()
-                .map(|mle| mle.as_ref().clone())
-                .collect_vec();
+            PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());
 
         DeviceProvingKey {
             pcs_data,

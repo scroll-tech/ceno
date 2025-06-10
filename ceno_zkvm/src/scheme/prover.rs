@@ -208,10 +208,7 @@ impl<
                         .map(|(sw, _)| sw)
                         .unwrap_or(vec![]),
                 );
-                let fixed = fixed_mles
-                    .drain(..cs.num_fixed)
-                    .map(|mle| mle.into())
-                    .collect_vec();
+                let fixed = fixed_mles.drain(..cs.num_fixed).collect_vec();
                 let public_input = self.device.transport_mles(pi.clone());
                 let mut input = ProofInput {
                     witness: witness_mle,
