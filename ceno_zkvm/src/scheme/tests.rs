@@ -7,10 +7,14 @@ use crate::{
         Instruction,
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
+    scheme::{
+        cpu::{CpuBackend, CpuProver, CpuTowerProver},
+        hal::{ProofInput, TowerProverSpec},
+        prover::ZkVMCpuProver,
+    },
     set_val,
     structs::{
-        PointAndEval, RAMType::Register, TowerProver, TowerProverSpec, ZKVMConstraintSystem,
-        ZKVMFixedTraces, ZKVMWitnesses,
+        PointAndEval, RAMType::Register, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
     },
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
@@ -124,7 +128,9 @@ fn test_rw_lk_expression_combination() {
             .unwrap();
 
         // get proof
-        let prover = ZKVMProver::new(pk);
+        let backend = CpuBackend::<E, Pcs>::new();
+        let device = CpuProver::new(backend);
+        let prover = ZkVMCpuProver::new(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
         let wits_in = rmm.to_mles();
@@ -143,15 +149,18 @@ fn test_rw_lk_expression_combination() {
             transcript.read_challenge().elements,
         ];
 
+        let input = ProofInput {
+            fixed: vec![],
+            witness: wits_in,
+            structural_witness: vec![],
+            public_input: vec![],
+            num_instances,
+        };
         let (proof, _, _) = prover
             .create_chip_proof(
                 name.as_str(),
                 prover.pk.circuit_pks.get(&name).unwrap(),
-                vec![],
-                wits_in,
-                vec![],
-                &[],
-                num_instances,
+                input,
                 &mut transcript,
                 &prover_challenges,
             )
@@ -281,7 +290,9 @@ fn test_single_add_instance_e2e() {
     assert_eq!(halt_records.len(), 1);
 
     // proving
-    let prover = ZKVMProver::new(pk);
+    let backend = CpuBackend::<E, Pcs>::new();
+    let device = CpuProver::new(backend);
+    let mut prover = ZKVMProver::new(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
@@ -345,7 +356,7 @@ fn test_tower_proof_various_prod_size() {
         let last_layer_splitted_fanin: Vec<MultilinearExtension<E>> =
             vec![first.to_vec().into_mle(), second.to_vec().into_mle()];
         let layers = infer_tower_product_witness(num_vars, last_layer_splitted_fanin, 2);
-        let (rt_tower_p, tower_proof) = TowerProver::create_proof(
+        let (rt_tower_p, tower_proof) = CpuTowerProver::create_proof::<E, WhirDefault<E>>(
             vec![TowerProverSpec {
                 witness: layers.clone(),
             }],

@@ -18,45 +18,42 @@ use crate::scheme::constants::MIN_PAR_SIZE;
 
 // first computes the masked mle'[j] = mle[j] if j < num_instance, else default
 // then split it into `num_parts` smaller mles
-pub(crate) fn masked_mle_split_to_chunks<'a, E: ExtensionField>(
-    mle: &'a ArcMultilinearExtension<'a, E>,
+pub(crate) fn masked_mle_split_to_chunks<'a, 'b, E: ExtensionField>(
+    mle: &'a MultilinearExtension<'a, E>,
     num_instance: usize,
     num_chunks: usize,
     default: E,
-) -> Vec<MultilinearExtension<'a, E>> {
+) -> Vec<MultilinearExtension<'b, E>> {
     assert!(num_chunks.is_power_of_two());
     assert!(num_instance <= mle.evaluations().len());
 
-    if num_instance == mle.evaluations().len() {
-        mle.as_view_chunks(num_chunks)
-    } else {
-        (0..num_chunks)
-            .into_par_iter()
-            .map(|part_idx| {
-                let n = mle.evaluations().len() / num_chunks;
+    // TODO: when mle.len() is two's power, we should avoid the clone
+    (0..num_chunks)
+        .into_par_iter()
+        .map(|part_idx| {
+            let n = mle.evaluations().len() / num_chunks;
 
-                match mle.evaluations() {
-                    FieldType::Ext(evals) => (part_idx * n..(part_idx + 1) * n)
-                        .into_par_iter()
-                        .with_min_len(64)
-                        .map(|i| if i < num_instance { evals[i] } else { default })
-                        .collect::<Vec<_>>()
-                        .into_mle(),
-                    FieldType::Base(evals) => (part_idx * n..(part_idx + 1) * n)
-                        .map(|i| {
-                            if i < num_instance {
-                                E::from(evals[i])
-                            } else {
-                                default
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .into_mle(),
-                    _ => unreachable!(),
-                }
-            })
-            .collect::<Vec<_>>()
-    }
+            match mle.evaluations() {
+                FieldType::Ext(evals) => (part_idx * n..(part_idx + 1) * n)
+                    .into_par_iter()
+                    .with_min_len(64)
+                    .map(|i| if i < num_instance { evals[i] } else { default })
+                    .collect::<Vec<_>>()
+                    .into_mle(),
+                FieldType::Base(evals) => (part_idx * n..(part_idx + 1) * n)
+                    .map(|i| {
+                        if i < num_instance {
+                            E::from(evals[i])
+                        } else {
+                            default
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .into_mle(),
+                _ => unreachable!(),
+            }
+        })
+        .collect::<Vec<_>>()
 }
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector

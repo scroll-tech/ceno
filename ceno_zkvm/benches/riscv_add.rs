@@ -3,7 +3,11 @@ use std::{collections::BTreeMap, time::Duration};
 use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
-    scheme::prover::ZKVMProver,
+    scheme::{
+        cpu::{CpuBackend, CpuProver},
+        hal::ProofInput,
+        prover::ZKVMProver,
+    },
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
 mod alloc;
@@ -52,7 +56,9 @@ fn bench_add(c: &mut Criterion) {
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
 
-    let prover = ZKVMProver::new(pk);
+    let backend = CpuBackend::<E, Pcs>::new();
+    let device = CpuProver::new(backend);
+    let prover = ZKVMProver::new(pk, device);
     let circuit_pk = prover
         .pk
         .circuit_pks
@@ -91,15 +97,18 @@ fn bench_add(c: &mut Criterion) {
                             transcript.read_challenge().elements,
                         ];
 
+                        let input = ProofInput {
+                            fixed: vec![],
+                            witness: polys,
+                            structural_witness: vec![],
+                            public_input: vec![],
+                            num_instances,
+                        };
                         let _ = prover
                             .create_chip_proof(
                                 "ADD",
                                 circuit_pk,
-                                vec![],
-                                polys,
-                                vec![],
-                                &[],
-                                num_instances,
+                                input,
                                 &mut transcript,
                                 &challenges,
                             )
