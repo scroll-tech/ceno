@@ -1,8 +1,7 @@
 // WARNING: VIBE-CODED!
 extern crate ceno_rt;
-use ceno_rt::{debug_print, syscalls::syscall_sha256_extend};
-use core::fmt::Write;
-use rkyv::Archived;
+use ceno_rt::syscalls::syscall_sha256_extend;
+use rkyv::vec::ArchivedVec;
 
 // SHA-256 constants
 const K: [u32; 64] = [
@@ -68,11 +67,17 @@ fn main() {
         process_block(&mut h, &w);
     }
 
-    // // Output the final hash values one by one
-    for &value in &h {
-        ceno_rt::commit::<Archived<u32>, _>(&value);
-    }
+    // Output the final hash values one by one
+    ceno_rt::commit::<ArchivedVec<u32>, SHA256Result>(&SHA256Result(h.to_vec()));
     // debug_print!("{:x}", h[0]);
+}
+
+#[derive(Debug, PartialEq)]
+struct SHA256Result(Vec<u32>);
+impl From<&ArchivedVec<u32>> for SHA256Result {
+    fn from(value: &ArchivedVec<u32>) -> Self {
+        SHA256Result(value.to_vec())
+    }
 }
 
 fn process_block(h: &mut [u32; 8], w: &[u32; 64]) {
