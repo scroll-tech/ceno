@@ -21,7 +21,7 @@ rustup target add riscv32im-unknown-none-elf
 ```
 
 ## Try end-to-end with examples
-A variety of [examples](https://github.com/scroll-tech/ceno/tree/master/examples/examples) are availables.
+A variety of [examples](https://github.com/scroll-tech/ceno/tree/master/examples/examples) are available.
 
 To run an example in e2e, use the following command:
 
