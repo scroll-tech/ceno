@@ -230,6 +230,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let config =
             LargeEcallDummy::<E, KeccakSpec>::construct_circuit_with_gkr_iop(&mut circuit_builder)
                 .unwrap();
+        circuit_builder.finalize();
         assert!(
             self.circuit_css
                 .insert(KeccakSpec::NAME.to_owned(), cs)
@@ -244,6 +245,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let mut circuit_builder =
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = OC::construct_circuit(&mut circuit_builder).unwrap();
+        circuit_builder.finalize();
         assert!(self.circuit_css.insert(OC::name(), cs).is_none());
 
         config
@@ -254,6 +256,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let mut circuit_builder =
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = TC::construct_circuit(&mut circuit_builder).unwrap();
+        circuit_builder.finalize();
         assert!(self.circuit_css.insert(TC::name(), cs).is_none());
 
         config
@@ -267,6 +270,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             SC::initial_global_state(&mut circuit_builder).expect("global_state_in failed");
         self.finalize_global_state_expr =
             SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
+        circuit_builder.finalize();
     }
 
     pub fn get_css(&self) -> &BTreeMap<String, ConstraintSystem<E>> {

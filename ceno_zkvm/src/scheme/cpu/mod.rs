@@ -7,34 +7,32 @@ use crate::{
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP},
-        hal::{DeviceProvingKey, ProofInput, TowerProverSpec},
+        hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
             wit_infer_by_expr,
         },
     },
     structs::TowerProofs,
-    utils::add_mle_list_by_expr,
 };
 use either::Either;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::{
-    Expression,
+    Expression, Instance,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
+    monomial::Term,
+    utils::eval_by_expr_with_instance,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::{
-    field::{PrimeCharacteristicRing, TwoAdicField, dot_product},
+    field::{PrimeCharacteristicRing, TwoAdicField},
     matrix::dense::RowMajorMatrix,
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -614,37 +612,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
-        records: Vec<ArcMultilinearExtension<'b, E>>,
+        _records: Vec<ArcMultilinearExtension<'b, E>>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
         cs: &ConstraintSystem<E>,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
-    ) -> Result<(Point<E>, Option<Vec<IOPProverMessage<E>>>), ZKVMError> {
+    ) -> Result<
+        (
+            Point<E>,
+            MainSumcheckEvals<E>,
+            Option<Vec<IOPProverMessage<E>>>,
+        ),
+        ZKVMError,
+    > {
         let num_instances = input.num_instances;
         let next_pow2_instances = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instances);
-        let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
-        let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
-        let (chip_record_alpha, _) = (challenges[0], challenges[1]);
         let is_opcode_circuit = !cs.lk_expressions.is_empty()
             || !cs.r_expressions.is_empty()
             || !cs.w_expressions.is_empty();
 
         // main selector sumcheck / same point sumcheck
         let sumcheck_span = entered_span!("main sumcheck");
-        let (input_opening_point, main_sumcheck_proofs) = if is_opcode_circuit {
+        let (input_opening_point, evals, main_sumcheck_proofs) = if is_opcode_circuit {
             let main_sel_span = entered_span!("main_sel");
             let num_threads = optimal_sumcheck_threads(log2_num_instances);
-            let alpha_pow = get_challenge_pows(
-                num_reads
-                    + num_writes
-                    + cs.lk_expressions.len()
-                    + cs.lk_table_expressions.len()
-                    + cs.assert_zero_sumcheck_expressions.len(),
-                transcript,
-            );
+            let alpha_pow = get_challenge_pows(cs.num_layer_challenges as usize, transcript);
             // create selector: all ONE, but padding ZERO to ceil_log2
-            let sel: MultilinearExtension<E> = {
+            let mut sel: MultilinearExtension<E> = {
                 // TODO sel can be shared if expression count match
                 let mut sel = build_eq_x_r_vec(&rt_tower);
                 if num_instances < sel.len() {
@@ -656,89 +651,38 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 sel.into_mle()
             };
 
-            // for each j, computes \sum_i coeffs[i] * (mles[i][j] + shifting)
-            let linear_combine_mles =
-                |coeffs: &[E], mles: &[ArcMultilinearExtension<E>], shifting: E| {
-                    assert!(!mles.is_empty());
-                    assert_eq!(coeffs.len(), mles.len());
-
-                    let n = mles[0].evaluations().len();
-
-                    // combine into single mle by dot product with coeff
-                    (0..n)
-                        .into_par_iter()
-                        .map(|j| {
-                            dot_product::<E, _, _>(
-                                mles.iter().map(|mle| match mle.evaluations() {
-                                    FieldType::Ext(evals) => evals[j] + shifting,
-                                    FieldType::Base(evals) => E::from(evals[j]) + shifting,
-                                    _ => unreachable!(),
-                                }),
-                                // mle_evals.iter().map(|mle_eval| mle_eval[j] + shifting),
-                                coeffs.iter().copied(),
-                            )
+            // get backend expr monimial form and evaluate scalar with challenges
+            let (public_io_evals, challenges) = {
+                (
+                    // get public io evaluations
+                    cs.instance_name_map
+                        .keys()
+                        .sorted()
+                        .map(|Instance(inst_id)| {
+                            let mle = &input.public_input[*inst_id];
+                            assert_eq!(
+                                mle.evaluations.len(),
+                                1,
+                                "doesnt support instance with evaluation length > 1"
+                            );
+                            match mle.evaluations() {
+                                FieldType::Base(smart_slice) => E::from(smart_slice[0]),
+                                FieldType::Ext(smart_slice) => smart_slice[0],
+                                _ => unreachable!(),
+                            }
                         })
-                        .collect::<Vec<_>>()
-                        .into_mle()
-                };
-
-            // The relation between the last layer of tower binary tree and read/write/logup records is
-            //
-            // outs[i][j] = padding + sel[j] * (records[i][j] - padding)
-            //
-            // it's easy to see the above formula is right because
-            //   1. outs[i][j] = padding, if j > num_instances
-            //   2. outs[i][j] = records[i][j], otherwise
-            //
-            // Then we have
-            // outs[i](rt) - padding = \sum_j sel[j] * (records[i][j] - padding)
-
-            let mut alpha_offset = 0;
-            // r_records_combined is \sum_i alpha^i * (r_records[i][j]-padding) where padding = 1
-            let mut r_records_combined: MultilinearExtension<E> = linear_combine_mles(
-                &alpha_pow[alpha_offset..alpha_offset + num_reads],
-                &records[..num_reads],
-                E::ONE.neg(),
-            );
-            alpha_offset += num_reads;
-
-            // w_records_combined is \sum_i alpha^i * (w_records[i][j]-padding) where padding = 1
-            let mut w_records_combined: MultilinearExtension<E> = linear_combine_mles(
-                &alpha_pow[alpha_offset..(alpha_offset + num_writes)],
-                &records[num_reads..(num_reads + num_writes)],
-                E::ONE.neg(),
-            );
-            alpha_offset += num_writes;
-
-            // lk_records_combined is \sum_i alpha^i * (lk_records[i][j]-padding)
-            //  where padding = chip_record_alpha
-            let mut lk_records_combined: MultilinearExtension<E> = linear_combine_mles(
-                &alpha_pow[alpha_offset..(alpha_offset + cs.lk_expressions.len())],
-                &records[(num_reads + num_writes)..],
-                chip_record_alpha.neg(),
-            );
-            alpha_offset += cs.lk_expressions.len();
-
-            let mut exprs = vec![];
-            let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, log2_num_instances);
-            let (sel_expr, r_records_combined, w_records_combined, lk_records_combined) = (
-                expr_builder.lift(Either::Left(&sel)),
-                expr_builder.lift(Either::Right(&mut r_records_combined)),
-                expr_builder.lift(Either::Right(&mut w_records_combined)),
-                expr_builder.lift(Either::Right(&mut lk_records_combined)),
-            );
-
-            exprs.push(sel_expr * (r_records_combined + w_records_combined + lk_records_combined));
-
-            let mut distinct_zerocheck_terms_set = BTreeSet::new();
-            // degree > 1 zero expression sumcheck
-            if !cs.assert_zero_sumcheck_expressions.is_empty() {
+                        .collect_vec(),
+                    // concat challenge with layer challenge
+                    challenges.iter().chain(&alpha_pow).copied().collect_vec(),
+                )
+            };
+            // sanity check degree > 1 zero expression sumcheck
+            if cfg!(debug_assertions) && !cs.assert_zero_sumcheck_expressions.is_empty() {
                 // \sum_t sel(rt, t) * \sum_j alpha_{j} * all_monomial_terms(t)
-                for ((expr, name), alpha) in cs
+                for (expr, name) in cs
                     .assert_zero_sumcheck_expressions
                     .iter()
                     .zip_eq(cs.assert_zero_sumcheck_expressions_namespace_map.iter())
-                    .zip_eq(&alpha_pow[alpha_offset..])
                 {
                     // sanity check in debug build and output != instance index for zero check sumcheck poly
                     if cfg!(debug_assertions) {
@@ -747,7 +691,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                             &input.witness,
                             &[],
                             &input.public_input,
-                            challenges,
+                            &challenges,
                             expr,
                         );
                         let top_100_errors = expected_zero_poly
@@ -764,40 +708,92 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                             )));
                         }
                     }
-
-                    distinct_zerocheck_terms_set.extend(add_mle_list_by_expr(
-                        &mut expr_builder,
-                        &mut exprs,
-                        Some(&sel),
-                        input.witness.iter().collect_vec(),
-                        expr,
-                        challenges,
-                        *alpha,
-                    ));
                 }
             }
+            let mut monomial_terms = cs
+                .backend_expr_monomial_form
+                .iter()
+                .map(
+                    |Term {
+                         scalar: scalar_expr,
+                         product,
+                     }| {
+                        // evaluate scalar with instances (public io) + challenges
+                        let scalar = eval_by_expr_with_instance(
+                            &[],
+                            &[],
+                            &[],
+                            &public_io_evals,
+                            &challenges,
+                            scalar_expr,
+                        );
+                        Term {
+                            scalar,
+                            product: product.clone(),
+                        }
+                    },
+                )
+                .collect_vec();
+
+            let expr_builder = VirtualPolynomialsBuilder::new_with_mles(
+                num_threads,
+                log2_num_instances,
+                chain!(&input.witness, &input.structural_witness, &input.fixed)
+                    .map(|mle| Either::Left(mle.as_ref()))
+                    .chain(std::iter::once(&mut sel).map(Either::Right))
+                    .collect_vec(),
+            );
+            // we append selector at the last of mle, thus its id also in the end
+            let select_expr = Expression::<E>::WitIn(cs.num_backend_witin);
+            // every terms times selector
+            monomial_terms
+                .iter_mut()
+                .for_each(|Term { product, .. }| product.push(select_expr.clone()));
+
             tracing::trace!("main sel sumcheck start");
             let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(
-                expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
+                expr_builder.to_virtual_polys_with_monimial_terms(monomial_terms),
                 transcript,
             );
             tracing::trace!("main sel sumcheck end");
             exit_span!(main_sel_span);
 
+            let mut evals = state.get_mle_flatten_final_evaluations();
+            let wits_in_evals: Vec<_> = evals.drain(..cs.num_witin as usize).collect();
+            let fixed_in_evals: Vec<_> = evals.drain(..cs.num_fixed).collect();
             (
                 state.collect_raw_challenges(),
+                MainSumcheckEvals {
+                    wits_in_evals,
+                    fixed_in_evals,
+                },
                 Some(main_sel_sumcheck_proofs.proofs),
             )
         } else {
+            let span = entered_span!("fixed::evals + witin::evals");
             // In table proof, we always skip same point sumcheck for now
             // as tower sumcheck batch product argument/logup in same length
-
-            (rt_tower, None)
+            let mut evals = input
+                .witness
+                .par_iter()
+                .chain(input.fixed.par_iter())
+                .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
+                .collect::<Vec<_>>();
+            let fixed_in_evals = evals.split_off(input.witness.len());
+            let wits_in_evals = evals;
+            exit_span!(span);
+            (
+                rt_tower,
+                MainSumcheckEvals {
+                    wits_in_evals,
+                    fixed_in_evals,
+                },
+                None,
+            )
         };
-
         exit_span!(sumcheck_span);
 
-        Ok((input_opening_point, main_sumcheck_proofs))
+        Ok((input_opening_point, evals, main_sumcheck_proofs))
     }
 }
 
