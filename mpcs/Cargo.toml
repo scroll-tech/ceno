@@ -53,6 +53,7 @@ nightly-features = [
 parallel = ["dep:rayon"]
 print-trace = ["whir/print-trace"]
 sanity-check = []
+output-test-data = []
 
 [[bench]]
 harness = false

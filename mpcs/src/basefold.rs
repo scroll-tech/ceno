@@ -703,6 +703,37 @@ where
             &point_evals,
         );
 
+        #[cfg(feature = "output-test-data")]
+        {
+            println!("let input = QueryPhaseVerifierInput {{");
+
+            // Output the rust code for populating the query phase
+            // verifier input structure defined as follows:
+
+            // pub struct QueryPhaseVerifierInput {
+            //     pub max_num_var: usize,
+            //     pub indices: Vec<usize>,
+            //     pub vp: RSCodeVerifierParameters,
+            //     pub final_message: Vec<Vec<E>>,
+            //     pub batch_coeffs: Vec<E>,
+            //     pub queries: QueryOpeningProofs,
+            //     pub fixed_comm: Option<BasefoldCommitment>,
+            //     pub witin_comm: BasefoldCommitment,
+            //     pub circuit_meta: Vec<CircuitIndexMeta>,
+            //     pub commits: Vec<HashDigest>,
+            //     pub fold_challenges: Vec<E>,
+            //     pub sumcheck_messages: Vec<IOPProverMessage>,
+            //     pub point_evals: Vec<(Point, Vec<E>)>,
+            // }
+            println!("  max_num_var: {},", max_num_var);
+            println!("  indices: {:?},", queries);
+            println!("  vp: RSCodeVerifierParameters {{, ");
+            println!("    t_inv_halves: {:?},", vp.encoding_params.t_inv_halves);
+            println!("  }}");
+
+            println!("}}");
+        }
+
         #[cfg(debug_assertions)]
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
@@ -733,7 +764,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::{BabyBearExt4, GoldilocksExt2};
 
     use crate::{
         basefold::Basefold,
@@ -743,6 +774,7 @@ mod test {
     use super::BasefoldRSParams;
 
     type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type PcsBabybearRSCode = Basefold<BabyBearExt4, BasefoldRSParams>;
 
     #[test]
     fn batch_commit_open_verify_goldilocks() {
@@ -750,6 +782,11 @@ mod test {
         run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 1);
         run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 4);
         // TODO support all trivial proof
+    }
+
+    #[test]
+    fn batch_commit_open_verify_babybear() {
+        run_batch_commit_open_verify::<BabyBearExt4, PcsBabybearRSCode>(10, 11, 4);
     }
 
     #[test]
