@@ -104,7 +104,7 @@ macro_rules! tower_mle_4 {
 
 /// infer logup witness from last layer
 /// return is the ([p1,p2], [q1,q2]) for each layer
-pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
+pub fn infer_tower_logup_witness<'a, E: ExtensionField>(
     p_mles: Option<Vec<ArcMultilinearExtension<'a, E>>>,
     q_mles: Vec<ArcMultilinearExtension<'a, E>>,
 ) -> Vec<Vec<ArcMultilinearExtension<'a, E>>> {
@@ -195,7 +195,7 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
 }
 
 /// infer tower witness from last layer
-pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
+pub fn infer_tower_product_witness<E: ExtensionField>(
     num_vars: usize,
     last_layer: Vec<ArcMultilinearExtension<'_, E>>,
     num_product_fanin: usize,
