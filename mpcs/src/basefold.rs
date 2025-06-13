@@ -726,10 +726,26 @@ where
             //     pub point_evals: Vec<(Point, Vec<E>)>,
             // }
             println!("  max_num_var: {},", max_num_var);
-            println!("  indices: {:?},", queries);
-            println!("  vp: RSCodeVerifierParameters {{, ");
-            println!("    t_inv_halves: {:?},", vp.encoding_params.t_inv_halves);
-            println!("  }}");
+            println!("  indices: vec!{:?},", queries);
+            println!(
+                "  final_message: vec![\n    {}\n  ],",
+                final_message
+                    .iter()
+                    .map(|x| {
+                        format!(
+                            "vec![\n      {}\n    ]",
+                            x.iter()
+                                .map(|x| {
+                                    format!(
+                                        "BabyBearExt4::from_bases(&{:?})",
+                                        x.as_basis_coefficients_slice()
+                                    )
+                                })
+                                .join(",\n      ")
+                        )
+                    })
+                    .join(",\n      ")
+            );
 
             println!("}}");
         }
