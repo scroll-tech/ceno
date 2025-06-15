@@ -746,6 +746,18 @@ where
                     })
                     .join(",\n      ")
             );
+            println!(
+                "  batch_coeffs: vec![\n    {}\n  ],",
+                batch_coeffs
+                    .iter()
+                    .map(|x| {
+                        format!(
+                            "BabyBearExt4::from_bases(&{:?})",
+                            x.as_basis_coefficients_slice()
+                        )
+                    })
+                    .join(",\n    ")
+            );
 
             println!("}}");
         }
