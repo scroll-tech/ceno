@@ -758,6 +758,14 @@ where
                     })
                     .join(",\n    ")
             );
+            println!(
+                "  queries: vec![\n    {}\n  ]",
+                proof
+                    .query_opening_proof
+                    .iter()
+                    .map(|x| { format!("QueryOpeningProof {{}}") })
+                    .join(",\n    ")
+            );
 
             println!("}}");
         }
