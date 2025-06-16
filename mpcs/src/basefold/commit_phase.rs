@@ -377,7 +377,7 @@ pub fn batch_commit_phase_prepare<E: ExtensionField, Spec: BasefoldSpec<E>>(
     max_num_vars: usize,
     num_rounds: usize,
     circuit_num_polys: &[(usize, usize)],
-) -> (Vec<usize>, Vec<E>, VecDeque<DenseMatrix<E>>, Option<Challenge<E>>, Option<Challenge<E>>, Vec<Digest<E>>)
+) -> (Option<Challenge<E>>, Option<Challenge<E>>, Vec<Digest<E>>)
 where
     E::BaseField: Serialize + DeserializeOwned,
     <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
@@ -481,7 +481,7 @@ where
     );
 
     // sorted batch codewords by height in descending order
-    let batched_codewords = VecDeque::from(
+    let mut batched_codewords = VecDeque::from(
         batched_codewords
             .into_iter()
             .sorted_by_key(|codeword| std::cmp::Reverse(codeword.height()))
@@ -500,12 +500,11 @@ where
     let phase1_rounds = num_rounds.min(max_num_vars - log2_num_threads);
     println!("[ceno] phase1_rounds: {}", phase1_rounds);
 
-    let mut batched_codewords_round = batched_codewords.clone();
     for i in 0..phase1_rounds {
         // Note: We are not doing sumcheck in this funciton
         challenge_phase1 = basefold_one_round_fri_only::<E, Spec>(
             pp,
-            &mut batched_codewords_round,
+            &mut batched_codewords,
             transcript,
             &mut trees,
             &mut commits,
@@ -519,22 +518,21 @@ where
     let sumcheck_phase2 = entered_span!("sumcheck_phase2");
     let remaining_rounds = num_rounds.saturating_sub(max_num_vars - log2_num_threads);
 
-    // for i in 0..remaining_rounds {
-    //     challenge_phase2 = basefold_one_round_fri_only::<E, Spec>(
-    //         pp,
-    //         &mut batched_codewords_round,
-    //         transcript,
-    //         &mut trees,
-    //         &mut commits,
-    //         &mmcs_ext,
-    //         i == remaining_rounds - 1,
-    //     );
-    // }
+    for i in 0..remaining_rounds {
+        challenge_phase2 = basefold_one_round_fri_only::<E, Spec>(
+            pp,
+            &mut batched_codewords,
+            transcript,
+            &mut trees,
+            &mut commits,
+            &mmcs_ext,
+            i == remaining_rounds - 1,
+        );
+    }
 
     exit_span!(sumcheck_phase2);
 
-    // witins_codeword, fixed_codeword, 
-    (batch_group_size, batch_coeffs.clone(), batched_codewords, challenge_phase1, challenge_phase2, commits)
+    (challenge_phase1, challenge_phase2, commits)
 }
 
 /// basefold fri round to fold codewords

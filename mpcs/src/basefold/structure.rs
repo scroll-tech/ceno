@@ -90,15 +90,15 @@ pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) commit: Digest<E>,
+    pub commit: Digest<E>,
     pub codeword: MerkleTree<E::BaseField>,
 
     pub log2_max_codeword_size: usize,
     // for small polynomials, the prover commits the entire polynomial as merkle leaves without encoding to codeword
     // the verifier performs direct checks on these leaves without requiring a proximity test.
-    pub(crate) trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
+    pub trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
     // poly groups w.r.t circuit index
-    pub(crate) polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
+    pub polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
     // keep codeword index w.r.t circuit index
     pub circuit_codeword_index: BTreeMap<usize, usize>,
 }
@@ -298,13 +298,13 @@ pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) commits: Vec<Digest<E>>,
-    pub(crate) final_message: Vec<Vec<E>>,
-    pub(crate) query_opening_proof: QueryOpeningProofs<E>,
-    pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
+    pub commits: Vec<Digest<E>>,
+    pub final_message: Vec<Vec<E>>,
+    pub query_opening_proof: QueryOpeningProofs<E>,
+    pub sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     // vec![witness, fixed], where fixed is optional
-    pub(crate) trivial_proof: Option<TrivialProof<E>>,
-    pub(crate) pow_witness: E::BaseField,
+    pub trivial_proof: Option<TrivialProof<E>>,
+    pub pow_witness: E::BaseField,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
