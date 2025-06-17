@@ -104,6 +104,11 @@ pub trait TowerProver<PB: ProverBackend> {
     ) -> (Point<PB::E>, TowerProofs<PB::E>);
 }
 
+pub struct MainSumcheckEvals<E: ExtensionField> {
+    pub wits_in_evals: Vec<E>,
+    pub fixed_in_evals: Vec<E>,
+}
+
 pub trait MainSumcheckProver<PB: ProverBackend> {
     // this prover aims to achieve two goals:
     // 1. the validity of last layer in the tower tree is reduced to
@@ -119,7 +124,14 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
         cs: &ConstraintSystem<PB::E>,
         challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
-    ) -> Result<(Point<PB::E>, Option<Vec<IOPProverMessage<PB::E>>>), ZKVMError>;
+    ) -> Result<
+        (
+            Point<PB::E>,
+            MainSumcheckEvals<PB::E>,
+            Option<Vec<IOPProverMessage<PB::E>>>,
+        ),
+        ZKVMError,
+    >;
 }
 
 pub trait OpeningProver<PB: ProverBackend> {

@@ -96,6 +96,28 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         .into_inner()
     }
 
+    pub fn to_virtual_polys_with_monimial_terms(
+        self,
+        monimial_terms: MonomialTermsExpr<'a, E>,
+    ) -> VirtualPolynomials<'a, E> {
+        let mles = self
+            .mle_ptr_registry
+            .into_values()
+            .collect::<Vec<_>>() // collect into Vec<&(usize, &ArcMultilinearExtension)>
+            .into_iter()
+            .sorted_by_key(|(witin_id, _)| *witin_id) // sort by witin_id
+            .map(|(_, mle)| mle) // extract &ArcMultilinearExtension
+            .collect::<Vec<_>>();
+
+        let mut virtual_polys =
+            VirtualPolynomials::<E>::new(self.num_threads, self.max_num_variables);
+        // register mles to assure index matching the arc_poly order
+        virtual_polys.register_mles(mles);
+
+        virtual_polys.add_monomial_terms(monimial_terms);
+        virtual_polys
+    }
+
     pub fn to_virtual_polys(
         self,
         expressions: &[Expression<E>],
