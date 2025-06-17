@@ -119,14 +119,11 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                         let mut prover_transcript = Transcript::new(b"test");
                         let (_, fs) = { prepare_input(nv) };
 
-                        let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
-                            threads,
-                            nv,
-                            vec![Term {
+                        let virtual_poly_v2 =
+                            VirtualPolynomials::new_from_monimials(threads, nv, vec![Term {
                                 scalar: Either::Right(E::ONE),
                                 product: fs.iter().map(Either::Left).collect_vec(),
-                            }],
-                        );
+                            }]);
                         let instant = std::time::Instant::now();
                         let (_sumcheck_proof_v2, _) =
                             IOPProverState::<E>::prove(virtual_poly_v2, &mut prover_transcript);
@@ -160,14 +157,11 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                             })
                             .collect_vec();
 
-                        let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
-                            threads,
-                            nv,
-                            vec![Term {
+                        let virtual_poly_v2 =
+                            VirtualPolynomials::new_from_monimials(threads, nv, vec![Term {
                                 scalar: Either::Right(E::ONE),
                                 product: fs.iter().map(Either::Left).collect_vec(),
-                            }],
-                        );
+                            }]);
                         let instant = std::time::Instant::now();
                         let (_sumcheck_proof_v2, _) =
                             IOPProverState::<E>::prove(virtual_poly_v2, &mut prover_transcript);
@@ -201,14 +195,11 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                             })
                             .collect_vec();
 
-                        let virtual_poly_v2 = VirtualPolynomials::new_from_monimials(
-                            threads,
-                            nv,
-                            vec![Term {
+                        let virtual_poly_v2 =
+                            VirtualPolynomials::new_from_monimials(threads, nv, vec![Term {
                                 scalar: Either::Right(E::ONE),
                                 product: fs.iter_mut().map(Either::Right).collect_vec(),
-                            }],
-                        );
+                            }]);
                         let instant = std::time::Instant::now();
                         let (_sumcheck_proof_v2, _) =
                             IOPProverState::<E>::prove(virtual_poly_v2, &mut prover_transcript);

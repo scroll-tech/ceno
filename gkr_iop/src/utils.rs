@@ -1,8 +1,10 @@
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use multilinear_extensions::{
+    Expression,
     mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
+    virtual_poly::{build_eq_x_r_vec, eq_eval},
     wit_infer_by_expr,
 };
 use p3_field::FieldAlgebra;
@@ -68,15 +70,87 @@ where
         .collect::<Vec<_>>()
 }
 
+pub fn extend_exprs_with_rotation<E: ExtensionField>(
+    layer: &Layer<E>,
+    alpha_pows: &[Expression<E>],
+) -> Vec<Expression<E>> {
+    let mut alpha_pows_iter = alpha_pows.iter();
+    let mut expr_iter = layer.exprs.iter();
+    let mut zero_check_exprs = Vec::with_capacity(layer.expr_evals.len());
+    for (eq_expr, out_evals) in layer.expr_evals.iter() {
+        let group_length = out_evals.len();
+        let zero_check_expr = expr_iter
+            .by_ref()
+            .take(group_length)
+            .cloned()
+            .zip_eq(alpha_pows_iter.by_ref().take(group_length))
+            .map(|(expr, alpha)| alpha * expr)
+            .sum::<Expression<E>>();
+        zero_check_exprs.push(eq_expr.clone().unwrap() * zero_check_expr);
+    }
+
+    // prepare rotation expr
+    let (rotation_eq, rotation_exprs) = &layer.rotation_exprs;
+    if rotation_eq.is_none() {
+        return zero_check_exprs;
+    }
+
+    let left_rotation_expr: Expression<E> = izip!(
+        rotation_exprs.iter(),
+        alpha_pows_iter.by_ref().take(rotation_exprs.len())
+    )
+    .map(|((rotate_expr, _), alpha)| {
+        assert!(matches!(rotate_expr, Expression::WitIn(_)));
+        alpha * rotate_expr
+    })
+    .sum();
+    let right_rotation_expr: Expression<E> = izip!(
+        rotation_exprs.iter(),
+        alpha_pows_iter.by_ref().take(rotation_exprs.len())
+    )
+    .map(|((rotate_expr, _), alpha)| {
+        assert!(matches!(rotate_expr, Expression::WitIn(_)));
+        alpha * rotate_expr
+    })
+    .sum();
+    let rotation_expr: Expression<E> = izip!(
+        rotation_exprs.iter(),
+        alpha_pows_iter.by_ref().take(rotation_exprs.len())
+    )
+    .map(|((_, expr), alpha)| {
+        assert!(matches!(expr, Expression::WitIn(_)));
+        alpha * expr
+    })
+    .sum();
+
+    // push rotation expr to zerocheck expr
+    if let Some(
+        [
+            rotation_left_eq_expr,
+            rotation_right_eq_expr,
+            rotation_eq_expr,
+        ],
+    ) = rotation_eq.as_ref()
+    {
+        // add rotation left expr
+        zero_check_exprs.push(rotation_left_eq_expr * left_rotation_expr);
+        // add rotation right expr
+        zero_check_exprs.push(rotation_right_eq_expr * right_rotation_expr);
+        // add target expr
+        zero_check_exprs.push(rotation_eq_expr * rotation_expr);
+    }
+    assert!(expr_iter.next().is_none() && alpha_pows_iter.next().is_none());
+
+    zero_check_exprs
+}
+
 pub fn rotation_next_base_mle<'a, E: ExtensionField>(
+    bh: &BooleanHypercube,
     mle: &ArcMultilinearExtension<'a, E>,
-    cyclic_subgroup_size: usize,
     cyclic_group_log2_size: usize,
 ) -> MultilinearExtension<'a, E> {
     let cyclic_group_size = 1 << cyclic_group_log2_size;
-    assert!(cyclic_subgroup_size < cyclic_group_size);
-    let bh = BooleanHypercube::new(cyclic_group_log2_size);
-    let rotation_index = bh.into_iter().take(cyclic_subgroup_size + 1).collect_vec();
+    let rotation_index = bh.into_iter().take(cyclic_group_size + 1).collect_vec();
     let mut rotated_mle_evals = Vec::with_capacity(mle.evaluations().len());
     rotated_mle_evals.par_extend(
         (0..mle.evaluations().len())
@@ -94,6 +168,8 @@ pub fn rotation_next_base_mle<'a, E: ExtensionField>(
                 rotate_chunk[last] = original_chunk[first]
             }
 
+            rotate_chunk[0] = original_chunk[0];
+
             for i in (0..rotation_index.len() - 1).rev() {
                 let to = rotation_index[i] as usize;
                 let from = rotation_index[i + 1] as usize;
@@ -104,6 +180,8 @@ pub fn rotation_next_base_mle<'a, E: ExtensionField>(
 }
 
 pub fn rotation_selector<'a, E: ExtensionField>(
+    bh: &BooleanHypercube,
+    eq: &[E],
     cyclic_subgroup_size: usize,
     cyclic_group_log2_size: usize,
     total_len: usize,
@@ -111,26 +189,52 @@ pub fn rotation_selector<'a, E: ExtensionField>(
     assert!(total_len.is_power_of_two());
     let cyclic_group_size = 1 << cyclic_group_log2_size;
     assert!(cyclic_subgroup_size <= cyclic_group_size);
-    let bh = BooleanHypercube::new(cyclic_group_log2_size);
     let rotation_index = bh.into_iter().take(cyclic_subgroup_size).collect_vec();
     let mut rotated_mle_evals = Vec::with_capacity(total_len);
-    rotated_mle_evals.par_extend((0..total_len).into_par_iter().map(|_| E::BaseField::ZERO));
+    rotated_mle_evals.par_extend((0..total_len).into_par_iter().map(|_| E::ZERO));
     rotated_mle_evals
         .par_chunks_mut(cyclic_group_size)
-        .for_each(|rotate_chunk| {
+        .zip_eq(eq.par_chunks(cyclic_group_size))
+        .for_each(|(rotate_chunk, eq_chunk)| {
             for i in (0..rotation_index.len()).rev() {
                 let to = rotation_index[i] as usize;
-                rotate_chunk[to] = E::BaseField::ONE;
+                rotate_chunk[to] = eq_chunk[to];
             }
         });
     MultilinearExtension::from_evaluation_vec_smart(ceil_log2(total_len), rotated_mle_evals)
+}
+
+/// sel(rx)
+/// = (\sum_{b = 0}^{cyclic_subgroup_size - 1} eq(out_point[..cyclic_group_log2_size], b) * eq(in_point[..cyclic_group_log2_size], b))
+///     * \prod_{k = cyclic_group_log2_size}^{n - 1} eq(out_point[k], in_point[k])
+pub fn rotation_selector_eval<E: ExtensionField>(
+    bh: &BooleanHypercube,
+    out_point: &[E],
+    in_point: &[E],
+    cyclic_subgroup_size: usize,
+    cyclic_group_log2_size: usize,
+) -> E {
+    let cyclic_group_size = 1 << cyclic_group_log2_size;
+    assert!(cyclic_subgroup_size <= cyclic_group_size);
+    let rotation_index = bh.into_iter().take(cyclic_subgroup_size).collect_vec();
+    let out_subgroup_eq = build_eq_x_r_vec(&out_point[..cyclic_group_log2_size]);
+    let in_subgroup_eq = build_eq_x_r_vec(&in_point[..cyclic_group_log2_size]);
+    let mut eval = E::ZERO;
+    for b in rotation_index {
+        let b = b as usize;
+        eval += out_subgroup_eq[b] * in_subgroup_eq[b];
+    }
+    eval * eq_eval(
+        &out_point[cyclic_group_log2_size..],
+        &in_point[cyclic_group_log2_size..],
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use p3_goldilocks::Goldilocks;
 
     use super::*;
@@ -145,40 +249,29 @@ mod tests {
     }
 
     #[test]
-    fn test_rotation_next_non_cyclic() {
+    fn test_rotation_next_base_mle_eval() {
         type E = GoldilocksExt2;
-        let mle = make_mle::<E>((0..32u64).map(Goldilocks::from_canonical_u64).collect_vec());
-        let full_rotated = rotation_next_base_mle(&mle, 31, 5);
-        assert_eq!(
-            full_rotated
-                .get_base_field_vec()
-                .iter()
-                .filter(|v| **v == Goldilocks::ZERO)
-                .count(),
-            1 // only position 0 not rotate
+        let bh = BooleanHypercube::new(5);
+        let poly = make_mle::<E>(
+            (0..128u64)
+                .map(Goldilocks::from_canonical_u64)
+                .collect_vec(),
         );
+        let rotated = rotation_next_base_mle(&bh, &poly, 5);
 
-        let partial_rotate = rotation_next_base_mle(&mle, 23, 5);
+        let mut rng = rand::thread_rng();
+        let point: Vec<_> = (0..7).map(|_| E::random(&mut rng)).collect();
+        let (left_point, right_point) = bh.get_rotation_points(&point);
+        let rotated_eval = rotated.evaluate(&point);
+        let left_eval = poly.evaluate(&left_point);
+        let right_eval = poly.evaluate(&right_point);
         assert_eq!(
-            partial_rotate
-                .get_base_field_vec()
-                .iter()
-                .filter(|v| **v == Goldilocks::ZERO)
-                .count(),
-            9,
+            rotated_eval,
+            (E::ONE - point[4]) * left_eval + point[4] * right_eval
         );
-    }
-
-    #[test]
-    fn test_rotation_selector() {
-        type E = GoldilocksExt2;
-        let sel = rotation_selector::<E>(23, 5, 32);
         assert_eq!(
-            sel.get_base_field_vec()
-                .iter()
-                .filter(|v| **v == Goldilocks::ZERO)
-                .count(),
-            9,
+            right_eval,
+            bh.get_rotation_right_eval_from_left(rotated_eval, left_eval, &point)
         );
     }
 }

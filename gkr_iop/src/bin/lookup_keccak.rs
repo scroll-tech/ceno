@@ -69,7 +69,6 @@ fn main() {
         .map(|_| std::array::from_fn(|_| rng.gen()))
         .collect_vec();
     let circuit_setup = setup_keccak_lookup_circuit();
-    let proof =
-        run_faster_keccakf::<E>(circuit_setup, states, false, false).expect("generate proof");
+    let proof = run_faster_keccakf::<E>(circuit_setup, states, true, true).expect("generate proof");
     tracing::info!("lookup keccak proof stat: {}", proof);
 }

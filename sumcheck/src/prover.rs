@@ -510,13 +510,10 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         // return empty proof when target polymonial is constant
         if num_variables == 0 {
-            return (
-                IOPProof::default(),
-                IOPProverState {
-                    poly,
-                    ..Default::default()
-                },
-            );
+            return (IOPProof::default(), IOPProverState {
+                poly,
+                ..Default::default()
+            });
         }
         let start = entered_span!("sum check prove");
 
@@ -711,7 +708,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     }
 }
 
-impl<'a, E: ExtensionField> IOPProverState<'a, E> {
+impl<E: ExtensionField> IOPProverState<'_, E> {
     pub fn push_challenges(&mut self, challenge: Vec<Challenge<E>>) {
         self.challenges.extend(challenge)
     }

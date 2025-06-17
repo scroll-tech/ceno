@@ -934,6 +934,7 @@ macro_rules! op_mle {
             }
             $crate::mle::FieldType::Ext(a) => {
                 let $tmp_a = &a[..];
+                #[allow(clippy::useless_conversion)]
                 $op
             }
             _ => unreachable!(),

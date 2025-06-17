@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use crate::gkr::layer::zerocheck_layer::RotationProof;
 use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -23,26 +22,36 @@ use super::{Layer, LayerWitness, linear_layer::LayerClaims};
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
+pub struct LayerProof<E: ExtensionField> {
+    pub rotation: Option<SumcheckLayerProof<E>>,
+    pub main: SumcheckLayerProof<E>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct SumcheckLayerProof<E: ExtensionField> {
     pub proof: IOPProof<E>,
-    pub rotation_proof: Option<RotationProof<E>>,
     pub evals: Vec<E>,
 }
+
 pub trait SumcheckLayer<E: ExtensionField> {
     #[allow(clippy::too_many_arguments)]
-    fn prove<'a>(
+    fn prove(
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        wit: LayerWitness<'a, E>,
+        wit: LayerWitness<'_, E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E>;
+    ) -> LayerProof<E>;
 
     fn verify(
         &self,
         max_num_variables: usize,
-        proof: SumcheckLayerProof<E>,
+        proof: LayerProof<E>,
         sigma: &E,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
@@ -50,18 +59,18 @@ pub trait SumcheckLayer<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
-    fn prove<'a>(
+    fn prove(
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        wit: LayerWitness<'a, E>,
+        wit: LayerWitness<'_, E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E> {
+    ) -> LayerProof<E> {
         let builder = VirtualPolynomialsBuilder::new_with_mles(
             num_threads,
             max_num_variables,
-            wit.bases
+            wit.wits
                 .iter()
                 .map(|mle| Either::Left(mle.as_ref()))
                 .collect_vec(),
@@ -70,24 +79,29 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
             builder.to_virtual_polys(&[self.exprs[0].clone()], challenges),
             transcript,
         );
-        SumcheckLayerProof {
-            proof,
-            rotation_proof: None,
-            evals: prover_state.get_mle_flatten_final_evaluations(),
+        LayerProof {
+            main: SumcheckLayerProof {
+                proof,
+                evals: prover_state.get_mle_flatten_final_evaluations(),
+            },
+            rotation: None,
         }
     }
 
     fn verify(
         &self,
         max_num_variables: usize,
-        proof: SumcheckLayerProof<E>,
+        proof: LayerProof<E>,
         sigma: &E,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>> {
-        let SumcheckLayerProof {
-            proof: IOPProof { proofs, .. },
-            evals,
+        let LayerProof {
+            main:
+                SumcheckLayerProof {
+                    proof: IOPProof { proofs, .. },
+                    evals,
+                },
             ..
         } = proof;
 
@@ -114,12 +128,7 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
         if got_claim != expected_evaluation {
             return Err(BackendError::LayerVerificationFailed(
                 "sumcheck verify failed".to_string(),
-                VerifierError::ClaimNotMatch(
-                    self.exprs[0].clone(),
-                    expected_evaluation,
-                    got_claim,
-                    self.expr_names[0].clone(),
-                ),
+                VerifierError::ClaimNotMatch(expected_evaluation, got_claim),
             ));
         }
 

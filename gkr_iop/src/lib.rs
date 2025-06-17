@@ -1,11 +1,15 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use chip::Chip;
 use evaluation::EvalExpression;
 use ff_ext::ExtensionField;
 use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
 use itertools::Itertools;
-use multilinear_extensions::mle::ArcMultilinearExtension;
+use multilinear_extensions::{
+    mle::{ArcMultilinearExtension, IntoMLE},
+    op_mle,
+    utils::eval_by_expr_constant,
+};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use utils::infer_layer_witness;
@@ -69,7 +73,7 @@ where
             .collect_vec();
 
         layer_wits.push(LayerWitness::new(phase1_witness_group.clone()));
-        let mut witness_mle_flattern = vec![None; circuit.n_evaluations];
+        let mut witness_mle_flatten = vec![None; circuit.n_evaluations];
 
         // initialize a vector to store the final outputs of the GKR circuit.
         // these outputs correspond to the evaluations at the last layer of the circuit.
@@ -77,32 +81,57 @@ where
         // the number of expected outputs is given by `circuit.n_evaluations`.
         let mut gkr_out_well_order = Vec::with_capacity(circuit.n_evaluations);
 
-        // set input to witness_mle_flattern via first layer in_eval_expr
-        if let Some(first_layer) = circuit.layers.last() {
-            first_layer
-                .in_eval_expr
-                .iter()
-                .enumerate()
-                .for_each(|(index, eval_expr)| match eval_expr {
-                    EvalExpression::Single(witin) => {
-                        witness_mle_flattern[*witin] = Some(phase1_witness_group[index].clone());
+        // set input to witness_mle_flatten via first layer in_eval_expr
+        let mut phase1_wit_map = HashMap::new();
+        circuit
+            .openings
+            .iter()
+            .for_each(|(phase1_wit_id, eval)| match eval {
+                EvalExpression::Zero => {}
+                EvalExpression::Single(eval_id) | EvalExpression::Linear(eval_id, _, _) => {
+                    if !phase1_wit_map.contains_key(eval_id) {
+                        phase1_wit_map.insert(*eval_id, (*phase1_wit_id, eval));
                     }
-                    other => unimplemented!("{:?}", other),
-                })
-        }
+                }
+                EvalExpression::Partition(_, _) => unimplemented!("unsupported"),
+            });
 
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
             tracing::info!("generating input {i} layer with layer name {}", layer.name);
             let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
             // process in_evals to prepare layer witness
+            // This should assume the input of the first layer is the phase1 witness of the circuit.
             let current_layer_wits = layer
                 .in_eval_expr
                 .iter()
                 .map(|eval| match eval {
-                    EvalExpression::Single(witin) => witness_mle_flattern[*witin]
-                        .clone()
-                        .expect("witness must exist"),
+                    EvalExpression::Single(eval_id) => {
+                        if let Some((phase1_wit_id, eval)) = phase1_wit_map.get(eval_id) {
+                            match eval {
+                                EvalExpression::Single(_) => {
+                                    witness_mle_flatten[*eval_id] =
+                                        Some(phase1_witness_group[*phase1_wit_id].clone())
+                                }
+                                EvalExpression::Linear(_, a, b) => {
+                                    let a_inv = eval_by_expr_constant(challenges, a).inverse();
+                                    let b = eval_by_expr_constant(challenges, b);
+                                    let f = &phase1_witness_group[*phase1_wit_id];
+                                    let new_wit = op_mle!(|f| f
+                                        .iter()
+                                        .map(|x| a_inv * (-b + *x))
+                                        .collect_vec()
+                                        .into_mle()
+                                        .into());
+                                    witness_mle_flatten[*eval_id] = Some(new_wit);
+                                }
+                                _ => unimplemented!("unsupported"),
+                            }
+                        }
+                        witness_mle_flatten[*eval_id]
+                            .clone()
+                            .expect("witness must exist")
+                    }
                     other => unimplemented!("{:?}", other),
                 })
                 .collect_vec();
@@ -119,11 +148,22 @@ where
                 .zip_eq(&current_layer_output)
                 .for_each(|(out_eval, out_mle)| match out_eval {
                     EvalExpression::Single(out) => {
-                        witness_mle_flattern[*out] = Some(out_mle.clone());
+                        witness_mle_flatten[*out] = Some(out_mle.clone());
                         // last layer we record gkr circuit output
                         if i == circuit.layers.len() - 1 {
                             gkr_out_well_order.push((*out, out_mle.clone()));
                         }
+                    }
+                    EvalExpression::Linear(out, a, b) => {
+                        let a_inv = eval_by_expr_constant(challenges, a).inverse();
+                        let b = eval_by_expr_constant(challenges, b);
+                        let new_wit = op_mle!(|out_mle| out_mle
+                            .iter()
+                            .map(|x| a_inv * (-b + *x))
+                            .collect_vec()
+                            .into_mle()
+                            .into());
+                        witness_mle_flatten[*out] = Some(new_wit);
                     }
                     EvalExpression::Zero => { // zero expression
                         // do nothing on zero expression
@@ -145,7 +185,7 @@ where
         (
             GKRCircuitWitness { layers: layer_wits },
             GKRCircuitOutput(LayerWitness {
-                bases: gkr_out_well_order,
+                wits: gkr_out_well_order,
                 ..Default::default()
             }),
         )

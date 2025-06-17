@@ -2,7 +2,7 @@ use core::fmt;
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
-use layer::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
+use layer::{Layer, LayerWitness, sumcheck_layer::LayerProof};
 use multilinear_extensions::mle::{Point, PointAndEval};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck::macros::{entered_span, exit_span};
@@ -47,7 +47,7 @@ pub struct GKRProverOutput<E: ExtensionField, Evaluation> {
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct GKRProof<E: ExtensionField>(pub Vec<SumcheckLayerProof<E>>);
+pub struct GKRProof<E: ExtensionField>(pub Vec<LayerProof<E>>);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(

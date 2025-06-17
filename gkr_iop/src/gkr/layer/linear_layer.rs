@@ -4,9 +4,9 @@ use multilinear_extensions::{mle::Point, utils::eval_by_expr_with_instance};
 use sumcheck::structs::{IOPProof, VerifierError};
 use transcript::Transcript;
 
-use crate::error::BackendError;
+use crate::{error::BackendError, gkr::layer::sumcheck_layer::SumcheckLayerProof};
 
-use super::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
+use super::{Layer, LayerWitness, sumcheck_layer::LayerProof};
 
 pub struct LayerClaims<E: ExtensionField> {
     pub in_point: Point<E>,
@@ -18,11 +18,11 @@ pub trait LinearLayer<E: ExtensionField> {
         wit: LayerWitness<E>,
         out_point: &Point<E>,
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E>;
+    ) -> LayerProof<E>;
 
     fn verify(
         &self,
-        proof: SumcheckLayerProof<E>,
+        proof: LayerProof<E>,
         sigmas: &[E],
         out_point: &Point<E>,
         challenges: &[E],
@@ -36,42 +36,47 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
         wit: LayerWitness<E>,
         out_point: &Point<E>,
         transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E> {
+    ) -> LayerProof<E> {
         let evals = wit
-            .bases
+            .wits
             .iter()
             .map(|base| base.evaluate(out_point))
             .collect_vec();
 
         transcript.append_field_element_exts(&evals);
 
-        SumcheckLayerProof {
-            evals,
-            rotation_proof: None,
-            proof: IOPProof { proofs: vec![] },
+        LayerProof {
+            main: SumcheckLayerProof {
+                proof: IOPProof { proofs: vec![] },
+                evals,
+            },
+            rotation: None,
         }
     }
 
     fn verify(
         &self,
-        proof: SumcheckLayerProof<E>,
+        proof: LayerProof<E>,
         sigmas: &[E],
         out_point: &Point<E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>> {
-        let SumcheckLayerProof { evals, .. } = proof;
+        let LayerProof {
+            main: SumcheckLayerProof { evals, .. },
+            ..
+        } = proof;
+
         transcript.append_field_element_exts(&evals);
 
-        for ((sigma, expr), expr_name) in sigmas.iter().zip_eq(&self.exprs).zip_eq(&self.expr_names)
-        {
+        for (sigma, expr) in sigmas.iter().zip_eq(&self.exprs) {
             let got = eval_by_expr_with_instance(&[], &evals, &[], &[], challenges, expr)
                 .right()
                 .unwrap();
             if *sigma != got {
                 return Err(BackendError::LayerVerificationFailed(
                     self.name.clone(),
-                    VerifierError::<E>::ClaimNotMatch(expr.clone(), *sigma, got, expr_name.clone()),
+                    VerifierError::<E>::ClaimNotMatch(*sigma, got),
                 ));
             }
         }
