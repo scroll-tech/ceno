@@ -975,20 +975,21 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
         &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
         &|scalar| {
-            let scalar: ArcMultilinearExtension<E> =
-                MultilinearExtension::from_evaluations_vec(0, vec![
-                    scalar.left().expect("do not support extension field"),
-                ])
-                .into();
+            let scalar: ArcMultilinearExtension<E> = MultilinearExtension::from_evaluations_vec(
+                0,
+                vec![scalar.left().expect("do not support extension field")],
+            )
+            .into();
             scalar
         },
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power
             let challenge = challenges[challenge_id as usize];
             let challenge: ArcMultilinearExtension<E> =
-                MultilinearExtension::from_evaluations_ext_vec(0, vec![
-                    challenge.exp_u64(pow as u64) * scalar + offset,
-                ])
+                MultilinearExtension::from_evaluations_ext_vec(
+                    0,
+                    vec![challenge.exp_u64(pow as u64) * scalar + offset],
+                )
                 .into();
             challenge
         },
