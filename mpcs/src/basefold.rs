@@ -763,7 +763,35 @@ where
                 proof
                     .query_opening_proof
                     .iter()
-                    .map(|x| { format!("QueryOpeningProof {{}}") })
+                    .map(|x| {
+                        format!("""QueryOpeningProof {{
+    witin_base_proof: BatchOpening {{
+      opened_values: vec![
+        {}
+      ],
+      opening_proof: {},
+    }},
+    fixed_base_proof: {},
+    commit_phase_openings: vec![
+      {}
+    ],
+  }}""",
+                            x.witin_base_proof.opened_values
+                             .iter()
+                             .map(|x| format!(
+                                "vec![\n      {}\n    ]",
+                                x.iter()
+                                 .map(|x| {
+                                     format!(
+                                         "BabyBearExt4::from_bases(&{:?})",
+                                         x.as_basis_coefficients_slice()
+                                     )
+                                 })
+                                 .join(",\n      ")
+                             ))
+                             .join(",\n      "),
+                        )
+                    })
                     .join(",\n    ")
             );
 
