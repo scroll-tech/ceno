@@ -705,6 +705,26 @@ where
 
         #[cfg(feature = "output-test-data")]
         {
+            let query_phase_verifier_input = QueryPhaseVerifierInput {
+                max_num_var,
+                indices: queries.clone(),
+                final_message: final_message.clone(),
+                batch_coeffs: batch_coeffs.clone(),
+                queries: proof.query_opening_proof.clone(),
+                fixed_comm: fixed_comms.clone().cloned(),
+                witin_comm: witin_comms.clone(),
+                circuit_meta: circuit_metas.clone(),
+                commits: proof.commits.clone(),
+                fold_challenges: fold_challenges.clone(),
+                sumcheck_messages: sumcheck_messages.clone(),
+                point_evals: point_evals.clone(),
+            };
+            // Serialize query_phase_verifier_input with bincode and
+            // save to file
+            use std::fs::File;
+            let filename = "query_phase_verifier_input.bin";
+            let f = File::create(filename).unwrap();
+            bincode::serialize_into(f, &query_phase_verifier_input).unwrap();
             println!("let input = QueryPhaseVerifierInput {{");
 
             // Output the rust code for populating the query phase
@@ -713,7 +733,6 @@ where
             // pub struct QueryPhaseVerifierInput {
             //     pub max_num_var: usize,
             //     pub indices: Vec<usize>,
-            //     pub vp: RSCodeVerifierParameters,
             //     pub final_message: Vec<Vec<E>>,
             //     pub batch_coeffs: Vec<E>,
             //     pub queries: QueryOpeningProofs,
@@ -758,42 +777,42 @@ where
                     })
                     .join(",\n    ")
             );
-            println!(
-                "  queries: vec![\n    {}\n  ]",
-                proof
-                    .query_opening_proof
-                    .iter()
-                    .map(|x| {
-                        format!("""QueryOpeningProof {{
-    witin_base_proof: BatchOpening {{
-      opened_values: vec![
-        {}
-      ],
-      opening_proof: {},
-    }},
-    fixed_base_proof: {},
-    commit_phase_openings: vec![
-      {}
-    ],
-  }}""",
-                            x.witin_base_proof.opened_values
-                             .iter()
-                             .map(|x| format!(
-                                "vec![\n      {}\n    ]",
-                                x.iter()
-                                 .map(|x| {
-                                     format!(
-                                         "BabyBearExt4::from_bases(&{:?})",
-                                         x.as_basis_coefficients_slice()
-                                     )
-                                 })
-                                 .join(",\n      ")
-                             ))
-                             .join(",\n      "),
-                        )
-                    })
-                    .join(",\n    ")
-            );
+            //             println!(
+            //                 "  queries: vec![\n    {}\n  ]",
+            //                 proof
+            //                     .query_opening_proof
+            //                     .iter()
+            //                     .map(|x| {
+            //                         format!("""QueryOpeningProof {{
+            //     witin_base_proof: BatchOpening {{
+            //       opened_values: vec![
+            //         {}
+            //       ],
+            //       opening_proof: {},
+            //     }},
+            //     fixed_base_proof: {},
+            //     commit_phase_openings: vec![
+            //       {}
+            //     ],
+            //   }}""",
+            //                             x.witin_base_proof.opened_values
+            //                              .iter()
+            //                              .map(|x| format!(
+            //                                 "vec![\n      {}\n    ]",
+            //                                 x.iter()
+            //                                  .map(|x| {
+            //                                      format!(
+            //                                          "BabyBearExt4::from_bases(&{:?})",
+            //                                          x.as_basis_coefficients_slice()
+            //                                      )
+            //                                  })
+            //                                  .join(",\n      ")
+            //                              ))
+            //                              .join(",\n      "),
+            //                         )
+            //                     })
+            //                     .join(",\n    ")
+            //             );
 
             println!("}}");
         }
@@ -824,6 +843,27 @@ where
     ) -> Vec<ArcMultilinearExtension<'static, E>> {
         commitment.polys.values().flatten().cloned().collect_vec()
     }
+}
+
+#[cfg(feature = "output-test-data")]
+use crate::basefold::structure::QueryOpeningProofs;
+#[cfg(feature = "output-test-data")]
+use sumcheck::structs::IOPProverMessage;
+#[cfg(feature = "output-test-data")]
+#[derive(Serialize)]
+pub struct QueryPhaseVerifierInput<E: ExtensionField> {
+    pub max_num_var: usize,
+    pub indices: Vec<usize>,
+    pub final_message: Vec<Vec<E>>,
+    pub batch_coeffs: Vec<E>,
+    pub queries: QueryOpeningProofs<E>,
+    pub fixed_comm: Option<BasefoldCommitment<E>>,
+    pub witin_comm: BasefoldCommitment<E>,
+    pub circuit_meta: Vec<CircuitIndexMeta>,
+    pub commits: Vec<Digest<E>>,
+    pub fold_challenges: Vec<E>,
+    pub sumcheck_messages: Vec<IOPProverMessage<E>>,
+    pub point_evals: Vec<(Vec<E>, Vec<E>)>,
 }
 
 #[cfg(test)]

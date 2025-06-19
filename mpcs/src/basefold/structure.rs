@@ -321,7 +321,7 @@ where
     pub(crate) final_message: Vec<Vec<E>>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize)]
 pub(crate) struct CircuitIndexMeta {
     pub witin_num_vars: usize,
     pub witin_num_polys: usize,
