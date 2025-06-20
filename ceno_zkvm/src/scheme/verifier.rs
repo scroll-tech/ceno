@@ -12,7 +12,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use std::collections::HashSet;
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState},
@@ -187,7 +187,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let circuit_vk = circuit_vks[*index];
             let name = circuit_names[*index];
             if let Some(opcode_proof) = vm_proof.opcode_proofs.get(index) {
-                transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
+                transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
                 let input_opening_point = self.verify_opcode_proof(
                     name,
                     circuit_vk,
@@ -230,7 +230,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     logup_sum += p2 * q2.inverse();
                 }
             } else if let Some(table_proof) = vm_proof.table_proofs.get(index) {
-                transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
+                transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
 
                 let input_opening_point = self.verify_table_proof(
                     name,
@@ -276,7 +276,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 unreachable!("respective proof of index {} should exist", index)
             }
         }
-        logup_sum -= E::from_u64(dummy_table_item_multiplicity as u64) * dummy_table_item.inverse();
+        logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
+            * dummy_table_item.inverse();
 
         // check logup relation across all proofs
         if logup_sum != E::ZERO {

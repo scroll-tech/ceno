@@ -9,7 +9,7 @@ use crate::{ExtensionField, SmallField};
 pub trait FieldChallengerExt<F: PoseidonField>: FieldChallenger<F> {
     fn observe_ext_slice<E: ExtensionField<BaseField = F>>(&mut self, exts: &[E]) {
         exts.iter()
-            .for_each(|ext| self.observe_slice(ext.as_basis_coefficients_slice()));
+            .for_each(|ext| self.observe_slice(ext.as_base_slice()));
     }
 
     fn sample_ext_vec<E: ExtensionField<BaseField = F>>(&mut self, n: usize) -> Vec<E> {

@@ -114,8 +114,6 @@ pub trait ExtensionField:
     const DEGREE: usize;
     const MULTIPLICATIVE_GENERATOR: Self;
     const TWO_ADICITY: usize;
-    const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField;
-    const TWO_ADIC_ROOT_OF_UNITY: Self;
     const NONRESIDUE: Self::BaseField;
 
     type BaseField: SmallField
@@ -126,7 +124,7 @@ pub trait ExtensionField:
         + PoseidonField
         + DeserializeOwned;
 
-    fn from_base(base: &Self::BaseField) -> Self {
+    fn from_ref_base(base: &Self::BaseField) -> Self {
         Self::from_base_iter(
             iter::once(*base).chain(iter::repeat_n(Self::BaseField::ZERO, Self::DEGREE - 1)),
         )

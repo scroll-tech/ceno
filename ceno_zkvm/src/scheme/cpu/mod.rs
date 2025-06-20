@@ -28,7 +28,7 @@ use multilinear_extensions::{
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::{
-    field::{PrimeCharacteristicRing, TwoAdicField},
+    field::{FieldAlgebra, TwoAdicField},
     matrix::dense::RowMajorMatrix,
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};

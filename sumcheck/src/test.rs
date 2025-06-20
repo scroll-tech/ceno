@@ -12,7 +12,7 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::{Rng, thread_rng};
 use transcript::{BasicTranscript, Transcript};
 

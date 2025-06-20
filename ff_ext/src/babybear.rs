@@ -195,11 +195,6 @@ pub mod impl_babybear {
         const DEGREE: usize = 4;
         const MULTIPLICATIVE_GENERATOR: Self = <BabyBearExt4 as Field>::GENERATOR;
         const TWO_ADICITY: usize = BabyBear::TWO_ADICITY;
-        // Passing two-adacity itself to this function will get the root of unity
-        // with the largest order, i.e., order = 2^two-adacity.
-        const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField = BabyBear::new(0x78000000);
-        const TWO_ADIC_ROOT_OF_UNITY: Self =
-            BinomialExtensionField::from_bases(&[BabyBear::new(0x78000000); 4]);
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <BabyBear as BinomiallyExtendable<4>>::W;

@@ -16,7 +16,7 @@ use multilinear_extensions::{
     mle::{MultilinearExtension, Point, PointAndEval},
     util::ceil_log2,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3_field::FieldAlgebra;
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
@@ -64,7 +64,7 @@ fn not_expr<E: ExtensionField>(a: Expression<E>) -> Expression<E> {
 }
 
 fn xor_expr<E: ExtensionField>(a: Expression<E>, b: Expression<E>) -> Expression<E> {
-    a.clone() + b.clone() - E::BaseField::from_u32(2).expr() * a * b
+    a.clone() + b.clone() - E::BaseField::from_canonical_u32(2).expr() * a * b
 }
 
 fn zero_expr<E: ExtensionField>() -> Expression<E> {
@@ -152,7 +152,7 @@ fn iota_expr<E: ExtensionField>(
     if x > 0 || y > 0 {
         bits[index].clone()
     } else {
-        let round_bit = E::BaseField::from_u64((round_value >> index) & 1).expr();
+        let round_bit = E::BaseField::from_canonical_u64((round_value >> index) & 1).expr();
         xor_expr(bits[from_xyz(0, 0, z)].clone(), round_bit)
     }
 }

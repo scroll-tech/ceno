@@ -27,7 +27,7 @@ use crate::{
         AdditiveArray, AdditiveVec, ceil_log2, merge_sumcheck_polys, merge_sumcheck_prover_state,
     },
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 
 impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.

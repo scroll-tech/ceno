@@ -5,7 +5,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     wit_infer_by_expr,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3_field::FieldAlgebra;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,

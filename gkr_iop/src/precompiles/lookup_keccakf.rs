@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct, izip, zip_eq};
 use multilinear_extensions::{Expression, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
 use ndarray::{ArrayView, Ix2, Ix3, s};
-use p3_field::PrimeCharacteristicRing;
+use p3_field::FieldAlgebra;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
@@ -73,7 +73,7 @@ fn expansion_expr<E: ExtensionField, const SIZE: usize>(
             .fold((0, E::BaseField::ZERO.expr()), |acc, (sz, felt)| {
                 (
                     acc.0 + sz,
-                    acc.1 * E::BaseField::from_i64(1 << sz).expr() + felt.expr(),
+                    acc.1 * E::BaseField::from_canonical_u64(1 << sz).expr() + felt.expr(),
                 )
             });
 
@@ -174,7 +174,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.range_lookups.push(CenoLookup::U16(value.clone()));
         if size < 16 {
             self.range_lookups.push(CenoLookup::U16(
-                value * E::BaseField::from_i64(1 << (16 - size)).expr(),
+                value * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
             ))
         }
     }
@@ -685,7 +685,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             system.lookup_xor8(
                 chi_output[[0, 0, k]].0.into(),
                 // TODO figure out how to deal with RC, since it's not a constant in rotation
-                E::BaseField::from_i64(((RC[0] >> (k * 8)) & 0xFF) as i64).expr(),
+                E::BaseField::from_canonical_u64((RC[0] >> (k * 8)) & 0xFF).expr(),
                 iota_output_arr[[0, 0, k]].0.into(),
             );
         }

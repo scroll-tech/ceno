@@ -7,7 +7,7 @@ use criterion::*;
 use either::Either;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::Itertools;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use sumcheck::structs::IOPProverState;
 
@@ -154,7 +154,7 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                                     mle.num_vars(),
                                     mle.get_base_field_vec()
                                         .iter()
-                                        .map(E::from_base)
+                                        .map(E::from_ref_base)
                                         .collect_vec(),
                                 )
                             })
@@ -195,7 +195,7 @@ fn devirgo_sumcheck_fn(c: &mut Criterion) {
                                     mle.num_vars(),
                                     mle.get_base_field_vec()
                                         .iter()
-                                        .map(E::from_base)
+                                        .map(E::from_ref_base)
                                         .collect_vec(),
                                 )
                             })

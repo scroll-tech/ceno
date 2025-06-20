@@ -20,7 +20,7 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, IntoMLEs},
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use std::{
     cmp::max,

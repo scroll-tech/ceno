@@ -18,7 +18,7 @@ use crate::{
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 
 pub struct JalrConfig<E: ExtensionField> {
     pub i_insn: IInstructionConfig<E>,
