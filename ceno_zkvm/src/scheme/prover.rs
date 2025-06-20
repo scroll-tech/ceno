@@ -12,7 +12,7 @@ use multilinear_extensions::{
     Instance,
     mle::{IntoMLE, MultilinearExtension},
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -194,7 +194,7 @@ impl<
                     // do nothing without point and evaluation insertion
                     return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points, evaluations));
                 }
-                transcript.append_field_element(&E::BaseField::from_u64(index as u64));
+                transcript.append_field_element(&E::BaseField::from_canonical_u64(index as u64));
                 // TODO: add an enum for circuit type either in constraint_system or vk
                 let cs = pk.get_cs();
                 let witness_mle = witness_mles

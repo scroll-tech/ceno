@@ -33,7 +33,7 @@ use ff_ext::{Instrumented, PoseidonField};
 use itertools::Itertools;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, WhirDefault};
 use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use transcript::{BasicTranscript, Transcript};
 

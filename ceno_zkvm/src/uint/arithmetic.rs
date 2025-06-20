@@ -7,7 +7,7 @@ use crate::{
     instructions::riscv::config::IsEqualConfig,
 };
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
@@ -83,7 +83,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
             // convert Expression::Constant to limbs
             let b_limbs = (0..Self::NUM_LIMBS)
-                .map(|i| E::BaseField::from_u64((b >> (C * i)) & Self::LIMB_BIT_MASK).expr())
+                .map(|i| {
+                    E::BaseField::from_canonical_u64((b >> (C * i)) & Self::LIMB_BIT_MASK).expr()
+                })
                 .collect_vec();
 
             self.internal_add(cb, &b_limbs, with_overflow)
@@ -298,7 +300,7 @@ mod tests {
         use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
         use multilinear_extensions::{ToExpr, utils::eval_by_expr};
-        use p3::field::PrimeCharacteristicRing;
+        use p3::field::FieldAlgebra;
 
         type E = GoldilocksExt2;
         #[test]
@@ -430,7 +432,7 @@ mod tests {
                 let uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
                 uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
             } else {
-                let const_b = E::BaseField::from_u64(const_b.unwrap()).expr();
+                let const_b = E::BaseField::from_canonical_u64(const_b.unwrap()).expr();
                 uint_a
                     .add_const(|| "uint_c", &mut cb, const_b, overflow)
                     .unwrap()
@@ -483,10 +485,13 @@ mod tests {
             let wit: Vec<E> = witness_values
                 .iter()
                 .cloned()
-                .map(E::from_u64)
+                .map(E::from_canonical_u64)
                 .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
+                assert_eq!(
+                    eval_by_expr(&wit, &[], &challenges, c),
+                    E::from_canonical_u64(ret)
+                );
             });
 
             // overflow
@@ -659,10 +664,13 @@ mod tests {
             let wit: Vec<E> = witness_values
                 .iter()
                 .cloned()
-                .map(E::from_u64)
+                .map(E::from_canonical_u64)
                 .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
+                assert_eq!(
+                    eval_by_expr(&wit, &[], &challenges, c),
+                    E::from_canonical_u64(ret)
+                );
             });
 
             // overflow
@@ -688,7 +696,7 @@ mod tests {
         use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
         use multilinear_extensions::mle::{ArcMultilinearExtension, MultilinearExtension};
-        use p3::field::PrimeCharacteristicRing;
+        use p3::field::FieldAlgebra;
 
         type E = GoldilocksExt2; // 18446744069414584321
 
@@ -704,7 +712,7 @@ mod tests {
                         let mle: ArcMultilinearExtension<E> =
                             MultilinearExtension::from_evaluation_vec_smart(
                                 0,
-                                vec![E::BaseField::from_u64(*a)],
+                                vec![E::BaseField::from_canonical_u64(*a)],
                             )
                             .into();
                         mle

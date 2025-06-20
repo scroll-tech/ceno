@@ -9,7 +9,7 @@ use crate::{
 };
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Either;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::de::DeserializeOwned;
 use std::{
@@ -1074,7 +1074,7 @@ macro_rules! impl_expr_from_unsigned {
         $(
             impl<F: ff_ext::SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
-                    Expression::Constant(Either::Left(F::from_u64(value as u64)))
+                    Expression::Constant(Either::Left(F::from_canonical_u64(value as u64)))
                 }
             }
         )*
@@ -1089,7 +1089,7 @@ macro_rules! impl_from_signed {
             impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
                     let reduced = (value as i128).rem_euclid(F::MODULUS_U64 as i128) as u64;
-                    Expression::Constant(Either::Left(F::from_u64(reduced)))
+                    Expression::Constant(Either::Left(F::from_canonical_u64(reduced)))
                 }
             }
         )*
@@ -1251,7 +1251,7 @@ mod tests {
     use crate::{expression::WitIn, mle::IntoMLE, wit_infer_by_expr};
     use either::Either;
     use ff_ext::{FieldInto, GoldilocksExt2};
-    use p3::field::PrimeCharacteristicRing;
+    use p3::field::FieldAlgebra;
 
     #[test]
     fn test_expression_arithmetics() {
@@ -1412,9 +1412,9 @@ mod tests {
         let res = wit_infer_by_expr(
             &[],
             &[
-                vec![B::from_u64(1)].into_mle().into(),
-                vec![B::from_u64(2)].into_mle().into(),
-                vec![B::from_u64(3)].into_mle().into(),
+                vec![B::from_canonical_u64(1)].into_mle().into(),
+                vec![B::from_canonical_u64(2)].into_mle().into(),
+                vec![B::from_canonical_u64(3)].into_mle().into(),
             ],
             &[],
             &[],
@@ -1441,9 +1441,9 @@ mod tests {
         let res = wit_infer_by_expr(
             &[],
             &[
-                vec![B::from_u64(1)].into_mle().into(),
-                vec![B::from_u64(2)].into_mle().into(),
-                vec![B::from_u64(3)].into_mle().into(),
+                vec![B::from_canonical_u64(1)].into_mle().into(),
+                vec![B::from_canonical_u64(2)].into_mle().into(),
+                vec![B::from_canonical_u64(3)].into_mle().into(),
             ],
             &[],
             &[],

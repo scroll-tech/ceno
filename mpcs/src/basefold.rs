@@ -9,10 +9,7 @@ use crate::{
 };
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
-use p3::{
-    commit::Mmcs, field::PrimeCharacteristicRing, matrix::dense::DenseMatrix,
-    util::log2_strict_usize,
-};
+use p3::{commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
 use structure::{BasefoldProof, CircuitIndexMeta};
 pub use structure::{BasefoldSpec, Digest};
@@ -235,8 +232,9 @@ where
         for trivial_commit in &comm.trivial_commits {
             write_digest_to_transcript(trivial_commit, transcript);
         }
-        transcript
-            .append_field_element(&E::BaseField::from_u64(comm.log2_max_codeword_size as u64));
+        transcript.append_field_element(&E::BaseField::from_canonical_u64(
+            comm.log2_max_codeword_size as u64,
+        ));
         Ok(())
     }
 

@@ -14,7 +14,7 @@ use crate::{
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey},
 };
 use multilinear_extensions::monomial::Term;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -270,7 +270,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
         let rlc_record = self.rlc_chip_record(
-            std::iter::once(E::BaseField::from_u64(rom_type as u64).expr())
+            std::iter::once(E::BaseField::from_canonical_u64(rom_type as u64).expr())
                 .chain(record.clone())
                 .collect(),
         );

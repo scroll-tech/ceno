@@ -39,7 +39,7 @@ where
 mod tests {
     use ff_ext::{ExtensionField, FromUniformBytes, GoldilocksExt2};
     use multilinear_extensions::mle::MultilinearExtension;
-    use p3::field::PrimeCharacteristicRing;
+    use p3::field::FieldAlgebra;
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
     use transcript::BasicTranscript;
@@ -91,7 +91,7 @@ mod tests {
 
         let polynomial = MultilinearExtension::from_evaluations_vec(
             num_variables,
-            vec![<E as ExtensionField>::BaseField::from_u64(1); num_coeffs],
+            vec![<E as ExtensionField>::BaseField::from_canonical_u64(1); num_coeffs],
         );
 
         let points: Vec<_> = (0..num_points)

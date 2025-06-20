@@ -12,7 +12,7 @@ use gkr_iop::{
 };
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, mle::PointAndEval, util::max_usable_threads};
-use p3_field::PrimeCharacteristicRing;
+use p3_field::FieldAlgebra;
 use rand::{Rng, rngs::OsRng};
 use transcript::{BasicTranscript, Transcript};
 
@@ -142,7 +142,12 @@ where
         let wits = phase1
             .table_with_multiplicity
             .iter()
-            .flat_map(|(x, y)| vec![E::BaseField::from_u64(*x), E::BaseField::from_u64(*y)])
+            .flat_map(|(x, y)| {
+                vec![
+                    E::BaseField::from_canonical_u64(*x),
+                    E::BaseField::from_canonical_u64(*y),
+                ]
+            })
             .collect_vec();
         RowMajorMatrix::new_by_values(wits, 2, witness::InstancePaddingStrategy::Default)
     }
