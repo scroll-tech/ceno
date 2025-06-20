@@ -177,9 +177,9 @@ pub mod impl_babybear {
                 .map(|chunk| {
                     let mut array = [0u8; 4];
                     array[..chunk.len()].copy_from_slice(chunk);
-                    unsafe { std::ptr::read_unaligned(array.as_ptr() as *const u64) }
+                    unsafe { std::ptr::read_unaligned(array.as_ptr() as *const u32) }
                 })
-                .map(Self::from_canonical_u64)
+                .map(Self::from_canonical_u32)
                 .collect::<Vec<_>>()
         }
 
