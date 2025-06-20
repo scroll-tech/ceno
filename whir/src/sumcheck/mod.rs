@@ -222,7 +222,7 @@ mod tests {
         {
             FieldType::Base(evals) => {
                 assert_eq!(evals.len(), 1);
-                F::from_base(&evals[0])
+                F::from_ref_base(&evals[0])
             }
             FieldType::Ext(evals) => {
                 assert_eq!(evals.len(), 1);
@@ -312,7 +312,7 @@ mod tests {
             .fix_variables(&folding_randomness_3.clone())
             .evaluations()
         {
-            FieldType::Base(evals) => F::from_base(&evals[0]),
+            FieldType::Base(evals) => F::from_ref_base(&evals[0]),
             FieldType::Ext(evals) => evals[0],
             _ => panic!("Invalid folded polynomial"),
         };

@@ -1100,7 +1100,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
             //             .to_vec()
             //             .iter()
             //             .flat_map(|e| vec![*e as u32, (e >> 32) as u32])
-            //             .map(|e| Goldilocks::from_u64(e as u64))
+            //             .map(|e| Goldilocks::from_canonical_u64(e as u64))
             //             .collect_vec(),
             //         instance_outputs[i]
             //     );

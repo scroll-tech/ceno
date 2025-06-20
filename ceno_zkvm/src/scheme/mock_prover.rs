@@ -1339,9 +1339,12 @@ mod tests {
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
         let wits_in = vec![
-            vec![Goldilocks::from_u64(3u64), Goldilocks::from_u64(5u64)]
-                .into_mle()
-                .into(),
+            vec![
+                Goldilocks::from_canonical_u64(3u64),
+                Goldilocks::from_canonical_u64(5u64),
+            ]
+            .into_mle()
+            .into(),
         ];
 
         let challenge = [1.into_f(), 1000.into_f()];
@@ -1375,7 +1378,7 @@ mod tests {
                             GoldilocksExt2::ONE,
                             GoldilocksExt2::ZERO,
                         )),
-                        Box::new(Goldilocks::from_u64(U5 as u64).expr()),
+                        Box::new(Goldilocks::from_canonical_u64(U5 as u64).expr()),
                     )),
                     Box::new(Expression::Challenge(
                         0,

@@ -1412,9 +1412,9 @@ mod tests {
         let res = wit_infer_by_expr(
             &[],
             &[
-                vec![B::from_u64(1)].into_mle().into(),
-                vec![B::from_u64(2)].into_mle().into(),
-                vec![B::from_u64(3)].into_mle().into(),
+                vec![B::from_canonical_u64(1)].into_mle().into(),
+                vec![B::from_canonical_u64(2)].into_mle().into(),
+                vec![B::from_canonical_u64(3)].into_mle().into(),
             ],
             &[],
             &[],
@@ -1441,9 +1441,9 @@ mod tests {
         let res = wit_infer_by_expr(
             &[],
             &[
-                vec![B::from_u64(1)].into_mle().into(),
-                vec![B::from_u64(2)].into_mle().into(),
-                vec![B::from_u64(3)].into_mle().into(),
+                vec![B::from_canonical_u64(1)].into_mle().into(),
+                vec![B::from_canonical_u64(2)].into_mle().into(),
+                vec![B::from_canonical_u64(3)].into_mle().into(),
             ],
             &[],
             &[],

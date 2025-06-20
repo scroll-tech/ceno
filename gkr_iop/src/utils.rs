@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn test_rotation_next_non_cyclic() {
         type E = GoldilocksExt2;
-        let mle = make_mle::<E>((0..32u64).map(Goldilocks::from_u64).collect_vec());
+        let mle = make_mle::<E>((0..32u64).map(Goldilocks::from_canonical_u64).collect_vec());
         let full_rotated = rotation_next_base_mle(&mle, 31, 5);
         assert_eq!(
             full_rotated
