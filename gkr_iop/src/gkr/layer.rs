@@ -257,13 +257,10 @@ impl<E: ExtensionField> Layer<E> {
 }
 
 impl<'a, E: ExtensionField> LayerWitness<'a, E> {
-    pub fn new(bases: Vec<ArcMultilinearExtension<'a, E>>) -> Self {
-        assert!(!bases.is_empty() || !bases.is_empty());
-        let num_vars = log2(bases[0].evaluations().len()) as usize;
-        assert!(bases.iter().all(|b| b.evaluations().len() == 1 << num_vars));
-        Self {
-            wits: bases,
-            num_vars,
-        }
+    pub fn new(wits: Vec<ArcMultilinearExtension<'a, E>>) -> Self {
+        assert!(!wits.is_empty() || !wits.is_empty());
+        let num_vars = log2(wits[0].evaluations().len()) as usize;
+        assert!(wits.iter().all(|b| b.evaluations().len() == 1 << num_vars));
+        Self { wits, num_vars }
     }
 }
