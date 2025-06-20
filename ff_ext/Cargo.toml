@@ -1,6 +1,6 @@
 [package]
 categories.workspace = true
-description = "Extra functionality for the ff ((finite fields) crate"
+description = "Extra functionality for the ff (finite fields) crate"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true

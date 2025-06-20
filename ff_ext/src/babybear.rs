@@ -5,8 +5,7 @@ pub mod impl_babybear {
         babybear::{BabyBear, Poseidon2BabyBear},
         challenger::DuplexChallenger,
         field::{
-            BasedVectorSpace, Field, PackedValue, PrimeCharacteristicRing, PrimeField32,
-            TwoAdicField,
+            Field, FieldAlgebra, FieldExtensionAlgebra, PackedValue, PrimeField32, TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
         merkle_tree::MerkleTreeMmcs,
@@ -77,13 +76,13 @@ pub mod impl_babybear {
 
     impl FieldFrom<u64> for BabyBear {
         fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
+            Self::from_canonical_u64(v)
         }
     }
 
     impl FieldFrom<u64> for BabyBearExt4 {
         fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
+            Self::from_canonical_u64(v)
         }
     }
 
@@ -164,7 +163,7 @@ pub mod impl_babybear {
         fn try_from_uniform_bytes(bytes: [u8; 8]) -> Option<Self> {
             let value = u32::from_le_bytes(bytes[..4].try_into().unwrap());
             let is_canonical = value < Self::ORDER_U32;
-            is_canonical.then(|| Self::from_u32(value))
+            is_canonical.then(|| Self::from_canonical_u32(value))
         }
     }
 
@@ -180,7 +179,7 @@ pub mod impl_babybear {
                     array[..chunk.len()].copy_from_slice(chunk);
                     unsafe { std::ptr::read_unaligned(array.as_ptr() as *const u64) }
                 })
-                .map(Self::from_u64)
+                .map(Self::from_canonical_u64)
                 .collect::<Vec<_>>()
         }
 
@@ -200,7 +199,7 @@ pub mod impl_babybear {
         // with the largest order, i.e., order = 2^two-adacity.
         const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField = BabyBear::new(0x78000000);
         const TWO_ADIC_ROOT_OF_UNITY: Self =
-            BinomialExtensionField::new_unchecked([BabyBear::new(0x78000000); 4]);
+            BinomialExtensionField::from_bases(&[BabyBear::new(0x78000000); 4]);
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <BabyBear as BinomiallyExtendable<4>>::W;
@@ -208,7 +207,7 @@ pub mod impl_babybear {
         type BaseField = BabyBear;
 
         fn to_canonical_u64_vec(&self) -> Vec<u64> {
-            self.as_basis_coefficients_slice()
+            self.as_base_slice()
                 .iter()
                 .map(|v: &Self::BaseField| v.as_canonical_u32() as u64)
                 .collect()
