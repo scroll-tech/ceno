@@ -132,7 +132,7 @@ pub struct TowerChipTrace {
     pub table_with_multiplicity: Vec<(u64, u64)>,
 }
 
-impl<'a, E> ProtocolWitnessGenerator<'a, E> for TowerChipLayout<E>
+impl<E> ProtocolWitnessGenerator<'_, E> for TowerChipLayout<E>
 where
     E: ExtensionField,
 {
@@ -188,7 +188,7 @@ fn main() {
         {
             use multilinear_extensions::{mle::FieldType, smart_slice::SmartSlice};
 
-            let last = gkr_witness.layers[0].bases.clone();
+            let last = gkr_witness.layers[0].wits.clone();
             MockProver::check(
                 gkr_circuit.clone(),
                 &gkr_witness,
@@ -207,7 +207,7 @@ fn main() {
         }
 
         let out_evals = {
-            let last = gkr_witness.layers[0].bases.clone();
+            let last = gkr_witness.layers[0].wits.clone();
             let point = vec![];
             assert_eq!(last[0].evaluations().len(), 1);
             vec![

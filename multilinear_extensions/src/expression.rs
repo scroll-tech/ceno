@@ -14,7 +14,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use serde::de::DeserializeOwned;
 use std::{
     cmp::max,
-    fmt::Display,
+    fmt::{Debug, Display},
     iter::{Product, Sum},
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
@@ -23,9 +23,7 @@ pub type WitnessId = u16;
 pub type ChallengeId = u16;
 pub const MIN_PAR_SIZE: usize = 64;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
@@ -49,6 +47,33 @@ pub enum Expression<E: ExtensionField> {
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
     /// Challenge(challenge_id, power, scalar, offset)
     Challenge(ChallengeId, usize, E, E),
+}
+
+impl<E: ExtensionField> Debug for Expression<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Expression::WitIn(id) => write!(f, "W[{}]", id),
+            Expression::StructuralWitIn(id, _max_len, _offset, _multi_factor) => {
+                write!(f, "S[{}]", id)
+            }
+            Expression::Fixed(fixed) => write!(f, "F[{}]", fixed.0),
+            Expression::Instance(instance) => write!(f, "I[{}]", instance.0),
+            Expression::Constant(c) => write!(f, "C[{}]", c),
+            Expression::Sum(a, b) => write!(f, "({} + {})", a, b),
+            Expression::Product(a, b) => write!(f, "({} * {})", a, b),
+            Expression::ScaledSum(x, a, b) => write!(f, "{} * {} + {}", x, a, b),
+            Expression::Challenge(challenge_id, pow, scalar, offset) => {
+                write!(
+                    f,
+                    "C({})^{} * {:?} + {:?}",
+                    challenge_id,
+                    pow,
+                    scalar.to_canonical_u64_vec(),
+                    offset.to_canonical_u64_vec(),
+                )
+            }
+        }
+    }
 }
 
 /// this is used as finite state machine state
@@ -111,6 +136,20 @@ impl<E: ExtensionField> Expression<E> {
             product,
             scaled,
         )
+    }
+
+    pub fn evaluate_constant<T>(
+        &self,
+        constant: &impl Fn(Either<E::BaseField, E>) -> T,
+        challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
+    ) -> T {
+        match self {
+            Expression::Constant(either) => constant(*either),
+            Expression::Challenge(challenge_id, pow, scalar, offset) => {
+                challenge(*challenge_id, *pow, *scalar, *offset)
+            }
+            _ => unimplemented!("unsupported"),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -711,7 +711,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     }
 }
 
-impl<'a, E: ExtensionField> IOPProverState<'a, E> {
+impl<E: ExtensionField> IOPProverState<'_, E> {
     pub fn push_challenges(&mut self, challenge: Vec<Challenge<E>>) {
         self.challenges.extend(challenge)
     }

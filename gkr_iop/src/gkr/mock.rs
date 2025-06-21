@@ -58,6 +58,7 @@ impl<E: ExtensionField> MockProver<E> {
         mut evaluations: Vec<FieldType<'a, E>>,
         mut challenges: Vec<E>,
     ) -> Result<(), MockProverError<'a, E>> {
+        // TODO: check the rotation argument.
         let mut rng = thread_rng();
         evaluations.resize(
             circuit.n_evaluations,
@@ -80,7 +81,7 @@ impl<E: ExtensionField> MockProver<E> {
                     Arc::into_inner(wit_infer_by_expr(
                         &[],
                         &layer_wit
-                            .bases
+                            .wits
                             .iter()
                             .map(|mle| mle.as_view().into())
                             .chain(eqs.clone())
@@ -135,7 +136,7 @@ impl<E: ExtensionField> MockProver<E> {
                     }
                 }
             }
-            for (in_pos, base) in izip!(&layer.in_eval_expr, &layer_wit.bases) {
+            for (in_pos, base) in izip!(&layer.in_eval_expr, &layer_wit.wits) {
                 *(in_pos.entry_mut(&mut evaluations)) = base.evaluations().as_borrowed_view();
             }
         }
