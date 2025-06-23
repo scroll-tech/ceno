@@ -114,7 +114,7 @@ where
             sumcheck_prover = Some(SumcheckProverNotSkipping::new(
                 witness.polys[0]
                     .par_iter()
-                    .map(|x| E::from_base(x))
+                    .map(|x| E::from_ref_base(x))
                     .collect(),
                 &initial_claims,
                 &combination_randomness,
@@ -151,7 +151,7 @@ where
                 self.0.mv_parameters.num_variables,
                 witness.polys[0]
                     .par_iter()
-                    .map(|x| E::from_base(x))
+                    .map(|x| E::from_ref_base(x))
                     .collect(),
             ),
             prev_merkle: Some(&witness.merkle_tree),
@@ -365,7 +365,7 @@ where
                             &round_state.folding_randomness,
                             coset_offset_inv,
                             coset_generator_inv,
-                            E::from_u64(2).inverse(),
+                            E::from_canonical_u64(2).inverse(),
                             self.0.folding_factor.at_round(round_state.round),
                         )
                     },

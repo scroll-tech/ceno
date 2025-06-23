@@ -6,7 +6,7 @@ use ff_ext::ExtensionField;
 use itertools::Itertools;
 use p3::{
     dft::{Radix2Dit, Radix2DitParallel, TwoAdicSubgroupDft},
-    field::{PrimeCharacteristicRing, TwoAdicField, batch_multiplicative_inverse},
+    field::{FieldAlgebra, TwoAdicField, batch_multiplicative_inverse},
     matrix::{Matrix, bitrev::BitReversableMatrix, dense::DenseMatrix},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -342,7 +342,7 @@ mod tests {
 
         // test basefold.encode(raw_message.fold(1-r, r)) ?= codeword.fold(1-r, r)
         let mut prove_data = vec![];
-        let r = E::from_u64(97);
+        let r = E::from_canonical_u64(97);
         basefold_fri_round::<E, BasefoldRSParams>(
             &pp,
             &mut codeword_ext,

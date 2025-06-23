@@ -75,7 +75,7 @@ mod tests {
         mle::{DenseMultilinearExtension, FieldType, MultilinearExtension},
         virtual_poly::eq_eval,
     };
-    use p3::{field::PrimeCharacteristicRing, util::log2_strict_usize};
+    use p3::{field::FieldAlgebra, util::log2_strict_usize};
     use transcript::{BasicTranscript, Transcript};
 
     use crate::{
@@ -102,14 +102,14 @@ mod tests {
     fn test_e2e_short() -> Result<(), Error> {
         let num_variables = 2;
         let folding_factor = 2;
-        let polynomial = (0..1 << num_variables).map(F::from_u64).collect::<Vec<_>>();
+        let polynomial = (0..1 << num_variables).map(F::from_canonical_u64).collect::<Vec<_>>();
 
         // Initial stuff
-        let ood_point = expand_from_univariate(F::from_u64(42), num_variables);
-        let statement_point = expand_from_univariate(F::from_u64(97), num_variables);
+        let ood_point = expand_from_univariate(F::from_canonical_u64(42), num_variables);
+        let statement_point = expand_from_univariate(F::from_canonical_u64(97), num_variables);
 
         // All the randomness
-        let [epsilon_1, epsilon_2] = [F::from_u64(15), F::from_u64(32)];
+        let [epsilon_1, epsilon_2] = [F::from_canonical_u64(15), F::from_canonical_u64(32)];
 
         // Prover part
         let mut transcript = T::new(b"test");
@@ -194,16 +194,16 @@ mod tests {
     fn test_e2e() -> Result<(), Error> {
         let num_variables = 4;
         let folding_factor = 2;
-        let polynomial = (0..1 << num_variables).map(F::from_u64).collect::<Vec<_>>();
+        let polynomial = (0..1 << num_variables).map(F::from_canonical_u64).collect::<Vec<_>>();
 
         // Initial stuff
-        let ood_point = expand_from_univariate(F::from_u64(42), num_variables);
-        let statement_point = expand_from_univariate(F::from_u64(97), num_variables);
+        let ood_point = expand_from_univariate(F::from_canonical_u64(42), num_variables);
+        let statement_point = expand_from_univariate(F::from_canonical_u64(97), num_variables);
 
         // All the randomness
-        let [epsilon_1, epsilon_2] = [F::from_u64(15), F::from_u64(32)];
-        let fold_point = vec![F::from_u64(31), F::from_u64(15)];
-        let combination_randomness = vec![F::from_u64(1000)];
+        let [epsilon_1, epsilon_2] = [F::from_canonical_u64(15), F::from_canonical_u64(32)];
+        let fold_point = vec![F::from_canonical_u64(31), F::from_canonical_u64(15)];
+        let combination_randomness = vec![F::from_canonical_u64(1000)];
 
         // Prover part
         let mut transcript = T::new(b"test");

@@ -291,7 +291,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                             // the multiplicity
                             .saturating_sub(num_var);
                         if num_vars_multiplicity > 0 {
-                            sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                            sum *= E::BaseField::from_canonical_u64(1 << num_vars_multiplicity);
                         }
                         AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
                     } else {
@@ -315,7 +315,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                             .saturating_sub(1)
                             .saturating_sub(num_var);
                         if num_vars_multiplicity > 0 {
-                            sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                            sum *= E::BaseField::from_canonical_u64(1 << num_vars_multiplicity);
                         }
                         AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
                     } else {

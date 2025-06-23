@@ -6,7 +6,7 @@ use std::time::Duration;
 use criterion::*;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use itertools::Itertools;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use sumcheck::structs::IOPProverState;
 

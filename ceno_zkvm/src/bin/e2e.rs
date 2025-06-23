@@ -6,7 +6,7 @@ use ceno_zkvm::{
     with_panic_hook,
 };
 use clap::Parser;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
 use tracing::{error, level_filters::LevelFilter};
 use tracing_forest::ForestLayer;

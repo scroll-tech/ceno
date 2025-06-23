@@ -15,7 +15,7 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
@@ -182,7 +182,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             InstancePaddingStrategy::Default,
         );
         witness.par_rows_mut().zip(prog_mlt).for_each(|(row, mlt)| {
-            set_val!(row, config.mlt, E::BaseField::from_u64(mlt as u64));
+            set_val!(row, config.mlt, E::BaseField::from_canonical_u64(mlt as u64));
         });
 
         Ok([witness, RowMajorMatrix::empty()])

@@ -241,7 +241,7 @@ where
 mod tests {
     use ff_ext::GoldilocksExt2;
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use p3::field::PrimeCharacteristicRing;
+    use p3::field::FieldAlgebra;
 
     use super::SumcheckSingle;
 
@@ -249,12 +249,12 @@ mod tests {
 
     #[test]
     fn test_sumcheck_folding_factor_1() {
-        let eval_point = vec![E::from_u64(10), E::from_u64(11)];
+        let eval_point = vec![E::from_canonical_u64(10), E::from_canonical_u64(11)];
         let polynomial = vec![
-            E::from_u64(1),
-            E::from_u64(5),
-            E::from_u64(10),
-            E::from_u64(14),
+            E::from_canonical_u64(1),
+            E::from_canonical_u64(5),
+            E::from_canonical_u64(10),
+            E::from_canonical_u64(14),
         ];
 
         let claimed_value =
@@ -263,15 +263,15 @@ mod tests {
 
         let eval = DenseMultilinearExtension::from_evaluations_ext_vec(2, polynomial.clone())
             .evaluate(&eval_point);
-        let mut prover = SumcheckSingle::new(polynomial, &[eval_point], &[E::from_u64(1)], &[eval]);
+        let mut prover = SumcheckSingle::new(polynomial, &[eval_point], &[E::from_canonical_u64(1)], &[eval]);
 
         let poly_1 = prover.compute_sumcheck_polynomial();
 
         // First, check that is sums to the right value over the hypercube
         assert_eq!(poly_1.sum_over_hypercube(), claimed_value);
 
-        let combination_randomness = E::from_u64(100101);
-        let folding_randomness = vec![E::from_u64(4999)];
+        let combination_randomness = E::from_canonical_u64(100101);
+        let folding_randomness = vec![E::from_canonical_u64(4999)];
 
         prover.compress(combination_randomness, &folding_randomness, &poly_1);
 

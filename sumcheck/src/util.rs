@@ -160,7 +160,7 @@ pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
 
     // `prod = \prod_{j} (eval_at - j)`
     for e in 1..len {
-        let tmp = eval_at - F::from_u64(e as u64);
+        let tmp = eval_at - F::from_canonical_u64(e as u64);
         evals.push(tmp);
         prod *= tmp;
     }
@@ -191,8 +191,8 @@ pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
 
         // compute denom for the next step is current_denom * (len-i)/i
         if i != 0 {
-            denom_up *= -F::from_u64((len - i) as u64);
-            denom_down *= F::from_u64(i as u64);
+            denom_up *= -F::from_canonical_u64((len - i) as u64);
+            denom_down *= F::from_canonical_u64(i as u64);
         }
     }
     exit_span!(start);
@@ -204,7 +204,7 @@ pub fn interpolate_uni_poly<F: Field>(p_i: &[F], eval_at: F) -> F {
 fn field_factorial<F: Field>(a: usize) -> F {
     let mut res = F::ONE;
     for i in 2..=a {
-        res *= F::from_u64(i as u64);
+        res *= F::from_canonical_u64(i as u64);
     }
     res
 }

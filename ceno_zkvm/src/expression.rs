@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 
 use ceno_emul::InsnKind;
 use ff_ext::{ExtensionField, SmallField};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 
 use multilinear_extensions::virtual_poly::ArcMultilinearExtension;
 
@@ -923,7 +923,7 @@ macro_rules! impl_from_unsigned {
         $(
             impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
-                    Expression::Constant(F::from_u64(value as u64))
+                    Expression::Constant(F::from_canonical_u64(value as u64))
                 }
             }
         )*
@@ -938,7 +938,7 @@ macro_rules! impl_from_signed {
             impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
                     let reduced = (value as i128).rem_euclid(F::MODULUS_U64 as i128) as u64;
-                    Expression::Constant(F::from_u64(reduced))
+                    Expression::Constant(F::from_canonical_u64(reduced))
                 }
             }
         )*
@@ -1098,7 +1098,7 @@ mod tests {
     use super::{Expression, ToExpr, fmt};
     use crate::circuit_builder::{CircuitBuilder, ConstraintSystem};
     use ff_ext::{FieldInto, GoldilocksExt2};
-    use p3::field::PrimeCharacteristicRing;
+    use p3::field::FieldAlgebra;
 
     #[test]
     fn test_expression_arithmetics() {

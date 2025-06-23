@@ -445,7 +445,7 @@ mod tests {
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
     use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks as F};
+    use p3::{field::FieldAlgebra, goldilocks::Goldilocks as F};
     use witness::next_pow2_instance_padding;
 
     #[test]
@@ -487,7 +487,7 @@ mod tests {
             structural_witness.to_mles()[addr_column].clone();
         // Expect addresses to proceed consecutively inside the padding as well
         let expected = successors(Some(addr_padded_view.get_base_field_vec()[0]), |idx| {
-            Some(*idx + F::from_u64(WORD_SIZE as u64))
+            Some(*idx + F::from_canonical_u64(WORD_SIZE as u64))
         })
         .take(next_pow2_instance_padding(
             structural_witness.num_instances(),

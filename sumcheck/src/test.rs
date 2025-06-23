@@ -8,7 +8,7 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::{Rng, thread_rng};
 use transcript::{BasicTranscript, Transcript};
 
@@ -46,7 +46,7 @@ fn test_sumcheck_with_different_degree_helper<E: ExtensionField>(num_threads: us
                 poly.merge(new_poly);
                 (
                     poly,
-                    sum + E::from_u64(
+                    sum + E::from_canonical_u64(
                         1 << (max_num_variables - new_poly.aux_info.max_num_variables),
                     ) * *new_sum,
                 )
@@ -232,7 +232,7 @@ fn test_interpolation() {
     // test a polynomial with 20 known points, i.e., with degree 19
     let poly = DensePolynomial::rand(20 - 1, &mut prng);
     let evals = (0..20)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
+        .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
         .collect::<Vec<GoldilocksExt2>>();
     let query = GoldilocksExt2::random(&mut prng);
 
@@ -241,7 +241,7 @@ fn test_interpolation() {
     // test a polynomial with 33 known points, i.e., with degree 32
     let poly = DensePolynomial::rand(33 - 1, &mut prng);
     let evals = (0..33)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
+        .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
         .collect::<Vec<GoldilocksExt2>>();
     let query = GoldilocksExt2::random(&mut prng);
 
@@ -250,7 +250,7 @@ fn test_interpolation() {
     // test a polynomial with 64 known points, i.e., with degree 63
     let poly = DensePolynomial::rand(64 - 1, &mut prng);
     let evals = (0..64)
-        .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
+        .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
         .collect::<Vec<GoldilocksExt2>>();
     let query = GoldilocksExt2::random(&mut prng);
 
