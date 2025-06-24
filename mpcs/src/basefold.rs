@@ -9,10 +9,7 @@ use crate::{
 };
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
-use p3::{
-    commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix,
-    util::log2_strict_usize,
-};
+use p3::{commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
 use structure::{BasefoldProof, CircuitIndexMeta};
 pub use structure::{BasefoldSpec, Digest};
@@ -21,7 +18,7 @@ use transcript::Transcript;
 use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
 
 use itertools::{Itertools, izip};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 
@@ -287,8 +284,9 @@ where
         for trivial_commit in &comm.trivial_commits {
             write_digest_to_transcript(trivial_commit, transcript);
         }
-        transcript
-            .append_field_element(&E::BaseField::from_canonical_u64(comm.log2_max_codeword_size as u64));
+        transcript.append_field_element(&E::BaseField::from_canonical_u64(
+            comm.log2_max_codeword_size as u64,
+        ));
         Ok(())
     }
 
@@ -732,6 +730,28 @@ where
     ) -> Vec<ArcMultilinearExtension<'static, E>> {
         commitment.polys.values().flatten().cloned().collect_vec()
     }
+}
+
+use crate::basefold::structure::QueryOpeningProofs;
+use sumcheck::structs::IOPProverMessage;
+#[derive(Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct QueryPhaseVerifierInput<E: ExtensionField> {
+    pub max_num_var: usize,
+    pub indices: Vec<usize>,
+    pub final_message: Vec<Vec<E>>,
+    pub batch_coeffs: Vec<E>,
+    pub queries: QueryOpeningProofs<E>,
+    pub fixed_comm: Option<BasefoldCommitment<E>>,
+    pub witin_comm: BasefoldCommitment<E>,
+    pub circuit_meta: Vec<CircuitIndexMeta>,
+    pub commits: Vec<Digest<E>>,
+    pub fold_challenges: Vec<E>,
+    pub sumcheck_messages: Vec<IOPProverMessage<E>>,
+    pub point_evals: Vec<(Vec<E>, Vec<E>)>,
 }
 
 #[cfg(test)]
