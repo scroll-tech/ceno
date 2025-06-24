@@ -17,6 +17,10 @@ impl StructuralWitIn {
     }
 }
 
+pub fn eval_by_expr_constant<E: ExtensionField>(challenges: &[E], expr: &Expression<E>) -> E {
+    eval_by_expr_with_fixed(&[], &[], &[], challenges, expr)
+}
+
 pub fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
     structural_witnesses: &[E],

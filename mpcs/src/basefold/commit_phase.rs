@@ -20,7 +20,7 @@ use multilinear_extensions::{
 };
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
-    field::{Field, PrimeCharacteristicRing, dot_product},
+    field::{Field, FieldAlgebra, dot_product},
     matrix::{
         Matrix,
         dense::{DenseMatrix, RowMajorMatrix},
@@ -391,7 +391,7 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let level = log2_strict_usize(target_len) - 1;
     let folding_coeffs =
         <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs_level(pp, level);
-    let inv_2 = E::BaseField::from_u64(2).inverse();
+    let inv_2 = E::BaseField::from_canonical_u64(2).inverse();
     debug_assert_eq!(folding_coeffs.len(), 1 << level);
 
     // take codewords match with target length then fold

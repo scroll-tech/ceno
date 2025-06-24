@@ -12,7 +12,7 @@ use gkr_iop::{
 };
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, mle::PointAndEval, util::max_usable_threads};
-use p3_field::PrimeCharacteristicRing;
+use p3_field::FieldAlgebra;
 use rand::{Rng, rngs::OsRng};
 use transcript::{BasicTranscript, Transcript};
 
@@ -132,7 +132,7 @@ pub struct TowerChipTrace {
     pub table_with_multiplicity: Vec<(u64, u64)>,
 }
 
-impl<'a, E> ProtocolWitnessGenerator<'a, E> for TowerChipLayout<E>
+impl<E> ProtocolWitnessGenerator<'_, E> for TowerChipLayout<E>
 where
     E: ExtensionField,
 {
@@ -142,7 +142,12 @@ where
         let wits = phase1
             .table_with_multiplicity
             .iter()
-            .flat_map(|(x, y)| vec![E::BaseField::from_u64(*x), E::BaseField::from_u64(*y)])
+            .flat_map(|(x, y)| {
+                vec![
+                    E::BaseField::from_canonical_u64(*x),
+                    E::BaseField::from_canonical_u64(*y),
+                ]
+            })
             .collect_vec();
         RowMajorMatrix::new_by_values(wits, 2, witness::InstancePaddingStrategy::Default)
     }
@@ -183,7 +188,7 @@ fn main() {
         {
             use multilinear_extensions::{mle::FieldType, smart_slice::SmartSlice};
 
-            let last = gkr_witness.layers[0].bases.clone();
+            let last = gkr_witness.layers[0].wits.clone();
             MockProver::check(
                 gkr_circuit.clone(),
                 &gkr_witness,
@@ -202,7 +207,7 @@ fn main() {
         }
 
         let out_evals = {
-            let last = gkr_witness.layers[0].bases.clone();
+            let last = gkr_witness.layers[0].wits.clone();
             let point = vec![];
             assert_eq!(last[0].evaluations().len(), 1);
             vec![

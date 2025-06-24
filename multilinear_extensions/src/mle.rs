@@ -9,7 +9,7 @@ use crate::{
 use core::hash::Hash;
 use either::Either;
 use ff_ext::{ExtensionField, FromUniformBytes};
-use p3::field::{Field, PrimeCharacteristicRing};
+use p3::field::{Field, FieldAlgebra};
 use rand::Rng;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -934,6 +934,7 @@ macro_rules! op_mle {
             }
             $crate::mle::FieldType::Ext(a) => {
                 let $tmp_a = &a[..];
+                #[allow(clippy::useless_conversion)]
                 $op
             }
             _ => unreachable!(),

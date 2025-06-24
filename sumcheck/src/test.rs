@@ -12,7 +12,7 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::{Rng, thread_rng};
 use transcript::{BasicTranscript, Transcript};
 
@@ -233,7 +233,7 @@ fn test_extrapolation() {
         let mut prng = rand::thread_rng();
         let poly = DensePolynomial::rand_coeffs(degree, &mut prng);
         let evals = (0..=degree)
-            .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
+            .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
             .collect::<Vec<_>>();
         let query = GoldilocksExt2::random(&mut prng);
         assert_eq!(poly.evaluate(&query), extrapolate_uni_poly(&evals, query));

@@ -10,13 +10,13 @@ use crate::{
     },
 };
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain, iproduct};
+use itertools::{Itertools, chain, iproduct, izip};
 use multilinear_extensions::{
     Expression, ToExpr,
     mle::{MultilinearExtension, Point, PointAndEval},
     util::ceil_log2,
 };
-use p3_field::PrimeCharacteristicRing;
+use p3_field::FieldAlgebra;
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
@@ -28,14 +28,25 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 #[derive(Clone, Debug, Default)]
 pub struct KeccakParams {}
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct KeccakLayout<E: ExtensionField> {
     _params: KeccakParams,
 
-    committed_bits_id: usize,
+    committed_bits_id: [usize; STATE_SIZE],
 
     _result: Vec<EvalExpression<E>>,
     _marker: PhantomData<E>,
+}
+
+impl<E: ExtensionField> Default for KeccakLayout<E> {
+    fn default() -> Self {
+        Self {
+            _params: KeccakParams {},
+            committed_bits_id: [0; STATE_SIZE],
+            _result: vec![],
+            _marker: PhantomData,
+        }
+    }
 }
 
 const X: usize = 5;
@@ -64,7 +75,7 @@ fn not_expr<E: ExtensionField>(a: Expression<E>) -> Expression<E> {
 }
 
 fn xor_expr<E: ExtensionField>(a: Expression<E>, b: Expression<E>) -> Expression<E> {
-    a.clone() + b.clone() - E::BaseField::from_u32(2).expr() * a * b
+    a.clone() + b.clone() - E::BaseField::from_canonical_u32(2).expr() * a * b
 }
 
 fn zero_expr<E: ExtensionField>() -> Expression<E> {
@@ -152,7 +163,7 @@ fn iota_expr<E: ExtensionField>(
     if x > 0 || y > 0 {
         bits[index].clone()
     } else {
-        let round_bit = E::BaseField::from_u64((round_value >> index) & 1).expr();
+        let round_bit = E::BaseField::from_canonical_u64((round_value >> index) & 1).expr();
         xor_expr(bits[from_xyz(0, 0, z)].clone(), round_bit)
     }
 }
@@ -179,13 +190,13 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     }
 
     fn build_commit_phase(&mut self, chip: &mut Chip<E>) {
-        [self.committed_bits_id] = chip.allocate_committed();
+        self.committed_bits_id = chip.allocate_committed();
     }
 
     fn build_gkr_phase(&mut self, chip: &mut Chip<E>) {
         let final_output = chip.allocate_output_evals::<STATE_SIZE>();
 
-        (0..ROUNDS).rev().fold(final_output, |round_output, round| {
+        let input_eval_exprs = (0..ROUNDS).rev().fold(final_output, |round_output, round| {
             let (chi_output, [eq]) = chip.allocate_wits_in_zero_layer::<STATE_SIZE, 1>();
 
             let exprs = (0..STATE_SIZE)
@@ -323,7 +334,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             state.iter().map(|e| e.1.clone()).collect_vec()
         });
 
-        // Skip base opening allocation
+        izip!(&self.committed_bits_id, input_eval_exprs).for_each(|(id, expr)| {
+            chip.allocate_opening(*id, expr);
+        });
     }
 }
 
@@ -331,7 +344,7 @@ pub struct KeccakTrace<E: ExtensionField> {
     pub bits: RowMajorMatrix<E::BaseField>,
 }
 
-impl<'a, E> ProtocolWitnessGenerator<'a, E> for KeccakLayout<E>
+impl<E> ProtocolWitnessGenerator<'_, E> for KeccakLayout<E>
 where
     E: ExtensionField,
 {
@@ -406,7 +419,7 @@ pub fn run_keccakf<E: ExtensionField>(
 
     // Omit the commit phase1 and phase2.
     let span = entered_span!("gkr_witness", profiling_1 = true);
-    let (gkr_witness, _gkr_output) = layout.gkr_witness(&gkr_circuit, &phase1_witness, &[]);
+    let (gkr_witness, gkr_output) = layout.gkr_witness(&gkr_circuit, &phase1_witness, &[]);
     exit_span!(span);
 
     let out_evals = {
@@ -417,7 +430,7 @@ pub fn run_keccakf<E: ExtensionField>(
             // sanity check on first instance only
             // TODO test all instances
             let result_from_witness = gkr_witness.layers[0]
-                .bases
+                .wits
                 .iter()
                 .map(|bit| {
                     if <E as ExtensionField>::BaseField::ZERO == bit.get_base_field_vec()[0] {
@@ -441,8 +454,9 @@ pub fn run_keccakf<E: ExtensionField>(
             );
         }
 
-        gkr_witness.layers[0]
-            .bases
+        gkr_output
+            .0
+            .wits
             .iter()
             .map(|bit| PointAndEval {
                 point: point.clone(),
@@ -470,10 +484,16 @@ pub fn run_keccakf<E: ExtensionField>(
 
             // TODO verify output
             let mut point = Point::new();
-            point.extend(verifier_transcript.sample_vec(1).to_vec());
+            point.extend(verifier_transcript.sample_vec(log2_num_instances).to_vec());
 
             gkr_circuit
-                .verify(1, gkr_proof, &out_evals, &[], &mut verifier_transcript)
+                .verify(
+                    log2_num_instances,
+                    gkr_proof,
+                    &out_evals,
+                    &[],
+                    &mut verifier_transcript,
+                )
                 .expect("GKR verify failed");
 
             // Omit the PCS opening phase.
@@ -502,6 +522,6 @@ mod tests {
         let states: Vec<[u64; 25]> = (0..num_instance)
             .map(|_| std::array::from_fn(|_| rng.gen()))
             .collect_vec();
-        run_keccakf::<E>(setup_gkr_circuit(), states, false, false);
+        run_keccakf::<E>(setup_gkr_circuit(), states, false, false); // TODO: fix this, currently the output is wrong.
     }
 }

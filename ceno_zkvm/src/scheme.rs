@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -84,15 +84,17 @@ impl PublicValues {
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
         vec![
-            vec![E::BaseField::from_u32(self.exit_code & 0xffff)],
-            vec![E::BaseField::from_u32((self.exit_code >> 16) & 0xffff)],
-            vec![E::BaseField::from_u32(self.init_pc)],
-            vec![E::BaseField::from_u64(self.init_cycle)],
-            vec![E::BaseField::from_u32(self.end_pc)],
-            vec![E::BaseField::from_u64(self.end_cycle)],
+            vec![E::BaseField::from_canonical_u32(self.exit_code & 0xffff)],
+            vec![E::BaseField::from_canonical_u32(
+                (self.exit_code >> 16) & 0xffff,
+            )],
+            vec![E::BaseField::from_canonical_u32(self.init_pc)],
+            vec![E::BaseField::from_canonical_u64(self.init_cycle)],
+            vec![E::BaseField::from_canonical_u32(self.end_pc)],
+            vec![E::BaseField::from_canonical_u64(self.end_cycle)],
             self.public_io
                 .iter()
-                .map(|e| E::BaseField::from_u32(*e))
+                .map(|e| E::BaseField::from_canonical_u32(*e))
                 .collect(),
         ]
     }

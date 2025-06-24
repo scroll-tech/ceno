@@ -1,11 +1,11 @@
-use std::{array, cmp::Ordering, marker::PhantomData};
+use std::{cmp::Ordering, marker::PhantomData};
 
 use crate::gkr::booleanhypercube::BooleanHypercube;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct, izip, zip_eq};
 use multilinear_extensions::{Expression, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
 use ndarray::{ArrayView, Ix2, Ix3, s};
-use p3_field::PrimeCharacteristicRing;
+use p3_field::FieldAlgebra;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
@@ -43,7 +43,8 @@ use super::utils::CenoLookup;
 pub struct KeccakParams {}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct KeccakLayerLayout {
+pub struct KeccakLayout<E> {
+    input8: Vec<usize>,
     c_aux: Vec<usize>,
     c_temp: Vec<usize>,
     c_rot: Vec<usize>,
@@ -54,12 +55,6 @@ pub struct KeccakLayerLayout {
     nonlinear: Vec<usize>,
     chi_output: Vec<usize>,
     iota_output: Vec<usize>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct KeccakLayout<E> {
-    keccak_input8: Vec<usize>,
-    keccak_layers: [KeccakLayerLayout; 1],
     _marker: PhantomData<E>,
 }
 
@@ -73,7 +68,7 @@ fn expansion_expr<E: ExtensionField, const SIZE: usize>(
             .fold((0, E::BaseField::ZERO.expr()), |acc, (sz, felt)| {
                 (
                     acc.0 + sz,
-                    acc.1 * E::BaseField::from_i64(1 << sz).expr() + felt.expr(),
+                    acc.1 * E::BaseField::from_canonical_u64(1 << sz).expr() + felt.expr(),
                 )
             });
 
@@ -174,7 +169,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.range_lookups.push(CenoLookup::U16(value.clone()));
         if size < 16 {
             self.range_lookups.push(CenoLookup::U16(
-                value * E::BaseField::from_i64(1 << (16 - size)).expr(),
+                value * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
             ))
         }
     }
@@ -375,7 +370,7 @@ macro_rules! allocate_and_split {
 }
 
 macro_rules! split_from_offset {
-    ($witnesses:expr, $offset:ident, $total:expr, $( $size:expr ),* ) => {{
+    ($witnesses:expr, $offset:expr, $total:expr, $( $size:expr ),* ) => {{
         let mut iter = $witnesses[$offset..].iter().cloned();
         (
             $(
@@ -396,50 +391,35 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
     fn build_commit_phase(&mut self, chip: &mut Chip<E>) {
         let bases = chip.allocate_committed::<KECCAK_WIT_SIZE>();
-        self.keccak_input8 = bases[..KECCAK_LAYER_BYTE_SIZE].to_vec();
 
-        let mut offset = KECCAK_LAYER_BYTE_SIZE;
-        self.keccak_layers = array::from_fn(|_| {
-            let (
-                c_aux,
-                c_temp,
-                c_rot,
-                d,
-                theta_output,
-                rotation_witness,
-                rhopi_output,
-                nonlinear,
-                chi_output,
-                iota_output,
-            ) = split_from_offset!(
-                bases,
-                offset,
-                KECCAK_WIT_SIZE_PER_ROUND,
-                200,
-                30,
-                40,
-                40,
-                200,
-                146,
-                200,
-                200,
-                8,
-                200
-            );
-            offset += KECCAK_WIT_SIZE_PER_ROUND;
-            KeccakLayerLayout {
-                c_aux,
-                c_temp,
-                c_rot,
-                d,
-                theta_output,
-                rotation_witness,
-                rhopi_output,
-                nonlinear,
-                chi_output,
-                iota_output,
-            }
-        });
+        (
+            self.input8,
+            self.c_aux,
+            self.c_temp,
+            self.c_rot,
+            self.d,
+            self.theta_output,
+            self.rotation_witness,
+            self.rhopi_output,
+            self.nonlinear,
+            self.chi_output,
+            self.iota_output,
+        ) = split_from_offset!(
+            bases,
+            0,
+            KECCAK_WIT_SIZE,
+            KECCAK_LAYER_BYTE_SIZE,
+            200,
+            30,
+            40,
+            40,
+            200,
+            146,
+            200,
+            200,
+            8,
+            200
+        );
     }
 
     fn build_gkr_phase(&mut self, chip: &mut Chip<E>) {
@@ -467,14 +447,14 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // TODO   - group1: lookup one group (due to same tower prover length)
         // TODO   - group2: read/write another group
         // NOTE: eq order must follow gkr prover/verifier backend concat eq order
-        let (bases, [eq_zero, eq_rotation_left, eq_rotation_right, eq_rotation]) =
+        let (wits, [eq_zero, eq_rotation_left, eq_rotation_right, eq_rotation]) =
             chip.allocate_wits_in_zero_layer::<KECCAK_WIT_SIZE, 4>();
-        for (openings, wit) in bases.iter().enumerate() {
+        for (openings, wit) in wits.iter().enumerate() {
             chip.allocate_opening(openings, wit.1.clone());
         }
 
-        let keccak_input8 = &bases[..KECCAK_LAYER_BYTE_SIZE];
-        let keccak_output8 = &bases[KECCAK_WIT_SIZE - KECCAK_LAYER_BYTE_SIZE..];
+        let keccak_input8 = &wits[..KECCAK_LAYER_BYTE_SIZE];
+        let keccak_output8 = &wits[KECCAK_WIT_SIZE - KECCAK_LAYER_BYTE_SIZE..];
 
         let mut system = ConstraintSystem::new();
 
@@ -491,9 +471,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             chi_output,
             iota_output,
         ) = split_from_offset!(
-            bases,
+            wits,
             KECCAK_LAYER_BYTE_SIZE,
-            KECCAK_WIT_SIZE_PER_ROUND,
+            KECCAK_WIT_SIZE,
             200,
             30,
             40,
@@ -507,8 +487,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         );
 
         {
-            let n_wits = 200 + 30 + 40 + 40 + 200 + 146 + 200 + 200 + 8 + 200;
-            assert_eq!(KECCAK_WIT_SIZE_PER_ROUND, n_wits);
+            let n_wits =
+                KECCAK_LAYER_BYTE_SIZE + 200 + 30 + 40 + 40 + 200 + 146 + 200 + 200 + 8 + 200;
+            assert_eq!(KECCAK_WIT_SIZE, n_wits);
         }
 
         // TODO: ndarrays can be replaced with normal arrays
@@ -677,7 +658,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             }
         }
 
-        // TODO: 24/25 elements stay the same after Iota; eliminate duplication?
         let iota_output_arr: ArrayView<(WitIn, EvalExpression<E>), Ix3> =
             ArrayView::from_shape((5, 5, 8), &iota_output).unwrap();
 
@@ -685,7 +665,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             system.lookup_xor8(
                 chi_output[[0, 0, k]].0.into(),
                 // TODO figure out how to deal with RC, since it's not a constant in rotation
-                E::BaseField::from_i64(((RC[0] >> (k * 8)) & 0xFF) as i64).expr(),
+                E::BaseField::from_canonical_u64((RC[0] >> (k * 8)) & 0xFF).expr(),
                 iota_output_arr[[0, 0, k]].0.into(),
             );
         }
@@ -791,7 +771,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             LayerType::Zerocheck,
             expressions,
             vec![],
-            bases.into_iter().map(|e| e.1).collect_vec(),
+            wits.into_iter().map(|e| e.1).collect_vec(),
             vec![(Some(eq_zero.0.expr()), evals)],
             (
                 (
@@ -815,7 +795,7 @@ pub struct KeccakTrace {
     pub instances: Vec<[u32; KECCAK_INPUT_SIZE]>,
 }
 
-impl<'a, E> ProtocolWitnessGenerator<'a, E> for KeccakLayout<E>
+impl<E> ProtocolWitnessGenerator<'_, E> for KeccakLayout<E>
 where
     E: ExtensionField,
 {
@@ -1055,8 +1035,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
     let span = entered_span!("gkr_witness", profiling_2 = true);
-    // Omit the commit phase1 and phase2.
-    let (gkr_witness, _gkr_output) = layout.gkr_witness(&gkr_circuit, &phase1_witness, &[]);
+    let (gkr_witness, gkr_output) = layout.gkr_witness(&gkr_circuit, &phase1_witness, &[]);
     exit_span!(span);
 
     let span = entered_span!("out_eval", profiling_2 = true);
@@ -1075,7 +1054,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
                 .layers
                 .last()
                 .unwrap()
-                .bases
+                .wits
                 .iter()
                 .take(KECCAK_OUTPUT_SIZE)
             {
@@ -1100,23 +1079,23 @@ pub fn run_faster_keccakf<E: ExtensionField>(
             //             .to_vec()
             //             .iter()
             //             .flat_map(|e| vec![*e as u32, (e >> 32) as u32])
-            //             .map(|e| Goldilocks::from_u64(e as u64))
+            //             .map(|e| Goldilocks::from_canonical_u64(e as u64))
             //             .collect_vec(),
             //         instance_outputs[i]
             //     );
             // }
         }
 
-        let out_evals = _gkr_output
+        let out_evals = gkr_output
             .0
-            .bases
+            .wits
             .par_iter()
-            .map(|base| PointAndEval {
+            .map(|wit| PointAndEval {
                 point: point.clone(),
-                eval: if base.num_vars() == 0 {
-                    base.get_base_field_vec()[0].into()
+                eval: if wit.num_vars() == 0 {
+                    wit.get_base_field_vec()[0].into()
                 } else {
-                    base.evaluate(&point)
+                    wit.evaluate(&point)
                 },
             })
             .collect::<Vec<_>>();
@@ -1145,8 +1124,8 @@ pub fn run_faster_keccakf<E: ExtensionField>(
             let mut verifier_transcript = BasicTranscript::<E>::new(b"protocol");
 
             // This is to make prover/verifier match
-            let mut _point = Vec::with_capacity(log2_num_instance_rounds);
-            _point.extend(
+            let mut point = Vec::with_capacity(log2_num_instance_rounds);
+            point.extend(
                 verifier_transcript
                     .sample_vec(log2_num_instance_rounds)
                     .to_vec(),
@@ -1185,7 +1164,7 @@ mod tests {
             states.push(std::array::from_fn(|_| rng.gen()));
         }
         // TODO enable check
-        let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, false, false);
+        let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, true, true);
     }
 
     #[ignore]
@@ -1202,6 +1181,6 @@ mod tests {
         }
 
         // TODO enable check
-        let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, false, false);
+        let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, true, true);
     }
 }

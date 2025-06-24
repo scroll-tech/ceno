@@ -12,7 +12,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 use p3::{
-    field::{Field, PrimeCharacteristicRing},
+    field::{Field, FieldAlgebra},
     matrix::dense::RowMajorMatrix,
 };
 use sumcheck::macros::{entered_span, exit_span};
@@ -39,7 +39,7 @@ where
             #[cfg(feature = "parallel")]
             FieldType::Base(evals) => evals.to_vec(),
             #[cfg(not(feature = "parallel"))]
-            FieldType::Base(evals) => evals.iter().map(|x| E::from_base(x)).collect(),
+            FieldType::Base(evals) => evals.iter().map(|x| E::from_ref_base(x)).collect(),
             FieldType::Ext(_) => panic!("Not supporting committing to ext polys"),
             _ => panic!("Unsupported field type"),
         };

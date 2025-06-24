@@ -336,7 +336,7 @@ impl<'a, E: ExtensionField> VirtualPolynomials<'a, E> {
                 let scalar = E::random(&mut *rng);
                 monimial_term.push(Term { scalar, product });
                 // need to scale up for the smaller nv
-                sum += E::from_u64(1 << (max_num_variables - nv)) * product_sum * scalar;
+                sum += E::from_canonical_u64(1 << (max_num_variables - nv)) * product_sum * scalar;
             }
         }
         exit_span!(start);

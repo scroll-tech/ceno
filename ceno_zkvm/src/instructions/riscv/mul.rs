@@ -82,7 +82,7 @@ use std::marker::PhantomData;
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, SmallField};
-use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks};
+use p3::{field::FieldAlgebra, goldilocks::Goldilocks};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -353,8 +353,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             }
             MulhSignDependencies::UU { constrain_rd } => {
                 // assign nonzero value (u32::MAX - rd)
-                let rd_f = E::BaseField::from_u64(rd as u64);
-                let avoid_f = E::BaseField::from_u32(u32::MAX);
+                let rd_f = E::BaseField::from_canonical_u64(rd as u64);
+                let avoid_f = E::BaseField::from_canonical_u32(u32::MAX);
                 constrain_rd.assign_instance(instance, rd_f, avoid_f)?;
 
                 // only take the low part of the product
@@ -366,8 +366,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 assert_eq!(prod_lo, rd);
 
                 let prod_hi = prod >> BIT_WIDTH;
-                let avoid_f = E::BaseField::from_u32(u32::MAX);
-                constrain_rd.assign_instance(instance, E::BaseField::from_u64(prod_hi), avoid_f)?;
+                let avoid_f = E::BaseField::from_canonical_u32(u32::MAX);
+                constrain_rd.assign_instance(
+                    instance,
+                    E::BaseField::from_canonical_u64(prod_hi),
+                    avoid_f,
+                )?;
                 prod_hi as u32
             }
             MulhSignDependencies::SU {

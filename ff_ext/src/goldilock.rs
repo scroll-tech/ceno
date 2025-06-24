@@ -7,8 +7,7 @@ pub mod impl_goldilocks {
     use p3::{
         challenger::DuplexChallenger,
         field::{
-            BasedVectorSpace, Field, PackedValue, PrimeCharacteristicRing, PrimeField64,
-            TwoAdicField,
+            Field, FieldAlgebra, FieldExtensionAlgebra, PackedValue, PrimeField64, TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
         goldilocks::{
@@ -29,13 +28,13 @@ pub mod impl_goldilocks {
 
     impl FieldFrom<u64> for Goldilocks {
         fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
+            Self::from_canonical_u64(v)
         }
     }
 
     impl FieldFrom<u64> for GoldilocksExt2 {
         fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
+            Self::from_canonical_u64(v)
         }
     }
 
@@ -113,7 +112,7 @@ pub mod impl_goldilocks {
         fn try_from_uniform_bytes(bytes: [u8; 8]) -> Option<Self> {
             let value = u64::from_le_bytes(bytes);
             let is_canonical = value < Self::ORDER_U64;
-            is_canonical.then(|| Self::from_u64(value))
+            is_canonical.then(|| Self::from_canonical_u64(value))
         }
     }
 
@@ -129,7 +128,7 @@ pub mod impl_goldilocks {
                     array[..chunk.len()].copy_from_slice(chunk);
                     unsafe { std::ptr::read_unaligned(array.as_ptr() as *const u64) }
                 })
-                .map(Self::from_u64)
+                .map(Self::from_canonical_u64)
                 .collect::<Vec<_>>()
         }
 
@@ -143,13 +142,6 @@ pub mod impl_goldilocks {
         const DEGREE: usize = 2;
         const MULTIPLICATIVE_GENERATOR: Self = <GoldilocksExt2 as Field>::GENERATOR;
         const TWO_ADICITY: usize = Goldilocks::TWO_ADICITY;
-        // Passing two-adacity itself to this function will get the root of unity
-        // with the largest order, i.e., order = 2^two-adacity.
-        const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
-            Goldilocks::two_adic_generator_const(Goldilocks::TWO_ADICITY);
-        const TWO_ADIC_ROOT_OF_UNITY: Self = BinomialExtensionField::new_unchecked(
-            Goldilocks::ext_two_adic_generator_const(<GoldilocksExt2 as TwoAdicField>::TWO_ADICITY),
-        );
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
@@ -157,7 +149,7 @@ pub mod impl_goldilocks {
         type BaseField = Goldilocks;
 
         fn to_canonical_u64_vec(&self) -> Vec<u64> {
-            self.as_basis_coefficients_slice()
+            self.as_base_slice()
                 .iter()
                 .map(|v: &Self::BaseField| v.as_canonical_u64())
                 .collect()

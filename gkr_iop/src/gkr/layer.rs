@@ -7,7 +7,7 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, Point, PointAndEval},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sumcheck_layer::SumcheckLayerProof;
+use sumcheck_layer::LayerProof;
 use transcript::Transcript;
 use zerocheck_layer::ZerocheckLayer;
 
@@ -74,7 +74,7 @@ pub struct Layer<E: ExtensionField> {
 
 #[derive(Clone, Debug, Default)]
 pub struct LayerWitness<'a, E: ExtensionField> {
-    pub bases: Vec<ArcMultilinearExtension<'a, E>>,
+    pub wits: Vec<ArcMultilinearExtension<'a, E>>,
     pub num_vars: usize,
 }
 
@@ -100,7 +100,7 @@ impl<E: ExtensionField> Layer<E> {
             expr_names.len() == exprs.len(),
             "there are expr without name"
         );
-        let max_expr_degree = exprs.iter().map(|expr| expr.degree()).max().unwrap();
+        let max_expr_degree = exprs.iter().map(|expr| expr.degree()).max().unwrap_or(1);
 
         Self {
             name,
@@ -126,7 +126,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut T,
-    ) -> SumcheckLayerProof<E> {
+    ) -> LayerProof<E> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
@@ -157,7 +157,7 @@ impl<E: ExtensionField> Layer<E> {
             }
         };
 
-        self.update_claims(claims, &sumcheck_layer_proof.evals, &point);
+        self.update_claims(claims, &sumcheck_layer_proof.main.evals, &point);
 
         sumcheck_layer_proof
     }
@@ -165,7 +165,7 @@ impl<E: ExtensionField> Layer<E> {
     pub fn verify<Trans: Transcript<E>>(
         &self,
         max_num_variables: usize,
-        proof: SumcheckLayerProof<E>,
+        proof: LayerProof<E>,
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
@@ -257,10 +257,10 @@ impl<E: ExtensionField> Layer<E> {
 }
 
 impl<'a, E: ExtensionField> LayerWitness<'a, E> {
-    pub fn new(bases: Vec<ArcMultilinearExtension<'a, E>>) -> Self {
-        assert!(!bases.is_empty() || !bases.is_empty());
-        let num_vars = log2(bases[0].evaluations().len()) as usize;
-        assert!(bases.iter().all(|b| b.evaluations().len() == 1 << num_vars));
-        Self { bases, num_vars }
+    pub fn new(wits: Vec<ArcMultilinearExtension<'a, E>>) -> Self {
+        assert!(!wits.is_empty() || !wits.is_empty());
+        let num_vars = log2(wits[0].evaluations().len()) as usize;
+        assert!(wits.iter().all(|b| b.evaluations().len() == 1 << num_vars));
+        Self { wits, num_vars }
     }
 }
