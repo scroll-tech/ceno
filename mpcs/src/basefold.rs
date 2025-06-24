@@ -694,6 +694,27 @@ where
             max_num_var + Spec::get_rate_log(),
         );
 
+        let query_phase_verifier_input = QueryPhaseVerifierInput {
+            max_num_var,
+            indices: queries.clone(),
+            final_message: final_message.clone(),
+            batch_coeffs: batch_coeffs.clone(),
+            queries: proof.query_opening_proof.clone(),
+            fixed_comm: fixed_comms.clone().cloned(),
+            witin_comm: witin_comms.clone(),
+            circuit_meta: circuit_metas.clone(),
+            commits: proof.commits.clone(),
+            fold_challenges: fold_challenges.clone(),
+            sumcheck_messages: sumcheck_messages.clone(),
+            point_evals: point_evals.clone(),
+        };
+        // Serialize query_phase_verifier_input with bincode and
+        // save to file
+        use std::fs::File;
+        let filename = "query_phase_verifier_input.bin";
+        let f = File::create(filename).unwrap();
+        bincode::serialize_into(f, &query_phase_verifier_input).unwrap();
+
         // verify basefold sumcheck + FRI codeword query
         batch_verifier_query_phase::<E, Spec>(
             max_num_var,
