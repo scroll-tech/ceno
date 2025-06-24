@@ -37,7 +37,7 @@ pub fn batch_query_phase<E: ExtensionField>(
     witin_comms: &BasefoldCommitmentWithWitness<E>,
     trees: &[MerkleTreeExt<E>],
     num_verifier_queries: usize,
-) -> QueryOpeningProofs<E>
+) -> (QueryOpeningProofs<E>, Vec<usize>)
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -51,7 +51,7 @@ where
         witin_comms.log2_max_codeword_size,
     );
 
-    queries
+    let proof = queries
         .iter()
         .map(|idx| {
             let witin_base_proof = {
@@ -119,7 +119,8 @@ where
                 commit_phase_openings,
             }
         })
-        .collect_vec()
+        .collect_vec();
+    (proof, queries)
 }
 
 #[allow(clippy::too_many_arguments)]

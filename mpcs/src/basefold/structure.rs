@@ -277,6 +277,8 @@ where
     pub final_message: Vec<Vec<E>>,
     pub query_opening_proof: QueryOpeningProofs<E>,
     pub sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
+    // TODO: remove this as it's only used for testing
+    pub query_indices: Vec<usize>,
     // vec![witness, fixed], where fixed is optional
     pub trivial_proof: Option<TrivialProof<E>>,
 }

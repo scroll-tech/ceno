@@ -443,7 +443,7 @@ where
         let query_span = entered_span!("Basefold::open::query_phase");
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
-        let query_opening_proof = batch_query_phase(
+        let (query_opening_proof, query_indices) = batch_query_phase(
             transcript,
             fixed_comms,
             witin_comms,
@@ -457,6 +457,7 @@ where
             commits: commit_phase_proof.commits,
             final_message: commit_phase_proof.final_message,
             query_opening_proof,
+            query_indices,
             sumcheck_proof: Some(commit_phase_proof.sumcheck_messages),
             trivial_proof,
         })
