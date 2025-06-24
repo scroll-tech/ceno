@@ -290,7 +290,8 @@ pub enum Error {
 mod basefold;
 pub use basefold::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
-    BasefoldRSParams, BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,
+    BasefoldRSParams, BasefoldSpec, EncodingScheme, QueryPhaseVerifierInput, RSCode,
+    RSCodeDefaultSpec,
 };
 extern crate whir as whir_external;
 mod whir;
