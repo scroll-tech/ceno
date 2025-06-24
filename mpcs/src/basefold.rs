@@ -753,10 +753,7 @@ where
                             "vec![\n      {}\n    ]",
                             x.iter()
                                 .map(|x| {
-                                    format!(
-                                        "BabyBearExt4::from_bases(&{:?})",
-                                        x.as_basis_coefficients_slice()
-                                    )
+                                    format!("BabyBearExt4::from_bases(&{:?})", x.as_base_slice())
                                 })
                                 .join(",\n      ")
                         )
@@ -767,12 +764,7 @@ where
                 "  batch_coeffs: vec![\n    {}\n  ],",
                 batch_coeffs
                     .iter()
-                    .map(|x| {
-                        format!(
-                            "BabyBearExt4::from_bases(&{:?})",
-                            x.as_basis_coefficients_slice()
-                        )
-                    })
+                    .map(|x| { format!("BabyBearExt4::from_bases(&{:?})", x.as_base_slice()) })
                     .join(",\n    ")
             );
             //             println!(
