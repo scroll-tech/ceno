@@ -753,6 +753,7 @@ where
     }
 }
 
+pub use crate::basefold::structure::QueryOpeningProof;
 use crate::basefold::structure::QueryOpeningProofs;
 use sumcheck::structs::IOPProverMessage;
 #[derive(Serialize, Deserialize)]
