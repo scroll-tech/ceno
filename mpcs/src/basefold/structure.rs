@@ -296,7 +296,7 @@ where
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
-pub(crate) struct CircuitIndexMeta {
+pub struct CircuitIndexMeta {
     pub witin_num_vars: usize,
     pub witin_num_polys: usize,
     pub fixed_num_vars: usize,
