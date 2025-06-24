@@ -18,9 +18,9 @@ use crate::expression::Expression;
 
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {
     if x >= 0 {
-        F::from_u64(x as u64)
+        F::from_canonical_u64(x as u64)
     } else {
-        -F::from_u64((-x) as u64)
+        -F::from_canonical_u64((-x) as u64)
     }
 }
 
@@ -117,7 +117,7 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
         let mut running_product = vec![E::ZERO; b.len() + 1];
         running_product[b.len()] = E::ONE;
         for i in (0..b.len()).rev() {
-            let bit = E::from_u64(((max_idx >> i) & 1) as u64);
+            let bit = E::from_canonical_u64(((max_idx >> i) & 1) as u64);
             running_product[i] = running_product[i + 1]
                 * (a[i] * b[i] * bit + (E::ONE - a[i]) * (E::ONE - b[i]) * (E::ONE - bit));
         }
@@ -155,12 +155,12 @@ pub fn eval_wellform_address_vec<E: ExtensionField>(
     r: &[E],
     descending: bool,
 ) -> E {
-    let (offset, scaled) = (E::from_u64(offset), E::from_u64(scaled));
+    let (offset, scaled) = (E::from_canonical_u64(offset), E::from_canonical_u64(scaled));
     let tmp = scaled
         * r.iter()
             .scan(E::ONE, |state, x| {
                 let result = *x * *state;
-                *state *= E::from_u64(2); // Update the state for the next power of 2
+                *state *= E::from_canonical_u64(2); // Update the state for the next power of 2
                 Some(result)
             })
             .sum::<E>();
@@ -292,7 +292,7 @@ mod tests {
     use multilinear_extensions::{
         mle::IntoMLE, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
     };
-    use p3::field::PrimeCharacteristicRing;
+    use p3::field::FieldAlgebra;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -311,7 +311,7 @@ mod tests {
         let y = cb.create_witin(|| "y");
 
         let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
-            .map(|_| vec![F::from_u64(1)].into_mle().into())
+            .map(|_| vec![F::from_canonical_u64(1)].into_mle().into())
             .collect();
 
         let mut virtual_polys = VirtualPolynomials::new(1, 0);

@@ -21,7 +21,7 @@ use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -1344,7 +1344,7 @@ mod tests {
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
         let wits_in = vec![
-            vec![Goldilocks::from_u64(3u64), Goldilocks::from_u64(5u64)]
+            vec![Goldilocks::from_canonical_u64(3u64), Goldilocks::from_canonical_u64(5u64)]
                 .into_mle()
                 .into(),
         ];
@@ -1378,7 +1378,7 @@ mod tests {
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                    Box::new(Expression::Constant(Goldilocks::from_u64(U5 as u64))),
+                    Box::new(Expression::Constant(Goldilocks::from_canonical_u64(U5 as u64))),
                 )),
                 Box::new(Expression::Challenge(
                     0,

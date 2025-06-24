@@ -10,7 +10,7 @@ use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
-    field::{Field, PrimeCharacteristicRing, dot_product},
+    field::{Field, FieldAlgebra, dot_product},
     fri::{BatchOpening, CommitPhaseProofStep},
     matrix::{Dimensions, dense::RowMajorMatrix},
     util::log2_strict_usize,
@@ -37,7 +37,7 @@ pub fn batch_query_phase<E: ExtensionField>(
     witin_comms: &BasefoldCommitmentWithWitness<E>,
     trees: &[MerkleTreeExt<E>],
     num_verifier_queries: usize,
-) -> QueryOpeningProofs<E>
+) -> (QueryOpeningProofs<E>, Vec<usize>)
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -51,7 +51,7 @@ where
         witin_comms.log2_max_codeword_size,
     );
 
-    queries
+    let proof = queries
         .iter()
         .map(|idx| {
             let witin_base_proof = {
@@ -119,7 +119,8 @@ where
                 commit_phase_openings,
             }
         })
-        .collect_vec()
+        .collect_vec();
+    (proof, queries)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -140,7 +141,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let inv_2 = E::BaseField::from_u64(2).inverse();
+    let inv_2 = E::BaseField::from_canonical_u64(2).inverse();
     debug_assert_eq!(point_evals.len(), circuit_meta.len());
     let encode_span = entered_span!("encode_final_codeword");
     let final_codeword = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
@@ -390,7 +391,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             point_evals.iter().zip_eq(circuit_meta.iter()).flat_map(
                 |((_, evals), CircuitIndexMeta { witin_num_vars, .. })| {
                     evals.iter().copied().map(move |eval| {
-                        eval * E::from_u64(1 << (max_num_var - witin_num_vars) as u64)
+                        eval * E::from_canonical_u64(1 << (max_num_var - witin_num_vars) as u64)
                     })
                 }
             )

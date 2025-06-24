@@ -10,7 +10,7 @@ use crate::{
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use p3::{
-    commit::Mmcs, field::PrimeCharacteristicRing, matrix::dense::DenseMatrix,
+    commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix,
     util::log2_strict_usize,
 };
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
@@ -288,7 +288,7 @@ where
             write_digest_to_transcript(trivial_commit, transcript);
         }
         transcript
-            .append_field_element(&E::BaseField::from_u64(comm.log2_max_codeword_size as u64));
+            .append_field_element(&E::BaseField::from_canonical_u64(comm.log2_max_codeword_size as u64));
         Ok(())
     }
 
@@ -443,7 +443,7 @@ where
         let query_span = entered_span!("Basefold::open::query_phase");
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
-        let query_opening_proof = batch_query_phase(
+        let (query_opening_proof, query_indices) = batch_query_phase(
             transcript,
             fixed_comms,
             witin_comms,
@@ -457,6 +457,7 @@ where
             commits: commit_phase_proof.commits,
             final_message: commit_phase_proof.final_message,
             query_opening_proof,
+            query_indices,
             sumcheck_proof: Some(commit_phase_proof.sumcheck_messages),
             trivial_proof,
         })

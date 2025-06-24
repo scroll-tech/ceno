@@ -71,8 +71,8 @@ impl RangeTableConfig {
             .zip(mlts)
             .zip(content)
             .for_each(|(((row, structural_row), mlt), i)| {
-                set_val!(row, self.mlt, F::from_u64(mlt as u64));
-                set_val!(structural_row, self.range, F::from_u64(i));
+                set_val!(row, self.mlt, F::from_canonical_u64(mlt as u64));
+                set_val!(structural_row, self.range, F::from_canonical_u64(i));
             });
 
         Ok([witness, structural_witness])

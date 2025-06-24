@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -103,17 +103,17 @@ impl PublicValues<u32> {
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
         vec![
-            vec![E::BaseField::from_u64((self.exit_code & 0xffff) as u64)],
-            vec![E::BaseField::from_u64(
+            vec![E::BaseField::from_canonical_u64((self.exit_code & 0xffff) as u64)],
+            vec![E::BaseField::from_canonical_u64(
                 ((self.exit_code >> 16) & 0xffff) as u64,
             )],
-            vec![E::BaseField::from_u64(self.init_pc as u64)],
-            vec![E::BaseField::from_u64(self.init_cycle as u64)],
-            vec![E::BaseField::from_u64(self.end_pc as u64)],
-            vec![E::BaseField::from_u64(self.end_cycle as u64)],
+            vec![E::BaseField::from_canonical_u64(self.init_pc as u64)],
+            vec![E::BaseField::from_canonical_u64(self.init_cycle as u64)],
+            vec![E::BaseField::from_canonical_u64(self.end_pc as u64)],
+            vec![E::BaseField::from_canonical_u64(self.end_cycle as u64)],
             self.public_io
                 .iter()
-                .map(|e| E::BaseField::from_u64(*e as u64))
+                .map(|e| E::BaseField::from_canonical_u64(*e as u64))
                 .collect(),
         ]
     }
@@ -135,9 +135,9 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pi_evals: Vec<E>,
     // circuit size -> instance mapping
     pub num_instances: Vec<(usize, usize)>,
-    opcode_proofs: BTreeMap<usize, ZKVMOpcodeProof<E>>,
-    table_proofs: BTreeMap<usize, ZKVMTableProof<E>>,
-    witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
+    pub opcode_proofs: BTreeMap<usize, ZKVMOpcodeProof<E>>,
+    pub table_proofs: BTreeMap<usize, ZKVMTableProof<E>>,
+    pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub fixed_witin_opening_proof: PCS::Proof,
 }
 

@@ -7,7 +7,7 @@ use crate::{
 };
 use core::hash::Hash;
 use ff_ext::{ExtensionField, FromUniformBytes};
-use p3::field::{Field, PrimeCharacteristicRing};
+use p3::field::{Field, FieldAlgebra};
 use rand::Rng;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,

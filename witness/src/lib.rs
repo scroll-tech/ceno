@@ -1,6 +1,6 @@
 use multilinear_extensions::mle::{DenseMultilinearExtension, IntoMLE};
 use p3::{
-    field::{Field, PrimeCharacteristicRing},
+    field::{Field, FieldAlgebra},
     matrix::Matrix,
 };
 use rand::{Rng, distributions::Standard, prelude::Distribution};
@@ -41,7 +41,7 @@ pub struct RowMajorMatrix<T: Sized + Sync + Clone + Send + Copy> {
     padding_strategy: InstancePaddingStrategy,
 }
 
-impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> RowMajorMatrix<T> {
+impl<T: Sized + Sync + Clone + Send + Copy + Default + FieldAlgebra> RowMajorMatrix<T> {
     pub fn rand<R: Rng>(rng: &mut R, rows: usize, cols: usize) -> Self
     where
         Standard: Distribution<T>,
@@ -163,7 +163,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
                     .enumerate()
                     .for_each(|(i, instance)| {
                         instance.iter_mut().enumerate().for_each(|(j, v)| {
-                            *v = T::from_u64(fun((start_index + i) as u64, j as u64));
+                            *v = T::from_canonical_u64(fun((start_index + i) as u64, j as u64));
                         })
                     });
             }
@@ -176,7 +176,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     }
 }
 
-impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
+impl<F: Field + FieldAlgebra> RowMajorMatrix<F> {
     pub fn to_mles<E: ff_ext::ExtensionField<BaseField = F>>(
         &self,
     ) -> Vec<DenseMultilinearExtension<E>> {
@@ -226,14 +226,14 @@ impl<F: Field + PrimeCharacteristicRing> RowMajorMatrix<F> {
                     .skip(i)
                     .step_by(n_column)
                     .copied()
-                    .map(|v| E::from_base(&v))
+                    .map(|v| E::from_ref_base(&v))
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>()
     }
 }
 
-impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> Deref
+impl<T: Sized + Sync + Clone + Send + Copy + Default + FieldAlgebra> Deref
     for RowMajorMatrix<T>
 {
     type Target = p3::matrix::dense::DenseMatrix<T>;
@@ -243,7 +243,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     }
 }
 
-impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> DerefMut
+impl<T: Sized + Sync + Clone + Send + Copy + Default + FieldAlgebra> DerefMut
     for RowMajorMatrix<T>
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -251,7 +251,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + PrimeCharacteristicRing> 
     }
 }
 
-impl<F: Sync + Send + Copy + PrimeCharacteristicRing> Index<usize> for RowMajorMatrix<F> {
+impl<F: Sync + Send + Copy + FieldAlgebra> Index<usize> for RowMajorMatrix<F> {
     type Output = [F];
 
     fn index(&self, idx: usize) -> &Self::Output {

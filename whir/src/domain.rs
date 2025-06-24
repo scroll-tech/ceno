@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use p3::{
     commit::TwoAdicMultiplicativeCoset,
-    field::{Field, PrimeCharacteristicRing, TwoAdicField},
+    field::{Field, FieldAlgebra, TwoAdicField},
 };
 
 #[derive(Debug, Clone)]
@@ -22,7 +22,7 @@ where
         let size = degree * (1 << log_rho_inv);
         let base_domain = TwoAdicMultiplicativeCoset {
             log_n: p3::util::log2_strict_usize(size),
-            shift: E::BaseField::from_u64(1),
+            shift: E::BaseField::from_canonical_u64(1),
         };
         let backing_domain = Self::to_extension_domain(&base_domain);
 
