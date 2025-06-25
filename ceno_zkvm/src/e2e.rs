@@ -20,18 +20,60 @@ use ceno_emul::{
     StepRecord, Tracer, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
-use ff_ext::BabyBearExt4, ExtensionField;
+use ff_ext::{BabyBearExt4, ExtensionField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
 use p3::{babybear::BabyBear, goldilocks::Goldilocks};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 use tracing::info;
-use transcript::{BasicTranscript as Transcript, BasicTranscriptWithStat, StatisticRecorder};
+use transcript::BasicTranscript as Transcript;
+
+/// The polynomial commitment scheme kind
+#[derive(
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    ValueEnum,
+    strum_macros::AsRefStr,
+    strum_macros::Display,
+    strum_macros::IntoStaticStr,
+)]
+pub enum PcsKind {
+    #[default]
+    Basefold,
+    Whir,
+}
+
+/// The field type
+#[derive(
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    ValueEnum,
+    strum_macros::AsRefStr,
+    strum_macros::Display,
+    strum_macros::IntoStaticStr,
+)]
+pub enum FieldType {
+    #[default]
+    Goldilocks,
+    BabyBear,
+}
 
 // pub type E = GoldilocksExt2;
 // pub type B = Goldilocks;
