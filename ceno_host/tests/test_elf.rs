@@ -9,7 +9,7 @@ use ceno_emul::{
 };
 use ceno_host::CenoStdin;
 use itertools::{Itertools, enumerate, izip};
-use rand::{Rng, thread_rng};
+use rand::{RngCore, thread_rng};
 use tiny_keccak::{Hasher, Keccak, keccakf};
 
 #[test]
@@ -138,7 +138,7 @@ fn test_bubble_sorting() -> Result<()> {
         CENO_PLATFORM,
         ceno_examples::quadratic_sorting,
         // Provide some random numbers to sort.
-        CenoStdin::default().write(&(0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?,
+        CenoStdin::default().write(&(0..1_000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
         None,
     ));
     for msg in &all_messages {
@@ -153,7 +153,7 @@ fn test_sorting() -> Result<()> {
         CENO_PLATFORM,
         ceno_examples::sorting,
         // Provide some random numbers to sort.
-        CenoStdin::default().write(&(0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>())?,
+        CenoStdin::default().write(&(0..1000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
         None,
     ));
     for (i, msg) in enumerate(&all_messages) {
@@ -168,7 +168,7 @@ fn test_median() -> Result<()> {
     let mut rng = thread_rng();
 
     // Provide some random numbers to find the median of.
-    let mut nums = (0..1000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>();
+    let mut nums = (0..1000).map(|_| rng.next_u32()).collect::<Vec<_>>();
     hints.write(&nums)?;
     nums.sort();
     hints.write(&nums[nums.len() / 2])?;
@@ -191,7 +191,7 @@ fn test_median() -> Result<()> {
 fn test_hashing_fail() {
     let mut rng = thread_rng();
 
-    let mut nums = (0..1_000).map(|_| rng.gen::<u32>()).collect::<Vec<_>>();
+    let mut nums = (0..1_000).map(|_| rng.next_u32()).collect::<Vec<_>>();
     // Add a duplicate number to make uniqueness check fail:
     nums[211] = nums[907];
 
@@ -210,7 +210,7 @@ fn test_hashing() -> Result<()> {
     // Provide some unique random numbers to verify:
     let uniques: Vec<u32> = {
         let mut seen_so_far = BTreeSet::default();
-        from_fn(move || Some(rng.gen::<u32>()))
+        from_fn(move || Some(rng.next_u32()))
             .filter(|&item| seen_so_far.insert(item))
             .take(1_000)
             .collect::<Vec<_>>()

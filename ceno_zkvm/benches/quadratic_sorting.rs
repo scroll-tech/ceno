@@ -11,6 +11,7 @@ mod alloc;
 use criterion::*;
 use ff_ext::GoldilocksExt2;
 use mpcs::{BasefoldDefault, SecurityLevel};
+use rand::RngCore;
 
 criterion_group! {
   name = quadratic_sorting;
@@ -43,7 +44,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
     for n in [100, 500] {
         let max_steps = usize::MAX;
         let mut hints = CenoStdin::default();
-        _ = hints.write(&(0..n).map(|_| rng.gen::<u32>()).collect::<Vec<_>>());
+        _ = hints.write(&(0..n).map(|_| rng.next_u32()).collect::<Vec<_>>());
         let hints: Vec<u32> = (&hints).into();
 
         let mut group = c.benchmark_group("quadratic_sorting".to_string());

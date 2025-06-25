@@ -136,7 +136,7 @@ mod test {
     use ceno_emul::{Change, StepRecord, Word, encode_rv32};
     use ff_ext::GoldilocksExt2;
 
-    use rand::Rng;
+    use rand::RngCore;
 
     use super::*;
     use crate::{
@@ -222,8 +222,8 @@ mod test {
     #[test]
     fn test_slt_random() {
         let mut rng = rand::thread_rng();
-        let a: i32 = rng.gen();
-        let b: i32 = rng.gen();
+        let a: i32 = rng.next_u32() as i32;
+        let b: i32 = rng.next_u32() as i32;
         println!("random: {} <? {}", a, b); // For debugging, do not delete.
         verify::<SltOp>("random 1", a as Word, b as Word, (a < b) as u32);
         verify::<SltOp>("random 2", b as Word, a as Word, (a >= b) as u32);
@@ -244,8 +244,8 @@ mod test {
     #[test]
     fn test_sltu_random() {
         let mut rng = rand::thread_rng();
-        let a: u32 = rng.gen();
-        let b: u32 = rng.gen();
+        let a: u32 = rng.next_u32();
+        let b: u32 = rng.next_u32();
         verify::<SltuOp>("random 1", a, b, (a < b) as u32);
         verify::<SltuOp>("random 2", b, a, (a >= b) as u32);
     }
