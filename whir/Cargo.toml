@@ -16,7 +16,7 @@ default-run = "main"
 bincode = "1.3.3"
 blake2 = "0.10"
 blake3 = "1.5.0"
-clap = { version = "4.4.17", features = ["derive"] }
+clap.workspace = true
 derivative = { version = "2", features = ["use_core"] }
 ff_ext = { path = "../ff_ext" }
 lazy_static = "1.4"
@@ -46,6 +46,15 @@ debug = true
 [features]
 asm = []
 default = ["parallel"]
+nightly-features = [
+  "p3/nightly-features",
+  "ff_ext/nightly-features",
+  "multilinear_extensions/nightly-features",
+  "poseidon/nightly-features",
+  "sumcheck/nightly-features",
+  "transcript/nightly-features",
+  "witness/nightly-features",
+]
 parallel = [
   "dep:rayon",
 ]

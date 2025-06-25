@@ -1,4 +1,7 @@
 use itertools::{Itertools, chain};
+use multilinear_extensions::{
+    Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn, WitnessId,
+};
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -8,10 +11,10 @@ use crate::{
     ROMType,
     chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
-    expression::{Expression, Fixed, Instance, StructuralWitIn, WitIn},
-    structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey, WitnessId},
+    structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey},
 };
-use p3::field::PrimeCharacteristicRing;
+use multilinear_extensions::monomial::Term;
+use p3::field::FieldAlgebra;
 
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -133,6 +136,13 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
 
+    // this main expr will be finalized when constrian system finish
+    pub backend_expr_monomial_form: Vec<Term<Expression<E>, Expression<E>>>,
+    // this will be finalized when constriansystem finish
+    // represent all the alloc of witin: fixed, witin, structural_wit, ...
+    pub num_backend_witin: u16,
+    pub num_layer_challenges: u16,
+
     pub(crate) phantom: PhantomData<E>,
 }
 
@@ -169,6 +179,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             max_non_lc_degree: 0,
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
+
+            backend_expr_monomial_form: vec![],
+            num_backend_witin: 0,
+            num_layer_challenges: 0,
 
             debug_map: HashMap::new(),
 
@@ -256,11 +270,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), ZKVMError> {
         let rlc_record = self.rlc_chip_record(
-            std::iter::once(Expression::Constant(E::BaseField::from_u64(
-                rom_type as u64,
-            )))
-            .chain(record.clone())
-            .collect(),
+            std::iter::once(E::BaseField::from_canonical_u64(rom_type as u64).expr())
+                .chain(record.clone())
+                .collect(),
         );
         assert_eq!(
             rlc_record.degree(),
@@ -432,7 +444,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             let assert_zero_expr = if assert_zero_expr.is_monomial_form() {
                 assert_zero_expr
             } else {
-                let e = assert_zero_expr.to_monomial_form();
+                let e = assert_zero_expr.get_monomial_form();
                 assert!(e.is_monomial_form(), "failed to put into monomial form");
                 e
             };
@@ -454,6 +466,86 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let t = cb(self);
         self.ns.pop_namespace();
         t
+    }
+
+    pub fn finalize_backend_monomial_expression(&mut self) {
+        let exprs =
+            self.r_table_expressions
+                .iter()
+                .map(|r| r.expr.clone())
+                .chain(
+                    // padding with 1
+                    self.r_expressions
+                        .iter()
+                        .map(|expr| expr - E::BaseField::ONE.expr()),
+                )
+                .chain(self.w_table_expressions.iter().map(|w| &w.expr).cloned())
+                .chain(
+                    // padding with 1
+                    self.w_expressions
+                        .iter()
+                        .map(|expr| expr - E::BaseField::ONE.expr()),
+                )
+                .chain(
+                    self.lk_table_expressions
+                        .iter()
+                        .map(|lk| &lk.multiplicity)
+                        .cloned(),
+                )
+                .chain(
+                    self.lk_table_expressions
+                        .iter()
+                        .map(|lk| &lk.values)
+                        .cloned(),
+                )
+                .chain(
+                    // padding with alpha
+                    self.lk_expressions
+                        .iter()
+                        .map(|expr| expr.clone() - Expression::Challenge(0, 1, E::ONE, E::ZERO)),
+                )
+                .chain(self.assert_zero_sumcheck_expressions.clone())
+                .chain(self.assert_zero_expressions.clone())
+                .zip(
+                    (2u16..) // challenge id start from 2 because 0, 1 is alpha, beta respectively
+                        .map(|challenge_id| {
+                            Expression::Challenge(challenge_id, 1, E::ONE, E::ZERO)
+                        }),
+                )
+                .map(|(expr, r)| expr * r)
+                .collect_vec();
+
+        let num_layer_challenges = exprs.len() as u16;
+        let main_sumcheck_expr = exprs.into_iter().sum::<Expression<E>>();
+
+        let witid_offset = 0 as WitnessId;
+        let structural_witin_offset = witid_offset + self.num_witin;
+        let fixed_offset = structural_witin_offset + self.num_structural_witin;
+
+        let monomial_terms_expr = main_sumcheck_expr.get_monomial_terms();
+        self.backend_expr_monomial_form = monomial_terms_expr
+            .into_iter()
+            .map(
+                |Term {
+                     scalar,
+                     mut product,
+                 }| {
+                    product.iter_mut().for_each(|t| match t {
+                        Expression::WitIn(_) => (),
+                        Expression::StructuralWitIn(structural_wit_id, _, _, _) => {
+                            *t = Expression::WitIn(structural_witin_offset + *structural_wit_id);
+                        }
+                        Expression::Fixed(Fixed(fixed_id)) => {
+                            *t = Expression::WitIn(fixed_offset + (*fixed_id as u16));
+                        }
+                        e => panic!("unknown monimial terms {:?}", e),
+                    });
+                    Term { scalar, product }
+                },
+            )
+            .collect_vec();
+        self.num_backend_witin = fixed_offset;
+        self.num_layer_challenges = num_layer_challenges;
     }
 }
 

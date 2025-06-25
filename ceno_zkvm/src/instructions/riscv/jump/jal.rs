@@ -6,7 +6,6 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::ToExpr,
     instructions::{
         Instruction,
         riscv::{constants::UInt, j_insn::JInstructionConfig},
@@ -14,6 +13,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
+use multilinear_extensions::ToExpr;
 
 pub struct JalConfig<E: ExtensionField> {
     pub j_insn: JInstructionConfig<E>,

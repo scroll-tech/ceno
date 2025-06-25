@@ -1,5 +1,6 @@
 use anyhow::bail;
 use console::style;
+use get_dir::{FileTarget, GetDir, Target};
 use std::{
     backtrace::BacktraceStatus,
     fmt,
@@ -18,23 +19,59 @@ pub static QUITE: OnceLock<bool> = OnceLock::new();
 /// The rustc target triple name for ceno.
 pub const RUSTC_TARGET: &str = "riscv32im-ceno-zkvm-elf";
 
-/// Search for a `Cargo.toml` file in the given path and its parent directories.
-pub fn search_cargo_manifest_path<P: AsRef<Path>>(path: P) -> anyhow::Result<PathBuf> {
-    let path = path.as_ref();
-    let mut path_buf = path.to_path_buf();
-    loop {
-        let cargo_manifest = path_buf.join("Cargo.toml");
-        if cargo_manifest.try_exists()? {
-            return Ok(cargo_manifest.canonicalize()?);
+/// Search for a `Cargo.toml` in the given path and its parent directories.
+pub fn search_cargo_manifest<P: AsRef<Path>>(path: P) -> anyhow::Result<PathBuf> {
+    let path = path.as_ref().canonicalize()?;
+    match GetDir::new()
+        .directory(&path)
+        .targets(vec![Target::File(FileTarget { name: "Cargo.toml" })])
+        .run_reverse()
+    {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            bail!(
+                "Could not find a `Cargo.toml` in {} or its parent directories",
+                path.display()
+            );
         }
-        if !path_buf.pop() {
-            break;
-        }
+        path => Ok(path?.join("Cargo.toml")),
     }
-    bail!(
-        "could not find `Cargo.toml` in `{}` or any parent directory",
-        path.display()
-    )
+}
+
+/// Search for a workspace root in the given path and its parent directories.
+pub fn search_workspace_root<P: AsRef<Path>>(path: P) -> anyhow::Result<PathBuf> {
+    let path = path.as_ref().canonicalize()?;
+    match GetDir::new()
+        .directory(&path)
+        .targets(vec![Target::File(FileTarget { name: "Cargo.lock" })])
+        .run_reverse()
+    {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            // try to generate a lockfile if we are in a workspace
+            eprintln!(
+                "{}{} No Cargo.lock found, try to generating one.",
+                style("warning").yellow().bold(),
+                style(":").white().bold(),
+            );
+        }
+        path => return Ok(path?),
+    }
+
+    let result = Command::new("cargo").arg("generate-lockfile").status()?;
+    if !result.success() {
+        bail!("failed to generate lockfile");
+    }
+    match GetDir::new()
+        .targets(vec![Target::File(FileTarget { name: "Cargo.lock" })])
+        .run_reverse()
+    {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            bail!(
+                "Could not find a cargo workspace in {} or its parent directories",
+                path.display()
+            );
+        }
+        path => Ok(path?),
+    }
 }
 
 /// Get `RUSTFLAGS` env (if any) and append the base flags.
@@ -125,4 +162,36 @@ pub fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
         .with_binary()
         .parse_size(s)
         .map(|size| size as u32)
+}
+
+/// Canonicalize a path allowing for non-existent paths.
+pub fn canonicalize_allow_nx<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
+    let path = path.as_ref();
+    if path.exists() {
+        return path.canonicalize();
+    }
+
+    let mut cur = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+
+    let mut tails = Vec::new();
+    while !cur.exists() {
+        let name = cur.file_name().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("cannot peel off component from `{}`", cur.display()),
+            )
+        })?;
+        tails.push(name.to_os_string());
+        cur.pop();
+    }
+
+    let mut canon = cur.canonicalize()?;
+    for seg in tails.into_iter().rev() {
+        canon.push(seg);
+    }
+    Ok(canon)
 }

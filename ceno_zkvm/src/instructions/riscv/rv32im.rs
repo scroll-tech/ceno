@@ -347,7 +347,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         for (insn_kind, (_, records)) in
             izip!(InsnKind::iter(), &all_records).sorted_by_key(|(_, (_, a))| Reverse(a.len()))
         {
-            tracing::info!("tracer generated {:?} {} records", insn_kind, records.len());
+            tracing::trace!("tracer generated {:?} {} records", insn_kind, records.len());
         }
 
         macro_rules! assign_opcode {
@@ -466,7 +466,7 @@ pub struct DummyExtraConfig<E: ExtensionField> {
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
-        let keccak_config = cs.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>();
+        let keccak_config = cs.register_keccakf_circuit();
         let secp256k1_add_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>();
         let secp256k1_double_config =
@@ -509,10 +509,10 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
         fixed.register_opcode_circuit::<EcallDummy<E>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>(cs);
+        fixed.register_keccakf_circuit(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(cs);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(cs);
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(cs);
@@ -562,11 +562,8 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             }
         }
 
-        witness.assign_opcode_circuit::<LargeEcallDummy<E, KeccakSpec>>(
-            cs,
-            &self.keccak_config,
-            keccak_steps,
-        )?;
+        witness.assign_keccakf_circuit(cs, &self.keccak_config, keccak_steps)?;
+
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(
             cs,
             &self.secp256k1_add_config,

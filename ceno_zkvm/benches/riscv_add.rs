@@ -3,14 +3,19 @@ use std::{collections::BTreeMap, time::Duration};
 use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
-    scheme::prover::ZKVMProver,
+    scheme::{
+        cpu::{CpuBackend, CpuProver},
+        hal::ProofInput,
+        prover::ZKVMProver,
+    },
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
+mod alloc;
 use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
-use mpcs::{BasefoldDefault, PolynomialCommitmentScheme};
+use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
 
 use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
@@ -43,7 +48,7 @@ fn bench_add(c: &mut Criterion) {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
 
-    let param = Pcs::setup(1 << MAX_NUM_VARIABLES).unwrap();
+    let param = Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).unwrap();
     let (pp, vp) = Pcs::trim(param, 1 << MAX_NUM_VARIABLES).unwrap();
 
     let pk = zkvm_cs
@@ -51,7 +56,9 @@ fn bench_add(c: &mut Criterion) {
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
 
-    let prover = ZKVMProver::new(pk);
+    let backend = CpuBackend::<E, Pcs>::new();
+    let device = CpuProver::new(backend);
+    let prover = ZKVMProver::new(pk, device);
     let circuit_pk = prover
         .pk
         .circuit_pks
@@ -90,13 +97,18 @@ fn bench_add(c: &mut Criterion) {
                             transcript.read_challenge().elements,
                         ];
 
+                        let input = ProofInput {
+                            fixed: vec![],
+                            witness: polys,
+                            structural_witness: vec![],
+                            public_input: vec![],
+                            num_instances,
+                        };
                         let _ = prover
-                            .create_opcode_proof(
+                            .create_chip_proof(
                                 "ADD",
                                 circuit_pk,
-                                polys,
-                                &[],
-                                num_instances,
+                                input,
                                 &mut transcript,
                                 &challenges,
                             )

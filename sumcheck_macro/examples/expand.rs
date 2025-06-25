@@ -7,7 +7,7 @@ use multilinear_extensions::{
     mle::FieldType, util::largest_even_below, virtual_poly::VirtualPolynomial,
     virtual_polys::PolyMeta,
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::rngs::OsRng;
 use sumcheck::util::{AdditiveArray, ceil_log2};
 
@@ -36,7 +36,7 @@ impl<E: ExtensionField> Container<'_, E> {
 
     pub fn new() -> Self {
         Self {
-            poly: VirtualPolynomial::random(3, (4, 5), 2, &mut OsRng).0,
+            poly: VirtualPolynomial::random(&[3], (4, 5), 2, &mut OsRng).0,
             is_main_worker: true,
             phase2_numvar: Some(1),
         }

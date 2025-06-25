@@ -2,12 +2,12 @@ use crate::{
     chip_handler::{AddressExpr, MemoryChipOperations, MemoryExpr},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::Expression,
     gadgets::AssertLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
 };
 use ff_ext::ExtensionField;
+use multilinear_extensions::Expression;
 
 impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperations<E, NR, N>
     for CircuitBuilder<'_, E>

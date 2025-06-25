@@ -1,15 +1,14 @@
 use ff_ext::ExtensionField;
 
 use super::GlobalStateRegisterMachineChipOperations;
-use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, expression::Expression, structs::RAMType,
-};
-use p3::field::PrimeCharacteristicRing;
+use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::RAMType};
+use multilinear_extensions::{Expression, ToExpr};
+use p3::field::FieldAlgebra;
 
 impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitBuilder<'_, E> {
     fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError> {
         let record: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from_u64(RAMType::GlobalState as u64)),
+            E::BaseField::from_canonical_u64(RAMType::GlobalState as u64).expr(),
             pc,
             ts,
         ];
@@ -19,7 +18,7 @@ impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitB
 
     fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError> {
         let record: Vec<Expression<E>> = vec![
-            Expression::Constant(E::BaseField::from_u64(RAMType::GlobalState as u64)),
+            E::BaseField::from_canonical_u64(RAMType::GlobalState as u64).expr(),
             pc,
             ts,
         ];

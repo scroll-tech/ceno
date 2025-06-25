@@ -3,13 +3,11 @@ use itertools::{Itertools, izip};
 
 use super::{UIntLimbs, UintLimb};
 use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
-    gadgets::AssertLtConfig,
+    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::AssertLtConfig,
     instructions::riscv::config::IsEqualConfig,
 };
-use p3::field::PrimeCharacteristicRing;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
+use p3::field::FieldAlgebra;
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
@@ -78,14 +76,15 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             let Expression::Constant(c) = constant else {
                 panic!("addend is not a constant type");
             };
-            let b = c.to_canonical_u64();
+            let b = c
+                .left()
+                .expect("do not support extension field here")
+                .to_canonical_u64();
 
             // convert Expression::Constant to limbs
             let b_limbs = (0..Self::NUM_LIMBS)
                 .map(|i| {
-                    Expression::Constant(E::BaseField::from_u64(
-                        (b >> (C * i)) & Self::LIMB_BIT_MASK,
-                    ))
+                    E::BaseField::from_canonical_u64((b >> (C * i)) & Self::LIMB_BIT_MASK).expr()
                 })
                 .collect_vec();
 
@@ -278,7 +277,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
         let sum_expr = is_equal_per_limb.iter().map(ToExpr::expr).sum();
 
-        let sum_flag = WitIn::from_expr(|| "sum_flag", circuit_builder, sum_expr, false)?;
+        let sum_flag = circuit_builder.create_witin_from_exprs(|| "sum_flag", sum_expr, false)?;
         let (is_equal, diff_inv) =
             circuit_builder.is_equal(sum_flag.expr(), Expression::from(n_limbs))?;
         Ok(IsEqualConfig {
@@ -296,12 +295,12 @@ mod tests {
     mod add {
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
-            expression::{Expression, ToExpr},
-            scheme::utils::eval_by_expr,
             uint::UIntLimbs,
         };
-        use ff_ext::{ExtensionField, FieldInto, GoldilocksExt2};
+        use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
+        use multilinear_extensions::{ToExpr, utils::eval_by_expr};
+        use p3::field::FieldAlgebra;
 
         type E = GoldilocksExt2;
         #[test]
@@ -433,7 +432,7 @@ mod tests {
                 let uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
                 uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
             } else {
-                let const_b = Expression::Constant(const_b.unwrap().into_f());
+                let const_b = E::BaseField::from_canonical_u64(const_b.unwrap()).expr();
                 uint_a
                     .add_const(|| "uint_c", &mut cb, const_b, overflow)
                     .unwrap()
@@ -486,10 +485,13 @@ mod tests {
             let wit: Vec<E> = witness_values
                 .iter()
                 .cloned()
-                .map(E::from_u64)
+                .map(E::from_canonical_u64)
                 .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
+                assert_eq!(
+                    eval_by_expr(&wit, &[], &challenges, c),
+                    E::from_canonical_u64(ret)
+                );
             });
 
             // overflow
@@ -506,12 +508,11 @@ mod tests {
     mod mul {
         use crate::{
             circuit_builder::{CircuitBuilder, ConstraintSystem},
-            expression::ToExpr,
-            scheme::utils::eval_by_expr,
             uint::UIntLimbs,
         };
         use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
+        use multilinear_extensions::{ToExpr, utils::eval_by_expr};
 
         type E = GoldilocksExt2; // 18446744069414584321
         #[test]
@@ -663,10 +664,13 @@ mod tests {
             let wit: Vec<E> = witness_values
                 .iter()
                 .cloned()
-                .map(E::from_u64)
+                .map(E::from_canonical_u64)
                 .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
+                assert_eq!(
+                    eval_by_expr(&wit, &[], &challenges, c),
+                    E::from_canonical_u64(ret)
+                );
             });
 
             // overflow
@@ -691,10 +695,8 @@ mod tests {
         };
         use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
-        use multilinear_extensions::{
-            mle::DenseMultilinearExtension, virtual_poly::ArcMultilinearExtension,
-        };
-        use p3::field::PrimeCharacteristicRing;
+        use multilinear_extensions::mle::{ArcMultilinearExtension, MultilinearExtension};
+        use p3::field::FieldAlgebra;
 
         type E = GoldilocksExt2; // 18446744069414584321
 
@@ -708,9 +710,10 @@ mod tests {
                 self.iter()
                     .map(|a| {
                         let mle: ArcMultilinearExtension<E> =
-                            DenseMultilinearExtension::from_evaluation_vec_smart(0, vec![
-                                E::BaseField::from_u64(*a),
-                            ])
+                            MultilinearExtension::from_evaluation_vec_smart(
+                                0,
+                                vec![E::BaseField::from_canonical_u64(*a)],
+                            )
                             .into();
                         mle
                     })

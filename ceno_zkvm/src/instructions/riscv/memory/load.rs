@@ -1,9 +1,7 @@
-// will remove #[allow(dead_code)] when we finished fibonacci integration test
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     gadgets::SignedExtendConfig,
     instructions::{
         Instruction,
@@ -19,7 +17,8 @@ use crate::{
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
-use p3::field::PrimeCharacteristicRing;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
+use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {
@@ -49,28 +48,24 @@ pub struct LhOp;
 impl RIVInstruction for LhOp {
     const INST_KIND: InsnKind = InsnKind::LH;
 }
-#[allow(dead_code)]
 pub type LhInstruction<E> = LoadInstruction<E, LhOp>;
 
 pub struct LhuOp;
 impl RIVInstruction for LhuOp {
     const INST_KIND: InsnKind = InsnKind::LHU;
 }
-#[allow(dead_code)]
 pub type LhuInstruction<E> = LoadInstruction<E, LhuOp>;
 
 pub struct LbOp;
 impl RIVInstruction for LbOp {
     const INST_KIND: InsnKind = InsnKind::LB;
 }
-#[allow(dead_code)]
 pub type LbInstruction<E> = LoadInstruction<E, LbOp>;
 
 pub struct LbuOp;
 impl RIVInstruction for LbuOp {
     const INST_KIND: InsnKind = InsnKind::LBU;
 }
-#[allow(dead_code)]
 pub type LbuInstruction<E> = LoadInstruction<E, LbuOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
@@ -226,7 +221,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             .memory_addr
             .assign_instance(instance, lk_multiplicity, unaligned_addr.into())?;
         if let Some(&limb) = config.target_limb.as_ref() {
-            set_val!(instance, limb, E::BaseField::from_u16(target_limb));
+            set_val!(
+                instance,
+                limb,
+                E::BaseField::from_canonical_u16(target_limb)
+            );
         }
         if let Some(limb_bytes) = config.target_limb_bytes.as_ref() {
             if addr_low_bits[0] == 1 {
@@ -236,7 +235,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             }
             for (&col, byte) in izip!(limb_bytes.iter(), target_limb_bytes.into_iter()) {
                 lk_multiplicity.assert_ux::<8>(byte as u64);
-                set_val!(instance, col, E::BaseField::from_u8(byte));
+                set_val!(instance, col, E::BaseField::from_canonical_u8(byte));
             }
         }
         let val = match I::INST_KIND {

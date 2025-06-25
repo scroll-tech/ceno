@@ -291,7 +291,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                             // the multiplicity
                             .saturating_sub(num_var);
                         if num_vars_multiplicity > 0 {
-                            sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                            sum *= E::BaseField::from_canonical_u64(1 << num_vars_multiplicity);
                         }
                         AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
                     } else {
@@ -315,7 +315,7 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
                             .saturating_sub(1)
                             .saturating_sub(num_var);
                         if num_vars_multiplicity > 0 {
-                            sum *= E::BaseField::from_u64(1 << num_vars_multiplicity);
+                            sum *= E::BaseField::from_canonical_u64(1 << num_vars_multiplicity);
                         }
                         AdditiveArray::<_, #degree_plus_one>([sum; #degree_plus_one])
                     } else {
@@ -363,30 +363,14 @@ pub fn sumcheck_code_gen(input: proc_macro::TokenStream) -> proc_macro::TokenStr
             });
 
         // Generate the body for this match arm.
-        let mut arm_body = arg_items
-            .iter()
-            .fold(TokenStream::new(), |acc, (arg_id, _, ident)| {
-                let f = &f_var_names[*arg_id - 1];
-                quote! {
-                    #acc
-                    let #ident = if let Some((start, offset)) = #f.evaluations_range() {
-                        &#ident[start..][..offset]
-                    } else {
-                        &#ident[..]
-                    };
-                }
-            });
-
         // Convert inner type from E::BaseField to E if it is required.
-        arm_body = if num_exts == degree {
+        let arm_body = if num_exts == degree {
             quote! {
-                #arm_body
                 let result = {#additive_converter};
                 AdditiveArray(result.0.map(|b| b.into()))
             }
         } else {
             quote! {
-                #arm_body
                 #additive_converter
             }
         };

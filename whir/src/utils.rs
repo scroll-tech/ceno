@@ -129,8 +129,8 @@ pub fn stack_evaluations_bench_allocate<F: Field>(
 
 pub fn interpolate_field_type_over_boolean_hypercube<E: ExtensionField>(evals: &mut FieldType<E>) {
     match evals {
-        FieldType::Ext(evals) => interpolate_over_boolean_hypercube(evals),
-        FieldType::Base(evals) => interpolate_over_boolean_hypercube(evals),
+        FieldType::Ext(evals) => interpolate_over_boolean_hypercube(evals.to_mut()),
+        FieldType::Base(evals) => interpolate_over_boolean_hypercube(evals.to_mut()),
         _ => unreachable!(),
     };
 }
@@ -214,13 +214,14 @@ pub fn evaluate_over_hypercube<F: Field>(coeffs: &mut [F]) {
 pub fn evaluate_as_multilinear_evals<E: ExtensionField>(evals: &[E::BaseField], point: &[E]) -> E {
     if evals.len() == 1 {
         // It's a constant function, so just return the constant value.
-        return E::from_base(&evals[0]);
+        return E::from_ref_base(&evals[0]);
     }
     assert_eq!(evals.len(), 1 << point.len());
     let mut fold_result = evals
         .par_chunks_exact(2)
         .map(|chunk| {
-            (E::ONE - point[0]) * E::from_base(&chunk[0]) + E::from_base(&chunk[1]) * point[0]
+            (E::ONE - point[0]) * E::from_ref_base(&chunk[0])
+                + E::from_ref_base(&chunk[1]) * point[0]
         })
         .collect::<Vec<_>>();
     let mut index = 1;
@@ -278,7 +279,7 @@ pub fn evaluate_as_univariate<E: ExtensionField>(evals: &[E], points: &[E]) -> V
 #[cfg(test)]
 mod tests {
     use multilinear_extensions::mle::FieldType;
-    use p3::field::PrimeCharacteristicRing;
+    use p3::field::FieldAlgebra;
     use rand::thread_rng;
     use witness::RowMajorMatrix;
 
@@ -297,7 +298,7 @@ mod tests {
         let folding_factor = 3;
         let fold_size = 1 << folding_factor;
         assert_eq!(num % fold_size, 0);
-        let evals: Vec<F> = (0..num as u64).map(F::from_u64).collect();
+        let evals: Vec<F> = (0..num as u64).map(F::from_canonical_u64).collect();
 
         let stacked = stack_evaluations(evals, folding_factor);
         assert_eq!(stacked.len(), num);
@@ -305,7 +306,10 @@ mod tests {
         for (i, fold) in stacked.chunks_exact(fold_size).enumerate() {
             assert_eq!(fold.len(), fold_size);
             for (j, item) in fold.iter().copied().enumerate().take(fold_size) {
-                assert_eq!(item, F::from_u64((i + j * num / fold_size) as u64));
+                assert_eq!(
+                    item,
+                    F::from_canonical_u64((i + j * num / fold_size) as u64)
+                );
             }
         }
     }
@@ -355,7 +359,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         polys.iter_mut().for_each(|poly| {
-            interpolate_over_boolean_hypercube(poly);
+            interpolate_over_boolean_hypercube(poly.to_mut());
         });
         let new_mles = rmm.to_mles::<E>();
         let new_polys = new_mles

@@ -1,26 +1,19 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::HashMap,
     fmt::Display,
     hash::Hash,
-    mem,
     panic::{self, PanicHookInfo},
 };
 
 use ff_ext::{ExtensionField, SmallField};
 use itertools::Itertools;
-use multilinear_extensions::{
-    virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
-};
 use p3::field::Field;
-use transcript::Transcript;
-
-use crate::expression::Expression;
 
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {
     if x >= 0 {
-        F::from_u64(x as u64)
+        F::from_canonical_u64(x as u64)
     } else {
-        -F::from_u64((-x) as u64)
+        -F::from_canonical_u64((-x) as u64)
     }
 }
 
@@ -62,24 +55,6 @@ pub(crate) fn add_one_to_big_num<F: Field>(limb_modulo: F, limbs: &[F]) -> Vec<F
     result
 }
 
-/// derive challenge from transcript and return all pows result
-pub fn get_challenge_pows<E: ExtensionField>(
-    size: usize,
-    transcript: &mut impl Transcript<E>,
-) -> Vec<E> {
-    // println!("alpha_pow");
-    let alpha = transcript
-        .sample_and_append_challenge(b"combine subset evals")
-        .elements;
-    (0..size)
-        .scan(E::ONE, |state, _| {
-            let res = *state;
-            *state *= alpha;
-            Some(res)
-        })
-        .collect_vec()
-}
-
 // split single u64 value into W slices, each slice got C bits.
 // all the rest slices will be filled with 0 if W x C > 64
 pub fn u64vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
@@ -117,7 +92,7 @@ pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &
         let mut running_product = vec![E::ZERO; b.len() + 1];
         running_product[b.len()] = E::ONE;
         for i in (0..b.len()).rev() {
-            let bit = E::from_u64(((max_idx >> i) & 1) as u64);
+            let bit = E::from_canonical_u64(((max_idx >> i) & 1) as u64);
             running_product[i] = running_product[i + 1]
                 * (a[i] * b[i] * bit + (E::ONE - a[i]) * (E::ONE - b[i]) * (E::ONE - bit));
         }
@@ -155,12 +130,12 @@ pub fn eval_wellform_address_vec<E: ExtensionField>(
     r: &[E],
     descending: bool,
 ) -> E {
-    let (offset, scaled) = (E::from_u64(offset), E::from_u64(scaled));
+    let (offset, scaled) = (E::from_canonical_u64(offset), E::from_canonical_u64(scaled));
     let tmp = scaled
         * r.iter()
             .scan(E::ONE, |state, x| {
                 let result = *x * *state;
-                *state *= E::from_u64(2); // Update the state for the next power of 2
+                *state *= E::from_canonical_u64(2); // Update the state for the next power of 2
                 Some(result)
             })
             .sum::<E>();
@@ -210,137 +185,15 @@ where
     result
 }
 
-/// add mle terms into virtual poly by expression
-/// return distinct witin in set
-pub fn add_mle_list_by_expr<'a, E: ExtensionField>(
-    virtual_polys: &mut VirtualPolynomials<'a, E>,
-    selector: Option<&'a ArcMultilinearExtension<'a, E>>,
-    wit_ins: Vec<&'a ArcMultilinearExtension<'a, E>>,
-    expr: &Expression<E>,
-    challenges: &[E],
-    // sumcheck batch challenge
-    alpha: E,
-) -> BTreeSet<u16> {
-    assert!(expr.is_monomial_form());
-    let monomial_terms = expr.evaluate(
-        &|_| unreachable!(),
-        &|witness_id| vec![(E::ONE, { vec![witness_id] })],
-        &|structural_witness_id, _, _, _| vec![(E::ONE, { vec![structural_witness_id] })],
-        &|scalar| vec![(E::from(scalar), { vec![] })],
-        &|challenge_id, pow, scalar, offset| {
-            let challenge = challenges[challenge_id as usize];
-            vec![(challenge.exp_u64(pow as u64) * scalar + offset, vec![])]
-        },
-        &|mut a, b| {
-            a.extend(b);
-            a
-        },
-        &|mut a, mut b| {
-            assert!(a.len() <= 2);
-            assert!(b.len() <= 2);
-            // special logic to deal with scaledsum
-            // scaledsum second parameter must be 0
-            if a.len() == 2 {
-                assert!((a[1].0, a[1].1.is_empty()) == (E::ZERO, true));
-                a.truncate(1);
-            }
-            if b.len() == 2 {
-                assert!((b[1].0, b[1].1.is_empty()) == (E::ZERO, true));
-                b.truncate(1);
-            }
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+pub fn print_allocated_bytes() {
+    use tikv_jemalloc_ctl::{epoch, stats};
 
-            a[0].1.extend(mem::take(&mut b[0].1));
-            // return [ab]
-            vec![(a[0].0 * b[0].0, mem::take(&mut a[0].1))]
-        },
-        &|mut x, a, b| {
-            assert!(a.len() == 1 && a[0].1.is_empty()); // for challenge or constant, term should be empty
-            assert!(b.len() == 1 && b[0].1.is_empty()); // for challenge or constant, term should be empty
-            assert!(x.len() == 1 && (x[0].0, x[0].1.len()) == (E::ONE, 1)); // witin size only 1
-            if b[0].0 == E::ZERO {
-                // only include first term if b = 0
-                vec![(a[0].0, mem::take(&mut x[0].1))]
-            } else {
-                // return [ax, b]
-                vec![(a[0].0, mem::take(&mut x[0].1)), (b[0].0, vec![])]
-            }
-        },
-    );
-    for (constant, monomial_term) in monomial_terms.iter() {
-        if *constant != E::ZERO && monomial_term.is_empty() && selector.is_none() {
-            todo!("make virtual poly support pure constant")
-        }
-        let sel = selector.map(|sel| vec![sel]).unwrap_or_default();
-        let terms_polys = monomial_term
-            .iter()
-            .map(|wit_id| wit_ins[*wit_id as usize])
-            .collect_vec();
+    // Advance the epoch to refresh the stats
+    let e = epoch::mib().unwrap();
+    e.advance().unwrap();
 
-        virtual_polys.add_mle_list([sel, terms_polys].concat(), *constant * alpha);
-    }
-
-    monomial_terms
-        .into_iter()
-        .flat_map(|(_, monomial_term)| monomial_term.into_iter().collect_vec())
-        .collect::<BTreeSet<u16>>()
-}
-
-#[cfg(test)]
-mod tests {
-    use ff_ext::GoldilocksExt2;
-    use itertools::Itertools;
-    use multilinear_extensions::{
-        mle::IntoMLE, virtual_poly::ArcMultilinearExtension, virtual_polys::VirtualPolynomials,
-    };
-    use p3::field::PrimeCharacteristicRing;
-
-    use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem},
-        expression::{Expression, ToExpr},
-        utils::add_mle_list_by_expr,
-    };
-    use p3::goldilocks::Goldilocks;
-
-    #[test]
-    fn test_add_mle_list_by_expr() {
-        type E = GoldilocksExt2;
-        type F = Goldilocks;
-        let mut cs = ConstraintSystem::new(|| "test_root");
-        let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let x = cb.create_witin(|| "x");
-        let y = cb.create_witin(|| "y");
-
-        let wits_in: Vec<ArcMultilinearExtension<E>> = (0..cs.num_witin as usize)
-            .map(|_| vec![F::from_u64(1)].into_mle().into())
-            .collect();
-
-        let mut virtual_polys = VirtualPolynomials::new(1, 0);
-
-        // 3xy + 2y
-        let expr: Expression<E> = 3 * x.expr() * y.expr() + 2 * y.expr();
-
-        let distrinct_zerocheck_terms_set = add_mle_list_by_expr(
-            &mut virtual_polys,
-            None,
-            wits_in.iter().collect_vec(),
-            &expr,
-            &[],
-            GoldilocksExt2::ONE,
-        );
-        assert!(distrinct_zerocheck_terms_set.len() == 2);
-        assert!(virtual_polys.degree() == 2);
-
-        // 3x^3
-        let expr: Expression<E> = 3 * x.expr() * x.expr() * x.expr();
-        let distrinct_zerocheck_terms_set = add_mle_list_by_expr(
-            &mut virtual_polys,
-            None,
-            wits_in.iter().collect_vec(),
-            &expr,
-            &[],
-            GoldilocksExt2::ONE,
-        );
-        assert!(distrinct_zerocheck_terms_set.len() == 1);
-        assert!(virtual_polys.degree() == 3);
-    }
+    // Read allocated bytes
+    let allocated = stats::allocated::read().unwrap();
+    tracing::info!("jemalloc total allocated bytes: {}", allocated);
 }

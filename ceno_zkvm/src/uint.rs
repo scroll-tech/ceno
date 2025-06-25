@@ -7,7 +7,6 @@ use crate::{
     chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
     error::{UtilError, ZKVMError},
-    expression::{Expression, ToExpr, WitIn},
     gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::riscv::constants::UInt,
     utils::add_one_to_big_num,
@@ -15,7 +14,8 @@ use crate::{
 };
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, enumerate};
-use p3::field::PrimeCharacteristicRing;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
+use p3::field::FieldAlgebra;
 use std::{
     borrow::Cow,
     mem::{self},
@@ -156,7 +156,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 limbs
                     .into_iter()
                     .take(Self::NUM_LIMBS)
-                    .map(|limb| Expression::Constant(E::BaseField::from_u64(limb.into())))
+                    .map(|limb| E::BaseField::from_canonical_u64(limb.into()).expr())
                     .collect::<Vec<Expression<E>>>(),
             ),
             carries: None,
@@ -233,7 +233,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             for (wire, limb) in wires.iter().zip(
                 limbs_values
                     .iter()
-                    .map(|v| E::BaseField::from_u64(*v as u64))
+                    .map(|v| E::BaseField::from_canonical_u64(*v as u64))
                     .chain(std::iter::repeat(E::BaseField::ZERO)),
             ) {
                 instance[wire.id as usize] = limb;
@@ -259,7 +259,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             for (wire, carry) in carries.iter().zip(
                 carry_values
                     .iter()
-                    .map(|v| E::BaseField::from_u64(Into::<u64>::into(*v)))
+                    .map(|v| E::BaseField::from_canonical_u64(Into::<u64>::into(*v)))
                     .chain(std::iter::repeat(E::BaseField::ZERO)),
             ) {
                 instance[wire.id as usize] = carry;
@@ -300,7 +300,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let k = C / 8;
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
-            shift_pows.push(Expression::Constant(E::BaseField::ONE));
+            shift_pows.push(E::BaseField::ONE.expr());
             (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() << 8));
             shift_pows
         };
@@ -330,7 +330,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         let k = C / 8;
         let shift_pows = {
             let mut shift_pows = Vec::with_capacity(k);
-            shift_pows.push(Expression::Constant(E::BaseField::ONE));
+            shift_pows.push(E::BaseField::ONE.expr());
             (0..k - 1).for_each(|_| shift_pows.push(shift_pows.last().unwrap() << 8));
             shift_pows
         };
@@ -444,7 +444,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn counter_vector<F: SmallField>(size: usize) -> Vec<Vec<F>> {
         let num_vars = ceil_log2(size);
         let number_of_limbs = num_vars.div_ceil(C);
-        let cell_modulo = F::from_u64(1 << C);
+        let cell_modulo = F::from_canonical_u64(1 << C);
 
         let mut res = vec![vec![F::ZERO; number_of_limbs]];
 
@@ -635,7 +635,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
 
     const C: usize = 16;
 
-    const LIMBS: usize = (Self::M + 15) / 16;
+    const LIMBS: usize = Self::M.div_ceil(16);
 
     pub fn new(val: T, lkm: &mut LkMultiplicity) -> Self {
         let uint = Self::new_unchecked(val);
@@ -711,7 +711,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
     pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {
         self.limbs
             .iter()
-            .map(|v| F::from_u64(*v as u64))
+            .map(|v| F::from_canonical_u64(*v as u64))
             .collect_vec()
     }
 

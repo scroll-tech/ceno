@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::collections::HashSet;
 
 use super::{
     encoding::EncodingScheme,
@@ -14,10 +14,13 @@ use crate::{
     },
 };
 use ff_ext::{ExtensionField, PoseidonField};
-use itertools::{Itertools, izip};
+use itertools::{Either, Itertools};
+use multilinear_extensions::{
+    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
+};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
-    field::{Field, PrimeCharacteristicRing, dot_product},
+    field::{Field, FieldAlgebra, dot_product},
     matrix::{
         Matrix,
         dense::{DenseMatrix, RowMajorMatrix},
@@ -34,9 +37,8 @@ use sumcheck::{
 use transcript::{Challenge, Transcript};
 
 use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, IntoMLE},
-    virtual_poly::{ArcMultilinearExtension, build_eq_x_r_vec},
-    virtual_polys::VirtualPolynomials,
+    mle::{IntoMLE, MultilinearExtension},
+    virtual_poly::build_eq_x_r_vec,
 };
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
@@ -172,7 +174,7 @@ where
     exit_span!(batch_codeword_span);
 
     let batched_evals = entered_span!("batched_evals");
-    let initial_rlc_evals: Vec<ArcMultilinearExtension<E>> = witin_concat_with_fixed_polys
+    let mut initial_rlc_evals: Vec<MultilinearExtension<E>> = witin_concat_with_fixed_polys
         .par_iter()
         .zip_eq(batch_coeffs_splitted.par_iter())
         .map(|(witin_fixed_mle, batch_coeffs)| {
@@ -182,8 +184,8 @@ where
                 .iter()
                 .map(|mle| mle.get_base_field_vec())
                 .collect_vec();
-            let running_evals: ArcMultilinearExtension<_> =
-                Arc::new(DenseMultilinearExtension::from_evaluation_vec_smart(
+            let running_evals: MultilinearExtension<_> =
+                MultilinearExtension::from_evaluation_vec_smart(
                     num_vars,
                     (0..witin_fixed_mle[0].evaluations().len())
                         .into_par_iter()
@@ -194,7 +196,7 @@ where
                             )
                         })
                         .collect::<Vec<E>>(),
-                ));
+                );
             running_evals
         })
         .collect::<Vec<_>>();
@@ -203,20 +205,33 @@ where
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_span = entered_span!("Basefold::build eq");
-    let eq: Vec<ArcMultilinearExtension<E>> = witin_polys_and_meta
+    let mut eq: Vec<MultilinearExtension<E>> = witin_polys_and_meta
         .par_iter()
-        .map(|(point, _)| build_eq_x_r_vec(point).into_mle().into())
+        .map(|(point, _)| build_eq_x_r_vec(point).into_mle())
         .collect::<Vec<_>>();
     exit_span!(build_eq_span);
 
     let num_threads = optimal_sumcheck_threads(max_num_vars);
     let log2_num_threads = log2_strict_usize(num_threads);
 
-    // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
-    let mut polys = VirtualPolynomials::new(num_threads, max_num_vars);
-
-    izip!(&eq, &initial_rlc_evals)
-        .for_each(|(eq, running_evals)| polys.add_mle_list(vec![&eq, &running_evals], E::ONE));
+    let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, max_num_vars);
+    let eq_expr = eq
+        .iter_mut()
+        .map(|eq| expr_builder.lift(Either::Right(eq)))
+        .collect_vec();
+    let initial_rlc_evals_expr = initial_rlc_evals
+        .iter_mut()
+        .map(|initial_rlc_evals| expr_builder.lift(Either::Right(initial_rlc_evals)))
+        .collect_vec();
+    let polys = expr_builder.to_virtual_polys(
+        // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
+        &[eq_expr
+            .into_iter()
+            .zip(initial_rlc_evals_expr.clone())
+            .map(|(eq, initial_rlc_evals)| eq * initial_rlc_evals)
+            .sum::<Expression<E>>()],
+        &[],
+    );
 
     let (batched_polys, poly_meta) = polys.get_batched_polys();
 
@@ -227,7 +242,6 @@ where
             IOPProverState::prover_init_with_extrapolation_aux(
                 thread_id == 0, // set thread_id 0 to be main worker
                 poly,
-                vec![(vec![], vec![])],
                 Some(log2_num_threads),
                 Some(poly_meta.clone()),
             )
@@ -267,11 +281,7 @@ where
     let merge_sumcheck_prover_state_span = entered_span!("merge_sumcheck_prover_state");
     let poly = merge_sumcheck_prover_state(&prover_states);
     let mut prover_states = vec![IOPProverState::prover_init_with_extrapolation_aux(
-        true,
-        poly,
-        vec![(vec![], vec![])],
-        None,
-        None,
+        true, poly, None, None,
     )];
     exit_span!(merge_sumcheck_prover_state_span);
 
@@ -303,10 +313,17 @@ where
 
     let final_message = prover_states[0].get_mle_final_evaluations();
     // skip even index which is eq evaluations
+    let final_message_indexes = initial_rlc_evals_expr
+        .iter()
+        .map(|expr| match expr {
+            Expression::WitIn(index) => *index as usize,
+            _ => unreachable!(),
+        })
+        .collect::<HashSet<usize>>();
     let final_message = final_message
         .into_iter()
         .enumerate()
-        .filter(|(i, _)| i % 2 == 1)
+        .filter(|(i, _)| final_message_indexes.contains(i))
         .map(|(_, m)| m)
         .collect_vec();
 
@@ -327,11 +344,14 @@ where
         let _ = (trees.pop(), commits.pop());
     }
     transcript.append_field_element_exts_iter(final_message.iter().flatten());
-    (trees, BasefoldCommitPhaseProof {
-        sumcheck_messages,
-        commits,
-        final_message,
-    })
+    (
+        trees,
+        BasefoldCommitPhaseProof {
+            sumcheck_messages,
+            commits,
+            final_message,
+        },
+    )
 }
 
 /// basefold fri round to fold codewords
@@ -371,7 +391,7 @@ pub(crate) fn basefold_fri_round<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let level = log2_strict_usize(target_len) - 1;
     let folding_coeffs =
         <Spec::EncodingScheme as EncodingScheme<E>>::prover_folding_coeffs_level(pp, level);
-    let inv_2 = E::BaseField::from_u64(2).inverse();
+    let inv_2 = E::BaseField::from_canonical_u64(2).inverse();
     debug_assert_eq!(folding_coeffs.len(), 1 << level);
 
     // take codewords match with target length then fold

@@ -1,11 +1,7 @@
 use ff_ext::{ExtensionField, SmallField};
 
-use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
-    set_val,
-};
+use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, set_val};
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 
 pub struct IsZeroConfig {
     is_zero: Option<WitIn>,

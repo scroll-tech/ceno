@@ -3,13 +3,12 @@ mod structure;
 
 use std::collections::BTreeMap;
 
-use crate::Point;
-
 use super::PolynomialCommitmentScheme;
+use crate::{PCSFriParam, Point, SecurityLevel};
 use ff_ext::{ExtensionField, PoseidonField};
-use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::ArcMultilinearExtension};
+use multilinear_extensions::mle::ArcMultilinearExtension;
 use p3::{commit::Mmcs, util::log2_strict_usize};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub use spec::WhirDefaultSpec;
 use spec::WhirSpec;
 use structure::WhirCommitment;
@@ -23,6 +22,15 @@ use whir_external::{
         prover::Prover, verifier::Verifier,
     },
 };
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WHIRDummyParams;
+
+impl PCSFriParam for WHIRDummyParams {
+    fn get_pow_bits_by_level(&self, _pow_strategy: crate::PowStrategy) -> usize {
+        todo!()
+    }
+}
 
 impl<E: ExtensionField, Spec: WhirSpec<E>> PolynomialCommitmentScheme<E> for Whir<E, Spec>
 where
@@ -39,22 +47,25 @@ where
         Send + Sync,
 {
     type Param = ();
-    type ProverParam = ();
-    type VerifierParam = ();
+    type ProverParam = WHIRDummyParams;
+    type VerifierParam = WHIRDummyParams;
     type Commitment = WhirCommitment<E>;
     type Proof = WhirProof<E>;
     type CommitmentWithWitness = Witnesses<E>;
     type CommitmentChunk = WhirCommitment<E>;
 
-    fn setup(_poly_size: usize) -> Result<Self::Param, crate::Error> {
+    fn setup(
+        _poly_size: usize,
+        _security_level: SecurityLevel,
+    ) -> Result<Self::Param, crate::Error> {
         Ok(())
     }
 
     fn trim(
-        param: Self::Param,
+        _param: Self::Param,
         _poly_size: usize,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), crate::Error> {
-        Ok((param, param))
+        Ok((WHIRDummyParams {}, WHIRDummyParams {}))
     }
 
     fn commit(
@@ -167,7 +178,7 @@ where
 
     fn simple_batch_open(
         _pp: &Self::ProverParam,
-        polys: &[multilinear_extensions::virtual_poly::ArcMultilinearExtension<E>],
+        polys: &[ArcMultilinearExtension<E>],
         comm: &Self::CommitmentWithWitness,
         point: &[E],
         evals: &[E],
@@ -230,11 +241,12 @@ where
 mod tests {
     use super::*;
     use crate::test_util::{run_commit_open_verify, run_simple_batch_commit_open_verify};
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::{BabyBearExt4, GoldilocksExt2};
     use spec::WhirDefaultSpec;
     use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt};
 
     type PcsGoldilocks = Whir<GoldilocksExt2, WhirDefaultSpec>;
+    type PcsBabyBear = Whir<BabyBearExt4, WhirDefaultSpec>;
 
     #[test]
     fn whir_commit_open_verify_goldilocks() {
@@ -244,6 +256,17 @@ mod tests {
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(10, 11);
             // Test trivial proof with small num vars
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(4, 6);
+        }
+    }
+
+    #[test]
+    fn whir_commit_open_verify_babybear() {
+        // TODO: Only support committing to base field polynomial now
+        {
+            // Challenge is over extension field, poly over the base field
+            run_commit_open_verify::<BabyBearExt4, PcsBabyBear>(10, 11);
+            // Test trivial proof with small num vars
+            run_commit_open_verify::<BabyBearExt4, PcsBabyBear>(4, 6);
         }
     }
 
@@ -279,6 +302,21 @@ mod tests {
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(4, 6, 4);
             // Both challenge and poly are over base field
             run_simple_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocks>(4, 6, 1);
+        }
+    }
+
+    #[test]
+    fn whir_simple_batch_commit_open_verify_babybear() {
+        {
+            // Both challenge and poly are over base field
+            run_simple_batch_commit_open_verify::<BabyBearExt4, PcsBabyBear>(10, 16, 1);
+            run_simple_batch_commit_open_verify::<BabyBearExt4, PcsBabyBear>(10, 11, 4);
+            run_simple_batch_commit_open_verify::<BabyBearExt4, PcsBabyBear>(7, 8, 3);
+            run_simple_batch_commit_open_verify::<BabyBearExt4, PcsBabyBear>(7, 8, 2);
+            // Test trivial proof with small num vars
+            run_simple_batch_commit_open_verify::<BabyBearExt4, PcsBabyBear>(4, 6, 4);
+            // Both challenge and poly are over base field
+            run_simple_batch_commit_open_verify::<BabyBearExt4, PcsBabyBear>(4, 6, 1);
         }
     }
 }

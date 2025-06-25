@@ -9,12 +9,15 @@ pub struct RawKeygenCmd {
     elf: PathBuf,
     #[clap(flatten, next_help_heading = "Ceno Options")]
     ceno_options: CenoOptions,
+    #[clap(flatten, next_help_heading = "Compilation Options")]
+    compilation_options: CompilationOptions,
 }
 
 impl RawKeygenCmd {
     pub fn run(self) -> anyhow::Result<()> {
         self.ceno_options.try_setup_logger();
-        self.ceno_options.keygen(self.elf)
+        self.ceno_options
+            .keygen(&self.compilation_options, self.elf)
     }
 }
 
@@ -25,12 +28,14 @@ pub struct RawRunCmd {
     elf: PathBuf,
     #[clap(flatten, next_help_heading = "Ceno Options")]
     ceno_options: CenoOptions,
+    #[clap(flatten, next_help_heading = "Compilation Options")]
+    compilation_options: CompilationOptions,
 }
 
 impl RawRunCmd {
     pub fn run(self) -> anyhow::Result<()> {
         self.ceno_options.try_setup_logger();
-        self.ceno_options.run(self.elf)
+        self.ceno_options.run(&self.compilation_options, self.elf)
     }
 }
 
@@ -41,11 +46,13 @@ pub struct RawProveCmd {
     elf: PathBuf,
     #[clap(flatten, next_help_heading = "Ceno Options")]
     ceno_options: CenoOptions,
+    #[clap(flatten, next_help_heading = "Compilation Options")]
+    compilation_options: CompilationOptions,
 }
 
 impl RawProveCmd {
     pub fn run(self) -> anyhow::Result<()> {
         self.ceno_options.try_setup_logger();
-        self.ceno_options.prove(self.elf)
+        self.ceno_options.prove(&self.compilation_options, self.elf)
     }
 }

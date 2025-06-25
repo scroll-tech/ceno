@@ -3,11 +3,13 @@ use std::{any::TypeId, borrow::Cow, mem, sync::Arc};
 use crate::{
     macros::{entered_span, exit_span},
     op_mle,
+    smart_slice::SmartSlice,
     util::ceil_log2,
 };
 use core::hash::Hash;
+use either::Either;
 use ff_ext::{ExtensionField, FromUniformBytes};
-use p3::field::{Field, PrimeCharacteristicRing};
+use p3::field::{Field, FieldAlgebra};
 use rand::Rng;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -15,66 +17,29 @@ use rayon::iter::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
 
-pub trait MultilinearExtension<E: ExtensionField>: Send + Sync {
-    type Output;
-    fn fix_variables(&self, partial_point: &[E]) -> Self::Output;
-    fn fix_variables_in_place(&mut self, partial_point: &[E]);
-    fn fix_high_variables(&self, partial_point: &[E]) -> Self::Output;
-    fn fix_high_variables_in_place(&mut self, partial_point: &[E]);
-    fn evaluate(&self, point: &[E]) -> E;
-    fn num_vars(&self) -> usize;
-    fn evaluations(&self) -> &FieldType<E>;
-    fn evaluations_range(&self) -> Option<(usize, usize)>; // start offset
-    fn evaluations_to_owned(self) -> FieldType<E>;
-    fn merge(&mut self, rhs: Self::Output);
-    fn get_ranged_mle(
-        &self,
-        num_range: usize,
-        range_index: usize,
-    ) -> RangedMultilinearExtension<'_, E>;
-    #[deprecated = "TODO try to redesign this api for it's costly and create a new DenseMultilinearExtension "]
-    fn resize_ranged(
-        &self,
-        num_instances: usize,
-        new_size_per_instance: usize,
-        num_range: usize,
-        range_index: usize,
-    ) -> DenseMultilinearExtension<E>;
-    fn dup(&self, num_instances: usize, num_dups: usize) -> DenseMultilinearExtension<E>;
+/// A point is a vector of num_var length
+pub type Point<F> = Vec<F>;
 
-    fn fix_variables_parallel(&self, partial_point: &[E]) -> Self::Output;
-    fn fix_variables_in_place_parallel(&mut self, partial_point: &[E]);
+/// A point and the evaluation of this point.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct PointAndEval<F> {
+    pub point: Point<F>,
+    pub eval: F,
+}
 
-    fn name(&self) -> &'static str;
-
-    fn get_ext_field_vec(&self) -> &[E] {
-        match &self.evaluations() {
-            FieldType::Ext(evaluations) => {
-                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                &evaluations[start..][..offset]
-            }
-            _ => panic!("evaluation not in extension field"),
-        }
-    }
-
-    fn get_base_field_vec(&self) -> &[E::BaseField] {
-        match &self.evaluations() {
-            FieldType::Base(evaluations) => {
-                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                &evaluations[start..][..offset]
-            }
-            _ => panic!("evaluation not in base field"),
-        }
+impl<F> PointAndEval<F> {
+    pub fn new(point: Point<F>, eval: F) -> Self {
+        Self { point, eval }
     }
 }
 
-impl<E: ExtensionField> Debug for dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>> {
+impl<E: ExtensionField> Debug for MultilinearExtension<'_, E> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:?}", self.evaluations())
     }
 }
 
-impl<E: ExtensionField> From<Vec<Vec<E::BaseField>>> for DenseMultilinearExtension<E> {
+impl<E: ExtensionField> From<Vec<Vec<E::BaseField>>> for MultilinearExtension<'_, E> {
     fn from(val: Vec<Vec<E::BaseField>>) -> Self {
         let per_instance_size = val[0].len();
         let next_pow2_per_instance_size = ceil_log2(per_instance_size);
@@ -96,7 +61,7 @@ impl<E: ExtensionField> From<Vec<Vec<E::BaseField>>> for DenseMultilinearExtensi
             .collect::<Vec<E::BaseField>>();
         assert!(evaluations.len().is_power_of_two());
         let num_vars = ceil_log2(evaluations.len());
-        DenseMultilinearExtension::from_evaluations_vec(num_vars, evaluations)
+        MultilinearExtension::from_evaluations_vec(num_vars, evaluations)
     }
 }
 
@@ -106,11 +71,11 @@ pub trait IntoMLE<T>: Sized {
     fn into_mle(self) -> T;
 }
 
-impl<F: Field, E: ExtensionField> IntoMLE<DenseMultilinearExtension<E>> for Vec<F> {
-    fn into_mle(self) -> DenseMultilinearExtension<E> {
+impl<'a, F: Field, E: ExtensionField> IntoMLE<MultilinearExtension<'a, E>> for Vec<F> {
+    fn into_mle(self) -> MultilinearExtension<'a, E> {
         let next_pow2 = self.len().next_power_of_two();
         assert!(self.len().is_power_of_two(), "{}", self.len());
-        DenseMultilinearExtension::from_evaluation_vec_smart::<F>(ceil_log2(next_pow2), self)
+        MultilinearExtension::from_evaluation_vec_smart::<F>(ceil_log2(next_pow2), self)
     }
 }
 pub trait IntoMLEs<T>: Sized {
@@ -118,10 +83,10 @@ pub trait IntoMLEs<T>: Sized {
     fn into_mles(self) -> Vec<T>;
 }
 
-impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtension<E>>
+impl<'a, F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<MultilinearExtension<'a, E>>
     for Vec<Vec<F>>
 {
-    fn into_mles(self) -> Vec<DenseMultilinearExtension<E>> {
+    fn into_mles(self) -> Vec<MultilinearExtension<'a, E>> {
         self.into_iter().map(|v| v.into_mle()).collect()
     }
 }
@@ -132,19 +97,31 @@ impl<F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<DenseMultilinearExtens
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 /// Differentiate inner vector on base/extension field.
-pub enum FieldType<E: ExtensionField> {
-    Base(Vec<E::BaseField>),
-    Ext(Vec<E>),
+pub enum FieldType<'a, E: ExtensionField> {
+    Base(SmartSlice<'a, E::BaseField>),
+    Ext(SmartSlice<'a, E>),
     #[default]
     Unreachable,
 }
 
-impl<E: ExtensionField> FieldType<E> {
+impl<'a, E: ExtensionField> FieldType<'a, E> {
     pub fn len(&self) -> usize {
         match self {
             FieldType::Base(content) => content.len(),
             FieldType::Ext(content) => content.len(),
             FieldType::Unreachable => 0,
+        }
+    }
+
+    pub fn as_borrowed_view(&self) -> Self {
+        match self {
+            FieldType::Base(SmartSlice::Borrowed(slice)) => {
+                FieldType::Base(SmartSlice::Borrowed(slice))
+            }
+            FieldType::Ext(SmartSlice::Borrowed(slice)) => {
+                FieldType::Ext(SmartSlice::Borrowed(slice))
+            }
+            _ => panic!("invalid type"),
         }
     }
 
@@ -166,29 +143,19 @@ impl<E: ExtensionField> FieldType<E> {
 }
 
 /// Stores a multilinear polynomial in dense evaluation form.
-#[derive(Clone, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct DenseMultilinearExtension<E: ExtensionField> {
+pub struct MultilinearExtension<'a, E: ExtensionField> {
     /// The evaluation over {0,1}^`num_vars`
-    pub evaluations: FieldType<E>,
+    pub evaluations: FieldType<'a, E>,
     /// Number of variables
     pub num_vars: usize,
 }
 
-impl<E: ExtensionField> From<DenseMultilinearExtension<E>>
-    for Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>>
-{
-    fn from(
-        mle: DenseMultilinearExtension<E>,
-    ) -> Arc<dyn MultilinearExtension<E, Output = DenseMultilinearExtension<E>>> {
-        Arc::new(mle)
-    }
-}
-
-pub type ArcDenseMultilinearExtension<E> = Arc<DenseMultilinearExtension<E>>;
+pub type ArcMultilinearExtension<'a, E> = Arc<MultilinearExtension<'a, E>>;
 
 fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
     let length = vec.len();
@@ -204,7 +171,41 @@ fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
     unsafe { Vec::from_raw_parts(new_ptr, length, capacity) }
 }
 
-impl<E: ExtensionField> DenseMultilinearExtension<E> {
+macro_rules! split_eval_chunks {
+    ($chunk_fn:ident, $smart_variant:ident, $variant:ident, $slice:expr, $chunk_size:expr, $num_vars:expr) => {
+        $slice
+            .$chunk_fn($chunk_size)
+            .map(|chunk| MultilinearExtension {
+                evaluations: FieldType::$variant(SmartSlice::$smart_variant(chunk)),
+                num_vars: $num_vars,
+            })
+            .collect::<Vec<_>>()
+    };
+}
+
+impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
+    /// Returns `Right(&mut self)` if mutable access is possible, otherwise `Left(&self)`
+    pub fn to_either(&mut self) -> Either<&Self, &mut Self> {
+        if self.is_mut() {
+            Either::Right(self)
+        } else {
+            Either::Left(self)
+        }
+    }
+
+    /// returns true if the evaluations are either mutably borrowed or owned (i.e., mutable access is possible)
+    pub fn is_mut(&self) -> bool {
+        match &self.evaluations {
+            FieldType::Base(slice) => {
+                matches!(slice, SmartSlice::BorrowedMut(_) | SmartSlice::Owned(_))
+            }
+            FieldType::Ext(slice) => {
+                matches!(slice, SmartSlice::BorrowedMut(_) | SmartSlice::Owned(_))
+            }
+            FieldType::Unreachable => false,
+        }
+    }
+
     /// This function can tell T being Field or ExtensionField and invoke respective function
     pub fn from_evaluation_vec_smart<T: Clone + 'static>(
         num_vars: usize,
@@ -222,18 +223,35 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     }
 
     /// Create vector from field type
-    pub fn from_field_type(num_vars: usize, field_type: FieldType<E>) -> Self {
+    pub fn from_field_type(num_vars: usize, field_type: FieldType<'a, E>) -> Self {
         Self {
             num_vars,
             evaluations: field_type,
         }
     }
 
+    /// Create vector from field type
+    pub fn from_field_type_borrowed(num_vars: usize, field_type: &FieldType<'a, E>) -> Self {
+        Self {
+            num_vars,
+            evaluations: field_type.as_borrowed_view(),
+        }
+    }
+
     /// Construct a new polynomial from a list of evaluations where the index
     /// represents a point in {0,1}^`num_vars` in little endian form. For
     /// example, `0b1011` represents `P(1,1,0,1)`
-    pub fn from_evaluations_slice(num_vars: usize, evaluations: &[E::BaseField]) -> Self {
-        Self::from_evaluations_vec(num_vars, evaluations.to_vec())
+    pub fn from_evaluations_slice(num_vars: usize, evaluations: &'a [E::BaseField]) -> Self {
+        assert_eq!(
+            evaluations.len(),
+            1 << num_vars,
+            "The size of evaluations should be 2^num_vars."
+        );
+
+        Self {
+            num_vars,
+            evaluations: FieldType::Base(SmartSlice::Borrowed(evaluations)),
+        }
     }
 
     /// Construct a new polynomial from a list of evaluations where the index
@@ -241,7 +259,6 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
     /// example, `0b1011` represents `P(1,1,0,1)`
     pub fn from_evaluations_vec(num_vars: usize, evaluations: Vec<E::BaseField>) -> Self {
         // assert that the number of variables matches the size of evaluations
-        // TODO: return error.
         assert_eq!(
             evaluations.len(),
             1 << num_vars,
@@ -250,21 +267,29 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
 
         Self {
             num_vars,
-            evaluations: FieldType::Base(evaluations),
+            evaluations: FieldType::Base(SmartSlice::Owned(evaluations)),
         }
     }
 
     /// Identical to [`from_evaluations_slice`], with and exception that evaluation vector is in
     /// extension field
-    pub fn from_evaluations_ext_slice(num_vars: usize, evaluations: &[E]) -> Self {
-        Self::from_evaluations_ext_vec(num_vars, evaluations.to_vec())
+    pub fn from_evaluations_ext_slice(num_vars: usize, evaluations: &'a [E]) -> Self {
+        assert_eq!(
+            evaluations.len(),
+            1 << num_vars,
+            "The size of evaluations should be 2^num_vars."
+        );
+
+        Self {
+            num_vars,
+            evaluations: FieldType::Ext(SmartSlice::Borrowed(evaluations)),
+        }
     }
 
     /// Identical to [`from_evaluations_vec`], with and exception that evaluation vector is in
     /// extension field
     pub fn from_evaluations_ext_vec(num_vars: usize, evaluations: Vec<E>) -> Self {
         // assert that the number of variables matches the size of evaluations
-        // TODO: return error.
         assert_eq!(
             evaluations.len(),
             1 << num_vars,
@@ -273,7 +298,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
 
         Self {
             num_vars,
-            evaluations: FieldType::Ext(evaluations),
+            evaluations: FieldType::Ext(SmartSlice::Owned(evaluations)),
         }
     }
 
@@ -282,7 +307,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         let eval = (0..1 << nv)
             .map(|_| E::BaseField::random(&mut *rng))
             .collect();
-        DenseMultilinearExtension::from_evaluations_vec(nv, eval)
+        MultilinearExtension::from_evaluations_vec(nv, eval)
     }
 
     /// Sample a random list of multilinear polynomials.
@@ -293,7 +318,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         nv: usize,
         degree: usize,
         rng: &mut R,
-    ) -> (Vec<ArcDenseMultilinearExtension<E>>, E) {
+    ) -> (Vec<MultilinearExtension<'a, E>>, E) {
         let start = entered_span!("sample random mle list");
         let mut multiplicands = Vec::with_capacity(degree);
         for _ in 0..degree {
@@ -314,7 +339,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
 
         let list = multiplicands
             .into_iter()
-            .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x).into())
+            .map(|x| MultilinearExtension::from_evaluations_vec(nv, x))
             .collect();
 
         exit_span!(start);
@@ -326,7 +351,7 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
         nv: usize,
         degree: usize,
         rng: &mut R,
-    ) -> Vec<ArcDenseMultilinearExtension<E>> {
+    ) -> Vec<ArcMultilinearExtension<E>> {
         let start = entered_span!("sample random zero mle list");
 
         let mut multiplicands = Vec::with_capacity(degree);
@@ -342,11 +367,470 @@ impl<E: ExtensionField> DenseMultilinearExtension<E> {
 
         let list = multiplicands
             .into_iter()
-            .map(|x| DenseMultilinearExtension::from_evaluations_vec(nv, x).into())
+            .map(|x| MultilinearExtension::from_evaluations_vec(nv, x).into())
             .collect();
 
         exit_span!(start);
         list
+    }
+
+    pub fn fix_variables(&self, partial_point: &[E]) -> Self {
+        // TODO: return error.
+        assert!(
+            partial_point.len() <= self.num_vars(),
+            "invalid size of partial point"
+        );
+        let mut poly = Cow::Borrowed(self);
+
+        // evaluate single variable of partial point from left to right
+        // `Cow` type here to skip first evaluation vector copy
+        for point in partial_point.iter() {
+            match &mut poly {
+                poly @ Cow::Borrowed(_) => {
+                    *poly = op_mle!(self, |evaluations| {
+                        Cow::Owned(MultilinearExtension::from_evaluations_ext_vec(
+                            self.num_vars() - 1,
+                            evaluations
+                                .chunks(2)
+                                .map(|buf| *point * (buf[1] - buf[0]) + buf[0])
+                                .collect(),
+                        ))
+                    });
+                }
+                Cow::Owned(poly) => poly.fix_variables_in_place(&[*point]),
+            }
+        }
+        assert!(poly.num_vars == self.num_vars() - partial_point.len(),);
+        poly.into_owned()
+    }
+
+    /// Reduce the number of variables of `self` by fixing the
+    /// `partial_point.len()` variables at `partial_point` in place
+    pub fn fix_variables_in_place(&mut self, partial_point: &[E]) {
+        assert!(self.is_mut());
+        assert!(
+            partial_point.len() <= self.num_vars(),
+            "partial point len {} >= num_vars {}",
+            partial_point.len(),
+            self.num_vars()
+        );
+        let nv = self.num_vars();
+        // evaluate single variable of partial point from left to right
+        for point in partial_point.iter() {
+            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,
+            // b2,..bt, 1]
+            match &mut self.evaluations {
+                FieldType::Base(slice) => {
+                    let slice_ext = slice
+                        .chunks(2)
+                        .map(|buf| *point * (buf[1] - buf[0]) + buf[0])
+                        .collect();
+                    let _ = mem::replace(
+                        &mut self.evaluations,
+                        FieldType::Ext(SmartSlice::Owned(slice_ext)),
+                    );
+                }
+                FieldType::Ext(slice) => {
+                    let slice_mut = slice.to_mut();
+                    (0..slice_mut.len()).step_by(2).for_each(|b| {
+                        slice_mut[b >> 1] =
+                            slice_mut[b] + (slice_mut[b + 1] - slice_mut[b]) * *point
+                    });
+                }
+                FieldType::Unreachable => unreachable!(),
+            };
+        }
+        match &mut self.evaluations {
+            FieldType::Base(_) => unreachable!(),
+            FieldType::Ext(slice) => {
+                slice.truncate_mut(1 << (nv - partial_point.len()));
+            }
+            FieldType::Unreachable => unreachable!(),
+        }
+
+        self.num_vars = nv - partial_point.len();
+    }
+
+    /// Evaluate the MLE at a give point.
+    /// Returns an error if the MLE length does not match the point.
+    pub fn evaluate(&self, point: &[E]) -> E {
+        // TODO: return error.
+        assert_eq!(
+            self.num_vars(),
+            point.len(),
+            "MLE size does not match the point"
+        );
+        let mle = self.fix_variables_parallel(point);
+        op_mle!(
+            mle,
+            |f| {
+                assert_eq!(f.len(), 1);
+                f[0]
+            },
+            |v| E::from(v)
+        )
+    }
+
+    pub fn num_vars(&self) -> usize {
+        self.num_vars
+    }
+
+    /// Reduce the number of variables of `self` by fixing the
+    /// `partial_point.len()` variables at `partial_point`.
+    pub fn fix_variables_parallel(&self, partial_point: &[E]) -> Self {
+        // TODO: return error.
+        assert!(
+            partial_point.len() <= self.num_vars(),
+            "invalid size of partial point"
+        );
+        let mut poly = Cow::Borrowed(self);
+
+        // evaluate single variable of partial point from left to right
+        // `Cow` type here to skip first evaluation vector copy
+        for point in partial_point.iter() {
+            match &mut poly {
+                poly @ Cow::Borrowed(_) => {
+                    *poly = op_mle!(self, |evaluations| {
+                        Cow::Owned(MultilinearExtension::from_evaluations_ext_vec(
+                            self.num_vars() - 1,
+                            evaluations
+                                .par_iter()
+                                .chunks(2)
+                                .with_min_len(64)
+                                .map(|buf| *point * (*buf[1] - *buf[0]) + *buf[0])
+                                .collect(),
+                        ))
+                    });
+                }
+                Cow::Owned(poly) => poly.fix_variables_in_place_parallel(&[*point]),
+            }
+        }
+        assert!(poly.num_vars == self.num_vars() - partial_point.len(),);
+        poly.into_owned()
+    }
+
+    /// Reduce the number of variables of `self` by fixing the
+    /// `partial_point.len()` variables at `partial_point` in place
+    pub fn fix_variables_in_place_parallel(&mut self, partial_point: &[E]) {
+        assert!(self.is_mut());
+        assert!(
+            partial_point.len() <= self.num_vars(),
+            "partial point len {} >= num_vars {}",
+            partial_point.len(),
+            self.num_vars()
+        );
+        let nv = self.num_vars();
+        // evaluate single variable of partial point from left to right
+        for (i, point) in partial_point.iter().enumerate() {
+            let max_log2_size = nv - i;
+            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
+            match &mut self.evaluations {
+                FieldType::Base(slice) => {
+                    let slice_ext = slice
+                        .par_iter()
+                        .chunks(2)
+                        .with_min_len(64)
+                        .map(|buf| *point * (*buf[1] - *buf[0]) + *buf[0])
+                        .collect();
+                    let _ = mem::replace(
+                        &mut self.evaluations,
+                        FieldType::Ext(SmartSlice::Owned(slice_ext)),
+                    );
+                }
+                FieldType::Ext(slice) => {
+                    let slice_mut = slice.to_mut();
+                    slice_mut
+                        .par_iter_mut()
+                        .chunks(2)
+                        .with_min_len(64)
+                        .for_each(|mut buf| *buf[0] = *buf[0] + (*buf[1] - *buf[0]) * *point);
+
+                    // sequentially update buf[b1, b2,..bt] = buf[b1, b2,..bt, 0]
+                    for index in 0..1 << (max_log2_size - 1) {
+                        slice_mut[index] = slice_mut[index << 1];
+                    }
+                }
+                FieldType::Unreachable => unreachable!(),
+            };
+        }
+        match &mut self.evaluations {
+            FieldType::Base(_) => unreachable!(),
+            FieldType::Ext(slice) => {
+                slice.truncate_mut(1 << (nv - partial_point.len()));
+            }
+            FieldType::Unreachable => unreachable!(),
+        }
+
+        self.num_vars = nv - partial_point.len();
+    }
+
+    pub fn evaluations(&self) -> &FieldType<E> {
+        &self.evaluations
+    }
+
+    pub fn as_evaluations_view(&self) -> FieldType<E> {
+        self.evaluations.as_borrowed_view()
+    }
+
+    pub fn evaluations_to_owned(self) -> FieldType<'a, E> {
+        self.evaluations
+    }
+
+    pub fn merge(&mut self, rhs: MultilinearExtension<'a, E>) {
+        let rhs_num_vars = rhs.num_vars;
+
+        // Take owned version of RHS evaluations
+        let rhs_eval = rhs.evaluations_to_owned();
+
+        match (&mut self.evaluations, rhs_eval) {
+            (FieldType::Base(e1), FieldType::Base(e2)) => {
+                e1.extend(e2.to_vec());
+                self.num_vars = ceil_log2(e1.len());
+            }
+            (FieldType::Ext(e1), FieldType::Ext(e2)) => {
+                e1.extend(e2.to_vec());
+                self.num_vars = ceil_log2(e1.len());
+            }
+            (FieldType::Unreachable, b @ FieldType::Base(..)) => {
+                self.num_vars = rhs_num_vars;
+                self.evaluations = b;
+            }
+            (FieldType::Unreachable, b @ FieldType::Ext(..)) => {
+                self.num_vars = rhs_num_vars;
+                self.evaluations = b;
+            }
+            (a, b) => panic!(
+                "do not support merging different field types: a = {:?}, b = {:?}",
+                a, b
+            ),
+        }
+    }
+
+    pub fn as_view(&self) -> MultilinearExtension<'_, E> {
+        self.as_view_slice(1, 0)
+    }
+
+    /// get mle with arbitrary start end
+    pub fn as_view_slice(
+        &self,
+        num_chunks: usize,
+        chunk_index: usize,
+    ) -> MultilinearExtension<'_, E> {
+        let total_len = self.evaluations.len();
+        let chunk_size = total_len / num_chunks;
+        assert!(
+            num_chunks > 0
+                && total_len % num_chunks == 0
+                && chunk_size > 0
+                && chunk_index < num_chunks,
+            "invalid num_chunks: {num_chunks} total_len: {total_len}, chunk_index {chunk_index} parameter set"
+        );
+        let start = chunk_size * chunk_index;
+
+        let sub_evaluations = match &self.evaluations {
+            FieldType::Base(slice) => {
+                FieldType::Base(SmartSlice::Borrowed(&slice[start..][..chunk_size]))
+            }
+            FieldType::Ext(slice) => {
+                FieldType::Ext(SmartSlice::Borrowed(&slice[start..][..chunk_size]))
+            }
+            FieldType::Unreachable => FieldType::Unreachable,
+        };
+
+        MultilinearExtension {
+            evaluations: sub_evaluations,
+            num_vars: self.num_vars - num_chunks.trailing_zeros() as usize,
+        }
+    }
+
+    /// get mutable view
+    pub fn as_view_mut(&mut self) -> MultilinearExtension<'_, E> {
+        self.as_view_slice_mut(1, 0)
+    }
+
+    pub fn as_view_slice_mut(
+        &mut self,
+        num_chunks: usize,
+        chunk_index: usize,
+    ) -> MultilinearExtension<'_, E> {
+        let total_len = self.evaluations.len();
+        let chunk_size = total_len / num_chunks;
+        assert!(
+            num_chunks > 0
+                && total_len % num_chunks == 0
+                && chunk_size > 0
+                && chunk_index < num_chunks,
+            "invalid num_chunks: {num_chunks} total_len: {total_len}, chunk_index {chunk_index} parameter set"
+        );
+        let start = chunk_size * chunk_index;
+
+        let sub_evaluations = match &mut self.evaluations {
+            FieldType::Base(SmartSlice::BorrowedMut(slice)) => {
+                let slice = &mut slice[start..][..chunk_size];
+                FieldType::Base(SmartSlice::BorrowedMut(slice))
+            }
+            FieldType::Ext(SmartSlice::BorrowedMut(slice)) => {
+                FieldType::Ext(SmartSlice::BorrowedMut(&mut slice[start..][..chunk_size]))
+            }
+            FieldType::Base(SmartSlice::Owned(slice)) => {
+                FieldType::Base(SmartSlice::BorrowedMut(&mut slice[start..][..chunk_size]))
+            }
+            FieldType::Ext(SmartSlice::Owned(slice)) => {
+                FieldType::Ext(SmartSlice::BorrowedMut(&mut slice[start..][..chunk_size]))
+            }
+            _ => unimplemented!("Unsupported variant"),
+        };
+
+        MultilinearExtension {
+            evaluations: sub_evaluations,
+            num_vars: self.num_vars - num_chunks.trailing_zeros() as usize,
+        }
+    }
+
+    pub fn get_ext_field_vec(&self) -> &[E] {
+        match &self.evaluations() {
+            FieldType::Ext(slice) => slice.as_ref(),
+            _ => panic!("evaluation not in extension field"),
+        }
+    }
+
+    pub fn get_base_field_vec(&self) -> &[E::BaseField] {
+        match &self.evaluations() {
+            FieldType::Base(slice) => slice.as_ref(),
+            _ => panic!("evaluation not in base field"),
+        }
+    }
+
+    /// splits the MLE into `num_chunks` parts, where each part contains disjoint mutable pointers
+    /// to the original data (either borrowed mutably or owned).
+    pub fn as_view_chunks_mut(&'a mut self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
+        let total_len = self.evaluations.len();
+        let chunk_size = total_len / num_chunks;
+        assert!(
+            num_chunks > 0 && total_len % num_chunks == 0 && chunk_size > 0,
+            "invalid num_chunks: {num_chunks} total_len: {total_len} parameter set"
+        );
+        let num_vars_per_chunk = self.num_vars - ceil_log2(num_chunks);
+
+        match &mut self.evaluations {
+            FieldType::Base(SmartSlice::BorrowedMut(slice)) => {
+                split_eval_chunks!(
+                    chunks_mut,
+                    BorrowedMut,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            FieldType::Ext(SmartSlice::BorrowedMut(slice)) => {
+                split_eval_chunks!(
+                    chunks_mut,
+                    BorrowedMut,
+                    Ext,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            FieldType::Base(SmartSlice::Owned(slice)) => {
+                split_eval_chunks!(
+                    chunks_mut,
+                    BorrowedMut,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            FieldType::Ext(SmartSlice::Owned(slice)) => {
+                split_eval_chunks!(
+                    chunks_mut,
+                    BorrowedMut,
+                    Ext,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            e => {
+                panic!(
+                    "unsupported {:?}. can only split when evaluations are mutably borrowed",
+                    e
+                );
+            }
+        }
+    }
+
+    /// immutable counterpart to [`as_view_chunks_mut`]
+    pub fn as_view_chunks(&'a self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
+        let total_len = self.evaluations.len();
+        let chunk_size = total_len / num_chunks;
+        assert!(
+            num_chunks > 0 && total_len % num_chunks == 0 && chunk_size > 0,
+            "invalid num_chunks: {num_chunks} total_len: {total_len} parameter set"
+        );
+        let num_vars_per_chunk = self.num_vars - ceil_log2(num_chunks);
+
+        match &self.evaluations {
+            FieldType::Base(SmartSlice::Borrowed(slice)) => {
+                split_eval_chunks!(
+                    chunks,
+                    Borrowed,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            FieldType::Ext(SmartSlice::Borrowed(slice)) => {
+                split_eval_chunks!(chunks, Borrowed, Ext, slice, chunk_size, num_vars_per_chunk)
+            }
+            FieldType::Base(SmartSlice::BorrowedMut(slice)) => {
+                split_eval_chunks!(
+                    chunks,
+                    Borrowed,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            FieldType::Ext(SmartSlice::BorrowedMut(slice)) => {
+                split_eval_chunks!(chunks, Borrowed, Ext, slice, chunk_size, num_vars_per_chunk)
+            }
+            FieldType::Base(SmartSlice::Owned(slice)) => {
+                split_eval_chunks!(
+                    chunks,
+                    Borrowed,
+                    Base,
+                    slice,
+                    chunk_size,
+                    num_vars_per_chunk
+                )
+            }
+            FieldType::Ext(SmartSlice::Owned(slice)) => {
+                split_eval_chunks!(chunks, Borrowed, Ext, slice, chunk_size, num_vars_per_chunk)
+            }
+            e => {
+                panic!(
+                    "unsupported {:?}. can only split when evaluations are mutably borrowed",
+                    e
+                );
+            }
+        }
+    }
+
+    pub fn as_owned(&self) -> Self {
+        let owned_eval = match &self.evaluations {
+            FieldType::Base(slice) => FieldType::Base(SmartSlice::Owned(slice.to_vec())),
+            FieldType::Ext(slice) => FieldType::Ext(SmartSlice::Owned(slice.to_vec())),
+            FieldType::Unreachable => FieldType::Unreachable,
+        };
+        MultilinearExtension {
+            evaluations: owned_eval,
+            num_vars: self.num_vars,
+        }
     }
 }
 
@@ -439,595 +923,18 @@ impl<'a, T: 'a> IntoInstanceIterMut<'a, T> for Vec<T> {
     }
 }
 
-impl<E: ExtensionField> MultilinearExtension<E> for DenseMultilinearExtension<E> {
-    type Output = DenseMultilinearExtension<E>;
-    /// Reduce the number of variables of `self` by fixing the
-    /// `partial_point.len()` variables at `partial_point`.
-    fn fix_variables(&self, partial_point: &[E]) -> Self {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
-        let mut poly = Cow::Borrowed(self);
-
-        // evaluate single variable of partial point from left to right
-        // `Cow` type here to skip first evaluation vector copy
-        for point in partial_point.iter() {
-            match &mut poly {
-                poly @ Cow::Borrowed(_) => {
-                    *poly = op_mle!(self, |evaluations| {
-                        Cow::Owned(DenseMultilinearExtension::from_evaluations_ext_vec(
-                            self.num_vars() - 1,
-                            evaluations
-                                .chunks(2)
-                                .map(|buf| *point * (buf[1] - buf[0]) + buf[0])
-                                .collect(),
-                        ))
-                    });
-                }
-                Cow::Owned(poly) => poly.fix_variables_in_place(&[*point]),
-            }
-        }
-        assert!(poly.num_vars == self.num_vars() - partial_point.len(),);
-        poly.into_owned()
-    }
-
-    /// Reduce the number of variables of `self` by fixing the
-    /// `partial_point.len()` variables at `partial_point` in place
-    fn fix_variables_in_place(&mut self, partial_point: &[E]) {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "partial point len {} >= num_vars {}",
-            partial_point.len(),
-            self.num_vars()
-        );
-        let nv = self.num_vars();
-        // evaluate single variable of partial point from left to right
-        for point in partial_point.iter() {
-            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1,
-            // b2,..bt, 1] in parallel
-            match &mut self.evaluations {
-                FieldType::Base(evaluations) => {
-                    let evaluations_ext = evaluations
-                        .chunks(2)
-                        .map(|buf| *point * (buf[1] - buf[0]) + buf[0])
-                        .collect();
-                    let _ = mem::replace(&mut self.evaluations, FieldType::Ext(evaluations_ext));
-                }
-                FieldType::Ext(evaluations) => {
-                    (0..evaluations.len()).step_by(2).for_each(|b| {
-                        evaluations[b >> 1] =
-                            evaluations[b] + (evaluations[b + 1] - evaluations[b]) * *point
-                    });
-                }
-                FieldType::Unreachable => unreachable!(),
-            };
-        }
-        match &mut self.evaluations {
-            FieldType::Base(_) => unreachable!(),
-            FieldType::Ext(evaluations) => {
-                evaluations.truncate(1 << (nv - partial_point.len()));
-            }
-            FieldType::Unreachable => unreachable!(),
-        }
-
-        self.num_vars = nv - partial_point.len();
-    }
-
-    /// Reduce the number of variables of `self` by fixing the
-    /// `partial_point.len()` variables at `partial_point` from high position
-    fn fix_high_variables(&self, partial_point: &[E]) -> Self {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
-        let current_eval_size = self.evaluations.len();
-        let mut poly = Cow::Borrowed(self);
-        // `Cow` type here to skip first evaluation vector copy
-        for point in partial_point.iter().rev() {
-            match &mut poly {
-                poly @ Cow::Borrowed(_) => {
-                    let half_size = current_eval_size >> 1;
-                    *poly = op_mle!(self, |evaluations| Cow::Owned(
-                        DenseMultilinearExtension::from_evaluations_ext_vec(self.num_vars() - 1, {
-                            let (lo, hi) = evaluations.split_at(half_size);
-                            lo.par_iter()
-                                .zip(hi)
-                                .with_min_len(64)
-                                .map(|(lo, hi)| *point * (*hi - *lo) + *lo)
-                                .collect()
-                        })
-                    ));
-                }
-                Cow::Owned(poly) => poly.fix_high_variables_in_place(&[*point]),
-            }
-        }
-        assert!(poly.num_vars == self.num_vars() - partial_point.len(),);
-        poly.into_owned()
-    }
-
-    /// Reduce the number of variables of `self` by fixing the
-    /// `partial_point.len()` variables at `partial_point` from high position in place
-    fn fix_high_variables_in_place(&mut self, partial_point: &[E]) {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
-        let nv = self.num_vars();
-        let mut current_eval_size = self.evaluations.len();
-        for point in partial_point.iter().rev() {
-            let half_size = current_eval_size >> 1;
-            match &mut self.evaluations {
-                FieldType::Base(evaluations) => {
-                    let (lo, hi) = evaluations.split_at(half_size);
-                    let evaluations_ext = lo
-                        .par_iter()
-                        .zip(hi)
-                        .with_min_len(64)
-                        .map(|(lo, hi)| *point * (*hi - *lo) + *lo)
-                        .collect();
-                    let _ = mem::replace(&mut self.evaluations, FieldType::Ext(evaluations_ext));
-                    current_eval_size = half_size;
-                }
-                FieldType::Ext(evaluations) => {
-                    let (lo, hi) = evaluations.split_at_mut(half_size);
-                    lo.par_iter_mut()
-                        .zip(hi)
-                        .with_min_len(64)
-                        .for_each(|(lo, hi)| *lo += (*hi - *lo) * *point);
-                    current_eval_size = half_size;
-                }
-                FieldType::Unreachable => unreachable!(),
-            };
-        }
-        match &mut self.evaluations {
-            FieldType::Base(_) => {}
-            FieldType::Ext(evaluations) => {
-                evaluations.truncate(current_eval_size);
-            }
-            FieldType::Unreachable => unreachable!(),
-        }
-        self.num_vars = nv - partial_point.len()
-    }
-
-    /// Evaluate the MLE at a give point.
-    /// Returns an error if the MLE length does not match the point.
-    fn evaluate(&self, point: &[E]) -> E {
-        // TODO: return error.
-        assert_eq!(
-            self.num_vars(),
-            point.len(),
-            "MLE size does not match the point"
-        );
-        let mle = self.fix_variables_parallel(point);
-        op_mle!(
-            mle,
-            |f| {
-                assert_eq!(f.len(), 1);
-                f[0]
-            },
-            |v| E::from(v)
-        )
-    }
-
-    fn num_vars(&self) -> usize {
-        self.num_vars
-    }
-
-    /// Reduce the number of variables of `self` by fixing the
-    /// `partial_point.len()` variables at `partial_point`.
-    fn fix_variables_parallel(&self, partial_point: &[E]) -> Self {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
-        let mut poly = Cow::Borrowed(self);
-
-        // evaluate single variable of partial point from left to right
-        // `Cow` type here to skip first evaluation vector copy
-        for point in partial_point.iter() {
-            match &mut poly {
-                poly @ Cow::Borrowed(_) => {
-                    *poly = op_mle!(self, |evaluations| {
-                        Cow::Owned(DenseMultilinearExtension::from_evaluations_ext_vec(
-                            self.num_vars() - 1,
-                            evaluations
-                                .par_iter()
-                                .chunks(2)
-                                .with_min_len(64)
-                                .map(|buf| *point * (*buf[1] - *buf[0]) + *buf[0])
-                                .collect(),
-                        ))
-                    });
-                }
-                Cow::Owned(poly) => poly.fix_variables_in_place_parallel(&[*point]),
-            }
-        }
-        assert!(poly.num_vars == self.num_vars() - partial_point.len(),);
-        poly.into_owned()
-    }
-
-    /// Reduce the number of variables of `self` by fixing the
-    /// `partial_point.len()` variables at `partial_point` in place
-    fn fix_variables_in_place_parallel(&mut self, partial_point: &[E]) {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "partial point len {} >= num_vars {}",
-            partial_point.len(),
-            self.num_vars()
-        );
-        let nv = self.num_vars();
-        // evaluate single variable of partial point from left to right
-        for (i, point) in partial_point.iter().enumerate() {
-            let max_log2_size = nv - i;
-            // override buf[b1, b2,..bt, 0] = (1-point) * buf[b1, b2,..bt, 0] + point * buf[b1, b2,..bt, 1] in parallel
-            match &mut self.evaluations {
-                FieldType::Base(evaluations) => {
-                    let evaluations_ext = evaluations
-                        .par_iter()
-                        .chunks(2)
-                        .with_min_len(64)
-                        .map(|buf| *point * (*buf[1] - *buf[0]) + *buf[0])
-                        .collect();
-                    let _ = mem::replace(&mut self.evaluations, FieldType::Ext(evaluations_ext));
-                }
-                FieldType::Ext(evaluations) => {
-                    evaluations
-                        .par_iter_mut()
-                        .chunks(2)
-                        .with_min_len(64)
-                        .for_each(|mut buf| *buf[0] = *buf[0] + (*buf[1] - *buf[0]) * *point);
-
-                    // sequentially update buf[b1, b2,..bt] = buf[b1, b2,..bt, 0]
-                    for index in 0..1 << (max_log2_size - 1) {
-                        evaluations[index] = evaluations[index << 1];
-                    }
-                }
-                FieldType::Unreachable => unreachable!(),
-            };
-        }
-        match &mut self.evaluations {
-            FieldType::Base(_) => unreachable!(),
-            FieldType::Ext(evaluations) => {
-                evaluations.truncate(1 << (nv - partial_point.len()));
-            }
-            FieldType::Unreachable => unreachable!(),
-        }
-
-        self.num_vars = nv - partial_point.len();
-    }
-
-    fn evaluations(&self) -> &FieldType<E> {
-        &self.evaluations
-    }
-
-    fn evaluations_to_owned(self) -> FieldType<E> {
-        self.evaluations
-    }
-
-    fn evaluations_range(&self) -> Option<(usize, usize)> {
-        None
-    }
-
-    fn name(&self) -> &'static str {
-        "DenseMultilinearExtension"
-    }
-
-    /// assert and get base field vector
-    /// panic if not the case
-    fn get_base_field_vec(&self) -> &[E::BaseField] {
-        match &self.evaluations {
-            FieldType::Base(evaluations) => &evaluations[..],
-            FieldType::Ext(_) => unreachable!(),
-            FieldType::Unreachable => unreachable!(),
-        }
-    }
-
-    fn merge(&mut self, rhs: DenseMultilinearExtension<E>) {
-        assert_eq!(rhs.name(), "DenseMultilinearExtension");
-        let rhs_num_vars = rhs.num_vars();
-        match (&mut self.evaluations, rhs.evaluations_to_owned()) {
-            (FieldType::Base(e1), FieldType::Base(e2)) => {
-                e1.extend(e2);
-                self.num_vars = ceil_log2(e1.len());
-            }
-            (FieldType::Ext(e1), FieldType::Ext(e2)) => {
-                e1.extend(e2);
-                self.num_vars = ceil_log2(e1.len());
-            }
-            (FieldType::Unreachable, b @ FieldType::Base(..)) => {
-                self.num_vars = rhs_num_vars;
-                self.evaluations = b;
-            }
-            (FieldType::Unreachable, b @ FieldType::Ext(..)) => {
-                self.num_vars = rhs_num_vars;
-                self.evaluations = b;
-            }
-            (a, b) => panic!(
-                "do not support merge differnt field type DME a: {:?} b: {:?}",
-                a, b
-            ),
-        }
-    }
-
-    /// get ranged multiliear extention
-    fn get_ranged_mle(
-        &self,
-        num_range: usize,
-        range_index: usize,
-    ) -> RangedMultilinearExtension<'_, E> {
-        assert!(num_range > 0);
-        let offset = self.evaluations.len() / num_range;
-        assert!(
-            offset > 0,
-            "invalid: {num_range} > evaluation length {}",
-            self.evaluations.len()
-        );
-        let start = offset * range_index;
-        RangedMultilinearExtension::new(self, start, offset)
-    }
-
-    /// resize to new size (num_instances * new_size_per_instance / num_range)
-    /// and selected by range_index
-    /// only support resize base fields, otherwise panic
-    fn resize_ranged(
-        &self,
-        num_instances: usize,
-        new_size_per_instance: usize,
-        num_range: usize,
-        range_index: usize,
-    ) -> Self {
-        println!("called deprecated api");
-        assert!(num_range > 0 && num_instances > 0 && new_size_per_instance > 0);
-        let new_len = (new_size_per_instance * num_instances) / num_range;
-        match &self.evaluations {
-            FieldType::Base(evaluations) => {
-                let old_size_per_instance = evaluations.len() / num_instances;
-                DenseMultilinearExtension::from_evaluations_vec(
-                    ceil_log2(new_len),
-                    evaluations
-                        .chunks(old_size_per_instance)
-                        .flat_map(|chunk| {
-                            chunk
-                                .iter()
-                                .cloned()
-                                .chain(std::iter::repeat(E::BaseField::ZERO))
-                                .take(new_size_per_instance)
-                        })
-                        .skip(range_index * new_len)
-                        .take(new_len)
-                        .collect::<Vec<E::BaseField>>(),
-                )
-            }
-            FieldType::Ext(_) => unreachable!(),
-            FieldType::Unreachable => unreachable!(),
-        }
-    }
-
-    /// dup to new size 1 << (self.num_vars + ceil_log2(num_dups))
-    fn dup(&self, num_instances: usize, num_dups: usize) -> Self {
-        assert!(num_dups.is_power_of_two());
-        assert!(num_instances.is_power_of_two());
-        match &self.evaluations {
-            FieldType::Base(evaluations) => {
-                let old_size_per_instance = evaluations.len() / num_instances;
-                DenseMultilinearExtension::from_evaluations_vec(
-                    self.num_vars + ceil_log2(num_dups),
-                    evaluations
-                        .chunks(old_size_per_instance)
-                        .flat_map(|chunk| {
-                            chunk
-                                .iter()
-                                .cycle()
-                                .cloned()
-                                .take(old_size_per_instance * num_dups)
-                        })
-                        .take(1 << (self.num_vars + ceil_log2(num_dups)))
-                        .collect::<Vec<E::BaseField>>(),
-                )
-            }
-            FieldType::Ext(_) => unreachable!(),
-            FieldType::Unreachable => unreachable!(),
-        }
-    }
-}
-
-pub struct RangedMultilinearExtension<'a, E: ExtensionField> {
-    pub inner: &'a DenseMultilinearExtension<E>,
-    pub start: usize,
-    pub offset: usize,
-    pub(crate) num_vars: usize,
-}
-
-impl<'a, E: ExtensionField> RangedMultilinearExtension<'a, E> {
-    pub fn new(
-        inner: &'a DenseMultilinearExtension<E>,
-        start: usize,
-        offset: usize,
-    ) -> RangedMultilinearExtension<'a, E> {
-        assert!(inner.evaluations.len() >= offset);
-
-        RangedMultilinearExtension {
-            inner,
-            start,
-            offset,
-            num_vars: ceil_log2(offset),
-        }
-    }
-}
-
-impl<'a, E: ExtensionField> MultilinearExtension<E> for RangedMultilinearExtension<'a, E> {
-    type Output = DenseMultilinearExtension<E>;
-    fn fix_variables(&self, partial_point: &[E]) -> Self::Output {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
-
-        if !partial_point.is_empty() {
-            let first = partial_point[0];
-            let inner = self.inner;
-            let mut mle = op_mle!(inner, |evaluations| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(
-                    self.num_vars() - 1,
-                    // syntax: evaluations[start..(start+offset)]
-                    evaluations[self.start..][..self.offset]
-                        .chunks(2)
-                        .map(|buf| first * (buf[1] - buf[0]) + buf[0])
-                        .collect(),
-                )
-            });
-            mle.fix_variables_in_place(&partial_point[1..]);
-            mle
-        } else {
-            self.inner.clone()
-        }
-    }
-
-    fn fix_variables_in_place(&mut self, _partial_point: &[E]) {
-        unimplemented!()
-    }
-
-    fn fix_high_variables(&self, partial_point: &[E]) -> Self::Output {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
-        if !partial_point.is_empty() {
-            let last = partial_point.last().unwrap();
-            let inner = self.inner;
-            let half_size = self.offset >> 1;
-            let mut mle = op_mle!(inner, |evaluations| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(self.num_vars() - 1, {
-                    let (lo, hi) = evaluations[self.start..][..self.offset].split_at(half_size);
-                    lo.par_iter()
-                        .zip(hi)
-                        .with_min_len(64)
-                        .map(|(lo, hi)| *last * (*hi - *lo) + *lo)
-                        .collect()
-                })
-            });
-            mle.fix_high_variables_in_place(&partial_point[..partial_point.len() - 1]);
-            mle
-        } else {
-            self.inner.clone()
-        }
-    }
-
-    fn fix_high_variables_in_place(&mut self, _partial_point: &[E]) {
-        unimplemented!()
-    }
-
-    fn evaluate(&self, point: &[E]) -> E {
-        self.inner.evaluate(point)
-    }
-
-    fn num_vars(&self) -> usize {
-        self.num_vars
-    }
-
-    fn fix_variables_parallel(&self, partial_point: &[E]) -> Self::Output {
-        self.inner.fix_variables_parallel(partial_point)
-    }
-
-    fn fix_variables_in_place_parallel(&mut self, _partial_point: &[E]) {
-        unimplemented!()
-    }
-
-    fn evaluations(&self) -> &FieldType<E> {
-        &self.inner.evaluations
-    }
-
-    fn evaluations_range(&self) -> Option<(usize, usize)> {
-        Some((self.start, self.offset))
-    }
-
-    fn name(&self) -> &'static str {
-        "RangedMultilinearExtension"
-    }
-
-    /// assert and get base field vector
-    /// panic if not the case
-    fn get_base_field_vec(&self) -> &[E::BaseField] {
-        match &self.evaluations() {
-            FieldType::Base(evaluations) => {
-                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                &evaluations[start..][..offset]
-            }
-            FieldType::Ext(_) => unreachable!(),
-            FieldType::Unreachable => unreachable!(),
-        }
-    }
-
-    fn evaluations_to_owned(self) -> FieldType<E> {
-        println!("FIXME: very expensive..");
-        match &self.evaluations() {
-            FieldType::Base(evaluations) => {
-                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                FieldType::Base(evaluations[start..][..offset].to_vec())
-            }
-            FieldType::Ext(evaluations) => {
-                let (start, offset) = self.evaluations_range().unwrap_or((0, evaluations.len()));
-                FieldType::Ext(evaluations[start..][..offset].to_vec())
-            }
-            FieldType::Unreachable => unreachable!(),
-        }
-    }
-
-    fn merge(&mut self, _rhs: DenseMultilinearExtension<E>) {
-        unimplemented!()
-    }
-
-    fn get_ranged_mle(
-        &self,
-        _num_range: usize,
-        _range_index: usize,
-    ) -> RangedMultilinearExtension<'a, E> {
-        unimplemented!()
-    }
-
-    fn resize_ranged(
-        &self,
-        _num_instances: usize,
-        _new_size_per_instance: usize,
-        _num_range: usize,
-        _range_index: usize,
-    ) -> DenseMultilinearExtension<E> {
-        unimplemented!()
-    }
-
-    fn dup(&self, _num_instances: usize, _num_dups: usize) -> DenseMultilinearExtension<E> {
-        unimplemented!()
-    }
-}
-
 #[macro_export]
 macro_rules! op_mle {
     ($a:ident, |$tmp_a:ident| $op:expr, |$b_out:ident| $op_b_out:expr) => {
         match &$a.evaluations() {
             $crate::mle::FieldType::Base(a) => {
-                let $tmp_a = if let Some((start, offset)) = $a.evaluations_range() {
-                    &a[start..][..offset]
-                } else {
-                    &a[..]
-                };
+                let $tmp_a = &a[..];
                 let $b_out = $op;
                 $op_b_out
             }
             $crate::mle::FieldType::Ext(a) => {
-                let $tmp_a = if let Some((start, offset)) = $a.evaluations_range() {
-                    &a[start..][..offset]
-                } else {
-                    &a[..]
-                };
+                let $tmp_a = &a[..];
+                #[allow(clippy::useless_conversion)]
                 $op
             }
             _ => unreachable!(),
@@ -1047,27 +954,15 @@ macro_rules! op_mle {
 #[macro_export]
 macro_rules! op_mle3_range {
     ($x:ident, $a:ident, $b:ident, $x_vec:ident, $a_vec:ident, $b_vec:ident, $op:expr, |$bb_out:ident| $op_bb_out:expr) => {{
-        let $x = if let Some((start, offset)) = $x.evaluations_range() {
-            &$x_vec[start..][..offset]
-        } else {
-            &$x_vec[..]
-        };
-        let $a = if let Some((start, offset)) = $a.evaluations_range() {
-            &$a_vec[start..][..offset]
-        } else {
-            &$a_vec[..]
-        };
-        let $b = if let Some((start, offset)) = $b.evaluations_range() {
-            &$b_vec[start..][..offset]
-        } else {
-            &$b_vec[..]
-        };
+        let $x = &$x_vec[..];
+        let $a = &$a_vec[..];
+        let $b = &$b_vec[..];
         let $bb_out = $op;
         $op_bb_out
     }};
 }
 
-/// deal with x * a + b
+/// deal with x * a + b or a * x + b
 #[macro_export]
 macro_rules! op_mle_xa_b {
     (|$x:ident, $a:ident, $b:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
@@ -1092,6 +987,13 @@ macro_rules! op_mle_xa_b {
                 $crate::mle::FieldType::Ext(b_vec),
             ) => {
                 op_mle3_range!($x, $a, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
+            }
+            (
+                $crate::mle::FieldType::Ext(x_vec),
+                $crate::mle::FieldType::Base(a_vec),
+                $crate::mle::FieldType::Base(b_vec),
+            ) => {
+                op_mle3_range!($a, $x, $b, x_vec, a_vec, b_vec, $op, |$bb_out| $op_bb_out)
             }
             (x, a, b) => unreachable!(
                 "unmatched pattern {:?} {:?} {:?}",
@@ -1182,43 +1084,19 @@ macro_rules! commutative_op_mle_pair {
     (|$first:ident, $second:ident| $op:expr, |$bb_out:ident| $op_bb_out:expr) => {
         match (&$first.evaluations(), &$second.evaluations()) {
             ($crate::mle::FieldType::Base(base1), $crate::mle::FieldType::Base(base2)) => {
-                let $first = if let Some((start, offset)) = $first.evaluations_range() {
-                    &base1[start..][..offset]
-                } else {
-                    &base1[..]
-                };
-                let $second = if let Some((start, offset)) = $second.evaluations_range() {
-                    &base2[start..][..offset]
-                } else {
-                    &base2[..]
-                };
+                let $first = &base1[..];
+                let $second = &base2[..];
                 let $bb_out = $op;
                 $op_bb_out
             }
             ($crate::mle::FieldType::Ext(ext), $crate::mle::FieldType::Base(base)) => {
-                let $first = if let Some((start, offset)) = $first.evaluations_range() {
-                    &ext[start..][..offset]
-                } else {
-                    &ext[..]
-                };
-                let $second = if let Some((start, offset)) = $second.evaluations_range() {
-                    &base[start..][..offset]
-                } else {
-                    &base[..]
-                };
+                let $first = &ext[..];
+                let $second = &base[..];
                 $op
             }
             ($crate::mle::FieldType::Base(base), $crate::mle::FieldType::Ext(ext)) => {
-                let base = if let Some((start, offset)) = $first.evaluations_range() {
-                    &base[start..][..offset]
-                } else {
-                    &base[..]
-                };
-                let ext = if let Some((start, offset)) = $second.evaluations_range() {
-                    &ext[start..][..offset]
-                } else {
-                    &ext[..]
-                };
+                let base = &base[..];
+                let ext = &ext[..];
                 // swap first and second to make ext field come first before base field.
                 // so the same coding template can apply.
                 // that's why first and second operand must be commutative
@@ -1227,16 +1105,8 @@ macro_rules! commutative_op_mle_pair {
                 $op
             }
             ($crate::mle::FieldType::Ext(ext), $crate::mle::FieldType::Ext(base)) => {
-                let $first = if let Some((start, offset)) = $first.evaluations_range() {
-                    &ext[start..][..offset]
-                } else {
-                    &ext[..]
-                };
-                let $second = if let Some((start, offset)) = $second.evaluations_range() {
-                    &base[start..][..offset]
-                } else {
-                    &base[..]
-                };
+                let $first = &ext[..];
+                let $second = &base[..];
                 $op
             }
             _ => unreachable!(),

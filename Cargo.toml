@@ -11,6 +11,7 @@ members = [
   "multilinear_extensions",
   "sumcheck_macro",
   "poseidon",
+  "gkr_iop",
   "sumcheck",
   "transcript",
   "whir",
@@ -32,28 +33,31 @@ version = "0.1.0"
 anyhow = { version = "1.0", default-features = false }
 bincode = "1"
 cfg-if = "1.0"
+clap = { version = "4.5", features = ["derive"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
+either = { version = "1.15.*", features = ["serde"] }
 itertools = "0.13"
+ndarray = "*"
 num-bigint = { version = "0.4.6" }
 num-derive = "0.4"
 num-traits = "0.2"
 p3 = { path = "p3" }
-p3-baby-bear = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-challenger = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-commit = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-dft = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-field = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-fri = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-goldilocks = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-matrix = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-maybe-rayon = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-mds = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-merkle-tree = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-poseidon = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-poseidon2 = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-symmetric = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
-p3-util = { git = "https://github.com/scroll-tech/plonky3", rev = "20c3cb9" }
+p3-baby-bear = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-challenger = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-commit = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-dft = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-field = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-fri = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-goldilocks = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-matrix = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-maybe-rayon = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-mds = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-merkle-tree = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-poseidon = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-poseidon2 = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-symmetric = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-util = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
 paste = "1"
 poseidon = { path = "./poseidon" }
 pprof2 = { version = "0.13", features = ["flamegraph"] }
@@ -66,12 +70,13 @@ rand_xorshift = "0.3"
 rayon = "1.10"
 rkyv = { version = "0.8", features = ["pointer_width_32"] }
 secp = "0.4.1"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 strum = "0.26"
 strum_macros = "0.26"
 substrate-bn = { version = "0.6.0" }
 sumcheck = { path = "sumcheck" }
+thiserror = "1" # do we need this?
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tracing = { version = "0.1", features = [
   "attributes",

@@ -1,38 +1,15 @@
 use ff_ext::{ExtensionField, FromUniformBytes};
-use p3::{
-    field::{PrimeCharacteristicRing, extension::BinomialExtensionField},
-    goldilocks::Goldilocks,
-};
+use p3::{field::extension::BinomialExtensionField, goldilocks::Goldilocks};
 use rand::thread_rng;
 
 type F = Goldilocks;
 type E = BinomialExtensionField<F, 2>;
 
 use crate::{
-    mle::{ArcDenseMultilinearExtension, DenseMultilinearExtension, MultilinearExtension},
+    mle::{ArcMultilinearExtension, MultilinearExtension},
     util::bit_decompose,
-    virtual_poly::{VirtualPolynomial, build_eq_x_r},
+    virtual_poly::build_eq_x_r,
 };
-
-#[test]
-fn test_virtual_polynomial_additions() {
-    let mut rng = thread_rng();
-    for nv in 2..5 {
-        for num_products in 2..5 {
-            let base: Vec<E> = (0..nv).map(|_| E::random(&mut rng)).collect();
-
-            let (a, _a_sum) = VirtualPolynomial::<E>::random(nv, (2, 3), num_products, &mut rng);
-            let (b, _b_sum) = VirtualPolynomial::<E>::random(nv, (2, 3), num_products, &mut rng);
-            let mut c = a.clone();
-            c.merge(&b);
-
-            assert_eq!(
-                a.evaluate(base.as_ref()) + b.evaluate(base.as_ref()),
-                c.evaluate(base.as_ref())
-            );
-        }
-    }
-}
 
 #[test]
 fn test_eq_xr() {
@@ -45,46 +22,13 @@ fn test_eq_xr() {
     }
 }
 
-#[test]
-fn test_fix_high_variables() {
-    let poly: DenseMultilinearExtension<E> =
-        DenseMultilinearExtension::from_evaluations_vec(3, vec![
-            F::from_u64(13),
-            F::from_u64(97),
-            F::from_u64(11),
-            F::from_u64(101),
-            F::from_u64(7),
-            F::from_u64(103),
-            F::from_u64(5),
-            F::from_u64(107),
-        ]);
-
-    let partial_point = vec![E::from_u64(3), E::from_u64(5)];
-
-    let expected1 = DenseMultilinearExtension::from_evaluations_ext_vec(2, vec![
-        -E::from_u64(17),
-        E::from_u64(127),
-        -E::from_u64(19),
-        E::from_u64(131),
-    ]);
-    let result1 = poly.fix_high_variables(&partial_point[1..]);
-    assert_eq!(result1, expected1);
-
-    let expected2 = DenseMultilinearExtension::from_evaluations_ext_vec(1, vec![
-        -E::from_u64(23),
-        E::from_u64(139),
-    ]);
-    let result2 = poly.fix_high_variables(&partial_point);
-    assert_eq!(result2, expected2);
-}
-
 /// Naive method to build eq(x, r).
 /// Only used for testing purpose.
 // Evaluate
 //      eq(x,y) = \prod_i=1^num_var (x_i * y_i + (1-x_i)*(1-y_i))
 // over r, which is
 //      eq(x,y) = \prod_i=1^num_var (x_i * r_i + (1-x_i)*(1-r_i))
-fn build_eq_x_r_for_test<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExtension<E> {
+fn build_eq_x_r_for_test<E: ExtensionField>(r: &[E]) -> ArcMultilinearExtension<E> {
     // we build eq(x,r) from its evaluations
     // we want to evaluate eq(x,r) over x \in {0, 1}^num_vars
     // for example, with num_vars = 4, x is a binary vector of 4, then
@@ -113,7 +57,7 @@ fn build_eq_x_r_for_test<E: ExtensionField>(r: &[E]) -> ArcDenseMultilinearExten
         eval.push(current_eval);
     }
 
-    let mle = DenseMultilinearExtension::from_evaluations_ext_vec(num_var, eval);
+    let mle = MultilinearExtension::from_evaluations_ext_vec(num_var, eval);
 
     mle.into()
 }

@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-use p3::field::PrimeCharacteristicRing;
+use multilinear_extensions::mle::MultilinearExtension;
+use p3::field::FieldAlgebra;
 use transcript::BasicTranscript;
 use whir::{
     cmdline_utils::{AvailableFields, AvailableMerkle, WhirType},
@@ -126,9 +126,9 @@ fn run_whir_as_ldt(args: Args, hash_params: Poseidon2MerkleMmcs<E>) {
         println!("WARN: more PoW bits required than what specified.");
     }
 
-    let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+    let polynomial = MultilinearExtension::from_evaluations_ext_vec(
         num_variables,
-        (0..num_coeffs).map(E::from_u64).collect(),
+        (0..num_coeffs).map(E::from_canonical_u64).collect(),
     );
 
     let whir_prover_time = Instant::now();
@@ -216,12 +216,12 @@ fn run_whir_pcs(args: Args, hash_params: Poseidon2MerkleMmcs<E>) {
         println!("WARN: more PoW bits required than what specified.");
     }
 
-    let polynomial = DenseMultilinearExtension::from_evaluations_ext_vec(
+    let polynomial = MultilinearExtension::from_evaluations_ext_vec(
         num_variables,
-        (0..num_coeffs).map(E::from_u64).collect(),
+        (0..num_coeffs).map(E::from_canonical_u64).collect(),
     );
     let points: Vec<_> = (0..num_evaluations)
-        .map(|i| vec![E::from_u64(i as u64); num_variables])
+        .map(|i| vec![E::from_canonical_u64(i as u64); num_variables])
         .collect();
     let evaluations = points
         .iter()

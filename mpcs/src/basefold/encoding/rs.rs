@@ -2,12 +2,13 @@ use std::marker::PhantomData;
 
 use super::{EncodingProverParameters, EncodingScheme};
 use crate::Error;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldFrom};
 use itertools::Itertools;
 use p3::{
     dft::{Radix2Dit, Radix2DitParallel, TwoAdicSubgroupDft},
-    field::{PrimeCharacteristicRing, TwoAdicField, batch_multiplicative_inverse},
+    field::{Field, FieldAlgebra, TwoAdicField, batch_multiplicative_inverse},
     matrix::{Matrix, bitrev::BitReversableMatrix, dense::DenseMatrix},
+    util::reverse_bits_len,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use witness::RowMajorMatrix;
@@ -34,7 +35,7 @@ impl RSCodeSpec for RSCodeDefaultSpec {
     // $$
     // If we take $\lambda=100$ and $\rho=1/2$, then the number of queries is $200$.
     fn get_number_queries() -> usize {
-        200
+        100
     }
 
     fn get_rate_log() -> usize {
@@ -74,14 +75,15 @@ impl<E: ExtensionField> EncodingProverParameters for RSCodeProverParameters<E> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RSCodeVerifierParameters<E: ExtensionField>
-where
-    E::BaseField: Serialize + DeserializeOwned,
-{
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct RSCodeVerifierParameters<E: ExtensionField> {
     #[serde(skip)]
     // pub(crate) dft: Radix2Dit<E::BaseField>,
     pub(crate) dft: Radix2Dit<E>,
-    pub(crate) t_inv_halves: Vec<Vec<E::BaseField>>,
+    pub(crate) two_inv: E::BaseField,
     pub(crate) full_message_size_log: usize,
 }
 
@@ -123,7 +125,7 @@ where
                 },
                 Self::VerifierParameters {
                     dft: Default::default(),
-                    t_inv_halves: Default::default(),
+                    two_inv: E::BaseField::from_v(2).inverse(),
                     full_message_size_log: max_message_size_log,
                 },
             ));
@@ -172,13 +174,12 @@ where
         Ok((
             Self::ProverParameters {
                 dft: prover_dft,
-                t_inv_halves: t_inv_halves_prover.clone(),
+                t_inv_halves: t_inv_halves_prover,
                 full_message_size_log: max_message_size_log,
             },
             Self::VerifierParameters {
                 dft: verifier_dft,
-                // TODO make verifier calculate fft root by itself
-                t_inv_halves: t_inv_halves_prover,
+                two_inv: E::BaseField::from_v(2).inverse(),
                 full_message_size_log: max_message_size_log,
             },
         ))
@@ -194,9 +195,9 @@ where
             return Err(Error::PolynomialTooLarge(num_vars));
         }
 
-        // here 2 resize happend. first is padding to next pow2 height, second is extend to 2^get_rate_log times size
-        let mut m = rmm.into_default_padded_p3_rmm().to_row_major_matrix();
-        m.pad_to_height(m.height() * (1 << Spec::get_rate_log()), E::BaseField::ZERO);
+        let m = rmm
+            .into_default_padded_p3_rmm(Some(1 << Spec::get_rate_log()))
+            .to_row_major_matrix();
         let codeword = pp
             .dft
             .dft_batch(m)
@@ -269,22 +270,20 @@ where
         unimplemented!()
     }
 
+    // returns 1/(2*g^bit_rev(index)) where g^(2^(level+1)) = 1
     fn verifier_folding_coeffs(
-        _vp: &Self::VerifierParameters,
-        _level: usize,
-        _index: usize,
-    ) -> (E, E, E) {
-        unimplemented!()
+        vp: &Self::VerifierParameters,
+        level: usize,
+        index: usize,
+    ) -> E::BaseField {
+        let g_inv = E::BaseField::two_adic_generator(level + 1).inverse();
+        let idx_bit_rev = reverse_bits_len(index, level);
+        let g_inv_index = g_inv.exp_u64(idx_bit_rev as u64);
+
+        g_inv_index * vp.two_inv
     }
 
     fn prover_folding_coeffs_level(pp: &Self::ProverParameters, level: usize) -> &[E::BaseField] {
-        &pp.t_inv_halves[level]
-    }
-
-    fn verifier_folding_coeffs_level(
-        pp: &Self::VerifierParameters,
-        level: usize,
-    ) -> &[E::BaseField] {
         &pp.t_inv_halves[level]
     }
 }
@@ -342,7 +341,7 @@ mod tests {
 
         // test basefold.encode(raw_message.fold(1-r, r)) ?= codeword.fold(1-r, r)
         let mut prove_data = vec![];
-        let r = E::from_u64(97);
+        let r = E::from_canonical_u64(97);
         basefold_fri_round::<E, BasefoldRSParams>(
             &pp,
             &mut codeword_ext,

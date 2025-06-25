@@ -6,7 +6,6 @@ use crate::{
     chip_handler::RegisterExpr,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
     set_val,
     tables::InsnRecord,
@@ -14,6 +13,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 
 // Opcode: 1100011
 // Funct3:

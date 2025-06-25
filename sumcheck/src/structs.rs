@@ -1,6 +1,7 @@
 use ff_ext::ExtensionField;
 use multilinear_extensions::{virtual_poly::VirtualPolynomial, virtual_polys::PolyMeta};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use thiserror::Error;
 use transcript::Challenge;
 
 /// An IOP proof is a collections of
@@ -12,7 +13,6 @@ use transcript::Challenge;
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct IOPProof<E: ExtensionField> {
-    pub point: Vec<E>,
     pub proofs: Vec<IOPProverMessage<E>>,
 }
 impl<E: ExtensionField> IOPProof<E> {
@@ -42,12 +42,7 @@ pub struct IOPProverState<'a, E: ExtensionField> {
     pub(crate) round: usize,
     /// pointer to the virtual polynomial
     pub(crate) poly: VirtualPolynomial<'a, E>,
-    /// points with precomputed barycentric weights for extrapolating smaller
-    /// degree uni-polys to `max_degree + 1` evaluations.
-    pub(crate) extrapolation_aux: Vec<(Vec<E>, Vec<E>)>,
     pub(crate) max_num_variables: usize,
-    /// record poly should fix variable in place or not
-    pub(crate) poly_index_fixvar_in_place: Vec<bool>,
     pub(crate) poly_meta: Vec<PolyMeta>,
     /// phase 1 and phase 2 sumcheck we share similar implementation
     /// thus this option variable only use for phase 1 sumcheck to mark how many variables belongs to phase 2
@@ -76,4 +71,10 @@ pub struct SumCheckSubClaim<E: ExtensionField> {
     pub point: Vec<Challenge<E>>,
     /// the expected evaluation
     pub expected_evaluation: E,
+}
+
+#[derive(Clone, Debug, Error)]
+pub enum VerifierError<E: ExtensionField> {
+    #[error("Claim not match: expect: {0:?}, got: {1:?}")]
+    ClaimNotMatch(E, E),
 }

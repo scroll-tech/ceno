@@ -74,13 +74,13 @@ use super::{
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::Instruction,
     set_val,
     uint::Value,
     witness::LkMultiplicity,
 };
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::marker::PhantomData;
 
 pub struct DivRemConfig<E: ExtensionField> {
@@ -107,7 +107,7 @@ enum InternalDivRem<E: ExtensionField> {
         is_dividend_signed_min: IsEqualConfig,
         is_divisor_neg_one: IsEqualConfig,
         is_signed_overflow: WitIn,
-        remainder_nonnegative: AssertLtConfig,
+        remainder_nonnegative: Box<AssertLtConfig>,
     },
 }
 
@@ -256,7 +256,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                         is_dividend_signed_min,
                         is_divisor_neg_one,
                         is_signed_overflow,
-                        remainder_nonnegative,
+                        remainder_nonnegative: Box::new(remainder_nonnegative),
                     },
                     remainder_pos_orientation,
                     divisor_pos_orientation,
@@ -572,8 +572,10 @@ mod test {
         let outcome = Insn::correct(dividend, divisor);
         let insn_code = encode_rv32(Insn::INSN_KIND, 2, 3, 4, 0);
         // values assignment
-        let (raw_witin, lkm) = Insn::assign_instances(&config, cb.cs.num_witin as usize, vec![
-            StepRecord::new_r_instruction(
+        let (raw_witin, lkm) = Insn::assign_instances(
+            &config,
+            cb.cs.num_witin as usize,
+            vec![StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
                 insn_code,
@@ -581,8 +583,8 @@ mod test {
                 Insn::as_u32(divisor),
                 Change::new(0, Insn::as_u32(outcome)),
                 0,
-            ),
-        ])
+            )],
+        )
         .unwrap();
         let expected_rd_written = UInt::from_const_unchecked(
             Value::new_unchecked(Insn::as_u32(exp_outcome))

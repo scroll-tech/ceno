@@ -23,21 +23,26 @@ fn build_elfs() {
     let _ = remove_file(&dest_path);
     let mut dest = File::create(&dest_path).expect("failed to create vars.rs");
 
-    // TODO(Matthias): skip building the elfs if we are in clippy or check mode.
-    // See git history for an attempt to do this.
+    let is_release = std::env::var("PROFILE").unwrap() == "release";
+    let mut args = vec!["build", "--examples", "--target-dir", "target"];
+    if is_release {
+        args.insert(1, "--release"); // insert --release after "build"
+    }
+
     let output = Command::new("cargo")
-        .args(["build", "--release", "--examples", "--target-dir", "target"])
+        .args(args)
         .current_dir("../examples")
         .env_clear()
         .envs(std::env::vars().filter(|x| !x.0.starts_with("CARGO_")))
         .output()
         .expect("cargo command failed to run");
+
     if !output.status.success() {
         io::stdout().write_all(&output.stdout).unwrap();
         io::stderr().write_all(&output.stderr).unwrap();
         panic!("cargo build of examples failed.");
     }
-    // Contact Matthias, if your examples get complicated enough to need their own crates, instead of just being one file.
+
     for example in glob("../examples/examples/*.rs")
         .unwrap()
         .map(Result::unwrap)
@@ -47,8 +52,8 @@ fn build_elfs() {
             dest,
             r#"#[allow(non_upper_case_globals)]
             pub const {example}: &[u8] =
-                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/release/examples/{example}");"#
-        ).expect("failed to write vars.rs");
+                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/{}/examples/{example}");"#,
+        std::env::var("PROFILE").unwrap()).expect("failed to write vars.rs");
     }
     rerun_all_but_target(Path::new("../examples"));
     rerun_all_but_target(Path::new("../ceno_rt"));
@@ -56,5 +61,6 @@ fn build_elfs() {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=PROFILE");
     build_elfs();
 }

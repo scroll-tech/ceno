@@ -1,7 +1,8 @@
 use ff_ext::ExtensionField;
+use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -16,6 +17,8 @@ use crate::{
 };
 
 pub mod constants;
+pub mod cpu;
+pub mod hal;
 pub mod prover;
 pub mod utils;
 pub mod verifier;
@@ -29,42 +32,20 @@ mod tests;
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct ZKVMOpcodeProof<E: ExtensionField> {
-    // product constraints
-    pub record_r_out_evals: Vec<E>,
-    pub record_w_out_evals: Vec<E>,
-
-    // logup sum at layer 1
-    pub lk_p1_out_eval: E,
-    pub lk_p2_out_eval: E,
-    pub lk_q1_out_eval: E,
-    pub lk_q2_out_eval: E,
-
-    pub tower_proof: TowerProofs<E>,
-
-    // main constraint and select sumcheck proof
-    pub main_sel_sumcheck_proofs: Vec<IOPProverMessage<E>>,
-    pub r_records_in_evals: Vec<E>,
-    pub w_records_in_evals: Vec<E>,
-    pub lk_records_in_evals: Vec<E>,
-
-    pub wits_in_evals: Vec<E>,
-}
+pub struct GKROpcodeProof<E: ExtensionField>(pub GKRProof<E>);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
-pub struct ZKVMTableProof<E: ExtensionField> {
+pub struct ZKVMChipProof<E: ExtensionField> {
     // tower evaluation at layer 1
-    pub r_out_evals: Vec<[E; 2]>,
-    pub w_out_evals: Vec<[E; 2]>,
-    pub lk_out_evals: Vec<[E; 4]>,
+    pub r_out_evals: Vec<Vec<E>>,
+    pub w_out_evals: Vec<Vec<E>>,
+    pub lk_out_evals: Vec<Vec<E>>,
 
-    pub same_r_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
-    pub rw_in_evals: Vec<E>,
-    pub lk_in_evals: Vec<E>,
+    pub main_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
 
     pub tower_proof: TowerProofs<E>,
 
@@ -74,22 +55,22 @@ pub struct ZKVMTableProof<E: ExtensionField> {
 
 /// each field will be interpret to (constant) polynomial
 #[derive(Default, Clone, Debug)]
-pub struct PublicValues<T: Default + Clone + Debug> {
-    exit_code: T,
-    init_pc: T,
-    init_cycle: T,
-    end_pc: T,
-    end_cycle: T,
-    public_io: Vec<T>,
+pub struct PublicValues {
+    exit_code: u32,
+    init_pc: u32,
+    init_cycle: u64,
+    end_pc: u32,
+    end_cycle: u64,
+    public_io: Vec<u32>,
 }
 
-impl PublicValues<u32> {
+impl PublicValues {
     pub fn new(
         exit_code: u32,
         init_pc: u32,
-        init_cycle: u32,
+        init_cycle: u64,
         end_pc: u32,
-        end_cycle: u32,
+        end_cycle: u64,
         public_io: Vec<u32>,
     ) -> Self {
         Self {
@@ -103,17 +84,17 @@ impl PublicValues<u32> {
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
         vec![
-            vec![E::BaseField::from_u64((self.exit_code & 0xffff) as u64)],
-            vec![E::BaseField::from_u64(
-                ((self.exit_code >> 16) & 0xffff) as u64,
+            vec![E::BaseField::from_canonical_u32(self.exit_code & 0xffff)],
+            vec![E::BaseField::from_canonical_u32(
+                (self.exit_code >> 16) & 0xffff,
             )],
-            vec![E::BaseField::from_u64(self.init_pc as u64)],
-            vec![E::BaseField::from_u64(self.init_cycle as u64)],
-            vec![E::BaseField::from_u64(self.end_pc as u64)],
-            vec![E::BaseField::from_u64(self.end_cycle as u64)],
+            vec![E::BaseField::from_canonical_u32(self.init_pc)],
+            vec![E::BaseField::from_canonical_u64(self.init_cycle)],
+            vec![E::BaseField::from_canonical_u32(self.end_pc)],
+            vec![E::BaseField::from_canonical_u64(self.end_cycle)],
             self.public_io
                 .iter()
-                .map(|e| E::BaseField::from_u64(*e as u64))
+                .map(|e| E::BaseField::from_canonical_u32(*e))
                 .collect(),
         ]
     }
@@ -135,8 +116,8 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pi_evals: Vec<E>,
     // circuit size -> instance mapping
     pub num_instances: Vec<(usize, usize)>,
-    opcode_proofs: BTreeMap<usize, ZKVMOpcodeProof<E>>,
-    table_proofs: BTreeMap<usize, ZKVMTableProof<E>>,
+    opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+    table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
     witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub fixed_witin_opening_proof: PCS::Proof,
 }
@@ -145,8 +126,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
         raw_pi: Vec<Vec<E::BaseField>>,
         pi_evals: Vec<E>,
-        opcode_proofs: BTreeMap<usize, ZKVMOpcodeProof<E>>,
-        table_proofs: BTreeMap<usize, ZKVMTableProof<E>>,
+        opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+        table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         fixed_witin_opening_proof: PCS::Proof,
         num_instances: Vec<(usize, usize)>,
@@ -243,7 +224,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             .opcode_proofs
             .iter()
             .map(|(circuit_index, proof)| {
-                let size = bincode::serialized_size(&proof.main_sel_sumcheck_proofs);
+                let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
                 size.inspect(|size| {
                     *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })
@@ -271,7 +252,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             .table_proofs
             .iter()
             .map(|(circuit_index, proof)| {
-                let size = bincode::serialized_size(&proof.same_r_sumcheck_proofs);
+                let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
                 size.inspect(|size| {
                     *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
                 })

@@ -92,7 +92,7 @@ impl<E: ExtensionField> MultiPath<E> {
                 .map(|(leaves, _)| {
                     leaves
                         .iter()
-                        .map(|leaf| leaf.iter().map(|x| E::from_base(x)).collect())
+                        .map(|leaf| leaf.iter().map(|x| E::from_ref_base(x)).collect())
                         .collect()
                 })
                 .collect(),

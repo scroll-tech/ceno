@@ -1,7 +1,7 @@
 use ceno_emul::{Cycle, StepRecord, Word, WriteOp};
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
-use p3::field::{Field, PrimeCharacteristicRing};
+use p3::field::{Field, FieldAlgebra};
 
 use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
 use crate::{
@@ -11,13 +11,13 @@ use crate::{
     },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     gadgets::AssertLtConfig,
     set_val,
     uint::Value,
     witness::LkMultiplicity,
 };
 use ceno_emul::Tracer;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::{iter, marker::PhantomData};
 
 #[derive(Debug)]
@@ -436,7 +436,7 @@ impl<E: ExtensionField> MemAddr<E> {
             .sum();
 
         // Range check the middle bits, that is the low limb excluding the low bits.
-        let shift_right = E::BaseField::from_u64(1 << Self::N_LOW_BITS)
+        let shift_right = E::BaseField::from_canonical_u64(1 << Self::N_LOW_BITS)
             .inverse()
             .expr();
         let mid_u14 = (&limbs[0] - low_sum) * shift_right;

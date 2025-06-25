@@ -13,7 +13,6 @@ pub use utils::u64vec;
 mod chip_handler;
 pub mod circuit_builder;
 pub mod e2e;
-pub mod expression;
 pub mod gadgets;
 mod keygen;
 pub mod state;
@@ -21,6 +20,8 @@ pub mod stats;
 pub mod structs;
 mod uint;
 mod utils;
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+pub use utils::print_allocated_bytes;
 mod witness;
 
 pub use structs::ROMType;

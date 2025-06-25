@@ -1,5 +1,4 @@
 pub mod impl_goldilocks {
-
     use crate::{
         ExtensionField, FieldFrom, FieldInto, FromUniformBytes, SmallField,
         array_try_from_uniform_bytes, impl_from_uniform_bytes_for_binomial_extension,
@@ -8,8 +7,7 @@ pub mod impl_goldilocks {
     use p3::{
         challenger::DuplexChallenger,
         field::{
-            BasedVectorSpace, Field, PackedValue, PrimeCharacteristicRing, PrimeField64,
-            TwoAdicField,
+            Field, FieldAlgebra, FieldExtensionAlgebra, PackedValue, PrimeField64, TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
         goldilocks::{
@@ -21,17 +19,22 @@ pub mod impl_goldilocks {
         symmetric::{PaddingFreeSponge, TruncatedPermutation},
     };
 
+    #[cfg(debug_assertions)]
+    use crate::poseidon::impl_instruments::*;
+    #[cfg(debug_assertions)]
+    use p3::symmetric::CryptographicPermutation;
+
     pub type GoldilocksExt2 = BinomialExtensionField<Goldilocks, 2>;
 
     impl FieldFrom<u64> for Goldilocks {
         fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
+            Self::from_canonical_u64(v)
         }
     }
 
     impl FieldFrom<u64> for GoldilocksExt2 {
         fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
+            Self::from_canonical_u64(v)
         }
     }
 
@@ -44,12 +47,21 @@ pub mod impl_goldilocks {
     pub const POSEIDON2_GOLDILICK_WIDTH: usize = 8;
     pub const POSEIDON2_GOLDILICK_RATE: usize = 4;
 
+    #[cfg(debug_assertions)]
+    impl CryptographicPermutation<[Goldilocks; POSEIDON2_GOLDILICK_WIDTH]>
+        for Instrumented<Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>>
+    {
+    }
+
     impl PoseidonField for Goldilocks {
+        #[cfg(debug_assertions)]
+        type P = Instrumented<Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>>;
+        #[cfg(not(debug_assertions))]
         type P = Poseidon2GoldilocksHL<POSEIDON2_GOLDILICK_WIDTH>;
         type T =
             DuplexChallenger<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>;
-        type S = PaddingFreeSponge<Self::P, 8, 4, 4>;
-        type C = TruncatedPermutation<Self::P, 2, 4, 8>;
+        type S = PaddingFreeSponge<Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE, 4>;
+        type C = TruncatedPermutation<Self::P, 2, 4, POSEIDON2_GOLDILICK_WIDTH>;
         type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 4>;
         fn get_default_challenger() -> Self::T {
             DuplexChallenger::<Self, Self::P, POSEIDON2_GOLDILICK_WIDTH, POSEIDON2_GOLDILICK_RATE>::new(
@@ -57,6 +69,18 @@ pub mod impl_goldilocks {
             )
         }
 
+        #[cfg(debug_assertions)]
+        fn get_default_perm() -> Self::P {
+            Instrumented::new(Poseidon2GoldilocksHL::new(
+                ExternalLayerConstants::<Goldilocks, POSEIDON2_GOLDILICK_WIDTH>::new_from_saved_array(
+                    HL_GOLDILOCKS_8_EXTERNAL_ROUND_CONSTANTS,
+                    new_array,
+                ),
+                new_array(HL_GOLDILOCKS_8_INTERNAL_ROUND_CONSTANTS).to_vec(),
+            ))
+        }
+
+        #[cfg(not(debug_assertions))]
         fn get_default_perm() -> Self::P {
             Poseidon2GoldilocksHL::new(
                 ExternalLayerConstants::<Goldilocks, POSEIDON2_GOLDILICK_WIDTH>::new_from_saved_array(
@@ -88,7 +112,7 @@ pub mod impl_goldilocks {
         fn try_from_uniform_bytes(bytes: [u8; 8]) -> Option<Self> {
             let value = u64::from_le_bytes(bytes);
             let is_canonical = value < Self::ORDER_U64;
-            is_canonical.then(|| Self::from_u64(value))
+            is_canonical.then(|| Self::from_canonical_u64(value))
         }
     }
 
@@ -104,7 +128,7 @@ pub mod impl_goldilocks {
                     array[..chunk.len()].copy_from_slice(chunk);
                     unsafe { std::ptr::read_unaligned(array.as_ptr() as *const u64) }
                 })
-                .map(Self::from_u64)
+                .map(Self::from_canonical_u64)
                 .collect::<Vec<_>>()
         }
 
@@ -118,13 +142,6 @@ pub mod impl_goldilocks {
         const DEGREE: usize = 2;
         const MULTIPLICATIVE_GENERATOR: Self = <GoldilocksExt2 as Field>::GENERATOR;
         const TWO_ADICITY: usize = Goldilocks::TWO_ADICITY;
-        // Passing two-adacity itself to this function will get the root of unity
-        // with the largest order, i.e., order = 2^two-adacity.
-        const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField =
-            Goldilocks::two_adic_generator_const(Goldilocks::TWO_ADICITY);
-        const TWO_ADIC_ROOT_OF_UNITY: Self = BinomialExtensionField::new_unchecked(
-            Goldilocks::ext_two_adic_generator_const(<GoldilocksExt2 as TwoAdicField>::TWO_ADICITY),
-        );
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <Goldilocks as BinomiallyExtendable<2>>::W;
@@ -132,7 +149,7 @@ pub mod impl_goldilocks {
         type BaseField = Goldilocks;
 
         fn to_canonical_u64_vec(&self) -> Vec<u64> {
-            self.as_basis_coefficients_slice()
+            self.as_base_slice()
                 .iter()
                 .map(|v: &Self::BaseField| v.as_canonical_u64())
                 .collect()

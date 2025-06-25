@@ -6,7 +6,6 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{Expression, ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{constants::UInt, i_insn::IInstructionConfig, insn_base::MemAddr},
@@ -18,7 +17,8 @@ use crate::{
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 use ff_ext::FieldInto;
-use p3::field::PrimeCharacteristicRing;
+use multilinear_extensions::{Expression, ToExpr, WitIn};
+use p3::field::FieldAlgebra;
 
 pub struct JalrConfig<E: ExtensionField> {
     pub i_insn: IInstructionConfig<E>,

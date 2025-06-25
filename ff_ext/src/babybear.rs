@@ -5,8 +5,7 @@ pub mod impl_babybear {
         babybear::{BabyBear, Poseidon2BabyBear},
         challenger::DuplexChallenger,
         field::{
-            BasedVectorSpace, Field, PackedValue, PrimeCharacteristicRing, PrimeField32,
-            TwoAdicField,
+            Field, FieldAlgebra, FieldExtensionAlgebra, PackedValue, PrimeField32, TwoAdicField,
             extension::{BinomialExtensionField, BinomiallyExtendable},
         },
         merkle_tree::MerkleTreeMmcs,
@@ -77,13 +76,13 @@ pub mod impl_babybear {
 
     impl FieldFrom<u64> for BabyBear {
         fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
+            Self::from_canonical_u64(v)
         }
     }
 
     impl FieldFrom<u64> for BabyBearExt4 {
         fn from_v(v: u64) -> Self {
-            Self::from_u64(v)
+            Self::from_canonical_u64(v)
         }
     }
 
@@ -93,11 +92,26 @@ pub mod impl_babybear {
         }
     }
 
+    #[cfg(debug_assertions)]
+    use crate::poseidon::impl_instruments::*;
+    #[cfg(debug_assertions)]
+    use p3::symmetric::CryptographicPermutation;
+
+    #[cfg(debug_assertions)]
+    impl CryptographicPermutation<[BabyBear; POSEIDON2_BABYBEAR_WIDTH]>
+        for Instrumented<Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>>
+    {
+    }
+
     impl PoseidonField for BabyBear {
+        #[cfg(debug_assertions)]
+        type P = Instrumented<Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>>;
+        #[cfg(not(debug_assertions))]
         type P = Poseidon2BabyBear<POSEIDON2_BABYBEAR_WIDTH>;
+
         type T = DuplexChallenger<Self, Self::P, POSEIDON2_BABYBEAR_WIDTH, POSEIDON2_BABYBEAR_RATE>;
-        type S = PaddingFreeSponge<Self::P, 16, 8, 8>;
-        type C = TruncatedPermutation<Self::P, 2, 8, 16>;
+        type S = PaddingFreeSponge<Self::P, POSEIDON2_BABYBEAR_WIDTH, POSEIDON2_BABYBEAR_RATE, 8>;
+        type C = TruncatedPermutation<Self::P, 2, 8, POSEIDON2_BABYBEAR_WIDTH>;
         type MMCS = MerkleTreeMmcs<Self, Self, Self::S, Self::C, 8>;
         fn get_default_challenger() -> Self::T {
             DuplexChallenger::<
@@ -108,6 +122,18 @@ pub mod impl_babybear {
             >::new(Self::get_default_perm())
         }
 
+        #[cfg(debug_assertions)]
+        fn get_default_perm() -> Self::P {
+            Instrumented::new(Poseidon2BabyBear::new(
+                ExternalLayerConstants::new(
+                    BABYBEAR_RC16_EXTERNAL_INITIAL.to_vec(),
+                    BABYBEAR_RC16_EXTERNAL_FINAL.to_vec(),
+                ),
+                BABYBEAR_RC16_INTERNAL.to_vec(),
+            ))
+        }
+
+        #[cfg(not(debug_assertions))]
         fn get_default_perm() -> Self::P {
             Poseidon2BabyBear::new(
                 ExternalLayerConstants::new(
@@ -137,7 +163,7 @@ pub mod impl_babybear {
         fn try_from_uniform_bytes(bytes: [u8; 8]) -> Option<Self> {
             let value = u32::from_le_bytes(bytes[..4].try_into().unwrap());
             let is_canonical = value < Self::ORDER_U32;
-            is_canonical.then(|| Self::from_u32(value))
+            is_canonical.then(|| Self::from_canonical_u32(value))
         }
     }
 
@@ -147,13 +173,13 @@ pub mod impl_babybear {
         /// Convert a byte string into a list of field elements
         fn bytes_to_field_elements(bytes: &[u8]) -> Vec<Self> {
             bytes
-                .chunks(8)
+                .chunks(4)
                 .map(|chunk| {
-                    let mut array = [0u8; 8];
+                    let mut array = [0u8; 4];
                     array[..chunk.len()].copy_from_slice(chunk);
-                    unsafe { std::ptr::read_unaligned(array.as_ptr() as *const u64) }
+                    unsafe { std::ptr::read_unaligned(array.as_ptr() as *const u32) }
                 })
-                .map(Self::from_u64)
+                .map(Self::from_canonical_u32)
                 .collect::<Vec<_>>()
         }
 
@@ -169,11 +195,6 @@ pub mod impl_babybear {
         const DEGREE: usize = 4;
         const MULTIPLICATIVE_GENERATOR: Self = <BabyBearExt4 as Field>::GENERATOR;
         const TWO_ADICITY: usize = BabyBear::TWO_ADICITY;
-        // Passing two-adacity itself to this function will get the root of unity
-        // with the largest order, i.e., order = 2^two-adacity.
-        const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField = BabyBear::new(0x78000000);
-        const TWO_ADIC_ROOT_OF_UNITY: Self =
-            BinomialExtensionField::new_unchecked([BabyBear::new(0x78000000); 4]);
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <BabyBear as BinomiallyExtendable<4>>::W;
@@ -181,7 +202,7 @@ pub mod impl_babybear {
         type BaseField = BabyBear;
 
         fn to_canonical_u64_vec(&self) -> Vec<u64> {
-            self.as_basis_coefficients_slice()
+            self.as_base_slice()
                 .iter()
                 .map(|v: &Self::BaseField| v.as_canonical_u32() as u64)
                 .collect()

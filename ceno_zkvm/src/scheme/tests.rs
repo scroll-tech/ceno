@@ -3,15 +3,18 @@ use std::{collections::BTreeMap, marker::PhantomData};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    expression::{ToExpr, WitIn},
     instructions::{
         Instruction,
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
+    scheme::{
+        cpu::{CpuBackend, CpuProver, CpuTowerProver},
+        hal::{ProofInput, TowerProverSpec},
+        prover::ZkVMCpuProver,
+    },
     set_val,
     structs::{
-        PointAndEval, RAMType::Register, TowerProver, TowerProverSpec, ZKVMConstraintSystem,
-        ZKVMFixedTraces, ZKVMWitnesses,
+        PointAndEval, RAMType::Register, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
     },
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
@@ -22,14 +25,17 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
+use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
+
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
+
 use itertools::Itertools;
-use mpcs::{PolynomialCommitmentScheme, WhirDefault};
-use multilinear_extensions::{
-    mle::IntoMLE, util::ceil_log2, virtual_poly::ArcMultilinearExtension,
-};
-use p3::field::PrimeCharacteristicRing;
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel, WhirDefault};
+use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
+use p3::field::FieldAlgebra;
 use rand::thread_rng;
-use transcript::{BasicTranscript, BasicTranscriptWithStat, StatisticRecorder, Transcript};
+use transcript::{BasicTranscript, Transcript};
 
 use super::{
     PublicValues,
@@ -91,7 +97,7 @@ fn test_rw_lk_expression_combination() {
         type Pcs = WhirDefault<E>;
 
         // pcs setup
-        Pcs::setup(1 << 8).unwrap();
+        Pcs::setup(1 << 8, SecurityLevel::default()).unwrap();
         let (pp, vp) = Pcs::trim((), 1 << 8).unwrap();
 
         // configure
@@ -108,7 +114,7 @@ fn test_rw_lk_expression_combination() {
             .clone()
             .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
             .unwrap();
-        let vk = pk.get_vk();
+        let vk = pk.get_vk_slow();
 
         // generate mock witness
         let num_instances = 1 << 8;
@@ -122,7 +128,9 @@ fn test_rw_lk_expression_combination() {
             .unwrap();
 
         // get proof
-        let prover = ZKVMProver::new(pk);
+        let backend = CpuBackend::<E, Pcs>::new();
+        let device = CpuProver::new(backend);
+        let prover = ZkVMCpuProver::new(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
         let wits_in = rmm.to_mles();
@@ -141,22 +149,26 @@ fn test_rw_lk_expression_combination() {
             transcript.read_challenge().elements,
         ];
 
-        let (proof, _) = prover
-            .create_opcode_proof(
+        let input = ProofInput {
+            fixed: vec![],
+            witness: wits_in,
+            structural_witness: vec![],
+            public_input: vec![],
+            num_instances,
+        };
+        let (proof, _, _) = prover
+            .create_chip_proof(
                 name.as_str(),
                 prover.pk.circuit_pks.get(&name).unwrap(),
-                wits_in,
-                &[],
-                num_instances,
+                input,
                 &mut transcript,
                 &prover_challenges,
             )
             .expect("create_proof failed");
 
         // verify proof
-        let stat_recorder = StatisticRecorder::default();
         let verifier = ZKVMVerifier::new(vk.clone());
-        let mut v_transcript = BasicTranscriptWithStat::new(&stat_recorder, b"test");
+        let mut v_transcript = BasicTranscript::new(b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&witin_commit, &mut v_transcript).unwrap();
         let verifier_challenges = [
@@ -165,7 +177,11 @@ fn test_rw_lk_expression_combination() {
         ];
 
         assert_eq!(prover_challenges, verifier_challenges);
-        let _rt_input = verifier
+        #[cfg(debug_assertions)]
+        {
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
+        }
+        verifier
             .verify_opcode_proof(
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
@@ -178,10 +194,14 @@ fn test_rw_lk_expression_combination() {
                 &verifier_challenges,
             )
             .expect("verifier failed");
-        println!(
-            "hashed fields {}",
-            stat_recorder.into_inner().field_appended_num
+        #[cfg(debug_assertions)]
+        {
+            println!(
+            "instrumented metrics {}",
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
+            )
         );
+        }
     }
 
     // <lookup count, rw count>
@@ -212,7 +232,7 @@ fn test_single_add_instance_e2e() {
         Default::default(),
     );
 
-    Pcs::setup(1 << MAX_NUM_VARIABLES).expect("Basefold PCS setup");
+    Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
@@ -242,7 +262,7 @@ fn test_single_add_instance_e2e() {
         .clone()
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
-    let vk = pk.get_vk();
+    let vk = pk.get_vk_slow();
 
     // single instance
     let mut vm = VMState::new(CENO_PLATFORM, program.clone().into());
@@ -270,7 +290,9 @@ fn test_single_add_instance_e2e() {
     assert_eq!(halt_records.len(), 1);
 
     // proving
-    let prover = ZKVMProver::new(pk);
+    let backend = CpuBackend::<E, Pcs>::new();
+    let device = CpuProver::new(backend);
+    let mut prover = ZKVMProver::new(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
@@ -295,19 +317,25 @@ fn test_single_add_instance_e2e() {
         .expect("create_proof failed");
 
     println!("encoded zkvm proof {}", &zkvm_proof,);
-    let stat_recorder = StatisticRecorder::default();
+
+    #[cfg(debug_assertions)]
     {
-        let transcript = BasicTranscriptWithStat::new(&stat_recorder, b"riscv");
-        assert!(
-            verifier
-                .verify_proof(zkvm_proof, transcript)
-                .expect("verify proof return with error"),
+        Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
+    }
+    let transcript = BasicTranscript::new(b"riscv");
+    assert!(
+        verifier
+            .verify_proof(zkvm_proof, transcript)
+            .expect("verify proof return with error"),
+    );
+    #[cfg(debug_assertions)]
+    {
+        println!(
+            "instrumented metrics {}",
+            Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::format_metrics(
+            )
         );
     }
-    println!(
-        "hash_num: {}",
-        stat_recorder.into_inner().field_appended_num
-    );
 }
 
 /// test various product argument size, starting from minimal leaf size 2
@@ -318,20 +346,17 @@ fn test_tower_proof_various_prod_size() {
         let mut rng = thread_rng();
         type E = GoldilocksExt2;
         let mut transcript = BasicTranscript::new(b"test_tower_proof");
-        let leaf_layer: ArcMultilinearExtension<E> = (0..leaf_layer_size)
+        let leaf_layer: MultilinearExtension<E> = (0..leaf_layer_size)
             .map(|_| E::random(&mut rng))
             .collect_vec()
-            .into_mle()
-            .into();
+            .into_mle();
         let (first, second): (&[E], &[E]) = leaf_layer
             .get_ext_field_vec()
             .split_at(leaf_layer.evaluations().len() / 2);
-        let last_layer_splitted_fanin: Vec<ArcMultilinearExtension<E>> = vec![
-            first.to_vec().into_mle().into(),
-            second.to_vec().into_mle().into(),
-        ];
+        let last_layer_splitted_fanin: Vec<MultilinearExtension<E>> =
+            vec![first.to_vec().into_mle(), second.to_vec().into_mle()];
         let layers = infer_tower_product_witness(num_vars, last_layer_splitted_fanin, 2);
-        let (rt_tower_p, tower_proof) = TowerProver::create_proof(
+        let (rt_tower_p, tower_proof) = CpuTowerProver::create_proof::<E, WhirDefault<E>>(
             vec![TowerProverSpec {
                 witness: layers.clone(),
             }],

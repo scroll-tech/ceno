@@ -13,7 +13,7 @@ use crate::{
     whir::fold::{compute_fold, expand_from_univariate, restructure_evaluations},
 };
 use ff_ext::ExtensionField;
-use multilinear_extensions::mle::{DenseMultilinearExtension, FieldType, MultilinearExtension};
+use multilinear_extensions::mle::{FieldType, MultilinearExtension};
 use p3::matrix::dense::RowMajorMatrix;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::macros::{entered_span, exit_span};
@@ -114,7 +114,7 @@ where
             sumcheck_prover = Some(SumcheckProverNotSkipping::new(
                 witness.polys[0]
                     .par_iter()
-                    .map(|x| E::from_base(x))
+                    .map(|x| E::from_ref_base(x))
                     .collect(),
                 &initial_claims,
                 &combination_randomness,
@@ -147,11 +147,11 @@ where
             round: 0,
             sumcheck_prover,
             folding_randomness,
-            evaluations: DenseMultilinearExtension::from_evaluations_ext_vec(
+            evaluations: MultilinearExtension::from_evaluations_ext_vec(
                 self.0.mv_parameters.num_variables,
                 witness.polys[0]
                     .par_iter()
-                    .map(|x| E::from_base(x))
+                    .map(|x| E::from_ref_base(x))
                     .collect(),
             ),
             prev_merkle: Some(&witness.merkle_tree),
@@ -224,7 +224,7 @@ where
                     .sumcheck_prover
                     .unwrap_or_else(|| {
                         SumcheckProverNotSkipping::new(
-                            folded_evaluations_values.clone(),
+                            folded_evaluations_values.to_vec(),
                             &[],
                             &[],
                             &[],
@@ -242,7 +242,7 @@ where
                 sumcheck_poly_evals: sumcheck_poly_evals.clone(),
                 merkle_roots: merkle_roots.clone(),
                 ood_answers: ood_answers.clone(),
-                final_poly: folded_evaluations_values.clone(),
+                final_poly: folded_evaluations_values.to_vec(),
                 folded_evals: Vec::new(),
             });
         }
@@ -252,7 +252,7 @@ where
         // Fold the coefficients, and compute fft of polynomial (and commit)
         let new_domain = round_state.domain.scale(2);
         let expansion = new_domain.size() / folded_evaluations_values.len();
-        let mut folded_coeffs = folded_evaluations_values.clone();
+        let mut folded_coeffs = folded_evaluations_values.to_vec();
         interpolate_over_boolean_hypercube(&mut folded_coeffs);
         let evals = expand_from_coeff(&folded_coeffs, expansion);
         // Group the evaluations into leaves by the *next* round folding factor
@@ -365,7 +365,7 @@ where
                             &round_state.folding_randomness,
                             coset_offset_inv,
                             coset_generator_inv,
-                            E::from_u64(2).inverse(),
+                            E::from_canonical_u64(2).inverse(),
                             self.0.folding_factor.at_round(round_state.round),
                         )
                     },
@@ -378,7 +378,7 @@ where
                 // is just the folding of E evaluated at the folded point.
                 let mut answers_coeffs = answers.to_vec();
                 evaluate_over_hypercube(&mut answers_coeffs);
-                DenseMultilinearExtension::from_evaluations_ext_vec(
+                MultilinearExtension::from_evaluations_ext_vec(
                     p3::util::log2_strict_usize(answers_coeffs.len()),
                     answers_coeffs.to_vec(),
                 )
@@ -407,7 +407,7 @@ where
             })
             .unwrap_or_else(|| {
                 SumcheckProverNotSkipping::new(
-                    folded_evaluations_values.clone(),
+                    folded_evaluations_values.to_vec(),
                     &stir_challenges,
                     &combination_randomness,
                     &stir_evaluations,
@@ -447,7 +447,7 @@ pub(crate) struct RoundState<'a, E: ExtensionField> {
     pub(crate) domain: Domain<E>,
     pub(crate) sumcheck_prover: Option<SumcheckProverNotSkipping<E>>,
     pub(crate) folding_randomness: Vec<E>,
-    pub(crate) evaluations: DenseMultilinearExtension<E>,
+    pub(crate) evaluations: MultilinearExtension<'a, E>,
     pub(crate) prev_merkle: Option<&'a MerkleTree<E>>,
     pub(crate) merkle_proofs: Vec<MultiPath<E>>,
 }

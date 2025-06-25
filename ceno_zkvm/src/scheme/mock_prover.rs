@@ -1,12 +1,7 @@
-use super::{
-    PublicValues,
-    utils::{eval_by_expr, wit_infer_by_expr},
-};
+use super::{PublicValues, utils::wit_infer_by_expr};
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    expression::{Expression, fmt},
-    scheme::utils::{eval_by_expr_with_fixed, eval_by_expr_with_instance},
     state::{GlobalState, StateCircuit},
     structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
@@ -20,8 +15,12 @@ use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use itertools::{Itertools, chain, enumerate, izip};
-use multilinear_extensions::{mle::IntoMLEs, virtual_poly::ArcMultilinearExtension};
-use p3::field::PrimeCharacteristicRing;
+use multilinear_extensions::{
+    Expression, fmt,
+    mle::{ArcMultilinearExtension, IntoMLEs},
+    utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
+};
+use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -678,11 +677,14 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     fn load_program_table(program: &Program, challenge: [E; 2]) -> Vec<Vec<u64>> {
         let mut t_vec = vec![];
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
-        let mut cb = CircuitBuilder::new_with_params(&mut cs, ProgramParams {
-            platform: CENO_PLATFORM,
-            program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
-            ..ProgramParams::default()
-        });
+        let mut cb = CircuitBuilder::new_with_params(
+            &mut cs,
+            ProgramParams {
+                platform: CENO_PLATFORM,
+                program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
+                ..ProgramParams::default()
+            },
+        );
         let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
         let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);
         for table_expr in &cs.lk_table_expressions {
@@ -774,7 +776,7 @@ Hints:
         cs: &ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
-        pi: &PublicValues<u32>,
+        pi: &PublicValues,
         program: &Program,
     ) where
         E: LkMultiplicityKey,
@@ -1144,22 +1146,16 @@ Hints:
 
         let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
-        gs_rs.insert(eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            &instance,
-            &challenges,
-            &gs_final,
-        ));
-        gs_ws.insert(eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            &instance,
-            &challenges,
-            &gs_init,
-        ));
+        gs_rs.insert(
+            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_final)
+                .right()
+                .unwrap(),
+        );
+        gs_ws.insert(
+            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_init)
+                .right()
+                .unwrap(),
+        );
 
         // gs stores { (pc, timestamp) }
         find_rw_mismatch!(
@@ -1257,13 +1253,12 @@ mod tests {
     use crate::{
         ROMType::U5,
         error::ZKVMError,
-        expression::{ToExpr, WitIn},
         gadgets::{AssertLtConfig, IsLtConfig},
         set_val,
         witness::LkMultiplicity,
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
-    use multilinear_extensions::mle::IntoMLE;
+    use multilinear_extensions::{ToExpr, WitIn, mle::IntoMLE};
     use p3::goldilocks::Goldilocks;
     use witness::InstancePaddingStrategy;
 
@@ -1344,9 +1339,12 @@ mod tests {
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
         let wits_in = vec![
-            vec![Goldilocks::from_u64(3u64), Goldilocks::from_u64(5u64)]
-                .into_mle()
-                .into(),
+            vec![
+                Goldilocks::from_canonical_u64(3u64),
+                Goldilocks::from_canonical_u64(5u64),
+            ]
+            .into_mle()
+            .into(),
         ];
 
         let challenge = [1.into_f(), 1000.into_f()];
@@ -1367,30 +1365,33 @@ mod tests {
         let result = MockProver::run_with_challenge(&builder, &wits_in, challenge, None);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
-        assert_eq!(err, vec![MockProverError::LookupError {
-            rom_type: ROMType::U5,
-            expression: Expression::Sum(
-                Box::new(Expression::ScaledSum(
-                    Box::new(Expression::WitIn(0)),
+        assert_eq!(
+            err,
+            vec![MockProverError::LookupError {
+                rom_type: ROMType::U5,
+                expression: Expression::Sum(
+                    Box::new(Expression::ScaledSum(
+                        Box::new(Expression::WitIn(0)),
+                        Box::new(Expression::Challenge(
+                            1,
+                            1,
+                            GoldilocksExt2::ONE,
+                            GoldilocksExt2::ZERO,
+                        )),
+                        Box::new(Goldilocks::from_canonical_u64(U5 as u64).expr()),
+                    )),
                     Box::new(Expression::Challenge(
-                        1,
+                        0,
                         1,
                         GoldilocksExt2::ONE,
                         GoldilocksExt2::ZERO,
                     )),
-                    Box::new(Expression::Constant(Goldilocks::from_u64(U5 as u64))),
-                )),
-                Box::new(Expression::Challenge(
-                    0,
-                    1,
-                    GoldilocksExt2::ONE,
-                    GoldilocksExt2::ZERO,
-                )),
-            ),
-            evaluated: 123002.into_f(), // 123 * 1000 + 2
-            name: "test_lookup_error/assert_u5/assert u5".to_string(),
-            inst_id: 0,
-        }]);
+                ),
+                evaluated: 123002.into_f(), // 123 * 1000 + 2
+                name: "test_lookup_error/assert_u5/assert u5".to_string(),
+                inst_id: 0,
+            }]
+        );
         // because inst_id is not checked in our PartialEq impl
         assert_eq!(err[0].inst_id(), 0);
     }
@@ -1463,10 +1464,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![AssertLtCircuitInput { a: 3, b: 5 }, AssertLtCircuitInput {
-                    a: 7,
-                    b: 11,
-                }],
+                vec![
+                    AssertLtCircuitInput { a: 3, b: 5 },
+                    AssertLtCircuitInput { a: 7, b: 11 },
+                ],
                 &mut lk_multiplicity,
             )
             .unwrap();
@@ -1581,10 +1582,10 @@ mod tests {
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
                 builder.cs.num_witin as usize,
-                vec![LtCircuitInput { a: 3, b: 5 }, LtCircuitInput {
-                    a: 7,
-                    b: 11,
-                }],
+                vec![
+                    LtCircuitInput { a: 3, b: 5 },
+                    LtCircuitInput { a: 7, b: 11 },
+                ],
                 &mut lk_multiplicity,
             )
             .unwrap();

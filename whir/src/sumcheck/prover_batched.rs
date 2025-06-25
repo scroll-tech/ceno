@@ -50,7 +50,7 @@ where
             SumcheckSingle::eval_eq(
                 point,
                 &mut prover.evaluations_of_equality[i],
-                F::from_u64(1),
+                F::from_canonical_u64(1),
             );
             prover.sum += poly_comb_coeff[i] * evals[i];
         }
@@ -182,10 +182,9 @@ where
 
         // Update
         self.num_variables -= 1;
-        self.evaluation_of_p =
-            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
+        self.evaluation_of_p = MultilinearExtension::from_evaluations_ext_vec(evaluations_of_p);
         self.evaluation_of_equality =
-            DenseMultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
+            MultilinearExtension::from_evaluations_ext_vec(evaluations_of_eq);
         self.sum = combination_randomness * sumcheck_poly.evaluate_at_point(folding_randomness);
     }
 
@@ -234,8 +233,8 @@ where
 #[cfg(test)]
 mod tests {
     use ff_ext::GoldilocksExt2;
-    use multilinear_extensions::mle::{DenseMultilinearExtension, MultilinearExtension};
-    use p3::field::PrimeCharacteristicRing;
+    use multilinear_extensions::mle::MultilinearExtension;
+    use p3::field::FieldAlgebra;
 
     use super::SumcheckBatched;
 
@@ -244,37 +243,37 @@ mod tests {
     #[test]
     fn test_sumcheck_folding_factor_1() {
         let num_rounds = 2;
-        let eval_points = vec![vec![F::from_u64(10), F::from_u64(11)], vec![
-            F::from_u64(7),
-            F::from_u64(8),
-        ]];
+        let eval_points = vec![
+            vec![F::from_canonical_u64(10), F::from_canonical_u64(11)],
+            vec![F::from_canonical_u64(7), F::from_canonical_u64(8)],
+        ];
         let polynomials = vec![
             vec![
-                F::from_u64(1),
-                F::from_u64(5),
-                F::from_u64(10),
-                F::from_u64(14),
+                F::from_canonical_u64(1),
+                F::from_canonical_u64(5),
+                F::from_canonical_u64(10),
+                F::from_canonical_u64(14),
             ],
             vec![
-                F::from_u64(2),
-                F::from_u64(6),
-                F::from_u64(11),
-                F::from_u64(13),
+                F::from_canonical_u64(2),
+                F::from_canonical_u64(6),
+                F::from_canonical_u64(11),
+                F::from_canonical_u64(13),
             ],
         ];
-        let poly_comb_coeffs = vec![F::from_u64(2), F::from_u64(3)];
+        let poly_comb_coeffs = vec![F::from_canonical_u64(2), F::from_canonical_u64(3)];
 
         let evals: Vec<F> = polynomials
             .iter()
             .zip(&eval_points)
             .map(|(poly, point)| {
-                DenseMultilinearExtension::from_evaluations_ext_vec(2, poly.clone()).evaluate(point)
+                MultilinearExtension::from_evaluations_ext_vec(2, poly.clone()).evaluate(point)
             })
             .collect();
         let mut claimed_value: F = evals
             .iter()
             .zip(&poly_comb_coeffs)
-            .fold(F::from_u64(0), |sum, (eval, poly_rand)| {
+            .fold(F::from_canonical_u64(0), |sum, (eval, poly_rand)| {
                 *eval * *poly_rand + sum
             });
 
@@ -289,8 +288,8 @@ mod tests {
             // First, check that is sums to the right value over the hypercube
             assert_eq!(poly.sum_over_hypercube(), claimed_value);
 
-            let next_comb_randomness = F::from_u64(100101);
-            let next_fold_randomness = vec![F::from_u64(4999)];
+            let next_comb_randomness = F::from_canonical_u64(100101);
+            let next_fold_randomness = vec![F::from_canonical_u64(4999)];
 
             prover.compress(next_comb_randomness, &next_fold_randomness, &poly);
             claimed_value = next_comb_randomness * poly.evaluate_at_point(&next_fold_randomness);

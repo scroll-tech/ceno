@@ -1,12 +1,25 @@
-use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
-    e2e::{B, Checkpoint, E, Pcs, Preset, run_e2e_with_checkpoint, setup_platform, verify},
-    scheme::{ZKVMProof, constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    e2e::{
+        Checkpoint, FieldType, PcsKind, Preset, run_e2e_with_checkpoint, setup_platform,
+        setup_platform_debug, verify,
+    },
+    scheme::{
+        ZKVMProof, constants::MAX_NUM_VARIABLES, mock_prover::LkMultiplicityKey,
+        verifier::ZKVMVerifier,
+    },
     with_panic_hook,
 };
 use clap::Parser;
-use p3::field::PrimeCharacteristicRing;
+use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
+use mpcs::{
+    Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
+};
+use p3::field::FieldAlgebra;
+use serde::{Serialize, de::DeserializeOwned};
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
 use tracing::{error, level_filters::LevelFilter};
 use tracing_forest::ForestLayer;
@@ -14,6 +27,11 @@ use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 use transcript::BasicTranscript as Transcript;
+
+// Use jemalloc as global allocator for performance
+#[cfg(all(feature = "jemalloc", unix, not(test)))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
     parse_size::Config::new()
@@ -29,11 +47,11 @@ struct Args {
     elf: PathBuf,
     /// The path to the proof file to write.
     #[arg(default_value = "proof.bin")]
-    proof_file: String,
+    proof_file: PathBuf,
 
     /// The path to the verification key file to write.
     #[arg(default_value = "vk.bin")]
-    vk_file: String,
+    vk_file: PathBuf,
 
     /// The maximum number of steps to execute the program.
     #[arg(short, long)]
@@ -45,8 +63,15 @@ struct Args {
     profiling: Option<usize>,
 
     /// The preset configuration to use.
-    #[arg(short, long, value_enum, default_value_t = Preset::Ceno)]
+    #[arg(long, value_enum, default_value_t = Preset::Ceno)]
     platform: Preset,
+
+    /// The polynomial commitment scheme to use.
+    #[arg(long, value_enum, default_value_t = PcsKind::default())]
+    pcs: PcsKind,
+    /// The field to use, eg. goldilocks
+    #[arg(long, value_enum, default_value_t = FieldType::default())]
+    field: FieldType,
 
     /// Hints: prover-private unconstrained input.
     /// This is a raw file mapped as a memory segment.
@@ -74,6 +99,10 @@ struct Args {
 
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
+
+    /// The security level to use.
+    #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
+    security_level: SecurityLevel,
 }
 
 fn main() {
@@ -122,14 +151,20 @@ fn main() {
     let public_io = args
         .public_io
         .and_then(|public_io| {
-            public_io
-                .iter()
-                .try_fold(CenoStdin::default(), |mut std_in, public_io| {
-                    std_in.write(public_io)?;
-                    Ok::<CenoStdin, rkyv::rancor::Error>(std_in)
-                })
-                .ok()
-                .map(|std_in| Into::<Vec<u32>>::into(&std_in))
+            // if the vector contains only one element, write it as a raw `u32`
+            // otherwise, write the entire vector
+            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
+            if public_io.len() == 1 {
+                CenoStdin::default()
+                    .write(&public_io[0])
+                    .ok()
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+            } else {
+                CenoStdin::default()
+                    .write(&public_io)
+                    .ok()
+                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+            }
         })
         .unwrap_or_default();
 
@@ -141,13 +176,23 @@ fn main() {
     tracing::info!("Loading ELF file: {}", args.elf.display());
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
-    let platform = setup_platform(
-        args.platform,
-        &program,
-        args.stack_size,
-        args.heap_size,
-        pub_io_size,
-    );
+    let platform = if cfg!(debug_assertions) {
+        setup_platform_debug(
+            args.platform,
+            &program,
+            args.stack_size,
+            args.heap_size,
+            pub_io_size,
+        )
+    } else {
+        setup_platform(
+            args.platform,
+            &program,
+            args.stack_size,
+            args.heap_size,
+            pub_io_size,
+        )
+    };
     tracing::info!("Running on platform {:?} {}", args.platform, platform);
     tracing::info!(
         "Stack: {} bytes. Heap: {} bytes.",
@@ -170,51 +215,146 @@ fn main() {
         })
         .or_else(|| {
             args.hints.and_then(|hint| {
-                hint.iter()
-                    .try_fold(CenoStdin::default(), |mut std_in, hint| {
-                        std_in.write(hint)?;
-                        Ok::<CenoStdin, rkyv::rancor::Error>(std_in)
-                    })
-                    .ok()
-                    .map(|std_in| Into::<Vec<u32>>::into(&std_in))
+                // if the vector contains only one element, write it as a raw `u32`
+                // otherwise, write the entire vector
+                // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
+                if hint.len() == 1 {
+                    CenoStdin::default()
+                        .write(&hint[0])
+                        .ok()
+                        .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+                } else {
+                    CenoStdin::default()
+                        .write(&hint)
+                        .ok()
+                        .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
+                }
             })
         })
         .unwrap_or_default();
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
-    let ((zkvm_proof, vk), _) = run_e2e_with_checkpoint::<E, Pcs>(
+    match (args.pcs, args.field) {
+        (PcsKind::Basefold, FieldType::Goldilocks) => {
+            run_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>>(
+                program,
+                platform,
+                &hints,
+                &public_io,
+                max_steps,
+                args.max_num_variables,
+                args.proof_file,
+                args.vk_file,
+                args.security_level,
+                Checkpoint::Complete,
+            )
+        }
+        (PcsKind::Basefold, FieldType::BabyBear) => {
+            run_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>>(
+                program,
+                platform,
+                &hints,
+                &public_io,
+                max_steps,
+                args.max_num_variables,
+                args.proof_file,
+                args.vk_file,
+                args.security_level,
+                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+            )
+        }
+        (PcsKind::Whir, FieldType::Goldilocks) => {
+            run_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>>(
+                program,
+                platform,
+                &hints,
+                &public_io,
+                max_steps,
+                args.max_num_variables,
+                args.proof_file,
+                args.vk_file,
+                args.security_level,
+                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+            )
+        }
+        (PcsKind::Whir, FieldType::BabyBear) => {
+            run_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>>(
+                program,
+                platform,
+                &hints,
+                &public_io,
+                max_steps,
+                args.max_num_variables,
+                args.proof_file,
+                args.vk_file,
+                args.security_level,
+                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+            )
+        }
+    };
+
+    #[cfg(all(feature = "jemalloc", unix, not(test)))]
+    {
+        print_allocated_bytes();
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_inner<
+    E: ExtensionField + LkMultiplicityKey + DeserializeOwned,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+>(
+    program: Program,
+    platform: Platform,
+    hints: &[u32],
+    public_io: &[u32],
+    max_steps: usize,
+    max_num_variables: usize,
+    proof_file: PathBuf,
+    vk_file: PathBuf,
+    security_level: SecurityLevel,
+    checkpoint: Checkpoint,
+) {
+    let result = run_e2e_with_checkpoint::<E, PCS>(
         program,
         platform,
         hints,
         public_io,
         max_steps,
-        args.max_num_variables,
-        Checkpoint::PrepProof,
+        max_num_variables,
+        security_level,
+        checkpoint,
     );
 
-    let zkvm_proof = zkvm_proof.expect("PrepSanityCheck should yield zkvm_proof.");
-    let vk = vk.expect("PrepSanityCheck should yield vk.");
+    let zkvm_proof = result
+        .proof
+        .expect("PrepSanityCheck should yield zkvm_proof.");
+    let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
-    std::fs::write(&args.proof_file, proof_bytes).unwrap();
+    fs::write(&proof_file, proof_bytes).unwrap();
     let vk_bytes = bincode::serialize(&vk).unwrap();
     std::fs::write(&args.vk_file, vk_bytes).unwrap();
 
     return; // early terminate
 
-    let verifier = ZKVMVerifier::new(vk);
-    verify(&zkvm_proof, &verifier).expect("Verification failed");
-    // FIXME: it is a bit wired, let us move it else where later.
-    soundness_test(zkvm_proof, &verifier);
+    if checkpoint > Checkpoint::PrepVerify {
+        let verifier = ZKVMVerifier::new(vk);
+        verify(&zkvm_proof, &verifier).expect("Verification failed");
+        soundness_test(zkvm_proof, &verifier);
+    }
 }
 
-fn soundness_test(mut zkvm_proof: ZKVMProof<E, Pcs>, verifier: &ZKVMVerifier<E, Pcs>) {
+fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
+    mut zkvm_proof: ZKVMProof<E, Pcs>,
+    verifier: &ZKVMVerifier<E, Pcs>,
+) {
     // do sanity check
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![B::ONE];
-    zkvm_proof.raw_pi[1] = vec![B::ONE];
+    zkvm_proof.raw_pi[0] = vec![E::BaseField::ONE];
+    zkvm_proof.raw_pi[1] = vec![E::BaseField::ONE];
 
     // capture panic message, if have
     let result = with_panic_hook(Box::new(|_info| ()), || {

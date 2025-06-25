@@ -10,7 +10,7 @@ use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
-    field::{Field, PrimeCharacteristicRing, dot_product},
+    field::{Field, FieldAlgebra, dot_product},
     fri::{BatchOpening, CommitPhaseProofStep},
     matrix::{Dimensions, dense::RowMajorMatrix},
     util::log2_strict_usize,
@@ -19,7 +19,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverMessage,
-    util::interpolate_uni_poly,
+    util::extrapolate_uni_poly,
 };
 use transcript::Transcript;
 
@@ -140,7 +140,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    let inv_2 = E::BaseField::from_u64(2).inverse();
+    let inv_2 = E::BaseField::from_canonical_u64(2).inverse();
     debug_assert_eq!(point_evals.len(), circuit_meta.len());
     let encode_span = entered_span!("encode_final_codeword");
     let final_codeword = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
@@ -301,12 +301,13 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 .map(|(_, index)| {
                     let (lo, hi) = &base_codeword_lo_hi[*index];
                     let coeff =
-                        <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
+                        <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
                             vp,
                             cur_num_var
                                 + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log()
                                 - 1,
-                        )[idx];
+                            idx,
+                        );
                     codeword_fold_with_challenge(&[*lo, *hi], *r, coeff, inv_2)
                 })
                 .sum::<E>();
@@ -355,18 +356,10 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                         proof,
                     )
                     .expect("verify failed");
-                let coeff =
-                    <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
-                        vp,
-                        log2_strict_usize(n_d_i) - 1,
-                    )[idx];
-                debug_assert_eq!(
-                    <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs_level(
-                        vp,
-                        log2_strict_usize(n_d_i) - 1,
-                    )
-                    .len(),
-                    n_d_i >> 1
+                let coeff = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
+                    vp,
+                    log2_strict_usize(n_d_i) - 1,
+                    idx,
                 );
                 folded = codeword_fold_with_challenge(&[leafs[0], leafs[1]], *r, coeff, inv_2);
                 n_d_i >>= 1;
@@ -390,7 +383,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             point_evals.iter().zip_eq(circuit_meta.iter()).flat_map(
                 |((_, evals), CircuitIndexMeta { witin_num_vars, .. })| {
                     evals.iter().copied().map(move |eval| {
-                        eval * E::from_u64(1 << (max_num_var - witin_num_vars) as u64)
+                        eval * E::from_canonical_u64(1 << (max_num_var - witin_num_vars) as u64)
                     })
                 }
             )
@@ -400,13 +393,13 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     // 2. check every round of sumcheck match with prev claims
     for i in 0..fold_challenges.len() - 1 {
         assert_eq!(
-            interpolate_uni_poly(&sumcheck_messages[i].evaluations, fold_challenges[i]),
+            extrapolate_uni_poly(&sumcheck_messages[i].evaluations, fold_challenges[i]),
             { sumcheck_messages[i + 1].evaluations[0] + sumcheck_messages[i + 1].evaluations[1] }
         );
     }
     // 3. check final evaluation are correct
     assert_eq!(
-        interpolate_uni_poly(
+        extrapolate_uni_poly(
             &sumcheck_messages[fold_challenges.len() - 1].evaluations,
             fold_challenges[fold_challenges.len() - 1]
         ),

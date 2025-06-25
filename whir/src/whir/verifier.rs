@@ -3,13 +3,10 @@ use crate::{
     utils::{evaluate_as_multilinear_coeffs, evaluate_as_univariate},
 };
 use ff_ext::{ExtensionField, PoseidonField};
-use multilinear_extensions::{
-    mle::{DenseMultilinearExtension, MultilinearExtension},
-    virtual_poly::eq_eval,
-};
+use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::eq_eval};
 use p3::{
     commit::Mmcs,
-    field::{Field, PrimeCharacteristicRing},
+    field::{Field, FieldAlgebra},
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -77,7 +74,7 @@ where
     pub fn new(params: WhirConfig<E>) -> Self {
         Verifier {
             params,
-            two_inv: E::BaseField::from_u64(2).inverse(), // The only inverse in the entire code :)
+            two_inv: E::BaseField::from_canonical_u64(2).inverse(), /* The only inverse in the entire code :) */
         }
     }
 
@@ -444,7 +441,7 @@ where
                         &round.folding_randomness,
                         coset_offset_inv,
                         coset_generator_inv,
-                        E::from_base(&self.two_inv),
+                        E::from_ref_base(&self.two_inv),
                         self.params.folding_factor.at_round(round_index),
                     )
                 })
@@ -472,7 +469,7 @@ where
                     &parsed.final_folding_randomness,
                     coset_offset_inv,
                     coset_generator_inv,
-                    E::from_base(&self.two_inv),
+                    E::from_ref_base(&self.two_inv),
                     self.params.folding_factor.at_round(parsed.rounds.len()),
                 )
             })
@@ -673,7 +670,7 @@ where
         let evaluation_of_v_poly = self.compute_v_poly(parsed_commitment, statement, &parsed);
 
         let expected_sumcheck_poly_eval = evaluation_of_v_poly
-            * DenseMultilinearExtension::from_evaluations_ext_vec(
+            * MultilinearExtension::from_evaluations_ext_vec(
                 p3::util::log2_strict_usize(parsed.final_evaluations.len()),
                 parsed.final_evaluations,
             )
