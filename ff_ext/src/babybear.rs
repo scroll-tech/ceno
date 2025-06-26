@@ -5,7 +5,8 @@ pub mod impl_babybear {
         babybear::{BabyBear, Poseidon2BabyBear},
         challenger::DuplexChallenger,
         field::{
-            extension::{BinomialExtensionField, BinomiallyExtendable}, Field, FieldAlgebra, FieldExtensionAlgebra, PackedValue, PrimeField32, TwoAdicField
+            Field, FieldAlgebra, FieldExtensionAlgebra, PackedValue, PrimeField32, TwoAdicField,
+            extension::{BinomialExtensionField, BinomiallyExtendable},
         },
         merkle_tree::MerkleTreeMmcs,
         poseidon2::ExternalLayerConstants,

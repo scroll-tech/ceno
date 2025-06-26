@@ -42,7 +42,7 @@ impl RSCodeSpec for RSCodeDefaultSpec {
     }
 
     fn get_basecode_msg_size_log() -> usize {
-        7
+        0
     }
 }
 
