@@ -291,7 +291,7 @@ mod basefold;
 pub use basefold::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
     BasefoldRSParams, BasefoldSpec, CircuitIndexMeta, EncodingScheme, QueryOpeningProof,
-    QueryPhaseVerifierInput, RSCode, RSCodeDefaultSpec,
+    QueryPhaseAdditionalHint, QueryPhaseVerifierInput, RSCode, RSCodeDefaultSpec,
 };
 extern crate whir as whir_external;
 mod whir;
