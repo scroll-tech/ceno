@@ -505,7 +505,7 @@ pub fn run_keccakf<E: ExtensionField>(
 mod tests {
     use super::*;
     use ff_ext::GoldilocksExt2;
-    use rand::{Rng, SeedableRng};
+    use rand::{RngCore, SeedableRng};
 
     #[test]
     fn test_keccakf() {
@@ -520,7 +520,7 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(random_u64);
         let num_instance = 4;
         let states: Vec<[u64; 25]> = (0..num_instance)
-            .map(|_| std::array::from_fn(|_| rng.gen()))
+            .map(|_| std::array::from_fn(|_| rng.next_u64()))
             .collect_vec();
         run_keccakf::<E>(setup_gkr_circuit(), states, false, false); // TODO: fix this, currently the output is wrong.
     }
