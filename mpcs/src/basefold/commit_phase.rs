@@ -90,8 +90,7 @@ where
         .collect_vec();
     let total_num_polys = batch_group_size.iter().sum();
 
-    let batch_coeffs =
-        &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
+    let batch_coeffs = &transcript.sample_and_append_challenge_pows(total_num_polys, b"bac");
     // split batch coeffs to match with batch group for easier handling
     let batch_coeffs_splitted = split_by_sizes(batch_coeffs, &batch_group_size);
 
@@ -496,7 +495,7 @@ where
     });
     exit_span!(sumcheck_round_span);
 
-    let next_challenge = transcript.sample_and_append_challenge(b"commit round");
+    let next_challenge = transcript.sample_and_append_challenge(b"com");
 
     // 2. fri part
     let fri_round_span = entered_span!("basefold::fri_one_round");

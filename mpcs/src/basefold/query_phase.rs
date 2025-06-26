@@ -46,7 +46,7 @@ where
 
     // Transform the challenge queries from field elements into integers
     let queries: Vec<_> = transcript.sample_bits_and_append_vec(
-        b"query indices",
+        b"qin",
         num_verifier_queries,
         witin_comms.log2_max_codeword_size,
     );

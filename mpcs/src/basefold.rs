@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{cmp::Reverse, collections::BTreeMap};
 
 use crate::{
     Error, Point, PolynomialCommitmentScheme,
@@ -9,7 +9,12 @@ use crate::{
 };
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
-use p3::{commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix, util::log2_strict_usize};
+use p3::{
+    commit::Mmcs,
+    field::{Field, FieldAlgebra},
+    matrix::dense::DenseMatrix,
+    util::log2_strict_usize,
+};
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
 pub use structure::{BasefoldProof, BasefoldSpec, CircuitIndexMeta, Digest};
 use sumcheck::macros::{entered_span, exit_span};
@@ -663,8 +668,7 @@ where
             .iter()
             .map(|circuit_meta| circuit_meta.witin_num_polys + circuit_meta.fixed_num_polys)
             .sum();
-        let batch_coeffs =
-            &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
+        let batch_coeffs = &transcript.sample_and_append_challenge_pows(total_num_polys, b"bac");
 
         let max_num_var = *circuit_num_vars.iter().map(|(_, n)| n).max().unwrap();
         let num_rounds = max_num_var - Spec::get_basecode_msg_size_log();
@@ -675,11 +679,7 @@ where
         let sumcheck_messages = proof.sumcheck_proof.as_ref().unwrap();
         for i in 0..num_rounds {
             transcript.append_field_element_exts(sumcheck_messages[i].evaluations.as_slice());
-            fold_challenges.push(
-                transcript
-                    .sample_and_append_challenge(b"commit round")
-                    .elements,
-            );
+            fold_challenges.push(transcript.sample_and_append_challenge(b"com").elements);
             if i < num_rounds - 1 {
                 write_digest_to_transcript(&commits[i], transcript);
             }
@@ -688,7 +688,7 @@ where
         transcript.append_field_element_exts_iter(proof.final_message.iter().flatten());
 
         let queries: Vec<_> = transcript.sample_bits_and_append_vec(
-            b"query indices",
+            b"qin",
             Spec::get_number_queries(),
             max_num_var + Spec::get_rate_log(),
         );
@@ -707,12 +707,30 @@ where
             sumcheck_messages: sumcheck_messages.clone(),
             point_evals: point_evals.clone(),
         };
+        let additional_hint = QueryPhaseAdditionalHint::<E> {
+            two_inv: E::BaseField::from_canonical_u64(2).inverse(),
+            num_unique_entries: circuit_metas.iter().unique_by(|x| x.witin_num_vars).count(),
+            sorting_orders: {
+                circuit_metas
+                    .iter()
+                    .enumerate()
+                    .sorted_by_key(|(_, CircuitIndexMeta { witin_num_vars, .. })| {
+                        Reverse(witin_num_vars)
+                    })
+                    .map(|(index, _)| index)
+                    .collect_vec()
+            },
+        };
         // Serialize query_phase_verifier_input with bincode and
         // save to file
         use std::fs::File;
         let filename = "query_phase_verifier_input.bin";
         let f = File::create(filename).unwrap();
         bincode::serialize_into(f, &query_phase_verifier_input).unwrap();
+
+        let filename = "query_phase_additional_hint.bin";
+        let f = File::create(filename).unwrap();
+        bincode::serialize_into(f, &additional_hint).unwrap();
 
         // verify basefold sumcheck + FRI codeword query
         batch_verifier_query_phase::<E, Spec>(
@@ -775,9 +793,20 @@ pub struct QueryPhaseVerifierInput<E: ExtensionField> {
     pub point_evals: Vec<(Vec<E>, Vec<E>)>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct QueryPhaseAdditionalHint<E: ExtensionField> {
+    pub two_inv: E::BaseField,
+    pub num_unique_entries: usize,
+    pub sorting_orders: Vec<usize>,
+}
+
 #[cfg(test)]
 mod test {
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::{BabyBearExt4, GoldilocksExt2};
 
     use crate::{
         basefold::Basefold,
@@ -787,12 +816,21 @@ mod test {
     use super::BasefoldRSParams;
 
     type PcsGoldilocksRSCode = Basefold<GoldilocksExt2, BasefoldRSParams>;
+    type PcsBabybearRSCode = Basefold<BabyBearExt4, BasefoldRSParams>;
 
     #[test]
     fn batch_commit_open_verify_goldilocks() {
         // Both challenge and poly are over base field
         run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 1);
         run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(10, 11, 4);
+        // TODO support all trivial proof
+    }
+
+    #[test]
+    fn batch_commit_open_verify_babybear() {
+        // Both challenge and poly are over base field
+        run_batch_commit_open_verify::<BabyBearExt4, PcsBabybearRSCode>(10, 11, 1);
+        // run_batch_commit_open_verify::<BabyBearExt4, PcsBabybearRSCode>(10, 11, 4);
         // TODO support all trivial proof
     }
 

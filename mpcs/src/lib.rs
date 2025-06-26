@@ -338,7 +338,7 @@ pub mod test_util {
         num_vars: usize,
         transcript: &mut impl Transcript<E>,
     ) -> Vec<E> {
-        transcript.sample_and_append_vec(b"Point", num_vars)
+        transcript.sample_and_append_vec(b"pnt", num_vars)
     }
     pub fn get_points_from_challenge<E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,
@@ -489,7 +489,7 @@ pub mod test_util {
             let circuit_num_polys = vec![(batch_size, 0)];
 
             let (comm, evals, proof, challenge) = {
-                let mut transcript = BasicTranscript::new(b"BaseFold");
+                let mut transcript = BasicTranscript::new(b"test");
                 let rmm =
                     RowMajorMatrix::<E::BaseField>::rand(&mut OsRng, 1 << num_vars, batch_size);
 
@@ -522,7 +522,7 @@ pub mod test_util {
             };
             // Batch verify
             {
-                let mut transcript = BasicTranscript::new(b"BaseFold");
+                let mut transcript = BasicTranscript::new(b"test");
                 Pcs::write_commitment(&comm, &mut transcript).unwrap();
 
                 let point = get_point_from_challenge(num_vars, &mut transcript);
