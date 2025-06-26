@@ -1,3 +1,5 @@
+use std::vec::IntoIter;
+
 use ark_std::log2;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
@@ -6,6 +8,7 @@ use multilinear_extensions::{
     Expression,
     mle::{ArcMultilinearExtension, Point, PointAndEval},
 };
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck_layer::LayerProof;
 use transcript::Transcript;
@@ -54,12 +57,12 @@ pub struct Layer<E: ExtensionField> {
     pub exprs: Vec<Expression<E>>,
 
     /// Positions to place the evaluations of the base inputs of this layer.
-    pub in_eval_expr: Vec<EvalExpression<E>>,
+    pub in_eval_expr: Vec<usize>,
     /// The expressions of the evaluations from the succeeding layers, which are
     /// connected to the outputs of this layer.
     /// It format indicated as different output group
     /// first tuple value is optional eq
-    pub expr_evals: ExprEvalType<E>,
+    pub out_eq_and_eval_exprs: ExprEvalType<E>,
 
     // format: ([eq0, eq1, eq2], Vec<(rotatition_expr, expr)>) such that rotation_expr - expr == 0
     // there got 3 different eq for (left, right, target) during rotation argument
@@ -73,10 +76,7 @@ pub struct Layer<E: ExtensionField> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct LayerWitness<'a, E: ExtensionField> {
-    pub wits: Vec<ArcMultilinearExtension<'a, E>>,
-    pub num_vars: usize,
-}
+pub struct LayerWitness<'a, E: ExtensionField>(pub Vec<ArcMultilinearExtension<'a, E>>);
 
 impl<E: ExtensionField> Layer<E> {
     #[allow(clippy::too_many_arguments)]
@@ -86,9 +86,9 @@ impl<E: ExtensionField> Layer<E> {
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
         challenges: Vec<Expression<E>>,
-        in_eval_expr: Vec<EvalExpression<E>>,
+        in_eval_expr: Vec<usize>,
         // first tuple value is eq
-        expr_evals: ExprEvalType<E>,
+        out_eq_and_eval_exprs: ExprEvalType<E>,
         ((rotation_eq, rotation_exprs), rotation_cyclic_group_log2, rotation_cyclic_subgroup_size): (
             RotateExprs<E>,
             usize,
@@ -109,7 +109,7 @@ impl<E: ExtensionField> Layer<E> {
             challenges,
             exprs,
             in_eval_expr,
-            expr_evals,
+            out_eq_and_eval_exprs,
             rotation_exprs: (rotation_eq, rotation_exprs),
             rotation_cyclic_group_log2,
             rotation_cyclic_subgroup_size,
@@ -207,7 +207,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &[PointAndEval<E>],
         challenges: &[E],
     ) -> Vec<(Vec<E>, Option<Point<E>>)> {
-        self.expr_evals
+        self.out_eq_and_eval_exprs
             .iter()
             .map(|(_, out_evals)| {
                 let evals = out_evals
@@ -248,7 +248,7 @@ impl<E: ExtensionField> Layer<E> {
 
     fn update_claims(&self, claims: &mut [PointAndEval<E>], evals: &[E], point: &Point<E>) {
         for (value, pos) in izip!(chain![evals], chain![&self.in_eval_expr]) {
-            *(pos.entry_mut(claims)) = PointAndEval {
+            claims[*pos] = PointAndEval {
                 point: point.clone(),
                 eval: *value,
             };
@@ -257,10 +257,60 @@ impl<E: ExtensionField> Layer<E> {
 }
 
 impl<'a, E: ExtensionField> LayerWitness<'a, E> {
-    pub fn new(wits: Vec<ArcMultilinearExtension<'a, E>>) -> Self {
-        assert!(!wits.is_empty() || !wits.is_empty());
-        let num_vars = log2(wits[0].evaluations().len()) as usize;
-        assert!(wits.iter().all(|b| b.evaluations().len() == 1 << num_vars));
-        Self { wits, num_vars }
+    pub fn new(
+        wits: Vec<ArcMultilinearExtension<'a, E>>,
+        fixed: Vec<ArcMultilinearExtension<'a, E>>,
+    ) -> Self {
+        let mut wits_and_fixed = wits;
+        wits_and_fixed.extend(fixed);
+        assert!(!wits_and_fixed.is_empty());
+        let num_vars = log2(wits_and_fixed[0].evaluations().len()) as usize;
+        assert!(
+            wits_and_fixed
+                .iter()
+                .all(|b| b.evaluations().len() == 1 << num_vars)
+        );
+        Self(wits_and_fixed)
+    }
+
+    pub fn num_vars(&self) -> usize {
+        if self.0.is_empty() {
+            0
+        } else {
+            self.0[0].num_vars()
+        }
+    }
+}
+
+impl<'a, E: ExtensionField> IntoIterator for LayerWitness<'a, E> {
+    type Item = ArcMultilinearExtension<'a, E>;
+    type IntoIter = IntoIter<ArcMultilinearExtension<'a, E>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a, E: ExtensionField> LayerWitness<'a, E> {
+    pub fn iter(&self) -> impl Iterator<Item = &ArcMultilinearExtension<'a, E>> {
+        self.0.iter()
+    }
+}
+
+impl<'a, E: ExtensionField> IntoParallelIterator for LayerWitness<'a, E> {
+    type Iter = rayon::vec::IntoIter<ArcMultilinearExtension<'a, E>>;
+    type Item = ArcMultilinearExtension<'a, E>;
+
+    fn into_par_iter(self) -> Self::Iter {
+        self.0.into_par_iter()
+    }
+}
+
+impl<'a, E: ExtensionField> IntoParallelIterator for &'a LayerWitness<'a, E> {
+    type Iter = rayon::slice::Iter<'a, ArcMultilinearExtension<'a, E>>;
+    type Item = &'a ArcMultilinearExtension<'a, E>;
+
+    fn into_par_iter(self) -> Self::Iter {
+        self.0.par_iter()
     }
 }

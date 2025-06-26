@@ -71,3 +71,5 @@ fn main() {
     let circuit_setup = setup_keccak_bitwise_circuit();
     run_keccakf::<E>(circuit_setup, states, false, false);
 }
+
+fn main() {}

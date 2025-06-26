@@ -1,6 +1,6 @@
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
-    util::{ceil_log2, extrapolate_uni_poly},
+    util::extrapolate_uni_poly,
 };
 use either::Either;
 use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
@@ -8,7 +8,7 @@ use itertools::Itertools;
 use multilinear_extensions::{
     mle::Point,
     monomial::Term,
-    util::max_usable_threads,
+    util::{ceil_log2, max_usable_threads},
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };

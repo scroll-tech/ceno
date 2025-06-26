@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
-use crate::{error::BackendError, evaluation::EvalExpression};
+use crate::error::BackendError;
 
 pub(super) mod booleanhypercube;
 pub mod layer;
+pub mod layer_constraint_system;
 pub mod mock;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -21,7 +22,7 @@ pub struct GKRCircuit<E: ExtensionField> {
 
     pub n_challenges: usize,
     pub n_evaluations: usize,
-    pub openings: Vec<(usize, EvalExpression<E>)>,
+    pub n_out_evals: usize,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -96,7 +97,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
             .collect_vec();
         exit_span!(span);
 
-        let opening_evaluations = self.opening_evaluations(&running_evals, &challenges);
+        let opening_evaluations = self.opening_evaluations(&running_evals);
 
         Ok(GKRProverOutput {
             gkr_proof: GKRProof(sumcheck_proofs),
@@ -131,21 +132,18 @@ impl<E: ExtensionField> GKRCircuit<E> {
             )?;
         }
 
-        Ok(GKRClaims(
-            self.opening_evaluations(&evaluations, &challenges),
-        ))
+        Ok(GKRClaims(self.opening_evaluations(&evaluations)))
     }
 
-    fn opening_evaluations(
-        &self,
-        evaluations: &[PointAndEval<E>],
-        challenges: &[E],
-    ) -> Vec<Evaluation<E>> {
-        self.openings
+    /// Output opening evaluations. First witin and then fixed.
+    fn opening_evaluations(&self, evaluations: &[PointAndEval<E>]) -> Vec<Evaluation<E>> {
+        let input_layer = self.layers.last().unwrap();
+        input_layer
+            .in_eval_expr
             .iter()
+            .enumerate()
             .map(|(poly, eval)| {
-                let poly = *poly;
-                let PointAndEval { point, eval: value } = eval.evaluate(evaluations, challenges);
+                let PointAndEval { point, eval: value } = evaluations[*eval].clone();
                 Evaluation { value, point, poly }
             })
             .collect_vec()

@@ -143,7 +143,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State>
 ))]
 pub struct KeccakGKRIOP<E: ExtensionField> {
     pub circuit: GKRCircuit<E>,
-    pub layout: KeccakLayout<E>,
 }
 
 impl<E: ExtensionField> KeccakGKRIOP<E> {
@@ -218,9 +217,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     ) -> <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig {
         // Add GKR-IOP instance
         let params = gkr_iop::precompiles::KeccakParams {};
-        let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);
+        let (_layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);
         self.keccak_gkr_iop = Some(KeccakGKRIOP {
-            layout,
             circuit: chip.gkr_circuit(),
         });
 

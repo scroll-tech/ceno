@@ -82,10 +82,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         transcript: &mut impl Transcript<E>,
     ) -> (LayerProof<E>, Point<E>) {
         assert_eq!(
-            self.expr_evals.len(),
+            self.out_eq_and_eval_exprs.len(),
             out_points.len(),
             "out eval length {} != with distinct out_point {}",
-            self.expr_evals.len(),
+            self.out_eq_and_eval_exprs.len(),
             out_points.len(),
         );
 
@@ -163,10 +163,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let builder = VirtualPolynomialsBuilder::new_with_mles(
             num_threads,
             max_num_variables,
-            wit.wits
-                .iter()
+            wit.iter()
                 .map(|mle| Either::Left(mle.as_ref()))
-                // extend eqs to the end of wit
                 .chain(eqs.iter_mut().map(Either::Right))
                 .collect_vec(),
         );
@@ -198,10 +196,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         transcript: &mut impl Transcript<E>,
     ) -> Result<LayerClaims<E>, BackendError<E>> {
         assert_eq!(
-            self.expr_evals.len(),
+            self.out_eq_and_eval_exprs.len(),
             eval_and_dedup_points.len(),
             "out eval length {} != with eval_and_dedup_points {}",
-            self.expr_evals.len(),
+            self.out_eq_and_eval_exprs.len(),
             eval_and_dedup_points.len(),
         );
         let LayerProof {
@@ -275,7 +273,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         eval_and_dedup_points
             .iter()
             .map(|(_, out_point)| eq_eval(out_point.as_ref().unwrap(), &in_point))
-            .zip(&self.expr_evals)
+            .zip(&self.out_eq_and_eval_exprs)
             .for_each(|(eval, (eq_expr, _))| match eq_expr {
                 Some(Expression::WitIn(id)) => {
                     #[cfg(debug_assertions)]
@@ -340,7 +338,7 @@ fn prove_rotation<E: ExtensionField>(
             .map(|rotation_expr| match rotation_expr {
                 (Expression::WitIn(source_wit_id), _) => rotation_next_base_mle(
                     &bh,
-                    &wit.wits[*source_wit_id as usize],
+                    &wit.0[*source_wit_id as usize],
                     rotation_cyclic_group_log2,
                 ),
                 _ => unimplemented!("unimplemented rotation"),
@@ -350,7 +348,7 @@ fn prove_rotation<E: ExtensionField>(
                 &eq,
                 rotation_cyclic_subgroup_size,
                 rotation_cyclic_group_log2,
-                wit.wits[0].evaluations().len(), // Take first mle just to retrieve total length
+                wit.0[0].evaluations().len(), // Take first mle just to retrieve total length
             )))
             .collect::<Vec<_>>();
         let selector = mles.pop().unwrap();
@@ -373,7 +371,7 @@ fn prove_rotation<E: ExtensionField>(
                 Expression::WitIn(wit_id) => {
                     vec![
                         Either::Right(mle),
-                        Either::Left(wit.wits[*wit_id as usize].as_ref()),
+                        Either::Left(wit.0[*wit_id as usize].as_ref()),
                     ]
                 }
                 _ => panic!(""),
@@ -425,7 +423,7 @@ fn prove_rotation<E: ExtensionField>(
             };
             let left_eval = match rotated_expr {
                 Expression::WitIn(source_wit_id) => {
-                    wit.wits[*source_wit_id as usize].evaluate(&left_point)
+                    wit.0[*source_wit_id as usize].evaluate(&left_point)
                 }
                 _ => unreachable!(),
             };
@@ -435,7 +433,7 @@ fn prove_rotation<E: ExtensionField>(
             {
                 let expected_right_eval = match rotated_expr {
                     Expression::WitIn(source_wit_id) => {
-                        wit.wits[*source_wit_id as usize].evaluate(&right_point)
+                        wit.0[*source_wit_id as usize].evaluate(&right_point)
                     }
                     _ => unreachable!(),
                 };

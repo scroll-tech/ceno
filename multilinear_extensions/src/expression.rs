@@ -871,11 +871,13 @@ impl<E: ExtensionField> Mul for Expression<E> {
 }
 
 #[derive(Clone, Debug, Copy)]
+#[repr(C)]
 pub struct WitIn {
     pub id: WitnessId,
 }
 
 #[derive(Clone, Debug, Copy, serde::Serialize, serde::Deserialize)]
+#[repr(C)]
 pub struct StructuralWitIn {
     pub id: WitnessId,
     pub max_len: usize,
@@ -883,14 +885,17 @@ pub struct StructuralWitIn {
     pub multi_factor: usize,
     pub descending: bool,
 }
+
 #[derive(
     Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[repr(C)]
 pub struct Fixed(pub usize);
 
 #[derive(
     Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[repr(C)]
 pub struct Instance(pub usize);
 
 pub trait ToExpr<E: ExtensionField> {
@@ -970,7 +975,7 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
     expr.evaluate_with_instance::<ArcMultilinearExtension<'a, E>>(
-        &|f| fixed[f.0].clone(),
+        &|_f| unreachable!(),
         &|witness_id| witnesses[witness_id as usize].clone(),
         &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
