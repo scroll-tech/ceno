@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 
 use chip::Chip;
 use evaluation::EvalExpression;
@@ -10,6 +10,7 @@ use multilinear_extensions::{
     op_mle,
     utils::eval_by_expr_constant,
 };
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use utils::infer_layer_witness;
@@ -81,19 +82,28 @@ where
         // the number of expected outputs is given by `circuit.n_evaluations`.
         let mut gkr_out_well_order = Vec::with_capacity(circuit.n_evaluations);
 
-        // set input to witness_mle_flatten via first layer in_eval_expr
-        let mut phase1_wit_map = HashMap::new();
+        // set input to witness_mle_flattern via openings
         circuit
             .openings
             .iter()
             .for_each(|(phase1_wit_id, eval)| match eval {
-                EvalExpression::Zero => {}
-                EvalExpression::Single(eval_id) | EvalExpression::Linear(eval_id, _, _) => {
-                    if !phase1_wit_map.contains_key(eval_id) {
-                        phase1_wit_map.insert(*eval_id, (*phase1_wit_id, eval));
-                    }
+                EvalExpression::Single(eval_id) => {
+                    witness_mle_flatten[*eval_id] =
+                        Some(phase1_witness_group[*phase1_wit_id].clone())
                 }
-                EvalExpression::Partition(_, _) => unimplemented!("unsupported"),
+                EvalExpression::Linear(eval_id, a, b) => {
+                    let a_inv = eval_by_expr_constant(challenges, a).inverse();
+                    let b = eval_by_expr_constant(challenges, b);
+                    let f = &phase1_witness_group[*phase1_wit_id];
+                    let new_wit = op_mle!(|f| f
+                        .par_iter()
+                        .map(|x| a_inv * (-b + *x))
+                        .collect::<Vec<_>>()
+                        .into_mle()
+                        .into());
+                    witness_mle_flatten[*eval_id] = Some(new_wit);
+                }
+                _ => unimplemented!("unsupported"),
             });
 
         // generate all layer witness from input to output
@@ -106,32 +116,9 @@ where
                 .in_eval_expr
                 .iter()
                 .map(|eval| match eval {
-                    EvalExpression::Single(eval_id) => {
-                        if let Some((phase1_wit_id, eval)) = phase1_wit_map.get(eval_id) {
-                            match eval {
-                                EvalExpression::Single(_) => {
-                                    witness_mle_flatten[*eval_id] =
-                                        Some(phase1_witness_group[*phase1_wit_id].clone())
-                                }
-                                EvalExpression::Linear(_, a, b) => {
-                                    let a_inv = eval_by_expr_constant(challenges, a).inverse();
-                                    let b = eval_by_expr_constant(challenges, b);
-                                    let f = &phase1_witness_group[*phase1_wit_id];
-                                    let new_wit = op_mle!(|f| f
-                                        .iter()
-                                        .map(|x| a_inv * (-b + *x))
-                                        .collect_vec()
-                                        .into_mle()
-                                        .into());
-                                    witness_mle_flatten[*eval_id] = Some(new_wit);
-                                }
-                                _ => unimplemented!("unsupported"),
-                            }
-                        }
-                        witness_mle_flatten[*eval_id]
-                            .clone()
-                            .expect("witness must exist")
-                    }
+                    EvalExpression::Single(eval_id) => witness_mle_flatten[*eval_id]
+                        .clone()
+                        .expect("witness must exist"),
                     other => unimplemented!("{:?}", other),
                 })
                 .collect_vec();
@@ -158,9 +145,9 @@ where
                         let a_inv = eval_by_expr_constant(challenges, a).inverse();
                         let b = eval_by_expr_constant(challenges, b);
                         let new_wit = op_mle!(|out_mle| out_mle
-                            .iter()
+                            .par_iter()
                             .map(|x| a_inv * (-b + *x))
-                            .collect_vec()
+                            .collect::<Vec<_>>()
                             .into_mle()
                             .into());
                         witness_mle_flatten[*out] = Some(new_wit);
