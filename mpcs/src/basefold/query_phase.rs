@@ -342,7 +342,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
                 let mut leafs = vec![*leaf; 2];
                 leafs[is_interpolate_to_right_index as usize] = folded + new_involved_codewords;
-                println!("new leaf: {}", folded + new_involved_codewords);
+                println!("folded: {}", folded);
+                println!("new_involved_codewords: {}", new_involved_codewords);
                 idx >>= 1;
                 mmcs_ext
                     .verify_batch(
