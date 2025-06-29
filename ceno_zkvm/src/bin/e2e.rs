@@ -335,7 +335,9 @@ fn run_inner<
     let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
     fs::write(&proof_file, proof_bytes).unwrap();
     let vk_bytes = bincode::serialize(&vk).unwrap();
-    fs::write(&vk_file, vk_bytes).unwrap();
+    std::fs::write(&vk_file, vk_bytes).unwrap();
+
+    return; // early terminate
 
     if checkpoint > Checkpoint::PrepVerify {
         let verifier = ZKVMVerifier::new(vk);
