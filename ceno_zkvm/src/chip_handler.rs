@@ -9,7 +9,6 @@ pub mod general;
 pub mod global_state;
 pub mod memory;
 pub mod register;
-pub mod utils;
 
 #[cfg(test)]
 pub mod test;

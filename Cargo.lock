@@ -1122,6 +1122,8 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
+ "strum",
+ "strum_macros",
  "sumcheck",
  "thiserror 1.0.69",
  "tikv-jemalloc-ctl",
