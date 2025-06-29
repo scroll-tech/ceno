@@ -1,11 +1,14 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::BTreeMap};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitnessId};
 use p3_field::FieldAlgebra;
 
-use crate::evaluation::EvalExpression;
+use crate::{
+    evaluation::EvalExpression,
+    gkr::layer::{Layer, LayerType, ROTATION_OPENING_COUNT},
+};
 
 #[derive(Debug, Clone)]
 pub enum CenoLookup<E: ExtensionField> {
@@ -27,18 +30,30 @@ impl<E: ExtensionField> IntoIterator for CenoLookup<E> {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RotationParams<E: ExtensionField> {
+    pub rotation_eqs: Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
+    pub rotation_cyclic_group_log2: usize,
+    pub rotation_cyclic_subgroup_size: usize,
+}
+
 #[derive(Default)]
 pub struct LayerConstraintSystem<E: ExtensionField> {
     num_witin: usize,
     num_structural_witin: usize,
     #[allow(unused)]
     num_fixed: usize,
+
+    eq_zero: Option<Expression<E>>,
     // expressions include zero & non-zero expression, differentiate via evals
     // zero expr represented as Linear with all 0 value
     // TODO we should define an Zero enum for it
     pub expressions: Vec<Expression<E>>,
     pub expr_names: Vec<String>,
-    pub evals: Vec<EvalExpression<E>>,
+    pub evals: Vec<(Option<Expression<E>>, EvalExpression<E>)>,
+
+    pub rotations: Vec<(Expression<E>, Expression<E>)>,
+    pub rotation_params: Option<RotationParams<E>>,
 
     pub and_lookups: Vec<CenoLookup<E>>,
     pub xor_lookups: Vec<CenoLookup<E>>,
@@ -46,25 +61,32 @@ pub struct LayerConstraintSystem<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> LayerConstraintSystem<E> {
-    pub fn new(num_witin: usize, num_structural_witin: usize, num_fixed: usize) -> Self {
+    pub fn new(
+        num_witin: usize,
+        num_structural_witin: usize,
+        num_fixed: usize,
+        eq_zero: Option<Expression<E>>,
+    ) -> Self {
         LayerConstraintSystem {
             num_witin,
             num_structural_witin,
             num_fixed,
+            eq_zero,
             ..Default::default()
         }
     }
 
     pub fn add_zero_constraint(&mut self, expr: Expression<E>, name: String) {
         self.expressions.push(expr);
-        self.evals.push(EvalExpression::Zero);
+        self.evals
+            .push((self.eq_zero.clone(), EvalExpression::Zero));
         self.expr_names.push(name);
     }
 
     pub fn add_non_zero_constraint(
         &mut self,
         expr: Expression<E>,
-        eval: EvalExpression<E>,
+        eval: (Option<Expression<E>>, EvalExpression<E>),
         name: String,
     ) {
         self.expressions.push(expr);
@@ -215,10 +237,22 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         helper(rot8, split_rep, chunks_rotation);
     }
 
-    pub fn finalize_with_lookup_eval_iter<'a>(
+    pub fn set_rotation_params(&mut self, params: RotationParams<E>) {
+        assert!(self.rotation_params.is_none());
+        self.rotation_params = Some(params);
+    }
+
+    pub fn rotate_and_assert_eq(&mut self, a: Expression<E>, b: Expression<E>) {
+        self.rotations.push((a, b));
+    }
+
+    pub fn into_layer_with_lookup_eval_iter<'a>(
         mut self,
+        layer_name: String,
+        in_expr_evals: Vec<usize>,
+        challenges: Vec<Expression<E>>,
         lookup_evals: impl Iterator<Item = &'a usize>,
-    ) -> Self {
+    ) -> Layer<E> {
         for (idx, lookup, lookup_eval) in izip!(
             0..,
             chain!(
@@ -231,26 +265,112 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         ) {
             self.add_non_zero_constraint(
                 lookup,
-                EvalExpression::Single(*lookup_eval),
+                (None, EvalExpression::Single(*lookup_eval)),
                 format!("round 0th: {idx}th lookup felt"),
             );
         }
 
+        self.into_layer(layer_name, in_expr_evals, challenges)
+    }
+
+    pub fn into_layer(
+        mut self,
+        layer_name: String,
+        in_eval_expr: Vec<usize>,
+        challenges: Vec<Expression<E>>,
+    ) -> Layer<E> {
         let witin_offset = 0 as WitnessId;
         let structural_witin_offset = witin_offset + (self.num_witin as WitnessId);
         let fixed_offset = structural_witin_offset + (self.num_structural_witin as WitnessId);
 
-        self.expressions.iter_mut().for_each(|t| match t {
-            Expression::StructuralWitIn(structural_wit_id, _, _, _) => {
-                *t = Expression::WitIn(structural_witin_offset + *structural_wit_id);
-            }
-            Expression::Fixed(Fixed(fixed_id)) => {
-                *t = Expression::WitIn(fixed_offset + (*fixed_id as WitnessId));
-            }
-            _ => (),
+        let is_layer_linear = self
+            .expressions
+            .iter_mut()
+            .fold(true, |is_linear_so_far, t| {
+                match t {
+                    Expression::StructuralWitIn(structural_wit_id, _, _, _) => {
+                        *t = Expression::WitIn(structural_witin_offset + *structural_wit_id);
+                    }
+                    Expression::Fixed(Fixed(fixed_id)) => {
+                        *t = Expression::WitIn(fixed_offset + (*fixed_id as WitnessId));
+                    }
+                    _ => (),
+                }
+                is_linear_so_far && t.is_linear()
+            });
+
+        // Sort expressions, expr_names, and evals according to eval.0 and classify evals.
+        let Self {
+            expr_names,
+            expressions,
+            evals,
+            rotation_params,
+            rotations,
+            ..
+        } = self;
+
+        let mut eq_map = BTreeMap::new();
+        izip!(
+            evals.into_iter(),
+            expr_names.into_iter(),
+            expressions.into_iter()
+        )
+        .for_each(|((eq, eval), name, expr)| {
+            let (eval_group, names, exprs) = eq_map.entry(eq).or_insert((vec![], vec![], vec![]));
+            eval_group.push(eval);
+            names.push(name);
+            exprs.push(expr);
+        });
+        let mut expr_evals = vec![];
+        let mut expr_names = vec![];
+        let mut expressions = vec![];
+        eq_map.into_iter().for_each(|(eq, (evals, names, exprs))| {
+            expr_evals.push((eq, evals));
+            expr_names.extend(names);
+            expressions.extend(exprs);
         });
 
-        self
+        let layer_type = if is_layer_linear {
+            LayerType::Linear
+        } else {
+            LayerType::Zerocheck
+        };
+
+        if rotations.is_empty() {
+            Layer::new(
+                layer_name,
+                layer_type,
+                expressions,
+                challenges,
+                in_eval_expr,
+                expr_evals,
+                ((None, vec![]), 0, 0),
+                expr_names,
+            )
+        } else {
+            let Some(RotationParams {
+                rotation_eqs,
+                rotation_cyclic_group_log2,
+                rotation_cyclic_subgroup_size,
+            }) = rotation_params
+            else {
+                panic!("rotation params not set");
+            };
+            Layer::new(
+                layer_name,
+                layer_type,
+                expressions,
+                challenges,
+                in_eval_expr,
+                expr_evals,
+                (
+                    (rotation_eqs, rotations),
+                    rotation_cyclic_group_log2,
+                    rotation_cyclic_subgroup_size,
+                ),
+                expr_names,
+            )
+        }
     }
 }
 

@@ -39,28 +39,25 @@ where
         .zip_eq(out_evals.iter())
         .map(|((expr, expr_name), out_eval)| {
             let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
-            match out_eval {
-                EvalExpression::Zero => {
-                    // sanity check: zero mle
-                    if cfg!(debug_assertions) {
-                        let all_zero = match out_mle.evaluations() {
-                            multilinear_extensions::mle::FieldType::Base(smart_slice) => {
-                                smart_slice.iter().copied().all(|v| v == E::BaseField::ZERO)
-                            }
-                            multilinear_extensions::mle::FieldType::Ext(smart_slice) => {
-                                smart_slice.iter().copied().all(|v| v == E::ZERO)
-                            }
-                            multilinear_extensions::mle::FieldType::Unreachable => unreachable!(),
-                        };
-                        if !all_zero {
-                            panic!(
-                                "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
-                                layer.name
-                            );
+            if let EvalExpression::Zero = out_eval {
+                // sanity check: zero mle
+                if cfg!(debug_assertions) {
+                    let all_zero = match out_mle.evaluations() {
+                        multilinear_extensions::mle::FieldType::Base(smart_slice) => {
+                            smart_slice.iter().copied().all(|v| v == E::BaseField::ZERO)
                         }
+                        multilinear_extensions::mle::FieldType::Ext(smart_slice) => {
+                            smart_slice.iter().copied().all(|v| v == E::ZERO)
+                        }
+                        multilinear_extensions::mle::FieldType::Unreachable => unreachable!(),
+                    };
+                    if !all_zero {
+                        panic!(
+                            "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
+                            layer.name
+                        );
                     }
                 }
-                _ => {}
             };
             out_mle
         })
@@ -234,6 +231,16 @@ pub const fn indices_arr_with_offset<const N: usize, const OFFSET: usize>() -> [
     let mut i = 0;
     while i < N {
         indices_arr[i] = i + OFFSET;
+        i += 1;
+    }
+    indices_arr
+}
+
+pub fn indices_arr_with_offset_non_const<const N: usize>(offset: usize) -> [usize; N] {
+    let mut indices_arr = [0; N];
+    let mut i = 0;
+    while i < N {
+        indices_arr[i] = i + offset;
         i += 1;
     }
     indices_arr

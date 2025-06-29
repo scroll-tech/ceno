@@ -26,8 +26,10 @@ pub struct Chip<E: ExtensionField> {
     pub n_evaluations: usize,
 
     /// The number of output evaluations generated at the end of the protocol.
-    pub n_out_evals: usize,
+    pub n_nonzero_out_evals: usize,
 
     /// The layers of the GKR circuit, in the order outputs-to-inputs.
     pub layers: Vec<Layer<E>>,
+    /// The output of the circuit.
+    pub final_out_evals: Vec<usize>,
 }

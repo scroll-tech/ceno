@@ -46,9 +46,7 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     fn n_fixed(&self) -> usize;
     fn n_challenges(&self) -> usize;
     fn n_nonzero_out_evals(&self) -> usize;
-    fn n_evaluations(&self) -> usize {
-        self.n_committed() + self.n_fixed() + self.n_nonzero_out_evals()
-    }
+    fn n_evaluations(&self) -> usize;
 
     fn n_layers(&self) -> usize;
 }
@@ -80,12 +78,6 @@ where
             .collect_vec();
 
         let mut witness_mle_flatten = vec![None; circuit.n_evaluations];
-
-        // initialize a vector to store the final outputs of the GKR circuit.
-        // these outputs correspond to the evaluations at the last layer of the circuit.
-        // we preallocate the vector with exact capacity for efficiency, avoiding reallocations.
-        // the number of expected outputs is given by `circuit.n_evaluations`.
-        let mut gkr_out_well_order = Vec::with_capacity(circuit.n_out_evals);
 
         // set input to witness_mle_flatten via first layer in_eval_expr
         if let Some(first_layer) = circuit.layers.last() {
@@ -139,10 +131,6 @@ where
                 .for_each(|(out_eval, out_mle)| match out_eval {
                     EvalExpression::Single(out) => {
                         witness_mle_flatten[*out] = Some(out_mle.clone());
-                        // last layer we record gkr circuit output
-                        if i == circuit.layers.len() - 1 {
-                            gkr_out_well_order.push((*out, out_mle.clone()));
-                        }
                     }
                     EvalExpression::Linear(out, a, b) => {
                         let a_inv = eval_by_expr_constant(challenges, a).inverse();
@@ -162,15 +150,14 @@ where
                 });
             exit_span!(span);
         }
-
         layer_wits.reverse();
 
-        // process and sort by out_id
-        gkr_out_well_order.sort_by_key(|(i, _)| *i);
-        let gkr_out_well_order = gkr_out_well_order
-            .into_iter()
-            .map(|(_, val)| val)
-            .collect_vec();
+        // initialize a vector to store the final outputs of the GKR circuit.
+        let mut gkr_out_well_order = vec![Arc::default(); circuit.n_nonzero_out_evals];
+        circuit
+            .final_out_evals
+            .iter()
+            .for_each(|out| gkr_out_well_order[*out] = witness_mle_flatten[*out].clone().unwrap());
 
         (
             GKRCircuitWitness { layers: layer_wits },

@@ -277,6 +277,10 @@ impl<E: ExtensionField> Expression<E> {
         matches!(self, Expression::Constant(_))
     }
 
+    pub fn is_linear(&self) -> bool {
+        self.degree() <= 1
+    }
+
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
             Expression::Fixed(_) => false,
@@ -967,7 +971,7 @@ impl<E: ExtensionField> ToExpr<E> for Expression<E> {
 }
 
 pub fn wit_infer_by_expr<'a, E: ExtensionField>(
-    fixed: &[ArcMultilinearExtension<'a, E>],
+    _fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
     structual_witnesses: &[ArcMultilinearExtension<'a, E>],
     instance: &[ArcMultilinearExtension<'a, E>],

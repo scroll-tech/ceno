@@ -1118,7 +1118,7 @@ dependencies = [
  "ndarray",
  "p3-field",
  "p3-goldilocks",
- "p3-util 0.3.0",
+ "p3-util",
  "rand",
  "rayon",
  "serde",
@@ -1890,7 +1890,7 @@ dependencies = [
  "p3-poseidon",
  "p3-poseidon2",
  "p3-symmetric",
- "p3-util 0.1.0",
+ "p3-util",
 ]
 
 [[package]]
@@ -1915,7 +1915,7 @@ dependencies = [
  "p3-field",
  "p3-maybe-rayon",
  "p3-symmetric",
- "p3-util 0.1.0",
+ "p3-util",
  "tracing",
 ]
 
@@ -1929,7 +1929,7 @@ dependencies = [
  "p3-dft",
  "p3-field",
  "p3-matrix",
- "p3-util 0.1.0",
+ "p3-util",
  "serde",
 ]
 
@@ -1942,7 +1942,7 @@ dependencies = [
  "p3-field",
  "p3-matrix",
  "p3-maybe-rayon",
- "p3-util 0.1.0",
+ "p3-util",
  "tracing",
 ]
 
@@ -1957,7 +1957,7 @@ dependencies = [
  "num-traits",
  "nums",
  "p3-maybe-rayon",
- "p3-util 0.1.0",
+ "p3-util",
  "rand",
  "serde",
  "tracing",
@@ -1976,7 +1976,7 @@ dependencies = [
  "p3-interpolation",
  "p3-matrix",
  "p3-maybe-rayon",
- "p3-util 0.1.0",
+ "p3-util",
  "rand",
  "serde",
  "tracing",
@@ -1994,7 +1994,7 @@ dependencies = [
  "p3-poseidon",
  "p3-poseidon2",
  "p3-symmetric",
- "p3-util 0.1.0",
+ "p3-util",
  "rand",
  "serde",
 ]
@@ -2007,7 +2007,7 @@ dependencies = [
  "p3-field",
  "p3-matrix",
  "p3-maybe-rayon",
- "p3-util 0.1.0",
+ "p3-util",
 ]
 
 [[package]]
@@ -2018,7 +2018,7 @@ dependencies = [
  "itertools 0.14.0",
  "p3-field",
  "p3-maybe-rayon",
- "p3-util 0.1.0",
+ "p3-util",
  "rand",
  "serde",
  "tracing",
@@ -2043,7 +2043,7 @@ dependencies = [
  "p3-field",
  "p3-matrix",
  "p3-symmetric",
- "p3-util 0.1.0",
+ "p3-util",
  "rand",
 ]
 
@@ -2058,7 +2058,7 @@ dependencies = [
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-symmetric",
- "p3-util 0.1.0",
+ "p3-util",
  "rand",
  "serde",
  "tracing",
@@ -2078,7 +2078,7 @@ dependencies = [
  "p3-mds",
  "p3-poseidon2",
  "p3-symmetric",
- "p3-util 0.1.0",
+ "p3-util",
  "rand",
  "serde",
  "tracing",
@@ -2122,15 +2122,6 @@ dependencies = [
 name = "p3-util"
 version = "0.1.0"
 source = "git+https://github.com/Plonky3/plonky3?rev=1ba4e5c#1ba4e5c40417f4f7aae86bcca56b6484b4b2490b"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "p3-util"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dfee67245d9ce78a15176728da2280032f0a84b5819a39a953e7ec03cfd9bd7"
 dependencies = [
  "serde",
 ]

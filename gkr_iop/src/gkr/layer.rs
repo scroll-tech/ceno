@@ -28,7 +28,7 @@ pub type RotateExprs<E> = (
 
 // rotation contribute
 // left + right + target, overall 3
-const ROTATION_OPENING_COUNT: usize = 3;
+pub const ROTATION_OPENING_COUNT: usize = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerType {

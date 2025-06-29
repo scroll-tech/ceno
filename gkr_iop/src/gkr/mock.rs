@@ -110,7 +110,7 @@ impl<E: ExtensionField> MockProver<E> {
                         &layer.expr_names,
                         &layer.out_eq_and_eval_exprs
                     ) {
-                        if expect != got {
+                        if !expect.is_equal(&got) {
                             return Err(MockProverError::ZerocheckExpressionNotMatch(
                                 Box::new(out.1[0].clone()),
                                 Box::new(expr.clone()),
@@ -125,7 +125,7 @@ impl<E: ExtensionField> MockProver<E> {
                     for (got, expect, expr, out) in
                         izip!(gots, expects, &layer.exprs, &layer.out_eq_and_eval_exprs)
                     {
-                        if expect != got {
+                        if !expect.is_equal(&got) {
                             return Err(MockProverError::LinearExpressionNotMatch(
                                 Box::new(out.1[0].clone()),
                                 Box::new(expr.clone()),

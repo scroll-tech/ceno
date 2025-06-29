@@ -19,10 +19,11 @@ pub mod mock;
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct GKRCircuit<E: ExtensionField> {
     pub layers: Vec<Layer<E>>,
+    pub final_out_evals: Vec<usize>,
 
     pub n_challenges: usize,
     pub n_evaluations: usize,
-    pub n_out_evals: usize,
+    pub n_nonzero_out_evals: usize,
 }
 
 #[derive(Clone, Debug, Default)]

@@ -91,7 +91,7 @@ impl<'a, F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<MultilinearExtensi
     }
 }
 
-#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Hash, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -165,14 +165,6 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
         }
     }
 }
-
-impl<'a, E: ExtensionField> PartialEq for FieldType<'a, E> {
-    fn eq(&self, other: &Self) -> bool {
-        self.is_equal(other)
-    }
-}
-
-impl<'a, E: ExtensionField> Eq for FieldType<'a, E> {}
 
 /// Stores a multilinear polynomial in dense evaluation form.
 #[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

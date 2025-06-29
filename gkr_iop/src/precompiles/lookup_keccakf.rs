@@ -30,8 +30,9 @@ use crate::{
     gkr::{
         GKRCircuit, GKRProof, GKRProverOutput,
         booleanhypercube::BooleanHypercube,
-        layer::{Layer, LayerType},
-        layer_constraint_system::{LayerConstraintSystem, expansion_expr, rotation_split},
+        layer_constraint_system::{
+            LayerConstraintSystem, RotationParams, expansion_expr, rotation_split,
+        },
         mock::MockProver,
     },
     precompiles::utils::{
@@ -78,13 +79,18 @@ const ROTATION_CONSTANTS: [[usize; 5]; 5] = [
     [18, 2, 61, 56, 14],
 ];
 
-pub const KECCAK_INPUT_SIZE: usize = 50;
-pub const KECCAK_OUTPUT_SIZE: usize = 50;
+pub const KECCAK_INPUT32_SIZE: usize = 50;
+pub const KECCAK_OUTPUT32_SIZE: usize = 50;
 
-pub const AND_LOOKUPS_PER_ROUND: usize = 200;
-pub const XOR_LOOKUPS_PER_ROUND: usize = 608;
-pub const RANGE_LOOKUPS_PER_ROUND: usize = 290;
-pub const LOOKUP_FELTS_PER_ROUND: usize =
+pub const KECCAK_OUT_EVAL_SIZE: usize = size_of::<KeccakOutEvals<u8>>();
+pub const KECCAK_WIT_SIZE: usize = size_of::<KeccakWitCols<u8>>();
+const KECCAK_FIXED_SIZE: usize = size_of::<KeccakFixedCols<u8>>();
+const KECCAK_LAYER_SIZE: usize = size_of::<KeccakLayer<u8, u8, ()>>();
+
+const AND_LOOKUPS_PER_ROUND: usize = 200;
+const XOR_LOOKUPS_PER_ROUND: usize = 608;
+const RANGE_LOOKUPS_PER_ROUND: usize = 290;
+const LOOKUP_FELTS_PER_ROUND: usize =
     3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
 
 pub const AND_LOOKUPS: usize = AND_LOOKUPS_PER_ROUND;
@@ -97,8 +103,8 @@ pub struct KeccakParams {}
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub struct KeccakOutEvals<T> {
-    pub output32: [T; KECCAK_OUTPUT_SIZE],
-    pub input32: [T; KECCAK_INPUT_SIZE],
+    pub output32: [T; KECCAK_OUTPUT32_SIZE],
+    pub input32: [T; KECCAK_INPUT32_SIZE],
     pub lookup_entries: [T; LOOKUP_FELTS_PER_ROUND],
 }
 
@@ -143,11 +149,6 @@ pub struct KeccakLayout<E> {
     _marker: PhantomData<E>,
 }
 
-pub const KECCAK_OUT_EVAL_SIZE: usize = size_of::<KeccakOutEvals<u8>>();
-pub const KECCAK_WIT_SIZE: usize = size_of::<KeccakWitCols<u8>>();
-pub const KECCAK_FIXED_SIZE: usize = size_of::<KeccakFixedCols<u8>>();
-pub const KECCAK_LAYER_SIZE: usize = size_of::<KeccakLayer<u8, u8, ()>>();
-
 impl<E: ExtensionField> Default for KeccakLayout<E> {
     fn default() -> Self {
         // allocate evaluation expressions
@@ -188,7 +189,12 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     }
 
     fn build_gkr_chip(&self) -> Chip<E> {
-        let mut system = LayerConstraintSystem::new(KECCAK_WIT_SIZE, 0, KECCAK_WIT_SIZE);
+        let mut system = LayerConstraintSystem::new(
+            KECCAK_WIT_SIZE,
+            0,
+            KECCAK_WIT_SIZE,
+            Some(self.layer_exprs.eq_zero.expr()),
+        );
 
         let KeccakWitCols {
             input8,
@@ -406,7 +412,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     );
                     system.add_non_zero_constraint(
                         expr,
-                        keccak_output32_iter.next().unwrap(),
+                        (
+                            Some(self.layer_exprs.eq_zero.expr()),
+                            keccak_output32_iter.next().unwrap(),
+                        ),
                         format!("build 32-bit output: {x}, {y}, {k}"),
                     );
                 }
@@ -428,7 +437,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     );
                     system.add_non_zero_constraint(
                         expr,
-                        keccak_input32_iter.next().unwrap(),
+                        (
+                            Some(self.layer_exprs.eq_zero.expr()),
+                            keccak_input32_iter.next().unwrap(),
+                        ),
                         format!("build 32-bit input: {x}, {y}, {k}"),
                     );
                 }
@@ -436,9 +448,17 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         }
 
         // rotation constrain: rotation(keccak_input8).next() == keccak_output8
-        let rotations = izip!(keccak_input8, keccak_output8)
-            .map(|(input, output)| (input.expr(), output.expr()))
-            .collect_vec();
+        izip!(keccak_input8, keccak_output8)
+            .for_each(|(input, output)| system.rotate_and_assert_eq(input.expr(), output.expr()));
+        system.set_rotation_params(RotationParams {
+            rotation_eqs: Some([
+                self.layer_exprs.eq_rotation_left.expr(),
+                self.layer_exprs.eq_rotation_right.expr(),
+                self.layer_exprs.eq_rotation.expr(),
+            ]),
+            rotation_cyclic_group_log2: ROUNDS_CEIL_LOG2,
+            rotation_cyclic_subgroup_size: ROUNDS - 1,
+        });
 
         assert_eq!(system.and_lookups.len(), AND_LOOKUPS);
         assert_eq!(system.xor_lookups.len(), XOR_LOOKUPS);
@@ -446,43 +466,29 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
         let lookup_evals_iter = self.final_out_evals.lookup_entries.iter();
 
-        let LayerConstraintSystem {
-            expressions,
-            expr_names,
-            evals,
-            ..
-        } = system.finalize_with_lookup_eval_iter(lookup_evals_iter);
+        let layer = system.into_layer_with_lookup_eval_iter(
+            "Rounds".to_string(),
+            self.layer_in_evals.to_vec(),
+            vec![],
+            lookup_evals_iter,
+        );
 
         let mut chip = Chip {
             n_fixed: self.n_fixed(),
             n_committed: self.n_committed(),
             n_challenges: self.n_challenges(),
             n_evaluations: self.n_evaluations(),
-            n_out_evals: self.n_nonzero_out_evals(),
+            n_nonzero_out_evals: self.n_nonzero_out_evals(),
+            final_out_evals: unsafe {
+                transmute::<KeccakOutEvals<usize>, [usize; KECCAK_OUT_EVAL_SIZE]>(
+                    self.final_out_evals.clone(),
+                )
+            }
+            .to_vec(),
             layers: vec![],
         };
 
-        chip.add_layer(Layer::new(
-            "Rounds".to_string(),
-            LayerType::Zerocheck,
-            expressions,
-            vec![],
-            self.layer_in_evals.to_vec(),
-            vec![(Some(self.layer_exprs.eq_zero.expr()), evals)],
-            (
-                (
-                    Some([
-                        self.layer_exprs.eq_rotation_left.expr(),
-                        self.layer_exprs.eq_rotation_right.expr(),
-                        self.layer_exprs.eq_rotation.expr(),
-                    ]),
-                    rotations,
-                ),
-                ROUNDS_CEIL_LOG2,
-                ROUNDS - 1,
-            ),
-            expr_names,
-        ));
+        chip.add_layer(layer);
         chip
     }
 
@@ -505,11 +511,15 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     fn n_layers(&self) -> usize {
         1
     }
+
+    fn n_evaluations(&self) -> usize {
+        self.n_committed() + self.n_fixed() + self.n_nonzero_out_evals()
+    }
 }
 
 #[derive(Clone, Default)]
 pub struct KeccakTrace {
-    pub instances: Vec<[u32; KECCAK_INPUT_SIZE]>,
+    pub instances: Vec<[u32; KECCAK_INPUT32_SIZE]>,
 }
 
 impl<E> ProtocolWitnessGenerator<'_, E> for KeccakLayout<E>
@@ -781,7 +791,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
                 .last()
                 .unwrap()
                 .iter()
-                .take(KECCAK_OUTPUT_SIZE)
+                .take(KECCAK_OUTPUT32_SIZE)
             {
                 assert_eq!(
                     base.evaluations().len(),
