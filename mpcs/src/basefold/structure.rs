@@ -168,9 +168,9 @@ pub struct BasefoldCommitment<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(super) commit: Digest<E>,
-    pub(crate) log2_max_codeword_size: usize,
-    pub(crate) trivial_commits: Vec<Digest<E>>,
+    pub commit: Digest<E>,
+    pub log2_max_codeword_size: usize,
+    pub trivial_commits: Vec<Digest<E>>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>

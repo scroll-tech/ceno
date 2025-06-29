@@ -116,9 +116,9 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pi_evals: Vec<E>,
     // circuit size -> instance mapping
     pub num_instances: Vec<(usize, usize)>,
-    opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
-    table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
-    witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
+    pub opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+    pub table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+    pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub fixed_witin_opening_proof: PCS::Proof,
 }
 
