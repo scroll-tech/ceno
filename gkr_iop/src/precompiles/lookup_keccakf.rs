@@ -843,14 +843,16 @@ pub fn run_faster_keccakf<E: ExtensionField>(
     };
     exit_span!(span);
 
-    // mock prover
-    let out_wits = gkr_output
-        .0
-        .iter()
-        .map(|poly| poly.evaluations())
-        .collect_vec();
-    MockProver::check(gkr_circuit.clone(), &gkr_witness, out_wits, vec![])
-        .expect("mock prover failed");
+    if cfg!(debug_assertions) {
+        // mock prover
+        let out_wits = gkr_output
+            .0
+            .iter()
+            .map(|poly| poly.evaluations())
+            .collect_vec();
+        MockProver::check(gkr_circuit.clone(), &gkr_witness, out_wits, vec![])
+            .expect("mock prover failed");
+    }
 
     let span = entered_span!("create_proof", profiling_2 = true);
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
