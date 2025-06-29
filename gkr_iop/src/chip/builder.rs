@@ -1,5 +1,4 @@
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 
 use crate::gkr::layer::{Layer, LayerType};
 
@@ -12,9 +11,8 @@ impl<E: ExtensionField> Chip<E> {
             layer
                 .out_eq_and_eval_exprs
                 .iter()
-                .flat_map(|(_, outs)| outs)
-                .collect_vec()
-                .len(),
+                .map(|(_, outs)| outs.len())
+                .sum::<usize>(),
             layer.exprs.len()
         );
         if let LayerType::Linear = layer.ty {

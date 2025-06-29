@@ -78,7 +78,7 @@ impl<E: ExtensionField> MockProver<E> {
                 .exprs
                 .iter()
                 .map(|expr| {
-                    wit_infer_by_expr(
+                    match Arc::try_unwrap(wit_infer_by_expr(
                         &[],
                         &layer_wit
                             .iter()
@@ -89,9 +89,10 @@ impl<E: ExtensionField> MockProver<E> {
                         &[],
                         &challenges,
                         expr,
-                    )
-                    .as_ref()
-                    .clone()
+                    )) {
+                        Ok(inner) => inner,
+                        Err(shared) => (*shared).clone(),
+                    }
                     .evaluations_to_owned()
                 })
                 .collect_vec();
@@ -154,7 +155,7 @@ impl<E: ExtensionField> EvalExpression<E> {
         match self {
             EvalExpression::Zero => FieldType::zero(num_vars),
             EvalExpression::Single(i) => evals[*i].clone(),
-            EvalExpression::Linear(i, c0, c1) => wit_infer_by_expr(
+            EvalExpression::Linear(i, c0, c1) => match Arc::try_unwrap(wit_infer_by_expr(
                 &[],
                 &evals
                     .iter()
@@ -170,9 +171,10 @@ impl<E: ExtensionField> EvalExpression<E> {
                 &[],
                 challenges,
                 &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
-            )
-            .as_ref()
-            .clone()
+            )) {
+                Ok(inner) => inner,
+                Err(shared) => (*shared).clone(),
+            }
             .evaluations_to_owned(),
             EvalExpression::Partition(parts, indices) => {
                 assert_eq!(parts.len(), 1 << indices.len());

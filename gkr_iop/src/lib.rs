@@ -81,23 +81,26 @@ where
 
         // set input to witness_mle_flatten via first layer in_eval_expr
         if let Some(first_layer) = circuit.layers.last() {
-            let it = first_layer.in_eval_expr.iter();
-            it.enumerate().for_each(|(index, witin)| {
-                if index < phase1_witness_group.len() {
-                    witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
-                } else {
-                    witness_mle_flatten[*witin] = Some(
-                        fixed[index - phase1_witness_group.len()]
-                            .iter()
-                            .cycle()
-                            .cloned()
-                            .take(size)
-                            .collect_vec()
-                            .into_mle()
-                            .into(),
-                    )
-                }
-            });
+            first_layer
+                .in_eval_expr
+                .iter()
+                .enumerate()
+                .for_each(|(index, witin)| {
+                    if index < phase1_witness_group.len() {
+                        witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
+                    } else {
+                        witness_mle_flatten[*witin] = Some(
+                            fixed[index - phase1_witness_group.len()]
+                                .iter()
+                                .cycle()
+                                .cloned()
+                                .take(size)
+                                .collect_vec()
+                                .into_mle()
+                                .into(),
+                        )
+                    }
+                });
         }
 
         // generate all layer witness from input to output

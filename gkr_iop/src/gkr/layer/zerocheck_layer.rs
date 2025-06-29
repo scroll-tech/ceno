@@ -338,7 +338,7 @@ fn prove_rotation<E: ExtensionField>(
             .map(|rotation_expr| match rotation_expr {
                 (Expression::WitIn(source_wit_id), _) => rotation_next_base_mle(
                     &bh,
-                    &wit.0[*source_wit_id as usize],
+                    &wit[*source_wit_id as usize],
                     rotation_cyclic_group_log2,
                 ),
                 _ => unimplemented!("unimplemented rotation"),
@@ -348,7 +348,7 @@ fn prove_rotation<E: ExtensionField>(
                 &eq,
                 rotation_cyclic_subgroup_size,
                 rotation_cyclic_group_log2,
-                wit.0[0].evaluations().len(), // Take first mle just to retrieve total length
+                wit[0].evaluations().len(), // Take first mle just to retrieve total length
             )))
             .collect::<Vec<_>>();
         let selector = mles.pop().unwrap();
@@ -371,7 +371,7 @@ fn prove_rotation<E: ExtensionField>(
                 Expression::WitIn(wit_id) => {
                     vec![
                         Either::Right(mle),
-                        Either::Left(wit.0[*wit_id as usize].as_ref()),
+                        Either::Left(wit[*wit_id as usize].as_ref()),
                     ]
                 }
                 _ => panic!(""),
@@ -423,7 +423,7 @@ fn prove_rotation<E: ExtensionField>(
             };
             let left_eval = match rotated_expr {
                 Expression::WitIn(source_wit_id) => {
-                    wit.0[*source_wit_id as usize].evaluate(&left_point)
+                    wit[*source_wit_id as usize].evaluate(&left_point)
                 }
                 _ => unreachable!(),
             };
@@ -433,7 +433,7 @@ fn prove_rotation<E: ExtensionField>(
             {
                 let expected_right_eval = match rotated_expr {
                     Expression::WitIn(source_wit_id) => {
-                        wit.0[*source_wit_id as usize].evaluate(&right_point)
+                        wit[*source_wit_id as usize].evaluate(&right_point)
                     }
                     _ => unreachable!(),
                 };

@@ -971,7 +971,7 @@ impl<E: ExtensionField> ToExpr<E> for Expression<E> {
 }
 
 pub fn wit_infer_by_expr<'a, E: ExtensionField>(
-    _fixed: &[ArcMultilinearExtension<'a, E>],
+    fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
     structual_witnesses: &[ArcMultilinearExtension<'a, E>],
     instance: &[ArcMultilinearExtension<'a, E>],
@@ -979,7 +979,7 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
     expr.evaluate_with_instance::<ArcMultilinearExtension<'a, E>>(
-        &|_f| unreachable!(),
+        &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
         &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),

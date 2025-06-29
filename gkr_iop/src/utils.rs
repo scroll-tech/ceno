@@ -9,7 +9,10 @@ use multilinear_extensions::{
 };
 use p3_field::FieldAlgebra;
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
+        ParallelIterator,
+    },
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
@@ -31,12 +34,11 @@ where
         .iter()
         .flat_map(|(_, out_eval)| out_eval.iter())
         .collect();
-    // TODO: change to par_ter
     layer
         .exprs
-        .iter()
-        .zip_eq(layer.expr_names.iter())
-        .zip_eq(out_evals.iter())
+        .par_iter()
+        .zip_eq(layer.expr_names.par_iter())
+        .zip_eq(out_evals.par_iter())
         .map(|((expr, expr_name), out_eval)| {
             let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
             if let EvalExpression::Zero = out_eval {

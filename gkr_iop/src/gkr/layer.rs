@@ -1,6 +1,5 @@
 use std::vec::IntoIter;
 
-use ark_std::log2;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
@@ -77,6 +76,20 @@ pub struct Layer<E: ExtensionField> {
 
 #[derive(Clone, Debug, Default)]
 pub struct LayerWitness<'a, E: ExtensionField>(pub Vec<ArcMultilinearExtension<'a, E>>);
+
+impl<'a, E: ExtensionField> std::ops::Index<usize> for LayerWitness<'a, E> {
+    type Output = ArcMultilinearExtension<'a, E>;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl<'a, E: ExtensionField> std::ops::IndexMut<usize> for LayerWitness<'a, E> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
 
 impl<E: ExtensionField> Layer<E> {
     #[allow(clippy::too_many_arguments)]
@@ -264,12 +277,7 @@ impl<'a, E: ExtensionField> LayerWitness<'a, E> {
         let mut wits_and_fixed = wits;
         wits_and_fixed.extend(fixed);
         assert!(!wits_and_fixed.is_empty());
-        let num_vars = log2(wits_and_fixed[0].evaluations().len()) as usize;
-        assert!(
-            wits_and_fixed
-                .iter()
-                .all(|b| b.evaluations().len() == 1 << num_vars)
-        );
+        assert!(wits_and_fixed.iter().map(|b| b.num_vars()).all_equal());
         Self(wits_and_fixed)
     }
 
@@ -277,7 +285,7 @@ impl<'a, E: ExtensionField> LayerWitness<'a, E> {
         if self.0.is_empty() {
             0
         } else {
-            self.0[0].num_vars()
+            self[0].num_vars()
         }
     }
 }
