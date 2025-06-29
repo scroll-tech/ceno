@@ -1251,7 +1251,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        ROMType::U5,
+        ROMType,
         error::ZKVMError,
         gadgets::{AssertLtConfig, IsLtConfig},
         set_val,
@@ -1378,7 +1378,7 @@ mod tests {
                             GoldilocksExt2::ONE,
                             GoldilocksExt2::ZERO,
                         )),
-                        Box::new(Goldilocks::from_canonical_u64(U5 as u64).expr()),
+                        Box::new(Goldilocks::from_canonical_u64(ROMType::U5 as u64).expr()),
                     )),
                     Box::new(Expression::Challenge(
                         0,

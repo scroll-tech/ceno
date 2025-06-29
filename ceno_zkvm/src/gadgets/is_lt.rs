@@ -6,7 +6,6 @@ use itertools::izip;
 
 use crate::{
     Value,
-    chip_handler::utils::power_sequence,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::riscv::constants::{UINT_LIMBS, UInt},
@@ -15,7 +14,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
-use multilinear_extensions::{Expression, ToExpr, WitIn};
+use multilinear_extensions::{Expression, ToExpr, WitIn, power_sequence};
 
 use super::SignedExtendConfig;
 

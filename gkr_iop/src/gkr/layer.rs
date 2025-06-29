@@ -44,8 +44,8 @@ pub struct Layer<E: ExtensionField> {
     pub name: String,
     pub ty: LayerType,
     pub max_expr_degree: usize,
-    /// Challenges generated at the beginning of the layer protocol.
-    pub challenges: Vec<Expression<E>>,
+    /// num challenges dedicated to this layer.
+    pub n_challenges: usize,
     /// Expressions to prove in this layer. For zerocheck and linear layers,
     /// each expression corresponds to an output. While in sumcheck, there
     /// is only 1 expression, which corresponds to the sum of all outputs.
@@ -53,6 +53,8 @@ pub struct Layer<E: ExtensionField> {
     /// expression: `r^0 e_0 + r^1 * e_1 + ...
     ///    = \sum_x (r^0 eq_0(X) \cdot expr_0(x) + r^1 eq_1(X) \cdot expr_1(x) + ...)`.
     /// where `vec![e_0, e_1, ...]` will be the output evaluation expressions.
+    /// TODO we should convert into monimial format Vec<Vec<Term<Expression<E>, Expression<E>>>
+    /// TODO once we make eq, zero_check rlc challange alpha all encoded into static expression
     pub exprs: Vec<Expression<E>>,
 
     /// Positions to place the evaluations of the base inputs of this layer.
@@ -98,7 +100,7 @@ impl<E: ExtensionField> Layer<E> {
         ty: LayerType,
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
-        challenges: Vec<Expression<E>>,
+        n_challenges: usize,
         in_eval_expr: Vec<usize>,
         // first tuple value is eq
         out_eq_and_eval_exprs: ExprEvalType<E>,
@@ -113,13 +115,17 @@ impl<E: ExtensionField> Layer<E> {
             expr_names.len() == exprs.len(),
             "there are expr without name"
         );
-        let max_expr_degree = exprs.iter().map(|expr| expr.degree()).max().unwrap_or(1);
+        let max_expr_degree = exprs
+            .iter()
+            .map(|expr| expr.degree())
+            .max()
+            .expect("empty exprs");
 
         Self {
             name,
             ty,
             max_expr_degree,
-            challenges,
+            n_challenges,
             exprs,
             in_eval_expr,
             out_eq_and_eval_exprs,
@@ -241,22 +247,15 @@ impl<E: ExtensionField> Layer<E> {
             .collect_vec()
     }
 
-    // generate layer challenge, if have, and set to respective challenge_id index
-    // optional resize raw challenges vector to adapt new challenge
+    // generate layer challenge by order, starting from index 2
+    // as challenge id 0, 1 are occupied
     fn update_challenges(&self, challenges: &mut Vec<E>, transcript: &mut impl Transcript<E>) {
-        for challenge in &self.challenges {
-            let value = transcript.sample_and_append_challenge(b"layer challenge");
-            match challenge {
-                Expression::Challenge(challenge_id, ..) => {
-                    let challenge_id = *challenge_id as usize;
-                    if challenges.len() <= challenge_id {
-                        challenges.resize(challenge_id + 1, E::default());
-                    }
-                    challenges[challenge_id] = value.elements;
-                }
-                _ => unreachable!(),
-            }
-        }
+        if challenges.len() <= self.n_challenges + 2 {
+            challenges.resize(self.n_challenges + 2, E::default());
+        };
+        challenges[2..].copy_from_slice(
+            &transcript.sample_and_append_challenge_pows(self.n_challenges, b"layer challenge"),
+        );
     }
 
     fn update_claims(&self, claims: &mut [PointAndEval<E>], evals: &[E], point: &Point<E>) {

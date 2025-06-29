@@ -149,13 +149,12 @@ impl LkMultiplicity {
     /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
-        use ROMType::*;
         self.increment(
             match C {
-                16 => U16,
-                14 => U14,
-                8 => U8,
-                5 => U5,
+                16 => ROMType::U16,
+                14 => ROMType::U14,
+                8 => ROMType::U8,
+                5 => ROMType::U5,
                 _ => panic!("Unsupported bit range"),
             },
             v,

@@ -63,7 +63,7 @@ impl<E: ExtensionField> MockProver<E> {
         let field_type_default = FieldType::default();
         let mut evaluations = evaluations; // Change evaluations' lifetime.
         evaluations.resize_with(circuit.n_evaluations, || &field_type_default);
-        challenges.resize_with(circuit.n_challenges, || E::random(&mut rng));
+        challenges.resize_with(2 + circuit.n_challenges, || E::random(&mut rng));
         // check the input layer
         for (layer, layer_wit) in izip!(circuit.layers, &circuit_wit.layers) {
             let num_vars = layer_wit.num_vars();
