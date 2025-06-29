@@ -464,15 +464,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         assert_eq!(system.xor_lookups.len(), XOR_LOOKUPS);
         assert_eq!(system.range_lookups.len(), RANGE_LOOKUPS);
 
-        let lookup_evals_iter = self.final_out_evals.lookup_entries.iter();
-
-        let layer = system.into_layer_with_lookup_eval_iter(
-            "Rounds".to_string(),
-            self.layer_in_evals.to_vec(),
-            vec![],
-            lookup_evals_iter,
-        );
-
         let mut chip = Chip {
             n_fixed: self.n_fixed(),
             n_committed: self.n_committed(),
@@ -488,6 +479,18 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             layers: vec![],
         };
 
+        let lookup_evals_iter = self
+            .final_out_evals
+            .lookup_entries
+            .iter()
+            .cloned()
+            .map(|id| (Some(self.layer_exprs.eq_zero.expr()), id));
+        let layer = system.into_layer_with_lookup_eval_iter(
+            "Rounds".to_string(),
+            self.layer_in_evals.to_vec(),
+            vec![],
+            lookup_evals_iter,
+        );
         chip.add_layer(layer);
         chip
     }

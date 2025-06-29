@@ -246,12 +246,12 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         self.rotations.push((a, b));
     }
 
-    pub fn into_layer_with_lookup_eval_iter<'a>(
+    pub fn into_layer_with_lookup_eval_iter(
         mut self,
         layer_name: String,
         in_expr_evals: Vec<usize>,
         challenges: Vec<Expression<E>>,
-        lookup_evals: impl Iterator<Item = &'a usize>,
+        lookup_evals: impl Iterator<Item = (Option<Expression<E>>, usize)>,
     ) -> Layer<E> {
         for (idx, lookup, lookup_eval) in izip!(
             0..,
@@ -265,7 +265,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         ) {
             self.add_non_zero_constraint(
                 lookup,
-                (None, EvalExpression::Single(*lookup_eval)),
+                (lookup_eval.0, EvalExpression::Single(lookup_eval.1)),
                 format!("round 0th: {idx}th lookup felt"),
             );
         }
@@ -274,7 +274,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
     }
 
     pub fn into_layer(
-        mut self,
+        self,
         layer_name: String,
         in_eval_expr: Vec<usize>,
         challenges: Vec<Expression<E>>,
@@ -283,31 +283,31 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         let structural_witin_offset = witin_offset + (self.num_witin as WitnessId);
         let fixed_offset = structural_witin_offset + (self.num_structural_witin as WitnessId);
 
-        let is_layer_linear = self
-            .expressions
-            .iter_mut()
-            .fold(true, |is_linear_so_far, t| {
-                match t {
-                    Expression::StructuralWitIn(structural_wit_id, _, _, _) => {
-                        *t = Expression::WitIn(structural_witin_offset + *structural_wit_id);
-                    }
-                    Expression::Fixed(Fixed(fixed_id)) => {
-                        *t = Expression::WitIn(fixed_offset + (*fixed_id as WitnessId));
-                    }
-                    _ => (),
-                }
-                is_linear_so_far && t.is_linear()
-            });
-
         // Sort expressions, expr_names, and evals according to eval.0 and classify evals.
         let Self {
             expr_names,
-            expressions,
+            mut expressions,
             evals,
             rotation_params,
             rotations,
             ..
         } = self;
+
+        let mut is_layer_linear =
+            expressions
+                .iter_mut()
+                .fold(rotations.is_empty(), |is_linear_so_far, t| {
+                    match t {
+                        Expression::StructuralWitIn(structural_wit_id, _, _, _) => {
+                            *t = Expression::WitIn(structural_witin_offset + *structural_wit_id);
+                        }
+                        Expression::Fixed(Fixed(fixed_id)) => {
+                            *t = Expression::WitIn(fixed_offset + (*fixed_id as WitnessId));
+                        }
+                        _ => (),
+                    }
+                    is_linear_so_far && t.is_linear()
+                });
 
         let mut eq_map = BTreeMap::new();
         izip!(
@@ -329,6 +329,8 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             expr_names.extend(names);
             expressions.extend(exprs);
         });
+
+        is_layer_linear = is_layer_linear && expr_evals.len() == 1;
 
         let layer_type = if is_layer_linear {
             LayerType::Linear
