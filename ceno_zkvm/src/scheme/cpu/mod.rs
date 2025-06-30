@@ -1,6 +1,5 @@
 use super::hal::{
-    DeviceTransporter, MainSumcheckProver, MultilinearPolynomial, OpeningProver, ProverBackend,
-    ProverDevice, TowerProver, TraceCommitter,
+    DeviceTransporter, MainSumcheckProver, OpeningProver, ProverDevice, TowerProver, TraceCommitter,
 };
 use crate::{
     circuit_builder::ConstraintSystem,
@@ -17,8 +16,12 @@ use crate::{
 };
 use either::Either;
 use ff_ext::ExtensionField;
+use gkr_iop::{
+    cpu::{CpuBackend, CpuProver},
+    hal::ProverBackend,
+};
 use itertools::{Itertools, chain};
-use mpcs::{Point, PolynomialCommitmentScheme, SecurityLevel};
+use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression, Instance,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
@@ -28,10 +31,7 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use p3::{
-    field::{FieldAlgebra, TwoAdicField},
-    matrix::dense::RowMajorMatrix,
-};
+use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
@@ -41,63 +41,6 @@ use sumcheck::{
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
-
-pub struct CpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub param: PCS::Param,
-    _marker: std::marker::PhantomData<E>,
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for CpuBackend<E, PCS> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> CpuBackend<E, PCS> {
-    pub fn new() -> Self {
-        let param =
-            PCS::setup(E::BaseField::TWO_ADICITY, SecurityLevel::Conjecture100bits).unwrap();
-        Self {
-            param,
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtension<'a, E> {
-    fn num_vars(&self) -> usize {
-        self.num_vars()
-    }
-
-    fn eval(&self, point: Point<E>) -> E {
-        self.evaluate(&point)
-    }
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for CpuBackend<E, PCS> {
-    type E = E;
-    type Pcs = PCS;
-    type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
-    type Matrix = RowMajorMatrix<E::BaseField>;
-    type PcsData = PCS::CommitmentWithWitness;
-}
-
-/// CPU prover for CPU backend
-pub struct CpuProver<PB: ProverBackend> {
-    backend: PB,
-    pp: Option<<<PB as ProverBackend>::Pcs as PolynomialCommitmentScheme<PB::E>>::ProverParam>,
-    largest_poly_size: Option<usize>,
-}
-
-impl<PB: ProverBackend> CpuProver<PB> {
-    pub fn new(backend: PB) -> Self {
-        Self {
-            backend,
-            pp: None,
-            largest_poly_size: None,
-        }
-    }
-}
 
 pub struct CpuTowerProver;
 

@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
-use crate::error::BackendError;
+use crate::{
+    error::BackendError,
+    hal::{ProverBackend, ProverDevice},
+};
 
 pub(super) mod booleanhypercube;
 pub mod layer;
@@ -26,13 +29,13 @@ pub struct GKRCircuit<E: ExtensionField> {
     pub n_nonzero_out_evals: usize,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct GKRCircuitWitness<'a, E: ExtensionField> {
-    pub layers: Vec<LayerWitness<'a, E>>,
+#[derive(Clone, Debug)]
+pub struct GKRCircuitWitness<'a, PB: ProverBackend> {
+    pub layers: Vec<LayerWitness<'a, PB>>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct GKRCircuitOutput<'a, E: ExtensionField>(pub LayerWitness<'a, E>);
+#[derive(Clone, Debug)]
+pub struct GKRCircuitOutput<'a, PB: ProverBackend>(pub LayerWitness<'a, PB>);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -65,11 +68,11 @@ pub struct Evaluation<E: ExtensionField> {
 pub struct GKRClaims<Evaluation>(pub Vec<Evaluation>);
 
 impl<E: ExtensionField> GKRCircuit<E> {
-    pub fn prove(
+    pub fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        circuit_wit: GKRCircuitWitness<E>,
+        circuit_wit: GKRCircuitWitness<PB>,
         out_evals: &[PointAndEval<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
@@ -84,7 +87,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
             .map(|(i, (layer, layer_wit))| {
                 tracing::info!("prove layer {i} layer with layer name {}", layer.name);
                 let span = entered_span!("per_layer_proof", profiling_3 = true);
-                let res = layer.prove(
+                let res = layer.prove::<_, PB, PD>(
                     num_threads,
                     max_num_variables,
                     layer_wit,

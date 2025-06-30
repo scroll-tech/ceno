@@ -1,11 +1,11 @@
-use std::vec::IntoIter;
+use std::{sync::Arc, vec::IntoIter};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
     Expression,
-    mle::{ArcMultilinearExtension, Point, PointAndEval},
+    mle::{Point, PointAndEval},
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -13,8 +13,14 @@ use sumcheck_layer::LayerProof;
 use transcript::Transcript;
 use zerocheck_layer::ZerocheckLayer;
 
-use crate::{error::BackendError, evaluation::EvalExpression};
+use crate::{
+    error::BackendError,
+    evaluation::EvalExpression,
+    hal::{MultilinearPolynomial, ProverBackend, ProverDevice},
+};
 
+pub mod cpu;
+pub mod hal;
 pub mod linear_layer;
 pub mod sumcheck_layer;
 pub mod zerocheck_layer;
@@ -54,7 +60,7 @@ pub struct Layer<E: ExtensionField> {
     ///    = \sum_x (r^0 eq_0(X) \cdot expr_0(x) + r^1 eq_1(X) \cdot expr_1(x) + ...)`.
     /// where `vec![e_0, e_1, ...]` will be the output evaluation expressions.
     /// TODO we should convert into monimial format Vec<Vec<Term<Expression<E>, Expression<E>>>
-    /// TODO once we make eq, zero_check rlc challange alpha all encoded into static expression
+    /// TODO once we make eq, zero_check rlc challenge alpha all encoded into static expression
     pub exprs: Vec<Expression<E>>,
 
     /// Positions to place the evaluations of the base inputs of this layer.
@@ -76,20 +82,14 @@ pub struct Layer<E: ExtensionField> {
     pub expr_names: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct LayerWitness<'a, E: ExtensionField>(pub Vec<ArcMultilinearExtension<'a, E>>);
+#[derive(Clone, Debug)]
+pub struct LayerWitness<'a, PB: ProverBackend>(pub Vec<Arc<PB::MultilinearPoly<'a>>>);
 
-impl<'a, E: ExtensionField> std::ops::Index<usize> for LayerWitness<'a, E> {
-    type Output = ArcMultilinearExtension<'a, E>;
+impl<'a, PB: ProverBackend> std::ops::Index<usize> for LayerWitness<'a, PB> {
+    type Output = Arc<PB::MultilinearPoly<'a>>;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
-    }
-}
-
-impl<'a, E: ExtensionField> std::ops::IndexMut<usize> for LayerWitness<'a, E> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index]
     }
 }
 
@@ -137,11 +137,11 @@ impl<E: ExtensionField> Layer<E> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn prove<T: Transcript<E>>(
+    pub fn prove<T: Transcript<E>, PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        wit: LayerWitness<E>,
+        wit: LayerWitness<PB>,
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut T,
@@ -155,7 +155,7 @@ impl<E: ExtensionField> Layer<E> {
                     .into_iter()
                     .map(|(_, point)| point.expect("point must exist"))
                     .collect_vec();
-                <Layer<E> as ZerocheckLayer<E>>::prove(
+                <Layer<PB::E> as ZerocheckLayer<E>>::prove::<PB, PD>(
                     self,
                     num_threads,
                     max_num_variables,
@@ -170,7 +170,7 @@ impl<E: ExtensionField> Layer<E> {
                 let (_, point) = eval_and_dedup_points.remove(0);
                 let point = point.clone().unwrap();
                 (
-                    <Layer<E> as LinearLayer<E>>::prove(self, wit, &point, transcript),
+                    <Layer<E> as LinearLayer<E>>::prove::<PB, PD>(self, wit, &point, transcript),
                     point,
                 )
             }
@@ -268,10 +268,10 @@ impl<E: ExtensionField> Layer<E> {
     }
 }
 
-impl<'a, E: ExtensionField> LayerWitness<'a, E> {
+impl<'a, PB: ProverBackend> LayerWitness<'a, PB> {
     pub fn new(
-        wits: Vec<ArcMultilinearExtension<'a, E>>,
-        fixed: Vec<ArcMultilinearExtension<'a, E>>,
+        wits: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        fixed: Vec<Arc<PB::MultilinearPoly<'a>>>,
     ) -> Self {
         let mut wits_and_fixed = wits;
         wits_and_fixed.extend(fixed);
@@ -289,33 +289,33 @@ impl<'a, E: ExtensionField> LayerWitness<'a, E> {
     }
 }
 
-impl<'a, E: ExtensionField> IntoIterator for LayerWitness<'a, E> {
-    type Item = ArcMultilinearExtension<'a, E>;
-    type IntoIter = IntoIter<ArcMultilinearExtension<'a, E>>;
+impl<'a, PB: ProverBackend> IntoIterator for LayerWitness<'a, PB> {
+    type Item = Arc<PB::MultilinearPoly<'a>>;
+    type IntoIter = IntoIter<Arc<PB::MultilinearPoly<'a>>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
 
-impl<'a, E: ExtensionField> LayerWitness<'a, E> {
-    pub fn iter(&self) -> impl Iterator<Item = &ArcMultilinearExtension<'a, E>> {
+impl<'a, PB: ProverBackend> LayerWitness<'a, PB> {
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<PB::MultilinearPoly<'a>>> {
         self.0.iter()
     }
 }
 
-impl<'a, E: ExtensionField> IntoParallelIterator for LayerWitness<'a, E> {
-    type Iter = rayon::vec::IntoIter<ArcMultilinearExtension<'a, E>>;
-    type Item = ArcMultilinearExtension<'a, E>;
+impl<'a, PB: ProverBackend> IntoParallelIterator for LayerWitness<'a, PB> {
+    type Iter = rayon::vec::IntoIter<Arc<PB::MultilinearPoly<'a>>>;
+    type Item = Arc<PB::MultilinearPoly<'a>>;
 
     fn into_par_iter(self) -> Self::Iter {
         self.0.into_par_iter()
     }
 }
 
-impl<'a, E: ExtensionField> IntoParallelIterator for &'a LayerWitness<'a, E> {
-    type Iter = rayon::slice::Iter<'a, ArcMultilinearExtension<'a, E>>;
-    type Item = &'a ArcMultilinearExtension<'a, E>;
+impl<'a, PB: ProverBackend> IntoParallelIterator for &'a LayerWitness<'a, PB> {
+    type Iter = rayon::slice::Iter<'a, Arc<PB::MultilinearPoly<'a>>>;
+    type Item = &'a Arc<PB::MultilinearPoly<'a>>;
 
     fn into_par_iter(self) -> Self::Iter {
         self.0.par_iter()

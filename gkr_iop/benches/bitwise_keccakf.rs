@@ -4,6 +4,7 @@ use criterion::*;
 use ff_ext::GoldilocksExt2;
 use gkr_iop::precompiles::{run_bitwise_keccakf, setup_bitwise_keccak_gkr_circuit};
 use itertools::Itertools;
+use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
 mod alloc;
 criterion_group!(benches, keccak_f_fn);
@@ -34,7 +35,7 @@ fn keccak_f_fn(c: &mut Criterion) {
                         let instant = std::time::Instant::now();
 
                         #[allow(clippy::unit_arg)]
-                        run_bitwise_keccakf::<GoldilocksExt2>(
+                        run_bitwise_keccakf::<GoldilocksExt2, BasefoldDefault<GoldilocksExt2>>(
                             setup_bitwise_keccak_gkr_circuit(),
                             black_box(states),
                             false,

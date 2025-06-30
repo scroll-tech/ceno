@@ -5,6 +5,7 @@ use ff_ext::GoldilocksExt2;
 use gkr_iop::precompiles::{run_faster_keccakf, setup_lookup_keccak_gkr_circuit};
 
 use itertools::Itertools;
+use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
 mod alloc;
 criterion_group!(benches, keccak_f_fn);
@@ -39,13 +40,14 @@ fn keccak_f_fn(c: &mut Criterion) {
 
                         let circuit = setup_lookup_keccak_gkr_circuit();
                         #[allow(clippy::unit_arg)]
-                        let _ = run_faster_keccakf::<GoldilocksExt2>(
-                            circuit,
-                            black_box(states),
-                            false,
-                            false,
-                        )
-                        .expect("unable to get proof");
+                        let _ =
+                            run_faster_keccakf::<GoldilocksExt2, BasefoldDefault<GoldilocksExt2>>(
+                                circuit,
+                                black_box(states),
+                                false,
+                                false,
+                            )
+                            .expect("unable to get proof");
                         let elapsed = instant.elapsed();
                         println!(
                             "keccak_f::create_proof, instances = {}, time = {}",

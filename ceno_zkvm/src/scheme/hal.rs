@@ -6,30 +6,12 @@ use crate::{
     structs::{TowerProofs, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
+use gkr_iop::hal::ProverBackend;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
-
-pub trait MultilinearPolynomial<E: ExtensionField> {
-    fn num_vars(&self) -> usize;
-    fn eval(&self, point: Point<E>) -> E;
-}
-
-/// Defines basic types like field, pcs that are common among all devices
-/// and also defines the types that are specific to device.
-pub trait ProverBackend {
-    /// types that are common across all devices
-    type E: ExtensionField;
-    type Pcs: PolynomialCommitmentScheme<Self::E>;
-
-    /// device-specific types
-    // TODO: remove lifetime bound
-    type MultilinearPoly<'a>: Send + Sync + Clone + MultilinearPolynomial<Self::E>;
-    type Matrix: Send + Sync + Clone;
-    type PcsData;
-}
 
 pub trait ProverDevice<PB>:
     TraceCommitter<PB>

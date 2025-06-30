@@ -3,11 +3,7 @@ use std::{collections::BTreeMap, time::Duration};
 use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
-    scheme::{
-        cpu::{CpuBackend, CpuProver},
-        hal::ProofInput,
-        prover::ZKVMProver,
-    },
+    scheme::{hal::ProofInput, prover::ZKVMProver},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
 mod alloc;
@@ -15,6 +11,7 @@ use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
+use gkr_iop::cpu::{CpuBackend, CpuProver};
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
 
 use rand::rngs::OsRng;

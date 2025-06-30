@@ -2,6 +2,7 @@ use clap::{Parser, command};
 use ff_ext::GoldilocksExt2;
 use gkr_iop::precompiles::{run_faster_keccakf, setup_lookup_keccak_gkr_circuit};
 use itertools::Itertools;
+use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -26,6 +27,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
+    type Pcs = BasefoldDefault<E>;
 
     // default filter
     let default_filter = EnvFilter::builder()
@@ -69,6 +71,7 @@ fn main() {
         .map(|_| std::array::from_fn(|_| rng.next_u64()))
         .collect_vec();
     let circuit_setup = setup_lookup_keccak_gkr_circuit();
-    let proof = run_faster_keccakf::<E>(circuit_setup, states, true, true).expect("generate proof");
+    let proof =
+        run_faster_keccakf::<E, Pcs>(circuit_setup, states, true, true).expect("generate proof");
     tracing::info!("lookup keccak proof stat: {}", proof);
 }

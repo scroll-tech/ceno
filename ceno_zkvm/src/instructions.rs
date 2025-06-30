@@ -3,6 +3,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
+    hal::ProverBackend,
 };
 use multilinear_extensions::util::max_usable_threads;
 use rayon::{
@@ -95,7 +96,7 @@ pub trait GKRIOPInstruction<E: ExtensionField>
 where
     Self: Instruction<E>,
 {
-    type Layout<'a>: ProtocolWitnessGenerator<'a, E> + ProtocolBuilder<E>;
+    type Layout: ProtocolWitnessGenerator<E> + ProtocolBuilder<E>;
 
     /// Similar to Instruction::construct_circuit; generally
     /// meant to extend InstructionConfig with GKR-specific
@@ -108,8 +109,8 @@ where
     }
 
     /// Should generate phase1 witness for GKR from step records
-    fn phase1_witness_from_steps<'a>(
-        layout: &Self::Layout<'a>,
+    fn phase1_witness_from_steps(
+        layout: &Self::Layout,
         steps: &[StepRecord],
     ) -> RowMajorMatrix<E::BaseField>;
 
@@ -125,17 +126,17 @@ where
 
     /// Similar to Instruction::assign_instances, but with access to the GKR layout.
     #[allow(clippy::type_complexity)]
-    fn assign_instances_with_gkr_iop<'a>(
+    fn assign_instances_with_gkr_iop<'a, PB: ProverBackend<E = E>>(
         _config: &Self::InstructionConfig,
         _num_witin: usize,
         _steps: Vec<StepRecord>,
         _gkr_circuit: &GKRCircuit<E>,
-        _gkr_layout: &Self::Layout<'a>,
+        _gkr_layout: &Self::Layout,
     ) -> Result<
         (
             RowMajorMatrix<E::BaseField>,
-            GKRCircuitWitness<'a, E>,
-            GKRCircuitOutput<'a, E>,
+            GKRCircuitWitness<'a, PB>,
+            GKRCircuitOutput<'a, PB>,
             LkMultiplicity,
         ),
         ZKVMError,

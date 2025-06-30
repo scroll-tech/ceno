@@ -2,6 +2,7 @@ use std::mem::transmute;
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct, izip, zip_eq};
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     ChallengeId, Expression, Fixed, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2,
 };
@@ -9,10 +10,7 @@ use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::FieldAlgebra;
 use p3_util::indices_arr;
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
-        ParallelIterator,
-    },
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
     slice::ParallelSliceMut,
 };
 use sumcheck::{
@@ -27,6 +25,7 @@ use witness::{
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
+    cpu::{CpuBackend, CpuProver},
     error::BackendError,
     evaluation::EvalExpression,
     gkr::{
@@ -530,7 +529,7 @@ pub struct KeccakTrace {
     pub instances: Vec<[u32; KECCAK_INPUT32_SIZE]>,
 }
 
-impl<E> ProtocolWitnessGenerator<'_, E> for KeccakLayout<E>
+impl<E> ProtocolWitnessGenerator<E> for KeccakLayout<E>
 where
     E: ExtensionField,
 {
@@ -734,7 +733,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>
     level = "trace",
     fields(profiling_1)
 )]
-pub fn run_faster_keccakf<E: ExtensionField>(
+pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     (layout, gkr_circuit): (KeccakLayout<E>, GKRCircuit<E>),
     states: Vec<[u64; 25]>,
     verify: bool,
@@ -782,8 +781,14 @@ pub fn run_faster_keccakf<E: ExtensionField>(
                 .collect_vec()
         })
         .collect_vec();
-    let (gkr_witness, gkr_output) =
-        layout.gkr_witness(&gkr_circuit, &phase1_witness, &rc_witness, &challenges);
+    #[allow(clippy::type_complexity)]
+    let (gkr_witness, gkr_output) = layout
+        .gkr_witness::<CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>(
+            &gkr_circuit,
+            &phase1_witness,
+            &rc_witness,
+            &challenges,
+        );
     exit_span!(span);
 
     let span = entered_span!("out_eval", profiling_2 = true);
@@ -835,7 +840,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
 
         let out_evals = gkr_output
             .0
-            .par_iter()
+            .iter()
             .map(|wit| PointAndEval {
                 point: point.clone(),
                 eval: if wit.num_vars() == 0 {
@@ -870,7 +875,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
 
     let span = entered_span!("create_proof", profiling_2 = true);
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
-        .prove(
+        .prove::<CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>(
             num_threads,
             log2_num_instance_rounds,
             gkr_witness,
@@ -917,11 +922,13 @@ pub fn run_faster_keccakf<E: ExtensionField>(
 mod tests {
     use super::*;
     use ff_ext::GoldilocksExt2;
+    use mpcs::BasefoldDefault;
     use rand::{RngCore, SeedableRng};
 
     #[test]
     fn test_keccakf() {
         type E = GoldilocksExt2;
+        type Pcs = BasefoldDefault<E>;
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
         let num_instances = 8;
@@ -929,12 +936,13 @@ mod tests {
         for _ in 0..num_instances {
             states.push(std::array::from_fn(|_| rng.next_u64()));
         }
-        let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, true, true);
+        let _ = run_faster_keccakf::<E, Pcs>(setup_gkr_circuit::<E>(), states, true, true);
     }
 
     #[test]
     fn test_keccakf_nonpow2() {
         type E = GoldilocksExt2;
+        type Pcs = BasefoldDefault<E>;
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
@@ -944,6 +952,6 @@ mod tests {
             states.push(std::array::from_fn(|_| rng.next_u64()));
         }
 
-        let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, true, true);
+        let _ = run_faster_keccakf::<E, Pcs>(setup_gkr_circuit::<E>(), states, true, true);
     }
 }
