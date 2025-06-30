@@ -70,7 +70,7 @@ where
         challenges: &[E],
     ) -> (GKRCircuitWitness<'a, E>, GKRCircuitOutput<E>) {
         // layer order from output to input
-        let size = phase1_witness_group.num_instances();
+        let num_instances = phase1_witness_group.num_instances();
         let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(circuit.layers.len() + 1);
         let phase1_witness_group = phase1_witness_group
             .to_mles()
@@ -93,6 +93,7 @@ where
                 });
 
             // process fixed (and probably short) mle
+            // XXX currently fixed poly not support in layers > 1
             first_layer
                 .in_eval_expr
                 .par_iter()
@@ -106,7 +107,7 @@ where
                                 .iter()
                                 .cycle()
                                 .cloned()
-                                .take(size)
+                                .take(num_instances)
                                 .collect_vec()
                                 .into_mle()
                                 .into(),

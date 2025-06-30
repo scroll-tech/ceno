@@ -911,11 +911,9 @@ mod tests {
         for _ in 0..num_instances {
             states.push(std::array::from_fn(|_| rng.next_u64()));
         }
-        // TODO enable check
         let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, true, true);
     }
 
-    #[ignore]
     #[test]
     fn test_keccakf_nonpow2() {
         type E = GoldilocksExt2;
@@ -928,7 +926,6 @@ mod tests {
             states.push(std::array::from_fn(|_| rng.next_u64()));
         }
 
-        // TODO enable check
         let _ = run_faster_keccakf(setup_gkr_circuit::<E>(), states, true, true);
     }
 }
