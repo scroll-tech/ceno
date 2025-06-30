@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use chip::Chip;
 use evaluation::EvalExpression;
@@ -10,6 +10,7 @@ use multilinear_extensions::{
     op_mle,
     utils::eval_by_expr_constant,
 };
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use utils::infer_layer_witness;
@@ -81,15 +82,26 @@ where
 
         // set input to witness_mle_flatten via first layer in_eval_expr
         if let Some(first_layer) = circuit.layers.last() {
+            // process witin
             first_layer
                 .in_eval_expr
                 .iter()
+                .take(phase1_witness_group.len())
                 .enumerate()
                 .for_each(|(index, witin)| {
-                    if index < phase1_witness_group.len() {
-                        witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
-                    } else {
-                        witness_mle_flatten[*witin] = Some(
+                    witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
+                });
+
+            // process fixed (and probably short) mle
+            first_layer
+                .in_eval_expr
+                .par_iter()
+                .enumerate()
+                .skip(phase1_witness_group.len())
+                .map(|(index, witin)| {
+                    (
+                        *witin,
+                        Some(
                             fixed[index - phase1_witness_group.len()]
                                 .iter()
                                 .cycle()
@@ -98,9 +110,12 @@ where
                                 .collect_vec()
                                 .into_mle()
                                 .into(),
-                        )
-                    }
-                });
+                        ),
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+                .into_iter()
+                .for_each(|(witin, optional_mle)| witness_mle_flatten[witin] = optional_mle);
         }
 
         // generate all layer witness from input to output
