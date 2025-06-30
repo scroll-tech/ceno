@@ -55,19 +55,19 @@ impl<E: ExtensionField> MockProver<E> {
     pub fn check<'a>(
         circuit: GKRCircuit<E>,
         circuit_wit: &'a GKRCircuitWitness<'a, E>,
-        mut evaluations: Vec<FieldType<'a, E>>,
+        evaluations: Vec<&FieldType<'a, E>>,
         mut challenges: Vec<E>,
     ) -> Result<(), MockProverError<'a, E>> {
         // TODO: check the rotation argument.
         let mut rng = thread_rng();
-        evaluations.resize(
-            circuit.n_evaluations,
-            FieldType::Base(SmartSlice::Owned(vec![])),
-        );
+        let field_type_default = FieldType::default();
+        let mut evaluations = evaluations; // Change evaluations' lifetime.
+        evaluations.resize_with(circuit.n_evaluations, || &field_type_default);
         challenges.resize_with(circuit.n_challenges, || E::random(&mut rng));
+        // check the input layer
         for (layer, layer_wit) in izip!(circuit.layers, &circuit_wit.layers) {
-            let num_vars = layer_wit.num_vars;
-            let points = (0..layer.expr_evals.len())
+            let num_vars = layer_wit.num_vars();
+            let points = (0..layer.out_eq_and_eval_exprs.len())
                 .map(|_| random_point::<E>(OsRng, num_vars))
                 .collect_vec();
             let eqs = eq_mles(points.clone(), &vec![E::ONE; points.len()])
@@ -78,10 +78,9 @@ impl<E: ExtensionField> MockProver<E> {
                 .exprs
                 .iter()
                 .map(|expr| {
-                    Arc::into_inner(wit_infer_by_expr(
+                    match Arc::try_unwrap(wit_infer_by_expr(
                         &[],
                         &layer_wit
-                            .wits
                             .iter()
                             .map(|mle| mle.as_view().into())
                             .chain(eqs.clone())
@@ -90,16 +89,18 @@ impl<E: ExtensionField> MockProver<E> {
                         &[],
                         &challenges,
                         expr,
-                    ))
-                    .unwrap()
+                    )) {
+                        Ok(inner) => inner,
+                        Err(shared) => (*shared).clone(),
+                    }
                     .evaluations_to_owned()
                 })
                 .collect_vec();
             let expects = layer
-                .expr_evals
+                .out_eq_and_eval_exprs
                 .iter()
                 .flat_map(|(_, out)| out)
-                .map(|out| out.mock_evaluate(&evaluations, &challenges))
+                .map(|out| out.mock_evaluate(&evaluations, &challenges, num_vars))
                 .collect_vec();
             match layer.ty {
                 LayerType::Zerocheck => {
@@ -108,9 +109,9 @@ impl<E: ExtensionField> MockProver<E> {
                         expects,
                         &layer.exprs,
                         &layer.expr_names,
-                        &layer.expr_evals
+                        &layer.out_eq_and_eval_exprs
                     ) {
-                        if expect != got {
+                        if !expect.is_equal(&got) {
                             return Err(MockProverError::ZerocheckExpressionNotMatch(
                                 Box::new(out.1[0].clone()),
                                 Box::new(expr.clone()),
@@ -123,9 +124,9 @@ impl<E: ExtensionField> MockProver<E> {
                 }
                 LayerType::Linear => {
                     for (got, expect, expr, out) in
-                        izip!(gots, expects, &layer.exprs, &layer.expr_evals)
+                        izip!(gots, expects, &layer.exprs, &layer.out_eq_and_eval_exprs)
                     {
-                        if expect != got {
+                        if !expect.is_equal(&got) {
                             return Err(MockProverError::LinearExpressionNotMatch(
                                 Box::new(out.1[0].clone()),
                                 Box::new(expr.clone()),
@@ -136,8 +137,8 @@ impl<E: ExtensionField> MockProver<E> {
                     }
                 }
             }
-            for (in_pos, base) in izip!(&layer.in_eval_expr, &layer_wit.wits) {
-                *(in_pos.entry_mut(&mut evaluations)) = base.evaluations().as_borrowed_view();
+            for (in_pos, wit) in izip!(layer.in_eval_expr.iter(), layer_wit.iter()) {
+                evaluations[*in_pos] = wit.evaluations();
             }
         }
         Ok(())
@@ -147,13 +148,14 @@ impl<E: ExtensionField> MockProver<E> {
 impl<E: ExtensionField> EvalExpression<E> {
     pub fn mock_evaluate<'a>(
         &self,
-        evals: &[FieldType<'a, E>],
+        evals: &[&FieldType<'a, E>],
         challenges: &[E],
+        num_vars: usize,
     ) -> FieldType<'a, E> {
         match self {
-            EvalExpression::Zero => FieldType::default(),
+            EvalExpression::Zero => FieldType::zero(num_vars),
             EvalExpression::Single(i) => evals[*i].clone(),
-            EvalExpression::Linear(i, c0, c1) => Arc::into_inner(wit_infer_by_expr(
+            EvalExpression::Linear(i, c0, c1) => match Arc::try_unwrap(wit_infer_by_expr(
                 &[],
                 &evals
                     .iter()
@@ -169,14 +171,16 @@ impl<E: ExtensionField> EvalExpression<E> {
                 &[],
                 challenges,
                 &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
-            ))
-            .unwrap()
+            )) {
+                Ok(inner) => inner,
+                Err(shared) => (*shared).clone(),
+            }
             .evaluations_to_owned(),
             EvalExpression::Partition(parts, indices) => {
                 assert_eq!(parts.len(), 1 << indices.len());
                 let parts = parts
                     .iter()
-                    .map(|part| part.mock_evaluate(evals, challenges))
+                    .map(|part| part.mock_evaluate(evals, challenges, num_vars))
                     .collect_vec();
                 indices
                     .iter()

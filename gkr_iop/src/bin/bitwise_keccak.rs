@@ -1,6 +1,6 @@
 use clap::{Parser, command};
 use ff_ext::GoldilocksExt2;
-use gkr_iop::precompiles::{run_keccakf, setup_keccak_bitwise_circuit};
+use gkr_iop::precompiles::{run_bitwise_keccakf, setup_bitwise_keccak_gkr_circuit};
 use itertools::Itertools;
 use rand::{RngCore, SeedableRng};
 use tracing::level_filters::LevelFilter;
@@ -68,6 +68,5 @@ fn main() {
     let states: Vec<[u64; 25]> = (0..num_instance)
         .map(|_| std::array::from_fn(|_| rng.next_u64()))
         .collect_vec();
-    let circuit_setup = setup_keccak_bitwise_circuit();
-    run_keccakf::<E>(circuit_setup, states, false, false);
+    run_bitwise_keccakf::<E>(setup_bitwise_keccak_gkr_circuit(), states, false, false);
 }

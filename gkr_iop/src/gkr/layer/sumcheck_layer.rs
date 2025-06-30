@@ -70,8 +70,7 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
         let builder = VirtualPolynomialsBuilder::new_with_mles(
             num_threads,
             max_num_variables,
-            wit.wits
-                .iter()
+            wit.iter()
                 .map(|mle| Either::Left(mle.as_ref()))
                 .collect_vec(),
         );

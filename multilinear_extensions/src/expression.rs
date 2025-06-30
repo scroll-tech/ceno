@@ -277,6 +277,10 @@ impl<E: ExtensionField> Expression<E> {
         matches!(self, Expression::Constant(_))
     }
 
+    pub fn is_linear(&self) -> bool {
+        self.degree() <= 1
+    }
+
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
             Expression::Fixed(_) => false,
@@ -871,11 +875,13 @@ impl<E: ExtensionField> Mul for Expression<E> {
 }
 
 #[derive(Clone, Debug, Copy)]
+#[repr(C)]
 pub struct WitIn {
     pub id: WitnessId,
 }
 
 #[derive(Clone, Debug, Copy, serde::Serialize, serde::Deserialize)]
+#[repr(C)]
 pub struct StructuralWitIn {
     pub id: WitnessId,
     pub max_len: usize,
@@ -883,14 +889,17 @@ pub struct StructuralWitIn {
     pub multi_factor: usize,
     pub descending: bool,
 }
+
 #[derive(
     Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[repr(C)]
 pub struct Fixed(pub usize);
 
 #[derive(
     Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[repr(C)]
 pub struct Instance(pub usize);
 
 pub trait ToExpr<E: ExtensionField> {

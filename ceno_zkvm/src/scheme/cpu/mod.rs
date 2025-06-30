@@ -23,6 +23,7 @@ use multilinear_extensions::{
     Expression, Instance,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     monomial::Term,
+    util::ceil_log2,
     utils::eval_by_expr_with_instance,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
@@ -36,7 +37,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
-    util::{ceil_log2, get_challenge_pows, optimal_sumcheck_threads},
+    util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;

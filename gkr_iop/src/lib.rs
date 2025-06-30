@@ -10,6 +10,7 @@ use multilinear_extensions::{
     op_mle,
     utils::eval_by_expr_constant,
 };
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use utils::infer_layer_witness;
@@ -31,21 +32,24 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
 
     /// Build the protocol for GKR IOP.
     fn build(params: Self::Params) -> (Self, Chip<E>) {
-        let mut chip_spec = Self::init(params);
-        let mut chip = Chip::default();
-        chip_spec.build_commit_phase(&mut chip);
-        chip_spec.build_gkr_phase(&mut chip);
+        let chip_spec = Self::init(params);
+        let chip = chip_spec.build_gkr_chip();
 
         (chip_spec, chip)
     }
 
-    /// Specify the polynomials and challenges to be committed and generated in
-    /// Phase 1.
-    fn build_commit_phase(&mut self, spec: &mut Chip<E>);
     /// Create the GKR layers in the reverse order. For each layer, specify the
     /// polynomial expressions, evaluation expressions of outputs and evaluation
     /// positions of the inputs.
-    fn build_gkr_phase(&mut self, spec: &mut Chip<E>);
+    fn build_gkr_chip(&self) -> Chip<E>;
+
+    fn n_committed(&self) -> usize;
+    fn n_fixed(&self) -> usize;
+    fn n_challenges(&self) -> usize;
+    fn n_nonzero_out_evals(&self) -> usize;
+    fn n_evaluations(&self) -> usize;
+
+    fn n_layers(&self) -> usize;
 }
 
 pub trait ProtocolWitnessGenerator<'a, E>
@@ -62,9 +66,11 @@ where
         &self,
         circuit: &GKRCircuit<E>,
         phase1_witness_group: &RowMajorMatrix<E::BaseField>,
+        fixed: &[Vec<E::BaseField>],
         challenges: &[E],
     ) -> (GKRCircuitWitness<'a, E>, GKRCircuitOutput<E>) {
         // layer order from output to input
+        let num_instances = phase1_witness_group.num_instances();
         let mut layer_wits = Vec::<LayerWitness<E>>::with_capacity(circuit.layers.len() + 1);
         let phase1_witness_group = phase1_witness_group
             .to_mles()
@@ -72,29 +78,46 @@ where
             .map(Arc::new)
             .collect_vec();
 
-        layer_wits.push(LayerWitness::new(phase1_witness_group.clone()));
         let mut witness_mle_flatten = vec![None; circuit.n_evaluations];
 
-        // initialize a vector to store the final outputs of the GKR circuit.
-        // these outputs correspond to the evaluations at the last layer of the circuit.
-        // we preallocate the vector with exact capacity for efficiency, avoiding reallocations.
-        // the number of expected outputs is given by `circuit.n_evaluations`.
-        let mut gkr_out_well_order = Vec::with_capacity(circuit.n_evaluations);
-
         // set input to witness_mle_flatten via first layer in_eval_expr
-        let mut phase1_wit_map = HashMap::new();
-        circuit
-            .openings
-            .iter()
-            .for_each(|(phase1_wit_id, eval)| match eval {
-                EvalExpression::Zero => {}
-                EvalExpression::Single(eval_id) | EvalExpression::Linear(eval_id, _, _) => {
-                    if !phase1_wit_map.contains_key(eval_id) {
-                        phase1_wit_map.insert(*eval_id, (*phase1_wit_id, eval));
-                    }
-                }
-                EvalExpression::Partition(_, _) => unimplemented!("unsupported"),
-            });
+        if let Some(first_layer) = circuit.layers.last() {
+            // process witin
+            first_layer
+                .in_eval_expr
+                .iter()
+                .take(phase1_witness_group.len())
+                .enumerate()
+                .for_each(|(index, witin)| {
+                    witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
+                });
+
+            // process fixed (and probably short) mle
+            // XXX currently fixed poly not support in layers > 1
+            first_layer
+                .in_eval_expr
+                .par_iter()
+                .enumerate()
+                .skip(phase1_witness_group.len())
+                .map(|(index, witin)| {
+                    (
+                        *witin,
+                        Some(
+                            fixed[index - phase1_witness_group.len()]
+                                .iter()
+                                .cycle()
+                                .cloned()
+                                .take(num_instances)
+                                .collect_vec()
+                                .into_mle()
+                                .into(),
+                        ),
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+                .into_iter()
+                .for_each(|(witin, optional_mle)| witness_mle_flatten[witin] = optional_mle);
+        }
 
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
@@ -105,54 +128,28 @@ where
             let current_layer_wits = layer
                 .in_eval_expr
                 .iter()
-                .map(|eval| match eval {
-                    EvalExpression::Single(eval_id) => {
-                        if let Some((phase1_wit_id, eval)) = phase1_wit_map.get(eval_id) {
-                            match eval {
-                                EvalExpression::Single(_) => {
-                                    witness_mle_flatten[*eval_id] =
-                                        Some(phase1_witness_group[*phase1_wit_id].clone())
-                                }
-                                EvalExpression::Linear(_, a, b) => {
-                                    let a_inv = eval_by_expr_constant(challenges, a).inverse();
-                                    let b = eval_by_expr_constant(challenges, b);
-                                    let f = &phase1_witness_group[*phase1_wit_id];
-                                    let new_wit = op_mle!(|f| f
-                                        .iter()
-                                        .map(|x| a_inv * (-b + *x))
-                                        .collect_vec()
-                                        .into_mle()
-                                        .into());
-                                    witness_mle_flatten[*eval_id] = Some(new_wit);
-                                }
-                                _ => unimplemented!("unsupported"),
-                            }
-                        }
-                        witness_mle_flatten[*eval_id]
-                            .clone()
-                            .expect("witness must exist")
-                    }
-                    other => unimplemented!("{:?}", other),
+                .map(|witin| {
+                    witness_mle_flatten[*witin]
+                        .clone()
+                        .expect("witness must exist")
                 })
                 .collect_vec();
 
             // infer current layer output
-            let current_layer_output = infer_layer_witness(layer, &current_layer_wits, challenges);
-            layer_wits.push(LayerWitness::new(current_layer_wits));
+            let current_layer_output: Vec<
+                Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
+            > = infer_layer_witness(layer, &current_layer_wits, challenges);
+            layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
             // process out to prepare output witness
             layer
-                .expr_evals
+                .out_eq_and_eval_exprs
                 .iter()
                 .flat_map(|(_, out_eval)| out_eval)
                 .zip_eq(&current_layer_output)
                 .for_each(|(out_eval, out_mle)| match out_eval {
                     EvalExpression::Single(out) => {
                         witness_mle_flatten[*out] = Some(out_mle.clone());
-                        // last layer we record gkr circuit output
-                        if i == circuit.layers.len() - 1 {
-                            gkr_out_well_order.push((*out, out_mle.clone()));
-                        }
                     }
                     EvalExpression::Linear(out, a, b) => {
                         let a_inv = eval_by_expr_constant(challenges, a).inverse();
@@ -172,22 +169,18 @@ where
                 });
             exit_span!(span);
         }
-
         layer_wits.reverse();
 
-        // process and sort by out_id
-        gkr_out_well_order.sort_by_key(|(i, _)| *i);
-        let gkr_out_well_order = gkr_out_well_order
-            .into_iter()
-            .map(|(_, val)| val)
-            .collect_vec();
+        // initialize a vector to store the final outputs of the GKR circuit.
+        let mut gkr_out_well_order = vec![Arc::default(); circuit.n_nonzero_out_evals];
+        circuit
+            .final_out_evals
+            .iter()
+            .for_each(|out| gkr_out_well_order[*out] = witness_mle_flatten[*out].clone().unwrap());
 
         (
             GKRCircuitWitness { layers: layer_wits },
-            GKRCircuitOutput(LayerWitness {
-                wits: gkr_out_well_order,
-                ..Default::default()
-            }),
+            GKRCircuitOutput(LayerWitness(gkr_out_well_order)),
         )
     }
 }

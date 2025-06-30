@@ -14,7 +14,7 @@ use crate::{
 };
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, enumerate};
-use multilinear_extensions::{Expression, ToExpr, WitIn};
+use multilinear_extensions::{Expression, ToExpr, WitIn, util::ceil_log2};
 use p3::field::FieldAlgebra;
 use std::{
     borrow::Cow,
@@ -23,7 +23,6 @@ use std::{
 };
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
-use sumcheck::util::ceil_log2;
 use util::max_carry_word_for_multiplication;
 
 #[derive(Clone, EnumIter, Debug)]

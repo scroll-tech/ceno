@@ -1,6 +1,7 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{mle::Point, utils::eval_by_expr_with_instance};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use sumcheck::structs::{IOPProof, VerifierError};
 use transcript::Transcript;
 
@@ -37,11 +38,10 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
         out_point: &Point<E>,
         transcript: &mut impl Transcript<E>,
     ) -> LayerProof<E> {
-        let evals = wit
-            .wits
-            .iter()
+        let evals: Vec<_> = wit
+            .par_iter()
             .map(|base| base.evaluate(out_point))
-            .collect_vec();
+            .collect();
 
         transcript.append_field_element_exts(&evals);
 

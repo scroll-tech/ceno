@@ -1118,6 +1118,7 @@ dependencies = [
  "ndarray",
  "p3-field",
  "p3-goldilocks",
+ "p3-util",
  "rand",
  "rayon",
  "serde",

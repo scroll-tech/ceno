@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-use gkr_iop::precompiles::{run_faster_keccakf, setup_keccak_lookup_circuit};
+use gkr_iop::precompiles::{run_faster_keccakf, setup_lookup_keccak_gkr_circuit};
 
 use itertools::Itertools;
 use rand::{RngCore, SeedableRng};
@@ -37,7 +37,7 @@ fn keccak_f_fn(c: &mut Criterion) {
 
                         let instant = std::time::Instant::now();
 
-                        let circuit = setup_keccak_lookup_circuit();
+                        let circuit = setup_lookup_keccak_gkr_circuit();
                         #[allow(clippy::unit_arg)]
                         let _ = run_faster_keccakf::<GoldilocksExt2>(
                             circuit,

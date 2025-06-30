@@ -1,6 +1,5 @@
 use std::{mem, sync::Arc};
 
-use crate::{extrapolate::ExtrapolationCache, util::extrapolate_from_table};
 use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -8,7 +7,7 @@ use multilinear_extensions::{
     mle::FieldType,
     monomial::Term,
     op_mle,
-    util::largest_even_below,
+    util::{ceil_log2, largest_even_below},
     virtual_poly::{MonomialTerms, VirtualPolynomial},
     virtual_polys::{PolyMeta, VirtualPolynomials},
 };
@@ -21,10 +20,12 @@ use sumcheck_macro::sumcheck_code_gen;
 use transcript::{Challenge, Transcript, TranscriptSyncronized};
 
 use crate::{
+    extrapolate::ExtrapolationCache,
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage, IOPProverState},
     util::{
-        AdditiveArray, AdditiveVec, ceil_log2, merge_sumcheck_polys, merge_sumcheck_prover_state,
+        AdditiveArray, AdditiveVec, extrapolate_from_table, merge_sumcheck_polys,
+        merge_sumcheck_prover_state,
     },
 };
 use p3::field::FieldAlgebra;
