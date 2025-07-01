@@ -10,7 +10,10 @@ use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::FieldAlgebra;
 use p3_util::indices_arr;
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
+        ParallelIterator,
+    },
     slice::ParallelSliceMut,
 };
 use sumcheck::{
@@ -840,7 +843,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         let out_evals = gkr_output
             .0
-            .iter()
+            .par_iter()
             .map(|wit| PointAndEval {
                 point: point.clone(),
                 eval: if wit.num_vars() == 0 {
