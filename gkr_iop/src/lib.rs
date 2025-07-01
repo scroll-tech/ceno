@@ -2,9 +2,10 @@ use std::marker::PhantomData;
 
 use crate::hal::{ProtocolWitnessGeneratorProver, ProverDevice};
 use chip::Chip;
+use either::Either;
 use ff_ext::ExtensionField;
 use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
-use multilinear_extensions::mle::ArcMultilinearExtension;
+use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
 use strum_macros::EnumIter;
 use transcript::Transcript;
 use utils::infer_layer_witness;
@@ -103,3 +104,13 @@ pub enum LookupTable {
     Pow,         // a ** b where a is 2 and b is 5-bit value
     Instruction, // Decoded instruction from the fixed program.
 }
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(usize)]
+pub enum RAMType {
+    GlobalState,
+    Register,
+    Memory,
+}
+
+impl_expr_from_unsigned!(RAMType);

@@ -7,12 +7,11 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
-use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{LookupTable, gkr::GKRCircuit, precompiles::KeccakLayout};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{Expression, impl_expr_from_unsigned};
+use multilinear_extensions::Expression;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -45,14 +44,7 @@ pub type ChallengeId = u16;
 
 pub type ROMType = LookupTable;
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum RAMType {
-    GlobalState,
-    Register,
-    Memory,
-}
-
-impl_expr_from_unsigned!(RAMType);
+pub type RAMType = gkr_iop::RAMType;
 
 pub type PointAndEval<F> = multilinear_extensions::mle::PointAndEval<F>;
 

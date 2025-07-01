@@ -12,7 +12,6 @@ impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitB
             pc,
             ts,
         ];
-
         self.read_record(|| "state_in", RAMType::GlobalState, record)
     }
 
