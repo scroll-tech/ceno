@@ -8,7 +8,7 @@ use crate::{
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
     scheme::{
-        cpu::{CpuBackend, CpuProver, CpuTowerProver},
+        cpu::CpuTowerProver,
         hal::{ProofInput, TowerProverSpec},
         prover::ZkVMCpuProver,
     },
@@ -25,6 +25,7 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
+use gkr_iop::cpu::{CpuBackend, CpuProver};
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
 
 #[cfg(debug_assertions)]

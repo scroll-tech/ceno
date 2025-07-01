@@ -1,11 +1,16 @@
 use ff_ext::ExtensionField;
+use gkr_iop::{
+    cpu::{CpuBackend, CpuProver},
+    hal::ProverBackend,
+};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
     sync::Arc,
 };
 
-use crate::scheme::hal::{MainSumcheckEvals, MultilinearPolynomial};
+use crate::scheme::hal::MainSumcheckEvals;
+use gkr_iop::hal::MultilinearPolynomial;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -27,11 +32,7 @@ use crate::{
     structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
-use super::{
-    PublicValues, ZKVMChipProof, ZKVMProof,
-    cpu::{CpuBackend, CpuProver},
-    hal::{ProverBackend, ProverDevice},
-};
+use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 
 type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
 

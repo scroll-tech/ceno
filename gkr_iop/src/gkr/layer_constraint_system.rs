@@ -295,7 +295,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         self.into_layer(layer_name, in_expr_evals, n_challenges)
     }
 
-    /// n_challenges: num of challanges dedicated to this layer
+    /// n_challenges: num of challenges dedicated to this layer
     pub fn into_layer(
         self,
         layer_name: String,

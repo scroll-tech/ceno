@@ -2,6 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     WitnessId,
     mle::{MultilinearExtension, Point},
@@ -11,7 +12,7 @@ use multilinear_extensions::{
 use rand::{rngs::OsRng, thread_rng};
 use thiserror::Error;
 
-use crate::evaluation::EvalExpression;
+use crate::{cpu::CpuBackend, evaluation::EvalExpression};
 use multilinear_extensions::{
     Expression, mle::FieldType, smart_slice::SmartSlice, wit_infer_by_expr,
 };
@@ -52,12 +53,15 @@ pub enum MockProverError<'a, E: ExtensionField> {
 }
 
 impl<E: ExtensionField> MockProver<E> {
-    pub fn check<'a>(
+    pub fn check<'a, 'b, PCS: PolynomialCommitmentScheme<E>>(
         circuit: GKRCircuit<E>,
-        circuit_wit: &'a GKRCircuitWitness<'a, E>,
-        evaluations: Vec<&FieldType<'a, E>>,
+        circuit_wit: &'a GKRCircuitWitness<'b, CpuBackend<E, PCS>>,
+        evaluations: Vec<&FieldType<'b, E>>,
         mut challenges: Vec<E>,
-    ) -> Result<(), MockProverError<'a, E>> {
+    ) -> Result<(), MockProverError<'a, E>>
+    where
+        'b: 'a,
+    {
         // TODO: check the rotation argument.
         let mut rng = thread_rng();
         let field_type_default = FieldType::default();

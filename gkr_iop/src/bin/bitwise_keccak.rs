@@ -2,6 +2,7 @@ use clap::{Parser, command};
 use ff_ext::GoldilocksExt2;
 use gkr_iop::precompiles::{run_bitwise_keccakf, setup_bitwise_keccak_gkr_circuit};
 use itertools::Itertools;
+use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -26,6 +27,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
+    type Pcs = BasefoldDefault<E>;
 
     // default filter
     let default_filter = EnvFilter::builder()
@@ -68,5 +70,5 @@ fn main() {
     let states: Vec<[u64; 25]> = (0..num_instance)
         .map(|_| std::array::from_fn(|_| rng.next_u64()))
         .collect_vec();
-    run_bitwise_keccakf::<E>(setup_bitwise_keccak_gkr_circuit(), states, false, false);
+    run_bitwise_keccakf::<E, Pcs>(setup_bitwise_keccak_gkr_circuit(), states, false, false);
 }
