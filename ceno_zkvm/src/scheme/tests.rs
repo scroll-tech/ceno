@@ -13,9 +13,7 @@ use crate::{
         prover::ZkVMCpuProver,
     },
     set_val,
-    structs::{
-        PointAndEval, RAMType::Register, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
-    },
+    structs::{PointAndEval, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::LkMultiplicity,
 };
@@ -64,8 +62,8 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
         let reg_id = cb.create_witin(|| "reg_id");
         (0..RW).try_for_each(|_| {
             let record = vec![1.into(), reg_id.expr()];
-            cb.read_record(|| "read", Register, record.clone())?;
-            cb.write_record(|| "write", Register, record)?;
+            cb.read_record(|| "read", RAMType::Register, record.clone())?;
+            cb.write_record(|| "write", RAMType::Register, record)?;
             Result::<(), ZKVMError>::Ok(())
         })?;
         (0..L).try_for_each(|_| {

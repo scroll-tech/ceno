@@ -866,13 +866,12 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     // Omit the commit phase1 and phase2.
     let span = entered_span!("gkr_witness", profiling_1 = true);
     #[allow(clippy::type_complexity)]
-    let (gkr_witness, gkr_output) = layout
-        .gkr_witness::<CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>(
-            &gkr_circuit,
-            &phase1_witness,
-            &[],
-            &[],
-        );
+    let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
+        &gkr_circuit,
+        &phase1_witness,
+        &[],
+        &[],
+    );
     exit_span!(span);
 
     let out_evals = {
@@ -918,7 +917,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     let span = entered_span!("prove", profiling_1 = true);
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
-        .prove::<CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>(
+        .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
             log2_num_instances,
             gkr_witness,

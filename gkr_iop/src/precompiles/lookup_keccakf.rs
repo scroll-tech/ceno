@@ -1,5 +1,6 @@
 use std::mem::transmute;
 
+use ceno_emul::{ByteAddr, Cycle};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct, izip, zip_eq};
 use mpcs::PolynomialCommitmentScheme;
@@ -27,7 +28,6 @@ use crate::{
     chip::Chip,
     cpu::{CpuBackend, CpuProver},
     error::BackendError,
-    evaluation::EvalExpression,
     gkr::{
         GKRCircuit, GKRProof, GKRProverOutput,
         booleanhypercube::BooleanHypercube,
@@ -129,6 +129,9 @@ pub struct KeccakWitCols<T> {
     pub nonlinear: [T; 200],
     pub chi_output: [T; 8],
     pub iota_output: [T; 200],
+    pub input_ram_start_addr: [T; 1],
+    pub cur_ts: [T; 1],
+    pub input_ram_read_ts: [T; KECCAK_INPUT32_SIZE],
 }
 
 #[derive(Clone, Debug)]
@@ -137,6 +140,8 @@ pub struct KeccakLayer<WitT, FixedT, EqT> {
     pub wits: KeccakWitCols<WitT>,
     pub fixed: KeccakFixedCols<FixedT>,
     pub eq_zero: EqT,
+    pub eq_mem_read: EqT,
+    pub eq_mem_write: EqT,
     pub eq_rotation_left: EqT,
     pub eq_rotation_right: EqT,
     pub eq_rotation: EqT,
@@ -161,16 +166,28 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
         let layer_in_evals = indices_arr_with_offset::<KECCAK_LAYER_SIZE, KECCAK_OUT_EVAL_SIZE>();
 
         // allocate witnesses, fixed, and eqs
-        let (wits, fixed, eqs) = wits_fixed_and_eqs::<KECCAK_WIT_SIZE, KECCAK_FIXED_SIZE, 4>();
+        let (
+            wits,
+            fixed,
+            [
+                eq_zero,
+                eq_mem_write,
+                eq_mem_read,
+                eq_rotation_left,
+                eq_rotation_right,
+                eq_rotation,
+            ],
+        ) = wits_fixed_and_eqs::<KECCAK_WIT_SIZE, KECCAK_FIXED_SIZE, 6>();
         let wits = unsafe { transmute::<[WitIn; KECCAK_WIT_SIZE], KeccakWitCols<WitIn>>(wits) };
         let fixed = unsafe { transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(fixed) };
-        let [eq_zero, eq_rotation_left, eq_rotation_right, eq_rotation] = eqs;
 
         Self {
             layer_exprs: KeccakLayer {
                 wits,
                 fixed,
                 eq_zero,
+                eq_mem_read,
+                eq_mem_write,
                 eq_rotation_left,
                 eq_rotation_right,
                 eq_rotation,
@@ -212,6 +229,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             nonlinear,
             chi_output,
             iota_output,
+            input_ram_start_addr: [input_ram_start_addr],
+            cur_ts: [cur_ts],
+            input_ram_read_ts,
         } = &self.layer_exprs.wits;
 
         let KeccakFixedCols { rc } = &self.layer_exprs.fixed;
@@ -388,50 +408,35 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
         let keccak_input8: ArrayView<WitIn, Ix3> =
             ArrayView::from_shape((5, 5, 8), input8).unwrap();
-        let mut keccak_input32_iter = self
-            .final_out_evals
-            .input32
-            .iter()
-            .map(|x| EvalExpression::Single(*x));
-
         let keccak_output8: ArrayView<WitIn, Ix3> =
             ArrayView::from_shape((5, 5, 8), iota_output).unwrap();
-        let mut keccak_output32_iter = self
-            .final_out_evals
-            .output32
-            .iter()
-            .map(|x| EvalExpression::Single(*x));
 
         // process keccak output
+        let mut output32_exprs = Vec::with_capacity(KECCAK_OUTPUT32_SIZE);
         for x in 0..5 {
             for y in 0..5 {
                 for k in 0..2 {
                     // create an expression combining 4 elements of state8 into a single 32-bit felt
-                    let expr = expansion_expr::<E, 32>(
+                    let value_expr = expansion_expr::<E, 32>(
                         &keccak_output8
                             .slice(s![x, y, 4 * k..4 * (k + 1)])
                             .iter()
                             .map(|e| (8, e.expr()))
                             .collect_vec(),
                     );
-                    system.add_non_zero_constraint(
-                        expr,
-                        (
-                            Some(self.layer_exprs.eq_zero.expr()),
-                            keccak_output32_iter.next().unwrap(),
-                        ),
-                        format!("build 32-bit output: {x}, {y}, {k}"),
-                    );
+                    output32_exprs.push(value_expr);
                 }
             }
         }
+        system.ram_write_record(input_ram_start_addr.expr(), output32_exprs, cur_ts.expr());
 
         // process keccak input
+        let mut input32_exprs = Vec::with_capacity(KECCAK_INPUT32_SIZE);
         for x in 0..5 {
             for y in 0..5 {
                 for k in 0..2 {
                     // create an expression combining 4 elements of state8 into a single 32-bit felt
-                    let expr = expansion_expr::<E, 32>(
+                    let value_expr = expansion_expr::<E, 32>(
                         keccak_input8
                             .slice(s![x, y, 4 * k..4 * (k + 1)])
                             .iter()
@@ -439,17 +444,15 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                             .collect_vec()
                             .as_slice(),
                     );
-                    system.add_non_zero_constraint(
-                        expr,
-                        (
-                            Some(self.layer_exprs.eq_zero.expr()),
-                            keccak_input32_iter.next().unwrap(),
-                        ),
-                        format!("build 32-bit input: {x}, {y}, {k}"),
-                    );
+                    input32_exprs.push(value_expr);
                 }
             }
         }
+        system.ram_read_record(
+            input_ram_start_addr.expr(),
+            input32_exprs,
+            input_ram_read_ts.iter().map(|w| w.expr()).collect_vec(),
+        );
 
         // rotation constrain: rotation(keccak_input8).next() == keccak_output8
         izip!(keccak_input8, keccak_output8)
@@ -483,16 +486,33 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             layers: vec![],
         };
 
+        let ram_write_evals_iter = self
+            .final_out_evals
+            .output32
+            .iter()
+            .cloned()
+            .map(|id| (Some(self.layer_exprs.eq_mem_write.expr()), id));
+
+        let ram_read_evals_iter = self
+            .final_out_evals
+            .input32
+            .iter()
+            .cloned()
+            .map(|id| (Some(self.layer_exprs.eq_mem_read.expr()), id));
+
         let lookup_evals_iter = self
             .final_out_evals
             .lookup_entries
             .iter()
             .cloned()
             .map(|id| (Some(self.layer_exprs.eq_zero.expr()), id));
+
         let layer = system.into_layer_with_lookup_eval_iter(
             "Rounds".to_string(),
             self.layer_in_evals.to_vec(),
             self.n_challenges(),
+            ram_write_evals_iter,
+            ram_read_evals_iter,
             lookup_evals_iter,
         );
         chip.add_layer(layer);
@@ -527,6 +547,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 #[derive(Clone, Default)]
 pub struct KeccakTrace {
     pub instances: Vec<[u32; KECCAK_INPUT32_SIZE]>,
+    pub ram_start_addr: Vec<ByteAddr>,
+    pub cur_ts: Vec<Cycle>,
+    pub read_ts: Vec<[Cycle; KECCAK_INPUT32_SIZE]>,
 }
 
 impl<E> ProtocolWitnessGenerator<E> for KeccakLayout<E>
@@ -536,7 +559,12 @@ where
     type Trace = KeccakTrace;
 
     fn phase1_witness_group(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField> {
-        let instances = &phase1.instances;
+        let KeccakTrace {
+            instances,
+            ram_start_addr,
+            cur_ts,
+            read_ts,
+        } = phase1;
         let num_instances = instances.len();
 
         fn conv64to8(input: u64) -> [u64; 8] {
@@ -710,6 +738,12 @@ where
                         nonlinear8.into_iter().flatten().flatten(),
                         chi_output8[0][0].iter().copied(),
                         iota_output8.into_iter().flatten().flatten(),
+                        // input_ram_start_addr,
+                        vec![ram_start_addr[instance_id].0 as u64],
+                        // cur_ts,
+                        vec![cur_ts[instance_id]],
+                        // input_ram_read_ts with KECCAK_INPUT32_SIZE size
+                        read_ts[instance_id]
                     );
 
                     push_instance::<E, _>(wits, &mut wits_start_index, all_wits64);
@@ -763,7 +797,12 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     exit_span!(span);
 
     let span = entered_span!("phase1_witness", profiling_2 = true);
-    let phase1_witness = layout.phase1_witness_group(KeccakTrace { instances });
+    let phase1_witness = layout.phase1_witness_group(KeccakTrace {
+        instances,
+        ram_start_addr: vec![ByteAddr::from(0); num_instances],
+        cur_ts: vec![0; num_instances],
+        read_ts: vec![[0; KECCAK_INPUT32_SIZE]; num_instances],
+    });
     exit_span!(span);
 
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
@@ -782,13 +821,12 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         })
         .collect_vec();
     #[allow(clippy::type_complexity)]
-    let (gkr_witness, gkr_output) = layout
-        .gkr_witness::<CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>(
-            &gkr_circuit,
-            &phase1_witness,
-            &rc_witness,
-            &challenges,
-        );
+    let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
+        &gkr_circuit,
+        &phase1_witness,
+        &rc_witness,
+        &challenges,
+    );
     exit_span!(span);
 
     let span = entered_span!("out_eval", profiling_2 = true);
@@ -843,11 +881,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .iter()
             .map(|wit| PointAndEval {
                 point: point.clone(),
-                eval: if wit.num_vars() == 0 {
-                    wit.get_base_field_vec()[0].into()
-                } else {
-                    wit.evaluate(&point)
-                },
+                eval: wit.evaluate(&point),
             })
             .collect::<Vec<_>>();
 
@@ -875,7 +909,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
     let span = entered_span!("create_proof", profiling_2 = true);
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
-        .prove::<CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>(
+        .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
             log2_num_instance_rounds,
             gkr_witness,
