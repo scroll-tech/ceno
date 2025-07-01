@@ -2,33 +2,14 @@ use std::{cmp::Ordering, collections::BTreeMap};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
-use multilinear_extensions::{Expression, Fixed, ToExpr, WitnessId};
+use multilinear_extensions::{Expression, Fixed, ToExpr, WitnessId, rlc_chip_record};
 use p3_field::FieldAlgebra;
 
 use crate::{
+    LookupTable,
     evaluation::EvalExpression,
     gkr::layer::{Layer, LayerType, ROTATION_OPENING_COUNT},
 };
-
-#[derive(Debug, Clone)]
-pub enum CenoLookup<E: ExtensionField> {
-    And(Expression<E>, Expression<E>, Expression<E>),
-    Xor(Expression<E>, Expression<E>, Expression<E>),
-    U16(Expression<E>),
-}
-
-impl<E: ExtensionField> IntoIterator for CenoLookup<E> {
-    type Item = Expression<E>;
-    type IntoIter = std::vec::IntoIter<Expression<E>>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        match self {
-            CenoLookup::And(a, b, c) => vec![a, b, c].into_iter(),
-            CenoLookup::Xor(a, b, c) => vec![a, b, c].into_iter(),
-            CenoLookup::U16(a) => vec![a].into_iter(),
-        }
-    }
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct RotationParams<E: ExtensionField> {
@@ -37,7 +18,6 @@ pub struct RotationParams<E: ExtensionField> {
     pub rotation_cyclic_subgroup_size: usize,
 }
 
-#[derive(Default)]
 pub struct LayerConstraintSystem<E: ExtensionField> {
     num_witin: usize,
     num_structural_witin: usize,
@@ -55,9 +35,13 @@ pub struct LayerConstraintSystem<E: ExtensionField> {
     pub rotations: Vec<(Expression<E>, Expression<E>)>,
     pub rotation_params: Option<RotationParams<E>>,
 
-    pub and_lookups: Vec<CenoLookup<E>>,
-    pub xor_lookups: Vec<CenoLookup<E>>,
-    pub range_lookups: Vec<CenoLookup<E>>,
+    pub and_lookups: Vec<Expression<E>>,
+    pub xor_lookups: Vec<Expression<E>>,
+    pub range_lookups: Vec<Expression<E>>,
+
+    // global challenge
+    pub alpha: Expression<E>,
+    pub beta: Expression<E>,
 }
 
 impl<E: ExtensionField> LayerConstraintSystem<E> {
@@ -66,13 +50,24 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         num_structural_witin: usize,
         num_fixed: usize,
         eq_zero: Option<Expression<E>>,
+        alpha: Expression<E>,
+        beta: Expression<E>,
     ) -> Self {
         LayerConstraintSystem {
             num_witin,
             num_structural_witin,
             num_fixed,
             eq_zero,
-            ..Default::default()
+            rotations: vec![],
+            rotation_params: None,
+            expressions: vec![],
+            expr_names: vec![],
+            evals: vec![],
+            and_lookups: vec![],
+            xor_lookups: vec![],
+            range_lookups: vec![],
+            alpha,
+            beta,
         }
     }
 
@@ -94,12 +89,30 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         self.expr_names.push(name);
     }
 
+    fn rlc_table_lookup(
+        &self,
+        lookup_table: LookupTable,
+        values: impl Iterator<Item = Expression<E>>,
+    ) -> Expression<E> {
+        rlc_chip_record(
+            chain!(
+                std::iter::once(E::BaseField::from_canonical_u64(lookup_table as u64).expr()),
+                values
+            )
+            .collect_vec(),
+            self.alpha.clone(),
+            self.beta.clone(),
+        )
+    }
+
     pub fn lookup_and8(&mut self, a: Expression<E>, b: Expression<E>, c: Expression<E>) {
-        self.and_lookups.push(CenoLookup::And(a, b, c));
+        let rlc_record = self.rlc_table_lookup(LookupTable::And, [a, b, c].iter().cloned());
+        self.and_lookups.push(rlc_record);
     }
 
     pub fn lookup_xor8(&mut self, a: Expression<E>, b: Expression<E>, c: Expression<E>) {
-        self.xor_lookups.push(CenoLookup::Xor(a, b, c));
+        let rlc_record = self.rlc_table_lookup(LookupTable::Xor, [a, b, c].iter().cloned());
+        self.xor_lookups.push(rlc_record);
     }
 
     /// Generates U16 lookups to prove that `value` fits on `size < 16` bits.
@@ -107,11 +120,17 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
     /// `value << (16 - size)`.
     pub fn lookup_range(&mut self, value: Expression<E>, size: usize) {
         assert!(size <= 16);
-        self.range_lookups.push(CenoLookup::U16(value.clone()));
+        self.range_lookups
+            .push(self.rlc_table_lookup(LookupTable::U16, vec![value.clone()].into_iter()));
         if size < 16 {
-            self.range_lookups.push(CenoLookup::U16(
-                value * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
-            ))
+            self.range_lookups.push(
+                self.rlc_table_lookup(
+                    LookupTable::U16,
+                    [value * E::BaseField::from_canonical_u64(1 << (16 - size)).expr()]
+                        .iter()
+                        .cloned(),
+                ),
+            )
         }
     }
 
@@ -250,17 +269,20 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         mut self,
         layer_name: String,
         in_expr_evals: Vec<usize>,
-        challenges: Vec<Expression<E>>,
-        lookup_evals: impl Iterator<Item = (Option<Expression<E>>, usize)>,
+        n_challenges: usize,
+        lookup_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
     ) -> Layer<E> {
+        assert_eq!(
+            lookup_evals.len(),
+            self.and_lookups.len() + self.xor_lookups.len() + self.range_lookups.len()
+        );
         for (idx, lookup, lookup_eval) in izip!(
             0..,
             chain!(
                 self.and_lookups.clone(),
                 self.xor_lookups.clone(),
                 self.range_lookups.clone()
-            )
-            .flatten(),
+            ),
             lookup_evals
         ) {
             self.add_non_zero_constraint(
@@ -270,14 +292,15 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             );
         }
 
-        self.into_layer(layer_name, in_expr_evals, challenges)
+        self.into_layer(layer_name, in_expr_evals, n_challenges)
     }
 
+    /// n_challenges: num of challanges dedicated to this layer
     pub fn into_layer(
         self,
         layer_name: String,
         in_eval_expr: Vec<usize>,
-        challenges: Vec<Expression<E>>,
+        n_challenges: usize,
     ) -> Layer<E> {
         let witin_offset = 0 as WitnessId;
         let structural_witin_offset = witin_offset + (self.num_witin as WitnessId);
@@ -297,15 +320,19 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             expressions
                 .iter_mut()
                 .fold(rotations.is_empty(), |is_linear_so_far, t| {
-                    match t {
-                        Expression::StructuralWitIn(structural_wit_id, _, _, _) => {
-                            *t = Expression::WitIn(structural_witin_offset + *structural_wit_id);
-                        }
-                        Expression::Fixed(Fixed(fixed_id)) => {
-                            *t = Expression::WitIn(fixed_offset + (*fixed_id as WitnessId));
-                        }
-                        _ => (),
-                    }
+                    // replace `Fixed` and `StructuralWitIn` with `WitIn`, keep other unchanged
+                    *t = t.transform_all(
+                        &|Fixed(fixed_id)| {
+                            Expression::WitIn(fixed_offset + (*fixed_id as WitnessId))
+                        },
+                        &|id| Expression::WitIn(id),
+                        &|structural_wit_id, _, _, _| {
+                            Expression::WitIn(structural_witin_offset + structural_wit_id)
+                        },
+                        &|i| Expression::Instance(i),
+                        &|c| Expression::Constant(c),
+                        &|cid, pow, s, o| Expression::Challenge(cid, pow, s, o),
+                    );
                     is_linear_so_far && t.is_linear()
                 });
 
@@ -343,7 +370,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                 layer_name,
                 layer_type,
                 expressions,
-                challenges,
+                n_challenges,
                 in_eval_expr,
                 expr_evals,
                 ((None, vec![]), 0, 0),
@@ -362,7 +389,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                 layer_name,
                 layer_type,
                 expressions,
-                challenges,
+                n_challenges,
                 in_eval_expr,
                 expr_evals,
                 (

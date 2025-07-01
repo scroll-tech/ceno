@@ -1,6 +1,6 @@
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
-    Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn, WitnessId,
+    Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn, WitnessId, rlc_chip_record,
 };
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
@@ -9,7 +9,6 @@ use ff_ext::ExtensionField;
 
 use crate::{
     ROMType,
-    chip_handler::utils::rlc_chip_record,
     error::ZKVMError,
     structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey},
 };

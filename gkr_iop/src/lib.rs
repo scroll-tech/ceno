@@ -11,6 +11,7 @@ use multilinear_extensions::{
     utils::eval_by_expr_constant,
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use strum_macros::EnumIter;
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use utils::infer_layer_witness;
@@ -196,3 +197,20 @@ pub struct ProtocolProver<E: ExtensionField, Trans: Transcript<E>, PCS>(
 pub struct ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );
+
+#[derive(
+    Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[repr(usize)]
+pub enum LookupTable {
+    U5 = 0,      // 2^5 = 32
+    U8,          // 2^8 = 256
+    U14,         // 2^14 = 16,384
+    U16,         // 2^16 = 65,536
+    And,         // a & b where a, b are bytes
+    Or,          // a | b where a, b are bytes
+    Xor,         // a ^ b where a, b are bytes
+    Ltu,         // a <(usign) b where a, b are bytes and the result is 0/1.
+    Pow,         // a ** b where a is 2 and b is 5-bit value
+    Instruction, // Decoded instruction from the fixed program.
+}

@@ -1,8 +1,10 @@
-use std::{marker::PhantomData, mem::transmute};
+use std::mem::transmute;
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, iproduct, izip, zip_eq};
-use multilinear_extensions::{Fixed, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
+use multilinear_extensions::{
+    ChallengeId, Expression, Fixed, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2,
+};
 use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::FieldAlgebra;
 use p3_util::indices_arr;
@@ -91,7 +93,7 @@ const AND_LOOKUPS_PER_ROUND: usize = 200;
 const XOR_LOOKUPS_PER_ROUND: usize = 608;
 const RANGE_LOOKUPS_PER_ROUND: usize = 290;
 const LOOKUP_FELTS_PER_ROUND: usize =
-    3 * AND_LOOKUPS_PER_ROUND + 3 * XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
+    AND_LOOKUPS_PER_ROUND + XOR_LOOKUPS_PER_ROUND + RANGE_LOOKUPS_PER_ROUND;
 
 pub const AND_LOOKUPS: usize = AND_LOOKUPS_PER_ROUND;
 pub const XOR_LOOKUPS: usize = XOR_LOOKUPS_PER_ROUND;
@@ -142,17 +144,17 @@ pub struct KeccakLayer<WitT, FixedT, EqT> {
 }
 
 #[derive(Clone, Debug)]
-pub struct KeccakLayout<E> {
+pub struct KeccakLayout<E: ExtensionField> {
     layer_exprs: KeccakLayer<WitIn, Fixed, WitIn>,
     layer_in_evals: [usize; KECCAK_LAYER_SIZE],
     final_out_evals: KeccakOutEvals<usize>,
-    _marker: PhantomData<E>,
+    alpha: Expression<E>,
+    beta: Expression<E>,
 }
 
 impl<E: ExtensionField> Default for KeccakLayout<E> {
     fn default() -> Self {
         // allocate evaluation expressions
-        // TODO we can rlc lookup via alpha/beta challenge, so gkr output layer only got rlc result
         let final_out_evals = indices_arr::<KECCAK_OUT_EVAL_SIZE>();
         let final_out_evals = unsafe {
             transmute::<[usize; KECCAK_OUT_EVAL_SIZE], KeccakOutEvals<usize>>(final_out_evals)
@@ -176,7 +178,8 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
             },
             layer_in_evals,
             final_out_evals,
-            _marker: PhantomData,
+            alpha: Expression::Challenge(0 as ChallengeId, 1, E::ONE, E::ZERO),
+            beta: Expression::Challenge(1 as ChallengeId, 1, E::ONE, E::ZERO),
         }
     }
 }
@@ -194,6 +197,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             0,
             KECCAK_WIT_SIZE,
             Some(self.layer_exprs.eq_zero.expr()),
+            self.alpha.clone(),
+            self.beta.clone(),
         );
 
         let KeccakWitCols {
@@ -488,7 +493,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         let layer = system.into_layer_with_lookup_eval_iter(
             "Rounds".to_string(),
             self.layer_in_evals.to_vec(),
-            vec![],
+            self.n_challenges(),
             lookup_evals_iter,
         );
         chip.add_layer(layer);
@@ -763,6 +768,10 @@ pub fn run_faster_keccakf<E: ExtensionField>(
     exit_span!(span);
 
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
+    let challenges = [
+        prover_transcript.read_challenge().elements,
+        prover_transcript.read_challenge().elements,
+    ];
 
     let span = entered_span!("gkr_witness", profiling_2 = true);
     let rc_witness = RC
@@ -774,7 +783,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
         })
         .collect_vec();
     let (gkr_witness, gkr_output) =
-        layout.gkr_witness(&gkr_circuit, &phase1_witness, &rc_witness, &[]);
+        layout.gkr_witness(&gkr_circuit, &phase1_witness, &rc_witness, &challenges);
     exit_span!(span);
 
     let span = entered_span!("out_eval", profiling_2 = true);
@@ -850,8 +859,13 @@ pub fn run_faster_keccakf<E: ExtensionField>(
             .iter()
             .map(|poly| poly.evaluations())
             .collect_vec();
-        MockProver::check(gkr_circuit.clone(), &gkr_witness, out_wits, vec![])
-            .expect("mock prover failed");
+        MockProver::check(
+            gkr_circuit.clone(),
+            &gkr_witness,
+            out_wits,
+            challenges.to_vec(),
+        )
+        .expect("mock prover failed");
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
@@ -861,7 +875,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
             log2_num_instance_rounds,
             gkr_witness,
             &out_evals,
-            &[],
+            &challenges,
             &mut prover_transcript,
         )
         .expect("Failed to prove phase");
@@ -870,6 +884,10 @@ pub fn run_faster_keccakf<E: ExtensionField>(
     if verify {
         {
             let mut verifier_transcript = BasicTranscript::<E>::new(b"protocol");
+            let challenges = [
+                verifier_transcript.read_challenge().elements,
+                verifier_transcript.read_challenge().elements,
+            ];
 
             // This is to make prover/verifier match
             let mut point = Vec::with_capacity(log2_num_instance_rounds);
@@ -884,7 +902,7 @@ pub fn run_faster_keccakf<E: ExtensionField>(
                     log2_num_instance_rounds,
                     gkr_proof.clone(),
                     &out_evals,
-                    &[],
+                    &challenges,
                     &mut verifier_transcript,
                 )
                 .expect("GKR verify failed");

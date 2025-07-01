@@ -128,10 +128,10 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
 
     fn gkr_info() -> crate::instructions::GKRinfo {
         GKRinfo {
-            and_lookups: 3 * AND_LOOKUPS,
-            xor_lookups: 3 * XOR_LOOKUPS,
+            and_lookups: AND_LOOKUPS,
+            xor_lookups: XOR_LOOKUPS,
             range_lookups: RANGE_LOOKUPS,
-            aux_wits: 40144,
+            aux_wits: 40144, // TODO fix the hardcode value as now we have rlc lookup records
         }
     }
 
