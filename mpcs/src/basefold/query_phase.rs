@@ -53,8 +53,7 @@ where
 
     queries
         .iter()
-        .enumerate()
-        .map(|(i, idx)| {
+        .map(|idx| {
             let witin_base_proof = {
                 // extract the even part of `idx`
                 // ---------------------------------
