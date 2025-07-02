@@ -25,9 +25,18 @@ pub trait Instruction<E: ExtensionField> {
     }
 
     fn name() -> String;
+
+    /// construct circuit and manipulate circuit builder, then return the respective config
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
     ) -> Result<Self::InstructionConfig, ZKVMError>;
+
+    /// giving config, extract optional gkr circuit
+    fn extract_gkr_iop_circuit(
+        _config: &mut Self::InstructionConfig,
+    ) -> Result<Option<GKRCircuit<E>>, ZKVMError> {
+        Ok(None)
+    }
 
     // assign single instance giving step from trace
     fn assign_instance(

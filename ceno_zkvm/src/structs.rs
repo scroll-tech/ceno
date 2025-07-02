@@ -8,7 +8,7 @@ use crate::{
 };
 use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
 use ff_ext::ExtensionField;
-use gkr_iop::{LookupTable, gkr::GKRCircuit, precompiles::KeccakLayout};
+use gkr_iop::{gkr::GKRCircuit, precompiles::KeccakLayout, tables::LookupTable};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::Expression;
@@ -160,12 +160,20 @@ impl Default for ProgramParams {
     }
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
+pub struct ComposedConstrainSystem<E: ExtensionField> {
+    // TODO migrate tower_css to `GKRCircuit<E>`
+    pub tower_css: ConstraintSystem<E>,
+    pub main_css: Option<GKRCircuit<E>>,
+}
+
 #[derive(Clone)]
 pub struct ZKVMConstraintSystem<E: ExtensionField> {
-    pub(crate) circuit_css: BTreeMap<String, ConstraintSystem<E>>,
+    pub(crate) circuit_css: BTreeMap<String, ComposedConstrainSystem<E>>,
     pub(crate) initial_global_state_expr: Expression<E>,
     pub(crate) finalize_global_state_expr: Expression<E>,
-    pub keccak_gkr_iop: Option<KeccakGKRIOP<E>>,
+    // pub keccak_gkr_iop: Option<KeccakGKRIOP<E>>,
     pub params: ProgramParams,
 }
 
@@ -176,7 +184,7 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
             params: ProgramParams::default(),
-            keccak_gkr_iop: None,
+            // keccak_gkr_iop: None,
         }
     }
 }
@@ -219,10 +227,20 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder =
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
-        let config = OC::construct_circuit(&mut circuit_builder).unwrap();
+        let mut config = OC::construct_circuit(&mut circuit_builder).unwrap();
         circuit_builder.finalize();
-        assert!(self.circuit_css.insert(OC::name(), cs).is_none());
-
+        let gkr_iop_circuit = OC::extract_gkr_iop_circuit(&mut config).unwrap();
+        assert!(
+            self.circuit_css
+                .insert(
+                    OC::name(),
+                    ComposedConstrainSystem {
+                        tower_css: cs,
+                        main_css: gkr_iop_circuit
+                    }
+                )
+                .is_none()
+        );
         config
     }
 
@@ -232,8 +250,17 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = TC::construct_circuit(&mut circuit_builder).unwrap();
         circuit_builder.finalize();
-        assert!(self.circuit_css.insert(TC::name(), cs).is_none());
-
+        assert!(
+            self.circuit_css
+                .insert(
+                    TC::name(),
+                    ComposedConstrainSystem {
+                        tower_css: cs,
+                        main_css: None
+                    }
+                )
+                .is_none()
+        );
         config
     }
 
@@ -248,11 +275,11 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         circuit_builder.finalize();
     }
 
-    pub fn get_css(&self) -> &BTreeMap<String, ConstraintSystem<E>> {
+    pub fn get_css(&self) -> &BTreeMap<String, ComposedConstrainSystem<E>> {
         &self.circuit_css
     }
 
-    pub fn get_cs(&self, name: &String) -> Option<&ConstraintSystem<E>> {
+    pub fn get_cs(&self, name: &String) -> Option<&ComposedConstrainSystem<E>> {
         self.circuit_css.get(name)
     }
 }
@@ -286,7 +313,11 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
             self.circuit_fixed_traces
                 .insert(
                     TC::name(),
-                    Some(TC::generate_fixed_traces(config, cs.num_fixed, input)),
+                    Some(TC::generate_fixed_traces(
+                        config,
+                        cs.tower_css.num_fixed,
+                        input
+                    )),
                 )
                 .is_none()
         );

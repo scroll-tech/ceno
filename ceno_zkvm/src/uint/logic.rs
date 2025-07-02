@@ -1,11 +1,9 @@
 use ff_ext::ExtensionField;
+use gkr_iop::tables::OpsTable;
 use itertools::izip;
 
 use super::UIntLimbs;
-use crate::{
-    ROMType, circuit_builder::CircuitBuilder, error::ZKVMError, tables::OpsTable,
-    witness::LkMultiplicity,
-};
+use crate::{ROMType, circuit_builder::CircuitBuilder, error::ZKVMError, witness::LkMultiplicity};
 use multilinear_extensions::ToExpr;
 
 // Only implemented for u8 limbs.

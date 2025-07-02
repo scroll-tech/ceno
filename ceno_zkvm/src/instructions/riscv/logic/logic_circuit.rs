@@ -1,6 +1,7 @@
 //! The circuit implementation of logic instructions.
 
 use ff_ext::ExtensionField;
+use gkr_iop::tables::OpsTable;
 use std::marker::PhantomData;
 
 use crate::{
@@ -10,7 +11,6 @@ use crate::{
         Instruction,
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
     },
-    tables::OpsTable,
     utils::split_to_u8,
     witness::LkMultiplicity,
 };

@@ -215,8 +215,8 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
         layout.phase1_witness_group(KeccakTrace {
             instances,
             ram_start_addr: vec![ByteAddr::from(0); num_instances],
-            cur_ts: vec![0; num_instances],
             read_ts: vec![[0; KECCAK_INPUT32_SIZE]; num_instances],
+            cur_ts: vec![0; num_instances],
         })
     }
 

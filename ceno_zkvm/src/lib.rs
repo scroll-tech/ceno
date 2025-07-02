@@ -1,7 +1,6 @@
 #![deny(clippy::cargo)]
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
-#![feature(variant_count)]
 #![feature(strict_overflow_ops)]
 #![feature(let_chains)]
 

@@ -1,9 +1,10 @@
 use std::{cmp::Ordering, collections::BTreeMap};
 
 use crate::{
-    LookupTable, RAMType,
+    RAMType,
     evaluation::EvalExpression,
     gkr::layer::{Layer, LayerType, ROTATION_OPENING_COUNT},
+    tables::LookupTable,
 };
 use ceno_emul::Tracer;
 use ff_ext::ExtensionField;

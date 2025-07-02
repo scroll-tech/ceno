@@ -42,7 +42,7 @@ use crate::{
     precompiles::utils::{
         MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance,
     },
-    utils::{indices_arr_with_offset, wits_fixed_and_eqs},
+    utils::{indices_arr_with_offset, lk_multiplicity::LkMultiplicity, wits_fixed_and_eqs},
 };
 
 const ROUNDS: usize = 24;
@@ -133,8 +133,15 @@ pub struct KeccakWitCols<T> {
     pub chi_output: [T; 8],
     pub iota_output: [T; 200],
     pub input_ram_start_addr: [T; 1],
-    pub cur_ts: [T; 1],
     pub input_ram_read_ts: [T; KECCAK_INPUT32_SIZE],
+
+    // transition state
+    pub cur_ts: [T; 1],
+    pub pc: [T; 1],
+
+    // VM ecall specs
+    pub read_rs1: [T; 1],
+    pub read_rs2: [T; 1],
 }
 
 #[derive(Clone, Debug)]
@@ -152,7 +159,7 @@ pub struct KeccakLayer<WitT, FixedT, EqT> {
 
 #[derive(Clone, Debug)]
 pub struct KeccakLayout<E: ExtensionField> {
-    layer_exprs: KeccakLayer<WitIn, Fixed, WitIn>,
+    pub layer_exprs: KeccakLayer<WitIn, Fixed, WitIn>,
     layer_in_evals: [usize; KECCAK_LAYER_SIZE],
     final_out_evals: KeccakOutEvals<usize>,
     alpha: Expression<E>,
@@ -233,8 +240,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             chi_output,
             iota_output,
             input_ram_start_addr: [input_ram_start_addr],
-            cur_ts: [cur_ts],
             input_ram_read_ts,
+            cur_ts: [cur_ts],
+            pc: [_pc],
         } = &self.layer_exprs.wits;
 
         let KeccakFixedCols { rc } = &self.layer_exprs.fixed;
@@ -561,7 +569,12 @@ where
 {
     type Trace = KeccakTrace;
 
-    fn phase1_witness_group(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField> {
+    fn phase1_witness_group(
+        &self,
+        phase1: Self::Trace,
+        // TODO manipulate `lk_multiplicity` for correct lookup statement
+        _lk_multiplicity: &mut LkMultiplicity,
+    ) -> RowMajorMatrix<E::BaseField> {
         let KeccakTrace {
             instances,
             ram_start_addr,
@@ -741,12 +754,12 @@ where
                         nonlinear8.into_iter().flatten().flatten(),
                         chi_output8[0][0].iter().copied(),
                         iota_output8.into_iter().flatten().flatten(),
-                        // input_ram_start_addr,
+                        // input_ram_start_addr
                         vec![ram_start_addr[instance_id].0 as u64],
-                        // cur_ts,
-                        vec![cur_ts[instance_id]],
                         // input_ram_read_ts with KECCAK_INPUT32_SIZE size
-                        read_ts[instance_id]
+                        read_ts[instance_id],
+                        // cur_ts
+                        vec![cur_ts[instance_id]],
                     );
 
                     push_instance::<E, _>(wits, &mut wits_start_index, all_wits64);
@@ -800,12 +813,16 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     exit_span!(span);
 
     let span = entered_span!("phase1_witness", profiling_2 = true);
-    let phase1_witness = layout.phase1_witness_group(KeccakTrace {
-        instances,
-        ram_start_addr: vec![ByteAddr::from(0); num_instances],
-        cur_ts: vec![0; num_instances],
-        read_ts: vec![[0; KECCAK_INPUT32_SIZE]; num_instances],
-    });
+    let mut lk_multiplicity = LkMultiplicity::default();
+    let phase1_witness = layout.phase1_witness_group(
+        KeccakTrace {
+            instances,
+            ram_start_addr: vec![ByteAddr::from(0); num_instances],
+            read_ts: vec![[0; KECCAK_INPUT32_SIZE]; num_instances],
+            cur_ts: vec![0; num_instances],
+        },
+        &mut lk_multiplicity,
+    );
     exit_span!(span);
 
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");

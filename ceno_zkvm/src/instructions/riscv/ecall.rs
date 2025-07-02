@@ -1,4 +1,5 @@
 mod halt;
+mod keccak;
 
 use ceno_emul::InsnKind;
 pub use halt::HaltInstruction;

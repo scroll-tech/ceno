@@ -4,16 +4,20 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     state::{GlobalState, StateCircuit},
     structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{
-        AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
-    },
-    witness::{LkMultiplicity, LkMultiplicityRaw},
+    tables::{ProgramTableCircuit, RangeTable, TableCircuit, U5Table, U8Table, U14Table, U16Table},
+    witness::LkMultiplicity,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
+use gkr_iop::{
+    tables::{
+        OpsTable,
+        ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
+    },
+    utils::lk_multiplicity::LkMultiplicityRaw,
+};
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, fmt,
