@@ -792,6 +792,7 @@ where
     E: ExtensionField,
 {
     type Trace = KeccakTrace<E>;
+
     fn phase1_witness_group(
         &self,
         _phase1: Self::Trace,
@@ -803,6 +804,10 @@ where
 
     fn phase1_witin_rmm_height(&self, _num_instances: usize) -> usize {
         0
+    }
+
+    fn fixed_witness_group(&self) -> Vec<Vec<E::BaseField>> {
+        vec![vec![]]
     }
 }
 

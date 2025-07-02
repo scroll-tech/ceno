@@ -68,6 +68,10 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     /// return rmm height for phase 1 witness, which might include height for `multivariate rotation`
     fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize;
 
+    /// The fixed witness. Use Vec<Vec<E::BaseField>> as the return type in case
+    /// the fixed witnesses has different sizes.
+    fn fixed_witness_group(&self) -> Vec<Vec<E::BaseField>>;
+
     /// The vectors to be committed in the phase1.
     fn phase1_witness_group(
         &self,
