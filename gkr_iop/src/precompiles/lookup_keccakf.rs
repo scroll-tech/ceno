@@ -243,6 +243,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             input_ram_read_ts,
             cur_ts: [cur_ts],
             pc: [_pc],
+            read_rs1: [_read_rs1],
+            read_rs2: [_read_rs2],
         } = &self.layer_exprs.wits;
 
         let KeccakFixedCols { rc } = &self.layer_exprs.fixed;

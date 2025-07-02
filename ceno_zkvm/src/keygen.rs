@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     error::ZKVMError,
-    structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey},
+    structs::{ComposedConstrainSystem, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
@@ -17,7 +17,16 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let mut vm_pk = ZKVMProvingKey::new(pp.clone(), vp);
         let mut fixed_traces = BTreeMap::new();
 
-        for (circuit_index, (c_name, cs)) in self.circuit_css.into_iter().enumerate() {
+        for (
+            circuit_index,
+            (
+                c_name,
+                ComposedConstrainSystem {
+                    zkvm_v1_css: cs, ..
+                },
+            ),
+        ) in self.circuit_css.into_iter().enumerate()
+        {
             // fixed_traces is optional
             // verifier will check it existent if cs.num_fixed > 0
             if cs.num_fixed > 0 {

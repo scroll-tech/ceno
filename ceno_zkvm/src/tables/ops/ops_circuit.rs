@@ -7,7 +7,6 @@ use std::{collections::HashMap, marker::PhantomData};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    structs::ROMType,
     tables::{RMMCollections, TableCircuit},
 };
 use ff_ext::ExtensionField;

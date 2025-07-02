@@ -3,7 +3,10 @@ use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     state::{GlobalState, StateCircuit},
-    structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    structs::{
+        ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
+        ZKVMWitnesses,
+    },
     tables::{ProgramTableCircuit, RangeTable, TableCircuit, U5Table, U8Table, U14Table, U16Table},
     witness::LkMultiplicity,
 };
@@ -816,7 +819,13 @@ Hints:
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
         // Process all circuits.
-        for (circuit_name, cs) in &cs.circuit_css {
+        for (
+            circuit_name,
+            ComposedConstrainSystem {
+                zkvm_v1_css: cs, ..
+            },
+        ) in &cs.circuit_css
+        {
             let empty_rmm = RowMajorMatrix::empty();
             let is_opcode = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
@@ -953,7 +962,13 @@ Hints:
                 let mut writes_grp_by_annotations = HashMap::new();
                 // store (pc, timestamp) for $ram_type == RAMType::GlobalState
                 let mut gs = HashMap::new();
-                for (circuit_name, cs) in &cs.circuit_css {
+                for (
+                    circuit_name,
+                    ComposedConstrainSystem {
+                        zkvm_v1_css: cs, ..
+                    },
+                ) in &cs.circuit_css
+                {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
@@ -1022,7 +1037,13 @@ Hints:
 
                 let mut reads = HashSet::new();
                 let mut reads_grp_by_annotations = HashMap::new();
-                for (circuit_name, cs) in &cs.circuit_css {
+                for (
+                    circuit_name,
+                    ComposedConstrainSystem {
+                        zkvm_v1_css: cs, ..
+                    },
+                ) in &cs.circuit_css
+                {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();

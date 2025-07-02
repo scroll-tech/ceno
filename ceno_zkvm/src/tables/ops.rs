@@ -20,6 +20,7 @@ mod tests {
         tables::TableCircuit,
     };
     use ff_ext::{GoldilocksExt2 as E, SmallField};
+    use gkr_iop::tables::OpsTable;
 
     #[test]
     fn test_ops_pow_table_assign() {

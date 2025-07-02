@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use ceno_emul::{ByteAddr, InsnKind, PC_STEP_SIZE, StepRecord, Tracer};
-use ff_ext::{ExtensionField, SmallField};
+use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolWitnessGenerator,
     gkr::GKRCircuit,
@@ -20,7 +20,7 @@ use crate::{
         Instruction,
         riscv::{
             constants::UInt,
-            insn_base::{ReadRS1, ReadRS2, StateInOut},
+            insn_base::{ReadRS1, ReadRS2},
         },
     },
     tables::InsnRecord,
@@ -41,6 +41,13 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
     fn name() -> String {
         "Ecall_Keccak".to_string()
+    }
+
+    /// giving config, extract optional gkr circuit
+    fn extract_gkr_iop_circuit(
+        config: &mut Self::InstructionConfig,
+    ) -> Result<Option<GKRCircuit<E>>, ZKVMError> {
+        Ok(Some(config.circuit.clone()))
     }
 
     fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -70,11 +77,19 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         // TODO register read are not under same constrain system
         // rs1: ecall code
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let rs1_op = ReadRS1::construct_circuit(cb, rs1_read.register_expr(), cur_ts.clone())?;
+        let _rs1_op = ReadRS1::construct_circuit(
+            cb,
+            rs1_read.register_expr(),
+            layout.layer_exprs.wits.cur_ts[0],
+        )?;
 
         // rs2: state ptr
         let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
-        let rs2_op = ReadRS2::construct_circuit(cb, rs2_read.register_expr(), cur_ts)?;
+        let _rs2_op = ReadRS2::construct_circuit(
+            cb,
+            rs2_read.register_expr(),
+            layout.layer_exprs.wits.cur_ts[0],
+        )?;
 
         Ok(EcallKeccakConfig {
             circuit: chip.gkr_circuit(),
@@ -84,7 +99,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
     fn assign_instances(
         config: &Self::InstructionConfig,
-        num_witin: usize,
+        _num_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
