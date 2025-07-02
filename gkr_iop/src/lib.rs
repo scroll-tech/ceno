@@ -61,6 +61,10 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
 pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     type Trace;
 
+    /// The fixed witness. Use Vec<Vec<E::BaseField>> as the return type in case
+    /// the fixed witnesses has different sizes.
+    fn fixed_witness_group(&self) -> Vec<Vec<E::BaseField>>;
+
     /// The vectors to be committed in the phase1.
     fn phase1_witness_group(
         &self,

@@ -795,6 +795,11 @@ where
     E: ExtensionField,
 {
     type Trace = KeccakTrace<E>;
+
+    fn fixed_witness_group(&self) -> Vec<Vec<E::BaseField>> {
+        vec![vec![]]
+    }
+
     fn phase1_witness_group(
         &self,
         phase1: Self::Trace,
