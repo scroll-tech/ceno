@@ -1,4 +1,4 @@
-use std::{cmp::Reverse, collections::BTreeMap, slice};
+use std::{collections::BTreeMap, slice};
 
 use crate::{
     Point,
@@ -53,7 +53,8 @@ where
 
     queries
         .iter()
-        .map(|idx| {
+        .enumerate()
+        .map(|(i, idx)| {
             let witin_base_proof = {
                 // extract the even part of `idx`
                 // ---------------------------------
@@ -201,6 +202,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 // for each log2_height, accumulate base codewords
                 for (mat, dimension) in batch_opening.opened_values.iter().zip(dimensions.iter()) {
                     let width = mat.len() / 2;
+                    assert_eq!(dimension.width, mat.len());
+                    assert_eq!(width * 2, mat.len());
                     let batch_coeffs = batch_coeffs_iter
                         .by_ref()
                         .take(width)
@@ -212,10 +215,15 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                     let high =
                         dot_product::<E, _, _>(batch_coeffs.iter().copied(), hi.iter().copied());
                     let log2_height = log2_strict_usize(dimension.height);
-                    let (low_acc, high_acc) =
-                        reduced_openings.entry(log2_height).or_insert((low, high));
-                    *low_acc += low;
-                    *high_acc += high;
+
+                    reduced_openings
+                        .entry(log2_height)
+                        .and_modify(|(low_acc, high_acc)| {
+                            // accumulate low and high values for the same log2_height
+                            *low_acc += low;
+                            *high_acc += high;
+                        })
+                        .or_insert((low, high));
                 }
             }
 
@@ -259,14 +267,11 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 cur_num_var -= 1;
                 log2_height -= 1;
 
-                let is_interpolate_to_right_index = (idx & 1) == 1;
+                let idx_sibling = idx & 0x01;
                 let mut leafs = vec![*sibling_value; 2];
+                leafs[idx_sibling] = folded;
                 if let Some((lo, hi)) = reduced_openings.get(&log2_height) {
-                    if is_interpolate_to_right_index {
-                        leafs[1] = folded + *hi;
-                    } else {
-                        leafs[0] = folded + *lo;
-                    }
+                    leafs[idx_sibling] += if idx_sibling == 1 { *hi } else { *lo };
                 }
 
                 idx >>= 1;
