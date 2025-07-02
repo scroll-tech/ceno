@@ -157,9 +157,9 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
     let mmcs = poseidon2_merkle_tree::<E>();
     let check_queries_span = entered_span!("check_queries");
-    // can't use witin_comm.log2_max_codeword_size since it's untrusted
+    let log2_blowup = <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log();
     let log2_max_codeword_size =
-        max_num_var + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log();
+        max_num_var + log2_blowup;
 
     indices.iter().zip_eq(queries).for_each(
         |(
@@ -175,6 +175,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             let mut idx = idx >> 1;
 
             let mut reduced_openings = BTreeMap::new();
+            let mut batch_coeffs_iter = batch_coeffs.iter();
+
             // rounds
             let (witin_dimensions, fixed_dimensions) =
                 get_base_codeword_dimentions::<E, Spec>(circuit_meta);
@@ -183,12 +185,10 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 rounds.push((fixed_comm.unwrap(), fixed, fixed_dimensions));
             }
 
-            let mut batch_coeffs_iter = batch_coeffs.iter();
-
             for (commit, batch_opening, dimensions) in rounds {
                 let bits_reduced = log2_max_codeword_size - commit.log2_max_codeword_size;
                 let reduced_index = idx >> bits_reduced;
-                // verify MMCS opening proof
+                // verify base MMCS opening proof
                 mmcs.verify_batch(
                     &commit.commit(),
                     &dimensions,
@@ -198,7 +198,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                 )
                 .expect("verify mmcs opening proof failed");
 
-                // for each log2_height, accumulate base codewords
+                // for each log2_height, combine codewords with randomness
                 for (mat, dimension) in batch_opening.opened_values.iter().zip(dimensions.iter()) {
                     let width = mat.len() / 2;
                     assert_eq!(dimension.width, mat.len());
@@ -228,12 +228,11 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
             // fold and query
             let mut cur_num_var = max_num_var;
+            let mut log2_height = cur_num_var + log2_blowup - 1;
             // -1 because for there are only #max_num_var-1 openings proof
             let rounds = cur_num_var
                 - <Spec::EncodingScheme as EncodingScheme<E>>::get_basecode_msg_size_log()
                 - 1;
-            let n_d_next = 1
-                << (cur_num_var + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log() - 1);
 
             assert_eq!(rounds, fold_challenges.len() - 1);
             assert_eq!(rounds, commits.len(),);
@@ -241,8 +240,6 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
             // first folding challenge
             let r = fold_challenges.first().unwrap();
-            let log2_blowup = <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log();
-            let mut log2_height = cur_num_var + log2_blowup - 1;
             let coeff = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
                 vp,
                 log2_height,
@@ -251,7 +248,6 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             let (lo, hi) = reduced_openings[&log2_height];
             let mut folded = codeword_fold_with_challenge(&[lo, hi], *r, coeff, inv_2);
 
-            let mut n_d_i = n_d_next;
             for (
                 (pi_comm, r),
                 CommitPhaseProofStep {
@@ -280,7 +276,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                         &[Dimensions {
                             width: 2,
                             // width is 2, thus height divide by 2 via right shift
-                            height: n_d_i >> 1,
+                            height: 1 << log2_height,
                         }],
                         idx,
                         slice::from_ref(&leafs),
@@ -289,11 +285,10 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                     .expect("verify failed");
                 let coeff = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
                     vp,
-                    log2_strict_usize(n_d_i) - 1,
+                    log2_height,
                     idx,
                 );
                 folded = codeword_fold_with_challenge(&[leafs[0], leafs[1]], *r, coeff, inv_2);
-                n_d_i >>= 1;
             }
             assert!(
                 final_codeword.values[idx] == folded,
