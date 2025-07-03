@@ -583,6 +583,10 @@ where
             cur_ts,
             read_ts,
         } = phase1;
+        if instances.is_empty() {
+            return RowMajorMatrix::new(0, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default);
+        }
+
         let num_instances = instances.len();
 
         fn conv64to8(input: u64) -> [u64; 8] {

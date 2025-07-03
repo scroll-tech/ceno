@@ -54,6 +54,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         // construct keccak gkr-iop circuit
         let params = gkr_iop::precompiles::KeccakParams {};
         let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);
+        let circuit = chip.gkr_circuit();
 
         // TODO FIXME below circuit construction are out-of-sync with gkr-iop circuit, because both constrain system are separated
         // TODO FIXME and manage constrains/witness in isolated struct
@@ -93,10 +94,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             layout.layer_exprs.wits.cur_ts[0],
         )?;
 
-        Ok(EcallKeccakConfig {
-            circuit: chip.gkr_circuit(),
-            layout,
-        })
+        Ok(EcallKeccakConfig { circuit, layout })
     }
 
     fn assign_instances(

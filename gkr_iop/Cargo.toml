@@ -31,11 +31,11 @@ strum.workspace = true
 strum_macros.workspace = true
 sumcheck.workspace = true
 thiserror.workspace = true
+thread_local.workspace = true
 tiny-keccak.workspace = true
 tracing.workspace = true
 tracing-forest.workspace = true
 tracing-subscriber.workspace = true
-thread_local.workspace = true
 transcript = { path = "../transcript" }
 witness = { path = "../witness" }
 

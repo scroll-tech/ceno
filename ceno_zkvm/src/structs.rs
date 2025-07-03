@@ -165,17 +165,19 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let mut config = OC::construct_circuit(&mut circuit_builder).unwrap();
         circuit_builder.finalize();
         let gkr_iop_circuit = OC::extract_gkr_iop_circuit(&mut config).unwrap();
-        assert!(
-            self.circuit_css
-                .insert(
-                    OC::name(),
-                    ComposedConstrainSystem {
-                        zkvm_v1_css: cs,
-                        gkr_circuit: gkr_iop_circuit
-                    }
-                )
-                .is_none()
+        let cs = ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit: gkr_iop_circuit,
+        };
+        tracing::trace!(
+            "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
+            OC::name(),
+            cs.num_witin(),
+            cs.zkvm_v1_css.r_expressions.len(),
+            cs.zkvm_v1_css.w_expressions.len(),
+            cs.zkvm_v1_css.lk_expressions.len(),
         );
+        assert!(self.circuit_css.insert(OC::name(), cs).is_none());
         config
     }
 

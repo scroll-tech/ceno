@@ -219,15 +219,6 @@ impl<
                 };
 
                 if cs.is_opcode_circuit() {
-                    // tracing::trace!(
-                    //     "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
-                    //     circuit_name,
-                    //     cs.num_witin,
-                    //     cs.r_expressions.len(),
-                    //     cs.w_expressions.len(),
-                    //     cs.lk_expressions.len(),
-                    // );
-
                     let (opcode_proof, _, input_opening_point) = self.create_chip_proof(
                         circuit_name,
                         pk,
