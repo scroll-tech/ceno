@@ -463,7 +463,7 @@ mod test {
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use ff_ext::{ExtensionField, GoldilocksExt2 as GE};
     use itertools::Itertools;
-    use rand::Rng;
+    use rand::RngCore;
 
     // unifies DIV/REM/DIVU/REMU interface for testing purposes
     trait TestInstance<E: ExtensionField>
@@ -668,8 +668,8 @@ mod test {
     fn test_divrem_unsigned_random() {
         for _ in 0..10 {
             let mut rng = rand::thread_rng();
-            let dividend: u32 = rng.gen();
-            let divisor: u32 = rng.gen();
+            let dividend: u32 = rng.next_u32();
+            let divisor: u32 = rng.next_u32();
             let name = format!("random: dividend = {}, divisor = {}", dividend, divisor);
             verify_positive::<Divu>(&name, dividend, divisor);
             verify_positive::<Remu>(&name, dividend, divisor);
@@ -715,8 +715,8 @@ mod test {
     fn test_divrem_signed_random() {
         for _ in 0..10 {
             let mut rng = rand::thread_rng();
-            let dividend: i32 = rng.gen();
-            let divisor: i32 = rng.gen();
+            let dividend: i32 = rng.next_u32() as i32;
+            let divisor: i32 = rng.next_u32() as i32;
             let name = format!("random: dividend = {}, divisor = {}", dividend, divisor);
             verify_positive::<Div>(&name, dividend, divisor);
             verify_positive::<Rem>(&name, dividend, divisor);

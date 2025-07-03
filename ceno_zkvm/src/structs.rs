@@ -9,7 +9,7 @@ use crate::{
 use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
 use either::Either;
 use ff_ext::ExtensionField;
-use gkr_iop::{gkr::GKRCircuit, precompiles::KeccakLayout};
+use gkr_iop::{LookupTable, gkr::GKRCircuit, precompiles::KeccakLayout};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, impl_expr_from_unsigned};
@@ -18,7 +18,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
-use strum_macros::EnumIter;
 use sumcheck::structs::IOPProverMessage;
 use witness::RowMajorMatrix;
 
@@ -44,21 +43,7 @@ pub struct TowerProofs<E: ExtensionField> {
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 
-#[derive(
-    Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
-pub enum ROMType {
-    U5 = 0,      // 2^5 = 32
-    U8,          // 2^8 = 256
-    U14,         // 2^14 = 16,384
-    U16,         // 2^16 = 65,536
-    And,         // a & b where a, b are bytes
-    Or,          // a | b where a, b are bytes
-    Xor,         // a ^ b where a, b are bytes
-    Ltu,         // a <(usign) b where a, b are bytes and the result is 0/1.
-    Pow,         // a ** b where a is 2 and b is 5-bit value
-    Instruction, // Decoded instruction from the fixed program.
-}
+pub type ROMType = LookupTable;
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RAMType {
@@ -143,7 +128,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State>
 ))]
 pub struct KeccakGKRIOP<E: ExtensionField> {
     pub circuit: GKRCircuit<E>,
-    pub layout: KeccakLayout<E>,
 }
 
 impl<E: ExtensionField> KeccakGKRIOP<E> {
@@ -218,9 +202,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     ) -> <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig {
         // Add GKR-IOP instance
         let params = gkr_iop::precompiles::KeccakParams {};
-        let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);
+        let (_layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);
         self.keccak_gkr_iop = Some(KeccakGKRIOP {
-            layout,
             circuit: chip.gkr_circuit(),
         });
 

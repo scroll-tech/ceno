@@ -91,7 +91,7 @@ impl<'a, F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<MultilinearExtensi
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Hash, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -138,6 +138,30 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
             FieldType::Base(_) => "Base",
             FieldType::Ext(_) => "Ext",
             FieldType::Unreachable => "Unreachable",
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        match self {
+            FieldType::Base(content) => content.par_iter().all(|x| x.is_zero()),
+            FieldType::Ext(content) => content.par_iter().all(|x| x.is_zero()),
+            FieldType::Unreachable => true,
+        }
+    }
+
+    pub fn zero(num_vars: usize) -> Self {
+        FieldType::Base(SmartSlice::Owned(vec![E::BaseField::ZERO; 1 << num_vars]))
+    }
+
+    pub fn is_equal(&self, other: &Self) -> bool {
+        match (self, other) {
+            (FieldType::Base(a), FieldType::Base(b)) => a == b,
+            (FieldType::Ext(a), FieldType::Ext(b)) => a == b,
+            (FieldType::Base(a), FieldType::Ext(b)) | (FieldType::Ext(b), FieldType::Base(a)) => a
+                .par_iter()
+                .zip(b.par_iter())
+                .all(|(a, b)| E::from_base(*a) == *b),
+            _ => self.is_zero() && other.is_zero(),
         }
     }
 }

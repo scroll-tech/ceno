@@ -8,14 +8,14 @@ use crate::{
     util::ceil_log2,
 };
 use ff_ext::{ExtensionField, SmallField};
-use itertools::Either;
+use itertools::{Either, izip};
 use p3::field::FieldAlgebra;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::de::DeserializeOwned;
 use std::{
     cmp::max,
     fmt::{Debug, Display},
-    iter::{Product, Sum},
+    iter::{Product, Sum, successors},
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
@@ -277,6 +277,10 @@ impl<E: ExtensionField> Expression<E> {
         matches!(self, Expression::Constant(_))
     }
 
+    pub fn is_linear(&self) -> bool {
+        self.degree() <= 1
+    }
+
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
             Expression::Fixed(_) => false,
@@ -323,6 +327,102 @@ impl<E: ExtensionField> Expression<E> {
             (Expression::ScaledSum(x, a, b), MonomialState::ProductTerm) => {
                 Self::is_zero_expr(x) || Self::is_zero_expr(a) || Self::is_zero_expr(b)
             }
+        }
+    }
+
+    /// recursively transforms an expression tree by allowing custom handlers for each leaf variant.
+    /// this allows rewriting any part of the tree (e.g., replacing `Fixed` with `WitIn`, etc.).
+    /// each closure corresponds to the rewrite a specific leaf node.
+    pub fn transform_all<TF, TW, TS, TI, TC, CH>(
+        &self,
+        fixed_fn: &TF,
+        wit_fn: &TW,
+        struct_wit_fn: &TS,
+        instance_fn: &TI,
+        constant_fn: &TC,
+        challenge_fn: &CH,
+    ) -> Expression<E>
+    where
+        TF: Fn(&Fixed) -> Expression<E>,
+        TW: Fn(WitnessId) -> Expression<E>,
+        TS: Fn(WitnessId, usize, u32, usize) -> Expression<E>,
+        TI: Fn(Instance) -> Expression<E>,
+        TC: Fn(Either<E::BaseField, E>) -> Expression<E>,
+        CH: Fn(ChallengeId, usize, E, E) -> Expression<E>,
+    {
+        match self {
+            Expression::WitIn(id) => wit_fn(*id),
+            Expression::StructuralWitIn(id, len, offset, multi_factor) => {
+                struct_wit_fn(*id, *len, *offset, *multi_factor)
+            }
+            Expression::Fixed(f) => fixed_fn(f),
+            Expression::Instance(i) => instance_fn(*i),
+            Expression::Constant(c) => constant_fn(*c),
+            Expression::Challenge(id, pow, scalar, offset) => {
+                challenge_fn(*id, *pow, *scalar, *offset)
+            }
+            Expression::Sum(a, b) => Expression::Sum(
+                Box::new(a.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+                Box::new(b.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+            ),
+            Expression::Product(a, b) => Expression::Product(
+                Box::new(a.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+                Box::new(b.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+            ),
+            Expression::ScaledSum(x, a, b) => Expression::ScaledSum(
+                Box::new(x.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+                Box::new(a.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+                Box::new(b.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+            ),
         }
     }
 }
@@ -871,11 +971,13 @@ impl<E: ExtensionField> Mul for Expression<E> {
 }
 
 #[derive(Clone, Debug, Copy)]
+#[repr(C)]
 pub struct WitIn {
     pub id: WitnessId,
 }
 
 #[derive(Clone, Debug, Copy, serde::Serialize, serde::Deserialize)]
+#[repr(C)]
 pub struct StructuralWitIn {
     pub id: WitnessId,
     pub max_len: usize,
@@ -883,14 +985,17 @@ pub struct StructuralWitIn {
     pub multi_factor: usize,
     pub descending: bool,
 }
+
 #[derive(
     Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[repr(C)]
 pub struct Fixed(pub usize);
 
 #[derive(
     Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[repr(C)]
 pub struct Instance(pub usize);
 
 pub trait ToExpr<E: ExtensionField> {
@@ -1090,6 +1195,37 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
             })
         },
     )
+}
+
+pub fn rlc_chip_record<E: ExtensionField>(
+    records: Vec<Expression<E>>,
+    chip_record_alpha: Expression<E>,
+    chip_record_beta: Expression<E>,
+) -> Expression<E> {
+    assert!(!records.is_empty());
+    let beta_pows = power_sequence(chip_record_beta);
+
+    let item_rlc = izip!(records, beta_pows)
+        .map(|(record, beta)| record * beta)
+        .sum::<Expression<E>>();
+
+    item_rlc + chip_record_alpha.clone()
+}
+
+/// derive power sequence [1, base, base^2, ..., base^(len-1)] of base expression
+pub fn power_sequence<E: ExtensionField>(
+    base: Expression<E>,
+) -> impl Iterator<Item = Expression<E>> {
+    assert!(
+        matches!(
+            base,
+            Expression::Constant { .. } | Expression::Challenge { .. }
+        ),
+        "expression must be constant or challenge"
+    );
+    successors(Some(E::BaseField::ONE.expr()), move |prev| {
+        Some(prev.clone() * base.clone())
+    })
 }
 
 macro_rules! impl_from_via_ToExpr {
