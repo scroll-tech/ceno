@@ -4,6 +4,7 @@ use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
+    structs::ComposedConstrainSystem,
 };
 
 use super::arith::{AddInstruction, SubInstruction};
@@ -24,5 +25,9 @@ fn test_multiple_opcode() {
     );
     let param = Pcs::setup(1 << 10, SecurityLevel::default()).unwrap();
     let (_, _) = Pcs::trim(param, 1 << 10).unwrap();
+    let cs = ComposedConstrainSystem {
+        zkvm_v1_css: cs,
+        gkr_circuit: None,
+    };
     cs.key_gen();
 }

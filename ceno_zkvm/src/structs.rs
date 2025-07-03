@@ -11,7 +11,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::Expression;
+use multilinear_extensions::{Expression, Instance};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -97,6 +97,36 @@ pub struct ComposedConstrainSystem<E: ExtensionField> {
     // right now both co-exist because gkr_circuit couldn't cope with dynamic layers features which required by tower argument
     pub zkvm_v1_css: ConstraintSystem<E>,
     pub gkr_circuit: Option<GKRCircuit<E>>,
+}
+
+impl<E: ExtensionField> ComposedConstrainSystem<E> {
+    pub fn key_gen(self) -> ProvingKey<E> {
+        ProvingKey {
+            vk: VerifyingKey { cs: self },
+        }
+    }
+    pub fn num_witin(&self) -> usize {
+        self.zkvm_v1_css.num_witin.into()
+    }
+
+    pub fn num_fixed(&self) -> usize {
+        self.zkvm_v1_css.num_fixed
+    }
+
+    pub fn instance_name_map(&self) -> &HashMap<Instance, String> {
+        &self.zkvm_v1_css.instance_name_map
+    }
+
+    pub fn is_opcode_circuit(&self) -> bool {
+        self.zkvm_v1_css.lk_table_expressions.is_empty()
+            && self.zkvm_v1_css.r_table_expressions.is_empty()
+            && self.zkvm_v1_css.w_table_expressions.is_empty()
+    }
+
+    /// return number of lookup operation
+    pub fn num_lks(&self) -> usize {
+        self.zkvm_v1_css.lk_expressions.len()
+    }
 }
 
 #[derive(Clone)]
@@ -405,7 +435,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             circuit_num_polys: self
                 .circuit_pks
                 .values()
-                .map(|pk| (pk.vk.get_cs().num_witin as usize, pk.vk.get_cs().num_fixed))
+                .map(|pk| (pk.vk.get_cs().num_witin(), pk.vk.get_cs().num_fixed()))
                 .collect_vec(),
         }
     }
