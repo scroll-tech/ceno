@@ -480,9 +480,11 @@ where
         let mut circuit_metas = vec![];
         let mut circuit_trivial_metas = vec![];
         let mut evals_iter = evals.iter().cloned();
-        let (trivial_point_evals, point_evals) = izip!(&circuit_num_vars, points).fold(
-            (vec![], vec![]),
-            |(mut trivial_point_evals, mut point_evals), ((circuit_index, num_var), point)| {
+        let mut witin_evals = vec![];
+        let mut fixed_evals = vec![];
+        let trivial_point_evals = izip!(&circuit_num_vars, points).fold(
+            vec![],
+            |mut trivial_point_evals, ((circuit_index, num_var), point)| {
                 let (expected_witins_num_poly, expected_fixed_num_poly) =
                     &circuit_num_polys[*circuit_index];
                 let mut circuit_meta = CircuitIndexMeta {
@@ -505,21 +507,24 @@ where
                     }
                     circuit_trivial_metas.push(circuit_meta);
                 } else {
-                    point_evals.push((
+                    witin_evals.push((
+                        *num_var,
                         point.clone(),
                         evals_iter.next().unwrap()[0..*expected_witins_num_poly].to_vec(),
                     ));
                     if *expected_fixed_num_poly > 0 {
                         circuit_meta.fixed_num_vars = *num_var;
                         circuit_meta.fixed_num_polys = *expected_fixed_num_poly;
-                        point_evals.last_mut().unwrap().1.extend(
+                        fixed_evals.push((
+                            *num_var,
+                            point.clone(),
                             evals_iter.next().unwrap()[0..*expected_fixed_num_poly].to_vec(),
-                        );
+                        ));
                     }
                     circuit_metas.push(circuit_meta);
                 }
 
-                (trivial_point_evals, point_evals)
+                trivial_point_evals
             },
         );
         assert!(evals_iter.next().is_none());
@@ -684,6 +689,7 @@ where
             );
         }
 
+        let point_evals = vec![witin_evals, fixed_evals];
         // verify basefold sumcheck + FRI codeword query
         batch_verifier_query_phase::<E, Spec>(
             max_num_var,
@@ -698,7 +704,7 @@ where
             &proof.commits,
             &fold_challenges,
             sumcheck_messages,
-            &point_evals,
+            point_evals,
         );
 
         #[cfg(debug_assertions)]

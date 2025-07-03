@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use super::{
     encoding::EncodingScheme,
@@ -10,7 +10,7 @@ use crate::{
         codeword_fold_with_challenge,
         hash::write_digest_to_transcript,
         merkle_tree::{Poseidon2ExtMerkleMmcs, poseidon2_merkle_tree},
-        pop_front_while, split_by_sizes,
+        pop_front_while,
     },
 };
 use ff_ext::{ExtensionField, PoseidonField};
@@ -20,7 +20,7 @@ use multilinear_extensions::{
 };
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
-    field::{Field, FieldAlgebra, dot_product},
+    field::{Field, FieldAlgebra},
     matrix::{
         Matrix,
         dense::{DenseMatrix, RowMajorMatrix},
@@ -41,7 +41,7 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
 };
 use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
+    iter::{IntoParallelIterator, IntoParallelRefMutIterator},
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
@@ -61,7 +61,7 @@ pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     transcript: &mut impl Transcript<E>,
     max_num_vars: usize,
     num_rounds: usize,
-    circuit_num_polys: &[(usize, usize)],
+    _circuit_num_polys: &[(usize, usize)],
 ) -> (Vec<MerkleTreeExt<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -74,96 +74,101 @@ where
     let mmcs = poseidon2_merkle_tree::<E>();
     let mut trees: Vec<MerkleTreeExt<E>> = Vec::with_capacity(max_num_vars);
 
-    // concat witin mle with fixed mle under same circuit index
-    let witin_concat_with_fixed_polys: Vec<Vec<ArcMultilinearExtension<E>>> = witin_polys_and_meta
+    let circuit_idx_to_point: BTreeMap<usize, Point<E>> = witin_polys_and_meta
         .iter()
-        .map(|(_, (circuit_index, witin_polys))| {
-            let fixed_iter = fixed_comms
-                .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
-                .into_iter()
-                .flatten()
-                .cloned();
-            witin_polys.iter().cloned().chain(fixed_iter).collect()
-        })
-        .collect::<Vec<Vec<_>>>();
-    let batch_group_size = witin_concat_with_fixed_polys
-        .iter()
-        .map(|v| v.len())
-        .collect_vec();
-    let total_num_polys = batch_group_size.iter().sum();
+        .map(|(point, (circuit_index, _))| (*circuit_index, (*point).clone()))
+        .collect();
+
+    let witin_opening = (
+        mmcs.get_matrices(witin_commitment_with_witness),
+        witin_polys_and_meta
+            .iter()
+            .map(|(point, (_, witin_polys))| ((*point).clone(), *witin_polys))
+            .collect_vec(),
+    );
+    let mut total_num_polys = witin_opening.0.iter().map(|m| m.width() / 2).sum::<usize>();
+    let fixed_opening = fixed_comms.map(|f| {
+        total_num_polys += mmcs
+            .get_matrices(&f.codeword)
+            .iter()
+            .map(|m| m.width() / 2)
+            .sum::<usize>();
+        (
+            mmcs.get_matrices(&f.codeword),
+            circuit_idx_to_point
+                .iter()
+                .filter_map(|(circuit_index, point)| {
+                    f.polys
+                        .get(circuit_index)
+                        .map(|polys| (point.clone(), polys))
+                })
+                .collect::<Vec<_>>(),
+        )
+    });
 
     let batch_coeffs =
         &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
-    // split batch coeffs to match with batch group for easier handling
-    let batch_coeffs_splitted = split_by_sizes(batch_coeffs, &batch_group_size);
+    let mut batch_coeffs_iter = batch_coeffs.iter();
 
     // prepare
     // - codeword oracle => for FRI
     // - evals => for sumcheck
-    let witins_codeword = mmcs.get_matrices(witin_commitment_with_witness);
-    let fixed_codeword = fixed_comms
-        .map(|fixed_comms| mmcs.get_matrices(&fixed_comms.codeword))
-        .unwrap_or_default();
+    let mut rounds = vec![witin_opening];
+    if let Some((mats, polys)) = fixed_opening {
+        rounds.push((mats, polys));
+    }
 
     let batch_codeword_span = entered_span!("batch_codeword");
-    // we random linear combination of rmm under same circuit into single codeword, as they shared same height
-    let batched_codewords: Vec<DenseMatrix<E>> = witins_codeword
-        .iter()
-        .zip_eq(&batch_coeffs_splitted)
-        .zip_eq(&witin_polys_and_meta)
-        .map(
-            |((witin_codewords, batch_coeffs), (_, (circuit_index, _)))| {
-                let (expected_witins_num_poly, expected_fixed_num_poly) =
-                    circuit_num_polys[*circuit_index];
-                // batch_coeffs concat witin follow by fixed, where fixed is optional
-                let witin_fixed_concated_codeword: Vec<(_, usize)> =
-                    std::iter::once((witin_codewords, expected_witins_num_poly))
-                        .chain(
-                            fixed_comms
-                                .and_then(|fixed_comms| {
-                                    fixed_comms.circuit_codeword_index.get(circuit_index)
-                                })
-                                .and_then(|idx| {
-                                    fixed_codeword
-                                        .get(*idx)
-                                        .map(|rmm| (rmm, expected_fixed_num_poly))
-                                }),
-                        )
-                        .collect_vec();
-                // final poly size is 2 * height because we commit left: poly[j] and right: poly[j + ni] under same mk path (due to bit-reverse)
-                let size = witin_fixed_concated_codeword[0].0.height() * 2;
-                RowMajorMatrix::new(
-                    (0..size)
+    let mut batched_codewords: Vec<DenseMatrix<E>> = vec![];
+    let mut initial_rlc_evals: Vec<MultilinearExtension<E>> = vec![];
+    let mut eq: Vec<MultilinearExtension<E>> = vec![];
+    for (mats, polys) in rounds {
+        for (mat, (point, polys)) in mats.into_iter().zip(polys.into_iter()) {
+            // the actual ith row and (i+n/2)th row are packed in same row
+            let num_rows = mat.height() * 2;
+            let num_polys = mat.width() / 2;
+            let coeffs = batch_coeffs_iter
+                .by_ref()
+                .take(num_polys)
+                .copied()
+                .collect_vec();
+            let codeword = RowMajorMatrix::new(
+                (0..num_rows)
+                    .into_par_iter()
+                    .map(|j| {
+                        coeffs
+                            .iter()
+                            .zip_eq(mat.values[j * num_polys..(j + 1) * num_polys].iter())
+                            .map(|(coeff, value)| *coeff * *value)
+                            .sum::<E>()
+                    })
+                    .collect::<Vec<_>>(),
+                2,
+            );
+            let num_vars = polys[0].num_vars();
+            let mle_base_vec = polys
+                .iter()
+                .map(|mle| mle.get_base_field_vec())
+                .collect_vec();
+            let running_evals: MultilinearExtension<_> =
+                MultilinearExtension::from_evaluation_vec_smart(
+                    num_vars,
+                    (0..polys[0].evaluations().len())
                         .into_par_iter()
                         .map(|j| {
-                            witin_fixed_concated_codeword
+                            coeffs
                                 .iter()
-                                .scan(0, |start_index, (rmm, num_polys)| {
-                                    let batch_coeffs = batch_coeffs
-                                        [*start_index..*start_index + num_polys]
-                                        .iter()
-                                        .copied();
-                                    *start_index += num_polys;
-                                    Some(dot_product(
-                                        batch_coeffs,
-                                        rmm.values[j * num_polys..(j + 1) * num_polys]
-                                            .iter()
-                                            .copied(),
-                                    ))
-                                })
+                                .zip(mle_base_vec.iter())
+                                .map(|(batch_coeffs, mle)| *batch_coeffs * mle[j])
                                 .sum::<E>()
                         })
-                        .collect::<Vec<_>>(),
-                    2,
-                )
-            },
-        )
-        .collect_vec();
-    assert!(
-        [witin_polys_and_meta.len(), batched_codewords.len(),]
-            .iter()
-            .all_equal()
-    );
+                        .collect::<Vec<E>>(),
+                );
+            batched_codewords.push(codeword);
+            initial_rlc_evals.push(running_evals);
+            eq.push(build_eq_x_r_vec(&point).into_mle());
+        }
+    }
     // sorted batch codewords by height in descending order
     let mut batched_codewords = VecDeque::from(
         batched_codewords
@@ -173,42 +178,10 @@ where
     );
     exit_span!(batch_codeword_span);
 
-    let batched_evals = entered_span!("batched_evals");
-    let mut initial_rlc_evals: Vec<MultilinearExtension<E>> = witin_concat_with_fixed_polys
-        .par_iter()
-        .zip_eq(batch_coeffs_splitted.par_iter())
-        .map(|(witin_fixed_mle, batch_coeffs)| {
-            assert_eq!(witin_fixed_mle.len(), batch_coeffs.len());
-            let num_vars = witin_fixed_mle[0].num_vars();
-            let mle_base_vec = witin_fixed_mle
-                .iter()
-                .map(|mle| mle.get_base_field_vec())
-                .collect_vec();
-            let running_evals: MultilinearExtension<_> =
-                MultilinearExtension::from_evaluation_vec_smart(
-                    num_vars,
-                    (0..witin_fixed_mle[0].evaluations().len())
-                        .into_par_iter()
-                        .map(|j| {
-                            dot_product(
-                                batch_coeffs.iter().copied(),
-                                mle_base_vec.iter().map(|mle| mle[j]),
-                            )
-                        })
-                        .collect::<Vec<E>>(),
-                );
-            running_evals
-        })
-        .collect::<Vec<_>>();
-    exit_span!(batched_evals);
     exit_span!(prepare_span);
 
     // eq is the evaluation representation of the eq(X,r) polynomial over the hypercube
     let build_eq_span = entered_span!("Basefold::build eq");
-    let mut eq: Vec<MultilinearExtension<E>> = witin_polys_and_meta
-        .par_iter()
-        .map(|(point, _)| build_eq_x_r_vec(point).into_mle())
-        .collect::<Vec<_>>();
     exit_span!(build_eq_span);
 
     let num_threads = optimal_sumcheck_threads(max_num_vars);
