@@ -85,7 +85,7 @@ impl<E: ExtensionField> ProvingKey<E> {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct VerifyingKey<E: ExtensionField> {
-    pub(crate) cs: ConstraintSystem<E>,
+    pub cs: ConstraintSystem<E>,
 }
 
 impl<E: ExtensionField> VerifyingKey<E> {
