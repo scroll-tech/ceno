@@ -6,7 +6,7 @@ use crate::{
     util::{codeword_fold_with_challenge, merkle_tree::poseidon2_merkle_tree},
 };
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use multilinear_extensions::virtual_poly::{build_eq_x_r_vec, eq_eval};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
@@ -123,6 +123,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     max_num_var: usize,
     indices: &[usize],
@@ -324,29 +325,35 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         );
     }
     // 3. check final evaluation are correct
-    // assert_eq!(
-    //     extrapolate_uni_poly(
-    //         &sumcheck_messages[fold_challenges.len() - 1].evaluations,
-    //         fold_challenges[fold_challenges.len() - 1]
-    //     ),
-    //     izip!(final_message, point_evals.iter().map(|(point, _)| point))
-    //         .map(|(final_message, point)| {
-    //             // coeff is the eq polynomial evaluated at the first challenge.len() variables
-    //             let num_vars_evaluated = point.len()
-    //                 - <Spec::EncodingScheme as EncodingScheme<E>>::get_basecode_msg_size_log();
-    //             let coeff = eq_eval(
-    //                 &point[..num_vars_evaluated],
-    //                 &fold_challenges[fold_challenges.len() - num_vars_evaluated..],
-    //             );
-    //             // Compute eq as the partially evaluated eq polynomial
-    //             let eq = build_eq_x_r_vec(&point[num_vars_evaluated..]);
-    //             dot_product(
-    //                 final_message.iter().copied(),
-    //                 eq.into_iter().map(|e| e * coeff),
-    //             )
-    //         })
-    //         .sum()
-    // );
+    assert_eq!(
+        extrapolate_uni_poly(
+            &sumcheck_messages[fold_challenges.len() - 1].evaluations,
+            fold_challenges[fold_challenges.len() - 1]
+        ),
+        // eq(p,i) * f(i)
+        izip!(
+            final_message,
+            point_evals
+                .iter()
+                .flat_map(|evals| evals.iter().map(|(_, point, _)| point))
+        )
+        .map(|(final_message, point)| {
+            // coeff is the eq polynomial evaluated at the first challenge.len() variables
+            let num_vars_evaluated = point.len()
+                - <Spec::EncodingScheme as EncodingScheme<E>>::get_basecode_msg_size_log();
+            let coeff = eq_eval(
+                &point[..num_vars_evaluated],
+                &fold_challenges[fold_challenges.len() - num_vars_evaluated..],
+            );
+            // Compute eq as the partially evaluated eq polynomial
+            let eq = build_eq_x_r_vec(&point[num_vars_evaluated..]);
+            dot_product(
+                final_message.iter().copied(),
+                eq.into_iter().map(|e| e * coeff),
+            )
+        })
+        .sum()
+    );
 }
 
 fn get_base_codeword_dimentions<E: ExtensionField, Spec: BasefoldSpec<E>>(
