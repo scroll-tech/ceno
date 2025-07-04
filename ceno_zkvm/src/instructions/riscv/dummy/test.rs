@@ -9,6 +9,7 @@ use crate::{
         riscv::{arith::AddOp, branch::BeqOp, ecall::EcallDummy},
     },
     scheme::mock_prover::{MOCK_PC_START, MockProver},
+    structs::ProgramParams,
 };
 
 type AddDummy<E> = DummyInstruction<E, AddOp>;
@@ -22,7 +23,7 @@ fn test_dummy_ecall() {
         .namespace(
             || "ecall_dummy",
             |cb| {
-                let config = EcallDummy::construct_circuit(cb);
+                let config = EcallDummy::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -47,7 +48,7 @@ fn test_dummy_keccak() {
         .namespace(
             || "keccak_dummy",
             |cb| {
-                let config = KeccakDummy::construct_circuit(cb);
+                let config = KeccakDummy::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -69,7 +70,7 @@ fn test_dummy_r() {
         .namespace(
             || "add_dummy",
             |cb| {
-                let config = AddDummy::construct_circuit(cb);
+                let config = AddDummy::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -103,7 +104,7 @@ fn test_dummy_b() {
         .namespace(
             || "beq_dummy",
             |cb| {
-                let config = BeqDummy::construct_circuit(cb);
+                let config = BeqDummy::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )

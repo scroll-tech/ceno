@@ -2,7 +2,7 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use crate::{
-    chip_handler::RegisterExpr,
+    chip_handler::{RegisterExpr, general::InstFetch},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut, WriteRD},

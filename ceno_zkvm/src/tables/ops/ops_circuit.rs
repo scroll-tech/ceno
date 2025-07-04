@@ -7,29 +7,12 @@ use std::{collections::HashMap, marker::PhantomData};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    structs::ROMType,
+    structs::ProgramParams,
     tables::{RMMCollections, TableCircuit},
 };
 use ff_ext::ExtensionField;
+use gkr_iop::tables::OpsTable;
 use witness::RowMajorMatrix;
-
-/// Use this trait as parameter to OpsTableCircuit.
-pub trait OpsTable {
-    const ROM_TYPE: ROMType;
-
-    fn len() -> usize;
-
-    /// The content of the table: [[a, b, result], ...]
-    fn content() -> Vec<[u64; 3]>;
-
-    fn pack(a: u64, b: u64) -> u64 {
-        a | (b << 8)
-    }
-
-    fn unpack(i: u64) -> (u64, u64) {
-        (i & 0xff, (i >> 8) & 0xff)
-    }
-}
 
 pub struct OpsTableCircuit<E, R>(PhantomData<(E, R)>);
 
@@ -42,11 +25,14 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         format!("OPS_{:?}", OP::ROM_TYPE)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<OpTableConfig, ZKVMError> {
-        cb.namespace(
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<OpTableConfig, ZKVMError> {
+        Ok(cb.namespace(
             || Self::name(),
             |cb| OpTableConfig::construct_circuit(cb, OP::ROM_TYPE, OP::len()),
-        )
+        )?)
     }
 
     fn generate_fixed_traces(
@@ -65,6 +51,6 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         _input: &(),
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
-        config.assign_instances(num_witin, num_structural_witin, multiplicity, OP::len())
+        Ok(config.assign_instances(num_witin, num_structural_witin, multiplicity, OP::len())?)
     }
 }

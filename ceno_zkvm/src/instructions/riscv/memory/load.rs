@@ -10,6 +10,7 @@ use crate::{
         },
     },
     set_val,
+    structs::ProgramParams,
     tables::InsnRecord,
     utils::i64_to_base,
     witness::LkMultiplicity,
@@ -77,6 +78,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value

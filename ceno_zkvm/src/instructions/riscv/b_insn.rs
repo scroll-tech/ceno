@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 
 use super::constants::PC_STEP_SIZE;
 use crate::{
-    chip_handler::RegisterExpr,
+    chip_handler::{RegisterExpr, general::InstFetch},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},

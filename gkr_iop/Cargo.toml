@@ -12,6 +12,7 @@ version.workspace = true
 [dependencies]
 ark-std = { version = "0.5" }
 bincode.workspace = true
+ceno_emul = { path = "../ceno_emul" }
 clap.workspace = true
 either.workspace = true
 ff_ext = { path = "../ff_ext" }
@@ -30,6 +31,7 @@ strum.workspace = true
 strum_macros.workspace = true
 sumcheck.workspace = true
 thiserror.workspace = true
+thread_local.workspace = true
 tiny-keccak.workspace = true
 tracing.workspace = true
 tracing-forest.workspace = true

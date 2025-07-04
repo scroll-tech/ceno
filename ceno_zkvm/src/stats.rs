@@ -1,6 +1,6 @@
 use crate::{
     circuit_builder::{ConstraintSystem, NameSpace},
-    structs::{ZKVMConstraintSystem, ZKVMWitnesses},
+    structs::{ComposedConstrainSystem, ZKVMConstraintSystem, ZKVMWitnesses},
     utils,
 };
 use ff_ext::ExtensionField;
@@ -155,7 +155,14 @@ impl Report<CircuitStats> {
             circuits: zkvm_system
                 .get_css()
                 .iter()
-                .map(|(k, v)| (k.clone(), CircuitStats::new(v)))
+                .map(
+                    |(
+                        k,
+                        ComposedConstrainSystem {
+                            zkvm_v1_css: cs, ..
+                        },
+                    )| { (k.clone(), CircuitStats::new(cs)) },
+                )
                 .collect_vec(),
         }
     }

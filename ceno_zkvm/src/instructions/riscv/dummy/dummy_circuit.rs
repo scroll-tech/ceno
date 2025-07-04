@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 
 use ceno_emul::{InsnCategory, InsnFormat, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
+use gkr_iop::utils::i64_to_base;
 
 use super::super::{
     RIVInstruction,
@@ -9,8 +10,9 @@ use super::super::{
     insn_base::{ReadMEM, ReadRS1, ReadRS2, StateInOut, WriteMEM, WriteRD},
 };
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, set_val,
-    tables::InsnRecord, uint::Value, utils::i64_to_base, witness::LkMultiplicity,
+    chip_handler::general::InstFetch, circuit_builder::CircuitBuilder, error::ZKVMError,
+    instructions::Instruction, set_val, structs::ProgramParams, tables::InsnRecord, uint::Value,
+    witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
@@ -27,6 +29,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let kind = I::INST_KIND;
         let format = InsnFormat::from(kind);
@@ -90,7 +93,7 @@ pub struct DummyConfig<E: ExtensionField> {
 
 impl<E: ExtensionField> DummyConfig<E> {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn construct_circuit(
+    pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         kind: InsnKind,
         with_rs1: bool,

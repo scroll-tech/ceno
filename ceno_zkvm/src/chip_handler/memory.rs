@@ -1,12 +1,12 @@
 use crate::{
     chip_handler::{AddressExpr, MemoryChipOperations, MemoryExpr},
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     gadgets::AssertLtConfig,
     instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
 };
 use ff_ext::ExtensionField;
+use gkr_iop::error::CircuitBuilderError;
 use multilinear_extensions::Expression;
 
 impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperations<E, NR, N>
@@ -19,7 +19,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperation
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = [
@@ -61,7 +61,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperation
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = [

@@ -7,6 +7,7 @@ use crate::{
     error::ZKVMError,
     instructions::Instruction,
     scheme::mock_prover::{MOCK_PC_START, MockProver},
+    structs::ProgramParams,
 };
 
 const A: Word = 0xbead1010;
@@ -25,7 +26,7 @@ fn impl_opcode_beq(equal: bool) {
         .namespace(
             || "beq",
             |cb| {
-                let config = BeqInstruction::construct_circuit(cb);
+                let config = BeqInstruction::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -64,7 +65,7 @@ fn impl_opcode_bne(equal: bool) {
         .namespace(
             || "bne",
             |cb| {
-                let config = BneInstruction::construct_circuit(cb);
+                let config = BneInstruction::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -105,7 +106,8 @@ fn test_bltu_circuit() -> Result<(), ZKVMError> {
 fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let config = BltuInstruction::construct_circuit(&mut circuit_builder)?;
+    let config =
+        BltuInstruction::construct_circuit(&mut circuit_builder, &ProgramParams::default())?;
 
     let pc_after = if taken {
         ByteAddr(MOCK_PC_START.0 - 8)
@@ -148,7 +150,8 @@ fn test_bgeu_circuit() -> Result<(), ZKVMError> {
 fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let config = BgeuInstruction::construct_circuit(&mut circuit_builder)?;
+    let config =
+        BgeuInstruction::construct_circuit(&mut circuit_builder, &ProgramParams::default())?;
 
     let pc_after = if taken {
         ByteAddr(MOCK_PC_START.0 - 8)
@@ -191,7 +194,8 @@ fn test_blt_circuit() -> Result<(), ZKVMError> {
 fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let config = BltInstruction::construct_circuit(&mut circuit_builder)?;
+    let config =
+        BltInstruction::construct_circuit(&mut circuit_builder, &ProgramParams::default())?;
 
     let pc_after = if taken {
         ByteAddr(MOCK_PC_START.0 - 8)
@@ -234,7 +238,8 @@ fn test_bge_circuit() -> Result<(), ZKVMError> {
 fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "riscv");
     let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
-    let config = BgeInstruction::construct_circuit(&mut circuit_builder)?;
+    let config =
+        BgeInstruction::construct_circuit(&mut circuit_builder, &ProgramParams::default())?;
 
     let pc_after = if taken {
         ByteAddr(MOCK_PC_START.0 - 8)

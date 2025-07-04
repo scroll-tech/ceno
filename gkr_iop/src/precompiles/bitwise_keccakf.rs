@@ -28,7 +28,7 @@ use crate::{
         layer::Layer,
         layer_constraint_system::{LayerConstraintSystem, expansion_expr},
     },
-    utils::{indices_arr_with_offset, wits_fixed_and_eqs},
+    utils::{indices_arr_with_offset, lk_multiplicity::LkMultiplicity, wits_fixed_and_eqs},
 };
 
 fn to_xyz(i: usize) -> (usize, usize, usize) {
@@ -795,7 +795,11 @@ where
     E: ExtensionField,
 {
     type Trace = KeccakTrace<E>;
-    fn phase1_witness_group(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField> {
+    fn phase1_witness_group(
+        &self,
+        phase1: Self::Trace,
+        _lk_multiplicity: &mut LkMultiplicity,
+    ) -> RowMajorMatrix<E::BaseField> {
         phase1.bits
     }
 }
@@ -859,20 +863,20 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let bits = keccak_phase1_witness::<E>(&states);
     exit_span!(span);
     let span = entered_span!("phase1_witness_group", profiling_1 = true);
-    let phase1_witness = layout.phase1_witness_group(KeccakTrace { bits });
+    let mut lk_multiplicity = LkMultiplicity::default();
+    let phase1_witness = layout.phase1_witness_group(KeccakTrace { bits }, &mut lk_multiplicity);
     exit_span!(span);
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
     // Omit the commit phase1 and phase2.
     let span = entered_span!("gkr_witness", profiling_1 = true);
     #[allow(clippy::type_complexity)]
-    let (gkr_witness, gkr_output) = layout
-        .gkr_witness::<CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>(
-            &gkr_circuit,
-            &phase1_witness,
-            &[],
-            &[],
-        );
+    let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
+        &gkr_circuit,
+        &phase1_witness,
+        &[],
+        &[],
+    );
     exit_span!(span);
 
     let out_evals = {
@@ -918,7 +922,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     let span = entered_span!("prove", profiling_1 = true);
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
-        .prove::<CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>(
+        .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
             log2_num_instances,
             gkr_witness,

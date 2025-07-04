@@ -1,4 +1,6 @@
 mod halt;
+mod keccak;
+pub use keccak::KeccakInstruction;
 
 use ceno_emul::InsnKind;
 pub use halt::HaltInstruction;
