@@ -259,84 +259,59 @@ where
     /// Open a batch of polynomial commitments at several points.
     fn batch_open(
         pp: &Self::ProverParam,
-        num_instances: &[(usize, usize)],
-        fixed_comms: Option<&Self::CommitmentWithWitness>,
-        witin_comms: &Self::CommitmentWithWitness,
-        points: &[Point<E>],
-        // TODO this is only for debug purpose
-        evals: &[Vec<E>],
-        circuit_num_polys: &[(usize, usize)],
+        rounds: Vec<(
+            Self::CommitmentWithWitness,
+            // for each matrix open at one point
+            Vec<(Point<E>, Vec<E>)>,
+        )>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
         let span = entered_span!("Basefold::batch_open");
 
-        // sanity check
-        // number of point match with commitment length, assuming each commitment are opening under same point
-        assert!([points.len(), witin_comms.polys.len(),].iter().all_equal());
-        assert!(izip!(&witin_comms.polys, num_instances).all(
-            |((circuit_index, witin_polys), (_, num_instance))| {
-                // check num_vars & num_poly match
-                let (expected_witin_num_polys, expected_fixed_num_polys) =
-                    circuit_num_polys[*circuit_index];
-                let num_var = next_pow2_instance_padding(*num_instance).ilog2() as usize;
-                witin_polys
-                    .iter()
-                    .chain(
-                        fixed_comms
-                            .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
-                            .into_iter()
-                            .flatten(),
-                    )
-                    .all(|p| p.num_vars() == num_var)
-                    && witin_polys.len() == expected_witin_num_polys
-                    && fixed_comms
-                        .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
-                        .map(|fixed_polys| fixed_polys.len() == expected_fixed_num_polys)
-                        .unwrap_or(true)
-            },
-        ));
-        assert_eq!(num_instances.len(), witin_comms.polys.len());
+        let base_mmcs = poseidon2_merkle_tree::<E>();
 
-        if cfg!(feature = "sanity-check") {
-            // check poly evaluation on point equal eval
-            let point_poly_pair = witin_comms
-                .polys
-                .iter()
-                .zip_eq(points)
-                .flat_map(|((circuit_index, witin_polys), point)| {
-                    let fixed_iter = fixed_comms
-                        .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
-                        .into_iter()
-                        .flatten()
-                        .cloned();
-                    let flatten_polys = witin_polys
-                        .iter()
-                        .cloned()
-                        .chain(fixed_iter)
-                        .collect::<Vec<ArcMultilinearExtension<E>>>();
-                    let points = vec![point.clone(); flatten_polys.len()];
-                    izip!(points, flatten_polys)
-                })
-                .collect::<Vec<(Point<E>, ArcMultilinearExtension<E>)>>();
-            assert!(
-                point_poly_pair
-                    .into_iter()
-                    .zip_eq(evals.iter().flatten())
-                    .all(|((point, poly), eval)| poly.evaluate(&point) == *eval)
+        // sanity check
+        for (pcs_data, point_and_evals) in rounds.iter() {
+            let matrices = base_mmcs.get_matrices(&pcs_data.codeword);
+            // number of point match with number of matrices committed
+            assert_eq!(
+                matrices.len() + pcs_data.trivial_proofdata.len(),
+                point_and_evals.len()
             );
         }
 
-        // identify trivial/non trivial based on size
-        let (trivial_witin_polys_and_meta, witin_polys_and_meta): (Vec<_>, _) =
-            izip!(points, &witin_comms.polys)
-                .map(|(point, (circuit_index, polys))| (point, (*circuit_index, polys)))
-                .partition(|(_, (_, polys))| {
-                    polys[0].num_vars() <= Spec::get_basecode_msg_size_log()
-                });
+        if cfg!(feature = "sanity-check") {
+            // check poly evaluated on point equals to the expected value
+            for (pcs_data, point_and_evals) in rounds.iter() {
+                for (polys, (point, evals)) in
+                    pcs_data.polys.values().zip_eq(point_and_evals.iter())
+                {
+                    assert_eq!(polys.len(), evals.len());
+                    assert!(
+                        polys.iter().all(|poly| poly.num_vars() == point.len()),
+                        "all polys must have the same number of variables as the point"
+                    );
+                    assert!(
+                        polys
+                            .iter()
+                            .zip_eq(evals.iter())
+                            .all(|(poly, eval)| poly.evaluate(&point) == *eval),
+                        "all polys must evaluate to the same value at the point"
+                    )
+                }
+            }
+        }
 
-        let max_num_vars = witin_polys_and_meta
+        let max_num_var = rounds
             .iter()
-            .map(|(_, (_, polys))| polys[0].num_vars())
+            .map(|(pcs_data, _)| {
+                pcs_data
+                    .polys
+                    .values()
+                    .map(|polys| polys.iter().next().map(|poly| poly.num_vars()).unwrap_or(0))
+                    .max()
+                    .unwrap_or(0)
+            })
             .max()
             .unwrap();
 
@@ -344,46 +319,25 @@ where
         let commit_phase_span = entered_span!("Basefold::open::commit_phase");
         let (trees, commit_phase_proof) = batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
-            fixed_comms,
-            &witin_comms.codeword,
-            witin_polys_and_meta,
+            rounds,
+            max_num_var,
+            max_num_var - Spec::get_basecode_msg_size_log(),
             transcript,
-            max_num_vars,
-            max_num_vars - Spec::get_basecode_msg_size_log(),
-            circuit_num_polys,
         );
         exit_span!(commit_phase_span);
 
         // for smaller poly, we pass their merkle tree leafs directly
         let commit_trivial_span = entered_span!("Basefold::open::commit_trivial");
-        let trivial_proof = if !trivial_witin_polys_and_meta.is_empty() {
-            let mmcs = poseidon2_merkle_tree::<E>();
-            Some(
-                trivial_witin_polys_and_meta
-                    .iter()
-                    .map(|(_, (circuit_index, _))| {
-                        mmcs.get_matrices(&witin_comms.trivial_proofdata[circuit_index].1)
-                            .into_iter()
-                            .take(1)
-                            .chain(
-                                // fixed proof is optional
-                                fixed_comms
-                                    .and_then(|fixed_comms| {
-                                        fixed_comms.trivial_proofdata.get(circuit_index)
-                                    })
-                                    .iter()
-                                    .flat_map(|(_, proof_data)| {
-                                        mmcs.get_matrices(proof_data).into_iter().take(1)
-                                    }),
-                            )
-                            .cloned()
-                            .collect_vec()
-                    })
-                    .collect_vec(),
-            )
-        } else {
-            None
-        };
+        let trivial_proof = rounds
+            .iter()
+            .map(|(pcs_data, _)| {
+                pcs_data
+                    .trivial_proofdata
+                    .values()
+                    .map(|(_, root)| base_mmcs.get_matrices(&root)[0].clone())
+                    .collect_vec()
+            })
+            .collect_vec();
         exit_span!(commit_trivial_span);
 
         let pow_bits = pp.get_pow_bits_by_level(crate::PowStrategy::FriPow);
@@ -400,11 +354,11 @@ where
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
         let query_opening_proof = batch_query_phase(
-            transcript,
-            fixed_comms,
-            witin_comms,
+            rounds.iter().map(|(pcs_data, _)| pcs_data).collect_vec(),
             &trees,
             Spec::get_number_queries(),
+            max_num_var + Spec::get_rate_log(),
+            transcript,
         );
         exit_span!(query_span);
 
