@@ -90,7 +90,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     fn gkr_witness<'a>(
         circuit: &GKRCircuit<E>,
         phase1_witness_group: &RowMajorMatrix<E::BaseField>,
-        fixed: &[Vec<E::BaseField>],
+        fixed: &RowMajorMatrix<E::BaseField>,
         challenges: &[E],
     ) -> (
         GKRCircuitWitness<'a, CpuBackend<E, PCS>>,

@@ -796,8 +796,8 @@ where
 {
     type Trace = KeccakTrace<E>;
 
-    fn fixed_witness_group(&self) -> Vec<Vec<E::BaseField>> {
-        vec![vec![]]
+    fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::new_by_values(vec![], 1, InstancePaddingStrategy::Default)
     }
 
     fn phase1_witness_group(
@@ -879,7 +879,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
         &gkr_circuit,
         &phase1_witness,
-        &[],
+        &layout.fixed_witness_group(),
         &[],
     );
     exit_span!(span);

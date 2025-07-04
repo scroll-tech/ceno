@@ -571,14 +571,18 @@ where
 {
     type Trace = KeccakTrace;
 
-    fn fixed_witness_group(&self) -> Vec<Vec<E::BaseField>> {
-        RC.iter()
-            .map(|x| {
-                (0..8)
-                    .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
-                    .collect_vec()
-            })
-            .collect_vec()
+    fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::new_by_values(
+            RC.iter()
+                .flat_map(|x| {
+                    (0..8)
+                        .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
+                        .collect_vec()
+                })
+                .collect_vec(),
+            8,
+            InstancePaddingStrategy::Default,
+        )
     }
 
     fn phase1_witness_group(
