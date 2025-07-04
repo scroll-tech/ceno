@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{Change, InsnKind, KeccakSpec, StepRecord, SyscallSpec};
+use ceno_emul::{ByteAddr, Change, InsnKind, KeccakSpec, StepRecord, SyscallSpec};
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, zip_eq};
 use witness::RowMajorMatrix;
@@ -22,7 +22,9 @@ use multilinear_extensions::{ToExpr, WitIn};
 
 use gkr_iop::{
     ProtocolWitnessGenerator,
-    precompiles::{AND_LOOKUPS, KeccakLayout, KeccakTrace, RANGE_LOOKUPS, XOR_LOOKUPS},
+    precompiles::{
+        AND_LOOKUPS, KECCAK_INPUT32_SIZE, KeccakLayout, KeccakTrace, RANGE_LOOKUPS, XOR_LOOKUPS,
+    },
 };
 
 /// LargeEcallDummy can handle any instruction and produce its effects,
@@ -208,8 +210,14 @@ impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> 
                     .unwrap()
             })
             .collect_vec();
+        let num_instances = instances.len();
 
-        layout.phase1_witness_group(KeccakTrace { instances })
+        layout.phase1_witness_group(KeccakTrace {
+            instances,
+            ram_start_addr: vec![ByteAddr::from(0); num_instances],
+            cur_ts: vec![0; num_instances],
+            read_ts: vec![[0; KECCAK_INPUT32_SIZE]; num_instances],
+        })
     }
 
     fn assign_instance_with_gkr_iop(

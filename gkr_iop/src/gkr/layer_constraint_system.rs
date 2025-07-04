@@ -1,15 +1,15 @@
 use std::{cmp::Ordering, collections::BTreeMap};
 
+use crate::{
+    LookupTable, RAMType,
+    evaluation::EvalExpression,
+    gkr::layer::{Layer, LayerType, ROTATION_OPENING_COUNT},
+};
+use ceno_emul::Tracer;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitnessId, rlc_chip_record};
 use p3_field::FieldAlgebra;
-
-use crate::{
-    LookupTable,
-    evaluation::EvalExpression,
-    gkr::layer::{Layer, LayerType, ROTATION_OPENING_COUNT},
-};
 
 #[derive(Clone, Debug, Default)]
 pub struct RotationParams<E: ExtensionField> {
@@ -39,6 +39,9 @@ pub struct LayerConstraintSystem<E: ExtensionField> {
     pub xor_lookups: Vec<Expression<E>>,
     pub range_lookups: Vec<Expression<E>>,
 
+    pub ram_read: Vec<Expression<E>>,
+    pub ram_write: Vec<Expression<E>>,
+
     // global challenge
     pub alpha: Expression<E>,
     pub beta: Expression<E>,
@@ -66,6 +69,8 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             and_lookups: vec![],
             xor_lookups: vec![],
             range_lookups: vec![],
+            ram_read: vec![],
+            ram_write: vec![],
             alpha,
             beta,
         }
@@ -89,29 +94,31 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         self.expr_names.push(name);
     }
 
-    fn rlc_table_lookup(
-        &self,
-        lookup_table: LookupTable,
-        values: impl Iterator<Item = Expression<E>>,
-    ) -> Expression<E> {
-        rlc_chip_record(
-            chain!(
-                std::iter::once(E::BaseField::from_canonical_u64(lookup_table as u64).expr()),
-                values
-            )
-            .collect_vec(),
+    pub fn lookup_and8(&mut self, a: Expression<E>, b: Expression<E>, c: Expression<E>) {
+        let rlc_record = rlc_chip_record(
+            vec![
+                E::BaseField::from_canonical_u64(LookupTable::And as u64).expr(),
+                a,
+                b,
+                c,
+            ],
             self.alpha.clone(),
             self.beta.clone(),
-        )
-    }
-
-    pub fn lookup_and8(&mut self, a: Expression<E>, b: Expression<E>, c: Expression<E>) {
-        let rlc_record = self.rlc_table_lookup(LookupTable::And, [a, b, c].iter().cloned());
+        );
         self.and_lookups.push(rlc_record);
     }
 
     pub fn lookup_xor8(&mut self, a: Expression<E>, b: Expression<E>, c: Expression<E>) {
-        let rlc_record = self.rlc_table_lookup(LookupTable::Xor, [a, b, c].iter().cloned());
+        let rlc_record = rlc_chip_record(
+            vec![
+                E::BaseField::from_canonical_u64(LookupTable::Xor as u64).expr(),
+                a,
+                b,
+                c,
+            ],
+            self.alpha.clone(),
+            self.beta.clone(),
+        );
         self.xor_lookups.push(rlc_record);
     }
 
@@ -120,17 +127,90 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
     /// `value << (16 - size)`.
     pub fn lookup_range(&mut self, value: Expression<E>, size: usize) {
         assert!(size <= 16);
-        self.range_lookups
-            .push(self.rlc_table_lookup(LookupTable::U16, vec![value.clone()].into_iter()));
+        let rlc_record = rlc_chip_record(
+            vec![
+                E::BaseField::from_canonical_u64(LookupTable::U16 as u64).expr(),
+                value.clone(),
+            ],
+            self.alpha.clone(),
+            self.beta.clone(),
+        );
+        self.range_lookups.push(rlc_record);
         if size < 16 {
-            self.range_lookups.push(
-                self.rlc_table_lookup(
-                    LookupTable::U16,
-                    [value * E::BaseField::from_canonical_u64(1 << (16 - size)).expr()]
-                        .iter()
-                        .cloned(),
-                ),
-            )
+            let rlc_record = rlc_chip_record(
+                vec![
+                    E::BaseField::from_canonical_u64(LookupTable::U16 as u64).expr(),
+                    value * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
+                ],
+                self.alpha.clone(),
+                self.beta.clone(),
+            );
+            self.range_lookups.push(rlc_record)
+        }
+    }
+
+    /// records RAM write operations into the `ram_write` trace vector using RLC encoding.
+    ///
+    /// this function appends one RLC-encoded record per word written to memory,
+    /// starting from `mem_start_addr`. Each record includes:
+    /// - The operation type (assumed to be `RAMType::Memory`)
+    /// - The memory address of the word (adjusted by `4 * index`)
+    /// - The value being written
+    /// - The timestamp of the write
+    pub fn ram_write_record(
+        &mut self,
+        mem_start_addr: Expression<E>,
+        values: Vec<Expression<E>>,
+        cur_ts: Expression<E>,
+    ) {
+        for (idx, value) in values.into_iter().enumerate() {
+            let rlc_record = rlc_chip_record(
+                vec![
+                    E::BaseField::from_canonical_u64(RAMType::Memory as u64).expr(),
+                    mem_start_addr.clone()
+                    // `4` is num bytes per word
+                    // TODO fetch from constant
+                        + E::BaseField::from_canonical_u64((4 * idx) as u64).expr(),
+                    value,
+                    cur_ts.clone() + E::BaseField::from_canonical_u64(Tracer::SUBCYCLE_MEM).expr(),
+                ],
+                self.alpha.clone(),
+                self.beta.clone(),
+            );
+            self.ram_write.push(rlc_record);
+        }
+    }
+
+    /// records RAM read operations into the `ram_read` trace vector using RLC encoding.
+    ///
+    /// this function appends one RLC-encoded record per word written to memory,
+    /// starting from `mem_start_addr`. Each record includes:
+    /// - The operation type (assumed to be `RAMType::Memory`)
+    /// - The memory address of the word (adjusted by `4 * index`)
+    /// - The value being read
+    /// - The ts corresponding to each value
+    pub fn ram_read_record(
+        &mut self,
+        mem_start_addr: Expression<E>,
+        values: Vec<Expression<E>>,
+        ts: Vec<Expression<E>>,
+    ) {
+        assert_eq!(values.len(), ts.len());
+        for (idx, (value, ts)) in izip!(values, ts).enumerate() {
+            let rlc_record = rlc_chip_record(
+                vec![
+                    E::BaseField::from_canonical_u64(RAMType::Memory as u64).expr(),
+                    mem_start_addr.clone()
+                    // `4` is num bytes per word
+                    // TODO fetch from constant
+                        + E::BaseField::from_canonical_u64((4 * idx) as u64).expr(),
+                    value,
+                    ts,
+                ],
+                self.alpha.clone(),
+                self.beta.clone(),
+            );
+            self.ram_read.push(rlc_record);
         }
     }
 
@@ -270,8 +350,27 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         layer_name: String,
         in_expr_evals: Vec<usize>,
         n_challenges: usize,
+        ram_write_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
+        ram_read_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
         lookup_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
     ) -> Layer<E> {
+        // process ram read/write record
+        assert_eq!(ram_write_evals.len(), self.ram_write.len(),);
+        assert_eq!(ram_read_evals.len(), self.ram_read.len(),);
+
+        for (idx, ram_expr, ram_eval) in izip!(
+            0..,
+            chain!(self.ram_write.clone(), self.ram_read.clone(),),
+            ram_write_evals.chain(ram_read_evals)
+        ) {
+            self.add_non_zero_constraint(
+                ram_expr - E::BaseField::ONE.expr(), // ONE is for padding
+                (ram_eval.0, EvalExpression::Single(ram_eval.1)),
+                format!("round 0th: {idx}th ram read/write operation"),
+            );
+        }
+
+        // process lookup records
         assert_eq!(
             lookup_evals.len(),
             self.and_lookups.len() + self.xor_lookups.len() + self.range_lookups.len()
@@ -336,6 +435,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                     is_linear_so_far && t.is_linear()
                 });
 
+        // process evaluation group by eq expression
         let mut eq_map = BTreeMap::new();
         izip!(
             evals.into_iter(),
