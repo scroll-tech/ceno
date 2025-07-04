@@ -10,6 +10,7 @@ use ff_ext::ExtensionField;
 use crate::{RAMType, error::CircuitBuilderError, tables::LookupTable};
 use multilinear_extensions::monomial::Term;
 use p3::field::FieldAlgebra;
+pub mod ram;
 
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -218,17 +219,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         wit_in
     }
 
-    pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(
-        &mut self,
-        n: N,
-    ) -> Result<Fixed, CircuitBuilderError> {
+    pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> Fixed {
         let f = Fixed(self.num_fixed);
         self.num_fixed += 1;
 
         let path = self.ns.compute_path(n().into());
         self.fixed_namespace_map.push(path);
 
-        Ok(f)
+        f
     }
 
     pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
@@ -622,7 +620,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             .create_structural_witin(name_fn, max_len, offset, multi_factor, descending)
     }
 
-    pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Result<Fixed, CircuitBuilderError>
+    pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Fixed
     where
         NR: Into<String>,
         N: FnOnce() -> NR,

@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{ByteAddr, InsnKind, PC_STEP_SIZE, StepRecord, Tracer};
+use ceno_emul::{ByteAddr, InsnKind, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolWitnessGenerator,
@@ -20,7 +20,8 @@ use crate::{
         Instruction,
         riscv::{
             constants::UInt,
-            insn_base::{ReadRS1, ReadRS2},
+            ecall_base::WriteFixedRS,
+            insn_base::{ReadRS1, ReadRS2, StateInOut, WriteRD},
         },
     },
     structs::ProgramParams,
@@ -55,25 +56,26 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        // construct keccak gkr-iop circuit
-        let params = gkr_iop::precompiles::KeccakParams {};
-        let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);
-        let circuit = chip.gkr_circuit();
-
-        // TODO FIXME below circuit construction are out-of-sync with gkr-iop circuit, because both constrain system are separated
-        // TODO FIXME and manage constrains/witness in isolated struct
         // constrain vmstate
-        // state in and out
-        let cur_ts = layout.layer_exprs.wits.cur_ts[0].expr();
-        let next_ts = cur_ts.clone() + Tracer::SUBCYCLES_PER_INSN;
-        let pc = layout.layer_exprs.wits.pc[0].expr();
-        let next_pc = pc.expr() + PC_STEP_SIZE;
-        cb.state_in(pc.clone(), cur_ts.clone())?;
-        cb.state_out(next_pc, next_ts)?;
+        let vm_state = StateInOut::construct_circuit(cb, false)?;
+
+        let ecall_id_value = UInt::new_unchecked(|| "ecall_id", cb)?;
+        let state_ptr_value = UInt::new_unchecked(|| "state_ptr", cb)?;
+
+        let ecall_id = WriteFixedRS::<_, { Platform::reg_ecall() }>::construct_circuit(
+            cb,
+            ecall_id_value.register_expr(),
+            vm_state.ts,
+        )?;
+        let state_ptr = WriteFixedRS::<_, { Platform::reg_arg0() }>::construct_circuit(
+            cb,
+            state_ptr_value.register_expr(),
+            vm_state.ts,
+        )?;
 
         // fetch
         cb.lk_fetch(&InsnRecord::new(
-            pc.clone(),
+            vm_state.pc.expr(),
             InsnKind::ECALL.into(),
             Some(E::BaseField::ZERO.expr()),
             E::BaseField::ZERO.expr(),
@@ -81,22 +83,10 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             E::BaseField::ZERO.expr(),
         ))?;
 
-        // TODO register read are not under same constrain system
-        // rs1: ecall code
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let _rs1_op = ReadRS1::construct_circuit(
-            cb,
-            rs1_read.register_expr(),
-            layout.layer_exprs.wits.cur_ts[0],
-        )?;
-
-        // rs2: state ptr
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
-        let _rs2_op = ReadRS2::construct_circuit(
-            cb,
-            rs2_read.register_expr(),
-            layout.layer_exprs.wits.cur_ts[0],
-        )?;
+        // construct keccak gkr-iop circuit
+        let params = gkr_iop::precompiles::KeccakParams {};
+        let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(cb, params);
+        let circuit = chip.gkr_circuit();
 
         Ok(EcallKeccakConfig { circuit, layout })
     }

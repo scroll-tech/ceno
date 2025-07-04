@@ -21,6 +21,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
     evaluation::EvalExpression,
     gkr::{
@@ -638,11 +639,11 @@ fn keccak_first_layer<E: ExtensionField>(
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     type Params = KeccakParams;
 
-    fn init(_params: Self::Params) -> Self {
+    fn init(_cb: &mut CircuitBuilder<E>, _params: Self::Params) -> Self {
         Self::default()
     }
 
-    fn build_gkr_chip(&self) -> Chip<E> {
+    fn build_gkr_chip(&self, _cb: &mut CircuitBuilder<E>) -> Chip<E> {
         let mut chip = Chip {
             n_fixed: self.n_fixed(),
             n_committed: self.n_committed(),
@@ -845,7 +846,9 @@ fn rho_and_pi_permutation() -> Vec<usize> {
 
 pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>) {
     let params = KeccakParams {};
-    let (layout, chip) = KeccakLayout::build(params);
+    let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
+    let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+    let (layout, chip) = KeccakLayout::build(&mut circuit_builder, params);
     (layout, chip.gkr_circuit())
 }
 

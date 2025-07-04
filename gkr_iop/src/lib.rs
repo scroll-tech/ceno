@@ -3,6 +3,7 @@
 use std::marker::PhantomData;
 
 use crate::{
+    circuit_builder::CircuitBuilder,
     hal::{ProtocolWitnessGeneratorProver, ProverDevice},
     utils::lk_multiplicity::LkMultiplicity,
 };
@@ -34,12 +35,12 @@ pub type Phase1WitnessGroup<'a, E> = Vec<ArcMultilinearExtension<'a, E>>;
 pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     type Params;
 
-    fn init(params: Self::Params) -> Self;
+    fn init(cb: &mut CircuitBuilder<E>, params: Self::Params) -> Self;
 
     /// Build the protocol for GKR IOP.
-    fn build(params: Self::Params) -> (Self, Chip<E>) {
-        let chip_spec = Self::init(params);
-        let chip = chip_spec.build_gkr_chip();
+    fn build(cb: &mut CircuitBuilder<E>, params: Self::Params) -> (Self, Chip<E>) {
+        let chip_spec = Self::init(cb, params);
+        let chip = chip_spec.build_gkr_chip(cb);
 
         (chip_spec, chip)
     }
@@ -47,7 +48,7 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     /// Create the GKR layers in the reverse order. For each layer, specify the
     /// polynomial expressions, evaluation expressions of outputs and evaluation
     /// positions of the inputs.
-    fn build_gkr_chip(&self) -> Chip<E>;
+    fn build_gkr_chip(&self, cb: &mut CircuitBuilder<E>) -> Chip<E>;
 
     fn n_committed(&self) -> usize;
     fn n_fixed(&self) -> usize;

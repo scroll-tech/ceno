@@ -14,6 +14,7 @@ pub mod constants;
 pub mod div;
 pub mod dummy;
 pub mod ecall;
+pub mod ecall_base;
 pub mod jump;
 pub mod logic;
 pub mod logic_imm;

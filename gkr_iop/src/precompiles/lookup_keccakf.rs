@@ -1,4 +1,4 @@
-use std::mem::transmute;
+use std::{array, mem::transmute};
 
 use ceno_emul::{ByteAddr, Cycle};
 use ff_ext::ExtensionField;
@@ -29,6 +29,7 @@ use witness::{
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
     error::BackendError,
     gkr::{
@@ -42,7 +43,7 @@ use crate::{
     precompiles::utils::{
         MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance,
     },
-    utils::{indices_arr_with_offset, lk_multiplicity::LkMultiplicity, wits_fixed_and_eqs},
+    utils::{indices_arr_with_offset, lk_multiplicity::LkMultiplicity},
 };
 
 const ROUNDS: usize = 24;
@@ -102,7 +103,19 @@ pub const XOR_LOOKUPS: usize = XOR_LOOKUPS_PER_ROUND;
 pub const RANGE_LOOKUPS: usize = RANGE_LOOKUPS_PER_ROUND;
 
 #[derive(Clone, Debug)]
-pub struct KeccakParams {}
+#[repr(C)]
+pub struct KeccakStateCols<T> {
+    pub state_ptr_address: T,
+    pub input_prev_ts: [T; KECCAK_INPUT32_SIZE],
+
+    // transition state
+    pub cur_ts: T,
+}
+
+#[derive(Clone, Debug)]
+pub struct KeccakParams<T> {
+    state: KeccakStateCols<T>,
+}
 
 #[derive(Clone, Debug)]
 #[repr(C)]
@@ -132,21 +145,12 @@ pub struct KeccakWitCols<T> {
     pub nonlinear: [T; 200],
     pub chi_output: [T; 8],
     pub iota_output: [T; 200],
-    pub input_ram_start_addr: [T; 1],
-    pub input_ram_read_ts: [T; KECCAK_INPUT32_SIZE],
-
-    // transition state
-    pub cur_ts: [T; 1],
-    pub pc: [T; 1],
-
-    // VM ecall specs
-    pub read_rs1: [T; 1],
-    pub read_rs2: [T; 1],
 }
 
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub struct KeccakLayer<WitT, FixedT, EqT> {
+    pub state: KeccakStateCols<WitT>,
     pub wits: KeccakWitCols<WitT>,
     pub fixed: KeccakFixedCols<FixedT>,
     pub eq_zero: EqT,
@@ -166,8 +170,8 @@ pub struct KeccakLayout<E: ExtensionField> {
     beta: Expression<E>,
 }
 
-impl<E: ExtensionField> Default for KeccakLayout<E> {
-    fn default() -> Self {
+impl<E: ExtensionField> KeccakLayout<E> {
+    fn new(cb: &mut CircuitBuilder<E>, params: KeccakParams<WitIn>) -> Self {
         // allocate evaluation expressions
         let final_out_evals = indices_arr::<KECCAK_OUT_EVAL_SIZE>();
         let final_out_evals = unsafe {
@@ -187,9 +191,17 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
                 eq_rotation_right,
                 eq_rotation,
             ],
-        ) = wits_fixed_and_eqs::<KECCAK_WIT_SIZE, KECCAK_FIXED_SIZE, 6>();
-        let wits = unsafe { transmute::<[WitIn; KECCAK_WIT_SIZE], KeccakWitCols<WitIn>>(wits) };
-        let fixed = unsafe { transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(fixed) };
+        ): (KeccakWitCols<WitIn>, KeccakFixedCols<Fixed>, [WitIn; 6]) = unsafe {
+            (
+                transmute::<[WitIn; KECCAK_WIT_SIZE], KeccakWitCols<WitIn>>(array::from_fn(|id| {
+                    cb.create_witin(|| format!("lookup/witin_{}", id))
+                })),
+                transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(array::from_fn(|id| {
+                    cb.create_fixed(|| format!("lookup/fixed_{}", id))
+                })),
+                array::from_fn(|id| cb.create_witin(|| format!("lookup/eq_{}", id))),
+            )
+        };
 
         Self {
             layer_exprs: KeccakLayer {
@@ -201,6 +213,7 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
                 eq_rotation_left,
                 eq_rotation_right,
                 eq_rotation,
+                state: params.state,
             },
             layer_in_evals,
             final_out_evals,
@@ -211,13 +224,13 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
 }
 
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
-    type Params = KeccakParams;
+    type Params = KeccakParams<WitIn>;
 
-    fn init(_params: Self::Params) -> Self {
-        Self::default()
+    fn init(cb: &mut CircuitBuilder<E>, params: Self::Params) -> Self {
+        Self::new(cb, params)
     }
 
-    fn build_gkr_chip(&self) -> Chip<E> {
+    fn build_gkr_chip(&self, _cb: &mut CircuitBuilder<E>) -> Chip<E> {
         let mut system = LayerConstraintSystem::new(
             KECCAK_WIT_SIZE,
             0,
@@ -226,6 +239,12 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             self.alpha.clone(),
             self.beta.clone(),
         );
+
+        let KeccakStateCols {
+            state_ptr_address,
+            input_prev_ts,
+            cur_ts,
+        } = &self.layer_exprs.state;
 
         let KeccakWitCols {
             input8,
@@ -239,12 +258,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             nonlinear,
             chi_output,
             iota_output,
-            input_ram_start_addr: [input_ram_start_addr],
-            input_ram_read_ts,
-            cur_ts: [cur_ts],
-            pc: [_pc],
-            read_rs1: [_read_rs1],
-            read_rs2: [_read_rs2],
         } = &self.layer_exprs.wits;
 
         let KeccakFixedCols { rc } = &self.layer_exprs.fixed;
@@ -441,7 +454,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 }
             }
         }
-        system.ram_write_record(input_ram_start_addr.expr(), output32_exprs, cur_ts.expr());
+        system.ram_write_record(state_ptr_address.expr(), output32_exprs, cur_ts.expr());
 
         // process keccak input
         let mut input32_exprs = Vec::with_capacity(KECCAK_INPUT32_SIZE);
@@ -462,9 +475,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             }
         }
         system.ram_read_record(
-            input_ram_start_addr.expr(),
+            state_ptr_address.expr(),
             input32_exprs,
-            input_ram_read_ts.iter().map(|w| w.expr()).collect_vec(),
+            input_prev_ts.iter().map(|w| w.expr()).collect_vec(),
         );
 
         // rotation constrain: rotation(keccak_input8).next() == keccak_output8
@@ -557,12 +570,45 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     }
 }
 
+#[derive(Clone)]
+pub struct KeccakStateInstance {
+    pub state_ptr_address: ByteAddr,
+    pub cur_ts: Cycle,
+    pub read_ts: [Cycle; KECCAK_INPUT32_SIZE],
+}
+
+impl Default for KeccakStateInstance {
+    fn default() -> Self {
+        Self {
+            state_ptr_address: Default::default(),
+            cur_ts: Default::default(),
+            read_ts: [Cycle::default(); KECCAK_INPUT32_SIZE],
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct KeccakWitInstance {
+    pub instance: [u32; KECCAK_INPUT32_SIZE],
+}
+
+impl Default for KeccakWitInstance {
+    fn default() -> Self {
+        Self {
+            instance: [0u32; KECCAK_INPUT32_SIZE],
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct KeccakInstance {
+    pub state: KeccakStateInstance,
+    pub witin: KeccakWitInstance,
+}
+
 #[derive(Clone, Default)]
 pub struct KeccakTrace {
-    pub instances: Vec<[u32; KECCAK_INPUT32_SIZE]>,
-    pub ram_start_addr: Vec<ByteAddr>,
-    pub cur_ts: Vec<Cycle>,
-    pub read_ts: Vec<[Cycle; KECCAK_INPUT32_SIZE]>,
+    pub instances: Vec<KeccakInstance>,
 }
 
 impl<E> ProtocolWitnessGenerator<E> for KeccakLayout<E>
@@ -577,17 +623,29 @@ where
         // TODO manipulate `lk_multiplicity` for correct lookup statement
         _lk_multiplicity: &mut LkMultiplicity,
     ) -> RowMajorMatrix<E::BaseField> {
-        let KeccakTrace {
-            instances,
-            ram_start_addr,
-            cur_ts,
-            read_ts,
-        } = phase1;
-        if instances.is_empty() {
+        // let KeccakTrace {
+        //     instances,
+        //     ram_start_addr,
+        //     cur_ts,
+        //     read_ts,
+        // } = phase1;
+        if phase1.instances.is_empty() {
             return RowMajorMatrix::new(0, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default);
         }
 
-        let num_instances = instances.len();
+        let KeccakLayer {
+            state,
+            wits,
+            fixed,
+            eq_zero,
+            eq_mem_read,
+            eq_mem_write,
+            eq_rotation_left,
+            eq_rotation_right,
+            eq_rotation,
+        } = self.layer_exprs;
+
+        let num_instances = phase1.instances.len();
 
         fn conv64to8(input: u64) -> [u64; 8] {
             MaskRepresentation::new(vec![(64, input).into()])
@@ -611,10 +669,11 @@ where
         // keccak instance full rounds (24 rounds + 8 round padding) as chunk size
         // we need to do assignment on respective 31 cyclic group index
         wits.par_chunks_mut(KECCAK_WIT_SIZE * ROUNDS.next_power_of_two())
-            .enumerate()
             .take(num_instances)
-            .for_each(|(instance_id, wits)| {
-                let state_32_iter = instances[instance_id].iter().map(|&e| e as u64);
+            .zip(&phase1.instances)
+            .enumerate()
+            .for_each(|(instance_id, (wits, KeccakInstance { state, witin }))| {
+                let state_32_iter = witin.instance.iter().map(|&e| e as u64);
                 let mut state64 = [[0u64; 5]; 5];
                 zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
                     .map(|((x, y), (lo, hi))| {
@@ -779,7 +838,9 @@ where
 
 pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>) {
     let params = KeccakParams {};
-    let (layout, chip) = KeccakLayout::build(params);
+    let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
+    let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+    let (layout, chip) = KeccakLayout::build(&mut circuit_builder, params);
     (layout, chip.gkr_circuit())
 }
 
