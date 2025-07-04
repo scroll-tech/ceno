@@ -77,6 +77,7 @@ strum_macros = "0.26"
 substrate-bn = { version = "0.6.0" }
 sumcheck = { path = "sumcheck" }
 thiserror = "1" # do we need this?
+thread_local = "1.1"
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tracing = { version = "0.1", features = [
   "attributes",

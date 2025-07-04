@@ -1,3 +1,5 @@
+pub mod lk_multiplicity;
+
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use multilinear_extensions::{

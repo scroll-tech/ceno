@@ -10,7 +10,7 @@ use ff_ext::ExtensionField;
 use crate::{
     ROMType,
     error::ZKVMError,
-    structs::{ProgramParams, ProvingKey, RAMType, VerifyingKey},
+    structs::{ProgramParams, RAMType},
 };
 use multilinear_extensions::monomial::Term;
 use p3::field::FieldAlgebra;
@@ -186,12 +186,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             debug_map: HashMap::new(),
 
             phantom: std::marker::PhantomData,
-        }
-    }
-
-    pub fn key_gen(self) -> ProvingKey<E> {
-        ProvingKey {
-            vk: VerifyingKey { cs: self },
         }
     }
 
