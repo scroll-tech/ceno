@@ -558,6 +558,20 @@ where
 {
     type Trace = KeccakTrace;
 
+    fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::new_by_values(
+            RC.iter()
+                .flat_map(|x| {
+                    (0..8)
+                        .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
+                        .collect_vec()
+                })
+                .collect_vec(),
+            8,
+            InstancePaddingStrategy::Default,
+        )
+    }
+
     fn phase1_witness_group(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField> {
         let KeccakTrace {
             instances,
@@ -812,14 +826,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     ];
 
     let span = entered_span!("gkr_witness", profiling_2 = true);
-    let rc_witness = RC
-        .iter()
-        .map(|x| {
-            (0..8)
-                .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
-                .collect_vec()
-        })
-        .collect_vec();
+    let rc_witness = layout.fixed_witness_group();
     #[allow(clippy::type_complexity)]
     let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
         &gkr_circuit,

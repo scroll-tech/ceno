@@ -54,6 +54,9 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
 pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     type Trace;
 
+    /// The fixed witness.
+    fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField>;
+
     /// The vectors to be committed in the phase1.
     fn phase1_witness_group(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField>;
 
@@ -64,7 +67,7 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
         phase1_witness_group: &RowMajorMatrix<
             <<PB as ProverBackend>::E as ExtensionField>::BaseField,
         >,
-        fixed: &[Vec<<<PB as ProverBackend>::E as ExtensionField>::BaseField>],
+        fixed: &RowMajorMatrix<<<PB as ProverBackend>::E as ExtensionField>::BaseField>,
         challenges: &[PB::E],
     ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>) {
         <PD as ProtocolWitnessGeneratorProver<PB>>::gkr_witness(
