@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::RegisterChipOperations,
+    chip_handler::{RegisterChipOperations, general::PublicIOQuery},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     gadgets::AssertLtConfig,
@@ -11,6 +11,7 @@ use crate::{
         },
     },
     set_val,
+    structs::ProgramParams,
     witness::LkMultiplicity,
 };
 use ceno_emul::{StepRecord, Tracer};
@@ -34,7 +35,10 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         "ECALL_HALT".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         let prev_x10_ts = cb.create_witin(|| "prev_x10_ts");
         let exit_code = {
             let exit_code = cb.query_exit_code()?;

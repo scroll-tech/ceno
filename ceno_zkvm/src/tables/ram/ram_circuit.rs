@@ -73,11 +73,14 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
-        cb.namespace(
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self::TableConfig, ZKVMError> {
+        Ok(cb.namespace(
             || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb),
-        )
+            |cb| Self::TableConfig::construct_circuit(cb, params),
+        )?)
     }
 
     fn generate_fixed_traces(
@@ -97,7 +100,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         final_v: &Self::WitnessInput,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
-        config.assign_instances(num_witin, num_structural_witin, final_v)
+        Ok(config.assign_instances(num_witin, num_structural_witin, final_v)?)
     }
 }
 
@@ -121,11 +124,14 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
-        cb.namespace(
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self::TableConfig, ZKVMError> {
+        Ok(cb.namespace(
             || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb),
-        )
+            |cb| Self::TableConfig::construct_circuit(cb, params),
+        )?)
     }
 
     fn generate_fixed_traces(
@@ -145,7 +151,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         final_cycles: &[Cycle],
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed including padding
-        config.assign_instances(num_witin, num_structural_witin, final_cycles)
+        Ok(config.assign_instances(num_witin, num_structural_witin, final_cycles)?)
     }
 }
 
@@ -204,11 +210,14 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
         format!("RAM_{:?}_{}", DVRAM::RAM_TYPE, DVRAM::name())
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::TableConfig, ZKVMError> {
-        cb.namespace(
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self::TableConfig, ZKVMError> {
+        Ok(cb.namespace(
             || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb),
-        )
+            |cb| Self::TableConfig::construct_circuit(cb, params),
+        )?)
     }
 
     fn generate_fixed_traces(
@@ -227,6 +236,6 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
         final_v: &Self::WitnessInput,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
-        config.assign_instances(num_witin, num_structural_witin, final_v)
+        Ok(config.assign_instances(num_witin, num_structural_witin, final_v)?)
     }
 }

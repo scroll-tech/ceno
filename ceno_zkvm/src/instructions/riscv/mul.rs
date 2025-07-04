@@ -96,6 +96,7 @@ use crate::{
             r_insn::RInstructionConfig,
         },
     },
+    structs::ProgramParams,
     uint::Value,
     utils::i64_to_base,
     witness::LkMultiplicity,
@@ -168,6 +169,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<MulhConfig<E>, ZKVMError> {
         // The soundness analysis for these constraints is only valid for
         // 32-bit registers represented over the Goldilocks field, so verify
@@ -406,10 +408,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 mod test {
     use ceno_emul::{Change, StepRecord, encode_rv32};
     use ff_ext::GoldilocksExt2;
+    use gkr_iop::circuit_builder::DebugIndex;
 
     use super::*;
     use crate::{
-        chip_handler::test::DebugIndex,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
         scheme::mock_prover::{MOCK_PC_START, MockProver},
@@ -446,6 +448,7 @@ mod test {
                 |cb| {
                     Ok(MulhInstructionBase::<GoldilocksExt2, I>::construct_circuit(
                         cb,
+                        &ProgramParams::default(),
                     ))
                 },
             )
@@ -520,7 +523,15 @@ mod test {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
-            .namespace(|| "mulh", |cb| Ok(MulhInstruction::construct_circuit(cb)))
+            .namespace(
+                || "mulh",
+                |cb| {
+                    Ok(MulhInstruction::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
+            )
             .unwrap()
             .unwrap();
 
@@ -585,7 +596,12 @@ mod test {
         let config = cb
             .namespace(
                 || "mulhsu",
-                |cb| Ok(MulhsuInstruction::construct_circuit(cb)),
+                |cb| {
+                    Ok(MulhsuInstruction::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
             )
             .unwrap()
             .unwrap();

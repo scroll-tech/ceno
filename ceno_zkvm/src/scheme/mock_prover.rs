@@ -684,15 +684,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     fn load_program_table(program: &Program, challenge: [E; 2]) -> Vec<Vec<u64>> {
         let mut t_vec = vec![];
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
-        let mut cb = CircuitBuilder::new_with_params(
-            &mut cs,
-            ProgramParams {
-                platform: CENO_PLATFORM,
-                program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
-                ..ProgramParams::default()
-            },
-        );
-        let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
+        let params = ProgramParams {
+            platform: CENO_PLATFORM,
+            program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
+            ..ProgramParams::default()
+        };
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb, &params).unwrap();
         let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {

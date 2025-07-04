@@ -1,6 +1,7 @@
 //! The implementation of ops tables. No generics.
 
 use ff_ext::{ExtensionField, SmallField};
+use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::collections::HashMap;
@@ -8,7 +9,6 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
-    error::ZKVMError,
     set_fixed_val, set_val,
     structs::ROMType,
 };
@@ -25,7 +25,7 @@ impl OpTableConfig {
         cb: &mut CircuitBuilder<E>,
         rom_type: ROMType,
         table_len: usize,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         let abc = [
             cb.create_fixed(|| "a")?,
             cb.create_fixed(|| "b")?,
@@ -72,7 +72,7 @@ impl OpTableConfig {
         num_structural_witin: usize,
         multiplicity: &HashMap<u64, usize>,
         length: usize,
-    ) -> Result<[RowMajorMatrix<F>; 2], ZKVMError> {
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert_eq!(num_structural_witin, 0);
         let mut witness =
             RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);

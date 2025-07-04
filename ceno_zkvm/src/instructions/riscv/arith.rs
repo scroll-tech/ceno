@@ -5,8 +5,8 @@ use ff_ext::ExtensionField;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, uint::Value,
-    witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
+    structs::ProgramParams, uint::Value, witness::LkMultiplicity,
 };
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
@@ -42,6 +42,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let (rs1_read, rs2_read, rd_written) = match I::INST_KIND {
             InsnKind::ADD => {
@@ -132,10 +133,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 mod test {
     use ceno_emul::{Change, StepRecord, encode_rv32};
     use ff_ext::GoldilocksExt2;
+    use gkr_iop::circuit_builder::DebugIndex;
 
     use super::*;
     use crate::{
-        chip_handler::test::DebugIndex,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
         scheme::mock_prover::{MOCK_PC_START, MockProver},
@@ -166,7 +167,12 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| Ok(ArithInstruction::<GoldilocksExt2, I>::construct_circuit(cb)),
+                |cb| {
+                    Ok(ArithInstruction::<GoldilocksExt2, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
             )
             .unwrap()
             .unwrap();

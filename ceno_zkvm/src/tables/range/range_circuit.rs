@@ -7,7 +7,7 @@ use std::{collections::HashMap, marker::PhantomData};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    structs::ROMType,
+    structs::{ProgramParams, ROMType},
     tables::{RMMCollections, TableCircuit},
 };
 use ff_ext::ExtensionField;
@@ -35,11 +35,14 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
         format!("RANGE_{:?}", RANGE::ROM_TYPE)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<RangeTableConfig, ZKVMError> {
-        cb.namespace(
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<RangeTableConfig, ZKVMError> {
+        Ok(cb.namespace(
             || Self::name(),
             |cb| RangeTableConfig::construct_circuit(cb, RANGE::ROM_TYPE, RANGE::len()),
-        )
+        )?)
     }
 
     fn generate_fixed_traces(
@@ -59,12 +62,12 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[RANGE::ROM_TYPE as usize];
 
-        config.assign_instances(
+        Ok(config.assign_instances(
             num_witin,
             num_structural_witin,
             multiplicity,
             RANGE::content(),
             RANGE::len(),
-        )
+        )?)
     }
 }

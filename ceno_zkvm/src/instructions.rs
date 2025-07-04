@@ -7,7 +7,10 @@ use rayon::{
     slice::ParallelSlice,
 };
 
-use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, witness::LkMultiplicity};
+use crate::{
+    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams,
+    witness::LkMultiplicity,
+};
 
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
@@ -25,6 +28,7 @@ pub trait Instruction<E: ExtensionField> {
     /// construct circuit and manipulate circuit builder, then return the respective config
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError>;
 
     /// giving config, extract optional gkr circuit

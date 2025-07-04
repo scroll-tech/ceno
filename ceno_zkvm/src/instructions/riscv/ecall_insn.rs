@@ -1,6 +1,7 @@
 use crate::{
     chip_handler::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
+        general::InstFetch,
     },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,

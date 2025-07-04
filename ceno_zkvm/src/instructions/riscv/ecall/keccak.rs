@@ -13,7 +13,7 @@ use p3::field::FieldAlgebra;
 use witness::RowMajorMatrix;
 
 use crate::{
-    chip_handler::GlobalStateRegisterMachineChipOperations,
+    chip_handler::{GlobalStateRegisterMachineChipOperations, general::InstFetch},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
@@ -23,6 +23,7 @@ use crate::{
             insn_base::{ReadRS1, ReadRS2},
         },
     },
+    structs::ProgramParams,
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
@@ -50,7 +51,10 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         Ok(Some(config.circuit.clone()))
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         // construct keccak gkr-iop circuit
         let params = gkr_iop::precompiles::KeccakParams {};
         let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);

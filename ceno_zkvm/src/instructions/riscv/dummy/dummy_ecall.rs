@@ -14,6 +14,7 @@ use crate::{
         riscv::{constants::UInt, insn_base::WriteRD},
     },
     set_val,
+    structs::ProgramParams,
     witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
@@ -31,7 +32,10 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
     fn name() -> String {
         S::NAME.to_owned()
     }
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         let dummy_insn = DummyConfig::construct_circuit(
             cb,
             InsnKind::ECALL,

@@ -7,6 +7,7 @@ use std::{collections::HashMap, marker::PhantomData};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
+    structs::ProgramParams,
     tables::{RMMCollections, TableCircuit},
 };
 use ff_ext::ExtensionField;
@@ -24,11 +25,14 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         format!("OPS_{:?}", OP::ROM_TYPE)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<OpTableConfig, ZKVMError> {
-        cb.namespace(
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<OpTableConfig, ZKVMError> {
+        Ok(cb.namespace(
             || Self::name(),
             |cb| OpTableConfig::construct_circuit(cb, OP::ROM_TYPE, OP::len()),
-        )
+        )?)
     }
 
     fn generate_fixed_traces(
@@ -47,6 +51,6 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         _input: &(),
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];
-        config.assign_instances(num_witin, num_structural_witin, multiplicity, OP::len())
+        Ok(config.assign_instances(num_witin, num_structural_witin, multiplicity, OP::len())?)
     }
 }

@@ -5,14 +5,14 @@ use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
     set_fixed_val, set_val,
-    structs::ROMType,
+    structs::{ProgramParams, ROMType},
     tables::TableCircuit,
-    utils::i64_to_base,
 };
 use ceno_emul::{
     InsnFormat, InsnFormat::*, InsnKind::*, Instruction, PC_STEP_SIZE, Program, WORD_SIZE,
 };
 use ff_ext::{ExtensionField, FieldInto, SmallField};
+use gkr_iop::utils::i64_to_base;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
@@ -93,7 +93,10 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         "PROGRAM".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<ProgramTableConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<ProgramTableConfig, ZKVMError> {
         let record = InsnRecord([
             cb.create_fixed(|| "pc")?,
             cb.create_fixed(|| "kind")?,
@@ -114,7 +117,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         cb.lk_table_record(
             || "prog table",
             SetTableSpec {
-                len: Some(cb.params.program_size.next_power_of_two()),
+                len: Some(params.program_size.next_power_of_two()),
                 structural_witins: vec![],
             },
             ROMType::Instruction,
@@ -125,7 +128,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         Ok(ProgramTableConfig {
             record,
             mlt,
-            program_size: cb.params.program_size,
+            program_size: params.program_size,
         })
     }
 
@@ -196,7 +199,9 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{circuit_builder::ConstraintSystem, witness::LkMultiplicity};
+    use crate::{
+        circuit_builder::ConstraintSystem, structs::ProgramParams, witness::LkMultiplicity,
+    };
     use ceno_emul::encode_rv32;
 
     use ff_ext::GoldilocksExt2 as E;
@@ -217,12 +222,13 @@ mod tests {
             Default::default(),
         );
 
-        let config = ProgramTableCircuit::construct_circuit(&mut cb).unwrap();
+        let params = ProgramParams::default();
+        let config = ProgramTableCircuit::construct_circuit(&mut cb, &params).unwrap();
 
         let check = |matrix: &RowMajorMatrix<F>| {
             assert_eq!(
                 matrix.num_instances() + matrix.num_padding_instances(),
-                cb.params.program_size
+                params.program_size
             );
             for row in matrix.iter_rows().skip(actual_len) {
                 for col in row.iter() {
