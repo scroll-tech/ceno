@@ -20,7 +20,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         for (circuit_index, (c_name, cs)) in self.circuit_css.into_iter().enumerate() {
             // fixed_traces is optional
             // verifier will check it existent if cs.num_fixed > 0
-            if cs.num_fixed > 0 {
+            if cs.num_fixed() > 0 {
                 let fixed_trace_rmm = vm_fixed_traces
                     .circuit_fixed_traces
                     .remove(&c_name)
@@ -32,14 +32,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             let circuit_pk = cs.key_gen();
             assert!(vm_pk.circuit_pks.insert(c_name, circuit_pk).is_none());
         }
-
-        // TODO: get keccak cs manually
-        // assert_eq!(keccak_cs.num_fixed, 0);
-        // vm_pk.keccak_pk = self
-        //     .keccak_gkr_iop
-        //     .as_ref()
-        //     .unwrap()
-        //     .key_gen(&vm_pk.pp, None);
 
         vm_pk.commit_fixed(fixed_traces)?;
 

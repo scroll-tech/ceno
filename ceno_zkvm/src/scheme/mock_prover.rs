@@ -3,17 +3,24 @@ use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     state::{GlobalState, StateCircuit},
-    structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{
-        AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
+    structs::{
+        ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
+        ZKVMWitnesses,
     },
-    witness::{LkMultiplicity, LkMultiplicityRaw},
+    tables::{ProgramTableCircuit, RangeTable, TableCircuit, U5Table, U8Table, U14Table, U16Table},
+    witness::LkMultiplicity,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
+use gkr_iop::{
+    tables::{
+        OpsTable,
+        ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
+    },
+    utils::lk_multiplicity::LkMultiplicityRaw,
+};
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, fmt,
@@ -812,7 +819,13 @@ Hints:
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
         // Process all circuits.
-        for (circuit_name, cs) in &cs.circuit_css {
+        for (
+            circuit_name,
+            ComposedConstrainSystem {
+                zkvm_v1_css: cs, ..
+            },
+        ) in &cs.circuit_css
+        {
             let empty_rmm = RowMajorMatrix::empty();
             let is_opcode = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
@@ -949,7 +962,13 @@ Hints:
                 let mut writes_grp_by_annotations = HashMap::new();
                 // store (pc, timestamp) for $ram_type == RAMType::GlobalState
                 let mut gs = HashMap::new();
-                for (circuit_name, cs) in &cs.circuit_css {
+                for (
+                    circuit_name,
+                    ComposedConstrainSystem {
+                        zkvm_v1_css: cs, ..
+                    },
+                ) in &cs.circuit_css
+                {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
@@ -1018,7 +1037,13 @@ Hints:
 
                 let mut reads = HashSet::new();
                 let mut reads_grp_by_annotations = HashMap::new();
-                for (circuit_name, cs) in &cs.circuit_css {
+                for (
+                    circuit_name,
+                    ComposedConstrainSystem {
+                        zkvm_v1_css: cs, ..
+                    },
+                ) in &cs.circuit_css
+                {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();

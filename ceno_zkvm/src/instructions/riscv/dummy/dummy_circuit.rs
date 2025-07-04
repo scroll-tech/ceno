@@ -90,7 +90,7 @@ pub struct DummyConfig<E: ExtensionField> {
 
 impl<E: ExtensionField> DummyConfig<E> {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn construct_circuit(
+    pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         kind: InsnKind,
         with_rs1: bool,

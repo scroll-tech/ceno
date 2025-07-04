@@ -1,10 +1,10 @@
 mod logic_circuit;
+use gkr_iop::tables::ops::{AndTable, OrTable, XorTable};
 use logic_circuit::{LogicInstruction, LogicOp};
 
 #[cfg(test)]
 mod test;
 
-use crate::tables::{AndTable, OrTable, XorTable};
 use ceno_emul::InsnKind;
 
 pub struct AndOp;

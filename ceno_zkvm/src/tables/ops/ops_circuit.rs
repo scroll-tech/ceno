@@ -7,29 +7,11 @@ use std::{collections::HashMap, marker::PhantomData};
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    structs::ROMType,
     tables::{RMMCollections, TableCircuit},
 };
 use ff_ext::ExtensionField;
+use gkr_iop::tables::OpsTable;
 use witness::RowMajorMatrix;
-
-/// Use this trait as parameter to OpsTableCircuit.
-pub trait OpsTable {
-    const ROM_TYPE: ROMType;
-
-    fn len() -> usize;
-
-    /// The content of the table: [[a, b, result], ...]
-    fn content() -> Vec<[u64; 3]>;
-
-    fn pack(a: u64, b: u64) -> u64 {
-        a | (b << 8)
-    }
-
-    fn unpack(i: u64) -> (u64, u64) {
-        (i & 0xff, (i >> 8) & 0xff)
-    }
-}
 
 pub struct OpsTableCircuit<E, R>(PhantomData<(E, R)>);
 
