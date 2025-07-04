@@ -6,13 +6,13 @@ use gkr_iop::{
     ProtocolWitnessGenerator,
     gkr::GKRCircuit,
     precompiles::{
-        KECCAK_INPUT32_SIZE, KECCAK_WIT_SIZE, KeccakInOutCols, KeccakInstance, KeccakLayout,
-        KeccakStateInstance, KeccakTrace, KeccakWitInstance,
+        KECCAK_INPUT32_SIZE, KeccakInOutCols, KeccakInstance, KeccakLayout, KeccakStateInstance,
+        KeccakTrace, KeccakWitInstance,
     },
 };
 use itertools::Itertools;
 use multilinear_extensions::{ToExpr, WitIn, util::max_usable_threads};
-use p3::field::FieldAlgebra;
+use p3::{field::FieldAlgebra, matrix::Matrix};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
@@ -115,7 +115,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                 output32: array::from_fn(|i| mem_rw[i].0.after.expr()),
             },
         };
-        let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(cb, params)?;
+        let (layout, chip) =
+            <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_gkr_chip(cb, params)?;
         let circuit = chip.gkr_circuit();
 
         Ok(EcallKeccakConfig {
@@ -128,6 +129,15 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         })
     }
 
+    fn generate_fixed_traces(
+        config: &Self::InstructionConfig,
+        num_fixed: usize,
+    ) -> Option<RowMajorMatrix<E::BaseField>> {
+        let fixed = config.layout.fixed_witness_group();
+        assert_eq!(fixed.width(), num_fixed);
+        Some(fixed)
+    }
+
     fn assign_instances(
         config: &Self::InstructionConfig,
         num_witin: usize,
@@ -136,7 +146,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         let mut lk_multiplicity = LkMultiplicity::default();
         if steps.is_empty() {
             return Ok((
-                RowMajorMatrix::new(0, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default),
+                RowMajorMatrix::new(0, num_witin, InstancePaddingStrategy::Default),
                 lk_multiplicity,
             ));
         }
@@ -160,7 +170,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         // 1st pass: assign witness outside of gkr-iop scope
         // raw_witin
         //     .values
-        //     .par_chunks_mut(KECCAK_WIT_SIZE * KECCAK_ROUNDS.next_power_of_two())
+        //     .par_chunks_mut(num_witin * KECCAK_ROUNDS.next_power_of_two())
         //     .zip(steps.par_chunks(num_instance_per_batch))
         //     .flat_map(|(instances, steps)| {
         //         let mut lk_multiplicity = lk_multiplicity.clone();

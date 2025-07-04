@@ -84,8 +84,6 @@ pub const KECCAK_OUTPUT32_SIZE: usize = 50;
 
 // number of non zero out within keccak circuit
 pub const KECCAK_OUT_EVAL_SIZE: usize = size_of::<KeccakOutEvals<u8>>();
-// number of non zero out outside of keccak circuit
-pub const KECCAK_WIT_SIZE: usize = size_of::<KeccakWitCols<u8>>();
 
 const AND_LOOKUPS_PER_ROUND: usize = 200;
 const XOR_LOOKUPS_PER_ROUND: usize = 608;
@@ -154,6 +152,9 @@ pub struct KeccakLayer<WitT, FixedT, EqT> {
 pub struct KeccakLayout<E: ExtensionField> {
     pub params: KeccakParams<Expression<E>>,
     pub layer_exprs: KeccakLayer<WitIn, Fixed, WitIn>,
+    pub n_fixed: usize,
+    pub n_committed: usize,
+    pub n_challenges: usize,
 }
 
 impl<E: ExtensionField> KeccakLayout<E> {
@@ -172,9 +173,9 @@ impl<E: ExtensionField> KeccakLayout<E> {
             ],
         ): (KeccakWitCols<WitIn>, KeccakFixedCols<Fixed>, [WitIn; 6]) = unsafe {
             (
-                transmute::<[WitIn; KECCAK_WIT_SIZE], KeccakWitCols<WitIn>>(array::from_fn(|id| {
-                    cb.create_witin(|| format!("keccak_witin_{}", id))
-                })),
+                transmute::<[WitIn; size_of::<KeccakWitCols<u8>>()], KeccakWitCols<WitIn>>(
+                    array::from_fn(|id| cb.create_witin(|| format!("keccak_witin_{}", id))),
+                ),
                 transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(array::from_fn(|id| {
                     cb.create_fixed(|| format!("keccak_fixed_{}", id))
                 })),
@@ -194,6 +195,9 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation_right,
                 eq_rotation,
             },
+            n_fixed: 0,
+            n_committed: 0,
+            n_challenges: 0,
         }
     }
 }
@@ -201,17 +205,17 @@ impl<E: ExtensionField> KeccakLayout<E> {
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     type Params = KeccakParams<Expression<E>>;
 
-    fn init(cb: &mut CircuitBuilder<E>, params: Self::Params) -> Self {
-        Self::new(cb, params)
-    }
-
-    fn build_gkr_chip(&self, cb: &mut CircuitBuilder<E>) -> Result<Chip<E>, CircuitBuilderError> {
+    fn build_gkr_chip(
+        cb: &mut CircuitBuilder<E>,
+        params: Self::Params,
+    ) -> Result<(Self, Chip<E>), CircuitBuilderError> {
+        let mut layout = Self::new(cb, params);
         let system = cb;
 
         let KeccakInOutCols {
             output32: output32_expr,
             input32: input32_expr,
-        } = &self.params.io;
+        } = &layout.params.io;
 
         let KeccakWitCols {
             input8,
@@ -225,9 +229,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             nonlinear,
             chi_output,
             iota_output,
-        } = &self.layer_exprs.wits;
+        } = &layout.layer_exprs.wits;
 
-        let KeccakFixedCols { rc } = &self.layer_exprs.fixed;
+        let KeccakFixedCols { rc } = &layout.layer_exprs.fixed;
 
         // TODO: ndarrays can be replaced with normal arrays
         // Input state of the round in 8-bit chunks
@@ -454,9 +458,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             .for_each(|(input, output)| system.rotate_and_assert_eq(input.expr(), output.expr()));
         system.set_rotation_params(RotationParams {
             rotation_eqs: Some([
-                self.layer_exprs.eq_rotation_left.expr(),
-                self.layer_exprs.eq_rotation_right.expr(),
-                self.layer_exprs.eq_rotation.expr(),
+                layout.layer_exprs.eq_rotation_left.expr(),
+                layout.layer_exprs.eq_rotation_right.expr(),
+                layout.layer_exprs.eq_rotation.expr(),
             ]),
             rotation_cyclic_group_log2: ROUNDS_CEIL_LOG2,
             rotation_cyclic_subgroup_size: ROUNDS - 1,
@@ -465,7 +469,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         let mut chip = Chip {
             n_fixed: system.cs.num_fixed,
             n_committed: system.cs.num_witin as usize,
-            n_challenges: self.n_challenges(),
+            n_challenges: layout.n_challenges(),
             n_evaluations: system.cs.w_expressions.len()
                 + system.cs.r_expressions.len()
                 + system.cs.lk_expressions.len()
@@ -478,10 +482,14 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             layers: vec![],
         };
 
-        let read_eq = Some(self.layer_exprs.eq_mem_read.expr());
-        let write_eq = Some(self.layer_exprs.eq_mem_write.expr());
-        let lk_eq = Some(self.layer_exprs.eq_zero.expr()); // lk eq shared with zero
-        let zero_eq = Some(self.layer_exprs.eq_zero.expr());
+        layout.n_fixed = chip.n_fixed;
+        layout.n_committed = chip.n_committed;
+        layout.n_challenges = chip.n_challenges;
+
+        let read_eq = Some(layout.layer_exprs.eq_mem_read.expr());
+        let write_eq = Some(layout.layer_exprs.eq_mem_write.expr());
+        let lk_eq = Some(layout.layer_exprs.eq_zero.expr()); // lk eq shared with zero
+        let zero_eq = Some(layout.layer_exprs.eq_zero.expr());
 
         let w_len = system.cs.w_expressions.len();
         let r_len = system.cs.r_expressions.len();
@@ -498,14 +506,14 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         let layer = Layer::from_circuit_builder(
             &*system,
             "Rounds".to_string(),
-            self.n_challenges(),
+            layout.n_challenges(),
             w_records_eval,
             r_records_eval,
             lk_eval,
             zero_eval,
         );
         chip.add_layer(layer);
-        Ok(chip)
+        Ok((layout, chip))
     }
 
     fn n_committed(&self) -> usize {
@@ -579,17 +587,21 @@ where
     // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
     fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize {
         let n_row_padding = next_pow2_instance_padding(num_instances * ROUNDS.next_power_of_two());
-        n_row_padding * KECCAK_WIT_SIZE
+        n_row_padding * self.n_committed
     }
 
-    fn fixed_witness_group(&self) -> Vec<Vec<E::BaseField>> {
-        RC.iter()
-            .map(|x| {
-                (0..8)
-                    .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
-                    .collect_vec()
-            })
-            .collect_vec()
+    fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::new_by_values(
+            RC.iter()
+                .flat_map(|x| {
+                    (0..8)
+                        .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
+                        .collect_vec()
+                })
+                .collect_vec(),
+            8,
+            InstancePaddingStrategy::Default,
+        )
     }
 
     fn phase1_witness_group(
@@ -629,7 +641,7 @@ where
         // keccak instance full rounds (24 rounds + 8 round padding) as chunk size
         // we need to do assignment on respective 31 cyclic group index
         wits.values
-            .par_chunks_mut(KECCAK_WIT_SIZE * ROUNDS.next_power_of_two())
+            .par_chunks_mut(self.n_committed * ROUNDS.next_power_of_two())
             .take(num_instances)
             .zip(&phase1.instances)
             .for_each(|(wits, KeccakInstance { witin, .. })| {
@@ -647,7 +659,8 @@ where
                 #[allow(clippy::needless_range_loop)]
                 for round in 0..ROUNDS {
                     let round_index = cyclic_group.next().unwrap();
-                    let wits = &mut wits[round_index as usize * KECCAK_WIT_SIZE..];
+                    let wits =
+                        &mut wits[round_index as usize * self.n_committed..][..self.n_committed];
                     let mut state8 = [[[0u64; 8]; 5]; 5];
                     for x in 0..5 {
                         for y in 0..5 {
@@ -836,7 +849,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
             output32: output_value.map(|e| e.expr()),
         },
     };
-    let (layout, chip) = KeccakLayout::build(&mut circuit_builder, params)?;
+    let (layout, chip) = KeccakLayout::build_gkr_chip(&mut circuit_builder, params)?;
     circuit_builder.finalize();
     Ok((layout, chip.gkr_circuit(), cs.num_witin))
 }

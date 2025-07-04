@@ -1,12 +1,12 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    instructions::{Instruction, riscv::dummy::LargeEcallDummy},
+    instructions::Instruction,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
-use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord};
+use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable};
 use itertools::Itertools;
@@ -224,16 +224,20 @@ pub struct ZKVMFixedTraces<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ZKVMFixedTraces<E> {
-    pub fn register_keccakf_circuit(&mut self, _cs: &ZKVMConstraintSystem<E>) {
+    pub fn register_opcode_circuit<OC: Instruction<E>>(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        config: &OC::InstructionConfig,
+    ) {
+        let cs = cs.get_cs(&OC::name()).expect("cs not found");
         assert!(
             self.circuit_fixed_traces
-                .insert(LargeEcallDummy::<E, KeccakSpec>::name(), None)
+                .insert(
+                    OC::name(),
+                    OC::generate_fixed_traces(config, cs.zkvm_v1_css.num_fixed,)
+                )
                 .is_none()
         );
-    }
-
-    pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self, _cs: &ZKVMConstraintSystem<E>) {
-        assert!(self.circuit_fixed_traces.insert(OC::name(), None).is_none());
     }
 
     pub fn register_table_circuit<TC: TableCircuit<E>>(

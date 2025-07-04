@@ -36,23 +36,13 @@ pub type Phase1WitnessGroup<'a, E> = Vec<ArcMultilinearExtension<'a, E>>;
 pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     type Params;
 
-    fn init(cb: &mut CircuitBuilder<E>, params: Self::Params) -> Self;
-
-    /// Build the protocol for GKR IOP.
-    fn build(
-        cb: &mut CircuitBuilder<E>,
-        params: Self::Params,
-    ) -> Result<(Self, Chip<E>), CircuitBuilderError> {
-        let chip_spec = Self::init(cb, params);
-        let chip = chip_spec.build_gkr_chip(cb)?;
-
-        Ok((chip_spec, chip))
-    }
-
     /// Create the GKR layers in the reverse order. For each layer, specify the
     /// polynomial expressions, evaluation expressions of outputs and evaluation
     /// positions of the inputs.
-    fn build_gkr_chip(&self, cb: &mut CircuitBuilder<E>) -> Result<Chip<E>, CircuitBuilderError>;
+    fn build_gkr_chip(
+        cb: &mut CircuitBuilder<E>,
+        params: Self::Params,
+    ) -> Result<(Self, Chip<E>), CircuitBuilderError>;
 
     fn n_committed(&self) -> usize;
     fn n_fixed(&self) -> usize;
@@ -68,9 +58,8 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     /// return rmm height for phase 1 witness, which might include height for `multivariate rotation`
     fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize;
 
-    /// The fixed witness. Use Vec<Vec<E::BaseField>> as the return type in case
-    /// the fixed witnesses has different sizes.
-    fn fixed_witness_group(&self) -> Vec<Vec<E::BaseField>>;
+    /// The fixed witness.
+    fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField>;
 
     /// The vectors to be committed in the phase1.
     fn phase1_witness_group(
@@ -87,7 +76,7 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
         phase1_witness_group: &RowMajorMatrix<
             <<PB as ProverBackend>::E as ExtensionField>::BaseField,
         >,
-        fixed: &[Vec<<<PB as ProverBackend>::E as ExtensionField>::BaseField>],
+        fixed: &RowMajorMatrix<<<PB as ProverBackend>::E as ExtensionField>::BaseField>,
         challenges: &[PB::E],
     ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>) {
         <PD as ProtocolWitnessGeneratorProver<PB>>::gkr_witness(
