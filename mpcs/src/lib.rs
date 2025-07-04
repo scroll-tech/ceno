@@ -186,15 +186,13 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
-    #[allow(clippy::too_many_arguments)]
     fn batch_open(
         pp: &Self::ProverParam,
-        num_instances: &[(usize, usize)],
-        fixed_comms: Option<&Self::CommitmentWithWitness>,
-        witin_comms: &Self::CommitmentWithWitness,
-        points: &[Point<E>],
-        evals: &[Vec<E>],
-        circuit_num_polys: &[(usize, usize)],
+        rounds: Vec<(
+            Self::CommitmentWithWitness,
+            // for each matrix open at one point
+            Vec<(Point<E>, Vec<E>)>,
+        )>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 

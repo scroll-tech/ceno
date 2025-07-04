@@ -32,11 +32,11 @@ use super::{
 };
 
 pub fn batch_query_phase<E: ExtensionField>(
-    transcript: &mut impl Transcript<E>,
-    fixed_comms: Option<&BasefoldCommitmentWithWitness<E>>,
-    witin_comms: &BasefoldCommitmentWithWitness<E>,
+    rounds: Vec<&BasefoldCommitmentWithWitness<E>>,
     trees: &[MerkleTreeExt<E>],
     num_verifier_queries: usize,
+    log2_max_codeword_size: usize,
+    transcript: &mut impl Transcript<E>,
 ) -> QueryOpeningProofs<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -48,47 +48,32 @@ where
     let queries: Vec<_> = transcript.sample_bits_and_append_vec(
         b"query indices",
         num_verifier_queries,
-        witin_comms.log2_max_codeword_size,
+        log2_max_codeword_size,
     );
 
     queries
         .iter()
         .map(|idx| {
-            let witin_base_proof = {
-                // extract the even part of `idx`
-                // ---------------------------------
-                // the oracle values are committed in a row-bit-reversed format.
-                // rounding `idx` to an even value is equivalent to retrieving the "left-hand" side `j` index
-                // in the original (non-row-bit-reversed) format.
-                //
-                // however, since `p_d[j]` and `p_d[j + n_{d-1}]` are already concatenated in the same merkle leaf,
-                // we can simply mask out the least significant bit (lsb) by performing a right shift by 1.
-                let idx = idx >> 1;
-                let (opened_values, opening_proof) = mmcs.open_batch(idx, &witin_comms.codeword);
-                BatchOpening {
-                    opened_values,
-                    opening_proof,
-                }
-            };
-
-            let fixed_base_proof = if let Some(fixed_comms) = fixed_comms {
-                // follow same rule as witin base proof
-                let idx_shift = witin_comms.log2_max_codeword_size as i32
-                    - fixed_comms.log2_max_codeword_size as i32;
-                let idx = if idx_shift > 0 {
-                    idx >> idx_shift
-                } else {
-                    idx << -idx_shift
-                };
-                let idx = idx >> 1;
-                let (opened_values, opening_proof) = mmcs.open_batch(idx, &fixed_comms.codeword);
-                Some(BatchOpening {
-                    opened_values,
-                    opening_proof,
+            let input_proofs = rounds
+                .iter()
+                .map(|pcs_data| {
+                    // extract the even part of `idx`
+                    // ---------------------------------
+                    // the oracle values are committed in a row-bit-reversed format.
+                    // rounding `idx` to an even value is equivalent to retrieving the "left-hand" side `j` index
+                    // in the original (non-row-bit-reversed) format.
+                    //
+                    // however, since `p_d[j]` and `p_d[j + n_{d-1}]` are already concatenated in the same merkle leaf,
+                    // we can simply mask out the least significant bit (lsb) by performing a right shift by 1.
+                    let idx_shift = log2_max_codeword_size - pcs_data.log2_max_codeword_size;
+                    let idx = idx >> (idx_shift + 1);
+                    let (opened_values, opening_proof) = mmcs.open_batch(idx, &pcs_data.codeword);
+                    BatchOpening {
+                        opened_values,
+                        opening_proof,
+                    }
                 })
-            } else {
-                None
-            };
+                .collect_vec();
 
             // this is equivalent with "idx = idx % n_{d-1}" operation in non row bit reverse format
             let idx = idx >> 1;
@@ -114,8 +99,7 @@ where
                         (idx >> 1, commit_phase_openings)
                     });
             QueryOpeningProof {
-                witin_base_proof,
-                fixed_base_proof,
+                input_proofs,
                 commit_phase_openings,
             }
         })
@@ -164,8 +148,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
         |(
             idx,
             QueryOpeningProof {
-                witin_base_proof: witin_batch_opening,
-                fixed_base_proof: fixed_commit_option,
+                input_proofs,
                 commit_phase_openings: opening_ext,
             },
         )| {

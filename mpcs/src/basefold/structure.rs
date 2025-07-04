@@ -271,17 +271,12 @@ pub type ExtMmcs<E> = ExtensionMmcs<
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct QueryOpeningProof<E: ExtensionField> {
-    pub witin_base_proof: BatchOpening<
-        <E as ExtensionField>::BaseField,
-        <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
-    >,
-    pub fixed_base_proof: Option<
+    pub input_proofs: Vec<
         BatchOpening<
             <E as ExtensionField>::BaseField,
             <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
         >,
     >,
-    #[allow(clippy::type_complexity)]
     pub commit_phase_openings: Vec<CommitPhaseProofStep<E, ExtMmcs<E>>>,
 }
 
@@ -303,7 +298,7 @@ where
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     // vec![witness, fixed], where fixed is optional
-    pub(crate) trivial_proof: Option<TrivialProof<E>>,
+    pub(crate) trivial_proof: TrivialProof<E>,
     pub(crate) pow_witness: E::BaseField,
 }
 
