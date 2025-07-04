@@ -28,7 +28,7 @@ use crate::basefold::structure::QueryOpeningProofs;
 use super::{
     Digest,
     encoding::EncodingScheme,
-    structure::{BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldSpec},
+    structure::{BasefoldCommitment, BasefoldCommitmentWithWitness},
 };
 
 pub fn batch_query_phase<E: ExtensionField>(
@@ -124,10 +124,10 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
+pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
+    vp: &S::VerifierParameters,
     max_num_var: usize,
     indices: &[usize],
-    vp: &<Spec::EncodingScheme as EncodingScheme<E>>::VerifierParameters,
     final_message: &[Vec<E>],
     batch_coeffs: &[E],
     queries: &QueryOpeningProofs<E>,
@@ -143,7 +143,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 {
     let inv_2 = E::BaseField::from_canonical_u64(2).inverse();
     let encode_span = entered_span!("encode_final_codeword");
-    let final_codeword = <Spec::EncodingScheme as EncodingScheme<E>>::encode_small(
+    let final_codeword = S::encode_small(
         vp,
         RowMajorMatrix::new(
             (0..final_message[0].len())
@@ -157,7 +157,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
     let mmcs = poseidon2_merkle_tree::<E>();
     let check_queries_span = entered_span!("check_queries");
-    let log2_blowup = <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log();
+    let log2_blowup = S::get_rate_log();
     let log2_max_codeword_size = max_num_var + log2_blowup;
 
     indices.iter().zip_eq(queries).for_each(
@@ -178,7 +178,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
             // rounds
             let (witin_dimensions, fixed_dimensions) =
-                get_base_codeword_dimentions::<E, Spec>(circuit_meta);
+                get_base_codeword_dimentions::<E, S>(circuit_meta);
             let mut rounds = vec![(witin_comm, witin_batch_opening, witin_dimensions)];
             if let Some(fixed) = fixed_commit_option {
                 rounds.push((fixed_comm.unwrap(), fixed, fixed_dimensions));
@@ -229,9 +229,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
             let mut cur_num_var = max_num_var;
             let mut log2_height = cur_num_var + log2_blowup - 1;
             // -1 because for there are only #max_num_var-1 openings proof
-            let rounds = cur_num_var
-                - <Spec::EncodingScheme as EncodingScheme<E>>::get_basecode_msg_size_log()
-                - 1;
+            let rounds = cur_num_var - S::get_basecode_msg_size_log() - 1;
 
             assert_eq!(rounds, fold_challenges.len() - 1);
             assert_eq!(rounds, commits.len(),);
@@ -239,11 +237,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
 
             // first folding challenge
             let r = fold_challenges.first().unwrap();
-            let coeff = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
-                vp,
-                log2_height,
-                idx,
-            );
+            let coeff = S::verifier_folding_coeffs(vp, log2_height, idx);
             let (lo, hi) = reduced_openings[&log2_height];
             let mut folded = codeword_fold_with_challenge(&[lo, hi], *r, coeff, inv_2);
 
@@ -282,11 +276,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
                         proof,
                     )
                     .expect("verify failed");
-                let coeff = <Spec::EncodingScheme as EncodingScheme<E>>::verifier_folding_coeffs(
-                    vp,
-                    log2_height,
-                    idx,
-                );
+                let coeff = S::verifier_folding_coeffs(vp, log2_height, idx);
                 folded = codeword_fold_with_challenge(&[leafs[0], leafs[1]], *r, coeff, inv_2);
             }
             assert!(
@@ -339,8 +329,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
         )
         .map(|(final_message, point)| {
             // coeff is the eq polynomial evaluated at the first challenge.len() variables
-            let num_vars_evaluated = point.len()
-                - <Spec::EncodingScheme as EncodingScheme<E>>::get_basecode_msg_size_log();
+            let num_vars_evaluated = point.len() - S::get_basecode_msg_size_log();
             let coeff = eq_eval(
                 &point[..num_vars_evaluated],
                 &fold_challenges[fold_challenges.len() - num_vars_evaluated..],
@@ -356,7 +345,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     );
 }
 
-fn get_base_codeword_dimentions<E: ExtensionField, Spec: BasefoldSpec<E>>(
+fn get_base_codeword_dimentions<E: ExtensionField, S: EncodingScheme<E>>(
     circuit_meta_map: &[CircuitIndexMeta],
 ) -> (Vec<Dimensions>, Vec<Dimensions>) {
     let (wit_dim, fixed_dim): (Vec<_>, Vec<_>) = circuit_meta_map
@@ -372,19 +361,13 @@ fn get_base_codeword_dimentions<E: ExtensionField, Spec: BasefoldSpec<E>>(
                     Dimensions {
                         // width size is double num_polys due to leaf + right leafs are concat
                         width: witin_num_polys * 2,
-                        height: 1
-                            << (witin_num_vars
-                                + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log()
-                                - 1),
+                        height: 1 << (witin_num_vars + S::get_rate_log() - 1),
                     },
                     if *fixed_num_vars > 0 {
                         Some(Dimensions {
                             // width size is double num_polys due to leaf + right leafs are concat
                             width: fixed_num_polys * 2,
-                            height: 1
-                                << (fixed_num_vars
-                                    + <Spec::EncodingScheme as EncodingScheme<E>>::get_rate_log()
-                                    - 1),
+                            height: 1 << (fixed_num_vars + S::get_rate_log() - 1),
                         })
                     } else {
                         None

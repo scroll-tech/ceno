@@ -691,10 +691,10 @@ where
 
         let point_evals = vec![witin_evals, fixed_evals];
         // verify basefold sumcheck + FRI codeword query
-        batch_verifier_query_phase::<E, Spec>(
+        batch_verifier_query_phase::<E, Spec::EncodingScheme>(
+            &vp.encoding_params,
             max_num_var,
             &queries,
-            &vp.encoding_params,
             final_message,
             batch_coeffs,
             &proof.query_opening_proof,
