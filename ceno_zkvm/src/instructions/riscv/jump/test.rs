@@ -5,6 +5,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
     scheme::mock_prover::{MOCK_PC_START, MockProver},
+    structs::ProgramParams,
 };
 
 use super::{JalInstruction, JalrInstruction};
@@ -17,7 +18,10 @@ fn test_opcode_jal() {
         .namespace(
             || "jal",
             |cb| {
-                let config = JalInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                let config = JalInstruction::<GoldilocksExt2>::construct_circuit(
+                    cb,
+                    &ProgramParams::default(),
+                );
                 Ok(config)
             },
         )
@@ -51,7 +55,10 @@ fn test_opcode_jalr() {
         .namespace(
             || "jalr",
             |cb| {
-                let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(
+                    cb,
+                    &ProgramParams::default(),
+                );
                 Ok(config)
             },
         )

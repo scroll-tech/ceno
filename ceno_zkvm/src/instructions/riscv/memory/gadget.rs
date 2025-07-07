@@ -3,7 +3,6 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::riscv::{constants::UInt, insn_base::MemAddr},
-    set_val,
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
@@ -11,6 +10,7 @@ use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
+use witness::set_val;
 
 pub struct MemWordChange<const N_ZEROS: usize> {
     prev_limb_bytes: Vec<WitIn>,

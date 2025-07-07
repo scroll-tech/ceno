@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 
 use crate::{
     Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    tables::InsnRecord, witness::LkMultiplicity,
+    structs::ProgramParams, tables::InsnRecord, witness::LkMultiplicity,
 };
 
 use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};
@@ -33,6 +33,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let imm = UInt::new(|| "imm", circuit_builder)?;
@@ -91,6 +92,7 @@ mod test {
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::Instruction,
         scheme::mock_prover::{MOCK_PC_START, MockProver},
+        structs::ProgramParams,
     };
 
     use super::AddiInstruction;
@@ -103,7 +105,10 @@ mod test {
             .namespace(
                 || "addi",
                 |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    );
                     Ok(config)
                 },
             )
@@ -136,7 +141,10 @@ mod test {
             .namespace(
                 || "addi",
                 |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    );
                     Ok(config)
                 },
             )

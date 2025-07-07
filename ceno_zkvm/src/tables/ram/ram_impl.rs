@@ -2,15 +2,15 @@ use std::{marker::PhantomData, sync::Arc};
 
 use ceno_emul::{Addr, Cycle, WORD_SIZE};
 use ff_ext::{ExtensionField, SmallField};
+use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 use crate::{
+    chip_handler::general::PublicIOQuery,
     circuit_builder::{CircuitBuilder, SetTableSpec},
-    error::ZKVMError,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
-    set_fixed_val, set_val,
     structs::ProgramParams,
 };
 use ff_ext::FieldInto;
@@ -37,10 +37,11 @@ pub struct NonVolatileTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone>
 impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM> {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
-    ) -> Result<Self, ZKVMError> {
+        params: &ProgramParams,
+    ) -> Result<Self, CircuitBuilderError> {
         let init_v = (0..NVRAM::V_LIMBS)
             .map(|i| cb.create_fixed(|| format!("init_v_limb_{i}")))
-            .collect::<Result<Vec<Fixed>, ZKVMError>>()?;
+            .collect::<Result<Vec<Fixed>, CircuitBuilderError>>()?;
         let addr = cb.create_fixed(|| "addr")?;
 
         let final_cycle = cb.create_witin(|| "final_cycle");
@@ -78,7 +79,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             || "init_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
-                len: Some(NVRAM::len(&cb.params)),
+                len: Some(NVRAM::len(params)),
                 structural_witins: vec![],
             },
             init_table,
@@ -87,7 +88,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             || "final_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
-                len: Some(NVRAM::len(&cb.params)),
+                len: Some(NVRAM::len(params)),
                 structural_witins: vec![],
             },
             final_table,
@@ -99,7 +100,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             addr,
             final_cycle,
             phantom: PhantomData,
-            params: cb.params.clone(),
+            params: params.clone(),
         })
     }
 
@@ -148,7 +149,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         num_witin: usize,
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
-    ) -> Result<[RowMajorMatrix<F>; 2], ZKVMError> {
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert_eq!(num_structural_witin, 0);
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
@@ -194,7 +195,8 @@ pub struct PubIOTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
 impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
-    ) -> Result<Self, ZKVMError> {
+        params: &ProgramParams,
+    ) -> Result<Self, CircuitBuilderError> {
         assert!(!NVRAM::WRITABLE);
         let init_v = cb.query_public_io()?;
         let addr = cb.create_fixed(|| "addr")?;
@@ -222,7 +224,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             || "init_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
-                len: Some(NVRAM::len(&cb.params)),
+                len: Some(NVRAM::len(params)),
                 structural_witins: vec![],
             },
             init_table,
@@ -231,7 +233,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             || "final_table",
             NVRAM::RAM_TYPE,
             SetTableSpec {
-                len: Some(NVRAM::len(&cb.params)),
+                len: Some(NVRAM::len(params)),
                 structural_witins: vec![],
             },
             final_table,
@@ -241,7 +243,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             addr,
             final_cycle,
             phantom: PhantomData,
-            params: cb.params.clone(),
+            params: params.clone(),
         })
     }
 
@@ -275,7 +277,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         num_witin: usize,
         num_structural_witin: usize,
         final_cycles: &[Cycle],
-    ) -> Result<[RowMajorMatrix<F>; 2], ZKVMError> {
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert_eq!(num_structural_witin, 0);
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
@@ -310,12 +312,13 @@ pub struct DynVolatileRamTableConfig<DVRAM: DynVolatileRamTable + Send + Sync + 
 impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig<DVRAM> {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
-    ) -> Result<Self, ZKVMError> {
-        let max_len = DVRAM::max_len(&cb.params);
+        params: &ProgramParams,
+    ) -> Result<Self, CircuitBuilderError> {
+        let max_len = DVRAM::max_len(params);
         let addr = cb.create_structural_witin(
             || "addr",
             max_len,
-            DVRAM::offset_addr(&cb.params),
+            DVRAM::offset_addr(params),
             WORD_SIZE,
             DVRAM::DESCENDING,
         );
@@ -373,7 +376,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             final_v,
             final_cycle,
             phantom: PhantomData,
-            params: cb.params.clone(),
+            params: params.clone(),
         })
     }
 
@@ -383,7 +386,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_witin: usize,
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
-    ) -> Result<[RowMajorMatrix<F>; 2], ZKVMError> {
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert!(final_mem.len() <= DVRAM::max_len(&self.params));
         assert!(DVRAM::max_len(&self.params).is_power_of_two());
 
@@ -458,7 +461,7 @@ mod tests {
     fn test_well_formed_address_padding() {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = HintsCircuit::construct_circuit(&mut cb).unwrap();
+        let config = HintsCircuit::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
         let def_params = ProgramParams::default();
         let lkm = LkMultiplicity::default().into_finalize_result();

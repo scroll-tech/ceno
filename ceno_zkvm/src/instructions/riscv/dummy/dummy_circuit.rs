@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 
 use ceno_emul::{InsnCategory, InsnFormat, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
+use gkr_iop::utils::i64_to_base;
 
 use super::super::{
     RIVInstruction,
@@ -9,11 +10,13 @@ use super::super::{
     insn_base::{ReadMEM, ReadRS1, ReadRS2, StateInOut, WriteMEM, WriteRD},
 };
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction, set_val,
-    tables::InsnRecord, uint::Value, utils::i64_to_base, witness::LkMultiplicity,
+    chip_handler::general::InstFetch, circuit_builder::CircuitBuilder, error::ZKVMError,
+    instructions::Instruction, structs::ProgramParams, tables::InsnRecord, uint::Value,
+    witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
+use witness::set_val;
 
 /// DummyInstruction can handle any instruction and produce its side-effects.
 pub struct DummyInstruction<E, I>(PhantomData<(E, I)>);
@@ -27,6 +30,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let kind = I::INST_KIND;
         let format = InsnFormat::from(kind);
