@@ -295,15 +295,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // verify mpcs
+        let mut rounds = vec![];
+        rounds.push((
+            vm_proof.witin_commit.clone(),
+            rt_points
+                .iter()
+                .zip(evaluations.iter_mut())
+                .zip(self.vk.circuit_num_polys.iter())
+                .map(|((point, evals), (num_witin, num_fixed))| {
+                    (
+                        point.len(),
+                        (point.clone(), evals.drain(..num_witin).collect_vec()),
+                    )
+                })
+                .collect_vec(),
+        ));
+        if self.vk.fixed_commit.is_some() {
+            rounds.push((
+                self.vk.fixed_commit.as_ref().unwrap().clone(),
+                rt_points
+                    .iter()
+                    .zip(evaluations.iter_mut())
+                    .filter(|(_, evals)| !evals.is_empty())
+                    .map(|(point, evals)| (point.len(), (point.clone(), evals.to_vec())))
+                    .collect_vec(),
+            ));
+        }
         PCS::batch_verify(
             &self.vk.vp,
-            &vm_proof.num_instances,
-            &rt_points,
-            self.vk.fixed_commit.as_ref(),
-            &vm_proof.witin_commit,
-            &evaluations,
+            rounds,
             &vm_proof.fixed_witin_opening_proof,
-            &self.vk.circuit_num_polys,
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;

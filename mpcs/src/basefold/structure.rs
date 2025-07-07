@@ -138,7 +138,7 @@ where
             self.commit.clone(),
             self.trivial_proofdata
                 .iter()
-                .map(|(_, (digest, _))| digest.clone())
+                .map(|(i, (digest, _))| (*i, digest.clone()))
                 .collect_vec(),
             self.log2_max_codeword_size,
         )
@@ -170,7 +170,7 @@ where
 {
     pub(super) commit: Digest<E>,
     pub(crate) log2_max_codeword_size: usize,
-    pub(crate) trivial_commits: Vec<Digest<E>>,
+    pub(crate) trivial_commits: Vec<(usize, Digest<E>)>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
@@ -179,7 +179,7 @@ where
 {
     pub fn new(
         commit: Digest<E>,
-        trivial_commits: Vec<Digest<E>>,
+        trivial_commits: Vec<(usize, Digest<E>)>,
         log2_max_codeword_size: usize,
     ) -> Self {
         Self {

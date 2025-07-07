@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, slice};
 
 use crate::{
     Point,
-    basefold::structure::{CircuitIndexMeta, MerkleTreeExt, QueryOpeningProof},
+    basefold::structure::{BasefoldProof, CircuitIndexMeta, MerkleTreeExt, QueryOpeningProof},
     util::{codeword_fold_with_challenge, merkle_tree::poseidon2_merkle_tree},
 };
 use ff_ext::ExtensionField;
@@ -18,7 +18,6 @@ use p3::{
 use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::IOPProverMessage,
     util::extrapolate_uni_poly,
 };
 use transcript::Transcript;
@@ -26,7 +25,6 @@ use transcript::Transcript;
 use crate::basefold::structure::QueryOpeningProofs;
 
 use super::{
-    Digest,
     encoding::EncodingScheme,
     structure::{BasefoldCommitment, BasefoldCommitmentWithWitness},
 };
@@ -106,26 +104,21 @@ where
         .collect_vec()
 }
 
-#[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
     vp: &S::VerifierParameters,
     max_num_var: usize,
-    indices: &[usize],
-    final_message: &[Vec<E>],
     batch_coeffs: &[E],
-    queries: &QueryOpeningProofs<E>,
-    fixed_comm: Option<&BasefoldCommitment<E>>,
-    witin_comm: &BasefoldCommitment<E>,
-    circuit_meta: &[CircuitIndexMeta],
-    commits: &[Digest<E>],
     fold_challenges: &[E],
-    sumcheck_messages: &[IOPProverMessage<E>],
-    point_evals: Vec<Vec<(usize, Point<E>, Vec<E>)>>,
+    indices: &[usize],
+    proof: &BasefoldProof<E>,
+    rounds: &Vec<(BasefoldCommitment<E>, Vec<(usize, (Point<E>, Vec<E>))>)>,
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
     let inv_2 = E::BaseField::from_canonical_u64(2).inverse();
+    let final_message = &proof.final_message;
+    let sumcheck_messages = proof.sumcheck_proof.as_ref().unwrap();
     let encode_span = entered_span!("encode_final_codeword");
     let final_codeword = S::encode_small(
         vp,
@@ -144,140 +137,152 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
     let log2_blowup = S::get_rate_log();
     let log2_max_codeword_size = max_num_var + log2_blowup;
 
-    indices.iter().zip_eq(queries).for_each(
-        |(
-            idx,
-            QueryOpeningProof {
-                input_proofs,
-                commit_phase_openings: opening_ext,
-            },
-        )| {
-            // verify base oracle query proof
-            // refer to prover documentation for the reason of right shift by 1
-            let mut idx = idx >> 1;
-
-            let mut reduced_openings = BTreeMap::new();
-            let mut batch_coeffs_iter = batch_coeffs.iter();
-
-            // rounds
-            let (witin_dimensions, fixed_dimensions) =
-                get_base_codeword_dimentions::<E, S>(circuit_meta);
-            let mut rounds = vec![(witin_comm, witin_batch_opening, witin_dimensions)];
-            if let Some(fixed) = fixed_commit_option {
-                rounds.push((fixed_comm.unwrap(), fixed, fixed_dimensions));
-            }
-
-            for (commit, batch_opening, dimensions) in rounds {
-                let bits_reduced = log2_max_codeword_size - commit.log2_max_codeword_size;
-                let reduced_index = idx >> bits_reduced;
-                // verify base MMCS opening proof
-                mmcs.verify_batch(
-                    &commit.commit(),
-                    &dimensions,
-                    reduced_index,
-                    &batch_opening.opened_values,
-                    &batch_opening.opening_proof,
-                )
-                .expect("verify mmcs opening proof failed");
-
-                // for each log2_height, combine codewords with randomness
-                for (mat, dimension) in batch_opening.opened_values.iter().zip(dimensions.iter()) {
-                    let width = mat.len() / 2;
-                    assert_eq!(dimension.width, mat.len());
-                    assert_eq!(width * 2, mat.len());
-                    let batch_coeffs = batch_coeffs_iter
-                        .by_ref()
-                        .take(width)
-                        .copied()
-                        .collect_vec();
-                    let (lo, hi): (&[E::BaseField], &[E::BaseField]) = mat.split_at(width);
-                    let low =
-                        dot_product::<E, _, _>(batch_coeffs.iter().copied(), lo.iter().copied());
-                    let high =
-                        dot_product::<E, _, _>(batch_coeffs.iter().copied(), hi.iter().copied());
-                    let log2_height = log2_strict_usize(dimension.height);
-
-                    reduced_openings
-                        .entry(log2_height)
-                        .and_modify(|(low_acc, high_acc)| {
-                            // accumulate low and high values for the same log2_height
-                            *low_acc += low;
-                            *high_acc += high;
-                        })
-                        .or_insert((low, high));
-                }
-            }
-
-            // fold and query
-            let mut cur_num_var = max_num_var;
-            let mut log2_height = cur_num_var + log2_blowup - 1;
-            // -1 because for there are only #max_num_var-1 openings proof
-            let rounds = cur_num_var - S::get_basecode_msg_size_log() - 1;
-
-            assert_eq!(rounds, fold_challenges.len() - 1);
-            assert_eq!(rounds, commits.len(),);
-            assert_eq!(rounds, opening_ext.len(),);
-
-            // first folding challenge
-            let r = fold_challenges.first().unwrap();
-            let coeff = S::verifier_folding_coeffs(vp, log2_height, idx);
-            let (lo, hi) = reduced_openings[&log2_height];
-            let mut folded = codeword_fold_with_challenge(&[lo, hi], *r, coeff, inv_2);
-
-            for (
-                (pi_comm, r),
-                CommitPhaseProofStep {
-                    sibling_value,
-                    opening_proof: proof,
+    indices
+        .iter()
+        .zip_eq(proof.query_opening_proof.iter())
+        .for_each(
+            |(
+                idx,
+                QueryOpeningProof {
+                    input_proofs,
+                    commit_phase_openings: opening_ext,
                 },
-            ) in commits
-                .iter()
-                .zip_eq(fold_challenges.iter().skip(1))
-                .zip_eq(opening_ext)
-            {
-                cur_num_var -= 1;
-                log2_height -= 1;
+            )| {
+                // verify base oracle query proof
+                // refer to prover documentation for the reason of right shift by 1
+                let mut idx = idx >> 1;
 
-                let idx_sibling = idx & 0x01;
-                let mut leafs = vec![*sibling_value; 2];
-                leafs[idx_sibling] = folded;
-                if let Some((lo, hi)) = reduced_openings.get(&log2_height) {
-                    leafs[idx_sibling] += if idx_sibling == 1 { *hi } else { *lo };
+                let mut reduced_openings = BTreeMap::new();
+                let mut batch_coeffs_iter = batch_coeffs.iter();
+
+                for ((commit, batch_opening), input_proof) in
+                    rounds.iter().zip_eq(input_proofs.iter())
+                {
+                    let dimensions = batch_opening
+                        .iter()
+                        .map(|(num_var, (_, evals))| {
+                            Dimensions {
+                                width: evals.len() * 2, // we pack two rows into one in the mmcs
+                                height: 1 << (num_var + log2_blowup - 1),
+                            }
+                        })
+                        .collect_vec();
+                    let bits_reduced = log2_max_codeword_size - commit.log2_max_codeword_size;
+                    let reduced_index = idx >> bits_reduced;
+                    // verify base MMCS opening proof
+                    mmcs.verify_batch(
+                        &commit.commit(),
+                        &dimensions,
+                        reduced_index,
+                        &input_proof.opened_values,
+                        &input_proof.opening_proof,
+                    )
+                    .expect("verify mmcs opening proof failed");
+
+                    // for each log2_height, combine codewords with randomness
+                    for (mat, dimension) in input_proof.opened_values.iter().zip(dimensions.iter())
+                    {
+                        let width = mat.len() / 2;
+                        assert_eq!(dimension.width, mat.len());
+                        assert_eq!(width * 2, mat.len());
+                        let batch_coeffs = batch_coeffs_iter
+                            .by_ref()
+                            .take(width)
+                            .copied()
+                            .collect_vec();
+                        let (lo, hi): (&[E::BaseField], &[E::BaseField]) = mat.split_at(width);
+                        let low = dot_product::<E, _, _>(
+                            batch_coeffs.iter().copied(),
+                            lo.iter().copied(),
+                        );
+                        let high = dot_product::<E, _, _>(
+                            batch_coeffs.iter().copied(),
+                            hi.iter().copied(),
+                        );
+                        let log2_height = log2_strict_usize(dimension.height);
+
+                        reduced_openings
+                            .entry(log2_height)
+                            .and_modify(|(low_acc, high_acc)| {
+                                // accumulate low and high values for the same log2_height
+                                *low_acc += low;
+                                *high_acc += high;
+                            })
+                            .or_insert((low, high));
+                    }
                 }
 
-                idx >>= 1;
-                mmcs_ext
-                    .verify_batch(
-                        pi_comm,
-                        &[Dimensions {
-                            width: 2,
-                            // width is 2, thus height divide by 2 via right shift
-                            height: 1 << log2_height,
-                        }],
-                        idx,
-                        slice::from_ref(&leafs),
-                        proof,
-                    )
-                    .expect("verify failed");
+                // fold and query
+                let mut cur_num_var = max_num_var;
+                let mut log2_height = cur_num_var + log2_blowup - 1;
+                // -1 because for there are only #max_num_var-1 openings proof
+                let rounds = cur_num_var - S::get_basecode_msg_size_log() - 1;
+
+                assert_eq!(rounds, fold_challenges.len() - 1);
+                assert_eq!(rounds, proof.commits.len(),);
+                assert_eq!(rounds, opening_ext.len(),);
+
+                // first folding challenge
+                let r = fold_challenges.first().unwrap();
                 let coeff = S::verifier_folding_coeffs(vp, log2_height, idx);
-                folded = codeword_fold_with_challenge(&[leafs[0], leafs[1]], *r, coeff, inv_2);
-            }
-            assert!(
-                final_codeword.values[idx] == folded,
-                "final_codeword.values[idx] value {:?} != folded {:?}",
-                final_codeword.values[idx],
-                folded
-            );
-        },
-    );
+                let (lo, hi) = reduced_openings[&log2_height];
+                let mut folded = codeword_fold_with_challenge(&[lo, hi], *r, coeff, inv_2);
+
+                for (
+                    (pi_comm, r),
+                    CommitPhaseProofStep {
+                        sibling_value,
+                        opening_proof: proof,
+                    },
+                ) in proof
+                    .commits
+                    .iter()
+                    .zip_eq(fold_challenges.iter().skip(1))
+                    .zip_eq(opening_ext)
+                {
+                    cur_num_var -= 1;
+                    log2_height -= 1;
+
+                    let idx_sibling = idx & 0x01;
+                    let mut leafs = vec![*sibling_value; 2];
+                    leafs[idx_sibling] = folded;
+                    if let Some((lo, hi)) = reduced_openings.get(&log2_height) {
+                        leafs[idx_sibling] += if idx_sibling == 1 { *hi } else { *lo };
+                    }
+
+                    idx >>= 1;
+                    mmcs_ext
+                        .verify_batch(
+                            pi_comm,
+                            &[Dimensions {
+                                width: 2,
+                                // width is 2, thus height divide by 2 via right shift
+                                height: 1 << log2_height,
+                            }],
+                            idx,
+                            slice::from_ref(&leafs),
+                            &proof,
+                        )
+                        .expect("verify failed");
+                    let coeff = S::verifier_folding_coeffs(vp, log2_height, idx);
+                    folded = codeword_fold_with_challenge(&[leafs[0], leafs[1]], *r, coeff, inv_2);
+                }
+                assert!(
+                    final_codeword.values[idx] == folded,
+                    "final_codeword.values[idx] value {:?} != folded {:?}",
+                    final_codeword.values[idx],
+                    folded
+                );
+            },
+        );
     exit_span!(check_queries_span);
 
     // 1. check initial claim match with first round sumcheck value
     // we need to scale up with scalar for witin_num_vars < max_num_var
     let mut batch_coeffs_iter = batch_coeffs.iter();
     let mut expected_sum = E::ZERO;
-    for round in point_evals.iter() {
-        for (num_var, _, evals) in round {
+    for round in rounds.iter() {
+        for (num_var, (_, evals)) in round.1.iter() {
             expected_sum += evals
                 .iter()
                 .zip(batch_coeffs_iter.by_ref().take(evals.len()))
@@ -306,9 +311,9 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
         // eq(p,i) * f(i)
         izip!(
             final_message,
-            point_evals
+            rounds
                 .iter()
-                .flat_map(|evals| evals.iter().map(|(_, point, _)| point))
+                .flat_map(|(_, point_evals)| point_evals.iter().map(|(_, (point, _))| point))
         )
         .map(|(final_message, point)| {
             // coeff is the eq polynomial evaluated at the first challenge.len() variables

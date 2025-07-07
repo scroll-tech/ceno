@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use super::{
     encoding::EncodingScheme,
-    structure::{BasefoldCommitPhaseProof, BasefoldSpec, MerkleTree, MerkleTreeExt},
+    structure::{BasefoldCommitPhaseProof, BasefoldSpec, MerkleTreeExt},
 };
 use crate::{
     Point,
@@ -15,9 +15,7 @@ use crate::{
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{Either, Itertools};
-use multilinear_extensions::{
-    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
-};
+use multilinear_extensions::{Expression, virtual_polys::VirtualPolynomialsBuilder};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::{Field, FieldAlgebra},
@@ -52,8 +50,8 @@ use super::structure::BasefoldCommitmentWithWitness;
 #[allow(clippy::type_complexity)]
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-    rounds: Vec<(
-        BasefoldCommitmentWithWitness<E>,
+    rounds: &Vec<(
+        &BasefoldCommitmentWithWitness<E>,
         // for each matrix open at one point
         Vec<(Point<E>, Vec<E>)>,
     )>,
