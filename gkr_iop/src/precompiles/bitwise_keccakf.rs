@@ -23,6 +23,7 @@ use crate::{
     chip::Chip,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
+    error::CircuitBuilderError,
     evaluation::EvalExpression,
     gkr::{
         GKRCircuit, GKRProverOutput,
@@ -643,7 +644,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         Self::default()
     }
 
-    fn build_gkr_chip(&self, _cb: &mut CircuitBuilder<E>) -> Chip<E> {
+    fn build_gkr_chip(&self, _cb: &mut CircuitBuilder<E>) -> Result<Chip<E>, CircuitBuilderError> {
         let mut chip = Chip {
             n_fixed: self.n_fixed(),
             n_committed: self.n_committed(),
@@ -759,7 +760,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             self.alpha.clone(),
             self.beta.clone(),
         ));
-        chip
+        Ok(chip)
     }
 
     fn n_committed(&self) -> usize {
@@ -849,12 +850,13 @@ fn rho_and_pi_permutation() -> Vec<usize> {
     pi(&rho(&perm))
 }
 
-pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>) {
+pub fn setup_gkr_circuit<E: ExtensionField>()
+-> Result<(KeccakLayout<E>, GKRCircuit<E>), CircuitBuilderError> {
     let params = KeccakParams {};
     let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
     let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-    let (layout, chip) = KeccakLayout::build(&mut circuit_builder, params);
-    (layout, chip.gkr_circuit())
+    let (layout, chip) = KeccakLayout::build(&mut circuit_builder, params)?;
+    Ok((layout, chip.gkr_circuit()))
 }
 
 pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
@@ -987,6 +989,11 @@ mod tests {
         let states: Vec<[u64; 25]> = (0..num_instance)
             .map(|_| std::array::from_fn(|_| rng.next_u64()))
             .collect_vec();
-        run_keccakf::<E, Pcs>(setup_gkr_circuit(), states, false, true); // `verify` is temporarily false because the error `Extrapolation for degree 6 not implemented`.
+        run_keccakf::<E, Pcs>(
+            setup_gkr_circuit().expect("setup gkr circuit error"),
+            states,
+            false,
+            true,
+        ); // `verify` is temporarily false because the error `Extrapolation for degree 6 not implemented`.
     }
 }

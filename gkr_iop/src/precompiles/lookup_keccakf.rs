@@ -1,5 +1,9 @@
 use std::{array, mem::transmute};
 
+use crate::{
+    circuit_builder::{RotationParams, expansion_expr, rotation_split},
+    error::CircuitBuilderError,
+};
 use ceno_emul::{ByteAddr, Cycle};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, iproduct, izip, zip_eq};
@@ -28,12 +32,7 @@ use crate::{
     cpu::{CpuBackend, CpuProver},
     error::BackendError,
     gkr::{
-        GKRCircuit, GKRProof, GKRProverOutput,
-        booleanhypercube::BooleanHypercube,
-        layer_constraint_system::{
-            LayerConstraintSystem, RotationParams, expansion_expr, rotation_split,
-        },
-        mock::MockProver,
+        GKRCircuit, GKRProof, GKRProverOutput, booleanhypercube::BooleanHypercube, mock::MockProver,
     },
     precompiles::utils::{
         MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance,
@@ -222,15 +221,16 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         Self::new(cb, params)
     }
 
-    fn build_gkr_chip(&self, _cb: &mut CircuitBuilder<E>) -> Chip<E> {
-        let mut system = LayerConstraintSystem::new(
-            KECCAK_WIT_SIZE,
-            0,
-            KECCAK_WIT_SIZE,
-            Some(self.layer_exprs.eq_zero.expr()),
-            self.alpha.clone(),
-            self.beta.clone(),
-        );
+    fn build_gkr_chip(&self, _cb: &mut CircuitBuilder<E>) -> Result<Chip<E>, CircuitBuilderError> {
+        // let mut system = LayerConstraintSystem::new(
+        //     KECCAK_WIT_SIZE,
+        //     0,
+        //     KECCAK_WIT_SIZE,
+        //     Some(self.layer_exprs.eq_zero.expr()),
+        //     self.alpha.clone(),
+        //     self.beta.clone(),
+        // );
+        let system = _cb;
 
         let KeccakInOutCols {
             output32: output32_expr,
@@ -268,16 +268,16 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         for i in 0..5 {
             for k in 0..8 {
                 // Initialize first element
-                system.constrain_eq(
+                system.require_equal(
+                    || "init c_aux".to_string(),
                     state8[[0, i, k]].into(),
                     c_aux[[i, 0, k]].into(),
-                    "init c_aux".to_string(),
                 );
             }
             for j in 1..5 {
                 // Check xor using lookups over all chunks
                 for k in 0..8 {
-                    system.lookup_xor8(
+                    system.lookup_xor_byte(
                         c_aux[[i, j - 1, k]].into(),
                         state8[[j, i, k]].into(),
                         c_aux[[i, j, k]].into(),
@@ -299,7 +299,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         for i in 0..5 {
             assert_eq!(c_temp.slice(s![i, ..]).iter().len(), sizes.iter().len());
 
-            system.constrain_left_rotation64(
+            system.require_left_rotation64(
+                || format!("theta rotation/i"),
                 &c_aux
                     .slice(s![i, 4, ..])
                     .iter()
@@ -314,7 +315,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     .map(|e| e.expr())
                     .collect_vec(),
                 1,
-                "theta rotation".to_string(),
             );
         }
 
@@ -324,11 +324,11 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
         for i in 0..5 {
             for k in 0..8 {
-                system.lookup_xor8(
+                system.lookup_xor_byte(
                     c_aux[[(i + 5 - 1) % 5, 4, k]].into(),
                     c_rot[[(i + 1) % 5, k]].into(),
                     d[[i, k]].into(),
-                )
+                )?;
             }
         }
 
@@ -339,11 +339,11 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         for i in 0..5 {
             for j in 0..5 {
                 for k in 0..8 {
-                    system.lookup_xor8(
+                    system.lookup_xor_byte(
                         state8[[j, i, k]].into(),
                         d[[i, k]].into(),
                         theta_output[[j, i, k]].into(),
-                    )
+                    )?
                 }
             }
         }
@@ -375,12 +375,12 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     .iter()
                     .map(|e| e.expr())
                     .collect_vec();
-                system.constrain_left_rotation64(
+                system.require_left_rotation64(
+                    || format!("RHOPI {i}, {j}"),
                     &arg,
                     &rep_split,
                     &arg_rotated,
                     ROTATION_CONSTANTS[j][i],
-                    format!("RHOPI {i}, {j}"),
                 );
             }
         }
@@ -397,13 +397,13 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         for i in 0..5 {
             for j in 0..5 {
                 for k in 0..8 {
-                    system.lookup_and8(
+                    system.lookup_and_byte(
                         not8_expr(rhopi_output[[j, (i + 1) % 5, k]].into()),
                         rhopi_output[[j, (i + 2) % 5, k]].into(),
                         nonlinear[[j, i, k]].into(),
                     );
 
-                    system.lookup_xor8(
+                    system.lookup_xor_byte(
                         rhopi_output[[j, i, k]].into(),
                         nonlinear[[j, i, k]].into(),
                         chi_output[[j, i, k]].into(),
@@ -416,7 +416,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             ArrayView::from_shape((5, 5, 8), iota_output).unwrap();
 
         for k in 0..8 {
-            system.lookup_xor8(
+            system.lookup_xor_byte(
                 chi_output[[0, 0, k]].into(),
                 rc[k].into(),
                 iota_output_arr[[0, 0, k]].into(),
@@ -441,10 +441,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                             .map(|e| (8, e.expr()))
                             .collect_vec(),
                     );
-                    system.constrain_eq(
+                    system.require_equal(
+                        || format!("output32_u8_equality_{index}"),
                         output32_expr[index].clone(),
                         value_expr,
-                        format!("output32_u8_equality_{index}"),
                     );
                 }
             }
@@ -464,10 +464,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                             .collect_vec()
                             .as_slice(),
                     );
-                    system.constrain_eq(
+                    system.require_equal(
+                        || format!("input32_u8_equality_{index}"),
                         input32_expr[index].clone(),
                         value_expr,
-                        format!("input32_u8_equality_{index}"),
                     );
                 }
             }
@@ -486,9 +486,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             rotation_cyclic_subgroup_size: ROUNDS - 1,
         });
 
-        assert_eq!(system.and_lookups.len(), AND_LOOKUPS);
-        assert_eq!(system.xor_lookups.len(), XOR_LOOKUPS);
-        assert_eq!(system.range_lookups.len(), RANGE_LOOKUPS);
+        assert_eq!(
+            system.cs.lk_expressions.len(),
+            AND_LOOKUPS + XOR_LOOKUPS + RANGE_LOOKUPS
+        );
 
         let mut chip = Chip {
             n_fixed: self.n_fixed(),
@@ -535,7 +536,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             lookup_evals_iter,
         );
         chip.add_layer(layer);
-        chip
+        Ok(chip)
     }
 
     fn n_committed(&self) -> usize {
@@ -846,7 +847,8 @@ where
     }
 }
 
-pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>, u16) {
+pub fn setup_gkr_circuit<E: ExtensionField>()
+-> Result<(KeccakLayout<E>, GKRCircuit<E>, u16), CircuitBuilderError> {
     let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
     let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
     let input_value: [WitIn; KECCAK_INPUT32_SIZE] =
@@ -859,9 +861,9 @@ pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>
             output32: output_value.map(|e| e.expr()),
         },
     };
-    let (layout, chip) = KeccakLayout::build(&mut circuit_builder, params);
+    let (layout, chip) = KeccakLayout::build(&mut circuit_builder, params)?;
     circuit_builder.finalize();
-    (layout, chip.gkr_circuit(), cs.num_witin)
+    Ok((layout, chip.gkr_circuit(), cs.num_witin))
 }
 
 #[tracing::instrument(
@@ -1086,7 +1088,12 @@ mod tests {
         for _ in 0..num_instances {
             states.push(std::array::from_fn(|_| rng.next_u64()));
         }
-        let _ = run_faster_keccakf::<E, Pcs>(setup_gkr_circuit::<E>(), states, true, true);
+        let _ = run_faster_keccakf::<E, Pcs>(
+            setup_gkr_circuit::<E>().expect("setup gkr circuit failed"),
+            states,
+            true,
+            true,
+        );
     }
 
     #[test]
@@ -1102,6 +1109,11 @@ mod tests {
             states.push(std::array::from_fn(|_| rng.next_u64()));
         }
 
-        let _ = run_faster_keccakf::<E, Pcs>(setup_gkr_circuit::<E>(), states, true, true);
+        let _ = run_faster_keccakf::<E, Pcs>(
+            setup_gkr_circuit::<E>().expect("setup gkr circuit failed"),
+            states,
+            true,
+            true,
+        );
     }
 }

@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
+    error::CircuitBuilderError,
     hal::{ProtocolWitnessGeneratorProver, ProverDevice},
     utils::lk_multiplicity::LkMultiplicity,
 };
@@ -38,17 +39,20 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     fn init(cb: &mut CircuitBuilder<E>, params: Self::Params) -> Self;
 
     /// Build the protocol for GKR IOP.
-    fn build(cb: &mut CircuitBuilder<E>, params: Self::Params) -> (Self, Chip<E>) {
+    fn build(
+        cb: &mut CircuitBuilder<E>,
+        params: Self::Params,
+    ) -> Result<(Self, Chip<E>), CircuitBuilderError> {
         let chip_spec = Self::init(cb, params);
-        let chip = chip_spec.build_gkr_chip(cb);
+        let chip = chip_spec.build_gkr_chip(cb)?;
 
-        (chip_spec, chip)
+        Ok((chip_spec, chip))
     }
 
     /// Create the GKR layers in the reverse order. For each layer, specify the
     /// polynomial expressions, evaluation expressions of outputs and evaluation
     /// positions of the inputs.
-    fn build_gkr_chip(&self, cb: &mut CircuitBuilder<E>) -> Chip<E>;
+    fn build_gkr_chip(&self, cb: &mut CircuitBuilder<E>) -> Result<Chip<E>, CircuitBuilderError>;
 
     fn n_committed(&self) -> usize;
     fn n_fixed(&self) -> usize;
