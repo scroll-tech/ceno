@@ -798,10 +798,15 @@ where
     type Trace = KeccakTrace<E>;
     fn phase1_witness_group(
         &self,
-        phase1: Self::Trace,
+        _phase1: Self::Trace,
+        _wits: &mut RowMajorMatrix<E::BaseField>,
         _lk_multiplicity: &mut LkMultiplicity,
-    ) -> RowMajorMatrix<E::BaseField> {
-        phase1.bits
+    ) {
+        // phase1.bits
+    }
+
+    fn phase1_witin_rmm_height(&self, _num_instances: usize) -> usize {
+        0
     }
 }
 
@@ -866,8 +871,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let bits = keccak_phase1_witness::<E>(&states);
     exit_span!(span);
     let span = entered_span!("phase1_witness_group", profiling_1 = true);
-    let mut lk_multiplicity = LkMultiplicity::default();
-    let phase1_witness = layout.phase1_witness_group(KeccakTrace { bits }, &mut lk_multiplicity);
+    let phase1_witness = bits;
     exit_span!(span);
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 

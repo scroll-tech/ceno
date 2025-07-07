@@ -50,6 +50,7 @@ impl<E: ExtensionField> CircuitBuilder<'_, E> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn ram_type_write<const LIMBS: usize, NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,

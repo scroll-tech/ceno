@@ -62,12 +62,16 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
 pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     type Trace;
 
+    /// return rmm height for phase 1 witness, which might include height for `multivariate rotation`
+    fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize;
+
     /// The vectors to be committed in the phase1.
     fn phase1_witness_group(
         &self,
         phase1: Self::Trace,
+        wits: &mut RowMajorMatrix<E::BaseField>,
         lk_multiplicity: &mut LkMultiplicity,
-    ) -> RowMajorMatrix<E::BaseField>;
+    );
 
     /// GKR witness.
     fn gkr_witness<'a, PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(

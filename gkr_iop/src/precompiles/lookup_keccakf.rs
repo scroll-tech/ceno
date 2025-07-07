@@ -2,7 +2,7 @@ use std::{array, mem::transmute};
 
 use ceno_emul::{ByteAddr, Cycle};
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain, iproduct, izip, zip_eq};
+use itertools::{Itertools, iproduct, izip, zip_eq};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     ChallengeId, Expression, Fixed, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2,
@@ -11,10 +11,7 @@ use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::FieldAlgebra;
 use p3_util::indices_arr;
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
-        ParallelIterator,
-    },
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 use sumcheck::{
@@ -22,9 +19,7 @@ use sumcheck::{
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::{
-    CAPACITY_RESERVED_FACTOR, InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding,
-};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
 
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
@@ -46,7 +41,7 @@ use crate::{
     utils::{indices_arr_with_offset, lk_multiplicity::LkMultiplicity},
 };
 
-const ROUNDS: usize = 24;
+pub const ROUNDS: usize = 24;
 const ROUNDS_CEIL_LOG2: usize = 5; // log_2(2^32)
 
 const RC: [u64; ROUNDS] = [
@@ -114,7 +109,7 @@ pub struct KeccakStateCols<T> {
 
 #[derive(Clone, Debug)]
 pub struct KeccakParams<T> {
-    state: KeccakStateCols<T>,
+    pub state: KeccakStateCols<T>,
 }
 
 #[derive(Clone, Debug)]
@@ -150,7 +145,6 @@ pub struct KeccakWitCols<T> {
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub struct KeccakLayer<WitT, FixedT, EqT> {
-    pub state: KeccakStateCols<WitT>,
     pub wits: KeccakWitCols<WitT>,
     pub fixed: KeccakFixedCols<FixedT>,
     pub eq_zero: EqT,
@@ -163,6 +157,7 @@ pub struct KeccakLayer<WitT, FixedT, EqT> {
 
 #[derive(Clone, Debug)]
 pub struct KeccakLayout<E: ExtensionField> {
+    pub params: KeccakParams<Expression<E>>,
     pub layer_exprs: KeccakLayer<WitIn, Fixed, WitIn>,
     layer_in_evals: [usize; KECCAK_LAYER_SIZE],
     final_out_evals: KeccakOutEvals<usize>,
@@ -171,7 +166,7 @@ pub struct KeccakLayout<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> KeccakLayout<E> {
-    fn new(cb: &mut CircuitBuilder<E>, params: KeccakParams<WitIn>) -> Self {
+    fn new(cb: &mut CircuitBuilder<E>, params: KeccakParams<Expression<E>>) -> Self {
         // allocate evaluation expressions
         let final_out_evals = indices_arr::<KECCAK_OUT_EVAL_SIZE>();
         let final_out_evals = unsafe {
@@ -204,6 +199,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
         };
 
         Self {
+            params,
             layer_exprs: KeccakLayer {
                 wits,
                 fixed,
@@ -213,7 +209,6 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation_left,
                 eq_rotation_right,
                 eq_rotation,
-                state: params.state,
             },
             layer_in_evals,
             final_out_evals,
@@ -224,7 +219,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
 }
 
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
-    type Params = KeccakParams<WitIn>;
+    type Params = KeccakParams<Expression<E>>;
 
     fn init(cb: &mut CircuitBuilder<E>, params: Self::Params) -> Self {
         Self::new(cb, params)
@@ -244,7 +239,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             state_ptr_address,
             input_prev_ts,
             cur_ts,
-        } = &self.layer_exprs.state;
+        } = &self.params.state;
 
         let KeccakWitCols {
             input8,
@@ -617,32 +612,34 @@ where
 {
     type Trace = KeccakTrace;
 
+    // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
+    fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize {
+        let n_row_padding = next_pow2_instance_padding(num_instances * ROUNDS.next_power_of_two());
+        n_row_padding * KECCAK_WIT_SIZE
+    }
+
     fn phase1_witness_group(
         &self,
         phase1: Self::Trace,
-        // TODO manipulate `lk_multiplicity` for correct lookup statement
+        wits: &mut RowMajorMatrix<E::BaseField>,
         _lk_multiplicity: &mut LkMultiplicity,
-    ) -> RowMajorMatrix<E::BaseField> {
-        // let KeccakTrace {
-        //     instances,
-        //     ram_start_addr,
-        //     cur_ts,
-        //     read_ts,
-        // } = phase1;
-        if phase1.instances.is_empty() {
-            return RowMajorMatrix::new(0, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default);
-        }
-
+    ) {
         let KeccakLayer {
-            state,
-            wits,
-            fixed,
-            eq_zero,
-            eq_mem_read,
-            eq_mem_write,
-            eq_rotation_left,
-            eq_rotation_right,
-            eq_rotation,
+            wits:
+                KeccakWitCols {
+                    input8: input8_witin,
+                    c_aux: c_aux_witin,
+                    c_temp: c_temp_witin,
+                    c_rot: c_rot_witin,
+                    d: d_witin,
+                    theta_output: theta_output_witin,
+                    rotation_witness: rotation_witness_witin,
+                    rhopi_output: rhopi_output_witin,
+                    nonlinear: nonlinear_witin,
+                    chi_output: chi_output_witin,
+                    iota_output: iota_output_witin,
+                },
+            ..
         } = self.layer_exprs;
 
         let num_instances = phase1.instances.len();
@@ -655,24 +652,13 @@ where
                 .unwrap()
         }
 
-        // TODO take structural id information from circuit to do wits assignment
-        // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
-        let n_row_padding = next_pow2_instance_padding(num_instances * ROUNDS.next_power_of_two());
-        let mut wits =
-            Vec::with_capacity(n_row_padding * KECCAK_WIT_SIZE * CAPACITY_RESERVED_FACTOR);
-        wits.par_extend(
-            (0..n_row_padding * KECCAK_WIT_SIZE)
-                .into_par_iter()
-                .map(|_| E::BaseField::ZERO),
-        );
-
         // keccak instance full rounds (24 rounds + 8 round padding) as chunk size
         // we need to do assignment on respective 31 cyclic group index
-        wits.par_chunks_mut(KECCAK_WIT_SIZE * ROUNDS.next_power_of_two())
+        wits.values
+            .par_chunks_mut(KECCAK_WIT_SIZE * ROUNDS.next_power_of_two())
             .take(num_instances)
             .zip(&phase1.instances)
-            .enumerate()
-            .for_each(|(instance_id, (wits, KeccakInstance { state, witin }))| {
+            .for_each(|(wits, KeccakInstance { witin, .. })| {
                 let state_32_iter = witin.instance.iter().map(|&e| e as u64);
                 let mut state64 = [[0u64; 5]; 5];
                 zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
@@ -687,7 +673,7 @@ where
                 #[allow(clippy::needless_range_loop)]
                 for round in 0..ROUNDS {
                     let round_index = cyclic_group.next().unwrap();
-                    let mut wits_start_index = round_index as usize * KECCAK_WIT_SIZE;
+                    let wits = &mut wits[round_index as usize * KECCAK_WIT_SIZE..];
                     let mut state8 = [[[0u64; 8]; 5]; 5];
                     for x in 0..5 {
                         for y in 0..5 {
@@ -697,7 +683,7 @@ where
 
                     push_instance::<E, _>(
                         wits,
-                        &mut wits_start_index,
+                        input8_witin[0].id.into(),
                         state8.into_iter().flatten().flatten(),
                     );
 
@@ -808,40 +794,80 @@ where
                         }
                     }
 
-                    let all_wits64 = chain!(
+                    // set witness
+                    push_instance::<E, _>(
+                        wits,
+                        c_aux_witin[0].id.into(),
                         c_aux8.into_iter().flatten().flatten(),
-                        c_temp.into_iter().flatten(),
-                        crot8.into_iter().flatten(),
-                        d8.into_iter().flatten(),
-                        theta_state8.into_iter().flatten().flatten(),
-                        rotation_witness.into_iter(),
-                        rhopi_output8.into_iter().flatten().flatten(),
-                        nonlinear8.into_iter().flatten().flatten(),
-                        chi_output8[0][0].iter().copied(),
-                        iota_output8.into_iter().flatten().flatten(),
-                        // input_ram_start_addr
-                        vec![ram_start_addr[instance_id].0 as u64],
-                        // input_ram_read_ts with KECCAK_INPUT32_SIZE size
-                        read_ts[instance_id],
-                        // cur_ts
-                        vec![cur_ts[instance_id]],
                     );
-
-                    push_instance::<E, _>(wits, &mut wits_start_index, all_wits64);
+                    push_instance::<E, _>(
+                        wits,
+                        c_temp_witin[0].id.into(),
+                        c_temp.into_iter().flatten(),
+                    );
+                    push_instance::<E, _>(
+                        wits,
+                        c_rot_witin[0].id.into(),
+                        crot8.into_iter().flatten(),
+                    );
+                    push_instance::<E, _>(wits, d_witin[0].id.into(), d8.into_iter().flatten());
+                    push_instance::<E, _>(
+                        wits,
+                        theta_output_witin[0].id.into(),
+                        theta_state8.into_iter().flatten().flatten(),
+                    );
+                    push_instance::<E, _>(
+                        wits,
+                        rotation_witness_witin[0].id.into(),
+                        rotation_witness.into_iter(),
+                    );
+                    push_instance::<E, _>(
+                        wits,
+                        rhopi_output_witin[0].id.into(),
+                        rhopi_output8.into_iter().flatten().flatten(),
+                    );
+                    push_instance::<E, _>(
+                        wits,
+                        nonlinear_witin[0].id.into(),
+                        nonlinear8.into_iter().flatten().flatten(),
+                    );
+                    push_instance::<E, _>(
+                        wits,
+                        chi_output_witin[0].id.into(),
+                        chi_output8[0][0].iter().copied(),
+                    );
+                    push_instance::<E, _>(
+                        wits,
+                        iota_output_witin[0].id.into(),
+                        iota_output8.into_iter().flatten().flatten(),
+                    );
 
                     state64 = iota_output64;
                 }
             });
-        RowMajorMatrix::new_by_values(wits, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default)
     }
 }
 
-pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>) {
-    let params = KeccakParams {};
+pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>, u16) {
     let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
     let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+    let keccak_state_witin = KeccakStateCols {
+        state_ptr_address: circuit_builder.create_witin(|| "state_ptr_address"),
+        input_prev_ts: array::from_fn(|i| {
+            circuit_builder.create_witin(|| format!("input_prev_ts/{i}"))
+        }),
+        cur_ts: circuit_builder.create_witin(|| "cur_ts"),
+    };
+    let params = KeccakParams {
+        state: KeccakStateCols {
+            state_ptr_address: keccak_state_witin.state_ptr_address.expr(),
+            input_prev_ts: keccak_state_witin.input_prev_ts.map(|e| e.expr()),
+            cur_ts: keccak_state_witin.cur_ts.expr(),
+        },
+    };
     let (layout, chip) = KeccakLayout::build(&mut circuit_builder, params);
-    (layout, chip.gkr_circuit())
+    circuit_builder.finalize();
+    (layout, chip.gkr_circuit(), cs.num_witin)
 }
 
 #[tracing::instrument(
@@ -851,7 +877,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>
     fields(profiling_1)
 )]
 pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-    (layout, gkr_circuit): (KeccakLayout<E>, GKRCircuit<E>),
+    (layout, gkr_circuit, num_witin): (KeccakLayout<E>, GKRCircuit<E>, u16),
     states: Vec<[u64; 25]>,
     verify: bool,
     test_outputs: bool,
@@ -867,29 +893,38 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let state_mask64 = MaskRepresentation::from(state.iter().map(|e| (64, *e)).collect_vec());
         let state_mask32 = state_mask64.convert(vec![32; 50]);
 
-        instances.push(
-            state_mask32
-                .values()
-                .iter()
-                .map(|e| *e as u32)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        );
+        instances.push(KeccakInstance {
+            state: KeccakStateInstance {
+                state_ptr_address: ByteAddr::from(0),
+                cur_ts: 0,
+                read_ts: [0; KECCAK_INPUT32_SIZE],
+            },
+            witin: KeccakWitInstance {
+                instance: state_mask32
+                    .values()
+                    .iter()
+                    .map(|e| *e as u32)
+                    .collect_vec()
+                    .try_into()
+                    .unwrap(),
+            },
+        });
     }
     exit_span!(span);
 
     let span = entered_span!("phase1_witness", profiling_2 = true);
     let mut lk_multiplicity = LkMultiplicity::default();
-    let phase1_witness = layout.phase1_witness_group(
-        KeccakTrace {
-            instances,
-            ram_start_addr: vec![ByteAddr::from(0); num_instances],
-            read_ts: vec![[0; KECCAK_INPUT32_SIZE]; num_instances],
-            cur_ts: vec![0; num_instances],
-        },
+    let mut phase1_witness = RowMajorMatrix::<E::BaseField>::new(
+        layout.phase1_witin_rmm_height(states.len()),
+        num_witin as usize,
+        InstancePaddingStrategy::Default,
+    );
+    layout.phase1_witness_group(
+        KeccakTrace { instances },
+        &mut phase1_witness,
         &mut lk_multiplicity,
     );
+
     exit_span!(span);
 
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");

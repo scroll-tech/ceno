@@ -258,32 +258,33 @@ pub fn indices_arr_with_offset_non_const<const N: usize>(offset: usize) -> [usiz
     indices_arr
 }
 
-// /// Returns `[WitIn(0), ..., WitIn(N - 1)], [Fixed(N), Fixed(N + 1), ..., Fixed(N + M)], [WitIn(N + M + 1), ...]`.
-// #[must_use]
-// pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>()
-// -> ([WitIn; N], [Fixed; M], [WitIn; Q]) {
-//     let mut wits = [WitIn { id: 0 }; N];
-//     let mut i = 0;
-//     while i < N {
-//         wits[i] = WitIn { id: i as WitnessId };
-//         i += 1;
-//     }
-//     let mut i = 0;
-//     let mut fixed = [Fixed(0); M];
-//     while i < M {
-//         fixed[i] = Fixed(i);
-//         i += 1;
-//     }
-//     let mut i = 0;
-//     let mut eqs = [WitIn { id: 0 }; Q];
-//     while i < Q {
-//         eqs[i] = WitIn {
-//             id: (i + N + M) as WitnessId,
-//         };
-//         i += 1;
-//     }
-//     (wits, fixed, eqs)
-// }
+/// Returns `[WitIn(0), ..., WitIn(N - 1)], [Fixed(N), Fixed(N + 1), ..., Fixed(N + M)], [WitIn(N + M + 1), ...]`.
+/// TODO remove me
+#[must_use]
+pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>()
+-> ([WitIn; N], [Fixed; M], [WitIn; Q]) {
+    let mut wits = [WitIn { id: 0 }; N];
+    let mut i = 0;
+    while i < N {
+        wits[i] = WitIn { id: i as WitnessId };
+        i += 1;
+    }
+    let mut i = 0;
+    let mut fixed = [Fixed(0); M];
+    while i < M {
+        fixed[i] = Fixed(i);
+        i += 1;
+    }
+    let mut i = 0;
+    let mut eqs = [WitIn { id: 0 }; Q];
+    while i < Q {
+        eqs[i] = WitIn {
+            id: (i + N + M) as WitnessId,
+        };
+        i += 1;
+    }
+    (wits, fixed, eqs)
+}
 
 #[cfg(test)]
 mod tests {

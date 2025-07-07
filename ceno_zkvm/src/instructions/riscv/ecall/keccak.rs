@@ -1,16 +1,23 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{ByteAddr, InsnKind, PC_STEP_SIZE, Platform, StepRecord, Tracer};
+use ceno_emul::{ByteAddr, Change, Cycle, InsnKind, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolWitnessGenerator,
     gkr::GKRCircuit,
-    precompiles::{KECCAK_INPUT32_SIZE, KeccakLayout, KeccakTrace},
+    precompiles::{
+        KECCAK_INPUT32_SIZE, KECCAK_ROUNDS, KECCAK_WIT_SIZE, KeccakInstance, KeccakLayout,
+        KeccakStateCols, KeccakStateInstance, KeccakTrace, KeccakWitInstance,
+    },
 };
 use itertools::Itertools;
-use multilinear_extensions::ToExpr;
+use multilinear_extensions::{ToExpr, WitIn, util::max_usable_threads};
 use p3::field::FieldAlgebra;
-use witness::RowMajorMatrix;
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::{ParallelSlice, ParallelSliceMut},
+};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     chip_handler::{GlobalStateRegisterMachineChipOperations, general::InstFetch},
@@ -21,7 +28,7 @@ use crate::{
         riscv::{
             constants::UInt,
             ecall_base::WriteFixedRS,
-            insn_base::{ReadRS1, ReadRS2, StateInOut, WriteRD},
+            insn_base::{ReadRS1, ReadRS2, StateInOut, WriteMEM, WriteRD},
         },
     },
     structs::ProgramParams,
@@ -33,6 +40,10 @@ use crate::{
 pub struct EcallKeccakConfig<E: ExtensionField> {
     pub circuit: GKRCircuit<E>,
     pub layout: KeccakLayout<E>,
+    vm_state: StateInOut<E>,
+    ecall_id: WriteFixedRS<E, { Platform::reg_ecall() }>,
+    state_ptr: WriteFixedRS<E, { { Platform::reg_arg0() } }>,
+    mem_rw: Vec<WriteMEM>,
 }
 
 /// KeccakInstruction can handle any instruction and produce its side-effects.
@@ -73,6 +84,23 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             vm_state.ts,
         )?;
 
+        // memory rw, for we in-place update
+        let mem_rw = (0..KECCAK_INPUT32_SIZE)
+            .map(|i| {
+                let val_before = cb.create_witin(|| format!("mem_before_{}_READ_ARG", i));
+                let val_after = cb.create_witin(|| format!("mem_after_{}_WRITE_ARG", i));
+                WriteMEM::construct_circuit(
+                    cb,
+                    // mem address := state_ptr + i
+                    state_ptr.prev_value.value() + E::BaseField::from_canonical_u32(i).expr(),
+                    val_before.expr(),
+                    val_after.expr(),
+                    vm_state.ts,
+                )
+                .map(|writer| (Change::new(val_before, val_after), writer))
+            })
+            .collect::<Result<Vec<(Change<WitIn>, WriteMEM)>, _>>()?;
+
         // fetch
         cb.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
@@ -84,41 +112,146 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         ))?;
 
         // construct keccak gkr-iop circuit
-        let params = gkr_iop::precompiles::KeccakParams {};
+        let params = gkr_iop::precompiles::KeccakParams {
+            state: KeccakStateCols {
+                state_ptr_address: state_ptr.prev_value.value(),
+                input_prev_ts: mem_rw
+                    .iter()
+                    .map(|mem_config| mem_config.prev_ts.expr())
+                    .collect_vec(),
+                cur_ts: vm_state.ts.expr(),
+            },
+        };
         let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(cb, params);
         let circuit = chip.gkr_circuit();
 
-        Ok(EcallKeccakConfig { circuit, layout })
+        Ok(EcallKeccakConfig {
+            circuit,
+            layout,
+            vm_state,
+            ecall_id,
+            state_ptr,
+            mem_rw,
+        })
     }
 
     fn assign_instances(
         config: &Self::InstructionConfig,
-        _num_witin: usize,
+        num_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
-        let instances = steps
+        if steps.is_empty() {
+            return Ok((
+                RowMajorMatrix::new(0, KECCAK_WIT_SIZE, InstancePaddingStrategy::Default),
+                lk_multiplicity,
+            ));
+        }
+        let nthreads = max_usable_threads();
+        let _num_instance_per_batch = if steps.len() > 256 {
+            config
+                .layout
+                .phase1_witin_rmm_height(steps.len())
+                .div_ceil(nthreads)
+        } else {
+            config.layout.phase1_witin_rmm_height(steps.len())
+        }
+        .max(1);
+
+        let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+            config.layout.phase1_witin_rmm_height(steps.len()),
+            num_witin,
+            InstancePaddingStrategy::Default,
+        );
+
+        // 1st pass: assign witness outside of gkr-iop scope
+        // raw_witin
+        //     .values
+        //     .par_chunks_mut(KECCAK_WIT_SIZE * KECCAK_ROUNDS.next_power_of_two())
+        //     .zip(steps.par_chunks(num_instance_per_batch))
+        //     .flat_map(|(instances, steps)| {
+        //         let mut lk_multiplicity = lk_multiplicity.clone();
+        //         instances
+        //             .chunks_mut(num_witin)
+        //             .zip(steps)
+        //             .map(|(instance, step)| {
+        //                 // Registers
+        //                 // config.ecall_id.assign_op();
+        //                 if let Some((rs1_op, rs1_read)) = &self.rs1 {
+        //                     rs1_op.assign_instance(instance, lk_multiplicity, step)?;
+
+        //                     let rs1_val =
+        //                         Value::new_unchecked(step.rs1().expect("rs1 value").value);
+        //                     rs1_read.assign_value(instance, rs1_val);
+        //                 }
+        //                 if let Some((rs2_op, rs2_read)) = &self.rs2 {
+        //                     rs2_op.assign_instance(instance, lk_multiplicity, step)?;
+
+        //                     let rs2_val =
+        //                         Value::new_unchecked(step.rs2().expect("rs2 value").value);
+        //                     rs2_read.assign_value(instance, rs2_val);
+        //                 }
+        //                 if let Some((rd_op, rd_written)) = &self.rd {
+        //                     rd_op.assign_instance(instance, lk_multiplicity, step)?;
+
+        //                     let rd_val =
+        //                         Value::new_unchecked(step.rd().expect("rd value").value.after);
+        //                     rd_written.assign_value(instance, rd_val);
+        //                 }
+
+        //                 // Memory
+        //                 if let Some([mem_addr, mem_before, mem_after]) = &self.mem_addr_val {
+        //                     let mem_op = step.memory_op().expect("memory operation");
+        //                     set_val!(instance, mem_addr, u64::from(mem_op.addr));
+        //                     set_val!(instance, mem_before, mem_op.value.before as u64);
+        //                     set_val!(instance, mem_after, mem_op.value.after as u64);
+        //                 }
+        //                 if let Some(mem_read) = &self.mem_read {
+        //                     mem_read.assign_instance(instance, lk_multiplicity, step)?;
+        //                 }
+        //                 if let Some(mem_write) = &self.mem_write {
+        //                     mem_write.assign_instance::<E>(instance, lk_multiplicity, step)?;
+        //                 }
+
+        //                 // TODO assign vm state
+
+        //                 // TODO assign ecall_id
+
+        //                 // TODO assign state_ptr
+
+        //                 // TODO assign mem_rw
+        //             })
+        //             .collect::<Vec<_>>()
+        //     })
+        //     .collect::<Result<(), ZKVMError>>()?;
+
+        let instances: Vec<KeccakInstance> = steps
             .iter()
-            .map(|step| {
-                step.syscall()
+            .map(|step| -> KeccakInstance {
+                let (witin, prev_ts): (Vec<u32>, Vec<Cycle>) = step
+                    .syscall()
                     .unwrap()
                     .mem_ops
                     .iter()
-                    .map(|op| op.value.before)
-                    .collect_vec()
-                    .try_into()
-                    .unwrap()
+                    .map(|op| (op.value.before, op.previous_cycle))
+                    .unzip();
+                KeccakInstance {
+                    state: KeccakStateInstance {
+                        state_ptr_address: ByteAddr::from(step.rs1().unwrap().value),
+                        cur_ts: step.cycle(),
+                        read_ts: prev_ts.try_into().unwrap(),
+                    },
+                    witin: KeccakWitInstance {
+                        instance: witin.try_into().unwrap(),
+                    },
+                }
             })
             .collect_vec();
         let num_instances = instances.len();
 
-        let mut raw_witin = config.layout.phase1_witness_group(
-            KeccakTrace {
-                instances,
-                ram_start_addr: vec![ByteAddr::from(0); num_instances],
-                read_ts: vec![[0; KECCAK_INPUT32_SIZE]; num_instances],
-                cur_ts: vec![0; num_instances],
-            },
+        config.layout.phase1_witness_group(
+            KeccakTrace { instances },
+            &mut raw_witin,
             &mut lk_multiplicity,
         );
 
