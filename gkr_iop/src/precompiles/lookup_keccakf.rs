@@ -99,17 +99,14 @@ pub const RANGE_LOOKUPS: usize = RANGE_LOOKUPS_PER_ROUND;
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub struct KeccakStateCols<T> {
-    pub state_ptr_address: T,
-    pub input_prev_ts: [T; KECCAK_INPUT32_SIZE],
-
-    // transition state
-    pub cur_ts: T,
+pub struct KeccakInOutCols<T> {
+    pub output32: [T; KECCAK_OUTPUT32_SIZE],
+    pub input32: [T; KECCAK_INPUT32_SIZE],
 }
 
 #[derive(Clone, Debug)]
 pub struct KeccakParams<T> {
-    pub state: KeccakStateCols<T>,
+    pub io: KeccakInOutCols<T>,
 }
 
 #[derive(Clone, Debug)]
@@ -235,11 +232,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             self.beta.clone(),
         );
 
-        let KeccakStateCols {
-            state_ptr_address,
-            input_prev_ts,
-            cur_ts,
-        } = &self.params.state;
+        let KeccakInOutCols {
+            output32: output32_expr,
+            input32: input32_expr,
+        } = &self.params.io;
 
         let KeccakWitCols {
             input8,
@@ -433,10 +429,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             ArrayView::from_shape((5, 5, 8), iota_output).unwrap();
 
         // process keccak output
-        let mut output32_exprs = Vec::with_capacity(KECCAK_OUTPUT32_SIZE);
         for x in 0..5 {
             for y in 0..5 {
                 for k in 0..2 {
+                    let index = x * (5 * 2) + y * 2 + k;
                     // create an expression combining 4 elements of state8 into a single 32-bit felt
                     let value_expr = expansion_expr::<E, 32>(
                         &keccak_output8
@@ -445,17 +441,20 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                             .map(|e| (8, e.expr()))
                             .collect_vec(),
                     );
-                    output32_exprs.push(value_expr);
+                    system.constrain_eq(
+                        output32_expr[index].clone(),
+                        value_expr,
+                        format!("output32_u8_equality_{index}"),
+                    );
                 }
             }
         }
-        system.ram_write_record(state_ptr_address.expr(), output32_exprs, cur_ts.expr());
 
         // process keccak input
-        let mut input32_exprs = Vec::with_capacity(KECCAK_INPUT32_SIZE);
         for x in 0..5 {
             for y in 0..5 {
                 for k in 0..2 {
+                    let index = x * (5 * 2) + y * 2 + k;
                     // create an expression combining 4 elements of state8 into a single 32-bit felt
                     let value_expr = expansion_expr::<E, 32>(
                         keccak_input8
@@ -465,15 +464,14 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                             .collect_vec()
                             .as_slice(),
                     );
-                    input32_exprs.push(value_expr);
+                    system.constrain_eq(
+                        input32_expr[index].clone(),
+                        value_expr,
+                        format!("input32_u8_equality_{index}"),
+                    );
                 }
             }
         }
-        system.ram_read_record(
-            state_ptr_address.expr(),
-            input32_exprs,
-            input_prev_ts.iter().map(|w| w.expr()).collect_vec(),
-        );
 
         // rotation constrain: rotation(keccak_input8).next() == keccak_output8
         izip!(keccak_input8, keccak_output8)
@@ -851,18 +849,14 @@ where
 pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>, u16) {
     let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
     let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-    let keccak_state_witin = KeccakStateCols {
-        state_ptr_address: circuit_builder.create_witin(|| "state_ptr_address"),
-        input_prev_ts: array::from_fn(|i| {
-            circuit_builder.create_witin(|| format!("input_prev_ts/{i}"))
-        }),
-        cur_ts: circuit_builder.create_witin(|| "cur_ts"),
-    };
+    let input_value: [WitIn; KECCAK_INPUT32_SIZE] =
+        array::from_fn(|i| circuit_builder.create_witin(|| format!("input_value/{i}")));
+    let output_value: [WitIn; KECCAK_OUTPUT32_SIZE] =
+        array::from_fn(|i| circuit_builder.create_witin(|| format!("output_value/{i}")));
     let params = KeccakParams {
-        state: KeccakStateCols {
-            state_ptr_address: keccak_state_witin.state_ptr_address.expr(),
-            input_prev_ts: keccak_state_witin.input_prev_ts.map(|e| e.expr()),
-            cur_ts: keccak_state_witin.cur_ts.expr(),
+        io: KeccakInOutCols {
+            input32: input_value.map(|e| e.expr()),
+            output32: output_value.map(|e| e.expr()),
         },
     };
     let (layout, chip) = KeccakLayout::build(&mut circuit_builder, params);

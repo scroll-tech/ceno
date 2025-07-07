@@ -26,9 +26,9 @@ impl OpTableConfig {
         table_len: usize,
     ) -> Result<Self, CircuitBuilderError> {
         let abc = [
-            cb.create_fixed(|| "a")?,
-            cb.create_fixed(|| "b")?,
-            cb.create_fixed(|| "c")?,
+            cb.create_fixed(|| "a"),
+            cb.create_fixed(|| "b"),
+            cb.create_fixed(|| "c"),
         ];
         let mlt = cb.create_witin(|| "mlt");
 

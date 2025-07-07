@@ -1,4 +1,4 @@
-use ceno_emul::{Cycle, Platform, StepRecord, Word, WriteOp};
+use ceno_emul::{Cycle, StepRecord, Word, WriteOp};
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
 use p3::field::{Field, FieldAlgebra};
