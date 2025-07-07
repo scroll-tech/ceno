@@ -10,7 +10,7 @@
 //!     type AddDummy<E> = DummyInstruction<E, AddOp>;
 
 mod dummy_circuit;
-pub use dummy_circuit::DummyInstruction;
+pub use dummy_circuit::{DummyConfig, DummyInstruction};
 
 mod dummy_ecall;
 pub use dummy_ecall::LargeEcallDummy;

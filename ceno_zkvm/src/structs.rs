@@ -1,17 +1,17 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    instructions::{GKRIOPInstruction, Instruction, riscv::dummy::LargeEcallDummy},
+    instructions::{Instruction, riscv::dummy::LargeEcallDummy},
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
-use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord, SyscallSpec};
+use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord};
 use ff_ext::ExtensionField;
-use gkr_iop::{LookupTable, gkr::GKRCircuit, precompiles::KeccakLayout};
+use gkr_iop::{gkr::GKRCircuit, tables::LookupTable};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::Expression;
+use multilinear_extensions::{Expression, Instance};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -54,7 +54,7 @@ pub struct ProvingKey<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ProvingKey<E> {
-    pub fn get_cs(&self) -> &ConstraintSystem<E> {
+    pub fn get_cs(&self) -> &ComposedConstrainSystem<E> {
         self.vk.get_cs()
     }
 }
@@ -62,82 +62,12 @@ impl<E: ExtensionField> ProvingKey<E> {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct VerifyingKey<E: ExtensionField> {
-    pub(crate) cs: ConstraintSystem<E>,
+    pub(crate) cs: ComposedConstrainSystem<E>,
 }
 
 impl<E: ExtensionField> VerifyingKey<E> {
-    pub fn get_cs(&self) -> &ConstraintSystem<E> {
+    pub fn get_cs(&self) -> &ComposedConstrainSystem<E> {
         &self.cs
-    }
-}
-
-#[derive(Clone)]
-pub struct GKRIOPProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State> {
-    pub fixed_commit_wd: Option<PCS::CommitmentWithWitness>,
-    pub vk: GKRIOPVerifyingKey<E, PCS, State>,
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State: Default> Default
-    for GKRIOPProvingKey<E, PCS, State>
-{
-    fn default() -> Self {
-        Self {
-            fixed_commit_wd: None,
-            vk: GKRIOPVerifyingKey::default(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GKRIOPVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State> {
-    pub(crate) state: State,
-    pub fixed_commit: Option<PCS::Commitment>,
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State: Default> Default
-    for GKRIOPVerifyingKey<E, PCS, State>
-{
-    fn default() -> Self {
-        Self {
-            state: State::default(),
-            fixed_commit: None,
-        }
-    }
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, State>
-    GKRIOPVerifyingKey<E, PCS, State>
-{
-    pub fn get_state(&self) -> &State {
-        &self.state
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-pub struct KeccakGKRIOP<E: ExtensionField> {
-    pub circuit: GKRCircuit<E>,
-}
-
-impl<E: ExtensionField> KeccakGKRIOP<E> {
-    pub fn key_gen<PCS: PolynomialCommitmentScheme<E>>(
-        self,
-        pp: &PCS::ProverParam,
-        fixed_traces: Option<RowMajorMatrix<E::BaseField>>,
-    ) -> GKRIOPProvingKey<E, PCS, KeccakGKRIOP<E>> {
-        let fixed_commit_wd = fixed_traces.map(|traces| PCS::commit(pp, traces).unwrap());
-        let fixed_commit = fixed_commit_wd.as_ref().map(PCS::get_pure_commitment);
-
-        GKRIOPProvingKey {
-            fixed_commit_wd,
-            vk: GKRIOPVerifyingKey {
-                state: self,
-                fixed_commit,
-            },
-        }
     }
 }
 
@@ -160,12 +90,51 @@ impl Default for ProgramParams {
     }
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
+pub struct ComposedConstrainSystem<E: ExtensionField> {
+    // TODO combine zkvm_v1_css to `GKRCircuit<E>`
+    // right now both co-exist because gkr_circuit couldn't cope with dynamic layers features which required by tower argument
+    pub zkvm_v1_css: ConstraintSystem<E>,
+    pub gkr_circuit: Option<GKRCircuit<E>>,
+}
+
+impl<E: ExtensionField> ComposedConstrainSystem<E> {
+    pub fn key_gen(self) -> ProvingKey<E> {
+        ProvingKey {
+            vk: VerifyingKey { cs: self },
+        }
+    }
+    pub fn num_witin(&self) -> usize {
+        self.zkvm_v1_css.num_witin.into()
+    }
+
+    pub fn num_fixed(&self) -> usize {
+        self.zkvm_v1_css.num_fixed
+    }
+
+    pub fn instance_name_map(&self) -> &HashMap<Instance, String> {
+        &self.zkvm_v1_css.instance_name_map
+    }
+
+    pub fn is_opcode_circuit(&self) -> bool {
+        self.zkvm_v1_css.lk_table_expressions.is_empty()
+            && self.zkvm_v1_css.r_table_expressions.is_empty()
+            && self.zkvm_v1_css.w_table_expressions.is_empty()
+    }
+
+    /// return number of lookup operation
+    pub fn num_lks(&self) -> usize {
+        self.zkvm_v1_css.lk_expressions.len()
+    }
+}
+
 #[derive(Clone)]
 pub struct ZKVMConstraintSystem<E: ExtensionField> {
-    pub(crate) circuit_css: BTreeMap<String, ConstraintSystem<E>>,
+    pub(crate) circuit_css: BTreeMap<String, ComposedConstrainSystem<E>>,
     pub(crate) initial_global_state_expr: Expression<E>,
     pub(crate) finalize_global_state_expr: Expression<E>,
-    pub keccak_gkr_iop: Option<KeccakGKRIOP<E>>,
+    // pub keccak_gkr_iop: Option<KeccakGKRIOP<E>>,
     pub params: ProgramParams,
 }
 
@@ -176,7 +145,7 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
             params: ProgramParams::default(),
-            keccak_gkr_iop: None,
+            // keccak_gkr_iop: None,
         }
     }
 }
@@ -189,40 +158,26 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         }
     }
 
-    pub fn register_keccakf_circuit(
-        &mut self,
-    ) -> <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig {
-        // Add GKR-IOP instance
-        let params = gkr_iop::precompiles::KeccakParams {};
-        let (_layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);
-        self.keccak_gkr_iop = Some(KeccakGKRIOP {
-            circuit: chip.gkr_circuit(),
-        });
-
-        let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", KeccakSpec::NAME));
-        let mut circuit_builder =
-            CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
-        let config =
-            LargeEcallDummy::<E, KeccakSpec>::construct_circuit_with_gkr_iop(&mut circuit_builder)
-                .unwrap();
-        circuit_builder.finalize();
-        assert!(
-            self.circuit_css
-                .insert(KeccakSpec::NAME.to_owned(), cs)
-                .is_none()
-        );
-
-        config
-    }
-
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder =
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
-        let config = OC::construct_circuit(&mut circuit_builder).unwrap();
+        let mut config = OC::construct_circuit(&mut circuit_builder).unwrap();
         circuit_builder.finalize();
+        let gkr_iop_circuit = OC::extract_gkr_iop_circuit(&mut config).unwrap();
+        let cs = ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit: gkr_iop_circuit,
+        };
+        tracing::trace!(
+            "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
+            OC::name(),
+            cs.num_witin(),
+            cs.zkvm_v1_css.r_expressions.len(),
+            cs.zkvm_v1_css.w_expressions.len(),
+            cs.zkvm_v1_css.lk_expressions.len(),
+        );
         assert!(self.circuit_css.insert(OC::name(), cs).is_none());
-
         config
     }
 
@@ -232,8 +187,17 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             CircuitBuilder::<E>::new_with_params(&mut cs, self.params.clone());
         let config = TC::construct_circuit(&mut circuit_builder).unwrap();
         circuit_builder.finalize();
-        assert!(self.circuit_css.insert(TC::name(), cs).is_none());
-
+        assert!(
+            self.circuit_css
+                .insert(
+                    TC::name(),
+                    ComposedConstrainSystem {
+                        zkvm_v1_css: cs,
+                        gkr_circuit: None
+                    }
+                )
+                .is_none()
+        );
         config
     }
 
@@ -248,11 +212,11 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         circuit_builder.finalize();
     }
 
-    pub fn get_css(&self) -> &BTreeMap<String, ConstraintSystem<E>> {
+    pub fn get_css(&self) -> &BTreeMap<String, ComposedConstrainSystem<E>> {
         &self.circuit_css
     }
 
-    pub fn get_cs(&self, name: &String) -> Option<&ConstraintSystem<E>> {
+    pub fn get_cs(&self, name: &String) -> Option<&ComposedConstrainSystem<E>> {
         self.circuit_css.get(name)
     }
 }
@@ -286,7 +250,11 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
             self.circuit_fixed_traces
                 .insert(
                     TC::name(),
-                    Some(TC::generate_fixed_traces(config, cs.num_fixed, input)),
+                    Some(TC::generate_fixed_traces(
+                        config,
+                        cs.zkvm_v1_css.num_fixed,
+                        input
+                    )),
                 )
                 .is_none()
         );
@@ -314,56 +282,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.lk_mlts.get(name)
     }
 
-    pub fn assign_keccakf_circuit(
-        &mut self,
-        css: &ZKVMConstraintSystem<E>,
-        _config: &<LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
-        records: Vec<StepRecord>,
-    ) -> Result<(), ZKVMError> {
-        let cs = css
-            .get_cs(&LargeEcallDummy::<E, KeccakSpec>::name())
-            .unwrap();
-        // let (witness, _gkr_witness, _gkr_output, logup_multiplicity) =
-        //     LargeEcallDummy::<E, KeccakSpec>::assign_instances_with_gkr_iop(
-        //         config,
-        //         cs.num_witin as usize,
-        //         records,
-        //         &css.keccak_gkr_iop.as_ref().unwrap().circuit,
-        //         &css.keccak_gkr_iop.as_ref().unwrap().layout,
-        //     )?;
-
-        // self.keccak_gkr_wit = gkr_witness;
-        // self.keccak_gkr_out = gkr_output;
-
-        assert!(
-            self.witnesses_opcodes
-                .insert(
-                    LargeEcallDummy::<E, KeccakSpec>::name(),
-                    RowMajorMatrix::<E::BaseField>::new(
-                        records.len(),
-                        cs.num_witin as usize,
-                        witness::InstancePaddingStrategy::Default,
-                    )
-                )
-                .is_none()
-        );
-        // assert!(
-        //     !self
-        //         .witnesses_tables
-        //         .contains_key(&LargeEcallDummy::<E, KeccakSpec>::name())
-        // );
-        assert!(
-            self.lk_mlts
-                .insert(
-                    LargeEcallDummy::<E, KeccakSpec>::name(),
-                    LkMultiplicity::default()
-                )
-                .is_none()
-        );
-
-        Ok(())
-    }
-
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
@@ -374,7 +292,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) =
-            OC::assign_instances(config, cs.num_witin as usize, records)?;
+            OC::assign_instances(config, cs.zkvm_v1_css.num_witin as usize, records)?;
         assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
@@ -432,8 +350,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = cs.get_cs(&TC::name()).unwrap();
         let witness = TC::assign_instances(
             config,
-            cs.num_witin as usize,
-            cs.num_structural_witin as usize,
+            cs.zkvm_v1_css.num_witin as usize,
+            cs.zkvm_v1_css.num_structural_witin as usize,
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
@@ -519,7 +437,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             circuit_num_polys: self
                 .circuit_pks
                 .values()
-                .map(|pk| (pk.vk.get_cs().num_witin as usize, pk.vk.get_cs().num_fixed))
+                .map(|pk| (pk.vk.get_cs().num_witin(), pk.vk.get_cs().num_fixed()))
                 .collect_vec(),
         }
     }
@@ -527,8 +445,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "E::BaseField: Serialize, GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned, GKRIOPVerifyingKey<E, PCS, KeccakGKRIOP<E>>: DeserializeOwned",
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned",
 ))]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,

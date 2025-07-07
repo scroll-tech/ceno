@@ -1,9 +1,8 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
-    circuit_builder::ConstraintSystem,
     error::ZKVMError,
-    structs::{TowerProofs, ZKVMProvingKey},
+    structs::{ComposedConstrainSystem, TowerProofs, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
 use gkr_iop::hal::ProverBackend;
@@ -65,7 +64,7 @@ pub trait TowerProver<PB: ProverBackend> {
     #[allow(clippy::type_complexity)]
     fn build_tower_witness<'a, 'b>(
         &self,
-        cs: &ConstraintSystem<PB::E>,
+        cs: &ComposedConstrainSystem<PB::E>,
         input: &'b ProofInput<'a, PB>,
         challenge: &[PB::E; 2],
     ) -> (
@@ -103,7 +102,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
         rt_tower: Vec<PB::E>,
         records: Vec<Arc<PB::MultilinearPoly<'b>>>,
         input: &'b ProofInput<'a, PB>,
-        cs: &ConstraintSystem<PB::E>,
+        cs: &ComposedConstrainSystem<PB::E>,
         challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
     ) -> Result<

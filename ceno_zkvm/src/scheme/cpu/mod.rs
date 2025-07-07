@@ -2,7 +2,6 @@ use super::hal::{
     DeviceTransporter, MainSumcheckProver, OpeningProver, ProverDevice, TowerProver, TraceCommitter,
 };
 use crate::{
-    circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP},
@@ -12,7 +11,7 @@ use crate::{
             wit_infer_by_expr,
         },
     },
-    structs::TowerProofs,
+    structs::{ComposedConstrainSystem, TowerProofs},
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -286,7 +285,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 {
     fn build_tower_witness<'a, 'b>(
         &self,
-        cs: &ConstraintSystem<E>,
+        ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        }: &ComposedConstrainSystem<E>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
         challenges: &[E; 2],
     ) -> (
@@ -558,7 +559,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         rt_tower: Vec<E>,
         _records: Vec<ArcMultilinearExtension<'b, E>>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
-        cs: &ConstraintSystem<E>,
+        ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        }: &ComposedConstrainSystem<E>,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> Result<

@@ -1,9 +1,8 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{ByteAddr, Change, InsnKind, KeccakSpec, StepRecord, SyscallSpec};
-use ff_ext::{ExtensionField, SmallField};
-use itertools::{Itertools, zip_eq};
-use witness::RowMajorMatrix;
+use ceno_emul::{Change, InsnKind, StepRecord, SyscallSpec};
+use ff_ext::ExtensionField;
+use itertools::Itertools;
 
 use super::{super::insn_base::WriteMEM, dummy_circuit::DummyConfig};
 use crate::{
@@ -11,7 +10,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        GKRIOPInstruction, GKRinfo, Instruction,
+        Instruction,
         riscv::{constants::UInt, insn_base::WriteRD},
     },
     set_val,
@@ -19,13 +18,6 @@ use crate::{
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
-
-use gkr_iop::{
-    ProtocolWitnessGenerator,
-    precompiles::{
-        AND_LOOKUPS, KECCAK_INPUT32_SIZE, KeccakLayout, KeccakTrace, RANGE_LOOKUPS, XOR_LOOKUPS,
-    },
-};
 
 /// LargeEcallDummy can handle any instruction and produce its effects,
 /// including multiple memory operations.
@@ -78,17 +70,11 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Will be filled in by GKR Instruction trait
-        let lookups = vec![];
-        let aux_wits = vec![];
-
         Ok(LargeEcallConfig {
             dummy_insn,
             start_addr,
             reg_writes,
             mem_writes,
-            lookups,
-            aux_wits,
         })
     }
 
@@ -125,141 +111,6 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
     }
 }
 
-impl<E: ExtensionField> GKRIOPInstruction<E> for LargeEcallDummy<E, KeccakSpec> {
-    type Layout = KeccakLayout<E>;
-
-    fn gkr_info() -> crate::instructions::GKRinfo {
-        GKRinfo {
-            and_lookups: AND_LOOKUPS,
-            xor_lookups: XOR_LOOKUPS,
-            range_lookups: RANGE_LOOKUPS,
-            aux_wits: 40144, // TODO fix the hardcode value as now we have rlc lookup records
-        }
-    }
-
-    fn construct_circuit_with_gkr_iop(
-        cb: &mut CircuitBuilder<E>,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let mut partial_config = Self::construct_circuit(cb)?;
-
-        assert!(partial_config.lookups.is_empty());
-        assert!(partial_config.aux_wits.is_empty());
-
-        // TODO: capacity
-        let mut lookups = vec![];
-        let mut aux_wits = vec![];
-
-        for i in 0..AND_LOOKUPS {
-            let a = cb.create_witin(|| format!("and_lookup_{i}_a_LOOKUP_ARG"));
-            let b = cb.create_witin(|| format!("and_lookup_{i}_b_LOOKUP_ARG"));
-            let c = cb.create_witin(|| format!("and_lookup_{i}_c_LOOKUP_ARG"));
-            cb.lookup_and_byte(a.into(), b.into(), c.into())?;
-            lookups.extend(vec![a, b, c]);
-        }
-        for i in 0..XOR_LOOKUPS {
-            let a = cb.create_witin(|| format!("xor_lookup_{i}_a_LOOKUP_ARG"));
-            let b = cb.create_witin(|| format!("xor_lookup_{i}_b_LOOKUP_ARG"));
-            let c = cb.create_witin(|| format!("xor_lookup_{i}_c_LOOKUP_ARG"));
-            cb.lookup_xor_byte(a.into(), b.into(), c.into())?;
-            lookups.extend(vec![a, b, c]);
-        }
-        for i in 0..RANGE_LOOKUPS {
-            let wit = cb.create_witin(|| format!("range_lookup_{i}_LOOKUP_ARG"));
-            cb.assert_ux::<_, _, 16>(|| "nada", wit.into())?;
-            lookups.push(wit);
-        }
-
-        for i in 0..40144 {
-            aux_wits.push(cb.create_witin(|| format!("{i}_GKR_WITNESS")));
-        }
-
-        partial_config.lookups = lookups;
-        partial_config.aux_wits = aux_wits;
-
-        Ok(partial_config)
-    }
-
-    // TODO: make this nicer without access to config
-    // one alternative: the verifier uses the namespaces
-    // contained in the constraint system to select
-    // gkr-specific fields
-    fn output_evals_map(i: usize) -> usize {
-        if i < 50 {
-            27 + 6 * i
-        } else if i < 100 {
-            26 + 6 * (i - 50)
-        } else {
-            326 + i - 100
-        }
-    }
-
-    fn phase1_witness_from_steps(
-        layout: &Self::Layout,
-        steps: &[StepRecord],
-    ) -> RowMajorMatrix<E::BaseField> {
-        let instances = steps
-            .iter()
-            .map(|step| {
-                step.syscall()
-                    .unwrap()
-                    .mem_ops
-                    .iter()
-                    .map(|op| op.value.before)
-                    .collect_vec()
-                    .try_into()
-                    .unwrap()
-            })
-            .collect_vec();
-        let num_instances = instances.len();
-
-        layout.phase1_witness_group(KeccakTrace {
-            instances,
-            ram_start_addr: vec![ByteAddr::from(0); num_instances],
-            cur_ts: vec![0; num_instances],
-            read_ts: vec![[0; KECCAK_INPUT32_SIZE]; num_instances],
-        })
-    }
-
-    fn assign_instance_with_gkr_iop(
-        config: &Self::InstructionConfig,
-        instance: &mut [<E as ExtensionField>::BaseField],
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-        lookups: &[E::BaseField],
-        aux_wits: &[E::BaseField],
-    ) -> Result<(), ZKVMError> {
-        Self::assign_instance(config, instance, lk_multiplicity, step)?;
-
-        let mut wit_iter = lookups.iter().map(|f| f.to_canonical_u64());
-        let mut var_iter = config.lookups.iter();
-
-        let mut pop_arg = || -> u64 {
-            let wit = wit_iter.next().unwrap();
-            let var = var_iter.next().unwrap();
-            set_val!(instance, var, wit);
-            wit
-        };
-
-        for _i in 0..AND_LOOKUPS {
-            lk_multiplicity.lookup_and_byte(pop_arg(), pop_arg());
-            pop_arg();
-        }
-        for _i in 0..XOR_LOOKUPS {
-            lk_multiplicity.lookup_xor_byte(pop_arg(), pop_arg());
-            pop_arg();
-        }
-        for _i in 0..RANGE_LOOKUPS {
-            lk_multiplicity.assert_ux::<16>(pop_arg());
-        }
-
-        for (aux_wit_var, aux_wit) in zip_eq(config.aux_wits.iter(), aux_wits) {
-            set_val!(instance, aux_wit_var, (aux_wit.to_canonical_u64()));
-        }
-        assert!(var_iter.next().is_none());
-
-        Ok(())
-    }
-}
 #[derive(Debug)]
 pub struct LargeEcallConfig<E: ExtensionField> {
     dummy_insn: DummyConfig<E>,
@@ -268,7 +119,4 @@ pub struct LargeEcallConfig<E: ExtensionField> {
 
     start_addr: WitIn,
     mem_writes: Vec<(WitIn, Change<WitIn>, WriteMEM)>,
-
-    aux_wits: Vec<WitIn>,
-    lookups: Vec<WitIn>,
 }
