@@ -13,11 +13,11 @@ use crate::{
     error::ZKVMError,
     gadgets::{IsLtConfig, SignedExtendConfig},
     instructions::Instruction,
-    set_val,
+    structs::ProgramParams,
     tables::InsnRecord,
     uint::Value,
     utils::i64_to_base,
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
@@ -57,7 +57,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
         let imm = cb.create_witin(|| "imm");
@@ -240,8 +243,16 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                SetLessThanImmInstruction::<GoldilocksExt2, I>::construct_circuit,
+                |cb| {
+                    Ok(
+                        SetLessThanImmInstruction::<GoldilocksExt2, I>::construct_circuit(
+                            cb,
+                            &ProgramParams::default(),
+                        ),
+                    )
+                },
             )
+            .unwrap()
             .unwrap();
 
         let (raw_witin, lkm) = SetLessThanImmInstruction::<GoldilocksExt2, I>::assign_instances(

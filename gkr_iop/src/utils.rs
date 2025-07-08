@@ -1,6 +1,6 @@
 pub mod lk_multiplicity;
 
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, izip};
 use multilinear_extensions::{
     Expression, Fixed, WitIn, WitnessId,
@@ -226,6 +226,14 @@ pub fn rotation_selector_eval<E: ExtensionField>(
         &out_point[cyclic_group_log2_size..],
         &in_point[cyclic_group_log2_size..],
     )
+}
+
+pub fn i64_to_base<F: SmallField>(x: i64) -> F {
+    if x >= 0 {
+        F::from_canonical_u64(x as u64)
+    } else {
+        -F::from_canonical_u64((-x) as u64)
+    }
 }
 
 /// Returns `[0 + offset, ..., N - 1 + offset]`.

@@ -1,6 +1,9 @@
 use ff_ext::ExtensionField;
 
-use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::RAMType};
+use crate::{
+    chip_handler::general::PublicIOQuery, circuit_builder::CircuitBuilder, error::ZKVMError,
+    structs::RAMType,
+};
 use multilinear_extensions::{Expression, ToExpr};
 use p3::field::FieldAlgebra;
 

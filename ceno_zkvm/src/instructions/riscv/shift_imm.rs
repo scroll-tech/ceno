@@ -8,7 +8,7 @@ use crate::{
         Instruction,
         riscv::{constants::UInt, i_insn::IInstructionConfig},
     },
-    set_val,
+    structs::ProgramParams,
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
@@ -16,6 +16,7 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::marker::PhantomData;
+use witness::set_val;
 
 pub struct ShiftImmConfig<E: ExtensionField> {
     i_insn: IInstructionConfig<E>,
@@ -59,6 +60,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         // treat bit shifting as a bit "inflow" and "outflow" process, flowing from left to right or vice versa
         // this approach simplifies constraint and witness allocation compared to using multiplication/division gadget,
@@ -200,6 +202,7 @@ mod test {
             riscv::{RIVInstruction, constants::UInt},
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
+        structs::ProgramParams,
     };
 
     #[test]
@@ -275,7 +278,10 @@ mod test {
             .namespace(
                 || format!("{prefix}_({name})"),
                 |cb| {
-                    let config = ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
+                    let config = ShiftImmInstruction::<GoldilocksExt2, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    );
                     Ok(config)
                 },
             )

@@ -293,3 +293,17 @@ impl<F: Sync + Send + Copy + FieldAlgebra> Index<usize> for RowMajorMatrix<F> {
         &self.inner.values[num_col * idx..][..num_col]
     }
 }
+
+#[macro_export]
+macro_rules! set_val {
+    ($ins:ident, $field:expr, $val:expr) => {
+        $ins[$field.id as usize] = $val.into_f();
+    };
+}
+
+#[macro_export]
+macro_rules! set_fixed_val {
+    ($ins:ident, $field:expr, $val:expr) => {
+        $ins[$field.0] = $val;
+    };
+}

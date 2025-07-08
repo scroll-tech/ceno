@@ -76,9 +76,9 @@ use crate::{
     error::ZKVMError,
     gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::Instruction,
-    set_val,
+    structs::ProgramParams,
     uint::Value,
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::marker::PhantomData;
@@ -144,7 +144,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         // The soundness analysis for these constraints is only valid for
         // 32-bit registers represented over the Goldilocks field, so verify
         // these parameters
@@ -459,6 +462,7 @@ mod test {
             },
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
+        structs::ProgramParams,
     };
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use ff_ext::{ExtensionField, GoldilocksExt2 as GE};
@@ -565,7 +569,7 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{}_({})", Insn::name(), name),
-                |cb| Ok(Insn::construct_circuit(cb)),
+                |cb| Ok(Insn::construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();

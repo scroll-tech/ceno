@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
+    chip_handler::{AddressExpr, MemoryExpr, RegisterExpr, general::InstFetch},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::riscv::insn_base::{ReadMEM, ReadRS1, StateInOut, WriteRD},

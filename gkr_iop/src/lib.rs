@@ -1,4 +1,5 @@
 #![feature(variant_count)]
+#![feature(strict_overflow_ops)]
 use std::marker::PhantomData;
 
 use crate::{
@@ -17,9 +18,11 @@ use witness::RowMajorMatrix;
 use crate::hal::ProverBackend;
 
 pub mod chip;
+pub mod circuit_builder;
 pub mod cpu;
 pub mod error;
 pub mod evaluation;
+pub mod gadgets;
 pub mod gkr;
 pub mod hal;
 pub mod precompiles;

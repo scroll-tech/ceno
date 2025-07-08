@@ -15,6 +15,7 @@ use crate::{
         },
     },
     scheme::mock_prover::{MOCK_PC_START, MockProver},
+    structs::ProgramParams,
 };
 use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, Word, WriteOp, encode_rv32};
 use ff_ext::{ExtensionField, GoldilocksExt2};
@@ -80,7 +81,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
         .namespace(
             || Inst::name(),
             |cb| {
-                let config = Inst::construct_circuit(cb);
+                let config = Inst::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -130,7 +131,7 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
         .namespace(
             || Inst::name(),
             |cb| {
-                let config = Inst::construct_circuit(cb);
+                let config = Inst::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )

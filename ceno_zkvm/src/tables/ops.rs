@@ -17,6 +17,7 @@ mod tests {
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
+        structs::ProgramParams,
         tables::TableCircuit,
     };
     use ff_ext::{GoldilocksExt2 as E, SmallField};
@@ -27,7 +28,8 @@ mod tests {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let config = PowTableCircuit::<E>::construct_circuit(&mut cb).unwrap();
+        let config =
+            PowTableCircuit::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
         let fixed = PowTableCircuit::<E>::generate_fixed_traces(&config, cb.cs.num_fixed, &());
 

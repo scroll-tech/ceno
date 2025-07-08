@@ -12,9 +12,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     gadgets::AssertLtConfig,
-    set_val,
     uint::Value,
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::Tracer;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
