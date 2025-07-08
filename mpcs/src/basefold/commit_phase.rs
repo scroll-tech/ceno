@@ -16,7 +16,10 @@ use crate::{
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{Either, Itertools};
 use multilinear_extensions::{
-    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
+    Expression,
+    mle::ArcMultilinearExtension,
+    op_mle,
+    virtual_polys::{PolyMeta, VirtualPolynomialsBuilder},
 };
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
@@ -46,8 +49,7 @@ use rayon::{
     slice::ParallelSlice,
 };
 
-use super::structure::BasefoldCommitmentWithWitness;
-use super::structure::Digest;
+use super::structure::{BasefoldCommitmentWithWitness, Digest};
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -235,7 +237,9 @@ where
     );
 
     let (batched_polys, poly_meta) = polys.get_batched_polys();
+    println!("CPU batched_polys num: {}", batched_polys.len());
 
+    println!("[ceno]: init sumcheck");
     let mut prover_states = batched_polys
         .into_iter()
         .enumerate()
@@ -360,8 +364,6 @@ where
         },
     )
 }
-
-
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -490,12 +492,11 @@ where
     exit_span!(batch_codeword_span);
     exit_span!(prepare_span);
 
-
     let num_threads = optimal_sumcheck_threads(max_num_vars);
     let log2_num_threads = log2_strict_usize(num_threads);
     let mut commits = Vec::with_capacity(num_rounds - 1);
 
-    let mut challenge_phase1 = None; 
+    let mut challenge_phase1 = None;
     let sumcheck_phase1 = entered_span!("sumcheck_phase1");
     let phase1_rounds = num_rounds.min(max_num_vars - log2_num_threads);
     println!("[ceno] phase1_rounds: {}", phase1_rounds);
@@ -758,4 +759,278 @@ where
     exit_span!(fri_round_span);
 
     Some(next_challenge)
+}
+
+/// Simplified version without Phase1/Phase2 optimization
+/// All polynomials are treated as Normal, no Phase2Only optimization
+#[allow(clippy::too_many_arguments)]
+pub fn batch_commit_phase_without_opt<E: ExtensionField, Spec: BasefoldSpec<E>>(
+    pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
+    fixed_comms: Option<&BasefoldCommitmentWithWitness<E>>,
+    witin_commitment_with_witness: &MerkleTree<E::BaseField>,
+    witin_polys_and_meta: Vec<(
+        &Point<E>,
+        (usize, &Vec<ArcMultilinearExtension<'static, E>>),
+    )>,
+    transcript: &mut impl Transcript<E>,
+    max_num_vars: usize,
+    num_rounds: usize,
+    circuit_num_polys: &[(usize, usize)],
+) -> (Vec<MerkleTreeExt<E>>, BasefoldCommitPhaseProof<E>)
+where
+    E::BaseField: Serialize + DeserializeOwned,
+    <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment:
+        IntoIterator<Item = E::BaseField> + PartialEq,
+{
+    let prepare_span = entered_span!("Prepare without opt");
+
+    let mmcs_ext = ExtensionMmcs::<E::BaseField, E, _>::new(poseidon2_merkle_tree::<E>());
+    let mmcs = poseidon2_merkle_tree::<E>();
+    let mut trees: Vec<MerkleTreeExt<E>> = Vec::with_capacity(max_num_vars);
+
+    // concat witin mle with fixed mle under same circuit index
+    let witin_concat_with_fixed_polys: Vec<Vec<ArcMultilinearExtension<E>>> = witin_polys_and_meta
+        .iter()
+        .map(|(_, (circuit_index, witin_polys))| {
+            let fixed_iter = fixed_comms
+                .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
+                .into_iter()
+                .flatten()
+                .cloned();
+            witin_polys.iter().cloned().chain(fixed_iter).collect()
+        })
+        .collect::<Vec<Vec<_>>>();
+    let batch_group_size = witin_concat_with_fixed_polys
+        .iter()
+        .map(|v| v.len())
+        .collect_vec();
+    let total_num_polys = batch_group_size.iter().sum();
+
+    let batch_coeffs =
+        &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
+    // split batch coeffs to match with batch group for easier handling
+    let batch_coeffs_splitted = split_by_sizes(batch_coeffs, &batch_group_size);
+
+    // prepare
+    // - codeword oracle => for FRI
+    // - evals => for sumcheck
+    let witins_codeword = mmcs.get_matrices(witin_commitment_with_witness);
+    let fixed_codeword = fixed_comms
+        .map(|fixed_comms| mmcs.get_matrices(&fixed_comms.codeword))
+        .unwrap_or_default();
+
+    let batch_codeword_span = entered_span!("batch_codeword without opt");
+    // we random linear combination of rmm under same circuit into single codeword, as they shared same height
+    let batched_codewords: Vec<DenseMatrix<E>> = witins_codeword
+        .iter()
+        .zip_eq(&batch_coeffs_splitted)
+        .zip_eq(&witin_polys_and_meta)
+        .map(
+            |((witin_codewords, batch_coeffs), (_, (circuit_index, _)))| {
+                let (expected_witins_num_poly, expected_fixed_num_poly) =
+                    circuit_num_polys[*circuit_index];
+                // batch_coeffs concat witin follow by fixed, where fixed is optional
+                let witin_fixed_concated_codeword: Vec<(_, usize)> =
+                    std::iter::once((witin_codewords, expected_witins_num_poly))
+                        .chain(
+                            fixed_comms
+                                .and_then(|fixed_comms| {
+                                    fixed_comms.circuit_codeword_index.get(circuit_index)
+                                })
+                                .and_then(|idx| {
+                                    fixed_codeword
+                                        .get(*idx)
+                                        .map(|rmm| (rmm, expected_fixed_num_poly))
+                                }),
+                        )
+                        .collect_vec();
+                // final poly size is 2 * height because we commit left: poly[j] and right: poly[j + ni] under same mk path (due to bit-reverse)
+                let size = witin_fixed_concated_codeword[0].0.height() * 2;
+                RowMajorMatrix::new(
+                    (0..size)
+                        .into_par_iter()
+                        .map(|j| {
+                            witin_fixed_concated_codeword
+                                .iter()
+                                .scan(0, |start_index, (rmm, num_polys)| {
+                                    let batch_coeffs = batch_coeffs
+                                        [*start_index..*start_index + num_polys]
+                                        .iter()
+                                        .copied();
+                                    *start_index += num_polys;
+                                    Some(dot_product(
+                                        batch_coeffs,
+                                        rmm.values[j * num_polys..(j + 1) * num_polys]
+                                            .iter()
+                                            .copied(),
+                                    ))
+                                })
+                                .sum::<E>()
+                        })
+                        .collect::<Vec<_>>(),
+                    2,
+                )
+            },
+        )
+        .collect_vec();
+    assert!(
+        [witin_polys_and_meta.len(), batched_codewords.len(),]
+            .iter()
+            .all_equal()
+    );
+
+    // sorted batch codewords by height in descending order
+    let mut batched_codewords = VecDeque::from(
+        batched_codewords
+            .into_iter()
+            .sorted_by_key(|codeword| std::cmp::Reverse(codeword.height()))
+            .collect_vec(),
+    );
+    exit_span!(batch_codeword_span);
+    exit_span!(prepare_span);
+
+    // Key difference: Use single thread, no Phase1/Phase2 split
+    let num_threads = 1; // Force single thread
+    let log2_num_threads = 0; // log2(1) = 0
+
+    let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, max_num_vars);
+    let mut eq_mles: Vec<MultilinearExtension<E>> = witin_polys_and_meta
+        .iter()
+        .map(|(point, _)| build_eq_x_r_vec(point).into_mle())
+        .collect_vec();
+    let eq_expr = eq_mles
+        .iter_mut()
+        .map(|eq_mle| expr_builder.lift(Either::Right(eq_mle)))
+        .collect_vec();
+
+    let initial_rlc_evals = witin_concat_with_fixed_polys
+        .iter()
+        .zip_eq(&batch_coeffs_splitted)
+        .map(|(polys, batch_coeffs)| {
+            polys
+                .iter()
+                .zip_eq(batch_coeffs.iter())
+                .map(|(poly, coeff)| {
+                    op_mle!(poly, |evaluations| evaluations
+                        .iter()
+                        .map(|e| E::from(*e) * *coeff)
+                        .collect_vec())
+                })
+                .reduce(|acc, cur| {
+                    acc.into_iter()
+                        .zip_eq(cur.into_iter())
+                        .map(|(a, c)| a + c)
+                        .collect_vec()
+                })
+                .unwrap()
+        })
+        .map(|evals| MultilinearExtension::from_evaluations_ext_vec(max_num_vars, evals))
+        .collect_vec();
+
+    let mut initial_rlc_evals = initial_rlc_evals;
+    let initial_rlc_evals_expr = initial_rlc_evals
+        .iter_mut()
+        .map(|initial_rlc_evals| expr_builder.lift(Either::Right(initial_rlc_evals)))
+        .collect_vec();
+
+    let polys = expr_builder.to_virtual_polys(
+        // sumcheck formula: \sum_i \sum_b eq[point_i; b_i] * running_eval_i[b_i], |b_i| <= b and aligned on suffix
+        &[eq_expr
+            .into_iter()
+            .zip(initial_rlc_evals_expr.clone())
+            .map(|(eq, initial_rlc_evals)| eq * initial_rlc_evals)
+            .sum::<Expression<E>>()],
+        &[],
+    );
+
+    let (batched_polys, mut poly_meta) = polys.get_batched_polys();
+
+    // 🔥 Key difference: Force all polynomials to be Normal (no Phase2Only optimization)
+    for meta in poly_meta.iter_mut() {
+        *meta = PolyMeta::Normal;
+    }
+
+    let mut prover_states = batched_polys
+        .into_iter()
+        .enumerate()
+        .map(|(thread_id, poly)| {
+            IOPProverState::prover_init_with_extrapolation_aux(
+                thread_id == 0, // set thread_id 0 to be main worker
+                poly,
+                vec![(vec![], vec![])],
+                None,                    // 🔥 No phase2_numvar
+                Some(poly_meta.clone()), // 🔥 All Normal metadata
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut sumcheck_messages = Vec::with_capacity(num_rounds);
+    let mut commits = Vec::with_capacity(num_rounds - 1);
+
+    let mut challenge = None;
+    let sumcheck_no_opt = entered_span!("sumcheck_without_opt");
+    println!("[ceno] sumcheck without opt: {} rounds", num_rounds);
+
+    // 🔥 Key difference: No phase split, run all rounds continuously
+    for i in 0..num_rounds {
+        challenge = basefold_one_round::<E, Spec>(
+            pp,
+            &mut prover_states,
+            challenge,
+            &mut sumcheck_messages,
+            &mut batched_codewords,
+            transcript,
+            &mut trees,
+            &mut commits,
+            &mmcs_ext,
+            i == num_rounds - 1,
+        );
+    }
+
+    exit_span!(sumcheck_no_opt);
+
+    if let Some(p) = challenge {
+        prover_states[0].fix_var(p.elements);
+    }
+
+    let final_message = prover_states[0].get_mle_final_evaluations();
+    // skip even index which is eq evaluations
+    let final_message_indexes = initial_rlc_evals_expr
+        .iter()
+        .map(|expr| match expr {
+            Expression::WitIn(index) => *index as usize,
+            _ => unreachable!(),
+        })
+        .collect::<HashSet<usize>>();
+    let final_message = final_message
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| final_message_indexes.contains(i))
+        .map(|(_, m)| m)
+        .collect_vec();
+
+    if cfg!(feature = "sanity-check") {
+        assert!(final_message.iter().map(|m| m.len()).all_equal());
+        let final_message_agg: Vec<E> = (0..final_message[0].len())
+            .map(|j| final_message.iter().map(|row| row[j]).sum())
+            .collect_vec();
+        // last round running oracle should be exactly the encoding of the folded polynomial.
+        let basecode = <Spec::EncodingScheme as EncodingScheme<E>>::encode_slow_ext(
+            p3::matrix::dense::DenseMatrix::new(final_message_agg, 1),
+        );
+        assert_eq!(
+            basecode.values,
+            mmcs_ext.get_matrices(trees.last().unwrap())[0].values
+        );
+        // remove last tree/commmitment which is only for debug purpose
+        let _ = (trees.pop(), commits.pop());
+    }
+    transcript.append_field_element_exts_iter(final_message.iter().flatten());
+    (
+        trees,
+        BasefoldCommitPhaseProof {
+            sumcheck_messages,
+            commits,
+            final_message,
+        },
+    )
 }

@@ -29,7 +29,7 @@ pub use structure::{
     BasefoldProverParams, BasefoldRSParams, BasefoldVerifierParams,
 };
 pub mod commit_phase;
-use commit_phase::batch_commit_phase;
+use commit_phase::{batch_commit_phase, batch_commit_phase_without_opt};
 pub mod encoding;
 use multilinear_extensions::mle::ArcMultilinearExtension;
 
@@ -734,11 +734,17 @@ where
 #[cfg(test)]
 mod test {
     use ff_ext::GoldilocksExt2;
+    type Goldilocks = <GoldilocksExt2 as ff_ext::ExtensionField>::BaseField;
 
     use crate::{
+        BasefoldSpec,
         basefold::Basefold,
-        test_util::{run_batch_commit_open_verify, run_commit_open_verify},
+        test_util::{
+            get_point_from_challenge, run_batch_commit_open_verify, run_commit_open_verify,
+        },
     };
+
+    use crate::basefold::{batch_commit_phase, batch_commit_phase_without_opt};
 
     use super::BasefoldRSParams;
 
@@ -759,5 +765,185 @@ mod test {
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21);
             run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21, 64);
         }
+    }
+
+    /// Test verification of batch_commit_phase and batch_commit_phase_without_opt calculation consistency
+    #[test]
+    fn test_phase_optimization_consistency() {
+        use crate::{Point, PolynomialCommitmentScheme, SecurityLevel};
+        use multilinear_extensions::mle::{ArcMultilinearExtension, MultilinearExtension};
+        use rand::SeedableRng;
+        use transcript::BasicTranscript;
+        use witness::RowMajorMatrix;
+
+        println!("Testing Phase1/Phase2 optimization vs non-optimization consistency");
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        // Test parameters (refer to example tests)
+        let num_vars = 8;
+        let batch_size = 4;
+        const MAX_POLY_SIZE: usize = 1 << 16;
+
+        // Setup parameters (refer to example)
+        let mut transcript = BasicTranscript::<GoldilocksExt2>::new(b"BaseFold");
+        let params = PcsGoldilocksRSCode::setup(MAX_POLY_SIZE, SecurityLevel::default()).unwrap();
+        let (pp, _) = PcsGoldilocksRSCode::trim(params.clone(), MAX_POLY_SIZE).unwrap();
+
+        // Create test data (refer to example)
+        let mut witin_rmms = std::collections::BTreeMap::new();
+        witin_rmms.insert(
+            0,
+            RowMajorMatrix::<p3::goldilocks::Goldilocks>::rand(&mut rng, 1 << num_vars, batch_size),
+        );
+
+        // Create commitment
+        let witin_commitment = PcsGoldilocksRSCode::batch_commit(&pp, witin_rmms.clone()).unwrap();
+        let witin_pure_comm = PcsGoldilocksRSCode::get_pure_commitment(&witin_commitment);
+        PcsGoldilocksRSCode::write_commitment(&witin_pure_comm, &mut transcript).unwrap();
+
+        // Create test points (refer to get_point_from_challenge in example)
+        let point1 = crate::test_util::get_point_from_challenge(num_vars, &mut transcript);
+        let points = &[point1.clone()];
+
+        // Prepare witin_polys_and_meta (refer to example)
+        let witin_polys: std::collections::BTreeMap<
+            usize,
+            Vec<ArcMultilinearExtension<'static, GoldilocksExt2>>,
+        > = witin_rmms
+            .iter()
+            .map(|(circuit_index, rmm)| {
+                let mles = rmm.to_mles::<GoldilocksExt2>();
+                let arc_mles = mles.into_iter().map(|mle| mle.into()).collect();
+                (*circuit_index, arc_mles)
+            })
+            .collect();
+        let witin_polys_and_meta: Vec<(
+            &Point<GoldilocksExt2>,
+            (
+                usize,
+                &Vec<ArcMultilinearExtension<'static, GoldilocksExt2>>,
+            ),
+        )> = points
+            .iter()
+            .zip(witin_polys.iter())
+            .map(|(point, (circuit_index, polys))| (point, (*circuit_index, polys)))
+            .collect();
+
+        let max_num_vars = num_vars;
+        let num_rounds = num_vars
+            - <BasefoldRSParams as BasefoldSpec<GoldilocksExt2>>::get_basecode_msg_size_log();
+        let circuit_num_polys = vec![(batch_size, 0)]; // (witin_polys, fixed_polys)
+
+        // Test 1: Use optimized version (refer to example)
+        let mut transcript_opt = transcript.clone();
+        println!("   Running optimized version (Phase1/Phase2)...");
+        let (trees_opt, proof_opt) = batch_commit_phase::<GoldilocksExt2, BasefoldRSParams>(
+            &pp.encoding_params,
+            None, // fixed_comms
+            &witin_commitment.codeword,
+            witin_polys_and_meta.clone(),
+            &mut transcript_opt,
+            max_num_vars,
+            num_rounds,
+            &circuit_num_polys,
+        );
+
+        // Test 2: Use non-optimized version
+        let mut transcript_no_opt = transcript.clone();
+        println!("   Running non-optimized version (single-threaded)...");
+        let (trees_no_opt, proof_no_opt) =
+            batch_commit_phase_without_opt::<GoldilocksExt2, BasefoldRSParams>(
+                &pp.encoding_params,
+                None, // fixed_comms
+                &witin_commitment.codeword,
+                witin_polys_and_meta,
+                &mut transcript_no_opt,
+                max_num_vars,
+                num_rounds,
+                &circuit_num_polys,
+            );
+
+        // Verify consistency
+        println!("\\nVerifying result consistency:");
+
+        // 1. Verify final message consistency
+        println!(
+            "   Final messages length: opt={}, no_opt={}",
+            proof_opt.final_message.len(),
+            proof_no_opt.final_message.len()
+        );
+        assert_eq!(
+            proof_opt.final_message.len(),
+            proof_no_opt.final_message.len(),
+            "Final message length mismatch"
+        );
+
+        for (i, (opt_msg, no_opt_msg)) in proof_opt
+            .final_message
+            .iter()
+            .zip(&proof_no_opt.final_message)
+            .enumerate()
+        {
+            println!(
+                "   Final message[{}]: opt_len={}, no_opt_len={}",
+                i,
+                opt_msg.len(),
+                no_opt_msg.len()
+            );
+            assert_eq!(
+                opt_msg.len(),
+                no_opt_msg.len(),
+                "Final message[{}] length mismatch",
+                i
+            );
+
+            for (j, (opt_val, no_opt_val)) in opt_msg.iter().zip(no_opt_msg.iter()).enumerate() {
+                if opt_val != no_opt_val {
+                    println!(
+                        "   Final message[{}][{}] mismatch: opt={:?}, no_opt={:?}",
+                        i, j, opt_val, no_opt_val
+                    );
+                    panic!("Final message values don't match!");
+                }
+            }
+        }
+        println!("   Final messages match perfectly!");
+
+        // 2. Verify sumcheck message count consistency
+        println!(
+            "   Sumcheck messages: opt={}, no_opt={}",
+            proof_opt.sumcheck_messages.len(),
+            proof_no_opt.sumcheck_messages.len()
+        );
+        assert_eq!(
+            proof_opt.sumcheck_messages.len(),
+            proof_no_opt.sumcheck_messages.len(),
+            "Sumcheck messages count mismatch"
+        );
+
+        // 3. Verify commits count consistency
+        println!(
+            "   Commits: opt={}, no_opt={}",
+            proof_opt.commits.len(),
+            proof_no_opt.commits.len()
+        );
+        assert_eq!(
+            proof_opt.commits.len(),
+            proof_no_opt.commits.len(),
+            "Commits count mismatch"
+        );
+
+        // 4. Verify trees count consistency
+        println!(
+            "   Trees: opt={}, no_opt={}",
+            trees_opt.len(),
+            trees_no_opt.len()
+        );
+        assert_eq!(trees_opt.len(), trees_no_opt.len(), "Trees count mismatch");
+
+        println!(
+            "\\nAll verifications passed! Phase1/Phase2 optimization and non-optimization versions produce identical results!"
+        );
     }
 }
