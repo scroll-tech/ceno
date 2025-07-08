@@ -135,6 +135,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
+    #[allow(clippy::type_complexity)]
     fn batch_open(
         pp: &Self::ProverParam,
         rounds: Vec<(
@@ -167,6 +168,7 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;
 
+    #[allow(clippy::type_complexity)]
     fn batch_verify(
         vp: &Self::VerifierParam,
         rounds: Vec<(
@@ -455,8 +457,6 @@ pub mod test_util {
 
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
-            let num_instances = vec![(0, 1 << num_vars)];
-            let circuit_num_polys = vec![(batch_size, 0)];
 
             let (comm, evals, proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
@@ -472,17 +472,8 @@ pub mod test_util {
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);
 
-                let proof = Pcs::batch_open(
-                    &pp,
-                    &num_instances,
-                    None,
-                    &comm,
-                    &[point.clone()],
-                    &[evals.clone()],
-                    &circuit_num_polys,
-                    &mut transcript,
-                )
-                .unwrap();
+                let rounds = vec![(&comm, vec![(point, evals.clone())])];
+                let proof = Pcs::batch_open(&pp, rounds, &mut transcript).unwrap();
                 (
                     Pcs::get_pure_commitment(&comm),
                     evals,
@@ -498,18 +489,8 @@ pub mod test_util {
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_exts(&evals);
 
-                Pcs::batch_verify(
-                    &vp,
-                    &num_instances,
-                    &[point.clone()],
-                    None,
-                    &comm,
-                    &[evals.clone()],
-                    &proof,
-                    &circuit_num_polys,
-                    &mut transcript,
-                )
-                .unwrap();
+                let rounds = vec![(comm, vec![(point.len(), (point, evals.clone()))])];
+                Pcs::batch_verify(&vp, rounds, &proof, &mut transcript).unwrap();
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);

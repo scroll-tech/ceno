@@ -762,14 +762,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
                 .zip(evals.iter_mut())
                 .zip(num_instances.iter())
                 .map(|((point, evals), (chip_idx, _))| {
-                    let (num_witin, num_fixed) = circuit_num_polys[*chip_idx];
+                    let (num_witin, _) = circuit_num_polys[*chip_idx];
                     (point.clone(), evals.drain(..num_witin).collect_vec())
                 })
                 .collect_vec(),
         ));
-        if fixed_data.is_some() {
+        if let Some(fixed_data) = fixed_data {
             rounds.push((
-                fixed_data.as_ref().unwrap(),
+                fixed_data.as_ref(),
                 points
                     .iter()
                     .zip(evals.iter_mut())
@@ -777,9 +777,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
                     .map(|(point, evals)| (point.clone(), evals.to_vec()))
                     .collect_vec(),
             ));
+            PCS::batch_open(self.pp.as_ref().unwrap(), rounds, transcript).unwrap()
+        } else {
+            PCS::batch_open(self.pp.as_ref().unwrap(), rounds, transcript).unwrap()
         }
-
-        PCS::batch_open(self.pp.as_ref().unwrap(), rounds, transcript).unwrap()
     }
 }
 

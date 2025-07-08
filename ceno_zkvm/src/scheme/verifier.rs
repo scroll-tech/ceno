@@ -245,10 +245,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     &challenges,
                 )?;
                 rt_points.push(input_opening_point);
-                evaluations.push(vec![
-                    table_proof.wits_in_evals.clone(),
-                    table_proof.fixed_in_evals.clone(),
-                ].concat());
+                evaluations.push(
+                    [
+                        table_proof.wits_in_evals.clone(),
+                        table_proof.fixed_in_evals.clone(),
+                    ]
+                    .concat(),
+                );
                 tracing::debug!("verified proof for table {}", name);
 
                 logup_sum = table_proof

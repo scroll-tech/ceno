@@ -144,7 +144,7 @@ where
                 );
             batched_codewords.push(codeword);
             initial_rlc_evals.push(running_evals);
-            eq.push(build_eq_x_r_vec(&point).into_mle());
+            eq.push(build_eq_x_r_vec(point).into_mle());
         }
     }
     // sorted batch codewords by height in descending order

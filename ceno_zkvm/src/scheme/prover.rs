@@ -258,7 +258,7 @@ impl<
                     )?;
                     points.push(input_opening_point);
                     evaluations.push(
-                        vec![
+                        [
                             table_proof.wits_in_evals.clone(),
                             table_proof.fixed_in_evals.clone(),
                         ]

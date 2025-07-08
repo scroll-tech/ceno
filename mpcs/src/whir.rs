@@ -193,8 +193,8 @@ where
     }
 
     fn batch_verify(
-        vp: &Self::VerifierParam,
-        rounds: Vec<(
+        _vp: &Self::VerifierParam,
+        _rounds: Vec<(
             Self::Commitment,
             // for each matrix:
             Vec<(
@@ -208,8 +208,8 @@ where
                 ),
             )>,
         )>,
-        proof: &Self::Proof,
-        transcript: &mut impl Transcript<E>,
+        _proof: &Self::Proof,
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()
     }
