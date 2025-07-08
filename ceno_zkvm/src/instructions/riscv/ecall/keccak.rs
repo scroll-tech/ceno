@@ -7,7 +7,7 @@ use gkr_iop::{
     gkr::GKRCircuit,
     precompiles::{
         KECCAK_INPUT32_SIZE, KECCAK_WIT_SIZE, KeccakInOutCols, KeccakInstance, KeccakLayout,
-        KeccakStateInstance, KeccakTrace, KeccakWitInstance,
+        KeccakNonZeroOutEval, KeccakStateInstance, KeccakTrace, KeccakWitInstance,
     },
 };
 use itertools::Itertools;
@@ -63,8 +63,11 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
+        let mut non_zero_out_eval = KeccakNonZeroOutEval::default();
         // constrain vmstate
         let vm_state = StateInOut::construct_circuit(cb, false)?;
+        non_zero_out_eval.state_in = cb.cs.r_expressions.len() - 1;
+        non_zero_out_eval.state_out = cb.cs.w_expressions.len() - 1;
 
         let ecall_id_value = UInt::new_unchecked(|| "ecall_id", cb)?;
         let state_ptr_value = UInt::new_unchecked(|| "state_ptr", cb)?;
@@ -74,11 +77,15 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             ecall_id_value.register_expr(),
             vm_state.ts,
         )?;
+        non_zero_out_eval.ecall_id_read_record = cb.cs.r_expressions.len() - 1;
+        non_zero_out_eval.ecall_id_write_record = cb.cs.w_expressions.len() - 1;
         let state_ptr = WriteFixedRS::<_, { Platform::reg_arg0() }>::construct_circuit(
             cb,
             state_ptr_value.register_expr(),
             vm_state.ts,
         )?;
+        non_zero_out_eval.state_ptr_read_record = cb.cs.r_expressions.len() - 1;
+        non_zero_out_eval.state_ptr_write_record = cb.cs.w_expressions.len() - 1;
 
         // fetch
         cb.lk_fetch(&InsnRecord::new(
@@ -107,9 +114,14 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                 .map(|writer| (Change::new(val_before, val_after), writer))
             })
             .collect::<Result<Vec<(Change<WitIn>, WriteMEM)>, _>>()?;
+        non_zero_out_eval.mem_read_record =
+            array::from_fn(|i| cb.cs.r_expressions.len() - KECCAK_INPUT32_SIZE + i);
+        non_zero_out_eval.mem_write_record =
+            array::from_fn(|i| cb.cs.w_expressions.len() - KECCAK_INPUT32_SIZE + i);
 
         // construct keccak gkr-iop circuit
         let params = gkr_iop::precompiles::KeccakParams {
+            non_zero_out_eval,
             io: KeccakInOutCols {
                 input32: array::from_fn(|i| mem_rw[i].0.before.expr()),
                 output32: array::from_fn(|i| mem_rw[i].0.after.expr()),

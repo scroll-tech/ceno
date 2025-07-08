@@ -104,7 +104,36 @@ pub struct KeccakInOutCols<T> {
 }
 
 #[derive(Clone, Debug)]
+#[repr(C)]
+pub struct KeccakNonZeroOutEval<T> {
+    pub state_in: T,
+    pub state_out: T,
+    pub ecall_id_read_record: T,
+    pub ecall_id_write_record: T,
+    pub state_ptr_read_record: T,
+    pub state_ptr_write_record: T,
+    pub mem_read_record: [T; KECCAK_INPUT32_SIZE],
+    pub mem_write_record: [T; KECCAK_OUTPUT32_SIZE],
+}
+
+impl<T: Default + Copy> Default for KeccakNonZeroOutEval<T> {
+    fn default() -> Self {
+        Self {
+            state_in: Default::default(),
+            state_out: Default::default(),
+            ecall_id_read_record: Default::default(),
+            ecall_id_write_record: Default::default(),
+            state_ptr_read_record: Default::default(),
+            state_ptr_write_record: Default::default(),
+            mem_read_record: [T::default(); KECCAK_INPUT32_SIZE],
+            mem_write_record: [T::default(); KECCAK_OUTPUT32_SIZE],
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct KeccakParams<T> {
+    pub non_zero_out_eval: KeccakNonZeroOutEval<usize>,
     pub io: KeccakInOutCols<T>,
 }
 
@@ -185,12 +214,12 @@ impl<E: ExtensionField> KeccakLayout<E> {
         ): (KeccakWitCols<WitIn>, KeccakFixedCols<Fixed>, [WitIn; 6]) = unsafe {
             (
                 transmute::<[WitIn; KECCAK_WIT_SIZE], KeccakWitCols<WitIn>>(array::from_fn(|id| {
-                    cb.create_witin(|| format!("lookup/witin_{}", id))
+                    cb.create_witin(|| format!("keccak/witin_{}", id))
                 })),
                 transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(array::from_fn(|id| {
-                    cb.create_fixed(|| format!("lookup/fixed_{}", id))
+                    cb.create_fixed(|| format!("keccak/fixed_{}", id))
                 })),
-                array::from_fn(|id| cb.create_witin(|| format!("lookup/eq_{}", id))),
+                array::from_fn(|id| cb.create_witin(|| format!("keccak/eq_{}", id))),
             )
         };
 
@@ -221,16 +250,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         Self::new(cb, params)
     }
 
-    fn build_gkr_chip(&self, _cb: &mut CircuitBuilder<E>) -> Result<Chip<E>, CircuitBuilderError> {
-        // let mut system = LayerConstraintSystem::new(
-        //     KECCAK_WIT_SIZE,
-        //     0,
-        //     KECCAK_WIT_SIZE,
-        //     Some(self.layer_exprs.eq_zero.expr()),
-        //     self.alpha.clone(),
-        //     self.beta.clone(),
-        // );
-        let system = _cb;
+    fn build_gkr_chip(&self, cb: &mut CircuitBuilder<E>) -> Result<Chip<E>, CircuitBuilderError> {
+        let system = cb;
 
         let KeccakInOutCols {
             output32: output32_expr,
@@ -856,6 +877,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     let output_value: [WitIn; KECCAK_OUTPUT32_SIZE] =
         array::from_fn(|i| circuit_builder.create_witin(|| format!("output_value/{i}")));
     let params = KeccakParams {
+        non_zero_out_eval: Default::default(),
         io: KeccakInOutCols {
             input32: input_value.map(|e| e.expr()),
             output32: output_value.map(|e| e.expr()),
