@@ -9,7 +9,13 @@ use crate::{
 };
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
-use p3::{commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix, util::log2_strict_usize};
+use multilinear_extensions::{mle::MultilinearExtension, util::transpose};
+use p3::{
+    commit::Mmcs,
+    field::FieldAlgebra,
+    matrix::{Matrix, dense::DenseMatrix},
+    util::log2_strict_usize,
+};
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
 use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest};
@@ -296,7 +302,7 @@ where
                         polys
                             .iter()
                             .zip_eq(evals.iter())
-                            .all(|(poly, eval)| poly.evaluate(&point) == *eval),
+                            .all(|(poly, eval)| poly.evaluate(point) == *eval),
                         "all polys must evaluate to the same value at the point"
                     )
                 }
@@ -324,7 +330,7 @@ where
                 pcs_data
                     .trivial_proofdata
                     .values()
-                    .map(|(_, root)| base_mmcs.get_matrices(&root)[0].clone())
+                    .map(|(_, root)| base_mmcs.get_matrices(root)[0].clone())
                     .collect_vec()
             })
             .collect_vec();
@@ -435,13 +441,22 @@ where
                     return Err(Error::MerkleRootMismatch);
                 }
                 let opening = &openings[*idx];
-                // for poly in matrix.columns().zip(opening.1.iter()) {
-                //     if poly.evaluate(&opening.0) != opening.1 {
-                //         return Err(Error::InvalidPcsParam(
-                //             "trivial poly evaluation mismatch".to_string(),
-                //         ));
-                //     }
-                // }
+                let rows = (0..matrix.height())
+                    .map(|i| matrix.row_slice(i).to_vec())
+                    .collect_vec();
+                let columns = transpose(rows);
+
+                for (poly, eval) in columns.into_iter().zip(opening.1.1.iter()) {
+                    let mle = MultilinearExtension::from_evaluations_vec(
+                        log2_strict_usize(poly.len()),
+                        poly,
+                    );
+                    if mle.evaluate(&opening.1.0) != *eval {
+                        return Err(Error::InvalidPcsParam(
+                            "trivial poly evaluation mismatch".to_string(),
+                        ));
+                    }
+                }
             }
         }
 
