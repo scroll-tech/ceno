@@ -57,7 +57,6 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     fn n_committed(&self) -> usize;
     fn n_fixed(&self) -> usize;
     fn n_challenges(&self) -> usize;
-    fn n_nonzero_out_evals(&self) -> usize;
     fn n_evaluations(&self) -> usize;
 
     fn n_layers(&self) -> usize;

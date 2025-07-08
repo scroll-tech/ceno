@@ -884,12 +884,12 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.assert_u16(
             || format!("assert_ux_in_u16_1/{}", name_fn().into()),
             expr.clone(),
-        );
+        )?;
         if size < 16 {
             self.assert_u16(
                 || format!("assert_ux_in_u16_2/{}", name_fn().into()),
                 expr * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
-            );
+            )?;
         }
         Ok(())
     }
@@ -1048,14 +1048,15 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         name_fn: N,
         lhs: &[(usize, Expression<E>)],
         rhs: &[(usize, Expression<E>)],
-    ) where
+    ) -> Result<(), CircuitBuilderError>
+    where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
         self.require_zero(
             name_fn,
             expansion_expr::<E, SIZE>(lhs) - expansion_expr::<E, SIZE>(rhs),
-        );
+        )
     }
 
     /// Checks that `rot8` is equal to `input8` left-rotated by `delta`.
@@ -1111,7 +1112,8 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         split_rep: &[(usize, Expression<E>)],
         rot8: &[Expression<E>],
         delta: usize,
-    ) where
+    ) -> Result<(), CircuitBuilderError>
+    where
         NR: Into<String>,
         N: Fn() -> NR,
     {
@@ -1124,14 +1126,15 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
         // Lookup ranges
         for (i, (size, elem)) in split_rep.iter().enumerate() {
-            self.assert_ux_in_u16(|| format!("{}/{}", name().into(), i), *size, elem.clone());
+            self.assert_ux_in_u16(|| format!("{}/{}", name().into(), i), *size, elem.clone())?;
         }
 
         // constrain the fact that rep8 and repX.rotate_left(chunks_rotation) are
         // the same 64 bitstring
         let mut helper = |rep8: &[Expression<E>],
                           rep_x: &[(usize, Expression<E>)],
-                          chunks_rotation: usize| {
+                          chunks_rotation: usize|
+         -> Result<(), CircuitBuilderError> {
             // Do the same thing for the two 32-bit halves
             let mut rep_x = rep_x.to_owned();
             rep_x.rotate_right(chunks_rotation);
@@ -1155,12 +1158,15 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     ),
                     &lhs,
                     rhs,
-                );
+                )?;
             }
+            Ok(())
         };
 
-        helper(input8, split_rep, 0);
-        helper(rot8, split_rep, chunks_rotation);
+        helper(input8, split_rep, 0)?;
+        helper(rot8, split_rep, chunks_rotation)?;
+
+        Ok(())
     }
 
     pub fn set_rotation_params(&mut self, params: RotationParams<E>) {

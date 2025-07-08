@@ -26,7 +26,6 @@ pub struct GKRCircuit<E: ExtensionField> {
 
     pub n_challenges: usize,
     pub n_evaluations: usize,
-    pub n_nonzero_out_evals: usize,
 }
 
 #[derive(Clone, Debug)]

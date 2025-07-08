@@ -200,7 +200,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         layer_wits.reverse();
 
         // initialize a vector to store the final outputs of the GKR circuit.
-        let mut gkr_out_well_order = vec![Arc::default(); circuit.n_nonzero_out_evals];
+        let mut gkr_out_well_order = vec![Arc::default(); circuit.final_out_evals.len()];
         circuit
             .final_out_evals
             .iter()

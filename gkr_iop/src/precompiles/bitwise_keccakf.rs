@@ -650,7 +650,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             n_committed: self.n_committed(),
             n_challenges: self.n_challenges(),
             n_evaluations: self.n_evaluations(),
-            n_nonzero_out_evals: self.n_nonzero_out_evals(),
             layers: vec![],
             final_out_evals: unsafe {
                 transmute::<KeccakOutEvals<usize>, [usize; KECCAK_OUT_EVAL_SIZE]>(
@@ -773,10 +772,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
     fn n_challenges(&self) -> usize {
         0
-    }
-
-    fn n_nonzero_out_evals(&self) -> usize {
-        KECCAK_INPUT32_SIZE + KECCAK_OUTPUT32_SIZE
     }
 
     fn n_layers(&self) -> usize {
