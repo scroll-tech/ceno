@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use super::{
     encoding::EncodingScheme,
-    structure::{BasefoldCommitPhaseProof, BasefoldSpec, MerkleTree, MerkleTreeExt},
+    structure::{BasefoldCommitPhaseProof, BasefoldSpec, MerkleTreeExt},
 };
 use crate::{
     Point,
@@ -15,9 +15,7 @@ use crate::{
 };
 use ff_ext::{ExtensionField, PoseidonField};
 use itertools::{Either, Itertools};
-use multilinear_extensions::{
-    Expression, mle::ArcMultilinearExtension, virtual_polys::VirtualPolynomialsBuilder,
-};
+use multilinear_extensions::{Expression, virtual_polys::VirtualPolynomialsBuilder};
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     field::{Field, FieldAlgebra},
@@ -52,16 +50,14 @@ use super::structure::BasefoldCommitmentWithWitness;
 #[allow(clippy::type_complexity)]
 pub fn batch_commit_phase<E: ExtensionField, Spec: BasefoldSpec<E>>(
     pp: &<Spec::EncodingScheme as EncodingScheme<E>>::ProverParameters,
-    fixed_comms: Option<&BasefoldCommitmentWithWitness<E>>,
-    witin_commitment_with_witness: &MerkleTree<E::BaseField>,
-    witin_polys_and_meta: Vec<(
-        &Point<E>,
-        (usize, &Vec<ArcMultilinearExtension<'static, E>>),
+    rounds: &Vec<(
+        &BasefoldCommitmentWithWitness<E>,
+        // for each matrix open at one point
+        Vec<(Point<E>, Vec<E>)>,
     )>,
-    transcript: &mut impl Transcript<E>,
     max_num_vars: usize,
     num_rounds: usize,
-    _circuit_num_polys: &[(usize, usize)],
+    transcript: &mut impl Transcript<E>,
 ) -> (Vec<MerkleTreeExt<E>>, BasefoldCommitPhaseProof<E>)
 where
     E::BaseField: Serialize + DeserializeOwned,
@@ -74,37 +70,15 @@ where
     let mmcs = poseidon2_merkle_tree::<E>();
     let mut trees: Vec<MerkleTreeExt<E>> = Vec::with_capacity(max_num_vars);
 
-    let circuit_idx_to_point: BTreeMap<usize, Point<E>> = witin_polys_and_meta
+    let total_num_polys = rounds
         .iter()
-        .map(|(point, (circuit_index, _))| (*circuit_index, (*point).clone()))
-        .collect();
-
-    let witin_opening = (
-        mmcs.get_matrices(witin_commitment_with_witness),
-        witin_polys_and_meta
-            .iter()
-            .map(|(point, (_, witin_polys))| ((*point).clone(), *witin_polys))
-            .collect_vec(),
-    );
-    let mut total_num_polys = witin_opening.0.iter().map(|m| m.width() / 2).sum::<usize>();
-    let fixed_opening = fixed_comms.map(|f| {
-        total_num_polys += mmcs
-            .get_matrices(&f.codeword)
-            .iter()
-            .map(|m| m.width() / 2)
-            .sum::<usize>();
-        (
-            mmcs.get_matrices(&f.codeword),
-            circuit_idx_to_point
+        .map(|(_, point_and_evals)| {
+            point_and_evals
                 .iter()
-                .filter_map(|(circuit_index, point)| {
-                    f.polys
-                        .get(circuit_index)
-                        .map(|polys| (point.clone(), polys))
-                })
-                .collect::<Vec<_>>(),
-        )
-    });
+                .map(|(_, evals)| evals.len())
+                .sum::<usize>()
+        })
+        .sum::<usize>();
 
     let batch_coeffs =
         &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
@@ -113,17 +87,21 @@ where
     // prepare
     // - codeword oracle => for FRI
     // - evals => for sumcheck
-    let mut rounds = vec![witin_opening];
-    if let Some((mats, polys)) = fixed_opening {
-        rounds.push((mats, polys));
-    }
-
     let batch_codeword_span = entered_span!("batch_codeword");
     let mut batched_codewords: Vec<DenseMatrix<E>> = vec![];
     let mut initial_rlc_evals: Vec<MultilinearExtension<E>> = vec![];
     let mut eq: Vec<MultilinearExtension<E>> = vec![];
-    for (mats, polys) in rounds {
-        for (mat, (point, polys)) in mats.into_iter().zip(polys.into_iter()) {
+    for (pcs_data, point_and_evals) in rounds {
+        let codeword_idx_to_circuit_idx = pcs_data
+            .circuit_codeword_index
+            .iter()
+            .map(|(k, v)| (*v, *k))
+            .collect::<BTreeMap<_, _>>();
+        let mats = mmcs.get_matrices(&pcs_data.codeword);
+        for (i, mat) in mats.into_iter().enumerate() {
+            let circuit_idx = codeword_idx_to_circuit_idx[&i];
+            let (point, _) = &point_and_evals[circuit_idx];
+            let polys = &pcs_data.polys[&circuit_idx];
             // the actual ith row and (i+n/2)th row are packed in same row
             let num_rows = mat.height() * 2;
             let num_polys = mat.width() / 2;
@@ -166,7 +144,7 @@ where
                 );
             batched_codewords.push(codeword);
             initial_rlc_evals.push(running_evals);
-            eq.push(build_eq_x_r_vec(&point).into_mle());
+            eq.push(build_eq_x_r_vec(point).into_mle());
         }
     }
     // sorted batch codewords by height in descending order

@@ -749,22 +749,38 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
         witness_data: PCS::CommitmentWithWitness,
         fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
         points: Vec<Point<E>>,
-        evals: Vec<Vec<E>>,
+        mut evals: Vec<Vec<E>>,
         circuit_num_polys: &[(usize, usize)],
         num_instances: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> PCS::Proof {
-        PCS::batch_open(
-            self.pp.as_ref().unwrap(),
-            num_instances,
-            fixed_data.as_ref().map(|f| f.as_ref()),
+        let mut rounds = vec![];
+        rounds.push((
             &witness_data,
-            &points,
-            &evals,
-            circuit_num_polys,
-            transcript,
-        )
-        .unwrap()
+            points
+                .iter()
+                .zip(evals.iter_mut())
+                .zip(num_instances.iter())
+                .map(|((point, evals), (chip_idx, _))| {
+                    let (num_witin, _) = circuit_num_polys[*chip_idx];
+                    (point.clone(), evals.drain(..num_witin).collect_vec())
+                })
+                .collect_vec(),
+        ));
+        if let Some(fixed_data) = fixed_data {
+            rounds.push((
+                fixed_data.as_ref(),
+                points
+                    .iter()
+                    .zip(evals.iter_mut())
+                    .filter(|(_, evals)| !evals.is_empty())
+                    .map(|(point, evals)| (point.clone(), evals.to_vec()))
+                    .collect_vec(),
+            ));
+            PCS::batch_open(self.pp.as_ref().unwrap(), rounds, transcript).unwrap()
+        } else {
+            PCS::batch_open(self.pp.as_ref().unwrap(), rounds, transcript).unwrap()
+        }
     }
 }
 

@@ -138,7 +138,7 @@ where
             self.commit.clone(),
             self.trivial_proofdata
                 .iter()
-                .map(|(_, (digest, _))| digest.clone())
+                .map(|(i, (digest, _))| (*i, digest.clone()))
                 .collect_vec(),
             self.log2_max_codeword_size,
         )
@@ -170,7 +170,7 @@ where
 {
     pub(super) commit: Digest<E>,
     pub(crate) log2_max_codeword_size: usize,
-    pub(crate) trivial_commits: Vec<Digest<E>>,
+    pub(crate) trivial_commits: Vec<(usize, Digest<E>)>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
@@ -179,7 +179,7 @@ where
 {
     pub fn new(
         commit: Digest<E>,
-        trivial_commits: Vec<Digest<E>>,
+        trivial_commits: Vec<(usize, Digest<E>)>,
         log2_max_codeword_size: usize,
     ) -> Self {
         Self {
@@ -271,17 +271,12 @@ pub type ExtMmcs<E> = ExtensionMmcs<
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct QueryOpeningProof<E: ExtensionField> {
-    pub witin_base_proof: BatchOpening<
-        <E as ExtensionField>::BaseField,
-        <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
-    >,
-    pub fixed_base_proof: Option<
+    pub input_proofs: Vec<
         BatchOpening<
             <E as ExtensionField>::BaseField,
             <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
         >,
     >,
-    #[allow(clippy::type_complexity)]
     pub commit_phase_openings: Vec<CommitPhaseProofStep<E, ExtMmcs<E>>>,
 }
 
@@ -303,7 +298,7 @@ where
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     // vec![witness, fixed], where fixed is optional
-    pub(crate) trivial_proof: Option<TrivialProof<E>>,
+    pub(crate) trivial_proof: TrivialProof<E>,
     pub(crate) pow_witness: E::BaseField,
 }
 
@@ -319,12 +314,4 @@ where
     pub(crate) sumcheck_messages: Vec<IOPProverMessage<E>>,
     pub(crate) commits: Vec<Digest<E>>,
     pub(crate) final_message: Vec<Vec<E>>,
-}
-
-#[derive(Clone, Default)]
-pub(crate) struct CircuitIndexMeta {
-    pub witin_num_vars: usize,
-    pub witin_num_polys: usize,
-    pub fixed_num_vars: usize,
-    pub fixed_num_polys: usize,
 }

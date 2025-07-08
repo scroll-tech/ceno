@@ -245,10 +245,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     &challenges,
                 )?;
                 rt_points.push(input_opening_point);
-                evaluations.push(table_proof.wits_in_evals.clone());
-                if circuit_vk.cs.num_fixed > 0 {
-                    evaluations.push(table_proof.fixed_in_evals.clone());
-                }
+                evaluations.push(
+                    [
+                        table_proof.wits_in_evals.clone(),
+                        table_proof.fixed_in_evals.clone(),
+                    ]
+                    .concat(),
+                );
                 tracing::debug!("verified proof for table {}", name);
 
                 logup_sum = table_proof
@@ -295,15 +298,38 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // verify mpcs
+        let mut rounds = vec![];
+        rounds.push((
+            vm_proof.witin_commit.clone(),
+            rt_points
+                .iter()
+                .zip_eq(evaluations.iter_mut())
+                .zip_eq(vm_proof.num_instances.iter())
+                .map(|((point, evals), (chip_idx, num_instances))| {
+                    let (num_witin, num_fixed) = self.vk.circuit_num_polys[*chip_idx];
+                    println!("{num_witin}, {num_fixed}, {}, {num_instances}", evals.len());
+                    (
+                        point.len(),
+                        (point.clone(), evals.drain(..num_witin).collect_vec()),
+                    )
+                })
+                .collect_vec(),
+        ));
+        if self.vk.fixed_commit.is_some() {
+            rounds.push((
+                self.vk.fixed_commit.as_ref().unwrap().clone(),
+                rt_points
+                    .iter()
+                    .zip(evaluations.iter_mut())
+                    .filter(|(_, evals)| !evals.is_empty())
+                    .map(|(point, evals)| (point.len(), (point.clone(), evals.to_vec())))
+                    .collect_vec(),
+            ));
+        }
         PCS::batch_verify(
             &self.vk.vp,
-            &vm_proof.num_instances,
-            &rt_points,
-            self.vk.fixed_commit.as_ref(),
-            &vm_proof.witin_commit,
-            &evaluations,
+            rounds,
             &vm_proof.fixed_witin_opening_proof,
-            &self.vk.circuit_num_polys,
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;

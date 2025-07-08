@@ -58,29 +58,6 @@ pub fn pcs_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     Pcs::open(pp, poly, comm, point, eval, transcript)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn pcs_batch_open<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
-    pp: &Pcs::ProverParam,
-    num_instances: &[(usize, usize)],
-    fixed_comms: Option<&Pcs::CommitmentWithWitness>,
-    witin_comms: &Pcs::CommitmentWithWitness,
-    points: &[Point<E>],
-    evals: &[Vec<E>],
-    circuit_num_polys: &[(usize, usize)],
-    transcript: &mut impl Transcript<E>,
-) -> Result<Pcs::Proof, Error> {
-    Pcs::batch_open(
-        pp,
-        num_instances,
-        fixed_comms,
-        witin_comms,
-        points,
-        evals,
-        circuit_num_polys,
-        transcript,
-    )
-}
-
 pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     vp: &Pcs::VerifierParam,
     comm: &Pcs::Commitment,
@@ -90,34 +67,6 @@ pub fn pcs_verify<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     transcript: &mut impl Transcript<E>,
 ) -> Result<(), Error> {
     Pcs::verify(vp, comm, point, eval, proof, transcript)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn pcs_batch_verify<'a, E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
-    vp: &Pcs::VerifierParam,
-    num_instances: &[(usize, usize)],
-    points: &[Point<E>],
-    fixed_comms: Option<&Pcs::Commitment>,
-    witin_comms: &Pcs::Commitment,
-    evals: &[Vec<E>],
-    proof: &Pcs::Proof,
-    circuit_num_polys: &[(usize, usize)],
-    transcript: &mut impl Transcript<E>,
-) -> Result<(), Error>
-where
-    Pcs::Commitment: 'a,
-{
-    Pcs::batch_verify(
-        vp,
-        num_instances,
-        points,
-        fixed_comms,
-        witin_comms,
-        evals,
-        proof,
-        circuit_num_polys,
-        transcript,
-    )
 }
 
 pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
@@ -186,15 +135,14 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
     fn batch_open(
         pp: &Self::ProverParam,
-        num_instances: &[(usize, usize)],
-        fixed_comms: Option<&Self::CommitmentWithWitness>,
-        witin_comms: &Self::CommitmentWithWitness,
-        points: &[Point<E>],
-        evals: &[Vec<E>],
-        circuit_num_polys: &[(usize, usize)],
+        rounds: Vec<(
+            &Self::CommitmentWithWitness,
+            // for each matrix open at one point
+            Vec<(Point<E>, Vec<E>)>,
+        )>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error>;
 
@@ -220,16 +168,24 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
     fn batch_verify(
         vp: &Self::VerifierParam,
-        num_instances: &[(usize, usize)],
-        points: &[Point<E>],
-        fixed_comms: Option<&Self::Commitment>,
-        witin_comms: &Self::Commitment,
-        evals: &[Vec<E>],
+        rounds: Vec<(
+            Self::Commitment,
+            // for each matrix:
+            Vec<(
+                // its num_vars,
+                usize,
+                (
+                    // the point,
+                    Point<E>,
+                    // values at the point
+                    Vec<E>,
+                ),
+            )>,
+        )>,
         proof: &Self::Proof,
-        circuit_num_polys: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error>;
 
@@ -501,8 +457,6 @@ pub mod test_util {
 
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
-            let num_instances = vec![(0, 1 << num_vars)];
-            let circuit_num_polys = vec![(batch_size, 0)];
 
             let (comm, evals, proof, challenge) = {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
@@ -518,17 +472,8 @@ pub mod test_util {
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);
 
-                let proof = Pcs::batch_open(
-                    &pp,
-                    &num_instances,
-                    None,
-                    &comm,
-                    &[point.clone()],
-                    &[evals.clone()],
-                    &circuit_num_polys,
-                    &mut transcript,
-                )
-                .unwrap();
+                let rounds = vec![(&comm, vec![(point, evals.clone())])];
+                let proof = Pcs::batch_open(&pp, rounds, &mut transcript).unwrap();
                 (
                     Pcs::get_pure_commitment(&comm),
                     evals,
@@ -544,18 +489,8 @@ pub mod test_util {
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 transcript.append_field_element_exts(&evals);
 
-                Pcs::batch_verify(
-                    &vp,
-                    &num_instances,
-                    &[point.clone()],
-                    None,
-                    &comm,
-                    &[evals.clone()],
-                    &proof,
-                    &circuit_num_polys,
-                    &mut transcript,
-                )
-                .unwrap();
+                let rounds = vec![(comm, vec![(point.len(), (point, evals.clone()))])];
+                Pcs::batch_verify(&vp, rounds, &proof, &mut transcript).unwrap();
 
                 let v_challenge = transcript.read_challenge();
                 assert_eq!(challenge, v_challenge);
