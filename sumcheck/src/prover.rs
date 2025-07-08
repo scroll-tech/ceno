@@ -17,7 +17,7 @@ use rayon::{
     prelude::{IntoParallelIterator, ParallelIterator},
 };
 use sumcheck_macro::sumcheck_code_gen;
-use transcript::{Challenge, Transcript, TranscriptSyncronized};
+use transcript::{BasicTranscript, Challenge, Transcript, TranscriptSyncronized};
 
 use crate::{
     macros::{entered_span, exit_span},
@@ -30,6 +30,109 @@ use crate::{
 use p3::field::PrimeCharacteristicRing;
 
 impl<'a, E: ExtensionField> IOPProverState<'a, E> {
+    #[tracing::instrument(skip_all, name = "sumcheck::prove_simple", level = "trace")]
+    pub fn prove_simple(
+        virtual_poly: VirtualPolynomials<'a, E>,
+        transcript: &mut impl Transcript<E>,
+    ) -> (IOPProof<E>, IOPProverState<'a, E>) {
+        // let transcript_init = b"test virtual sumcheck ceno verify";
+        // let mut transcript = BasicTranscript::<E>::new(unsafe {
+        //     std::mem::transmute::<&[u8], &'static [u8]>(transcript_init)
+        // });
+
+        let (polys, poly_meta) = virtual_poly.get_batched_polys();
+        assert_eq!(polys.len(), 1);
+        println!("polys.len: {:?}", polys.len());
+        println!("poly_meta.len: {:?}", poly_meta.len());
+
+        assert!(!polys.is_empty(), "No polynomials to prove");
+        let poly = polys.into_iter().next().unwrap();
+
+        let (num_variables, max_degree) =
+            (poly.aux_info.max_num_variables, poly.aux_info.max_degree);
+
+        if num_variables == 0 {
+            let num_polys = poly.flattened_ml_extensions.len();
+            return (
+                IOPProof::default(),
+                IOPProverState {
+                    is_main_worker: true,
+                    max_num_variables: 0,
+                    challenges: Vec::new(),
+                    round: 0,
+                    poly,
+                    extrapolation_aux: vec![],
+                    poly_meta: vec![PolyMeta::Normal; num_polys],
+                    phase2_numvar: None,
+                },
+            );
+        }
+
+        let extrapolation_aux: Vec<(Vec<E>, Vec<E>)> = (1..max_degree)
+            .map(|degree| {
+                let points = (0..1 + degree as u64).map(E::from_u64).collect::<Vec<_>>();
+                let weights = barycentric_weights(&points);
+                (points, weights)
+            })
+            .collect::<Vec<_>>();
+
+        println!(
+            "num_variables: {}, max_degree: {}",
+            num_variables, max_degree
+        );
+        transcript.append_message(&num_variables.to_le_bytes());
+        transcript.append_message(&max_degree.to_le_bytes());
+
+        let mut prover_state = Self::prover_init_with_extrapolation_aux(
+            true,
+            poly,
+            extrapolation_aux,
+            None,
+            Some(poly_meta),
+        );
+
+        let mut prover_msgs = Vec::with_capacity(num_variables);
+        let span = entered_span!("prove_rounds_simple");
+        for round in 0..num_variables {
+            println!("cpu round: {}/{}", round, num_variables);
+
+            prover_state.round = round + 1;
+            let evaluations = prover_state.evaluate_sumcheck_round();
+
+            println!("  evaluations: {:?}", evaluations);
+            let prover_msg = IOPProverMessage { evaluations };
+
+            prover_msg
+                .evaluations
+                .iter()
+                .for_each(|e| transcript.append_field_element_ext(e)); // 修复：使用实际值而不是E::ONE
+
+            prover_msgs.push(prover_msg);
+
+            let challenge = transcript.sample_and_append_challenge(b"Internal round");
+            println!("  challenge: {:?}", challenge.elements);
+            prover_state.challenges.push(challenge);
+
+            prover_state.fold_sumcheck_round(challenge.elements);
+        }
+        exit_span!(span);
+
+        let span = entered_span!("after_rounds_prover_state_simple");
+        exit_span!(span);
+
+        (
+            IOPProof {
+                point: prover_state
+                    .challenges
+                    .iter()
+                    .map(|challenge| challenge.elements)
+                    .collect(),
+                proofs: prover_msgs,
+            },
+            prover_state,
+        )
+    }
+
     /// Given a virtual polynomial, generate an IOP proof.
     /// multi-threads model follow https://arxiv.org/pdf/2210.00264#page=8 "distributed sumcheck"
     /// This is experiment features. It's preferable that we move parallel level up more to
@@ -400,14 +503,24 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
 
         // Step 2: generate sum for the partial evaluated polynomial:
         // f(r_1, ... r_m,, x_{m+1}... x_n)
-        let span = entered_span!("build_uni_poly");
-        let AdditiveVec(uni_polys) = self.poly.products.iter().fold(
+        let evaluations = self.evaluate_sumcheck_round();
+
+        exit_span!(start);
+
+        IOPProverMessage { evaluations }
+    }
+
+    fn evaluate_sumcheck_round(&self) -> Vec<E> {
+        let AdditiveVec(uni_polys) = self.poly.products.iter().enumerate().fold(
             AdditiveVec::new(self.poly.aux_info.max_degree + 1),
-            |mut uni_polys, MonomialTerms { terms }| {
-                for Term {
-                    scalar,
-                    product: prod,
-                } in terms
+            |mut uni_polys, (prod_idx, MonomialTerms { terms })| {
+                for (
+                    term_idx,
+                    Term {
+                        scalar,
+                        product: prod,
+                    },
+                ) in terms.iter().enumerate()
                 {
                     let f = &self.poly.flattened_ml_extensions;
                     let f_type = &self.poly_meta;
@@ -443,13 +556,14 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                 uni_polys
             },
         );
+
+        uni_polys
+    }
+
+    pub fn fold_sumcheck_round(&mut self, challenge: E) {
+        let span = entered_span!("fold_product");
+        self.fix_var(challenge);
         exit_span!(span);
-
-        exit_span!(start);
-
-        IOPProverMessage {
-            evaluations: uni_polys,
-        }
     }
 
     /// collect all mle evaluation (claim) after sumcheck
