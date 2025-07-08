@@ -880,14 +880,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: Fn() -> NR,
     {
-        assert!(size <= 16);
+        assert!(size <= 16, "{size} > 16");
         self.assert_u16(
-            || format!("assert_ux_in_u16_1/{}", name_fn().into()),
+            || format!("assert_ux_in_u16_{}_check1", name_fn().into()),
             expr.clone(),
         )?;
         if size < 16 {
             self.assert_u16(
-                || format!("assert_ux_in_u16_2/{}", name_fn().into()),
+                || format!("assert_ux_in_u16_{}_check2", name_fn().into()),
                 expr * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
             )?;
         }
@@ -1126,7 +1126,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
         // Lookup ranges
         for (i, (size, elem)) in split_rep.iter().enumerate() {
-            self.assert_ux_in_u16(|| format!("{}/{}", name().into(), i), *size, elem.clone())?;
+            self.assert_ux_in_u16(|| format!("{}_{}", name().into(), i), *size, elem.clone())?;
         }
 
         // constrain the fact that rep8 and repX.rotate_left(chunks_rotation) are

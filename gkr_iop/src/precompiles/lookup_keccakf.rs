@@ -173,12 +173,12 @@ impl<E: ExtensionField> KeccakLayout<E> {
         ): (KeccakWitCols<WitIn>, KeccakFixedCols<Fixed>, [WitIn; 6]) = unsafe {
             (
                 transmute::<[WitIn; KECCAK_WIT_SIZE], KeccakWitCols<WitIn>>(array::from_fn(|id| {
-                    cb.create_witin(|| format!("keccak/witin_{}", id))
+                    cb.create_witin(|| format!("keccak_witin_{}", id))
                 })),
                 transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(array::from_fn(|id| {
-                    cb.create_fixed(|| format!("keccak/fixed_{}", id))
+                    cb.create_fixed(|| format!("keccak_fixed_{}", id))
                 })),
-                array::from_fn(|id| cb.create_witin(|| format!("keccak/eq_{}", id))),
+                array::from_fn(|id| cb.create_witin(|| format!("keccak_eq_{}", id))),
             )
         };
 
@@ -276,7 +276,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             assert_eq!(c_temp.slice(s![i, ..]).iter().len(), sizes.iter().len());
 
             system.require_left_rotation64(
-                || format!("theta rotation/{i}"),
+                || format!("theta rotation_{i}"),
                 &c_aux
                     .slice(s![i, 4, ..])
                     .iter()
