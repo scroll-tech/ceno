@@ -3,13 +3,15 @@ use std::{array, mem::transmute};
 use crate::{
     circuit_builder::{RotationParams, expansion_expr, rotation_split},
     error::CircuitBuilderError,
+    evaluation::EvalExpression,
+    gkr::layer::Layer,
 };
 use ceno_emul::{ByteAddr, Cycle};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, iproduct, izip, zip_eq};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    ChallengeId, Expression, Fixed, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2,
+    ChallengeId, Expression, Fixed, ToExpr, WitIn, WitnessId, mle::PointAndEval, util::ceil_log2,
 };
 use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3_field::FieldAlgebra;
@@ -81,7 +83,13 @@ const ROTATION_CONSTANTS: [[usize; 5]; 5] = [
 pub const KECCAK_INPUT32_SIZE: usize = 50;
 pub const KECCAK_OUTPUT32_SIZE: usize = 50;
 
+// TODO this represent number of witin allocated outside of gkr iop
+pub const STATE_WITIN_SIZE: usize = 32;
+
+// number of non zero out within keccak circuit
 pub const KECCAK_OUT_EVAL_SIZE: usize = size_of::<KeccakOutEvals<u8>>();
+// number of non zero out outside of keccak circuit
+const KECCAK_STATE_OUT_EVAL_SIZE: usize = size_of::<KeccakNonZeroOutEval<u8>>();
 pub const KECCAK_WIT_SIZE: usize = size_of::<KeccakWitCols<u8>>();
 const KECCAK_FIXED_SIZE: usize = size_of::<KeccakFixedCols<u8>>();
 const KECCAK_LAYER_SIZE: usize = size_of::<KeccakLayer<u8, u8, ()>>();
@@ -193,11 +201,18 @@ pub struct KeccakLayout<E: ExtensionField> {
 impl<E: ExtensionField> KeccakLayout<E> {
     fn new(cb: &mut CircuitBuilder<E>, params: KeccakParams<Expression<E>>) -> Self {
         // allocate evaluation expressions
-        let final_out_evals = indices_arr::<KECCAK_OUT_EVAL_SIZE>();
+        let final_out_evals =
+            indices_arr::<{ KECCAK_OUT_EVAL_SIZE + KECCAK_STATE_OUT_EVAL_SIZE }>();
         let final_out_evals = unsafe {
-            transmute::<[usize; KECCAK_OUT_EVAL_SIZE], KeccakOutEvals<usize>>(final_out_evals)
+            transmute::<
+                [usize; KECCAK_OUT_EVAL_SIZE + KECCAK_STATE_OUT_EVAL_SIZE],
+                KeccakOutEvals<usize>,
+            >(final_out_evals)
         };
-        let layer_in_evals = indices_arr_with_offset::<KECCAK_LAYER_SIZE, KECCAK_OUT_EVAL_SIZE>();
+        let layer_in_evals = indices_arr_with_offset::<
+            KECCAK_LAYER_SIZE,
+            { KECCAK_OUT_EVAL_SIZE + KECCAK_STATE_OUT_EVAL_SIZE + STATE_WITIN_SIZE },
+        >();
 
         // allocate witnesses, fixed, and eqs
         let (
@@ -548,7 +563,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             .cloned()
             .map(|id| (Some(self.layer_exprs.eq_zero.expr()), id));
 
-        let layer = system.into_layer_with_lookup_eval_iter(
+        let layer = into_layer_with_lookup_eval_iter(
+            system,
             "Rounds".to_string(),
             self.layer_in_evals.to_vec(),
             self.n_challenges(),
@@ -582,6 +598,161 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
     fn n_evaluations(&self) -> usize {
         self.n_committed() + self.n_fixed() + self.n_nonzero_out_evals()
+    }
+}
+
+pub fn into_layer_with_lookup_eval_iter<E: ExtensionField>(
+    cb: &mut CircuitBuilder<E>,
+    layer_name: String,
+    in_expr_evals: Vec<usize>,
+    n_challenges: usize,
+    ram_write_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
+    ram_read_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
+    lookup_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
+) -> Layer<E> {
+    // process ram read/write record
+    assert_eq!(ram_write_evals.len(), self.ram_write.len(),);
+    assert_eq!(ram_read_evals.len(), self.ram_read.len(),);
+
+    for (idx, ram_expr, ram_eval) in izip!(
+        0..,
+        chain!(self.ram_write.clone(), self.ram_read.clone(),),
+        ram_write_evals.chain(ram_read_evals)
+    ) {
+        self.add_non_zero_constraint(
+            ram_expr - E::BaseField::ONE.expr(), // ONE is for padding
+            (ram_eval.0, EvalExpression::Single(ram_eval.1)),
+            format!("round 0th: {idx}th ram read/write operation"),
+        );
+    }
+
+    // process lookup records
+    assert_eq!(
+        lookup_evals.len(),
+        self.and_lookups.len() + self.xor_lookups.len() + self.range_lookups.len()
+    );
+    for (idx, lookup, lookup_eval) in izip!(
+        0..,
+        chain!(
+            self.and_lookups.clone(),
+            self.xor_lookups.clone(),
+            self.range_lookups.clone()
+        ),
+        lookup_evals
+    ) {
+        self.add_non_zero_constraint(
+            lookup,
+            (lookup_eval.0, EvalExpression::Single(lookup_eval.1)),
+            format!("round 0th: {idx}th lookup felt"),
+        );
+    }
+
+    self.into_layer(layer_name, in_expr_evals, n_challenges)
+}
+
+/// n_challenges: num of challenges dedicated to this layer
+fn into_layer<E: ExtensionField>(
+    cb: &mut CircuitBuilder<E>,
+    layer_name: String,
+    in_eval_expr: Vec<usize>,
+    n_challenges: usize,
+) -> Layer<E> {
+    let witin_offset = 0 as WitnessId;
+    let structural_witin_offset = witin_offset + (cb.cs.num_witin as WitnessId);
+    let fixed_offset = structural_witin_offset + (cb.cs.num_structural_witin as WitnessId);
+
+    // Sort expressions, expr_names, and evals according to eval.0 and classify evals.
+    let Self {
+        expr_names,
+        mut expressions,
+        evals,
+        rotation_params,
+        rotations,
+        ..
+    } = self;
+
+    let mut is_layer_linear =
+        expressions
+            .iter_mut()
+            .fold(rotations.is_empty(), |is_linear_so_far, t| {
+                // replace `Fixed` and `StructuralWitIn` with `WitIn`, keep other unchanged
+                *t = t.transform_all(
+                    &|Fixed(fixed_id)| Expression::WitIn(fixed_offset + (*fixed_id as WitnessId)),
+                    &|id| Expression::WitIn(id),
+                    &|structural_wit_id, _, _, _| {
+                        Expression::WitIn(structural_witin_offset + structural_wit_id)
+                    },
+                    &|i| Expression::Instance(i),
+                    &|c| Expression::Constant(c),
+                    &|cid, pow, s, o| Expression::Challenge(cid, pow, s, o),
+                );
+                is_linear_so_far && t.is_linear()
+            });
+
+    // process evaluation group by eq expression
+    let mut eq_map = BTreeMap::new();
+    izip!(
+        evals.into_iter(),
+        expr_names.into_iter(),
+        expressions.into_iter()
+    )
+    .for_each(|((eq, eval), name, expr)| {
+        let (eval_group, names, exprs) = eq_map.entry(eq).or_insert((vec![], vec![], vec![]));
+        eval_group.push(eval);
+        names.push(name);
+        exprs.push(expr);
+    });
+    let mut expr_evals = vec![];
+    let mut expr_names = vec![];
+    let mut expressions = vec![];
+    eq_map.into_iter().for_each(|(eq, (evals, names, exprs))| {
+        expr_evals.push((eq, evals));
+        expr_names.extend(names);
+        expressions.extend(exprs);
+    });
+
+    is_layer_linear = is_layer_linear && expr_evals.len() == 1;
+
+    let layer_type = if is_layer_linear {
+        LayerType::Linear
+    } else {
+        LayerType::Zerocheck
+    };
+
+    if rotations.is_empty() {
+        Layer::new(
+            layer_name,
+            layer_type,
+            expressions,
+            n_challenges,
+            in_eval_expr,
+            expr_evals,
+            ((None, vec![]), 0, 0),
+            expr_names,
+        )
+    } else {
+        let Some(RotationParams {
+            rotation_eqs,
+            rotation_cyclic_group_log2,
+            rotation_cyclic_subgroup_size,
+        }) = rotation_params
+        else {
+            panic!("rotation params not set");
+        };
+        Layer::new(
+            layer_name,
+            layer_type,
+            expressions,
+            n_challenges,
+            in_eval_expr,
+            expr_evals,
+            (
+                (rotation_eqs, rotations),
+                rotation_cyclic_group_log2,
+                rotation_cyclic_subgroup_size,
+            ),
+            expr_names,
+        )
     }
 }
 
