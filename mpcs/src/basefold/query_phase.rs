@@ -112,7 +112,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
     fold_challenges: &[E],
     indices: &[usize],
     proof: &BasefoldProof<E>,
-    rounds: &Vec<(BasefoldCommitment<E>, Vec<(usize, (Point<E>, Vec<E>))>)>,
+    rounds: &[(BasefoldCommitment<E>, Vec<(usize, (Point<E>, Vec<E>))>)],
 ) where
     E::BaseField: Serialize + DeserializeOwned,
 {
@@ -262,7 +262,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                             }],
                             idx,
                             slice::from_ref(&leafs),
-                            &proof,
+                            proof,
                         )
                         .expect("verify failed");
                     let coeff = S::verifier_folding_coeffs(vp, log2_height, idx);
@@ -283,7 +283,11 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
     let mut batch_coeffs_iter = batch_coeffs.iter();
     let mut expected_sum = E::ZERO;
     for round in rounds.iter() {
-        for (num_var, (_, evals)) in round.1.iter().filter(|(num_var, _)| *num_var >= S::get_basecode_msg_size_log()) {
+        for (num_var, (_, evals)) in round
+            .1
+            .iter()
+            .filter(|(num_var, _)| *num_var >= S::get_basecode_msg_size_log())
+        {
             expected_sum += evals
                 .iter()
                 .zip(batch_coeffs_iter.by_ref().take(evals.len()))
@@ -309,14 +313,14 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
             &sumcheck_messages[fold_challenges.len() - 1].evaluations,
             fold_challenges[fold_challenges.len() - 1]
         ),
-        // eq(p,i) * f(i)
+        // \sum_i eq(p,[r,i]) * f(r,i)
         izip!(
             final_message,
-            rounds
+            rounds.iter().flat_map(|(_, point_evals)| point_evals
                 .iter()
-                .flat_map(|(_, point_evals)| point_evals.iter().map(|(_, (point, _))| point))
+                .filter(|(_, (point, _))| point.len() >= S::get_basecode_msg_size_log())
+                .map(|(_, (point, _))| point))
         )
-        .filter(|(_, point)| point.len() >= S::get_basecode_msg_size_log())
         .map(|(final_message, point)| {
             // coeff is the eq polynomial evaluated at the first challenge.len() variables
             let num_vars_evaluated = point.len() - S::get_basecode_msg_size_log();
