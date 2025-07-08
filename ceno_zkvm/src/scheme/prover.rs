@@ -257,10 +257,13 @@ impl<
                         &challenges,
                     )?;
                     points.push(input_opening_point);
-                    evaluations.push(table_proof.wits_in_evals.clone());
-                    if cs.num_fixed > 0 {
-                        evaluations.push(table_proof.fixed_in_evals.clone());
-                    }
+                    evaluations.push(
+                        vec![
+                            table_proof.wits_in_evals.clone(),
+                            table_proof.fixed_in_evals.clone(),
+                        ]
+                        .concat(),
+                    );
                     table_proofs.insert(index, table_proof);
                     for (idx, eval) in pi_in_evals {
                         pi_evals[idx] = eval;

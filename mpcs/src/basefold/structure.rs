@@ -315,11 +315,3 @@ where
     pub(crate) commits: Vec<Digest<E>>,
     pub(crate) final_message: Vec<Vec<E>>,
 }
-
-#[derive(Clone, Default)]
-pub(crate) struct CircuitIndexMeta {
-    pub witin_num_vars: usize,
-    pub witin_num_polys: usize,
-    pub fixed_num_vars: usize,
-    pub fixed_num_polys: usize,
-}

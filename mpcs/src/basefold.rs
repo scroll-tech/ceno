@@ -167,7 +167,7 @@ where
             Vec<_>,
             _,
             _,
-        ) = rmms.into_iter().fold(
+        ) = rmms.into_iter().enumerate().fold(
             (BTreeMap::new(), vec![], BTreeMap::new(), BTreeMap::new()),
             |(
                 mut polys,
@@ -175,7 +175,7 @@ where
                 mut trivial_proofdata,
                 mut circuit_codeword_index,
             ),
-             (index, rmm)| {
+             (index, (_, rmm))| {
                 // attach column-based poly
                 polys.insert(
                     index,

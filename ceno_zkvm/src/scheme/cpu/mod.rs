@@ -760,14 +760,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
             points
                 .iter()
                 .zip(evals.iter_mut())
-                .zip(circuit_num_polys.iter())
-                .map(|((point, evals), (num_witin, num_fixed))| {
-                    println!(
-                        "num_witin: {}, num_fixed: {}, evals.len(): {}",
-                        num_witin,
-                        num_fixed,
-                        evals.len()
-                    );
+                .zip(num_instances.iter())
+                .map(|((point, evals), (chip_idx, _))| {
+                    let (num_witin, num_fixed) = circuit_num_polys[*chip_idx];
                     (point.clone(), evals.drain(..num_witin).collect_vec())
                 })
                 .collect_vec(),

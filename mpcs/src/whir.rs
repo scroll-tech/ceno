@@ -164,13 +164,13 @@ where
     }
 
     fn batch_open(
-        pp: &Self::ProverParam,
-        rounds: Vec<(
+        _pp: &Self::ProverParam,
+        _rounds: Vec<(
             &Self::CommitmentWithWitness,
             // for each matrix open at one point
             Vec<(Point<E>, Vec<E>)>,
         )>,
-        transcript: &mut impl Transcript<E>,
+        _transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()
     }

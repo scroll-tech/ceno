@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, slice};
 
 use crate::{
     Point,
-    basefold::structure::{BasefoldProof, CircuitIndexMeta, MerkleTreeExt, QueryOpeningProof},
+    basefold::structure::{BasefoldProof, MerkleTreeExt, QueryOpeningProof},
     util::{codeword_fold_with_challenge, merkle_tree::poseidon2_merkle_tree},
 };
 use ff_ext::ExtensionField;
@@ -160,6 +160,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                 {
                     let dimensions = batch_opening
                         .iter()
+                        .filter(|(num_var, _)| *num_var >= S::get_basecode_msg_size_log())
                         .map(|(num_var, (_, evals))| {
                             Dimensions {
                                 width: evals.len() * 2, // we pack two rows into one in the mmcs
@@ -282,7 +283,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
     let mut batch_coeffs_iter = batch_coeffs.iter();
     let mut expected_sum = E::ZERO;
     for round in rounds.iter() {
-        for (num_var, (_, evals)) in round.1.iter() {
+        for (num_var, (_, evals)) in round.1.iter().filter(|(num_var, _)| *num_var >= S::get_basecode_msg_size_log()) {
             expected_sum += evals
                 .iter()
                 .zip(batch_coeffs_iter.by_ref().take(evals.len()))
@@ -315,6 +316,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                 .iter()
                 .flat_map(|(_, point_evals)| point_evals.iter().map(|(_, (point, _))| point))
         )
+        .filter(|(_, point)| point.len() >= S::get_basecode_msg_size_log())
         .map(|(final_message, point)| {
             // coeff is the eq polynomial evaluated at the first challenge.len() variables
             let num_vars_evaluated = point.len() - S::get_basecode_msg_size_log();
@@ -331,39 +333,4 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
         })
         .sum()
     );
-}
-
-fn get_base_codeword_dimentions<E: ExtensionField, S: EncodingScheme<E>>(
-    circuit_meta_map: &[CircuitIndexMeta],
-) -> (Vec<Dimensions>, Vec<Dimensions>) {
-    let (wit_dim, fixed_dim): (Vec<_>, Vec<_>) = circuit_meta_map
-        .iter()
-        .map(
-            |CircuitIndexMeta {
-                 witin_num_vars,
-                 witin_num_polys,
-                 fixed_num_vars,
-                 fixed_num_polys,
-             }| {
-                (
-                    Dimensions {
-                        // width size is double num_polys due to leaf + right leafs are concat
-                        width: witin_num_polys * 2,
-                        height: 1 << (witin_num_vars + S::get_rate_log() - 1),
-                    },
-                    if *fixed_num_vars > 0 {
-                        Some(Dimensions {
-                            // width size is double num_polys due to leaf + right leafs are concat
-                            width: fixed_num_polys * 2,
-                            height: 1 << (fixed_num_vars + S::get_rate_log() - 1),
-                        })
-                    } else {
-                        None
-                    },
-                )
-            },
-        )
-        .unzip();
-    let fixed_dim = fixed_dim.into_iter().flatten().collect_vec();
-    (wit_dim, fixed_dim)
 }

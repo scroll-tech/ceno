@@ -245,10 +245,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     &challenges,
                 )?;
                 rt_points.push(input_opening_point);
-                evaluations.push(table_proof.wits_in_evals.clone());
-                if circuit_vk.cs.num_fixed > 0 {
-                    evaluations.push(table_proof.fixed_in_evals.clone());
-                }
+                evaluations.push(vec![
+                    table_proof.wits_in_evals.clone(),
+                    table_proof.fixed_in_evals.clone(),
+                ].concat());
                 tracing::debug!("verified proof for table {}", name);
 
                 logup_sum = table_proof
@@ -300,9 +300,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             vm_proof.witin_commit.clone(),
             rt_points
                 .iter()
-                .zip(evaluations.iter_mut())
-                .zip(self.vk.circuit_num_polys.iter())
-                .map(|((point, evals), (num_witin, num_fixed))| {
+                .zip_eq(evaluations.iter_mut())
+                .zip_eq(vm_proof.num_instances.iter())
+                .map(|((point, evals), (chip_idx, num_instances))| {
+                    let (num_witin, num_fixed) = self.vk.circuit_num_polys[*chip_idx];
+                    println!("{num_witin}, {num_fixed}, {}, {num_instances}", evals.len());
                     (
                         point.len(),
                         (point.clone(), evals.drain(..num_witin).collect_vec()),
