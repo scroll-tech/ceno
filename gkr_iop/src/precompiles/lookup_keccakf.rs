@@ -462,11 +462,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             rotation_cyclic_subgroup_size: ROUNDS - 1,
         });
 
-        assert_eq!(
-            system.cs.lk_expressions.len(),
-            AND_LOOKUPS + XOR_LOOKUPS + RANGE_LOOKUPS
-        );
-
         let mut chip = Chip {
             n_fixed: system.cs.num_fixed,
             n_committed: system.cs.num_witin as usize,

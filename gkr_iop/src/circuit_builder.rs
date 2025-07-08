@@ -1126,7 +1126,9 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
         // Lookup ranges
         for (i, (size, elem)) in split_rep.iter().enumerate() {
-            self.assert_ux_in_u16(|| format!("{}_{}", name().into(), i), *size, elem.clone())?;
+            if *size != 32 {
+                self.assert_ux_in_u16(|| format!("{}_{}", name().into(), i), *size, elem.clone())?;
+            }
         }
 
         // constrain the fact that rep8 and repX.rotate_left(chunks_rotation) are

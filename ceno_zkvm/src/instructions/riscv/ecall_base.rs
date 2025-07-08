@@ -1,6 +1,7 @@
 use ceno_emul::{Cycle, WriteOp};
 use ff_ext::{ExtensionField, FieldInto};
 use p3::field::FieldAlgebra;
+use witness::set_val;
 
 use super::constants::UInt;
 use crate::{
@@ -8,7 +9,6 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     gadgets::AssertLtConfig,
-    set_val,
     uint::Value,
     witness::LkMultiplicity,
 };
