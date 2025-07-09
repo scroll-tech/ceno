@@ -24,7 +24,7 @@ use sumcheck::{
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
@@ -586,8 +586,7 @@ where
 
     // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
     fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize {
-        let n_row_padding = next_pow2_instance_padding(num_instances * ROUNDS.next_power_of_two());
-        n_row_padding * self.n_committed
+        num_instances * ROUNDS.next_power_of_two()
     }
 
     fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
@@ -840,9 +839,9 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
     let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
     let input_value: [WitIn; KECCAK_INPUT32_SIZE] =
-        array::from_fn(|i| circuit_builder.create_witin(|| format!("input_value/{i}")));
+        array::from_fn(|i| circuit_builder.create_witin(|| format!("input_value_{i}")));
     let output_value: [WitIn; KECCAK_OUTPUT32_SIZE] =
-        array::from_fn(|i| circuit_builder.create_witin(|| format!("output_value/{i}")));
+        array::from_fn(|i| circuit_builder.create_witin(|| format!("output_value_{i}")));
     let params = KeccakParams {
         io: KeccakInOutCols {
             input32: input_value.map(|e| e.expr()),
@@ -865,7 +864,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     states: Vec<[u64; 25]>,
     verify: bool,
     test_outputs: bool,
-) -> Result<GKRProof<E>, BackendError<E>> {
+) -> Result<GKRProof<E>, BackendError> {
     let num_instances = states.len();
     let num_instances_rounds = num_instances * ROUNDS.next_power_of_two();
     let log2_num_instance_rounds = ceil_log2(num_instances_rounds);

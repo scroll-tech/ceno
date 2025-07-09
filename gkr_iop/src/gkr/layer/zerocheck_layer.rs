@@ -62,7 +62,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>>;
+    ) -> Result<LayerClaims<E>, BackendError>;
 }
 
 impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
@@ -93,7 +93,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         mut eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>> {
+    ) -> Result<LayerClaims<E>, BackendError> {
         assert_eq!(
             self.out_eq_and_eval_exprs.len(),
             eval_and_dedup_points.len(),
@@ -145,6 +145,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             transcript,
         );
 
+        // TODO FIXME need to add padding
         let sigma = dot_product(
             alpha_pows.iter().copied(),
             eval_and_dedup_points
@@ -197,7 +198,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         if got_claim != expected_evaluation {
             return Err(BackendError::LayerVerificationFailed(
                 self.name.clone(),
-                VerifierError::ClaimNotMatch(expected_evaluation, got_claim),
+                VerifierError::ClaimNotMatch(
+                    format!("{}", expected_evaluation),
+                    format!("{}", got_claim),
+                ),
             ));
         }
 
@@ -215,7 +219,7 @@ fn verify_rotation<E: ExtensionField>(
     rotation_cyclic_group_log2: usize,
     rt: &Point<E>,
     transcript: &mut impl Transcript<E>,
-) -> Result<RotationClaims<E>, BackendError<E>> {
+) -> Result<RotationClaims<E>, BackendError> {
     let SumcheckLayerProof { proof, evals } = rotation_proof;
     let rotation_expr_len = evals.len() / 3;
     let rotation_alpha_pows = get_challenge_pows(rotation_expr_len, transcript)
@@ -274,7 +278,10 @@ fn verify_rotation<E: ExtensionField>(
     if got_claim != expected_evaluation {
         return Err(BackendError::LayerVerificationFailed(
             "rotation verify failed".to_string(),
-            VerifierError::ClaimNotMatch(expected_evaluation, got_claim),
+            VerifierError::ClaimNotMatch(
+                format!("{}", expected_evaluation),
+                format!("{}", got_claim),
+            ),
         ));
     }
 

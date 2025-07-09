@@ -112,7 +112,6 @@ impl<
             .enumerate()
             .map(|(k, v)| (v, k))
             .collect::<BTreeMap<_, _>>();
-        dbg!(circuit_name_index_mapping.clone());
         // only keep track of circuits that have non-zero instances
         let mut num_instances = Vec::with_capacity(self.pk.circuit_pks.len());
         for (index, (circuit_name, _)) in self.pk.circuit_pks.iter().enumerate() {
@@ -156,7 +155,19 @@ impl<
             } else {
                 RowMajorMatrix::empty()
             };
-            let num_instances = witness_rmm.num_instances();
+            let rotation_vars = self
+                .pk
+                .circuit_pks
+                .get(&circuit_name)
+                .unwrap()
+                .vk
+                .get_cs()
+                .rotation_vars();
+            let num_instances = if let Some(rotation_vars) = rotation_vars {
+                witness_rmm.num_instances() >> rotation_vars
+            } else {
+                witness_rmm.num_instances()
+            };
             assert!(
                 wits_instances
                     .insert(circuit_name.clone(), num_instances)
@@ -193,6 +204,7 @@ impl<
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
             (vec![], vec![]),
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
+                dbg!(circuit_name);
                 let num_instances = *wits_instances
                     .get(circuit_name)
                     .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
@@ -317,6 +329,7 @@ impl<
     ) -> Result<CreateTableProof<E>, ZKVMError> {
         let cs = circuit_pk.get_cs();
         let log2_num_instances = input.log2_num_instances();
+        let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
         // build tower witness
         // assume we already extract gkr-circuit information into zkvm_v1_css
@@ -335,12 +348,12 @@ impl<
 
         assert_eq!(
             rt_tower.len(), // num var length should equal to max_num_instance
-            log2_num_instances,
+            num_var_with_rotation,
         );
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
-        let (input_opening_point, evals, main_sumcheck_proofs) = self
+        let (input_opening_point, evals, main_sumcheck_proofs, _gkr_iop_proof) = self
             .device
             .prove_main_constraints(rt_tower, records, &input, cs, challenges, transcript)?;
         let MainSumcheckEvals {

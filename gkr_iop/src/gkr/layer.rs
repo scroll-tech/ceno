@@ -190,7 +190,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
-    ) -> Result<(), BackendError<E>> {
+    ) -> Result<(), BackendError> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 

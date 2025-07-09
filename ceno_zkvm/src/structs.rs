@@ -127,6 +127,14 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     pub fn num_lks(&self) -> usize {
         self.zkvm_v1_css.lk_expressions.len()
     }
+
+    /// return num_vars belongs to rotation
+    pub fn rotation_vars(&self) -> Option<usize> {
+        self.zkvm_v1_css
+            .rotation_params
+            .as_ref()
+            .map(|param| param.rotation_cyclic_group_log2)
+    }
 }
 
 #[derive(Clone)]
