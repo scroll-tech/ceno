@@ -305,9 +305,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .iter()
                 .zip_eq(evaluations.iter_mut())
                 .zip_eq(vm_proof.num_instances.iter())
-                .map(|((point, evals), (chip_idx, num_instances))| {
-                    let (num_witin, num_fixed) = self.vk.circuit_num_polys[*chip_idx];
-                    println!("{num_witin}, {num_fixed}, {}, {num_instances}", evals.len());
+                .map(|((point, evals), (chip_idx, _))| {
+                    let (num_witin, _) = self.vk.circuit_num_polys[*chip_idx];
                     (
                         point.len(),
                         (point.clone(), evals.drain(..num_witin).collect_vec()),
@@ -315,9 +314,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 })
                 .collect_vec(),
         ));
-        if self.vk.fixed_commit.is_some() {
+        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
             rounds.push((
-                self.vk.fixed_commit.as_ref().unwrap().clone(),
+                fixed_commit.clone(),
                 rt_points
                     .iter()
                     .zip(evaluations.iter_mut())
