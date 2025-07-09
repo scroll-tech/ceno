@@ -285,9 +285,7 @@ pub mod test_util {
     use itertools::Itertools;
 
     #[cfg(test)]
-    use rand::rngs::OsRng;
-    #[cfg(test)]
-    use rand::{distributions::Standard, prelude::Distribution};
+    use rand::{distributions::Standard, prelude::Distribution, rngs::OsRng};
     #[cfg(test)]
     use transcript::BasicTranscript;
 
@@ -308,6 +306,7 @@ pub mod test_util {
     ) -> Vec<E> {
         transcript.sample_and_append_vec(b"Point", num_vars)
     }
+
     pub fn get_points_from_challenge<E: ExtensionField>(
         num_vars: impl Fn(usize) -> usize,
         num_points: usize,
