@@ -329,6 +329,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
                 .iter()
                 .all(|v| { v.evaluations().len() == 1 << log2_num_instances })
         );
+        assert!(
+            input
+                .fixed
+                .iter()
+                .all(|v| { v.evaluations().len() == 1 << log2_num_instances })
+        );
         assert!(is_table_circuit || is_opcode_circuit);
         assert!(
             cs.r_table_expressions

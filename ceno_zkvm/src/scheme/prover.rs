@@ -112,6 +112,7 @@ impl<
             .enumerate()
             .map(|(k, v)| (v, k))
             .collect::<BTreeMap<_, _>>();
+        dbg!(circuit_name_index_mapping.clone());
         // only keep track of circuits that have non-zero instances
         let mut num_instances = Vec::with_capacity(self.pk.circuit_pks.len());
         for (index, (circuit_name, _)) in self.pk.circuit_pks.iter().enumerate() {
@@ -156,7 +157,11 @@ impl<
                 RowMajorMatrix::empty()
             };
             let num_instances = witness_rmm.num_instances();
-            wits_instances.insert(circuit_name.clone(), num_instances);
+            assert!(
+                wits_instances
+                    .insert(circuit_name.clone(), num_instances)
+                    .is_none()
+            );
             if num_instances == 0 {
                 continue;
             }
@@ -191,13 +196,16 @@ impl<
                 let num_instances = *wits_instances
                     .get(circuit_name)
                     .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
+                let cs = pk.get_cs();
                 if num_instances == 0 {
-                    // do nothing without point and evaluation insertion
+                    // we need to drain respective fixed when num_instances is 0
+                    if cs.num_fixed() > 0 {
+                        let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
+                    }
                     return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points, evaluations));
                 }
                 transcript.append_field_element(&E::BaseField::from_canonical_u64(index as u64));
                 // TODO: add an enum for circuit type either in constraint_system or vk
-                let cs = pk.get_cs();
                 let witness_mle = witness_mles
                     .drain(..cs.num_witin())
                     .map(|mle| mle.into())
