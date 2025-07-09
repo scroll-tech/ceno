@@ -13,6 +13,7 @@ use crate::{
     error::ZKVMError,
     gadgets::{IsLtConfig, SignedLtConfig},
     instructions::Instruction,
+    structs::ProgramParams,
     uint::Value,
     witness::LkMultiplicity,
 };
@@ -55,7 +56,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < rs2_read, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
@@ -152,7 +156,10 @@ mod test {
             .namespace(
                 || format!("{}/{name}", I::INST_KIND),
                 |cb| {
-                    let config = SetLessThanInstruction::<_, I>::construct_circuit(cb);
+                    let config = SetLessThanInstruction::<_, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    );
                     Ok(config)
                 },
             )

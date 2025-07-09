@@ -3,17 +3,24 @@ use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     state::{GlobalState, StateCircuit},
-    structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{
-        AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
+    structs::{
+        ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
+        ZKVMWitnesses,
     },
-    witness::{LkMultiplicity, LkMultiplicityRaw},
+    tables::{ProgramTableCircuit, RangeTable, TableCircuit, U5Table, U8Table, U14Table, U16Table},
+    witness::LkMultiplicity,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
+use gkr_iop::{
+    tables::{
+        OpsTable,
+        ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
+    },
+    utils::lk_multiplicity::LkMultiplicityRaw,
+};
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, fmt,
@@ -677,15 +684,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     fn load_program_table(program: &Program, challenge: [E; 2]) -> Vec<Vec<u64>> {
         let mut t_vec = vec![];
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
-        let mut cb = CircuitBuilder::new_with_params(
-            &mut cs,
-            ProgramParams {
-                platform: CENO_PLATFORM,
-                program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
-                ..ProgramParams::default()
-            },
-        );
-        let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
+        let params = ProgramParams {
+            platform: CENO_PLATFORM,
+            program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
+            ..ProgramParams::default()
+        };
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb, &params).unwrap();
         let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
@@ -812,7 +817,13 @@ Hints:
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
         // Process all circuits.
-        for (circuit_name, cs) in &cs.circuit_css {
+        for (
+            circuit_name,
+            ComposedConstrainSystem {
+                zkvm_v1_css: cs, ..
+            },
+        ) in &cs.circuit_css
+        {
             let empty_rmm = RowMajorMatrix::empty();
             let is_opcode = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
@@ -949,7 +960,13 @@ Hints:
                 let mut writes_grp_by_annotations = HashMap::new();
                 // store (pc, timestamp) for $ram_type == RAMType::GlobalState
                 let mut gs = HashMap::new();
-                for (circuit_name, cs) in &cs.circuit_css {
+                for (
+                    circuit_name,
+                    ComposedConstrainSystem {
+                        zkvm_v1_css: cs, ..
+                    },
+                ) in &cs.circuit_css
+                {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
@@ -1018,7 +1035,13 @@ Hints:
 
                 let mut reads = HashSet::new();
                 let mut reads_grp_by_annotations = HashMap::new();
-                for (circuit_name, cs) in &cs.circuit_css {
+                for (
+                    circuit_name,
+                    ComposedConstrainSystem {
+                        zkvm_v1_css: cs, ..
+                    },
+                ) in &cs.circuit_css
+                {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
@@ -1254,13 +1277,12 @@ mod tests {
         ROMType,
         error::ZKVMError,
         gadgets::{AssertLtConfig, IsLtConfig},
-        set_val,
         witness::LkMultiplicity,
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::{ToExpr, WitIn, mle::IntoMLE};
     use p3::goldilocks::Goldilocks;
-    use witness::InstancePaddingStrategy;
+    use witness::{InstancePaddingStrategy, set_val};
 
     #[derive(Debug)]
     struct AssertZeroCircuit {

@@ -5,17 +5,10 @@ use std::{
     panic::{self, PanicHookInfo},
 };
 
-use ff_ext::{ExtensionField, SmallField};
+use ff_ext::ExtensionField;
+pub use gkr_iop::utils::i64_to_base;
 use itertools::Itertools;
 use p3::field::Field;
-
-pub fn i64_to_base<F: SmallField>(x: i64) -> F {
-    if x >= 0 {
-        F::from_canonical_u64(x as u64)
-    } else {
-        -F::from_canonical_u64((-x) as u64)
-    }
-}
 
 pub fn split_to_u8<T: From<u8>>(value: u32) -> Vec<T> {
     (0..(u32::BITS / 8))

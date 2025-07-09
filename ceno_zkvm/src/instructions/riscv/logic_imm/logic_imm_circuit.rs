@@ -1,6 +1,7 @@
 //! The circuit implementation of logic instructions.
 
 use ff_ext::ExtensionField;
+use gkr_iop::tables::OpsTable;
 use std::marker::PhantomData;
 
 use crate::{
@@ -10,7 +11,8 @@ use crate::{
         Instruction,
         riscv::{constants::UInt8, i_insn::IInstructionConfig},
     },
-    tables::{InsnRecord, OpsTable},
+    structs::ProgramParams,
+    tables::InsnRecord,
     utils::split_to_u8,
     witness::LkMultiplicity,
 };
@@ -32,7 +34,10 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         let config = LogicConfig::construct_circuit(cb, I::INST_KIND)?;
 
         // Constrain the registers based on the given lookup table.
@@ -125,9 +130,9 @@ impl<E: ExtensionField> LogicConfig<E> {
 mod test {
     use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
     use ff_ext::GoldilocksExt2;
+    use gkr_iop::circuit_builder::DebugIndex;
 
     use crate::{
-        chip_handler::test::DebugIndex,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{
             Instruction,
@@ -137,6 +142,7 @@ mod test {
             },
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
+        structs::ProgramParams,
         utils::split_to_u8,
     };
 
@@ -183,7 +189,10 @@ mod test {
             .namespace(
                 || format!("{prefix}_({name})"),
                 |cb| {
-                    let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(cb);
+                    let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    );
                     Ok(config)
                 },
             )

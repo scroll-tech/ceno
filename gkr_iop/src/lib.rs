@@ -1,11 +1,16 @@
+#![feature(variant_count)]
+#![feature(strict_overflow_ops)]
 use std::marker::PhantomData;
 
-use crate::hal::{ProtocolWitnessGeneratorProver, ProverDevice};
+use crate::{
+    hal::{ProtocolWitnessGeneratorProver, ProverDevice},
+    utils::lk_multiplicity::LkMultiplicity,
+};
 use chip::Chip;
+use either::Either;
 use ff_ext::ExtensionField;
 use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
-use multilinear_extensions::mle::ArcMultilinearExtension;
-use strum_macros::EnumIter;
+use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
 use transcript::Transcript;
 use utils::infer_layer_witness;
 use witness::RowMajorMatrix;
@@ -13,12 +18,15 @@ use witness::RowMajorMatrix;
 use crate::hal::ProverBackend;
 
 pub mod chip;
+pub mod circuit_builder;
 pub mod cpu;
 pub mod error;
 pub mod evaluation;
+pub mod gadgets;
 pub mod gkr;
 pub mod hal;
 pub mod precompiles;
+pub mod tables;
 pub mod utils;
 
 pub type Phase1WitnessGroup<'a, E> = Vec<ArcMultilinearExtension<'a, E>>;
@@ -54,7 +62,11 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     type Trace;
 
     /// The vectors to be committed in the phase1.
-    fn phase1_witness_group(&self, phase1: Self::Trace) -> RowMajorMatrix<E::BaseField>;
+    fn phase1_witness_group(
+        &self,
+        phase1: Self::Trace,
+        lk_multiplicity: &mut LkMultiplicity,
+    ) -> RowMajorMatrix<E::BaseField>;
 
     /// GKR witness.
     fn gkr_witness<'a, PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
@@ -87,19 +99,12 @@ pub struct ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );
 
-#[derive(
-    Copy, Clone, Debug, EnumIter, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(usize)]
-pub enum LookupTable {
-    U5 = 0,      // 2^5 = 32
-    U8,          // 2^8 = 256
-    U14,         // 2^14 = 16,384
-    U16,         // 2^16 = 65,536
-    And,         // a & b where a, b are bytes
-    Or,          // a | b where a, b are bytes
-    Xor,         // a ^ b where a, b are bytes
-    Ltu,         // a <(usign) b where a, b are bytes and the result is 0/1.
-    Pow,         // a ** b where a is 2 and b is 5-bit value
-    Instruction, // Decoded instruction from the fixed program.
+pub enum RAMType {
+    GlobalState,
+    Register,
+    Memory,
 }
+
+impl_expr_from_unsigned!(RAMType);

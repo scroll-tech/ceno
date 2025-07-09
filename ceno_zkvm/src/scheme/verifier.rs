@@ -24,7 +24,7 @@ use witness::next_pow2_instance_padding;
 use crate::{
     error::ZKVMError,
     scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
-    structs::{PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
+    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec},
 };
 use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with_instance};
@@ -204,7 +204,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 tracing::debug!("verified proof for opcode {}", name);
 
                 // getting the number of dummy padding item that we used in this opcode circuit
-                let num_lks = circuit_vk.get_cs().lk_expressions.len();
+                let num_lks = circuit_vk.get_cs().num_lks();
                 let num_padded_instance =
                     next_pow2_instance_padding(*num_instances) - num_instances;
                 dummy_table_item_multiplicity += num_lks * num_padded_instance;
@@ -379,7 +379,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
-        let cs = circuit_vk.get_cs();
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        } = circuit_vk.get_cs();
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len(),
             cs.w_expressions.len(),
@@ -562,7 +564,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2],
     ) -> Result<Point<E>, ZKVMError> {
-        let cs = circuit_vk.get_cs();
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        } = circuit_vk.get_cs();
         debug_assert!(
             cs.r_table_expressions
                 .iter()

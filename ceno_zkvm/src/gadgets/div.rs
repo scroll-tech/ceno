@@ -1,11 +1,11 @@
 use std::fmt::Display;
 
 use ff_ext::ExtensionField;
+use gkr_iop::error::CircuitBuilderError;
 
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     instructions::riscv::constants::{UINT_LIMBS, UInt},
     witness::LkMultiplicity,
 };
@@ -30,7 +30,7 @@ impl<E: ExtensionField> DivConfig<E> {
         divisor: &mut UInt<E>,
         quotient: &mut UInt<E>,
         remainder: &UInt<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         circuit_builder.namespace(name_fn, |cb| {
             let (dividend, intermediate_mul) =
                 divisor.mul_add(|| "divisor * outcome + r", cb, quotient, remainder, true)?;
@@ -58,7 +58,7 @@ impl<E: ExtensionField> DivConfig<E> {
         divisor: &Value<'a, u32>,
         quotient: &Value<'a, u32>,
         remainder: &Value<'a, u32>,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), CircuitBuilderError> {
         let (dividend, intermediate) = divisor.mul_add(quotient, remainder, lkm, true);
         self.r_lt
             .assign_instance(instance, lkm, remainder.as_u64(), divisor.as_u64())?;

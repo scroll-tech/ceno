@@ -1109,6 +1109,7 @@ version = "0.1.0"
 dependencies = [
  "ark-std",
  "bincode",
+ "ceno_emul",
  "clap",
  "criterion",
  "either",
@@ -1128,6 +1129,7 @@ dependencies = [
  "strum_macros",
  "sumcheck",
  "thiserror 1.0.69",
+ "thread_local",
  "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "tiny-keccak",

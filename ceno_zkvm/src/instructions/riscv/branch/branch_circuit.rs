@@ -16,6 +16,7 @@ use crate::{
             constants::{UINT_LIMBS, UInt},
         },
     },
+    structs::ProgramParams,
     witness::LkMultiplicity,
 };
 use multilinear_extensions::Expression;
@@ -41,6 +42,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<BranchConfig<E>, ZKVMError> {
         let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
         let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;

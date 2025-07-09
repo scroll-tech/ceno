@@ -1,7 +1,8 @@
-use crate::{set_val, utils::i64_to_base, witness::LkMultiplicity};
+use crate::{utils::i64_to_base, witness::LkMultiplicity};
 use ff_ext::{FieldInto, SmallField};
 use itertools::Itertools;
 use multilinear_extensions::WitIn;
+use witness::set_val;
 
 #[derive(Clone)]
 pub struct IsEqualConfig {

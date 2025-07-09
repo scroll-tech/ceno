@@ -12,12 +12,11 @@ use crate::{
         hal::{ProofInput, TowerProverSpec},
         prover::ZkVMCpuProver,
     },
-    set_val,
     structs::{
-        PointAndEval, RAMType::Register, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
+        PointAndEval, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
     },
     tables::{ProgramTableCircuit, U16TableCircuit},
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{
     CENO_PLATFORM,
@@ -60,12 +59,15 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
         "TEST".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         let reg_id = cb.create_witin(|| "reg_id");
         (0..RW).try_for_each(|_| {
             let record = vec![1.into(), reg_id.expr()];
-            cb.read_record(|| "read", Register, record.clone())?;
-            cb.write_record(|| "write", Register, record)?;
+            cb.read_record(|| "read", RAMType::Register, record.clone())?;
+            cb.write_record(|| "write", RAMType::Register, record)?;
             Result::<(), ZKVMError>::Ok(())
         })?;
         (0..L).try_for_each(|_| {
