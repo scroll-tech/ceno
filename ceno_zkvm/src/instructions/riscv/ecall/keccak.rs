@@ -170,8 +170,6 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             InstancePaddingStrategy::Default,
         );
 
-        dbg!(num_witin, raw_witin.height(), raw_witin.width());
-
         // each instance are composed of KECCAK_ROUNDS.next_power_of_two()
         let raw_witin_iter = raw_witin
             .par_batch_iter_mut(num_instance_per_batch * KECCAK_ROUNDS.next_power_of_two());
