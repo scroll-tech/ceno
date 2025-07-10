@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc, vec::IntoIter};
+use std::{collections::BTreeMap, ops::Neg, sync::Arc, vec::IntoIter};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
@@ -306,7 +306,15 @@ impl<E: ExtensionField> Layer<E> {
             w_record_evals.chain(r_record_evals)
         ) {
             gkr_expressions.push(ram_eval.0.clone().unwrap() * ram_expr - E::BaseField::ONE.expr()); // ONE is for padding;
-            gkr_expressions_eval.push((ram_eval.0, EvalExpression::<E>::Single(ram_eval.1)));
+            gkr_expressions_eval.push((
+                ram_eval.0,
+                EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - one (padding)
+                    ram_eval.1,
+                    E::BaseField::ONE.expr().into(),
+                    E::BaseField::ONE.neg().expr().into(),
+                ),
+            ));
             gkr_expressions_name.push(format!("{}/{idx}", name));
         }
 
@@ -322,7 +330,15 @@ impl<E: ExtensionField> Layer<E> {
         ) {
             gkr_expressions
                 .push(lookup_eval.0.clone().unwrap() * lookup - cb.cs.chip_record_alpha.clone()); // alpha is for padding;
-            gkr_expressions_eval.push((lookup_eval.0, EvalExpression::Single(lookup_eval.1)));
+            gkr_expressions_eval.push((
+                lookup_eval.0,
+                EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - alpha (padding)
+                    lookup_eval.1,
+                    E::BaseField::ONE.expr().into(),
+                    cb.cs.chip_record_alpha.clone().neg().into(),
+                ),
+            ));
             gkr_expressions_name.push(format!("{}/{idx}", name));
         }
 
