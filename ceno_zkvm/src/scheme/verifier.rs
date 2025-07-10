@@ -180,6 +180,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     circuit_vk.get_cs().num_writes(),
                 )));
             }
+            if proof.lk_out_evals.len() != circuit_vk.get_cs().num_lks() {
+                return Err(ZKVMError::InvalidProof(format!(
+                    "lookup evaluations length mismatch: {} != {}",
+                    proof.lk_out_evals.len(),
+                    circuit_vk.get_cs().num_lks(),
+                )));
+            }
+
             let chip_logup_sum = proof
                 .lk_out_evals
                 .iter()

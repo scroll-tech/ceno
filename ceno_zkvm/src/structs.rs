@@ -133,7 +133,7 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
 
     /// return number of lookup operation
     pub fn num_lks(&self) -> usize {
-        self.zkvm_v1_css.lk_expressions.len()
+        self.zkvm_v1_css.lk_expressions.len() + self.zkvm_v1_css.lk_table_expressions.len()
     }
 }
 
