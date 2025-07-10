@@ -121,7 +121,7 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
             FieldType::Ext(SmartSlice::Borrowed(slice)) => {
                 FieldType::Ext(SmartSlice::Borrowed(slice))
             }
-            invalid_type @ _ => panic!("invalid type {:?}", invalid_type),
+            invalid_type => panic!("invalid type {:?}", invalid_type),
         }
     }
 

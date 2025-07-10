@@ -51,7 +51,7 @@ impl<E: ExtensionField> MockProver<E> {
     {
         // TODO: check the rotation argument.
         let mut rng = thread_rng();
-        evaluations.resize_with(circuit.n_evaluations, || Default::default());
+        evaluations.resize_with(circuit.n_evaluations, Default::default);
         challenges.resize_with(2 + circuit.n_challenges, || E::random(&mut rng));
         // check the input layer
         for (layer, layer_wit) in izip!(circuit.layers, &circuit_wit.layers) {
@@ -127,9 +127,9 @@ impl<E: ExtensionField> MockProver<E> {
 }
 
 impl<E: ExtensionField> EvalExpression<E> {
-    pub fn mock_evaluate<'a, 'b>(
+    pub fn mock_evaluate<'a>(
         &self,
-        evals: &'b [ArcMultilinearExtension<'a, E>],
+        evals: &[ArcMultilinearExtension<'a, E>],
         challenges: &[E],
         num_vars: usize,
     ) -> ArcMultilinearExtension<'a, E> {
@@ -140,7 +140,7 @@ impl<E: ExtensionField> EvalExpression<E> {
             EvalExpression::Single(i) => evals[*i].clone(),
             EvalExpression::Linear(i, c0, c1) => wit_infer_by_expr(
                 &[],
-                &evals,
+                evals,
                 &[],
                 &[],
                 challenges,
