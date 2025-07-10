@@ -464,5 +464,5 @@ pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
     pub finalize_global_state_expr: Expression<E>,
     // circuit index -> circuit name
     // mainly used for debugging
-    pub circuit_index: BTreeMap<usize, String>,
+    pub circuit_index_to_name: BTreeMap<usize, String>,
 }

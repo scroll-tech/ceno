@@ -133,7 +133,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
             pi_evals,
             chip_proofs,
             witin_commit,
-            opening_proof: opening_proof,
+            opening_proof,
         }
     }
 
