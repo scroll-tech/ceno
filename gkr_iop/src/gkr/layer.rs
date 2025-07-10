@@ -305,7 +305,8 @@ impl<E: ExtensionField> Layer<E> {
             ),
             w_record_evals.chain(r_record_evals)
         ) {
-            gkr_expressions.push(ram_eval.0.clone().unwrap() * ram_expr - E::BaseField::ONE.expr()); // ONE is for padding;
+            gkr_expressions
+                .push(ram_eval.0.clone().unwrap() * (ram_expr - E::BaseField::ONE.expr())); // ONE is for padding;
             gkr_expressions_eval.push((
                 ram_eval.0,
                 EvalExpression::<E>::Linear(
@@ -329,7 +330,7 @@ impl<E: ExtensionField> Layer<E> {
             lookup_evals
         ) {
             gkr_expressions
-                .push(lookup_eval.0.clone().unwrap() * lookup - cb.cs.chip_record_alpha.clone()); // alpha is for padding;
+                .push(lookup_eval.0.clone().unwrap() * (lookup - cb.cs.chip_record_alpha.clone())); // alpha is for padding;
             gkr_expressions_eval.push((
                 lookup_eval.0,
                 EvalExpression::<E>::Linear(
