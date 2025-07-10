@@ -1001,11 +1001,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
     if cfg!(debug_assertions) {
         // mock prover
-        let out_wits = gkr_output
-            .0
-            .iter()
-            .map(|poly| poly.evaluations())
-            .collect_vec();
+        let out_wits = gkr_output.0.0.clone();
         MockProver::check(
             gkr_circuit.clone(),
             &gkr_witness,
