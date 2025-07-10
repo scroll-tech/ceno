@@ -180,6 +180,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     circuit_vk.get_cs().num_writes(),
                 )));
             }
+            let chip_logup_sum = proof
+                .lk_out_evals
+                .iter()
+                .map(|evals| {
+                    let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
+                    p1 * q1.inverse() + p2 * q2.inverse()
+                })
+                .sum::<E>();
 
             transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
             let input_opening_point = if circuit_vk.get_cs().is_opcode_circuit() {
@@ -189,6 +197,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     next_pow2_instance_padding(proof.num_instances) - proof.num_instances;
                 dummy_table_item_multiplicity += num_lks * num_padded_instance;
 
+                logup_sum += chip_logup_sum;
                 self.verify_opcode_proof(
                     circuit_name,
                     circuit_vk,
@@ -200,6 +209,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     &challenges,
                 )?
             } else {
+                logup_sum -= chip_logup_sum;
                 self.verify_table_proof(
                     circuit_name,
                     circuit_vk,
@@ -221,15 +231,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 input_opening_point.len(),
                 (input_opening_point.clone(), proof.wits_in_evals.clone()),
             ));
-            fixed_openings.push((
-                input_opening_point.len(),
-                (input_opening_point.clone(), proof.fixed_in_evals.clone()),
-            ));
+            if !proof.fixed_in_evals.is_empty() {
+                fixed_openings.push((
+                    input_opening_point.len(),
+                    (input_opening_point.clone(), proof.fixed_in_evals.clone()),
+                ));
+            }
 
-            logup_sum = proof.lk_out_evals.iter().fold(logup_sum, |acc, evals| {
-                let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
-                acc - p1 * q1.inverse() - p2 * q2.inverse()
-            });
             prod_w *= proof.w_out_evals.iter().flatten().copied().product::<E>();
             prod_r *= proof.r_out_evals.iter().flatten().copied().product::<E>();
             tracing::debug!("verified proof for circuit {}", circuit_name);
