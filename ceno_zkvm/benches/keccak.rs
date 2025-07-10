@@ -31,14 +31,14 @@ fn setup() -> (Program, Platform) {
     let stack_size = 32768;
     let heap_size = 2097152;
     let pub_io_size = 16;
-    let program = Program::load_elf(ceno_examples::ceno_rt_keccak, u32::MAX).unwrap();
+    let program = Program::load_elf(ceno_examples::keccak_syscall, u32::MAX).unwrap();
     let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size, pub_io_size);
     (program, platform)
 }
 
 fn keccak_prove(c: &mut Criterion) {
     let (program, platform) = setup();
-    for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
+    for max_steps in [1usize << 22] {
         // retrive 1 << 20th keccak element >> max_steps
         let mut hints = CenoStdin::default();
         let _ = hints.write(&vec![1, 2, 3]);
@@ -92,7 +92,7 @@ fn keccak_prove(c: &mut Criterion) {
                         result.next_step();
                         let elapsed = instant.elapsed();
                         println!(
-                            "Fibonacci::create_proof, max_steps = {}, time = {}",
+                            "Keccak::create_proof, max_steps = {}, time = {}",
                             max_steps,
                             elapsed.as_secs_f64()
                         );

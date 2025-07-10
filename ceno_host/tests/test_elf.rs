@@ -231,8 +231,8 @@ fn test_hashing() -> Result<()> {
 }
 
 #[test]
-fn test_ceno_rt_keccak() -> Result<()> {
-    let program_elf = ceno_examples::ceno_rt_keccak;
+fn test_keccak_syscall() -> Result<()> {
+    let program_elf = ceno_examples::keccak_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
     let steps = run(&mut state)?;
 
