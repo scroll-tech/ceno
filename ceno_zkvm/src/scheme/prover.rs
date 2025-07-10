@@ -84,8 +84,7 @@ impl<
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let raw_pi = pi.to_vec::<E>();
         let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
-        let mut opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
-        let mut table_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
+        let mut chip_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
 
         let span = entered_span!("commit_to_pi", profiling_1 = true);
         // including raw public input to transcript
@@ -233,7 +232,7 @@ impl<
                     );
                     points.push(input_opening_point);
                     evaluations.push(opcode_proof.wits_in_evals.clone());
-                    opcode_proofs.insert(index, opcode_proof);
+                    chip_proofs.insert(index, opcode_proof);
                 } else {
                     // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
                     input.num_instances = 1 << input.log2_num_instances();
@@ -252,7 +251,7 @@ impl<
                         ]
                         .concat(),
                     );
-                    table_proofs.insert(index, table_proof);
+                    chip_proofs.insert(index, table_proof);
                     for (idx, eval) in pi_in_evals {
                         pi_evals[idx] = eval;
                     }
@@ -285,12 +284,9 @@ impl<
         let vm_proof = ZKVMProof::new(
             raw_pi,
             pi_evals,
-            opcode_proofs,
-            table_proofs,
+            chip_proofs,
             witin_commit,
             mpcs_opening_proof,
-            // verifier need this information from prover to achieve non-uniform design.
-            num_instances,
         );
         exit_span!(main_proofs_span);
 
@@ -366,6 +362,7 @@ impl<
                 tower_proof,
                 fixed_in_evals,
                 wits_in_evals,
+                num_instances: input.num_instances,
             },
             pi_in_evals,
             input_opening_point,
