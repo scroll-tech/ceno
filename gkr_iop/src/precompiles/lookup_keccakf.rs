@@ -10,11 +10,8 @@ use ceno_emul::{ByteAddr, Cycle};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, iproduct, izip, zip_eq};
 use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::{
-    Expression, Fixed, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2,
-};
+use multilinear_extensions::{Expression, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
 use ndarray::{ArrayView, Ix2, Ix3, s};
-use p3_field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -113,6 +110,7 @@ pub struct KeccakOutEvals<T> {
     pub lookup_entries: [T; LOOKUP_FELTS_PER_ROUND],
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub struct KeccakFixedCols<T> {
@@ -133,13 +131,15 @@ pub struct KeccakWitCols<T> {
     pub nonlinear: [T; 200],
     pub chi_output: [T; 8],
     pub iota_output: [T; 200],
+    // TODO temporarily define rc as witness
+    pub rc: [T; 8],
 }
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub struct KeccakLayer<WitT, FixedT, EqT> {
+pub struct KeccakLayer<WitT, EqT> {
     pub wits: KeccakWitCols<WitT>,
-    pub fixed: KeccakFixedCols<FixedT>,
+    //  pub fixed: KeccakFixedCols<FixedT>,
     pub eq_zero: EqT,
     pub eq_mem_read: EqT,
     pub eq_mem_write: EqT,
@@ -151,7 +151,7 @@ pub struct KeccakLayer<WitT, FixedT, EqT> {
 #[derive(Clone, Debug)]
 pub struct KeccakLayout<E: ExtensionField> {
     pub params: KeccakParams<Expression<E>>,
-    pub layer_exprs: KeccakLayer<WitIn, Fixed, WitIn>,
+    pub layer_exprs: KeccakLayer<WitIn, WitIn>,
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_challenges: usize,
@@ -162,7 +162,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
         // allocate witnesses, fixed, and eqs
         let (
             wits,
-            fixed,
+            // fixed,
             [
                 eq_zero,
                 eq_mem_write,
@@ -171,14 +171,14 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation_right,
                 eq_rotation,
             ],
-        ): (KeccakWitCols<WitIn>, KeccakFixedCols<Fixed>, [WitIn; 6]) = unsafe {
+        ): (KeccakWitCols<WitIn>, [WitIn; 6]) = unsafe {
             (
                 transmute::<[WitIn; size_of::<KeccakWitCols<u8>>()], KeccakWitCols<WitIn>>(
                     array::from_fn(|id| cb.create_witin(|| format!("keccak_witin_{}", id))),
                 ),
-                transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(array::from_fn(|id| {
-                    cb.create_fixed(|| format!("keccak_fixed_{}", id))
-                })),
+                // transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(array::from_fn(|id| {
+                //     cb.create_fixed(|| format!("keccak_fixed_{}", id))
+                // })),
                 array::from_fn(|id| cb.create_witin(|| format!("keccak_eq_{}", id))),
             )
         };
@@ -187,7 +187,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
             params,
             layer_exprs: KeccakLayer {
                 wits,
-                fixed,
+                // fixed,
                 eq_zero,
                 eq_mem_read,
                 eq_mem_write,
@@ -229,9 +229,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             nonlinear,
             chi_output,
             iota_output,
+            rc,
         } = &layout.layer_exprs.wits;
 
-        let KeccakFixedCols { rc } = &layout.layer_exprs.fixed;
+        // let KeccakFixedCols { rc } = &layout.layer_exprs.fixed;
 
         // TODO: ndarrays can be replaced with normal arrays
         // Input state of the round in 8-bit chunks
@@ -590,17 +591,19 @@ where
     }
 
     fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
-        RowMajorMatrix::new_by_values(
-            RC.iter()
-                .flat_map(|x| {
-                    (0..8)
-                        .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
-                        .collect_vec()
-                })
-                .collect_vec(),
-            8,
-            InstancePaddingStrategy::Default,
-        )
+        // TODO remove this after recover RC
+        RowMajorMatrix::new(0, 0, InstancePaddingStrategy::Default)
+        // RowMajorMatrix::new_by_values(
+        //     RC.iter()
+        //         .flat_map(|x| {
+        //             (0..8)
+        //                 .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
+        //                 .collect_vec()
+        //         })
+        //         .collect_vec(),
+        //     8,
+        //     InstancePaddingStrategy::Default,
+        // )
     }
 
     fn phase1_witness_group(
@@ -623,6 +626,7 @@ where
                     nonlinear: nonlinear_witin,
                     chi_output: chi_output_witin,
                     iota_output: iota_output_witin,
+                    rc: rc_witin,
                 },
             ..
         } = self.layer_exprs;
@@ -826,6 +830,12 @@ where
                         wits,
                         iota_output_witin[0].id.into(),
                         iota_output8.into_iter().flatten().flatten(),
+                    );
+                    // TODO temporarily move RC to witness
+                    push_instance::<E, _>(
+                        wits,
+                        rc_witin[0].id.into(),
+                        (0..8).map(|i| ((RC[round] >> (i << 3)) & 0xFF)),
                     );
 
                     state64 = iota_output64;

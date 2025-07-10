@@ -154,7 +154,6 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         num_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
-        dbg!(steps.len());
         let mut lk_multiplicity = LkMultiplicity::default();
         if steps.is_empty() {
             return Ok((

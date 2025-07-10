@@ -114,7 +114,10 @@ impl<
             .collect::<BTreeMap<_, _>>();
         // only keep track of circuits that have non-zero instances
         let mut num_instances = Vec::with_capacity(self.pk.circuit_pks.len());
-        for (index, (circuit_name, _)) in self.pk.circuit_pks.iter().enumerate() {
+        let mut num_instances_with_rotation = Vec::with_capacity(self.pk.circuit_pks.len());
+        for (index, (circuit_name, ProvingKey { vk, .. })) in self.pk.circuit_pks.iter().enumerate()
+        {
+            // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
                 .get_opcode_witness(circuit_name)
                 .or_else(|| {
@@ -131,14 +134,18 @@ impl<
                     }
                 })
             {
-                num_instances.push((index, num_instance));
+                num_instances.push((
+                    index,
+                    num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
+                ));
+                num_instances_with_rotation.push((index, num_instance))
             }
         }
 
         // write (circuit_idx, num_var) to transcript
-        for (circuit_idx, num_var) in &num_instances {
+        for (circuit_idx, num_instance) in &num_instances {
             transcript.append_message(&circuit_idx.to_le_bytes());
-            transcript.append_message(&num_var.to_le_bytes());
+            transcript.append_message(&num_instance.to_le_bytes());
         }
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_2 = true);
@@ -163,11 +170,7 @@ impl<
                 .vk
                 .get_cs()
                 .rotation_vars();
-            let num_instances = if let Some(rotation_vars) = rotation_vars {
-                witness_rmm.num_instances() >> rotation_vars
-            } else {
-                witness_rmm.num_instances()
-            };
+            let num_instances = witness_rmm.num_instances() >> (rotation_vars.unwrap_or(0));
             assert!(
                 wits_instances
                     .insert(circuit_name.clone(), num_instances)
@@ -204,7 +207,6 @@ impl<
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
             (vec![], vec![]),
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
-                dbg!(circuit_name);
                 let num_instances = *wits_instances
                     .get(circuit_name)
                     .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
@@ -293,7 +295,7 @@ impl<
             points,
             evaluations,
             &circuit_num_polys,
-            &num_instances,
+            &num_instances_with_rotation,
             &mut transcript,
         );
 
@@ -353,7 +355,7 @@ impl<
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
-        let (input_opening_point, evals, main_sumcheck_proofs, _gkr_iop_proof) = self
+        let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) = self
             .device
             .prove_main_constraints(rt_tower, records, &input, cs, challenges, transcript)?;
         let MainSumcheckEvals {
@@ -381,6 +383,7 @@ impl<
                 w_out_evals,
                 lk_out_evals,
                 main_sumcheck_proofs,
+                gkr_iop_proof,
                 tower_proof,
                 fixed_in_evals,
                 wits_in_evals,

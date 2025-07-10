@@ -18,6 +18,7 @@ pub trait ProverDevice<PB>:
     + MainSumcheckProver<PB>
     + OpeningProver<PB>
     + DeviceTransporter<PB>
+// + FixedMLEPadder<PB>
 where
     PB: ProverBackend,
 {
@@ -146,3 +147,14 @@ pub trait DeviceTransporter<PB: ProverBackend> {
         mles: Vec<MultilinearExtension<'a, PB::E>>,
     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
+
+// pub trait FixedMLEPadder<PB: ProverBackend> {
+//     fn padding_fixed_mle<'a, 'b>(
+//         &self,
+//         cs: &ComposedConstrainSystem<PB::E>,
+//         fixed_mles: Vec<Arc<PB::MultilinearPoly<'b>>>,
+//         num_instances: usize,
+//     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>
+//     where
+//         'b: 'a;
+// }

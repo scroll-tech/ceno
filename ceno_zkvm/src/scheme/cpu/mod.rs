@@ -335,32 +335,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
                 .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
         );
 
-        // fix polynomial might be short length
-        let fixed_poly_expand_span = entered_span!("fixed_poly_expand");
-        let fixed = if input
-            .fixed
-            .iter()
-            .all(|v| v.evaluations().len() == 1 << num_var_with_rotation)
-        {
-            input.fixed.clone()
-        } else {
-            input
-                .fixed
-                .par_iter()
-                .map(|v| {
-                    v.get_base_field_vec()
-                        .iter()
-                        .copied()
-                        .cycle()
-                        .take(1 << num_var_with_rotation)
-                        .collect_vec()
-                        .into_mle()
-                        .into()
-                })
-                .collect::<Vec<ArcMultilinearExtension<E>>>()
-        };
-        exit_span!(fixed_poly_expand_span);
-
         assert!(is_table_circuit || is_opcode_circuit);
         assert!(
             cs.r_table_expressions
@@ -389,7 +363,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
                 wit_infer_by_expr(
-                    &fixed,
+                    &input.fixed,
                     &input.witness,
                     &input.structural_witness,
                     &input.public_input,
@@ -886,6 +860,47 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
         mles.into_iter().map(|mle| mle.into()).collect_vec()
     }
 }
+
+// impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> FixedMLEPadder<CpuBackend<E, PCS>>
+//     for CpuProver<CpuBackend<E, PCS>>
+// {
+//     fn padding_fixed_mle<'a, 'b>(
+//         &self,
+//         composed_cs: &ComposedConstrainSystem<<CpuBackend<E, PCS> as ProverBackend>::E>,
+//         fixed_mles: Vec<ArcMultilinearExtension<'b, E>>,
+//         num_instances: usize,
+//     ) -> Vec<ArcMultilinearExtension<'a, E>>
+//     where
+//         'b: 'a,
+//     {
+//         let num_vars = ceil_log2(next_pow2_instance_padding(num_instances));
+//         let num_var_with_rotation = num_vars + composed_cs.rotation_vars().unwrap_or(0);
+//         // fix polynomial might be short length
+//         let fixed_poly_expand_span = entered_span!("fixed_poly_expand");
+//         let fixed_mles = if fixed_mles
+//             .iter()
+//             .all(|v| v.evaluations().len() == 1 << num_var_with_rotation)
+//         {
+//             fixed_mles.clone()
+//         } else {
+//             fixed_mles
+//                 .par_iter()
+//                 .map(|v| {
+//                     v.get_base_field_vec()
+//                         .iter()
+//                         .copied()
+//                         .cycle()
+//                         .take(1 << num_var_with_rotation)
+//                         .collect_vec()
+//                         .into_mle()
+//                         .into()
+//                 })
+//                 .collect::<Vec<ArcMultilinearExtension<E>>>()
+//         };
+//         exit_span!(fixed_poly_expand_span);
+//         fixed_mles
+//     }
+// }
 
 impl<E, PCS> ProverDevice<CpuBackend<E, PCS>> for CpuProver<CpuBackend<E, PCS>>
 where
