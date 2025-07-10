@@ -176,7 +176,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
         // 1st pass: assign witness outside of gkr-iop scope
         raw_witin_iter
-            .zip_eq(steps.par_chunks(1))
+            .zip_eq(steps.par_chunks(num_instance_per_batch))
             .flat_map(|(instances, steps)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 instances
