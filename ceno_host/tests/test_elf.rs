@@ -237,7 +237,7 @@ fn test_keccak_syscall() -> Result<()> {
     let steps = run(&mut state)?;
 
     // Expect the program to have written successive states between Keccak permutations.
-    const ITERATIONS: usize = 4;
+    const ITERATIONS: usize = 100;
     let keccak_outs = sample_keccak_f(ITERATIONS);
 
     let all_messages = read_all_messages(&state);

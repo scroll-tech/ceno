@@ -1,7 +1,9 @@
 use crate::{RAMType, error::CircuitBuilderError};
 use ff_ext::ExtensionField;
 
-use multilinear_extensions::{Expression, ToExpr};
+use crate::circuit_builder::DebugIndex;
+use itertools::izip;
+use multilinear_extensions::{Expression, ToExpr, power_sequence};
 
 use crate::{circuit_builder::CircuitBuilder, gadgets::AssertLtConfig};
 
@@ -92,12 +94,7 @@ impl<E: ExtensionField> CircuitBuilder<'_, E> {
 
             let next_ts = ts + 1;
 
-            #[cfg(test)]
-            {
-                use crate::circuit_builder::DebugIndex;
-                use itertools::izip;
-                use multilinear_extensions::power_sequence;
-
+            if matches!(ram_type, RAMType::Register) {
                 let pow_u16 = power_sequence((1 << u16::BITS as u64).into());
                 cb.register_debug_expr(
                     DebugIndex::RdWrite as usize,
