@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, slice};
+use std::slice;
 
 use crate::{
     Point,
@@ -152,7 +152,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                 // refer to prover documentation for the reason of right shift by 1
                 let mut idx = idx >> 1;
 
-                let mut reduced_openings = BTreeMap::new();
+                let mut reduced_openings_by_height: Vec<Option<(E, E)>> =
+                    vec![None; log2_max_codeword_size];
                 let mut batch_coeffs_iter = batch_coeffs.iter();
 
                 for ((commit, batch_opening), input_proof) in
@@ -202,14 +203,15 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                         );
                         let log2_height = log2_strict_usize(dimension.height);
 
-                        reduced_openings
-                            .entry(log2_height)
-                            .and_modify(|(low_acc, high_acc)| {
-                                // accumulate low and high values for the same log2_height
-                                *low_acc += low;
-                                *high_acc += high;
-                            })
-                            .or_insert((low, high));
+                        if let Some((low_acc, high_acc)) =
+                            reduced_openings_by_height[log2_height].as_mut()
+                        {
+                            // accumulate low and high values for the same log2_height
+                            *low_acc += low;
+                            *high_acc += high;
+                        } else {
+                            reduced_openings_by_height[log2_height] = Some((low, high));
+                        }
                     }
                 }
 
@@ -226,7 +228,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                 // first folding challenge
                 let r = fold_challenges.first().unwrap();
                 let coeff = S::verifier_folding_coeffs(vp, log2_height, idx);
-                let (lo, hi) = reduced_openings[&log2_height];
+                let (lo, hi) = reduced_openings_by_height[log2_height].unwrap();
                 let mut folded = codeword_fold_with_challenge(&[lo, hi], *r, coeff, inv_2);
 
                 for (
@@ -247,7 +249,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                     let idx_sibling = idx & 0x01;
                     let mut leafs = vec![*sibling_value; 2];
                     leafs[idx_sibling] = folded;
-                    if let Some((lo, hi)) = reduced_openings.get(&log2_height) {
+                    if let Some((lo, hi)) = reduced_openings_by_height[log2_height].as_mut() {
                         leafs[idx_sibling] += if idx_sibling == 1 { *hi } else { *lo };
                     }
 
