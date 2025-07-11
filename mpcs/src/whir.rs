@@ -165,12 +165,11 @@ where
 
     fn batch_open(
         _pp: &Self::ProverParam,
-        _num_instances: &[(usize, usize)],
-        _fixed_comms: Option<&Self::CommitmentWithWitness>,
-        _witin_comms: &Self::CommitmentWithWitness,
-        _points: &[Point<E>],
-        _evals: &[Vec<E>],
-        _circuit_num_polys: &[(usize, usize)],
+        _rounds: Vec<(
+            &Self::CommitmentWithWitness,
+            // for each matrix open at one point
+            Vec<(Point<E>, Vec<E>)>,
+        )>,
         _transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, crate::Error> {
         todo!()
@@ -195,13 +194,21 @@ where
 
     fn batch_verify(
         _vp: &Self::VerifierParam,
-        _num_instances: &[(usize, usize)],
-        _points: &[Point<E>],
-        _fixed_comms: Option<&Self::Commitment>,
-        _witin_comms: &Self::Commitment,
-        _evals: &[Vec<E>],
+        _rounds: Vec<(
+            Self::Commitment,
+            // for each matrix:
+            Vec<(
+                // its num_vars,
+                usize,
+                (
+                    // the point,
+                    Point<E>,
+                    // values at the point
+                    Vec<E>,
+                ),
+            )>,
+        )>,
         _proof: &Self::Proof,
-        _circuit_num_polys: &[(usize, usize)],
         _transcript: &mut impl Transcript<E>,
     ) -> Result<(), crate::Error> {
         todo!()
