@@ -428,9 +428,16 @@ where
     ) -> Result<(), Error> {
         let mmcs = poseidon2_merkle_tree::<E>();
 
-        // preprocess data into respective group, in particularly, trivials vs non-trivials
+        // check trivial proofs are well-formed
+        if rounds.len() != proof.trivial_proof.len() {
+            return Err(Error::InvalidPcsOpeningProof(format!(
+                "rounds length mismatch: {} != {}",
+                rounds.len(),
+                proof.trivial_proof.len()
+            )));
+        }
+        // check trivial proofs
         for ((commit, openings), trivial_proof) in rounds.iter().zip(proof.trivial_proof.iter()) {
-            // check trivial proofs
             // 1. check mmcs verify opening
             // 2. check mle.evaluate(point) == evals
             if trivial_proof.len() != commit.trivial_commits.len() {
@@ -459,7 +466,7 @@ where
                         poly,
                     );
                     if mle.evaluate(&opening.1.0) != *eval {
-                        return Err(Error::InvalidPcsParam(
+                        return Err(Error::InvalidPcsOpeningProof(
                             "trivial poly evaluation mismatch".to_string(),
                         ));
                     }
@@ -516,6 +523,10 @@ where
             })
             .max()
             .unwrap();
+        if max_num_var < Spec::get_basecode_msg_size_log() {
+            // all the matrices are trivial, so we can skip the folding
+            return Ok(());
+        }
         let num_rounds = max_num_var - Spec::get_basecode_msg_size_log();
 
         // prepare folding challenges via sumcheck round msg + FRI commitment
