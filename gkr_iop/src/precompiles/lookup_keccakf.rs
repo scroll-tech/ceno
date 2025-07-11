@@ -7,21 +7,27 @@ use crate::{
 };
 use ark_std::iterable::Iterable;
 use ceno_emul::{ByteAddr, Cycle};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldInto};
 use itertools::{Itertools, iproduct, izip, zip_eq};
+use keccakf::Permutation;
 use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::{Expression, ToExpr, WitIn, mle::PointAndEval, util::ceil_log2};
+use multilinear_extensions::{
+    Expression, StructuralWitIn, ToExpr, WitIn,
+    mle::PointAndEval,
+    util::{ceil_log2, max_usable_threads},
+};
 use ndarray::{ArrayView, Ix2, Ix3, s};
+use p3_field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::ParallelSliceMut,
+    slice::{ParallelSlice, ParallelSliceMut},
 };
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
 use crate::{
     ProtocolBuilder, ProtocolWitnessGenerator,
@@ -151,7 +157,7 @@ pub struct KeccakLayer<WitT, EqT> {
 #[derive(Clone, Debug)]
 pub struct KeccakLayout<E: ExtensionField> {
     pub params: KeccakParams<Expression<E>>,
-    pub layer_exprs: KeccakLayer<WitIn, WitIn>,
+    pub layer_exprs: KeccakLayer<WitIn, StructuralWitIn>,
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_challenges: usize,
@@ -171,7 +177,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation_right,
                 eq_rotation,
             ],
-        ): (KeccakWitCols<WitIn>, [WitIn; 6]) = unsafe {
+        ): (KeccakWitCols<WitIn>, [StructuralWitIn; 6]) = unsafe {
             (
                 transmute::<[WitIn; size_of::<KeccakWitCols<u8>>()], KeccakWitCols<WitIn>>(
                     array::from_fn(|id| cb.create_witin(|| format!("keccak_witin_{}", id))),
@@ -179,7 +185,9 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 // transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(array::from_fn(|id| {
                 //     cb.create_fixed(|| format!("keccak_fixed_{}", id))
                 // })),
-                array::from_fn(|id| cb.create_witin(|| format!("keccak_eq_{}", id))),
+                array::from_fn(|id| {
+                    cb.create_structural_witin(|| format!("keccak_eq_{}", id), 0, 0, 0, false)
+                }),
             )
         };
 
@@ -476,8 +484,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 + system.cs.lk_expressions.len()
                 + system.cs.num_fixed
                 + system.cs.num_witin as usize,
-            final_out_evals: (0..system.cs.r_expressions.len()
-                + system.cs.w_expressions.len()
+            final_out_evals: (0..system.cs.w_expressions.len()
+                + system.cs.r_expressions.len()
                 + system.cs.lk_expressions.len())
                 .collect_vec(),
             layers: vec![],
@@ -844,9 +852,16 @@ where
     }
 }
 
+/// this is for testing purpose
+pub struct TestKeccakLayout<E: ExtensionField> {
+    layout: KeccakLayout<E>,
+    input_value: [WitIn; KECCAK_INPUT32_SIZE],
+    output_value: [WitIn; KECCAK_OUTPUT32_SIZE],
+}
+
 pub fn setup_gkr_circuit<E: ExtensionField>()
--> Result<(KeccakLayout<E>, GKRCircuit<E>, u16), CircuitBuilderError> {
-    let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
+-> Result<(TestKeccakLayout<E>, GKRCircuit<E>, u16), CircuitBuilderError> {
+    let mut cs = ConstraintSystem::new(|| "lookup_keccak");
     let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
     let input_value: [WitIn; KECCAK_INPUT32_SIZE] =
         array::from_fn(|i| circuit_builder.create_witin(|| format!("input_value_{i}")));
@@ -860,7 +875,15 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     };
     let (layout, chip) = KeccakLayout::build_gkr_chip(&mut circuit_builder, params)?;
     circuit_builder.finalize();
-    Ok((layout, chip.gkr_circuit(), cs.num_witin))
+    Ok((
+        TestKeccakLayout {
+            layout,
+            input_value,
+            output_value,
+        },
+        chip.gkr_circuit(),
+        cs.num_witin,
+    ))
 }
 
 #[tracing::instrument(
@@ -870,7 +893,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     fields(profiling_1)
 )]
 pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-    (layout, gkr_circuit, num_witin): (KeccakLayout<E>, GKRCircuit<E>, u16),
+    (layout, gkr_circuit, num_witin): (TestKeccakLayout<E>, GKRCircuit<E>, u16),
     states: Vec<[u64; 25]>,
     verify: bool,
     test_outputs: bool,
@@ -880,13 +903,15 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     let log2_num_instance_rounds = ceil_log2(num_instances_rounds);
     let num_threads = optimal_sumcheck_threads(log2_num_instance_rounds);
     let mut instances = Vec::with_capacity(num_instances);
+    let mut instances_outputu32: Vec<[u32; KECCAK_OUTPUT32_SIZE]> =
+        Vec::with_capacity(num_instances);
 
     let span = entered_span!("instances", profiling_2 = true);
     for state in &states {
         let state_mask64 = MaskRepresentation::from(state.iter().map(|e| (64, e)).collect_vec());
         let state_mask32 = state_mask64.convert(vec![32; 50]);
 
-        instances.push(KeccakInstance {
+        let instance = KeccakInstance {
             state: KeccakStateInstance {
                 state_ptr_address: ByteAddr::from(0),
                 cur_ts: 0,
@@ -901,18 +926,71 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     .try_into()
                     .unwrap(),
             },
-        });
+        };
+        instances.push(instance);
+        instances_outputu32.push({
+            let mut state = *state;
+            state.permute();
+            let state_mask64 =
+                MaskRepresentation::from(state.iter().map(|e| (64, e)).collect_vec());
+            let state_mask32 = state_mask64.convert(vec![32; 50]);
+            state_mask32
+                .values()
+                .iter()
+                .map(|e| *e as u32)
+                .collect_vec()
+                .try_into()
+                .unwrap()
+        })
     }
     exit_span!(span);
 
     let span = entered_span!("phase1_witness", profiling_2 = true);
+    let nthreads = max_usable_threads();
+    let num_instance_per_batch = states.len().div_ceil(nthreads).max(1);
+
     let mut lk_multiplicity = LkMultiplicity::default();
     let mut phase1_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.phase1_witin_rmm_height(states.len()),
+        layout.layout.phase1_witin_rmm_height(states.len()),
         num_witin as usize,
         InstancePaddingStrategy::Default,
     );
-    layout.phase1_witness_group(
+    let raw_witin_iter =
+        phase1_witness.par_batch_iter_mut(num_instance_per_batch * ROUNDS.next_power_of_two());
+    raw_witin_iter
+        .zip_eq(instances.par_chunks(num_instance_per_batch))
+        .zip_eq(instances_outputu32.par_chunks(num_instance_per_batch))
+        .for_each(|((instances, steps), out32s)| {
+            instances
+                .chunks_mut(num_witin as usize * ROUNDS.next_power_of_two())
+                .zip_eq(steps)
+                .zip_eq(out32s)
+                .for_each(|((instance_with_rotation, step), out32)| {
+                    // assign full rotation with same witness
+                    for instance in instance_with_rotation.chunks_mut(num_witin as usize) {
+                        layout
+                            .input_value
+                            .iter()
+                            .zip_eq(layout.output_value)
+                            .zip_eq(step.witin.instance)
+                            .zip_eq(out32.iter())
+                            .for_each(|(((in_witin, out_witin), input_32), output_32)| {
+                                set_val!(
+                                    instance,
+                                    in_witin,
+                                    E::BaseField::from_canonical_u32(input_32)
+                                );
+                                set_val!(
+                                    instance,
+                                    out_witin,
+                                    E::BaseField::from_canonical_u32(output_32)
+                                );
+                            });
+                    }
+                })
+        });
+
+    layout.layout.phase1_witness_group(
         KeccakTrace { instances },
         &mut phase1_witness,
         &mut lk_multiplicity,
@@ -927,14 +1005,16 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     ];
 
     let span = entered_span!("gkr_witness", profiling_2 = true);
-    let rc_witness = layout.fixed_witness_group();
+    let fixed = layout.layout.fixed_witness_group();
     #[allow(clippy::type_complexity)]
-    let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
-        &gkr_circuit,
-        &phase1_witness,
-        &rc_witness,
-        &challenges,
-    );
+    let (gkr_witness, gkr_output) = layout
+        .layout
+        .gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
+            &gkr_circuit,
+            &phase1_witness,
+            &fixed,
+            &challenges,
+        );
     exit_span!(span);
 
     let span = entered_span!("out_eval", profiling_2 = true);

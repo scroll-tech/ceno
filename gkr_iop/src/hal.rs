@@ -24,7 +24,7 @@ pub trait ProverBackend {
 
     /// device-specific types
     // TODO: remove lifetime bound
-    type MultilinearPoly<'a>: Send + Sync + Clone + Debug + MultilinearPolynomial<Self::E> + 'a;
+    type MultilinearPoly<'a>: Send + Sync + Clone + Debug + MultilinearPolynomial<Self::E>;
     type Matrix: Send + Sync + Clone;
     type PcsData;
 }

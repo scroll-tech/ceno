@@ -51,6 +51,9 @@ pub enum LayerType {
 pub struct Layer<E: ExtensionField> {
     pub name: String,
     pub ty: LayerType,
+    pub n_witin: usize,
+    pub n_structural_witin: usize,
+    pub n_fixed: usize,
     pub max_expr_degree: usize,
     /// num challenges dedicated to this layer.
     pub n_challenges: usize,
@@ -100,6 +103,9 @@ impl<E: ExtensionField> Layer<E> {
     pub fn new(
         name: String,
         ty: LayerType,
+        n_witin: usize,
+        n_structural_witin: usize,
+        n_fixed: usize,
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
         n_challenges: usize,
@@ -126,6 +132,9 @@ impl<E: ExtensionField> Layer<E> {
         Self {
             name,
             ty,
+            n_witin,
+            n_structural_witin,
+            n_fixed,
             max_expr_degree,
             n_challenges,
             exprs,
@@ -305,8 +314,7 @@ impl<E: ExtensionField> Layer<E> {
             ),
             w_record_evals.chain(r_record_evals)
         ) {
-            gkr_expressions
-                .push(ram_eval.0.clone().unwrap() * (ram_expr - E::BaseField::ONE.expr())); // ONE is for padding;
+            gkr_expressions.push(ram_expr - E::BaseField::ONE.expr()); // ONE is for padding;
             gkr_expressions_eval.push((
                 ram_eval.0,
                 EvalExpression::<E>::Linear(
@@ -329,8 +337,7 @@ impl<E: ExtensionField> Layer<E> {
                 .zip_eq(&cb.cs.lk_expressions_namespace_map),
             lookup_evals
         ) {
-            gkr_expressions
-                .push(lookup_eval.0.clone().unwrap() * (lookup - cb.cs.chip_record_alpha.clone())); // alpha is for padding;
+            gkr_expressions.push(lookup - cb.cs.chip_record_alpha.clone()); // alpha is for padding;
             gkr_expressions_eval.push((
                 lookup_eval.0,
                 EvalExpression::<E>::Linear(
@@ -359,7 +366,7 @@ impl<E: ExtensionField> Layer<E> {
             ),
             zero_evals
         ) {
-            gkr_expressions.push(zero_eq.clone().unwrap() * zero_expr);
+            gkr_expressions.push(zero_expr.clone());
             gkr_expressions_eval.push((zero_eq, EvalExpression::Zero));
             gkr_expressions_name.push(format!("{}/{idx}", name));
         }
@@ -432,6 +439,9 @@ impl<E: ExtensionField> Layer<E> {
             Layer::new(
                 layer_name,
                 layer_type,
+                cb.cs.num_witin as usize,
+                cb.cs.num_structural_witin as usize,
+                cb.cs.num_fixed,
                 expressions,
                 n_challenges,
                 in_eval_expr,
@@ -451,6 +461,9 @@ impl<E: ExtensionField> Layer<E> {
             Layer::new(
                 layer_name,
                 layer_type,
+                cb.cs.num_witin as usize,
+                cb.cs.num_structural_witin as usize,
+                cb.cs.num_fixed,
                 expressions,
                 n_challenges,
                 in_eval_expr,

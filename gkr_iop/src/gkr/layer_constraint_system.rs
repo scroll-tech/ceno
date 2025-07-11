@@ -403,6 +403,9 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             Layer::new(
                 layer_name,
                 layer_type,
+                self.num_witin,
+                0,
+                self.num_fixed,
                 expressions,
                 n_challenges,
                 in_eval_expr,
@@ -422,6 +425,9 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             Layer::new(
                 layer_name,
                 layer_type,
+                self.num_witin,
+                0,
+                self.num_fixed,
                 expressions,
                 n_challenges,
                 in_eval_expr,

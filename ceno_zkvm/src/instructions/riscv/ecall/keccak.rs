@@ -183,48 +183,46 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                     .chunks_mut(num_witin * KECCAK_ROUNDS.next_power_of_two())
                     .zip_eq(steps)
                     .map(|(instance_with_rotation, step)| {
-                        let mut instances = instance_with_rotation.chunks_mut(num_witin);
-                        let Some(instance) = instances.next() else {
-                            unreachable!()
-                        };
                         let ops = &step.syscall().expect("syscall step");
 
-                        // vm_state
-                        config.vm_state.assign_instance(instance, step)?;
+                        // assign full rotation with same witness
+                        for instance in instance_with_rotation.chunks_mut(num_witin) {
+                            // vm_state
+                            config.vm_state.assign_instance(instance, step)?;
 
-                        //  assign ecall_id
-                        config.ecall_id.1.assign_value(
-                            instance,
-                            Value::new_unchecked(ops.reg_ops[0].value.after),
-                        );
-                        config.ecall_id.0.assign_op(
-                            instance,
-                            &mut lk_multiplicity,
-                            step.cycle(),
-                            &ops.reg_ops[0],
-                        )?;
-                        //  assign state_ptr
-                        config.state_ptr.1.assign_value(
-                            instance,
-                            Value::new_unchecked(ops.reg_ops[1].value.after),
-                        );
-                        config.state_ptr.0.assign_op(
-                            instance,
-                            &mut lk_multiplicity,
-                            step.cycle(),
-                            &ops.reg_ops[1],
-                        )?;
-                        // assign mem_rw
-                        for ((value, writer), op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
-                            set_val!(instance, value.before, op.value.before as u64);
-                            set_val!(instance, value.after, op.value.after as u64);
-                            writer.assign_op(instance, &mut lk_multiplicity, step.cycle(), op)?;
-                        }
-
-                        // propogate first instance change to all with repeat result
-                        for other_rotation_instance in instances {
-                            other_rotation_instance[..instance.len()]
-                                .copy_from_slice(&instance[..instance.len()]);
+                            //  assign ecall_id
+                            config.ecall_id.1.assign_value(
+                                instance,
+                                Value::new_unchecked(ops.reg_ops[0].value.after),
+                            );
+                            config.ecall_id.0.assign_op(
+                                instance,
+                                &mut lk_multiplicity,
+                                step.cycle(),
+                                &ops.reg_ops[0],
+                            )?;
+                            //  assign state_ptr
+                            config.state_ptr.1.assign_value(
+                                instance,
+                                Value::new_unchecked(ops.reg_ops[1].value.after),
+                            );
+                            config.state_ptr.0.assign_op(
+                                instance,
+                                &mut lk_multiplicity,
+                                step.cycle(),
+                                &ops.reg_ops[1],
+                            )?;
+                            // assign mem_rw
+                            for ((value, writer), op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
+                                set_val!(instance, value.before, op.value.before as u64);
+                                set_val!(instance, value.after, op.value.after as u64);
+                                writer.assign_op(
+                                    instance,
+                                    &mut lk_multiplicity,
+                                    step.cycle(),
+                                    op,
+                                )?;
+                            }
                         }
                         Ok(())
                     })

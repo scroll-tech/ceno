@@ -4,7 +4,7 @@ use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression,
+    Expression, WitnessId,
     mle::Point,
     utils::eval_by_expr,
     virtual_poly::{VPAuxInfo, eq_eval},
@@ -145,7 +145,6 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             transcript,
         );
 
-        // TODO FIXME need to add padding
         let sigma = dot_product(
             alpha_pows.iter().copied(),
             eval_and_dedup_points
@@ -190,6 +189,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .cloned()
                 .map(|r| Expression::Constant(Either::Right(r)))
                 .collect_vec(),
+            self.n_witin as WitnessId,
         );
 
         let zero_check_expr = zero_check_exprs.into_iter().sum::<Expression<E>>();

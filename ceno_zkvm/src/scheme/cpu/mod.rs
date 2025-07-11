@@ -315,25 +315,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 
         // sanity check
         assert_eq!(input.witness.len(), cs.num_witin as usize);
-        assert_eq!(
-            input.structural_witness.len(),
-            cs.num_structural_witin as usize
+
+        // structural witness can be empty. In this case they are `eq`, and will be filled later
+        assert!(
+            input.structural_witness.len() == cs.num_structural_witin as usize
+                || input.structural_witness.is_empty(),
         );
         assert_eq!(input.fixed.len(), cs.num_fixed);
-        // check all witness size are power of 2
 
+        // check all witness size are power of 2
         assert!(
             input
                 .witness
                 .iter()
                 .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
         );
-        assert!(
-            input
-                .structural_witness
-                .iter()
-                .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
-        );
+        if !input.structural_witness.is_empty() {
+            assert!(
+                input
+                    .structural_witness
+                    .iter()
+                    .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
+            );
+        }
 
         assert!(is_table_circuit || is_opcode_circuit);
         assert!(
