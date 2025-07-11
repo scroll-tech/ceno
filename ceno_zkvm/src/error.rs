@@ -13,6 +13,7 @@ pub enum ZKVMError {
     UtilError(UtilError),
     WitnessNotFound(String),
     InvalidWitness(String),
+    InvalidProof(String),
     VKNotFound(String),
     FixedTraceNotFound(String),
     VerifyError(String),
