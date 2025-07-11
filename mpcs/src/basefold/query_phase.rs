@@ -182,7 +182,8 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                     .expect("verify mmcs opening proof failed");
 
                     // for each log2_height, combine codewords with randomness
-                    for (mat, dimension) in input_proof.opened_values.iter().zip(dimensions.iter())
+                    for (mat, dimension) in
+                        input_proof.opened_values.iter().zip_eq(dimensions.iter())
                     {
                         let width = mat.len() / 2;
                         assert_eq!(dimension.width, mat.len());
@@ -281,7 +282,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
     exit_span!(check_queries_span);
 
     // 1. check initial claim match with first round sumcheck value
-    // we need to scale up with scalar for witin_num_vars < max_num_var
+    // we need to scale up with scalar for num_var < max_num_var
     let mut batch_coeffs_iter = batch_coeffs.iter();
     let mut expected_sum = E::ZERO;
     for round in rounds.iter() {
