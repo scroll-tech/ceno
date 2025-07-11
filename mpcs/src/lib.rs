@@ -249,6 +249,7 @@ pub enum Error {
     InvalidSumcheck(String),
     InvalidPcsParam(String),
     InvalidPcsOpen(String),
+    InvalidPcsOpeningProof(String),
     InvalidSnark(String),
     Serialization(String),
     Transcript(String),
