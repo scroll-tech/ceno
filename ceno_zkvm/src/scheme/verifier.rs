@@ -86,7 +86,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // make sure circuit index of chip proofs are
         // subset of that of self.vk.circuit_vks
         for chip_idx in vm_proof.chip_proofs.keys() {
-            if *chip_idx > self.vk.circuit_vks.len() {
+            if *chip_idx >= self.vk.circuit_vks.len() {
                 return Err(ZKVMError::VKNotFound(format!(
                     "chip index {chip_idx} not found in vk set [0..{})",
                     self.vk.circuit_vks.len()
