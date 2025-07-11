@@ -157,7 +157,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         .collect_vec();
 
         let span = entered_span!("gen_expr", profiling_4 = true);
-        let zero_check_exprs = extend_exprs_with_rotation(layer, &alpha_pows);
+        let zero_check_exprs =
+            extend_exprs_with_rotation(layer, &alpha_pows, layer.n_witin as WitnessId);
         exit_span!(span);
 
         let span = entered_span!("build_out_points_eq", profiling_4 = true);
@@ -191,14 +192,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .collect::<Vec<_>>();
         exit_span!(span);
 
-        let builder = VirtualPolynomialsBuilder::new_with_mles(
-            num_threads,
-            max_num_variables,
-            wit.iter()
-                .map(|mle| Either::Left(mle.as_ref()))
-                .chain(eqs.iter_mut().map(Either::Right))
-                .collect_vec(),
+        let all_witins = wit
+            .iter()
+            .map(|mle| Either::Left(mle.as_ref()))
+            .chain(eqs.iter_mut().map(Either::Right))
+            .collect_vec();
+        assert_eq!(
+            all_witins.len(),
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed
         );
+        let builder =
+            VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins);
 
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
         let zero_check_expr: Expression<E> = zero_check_exprs.into_iter().sum();

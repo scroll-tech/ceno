@@ -110,7 +110,7 @@ fn test_rw_lk_expression_combination() {
 
         // generate fixed traces
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-        zkvm_fixed_traces.register_opcode_circuit::<TestCircuit<E, RW, L>>(&zkvm_cs);
+        zkvm_fixed_traces.register_opcode_circuit::<TestCircuit<E, RW, L>>(&zkvm_cs, &config);
 
         // keygen
         let pk = zkvm_cs
@@ -246,8 +246,8 @@ fn test_single_add_instance_e2e() {
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config);
+    zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config);
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,

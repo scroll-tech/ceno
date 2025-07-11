@@ -101,3 +101,7 @@ name = "quadratic_sorting"
 [[bench]]
 harness = false
 name = "is_prime"
+
+[[bench]]
+harness = false
+name = "keccak"

@@ -38,7 +38,8 @@ fn keccak_f_fn(c: &mut Criterion) {
 
                         let instant = std::time::Instant::now();
 
-                        let circuit = setup_lookup_keccak_gkr_circuit();
+                        let circuit =
+                            setup_lookup_keccak_gkr_circuit().expect("setup circuit error");
                         #[allow(clippy::unit_arg)]
                         let _ =
                             run_faster_keccakf::<GoldilocksExt2, BasefoldDefault<GoldilocksExt2>>(

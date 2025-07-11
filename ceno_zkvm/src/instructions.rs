@@ -38,6 +38,13 @@ pub trait Instruction<E: ExtensionField> {
         Ok(None)
     }
 
+    fn generate_fixed_traces(
+        _config: &Self::InstructionConfig,
+        _num_fixed: usize,
+    ) -> Option<RowMajorMatrix<E::BaseField>> {
+        None
+    }
+
     // assign single instance giving step from trace
     fn assign_instance(
         config: &Self::InstructionConfig,

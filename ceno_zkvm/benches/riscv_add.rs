@@ -41,9 +41,9 @@ const NUM_SAMPLES: usize = 10;
 fn bench_add(c: &mut Criterion) {
     type Pcs = BasefoldDefault<E>;
     let mut zkvm_cs = ZKVMConstraintSystem::default();
-    let _ = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
+    let config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &config);
 
     let param = Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).unwrap();
     let (pp, vp) = Pcs::trim(param, 1 << MAX_NUM_VARIABLES).unwrap();
