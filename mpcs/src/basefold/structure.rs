@@ -169,8 +169,8 @@ where
     E::BaseField: Serialize + DeserializeOwned,
 {
     pub(super) commit: Digest<E>,
-    pub(crate) log2_max_codeword_size: usize,
-    pub(crate) trivial_commits: Vec<(usize, Digest<E>)>,
+    pub log2_max_codeword_size: usize,
+    pub trivial_commits: Vec<(usize, Digest<E>)>,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
@@ -293,10 +293,10 @@ pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) commits: Vec<Digest<E>>,
-    pub(crate) final_message: Vec<Vec<E>>,
-    pub(crate) query_opening_proof: QueryOpeningProofs<E>,
-    pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
+    pub commits: Vec<Digest<E>>,
+    pub final_message: Vec<Vec<E>>,
+    pub query_opening_proof: QueryOpeningProofs<E>,
+    pub sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     // vec![witness, fixed], where fixed is optional
     pub(crate) trivial_proof: TrivialProof<E>,
     pub(crate) pow_witness: E::BaseField,
