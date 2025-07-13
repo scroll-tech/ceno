@@ -27,7 +27,6 @@ pub mod evaluation;
 pub mod gadgets;
 pub mod gkr;
 pub mod hal;
-pub mod precompiles;
 pub mod tables;
 pub mod utils;
 

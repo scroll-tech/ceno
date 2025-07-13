@@ -8,8 +8,7 @@ use multilinear_extensions::{
     mle::{MultilinearExtension, Point, PointAndEval},
     util::ceil_log2,
 };
-use p3_field::FieldAlgebra;
-use p3_util::indices_arr;
+use p3::{field::FieldAlgebra, util::indices_arr};
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
@@ -18,7 +17,7 @@ use tiny_keccak::keccakf;
 use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
-use crate::{
+use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     circuit_builder::{CircuitBuilder, ConstraintSystem},

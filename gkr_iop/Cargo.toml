@@ -17,10 +17,8 @@ clap.workspace = true
 either.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
-keccakf = "0.1.2"
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
-ndarray.workspace = true
 p3.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
@@ -46,14 +44,6 @@ tikv-jemallocator = { version = "0.6", optional = true }
 
 [dev-dependencies]
 criterion.workspace = true
-
-[[bench]]
-harness = false
-name = "bitwise_keccakf"
-
-[[bench]]
-harness = false
-name = "lookup_keccakf"
 
 [features]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]

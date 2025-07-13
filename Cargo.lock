@@ -460,8 +460,10 @@ dependencies = [
  "gkr_iop",
  "glob",
  "itertools 0.13.0",
+ "keccakf",
  "mpcs",
  "multilinear_extensions",
+ "ndarray",
  "num-traits",
  "p3",
  "parse-size",
@@ -1115,10 +1117,8 @@ dependencies = [
  "either",
  "ff_ext",
  "itertools 0.13.0",
- "keccakf",
  "mpcs",
  "multilinear_extensions",
- "ndarray",
  "p3",
  "p3-field",
  "p3-goldilocks",
@@ -1618,9 +1618,9 @@ dependencies = [
 
 [[package]]
 name = "matrixmultiply"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9380b911e3e96d10c1f415da0876389aaf1b56759054eeb0de7df940c456ba1a"
+checksum = "a06de3016e9fae57a36fd14dba131fccf49f74b40b7fbdb472f96e361ec71a08"
 dependencies = [
  "autocfg",
  "rawpointer",

@@ -13,7 +13,7 @@ use crate::{
     hal::{ProverBackend, ProverDevice},
 };
 
-pub(super) mod booleanhypercube;
+pub mod booleanhypercube;
 pub mod layer;
 pub mod layer_constraint_system;
 pub mod mock;

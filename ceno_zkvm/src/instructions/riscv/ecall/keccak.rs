@@ -2,14 +2,7 @@ use std::{array, marker::PhantomData};
 
 use ceno_emul::{ByteAddr, Change, Cycle, InsnKind, Platform, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
-use gkr_iop::{
-    ProtocolWitnessGenerator,
-    gkr::GKRCircuit,
-    precompiles::{
-        KECCAK_INPUT32_SIZE, KECCAK_ROUNDS, KeccakInOutCols, KeccakInstance, KeccakLayout,
-        KeccakStateInstance, KeccakTrace, KeccakWitInstance,
-    },
-};
+use gkr_iop::{ProtocolWitnessGenerator, gkr::GKRCircuit};
 use itertools::Itertools;
 use multilinear_extensions::{ToExpr, WitIn, util::max_usable_threads};
 use p3::{field::FieldAlgebra, matrix::Matrix};
@@ -31,6 +24,10 @@ use crate::{
             ecall_base::WriteFixedRS,
             insn_base::{StateInOut, WriteMEM},
         },
+    },
+    precompiles::{
+        KECCAK_INPUT32_SIZE, KECCAK_ROUNDS, KeccakInOutCols, KeccakInstance, KeccakLayout,
+        KeccakParams, KeccakStateInstance, KeccakTrace, KeccakWitInstance,
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -120,7 +117,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .collect::<Result<Vec<(Change<WitIn>, WriteMEM)>, _>>()?;
 
         // construct keccak gkr-iop circuit
-        let params = gkr_iop::precompiles::KeccakParams {
+        let params = KeccakParams {
             io: KeccakInOutCols {
                 input32: array::from_fn(|i| mem_rw[i].0.before.expr()),
                 output32: array::from_fn(|i| mem_rw[i].0.after.expr()),

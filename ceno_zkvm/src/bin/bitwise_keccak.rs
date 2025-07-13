@@ -1,6 +1,6 @@
+use ceno_zkvm::precompiles::{run_bitwise_keccakf, setup_bitwise_keccak_gkr_circuit};
 use clap::{Parser, command};
 use ff_ext::GoldilocksExt2;
-use gkr_iop::precompiles::{run_bitwise_keccakf, setup_bitwise_keccak_gkr_circuit};
 use itertools::Itertools;
 use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
