@@ -255,8 +255,6 @@ pub struct QueryOpeningProof<E: ExtensionField> {
 
 pub type QueryOpeningProofs<E> = Vec<QueryOpeningProof<E>>;
 
-pub type TrivialProof<E> = Vec<Vec<DenseMatrix<<E as ExtensionField>::BaseField>>>;
-
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
@@ -270,8 +268,6 @@ where
     pub(crate) final_message: Vec<Vec<E>>,
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
-    // vec![witness, fixed], where fixed is optional
-    pub(crate) trivial_proof: TrivialProof<E>,
     pub(crate) pow_witness: E::BaseField,
 }
 

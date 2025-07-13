@@ -7,13 +7,7 @@ use crate::{
 };
 pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
-use multilinear_extensions::{mle::MultilinearExtension, util::transpose};
-use p3::{
-    commit::Mmcs,
-    field::FieldAlgebra,
-    matrix::{Matrix, dense::DenseMatrix},
-    util::log2_strict_usize,
-};
+use p3::{commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
 use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest};
@@ -258,14 +252,7 @@ where
 
         let max_num_var = rounds
             .iter()
-            .map(|(pcs_data, _)| {
-                pcs_data
-                    .polys
-                    .values()
-                    .map(|polys| polys.iter().next().map(|poly| poly.num_vars()).unwrap_or(0))
-                    .max()
-                    .unwrap_or(0)
-            })
+            .map(|(pcs_data, _)| pcs_data.log2_max_codeword_size - Spec::get_rate_log())
             .max()
             .unwrap();
 
@@ -308,7 +295,6 @@ where
             final_message: commit_phase_proof.final_message,
             query_opening_proof,
             sumcheck_proof: Some(commit_phase_proof.sumcheck_messages),
-            trivial_proof,
             pow_witness,
         })
     }
@@ -359,54 +345,6 @@ where
         proof: &Self::Proof,
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
-        let mmcs = poseidon2_merkle_tree::<E>();
-
-        // check trivial proofs are well-formed
-        if rounds.len() != proof.trivial_proof.len() {
-            return Err(Error::InvalidPcsOpeningProof(format!(
-                "rounds length mismatch: {} != {}",
-                rounds.len(),
-                proof.trivial_proof.len()
-            )));
-        }
-        // check trivial proofs
-        for ((commit, openings), trivial_proof) in rounds.iter().zip(proof.trivial_proof.iter()) {
-            // 1. check mmcs verify opening
-            // 2. check mle.evaluate(point) == evals
-            if trivial_proof.len() != commit.trivial_commits.len() {
-                return Err(Error::InvalidPcsOpeningProof(format!(
-                    "trivial proof length mismatch: {} != {}",
-                    trivial_proof.len(),
-                    commit.trivial_commits.len()
-                )));
-            }
-            for ((idx, trivial_commit), matrix) in
-                commit.trivial_commits.iter().zip(trivial_proof.iter())
-            {
-                let (commit, _) = mmcs.commit_matrix(matrix.clone());
-                if commit != *trivial_commit {
-                    return Err(Error::MerkleRootMismatch);
-                }
-                let opening = &openings[*idx];
-                let rows = (0..matrix.height())
-                    .map(|i| matrix.row_slice(i).to_vec())
-                    .collect_vec();
-                let columns = transpose(rows);
-
-                for (poly, eval) in columns.into_iter().zip_eq(opening.1.1.iter()) {
-                    let mle = MultilinearExtension::from_evaluations_vec(
-                        log2_strict_usize(poly.len()),
-                        poly,
-                    );
-                    if mle.evaluate(&opening.1.0) != *eval {
-                        return Err(Error::InvalidPcsOpeningProof(
-                            "trivial poly evaluation mismatch".to_string(),
-                        ));
-                    }
-                }
-            }
-        }
-
         assert!(
             !proof.final_message.is_empty()
                 && proof
@@ -538,7 +476,7 @@ where
     fn get_arc_mle_witness_from_commitment(
         commitment: &Self::CommitmentWithWitness,
     ) -> Vec<ArcMultilinearExtension<'static, E>> {
-        commitment.polys.values().flatten().cloned().collect_vec()
+        commitment.polys.iter().flatten().cloned().collect_vec()
     }
 }
 

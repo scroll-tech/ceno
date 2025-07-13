@@ -414,7 +414,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     ) -> Result<(), ZKVMError> {
         if !fixed_traces.is_empty() {
             let fixed_commit_wd =
-                PCS::batch_commit(&self.pp, fixed_traces).map_err(ZKVMError::PCSError)?;
+                PCS::batch_commit(&self.pp, fixed_traces.into_values().collect_vec())
+                    .map_err(ZKVMError::PCSError)?;
             let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
             self.fixed_commit_wd = Some(Arc::new(fixed_commit_wd));
             self.fixed_commit = Some(fixed_commit);

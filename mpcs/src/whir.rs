@@ -1,8 +1,6 @@
 mod spec;
 mod structure;
 
-use std::collections::BTreeMap;
-
 use super::PolynomialCommitmentScheme;
 use crate::{PCSFriParam, Point, SecurityLevel};
 use ff_ext::{ExtensionField, PoseidonField};
@@ -153,11 +151,11 @@ where
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         let parameters = Spec::get_whir_parameters(true);
         let whir_config = WhirConfig::new(
-            MultivariateParameters::new(log2_strict_usize(rmms[&0].num_instances())),
+            MultivariateParameters::new(log2_strict_usize(rmms[0].num_instances())),
             parameters,
         );
         let (witness, _commitment) = Committer::new(whir_config)
-            .batch_commit(rmms.remove(&0).unwrap())
+            .batch_commit(rmms.remove(0))
             .map_err(crate::Error::WhirError)?;
 
         Ok(witness)

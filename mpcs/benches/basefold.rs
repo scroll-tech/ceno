@@ -8,7 +8,6 @@ use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel,
     test_util::{get_point_from_challenge, setup_pcs},
 };
-use std::collections::BTreeMap;
 
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
@@ -45,7 +44,7 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
 
         let mut transcript = T::new(b"BaseFold");
         let mut rng = rand::thread_rng();
-        let rmms = BTreeMap::from([(0, RowMajorMatrix::rand(&mut rng, 1 << num_vars, 1))]);
+        let rmms = vec![RowMajorMatrix::rand(&mut rng, 1 << num_vars, 1)];
         let comm = Pcs::batch_commit_and_write(&pp, rmms.clone(), &mut transcript).unwrap();
         let poly = Pcs::get_arc_mle_witness_from_commitment(&comm).remove(0);
 
@@ -112,10 +111,9 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
             let mut rng = rand::thread_rng();
-            let rmms =
-                BTreeMap::from([(0, RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size))]);
+            let rmms = vec![RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size)];
 
-            let polys = rmms[&0].to_mles();
+            let polys = rmms[0].to_mles();
             let comm = Pcs::batch_commit_and_write(&pp, rmms.clone(), &mut transcript).unwrap();
 
             group.bench_function(

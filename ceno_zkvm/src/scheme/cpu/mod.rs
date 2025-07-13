@@ -269,7 +269,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
             self.pp = Some(prover_param);
             self.pp.as_ref().unwrap()
         };
-        let pcs_data = PCS::batch_commit(prover_param, traces).unwrap();
+        let pcs_data = PCS::batch_commit(prover_param, traces.into_values().collect_vec()).unwrap();
         let commit = PCS::get_pure_commitment(&pcs_data);
         let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data)
             .into_par_iter()
