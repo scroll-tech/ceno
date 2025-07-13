@@ -149,7 +149,7 @@ where
 
     fn batch_commit(
         _pp: &Self::ProverParam,
-        mut rmms: BTreeMap<usize, witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+        mut rmms: Vec<witness::RowMajorMatrix<E::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, crate::Error> {
         let parameters = Spec::get_whir_parameters(true);
         let whir_config = WhirConfig::new(

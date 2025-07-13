@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{HashSet};
 
 use super::{
     encoding::EncodingScheme,
@@ -92,16 +92,10 @@ where
     let mut initial_rlc_evals: Vec<MultilinearExtension<E>> = vec![];
     let mut eq: Vec<MultilinearExtension<E>> = vec![];
     for (pcs_data, point_and_evals) in rounds {
-        let codeword_idx_to_circuit_idx = pcs_data
-            .circuit_codeword_index
-            .iter()
-            .map(|(k, v)| (*v, *k))
-            .collect::<BTreeMap<_, _>>();
         let mats = mmcs.get_matrices(&pcs_data.codeword);
         for (i, mat) in mats.into_iter().enumerate() {
-            let circuit_idx = codeword_idx_to_circuit_idx[&i];
-            let (point, _) = &point_and_evals[circuit_idx];
-            let polys = &pcs_data.polys[&circuit_idx];
+            let (point, _) = &point_and_evals[i];
+            let polys = &pcs_data.polys[i];
             // the actual ith row and (i+n/2)th row are packed in same row
             let num_rows = mat.height() * 2;
             let num_polys = mat.width() / 2;

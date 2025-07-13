@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::{
     Error, PCSFriParam, Point, PolynomialCommitmentScheme, SecurityLevel,
     util::{
@@ -157,7 +155,7 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        rmms: BTreeMap<usize, witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>>,
+        rmms: Vec<RowMajorMatrix<E::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
         if rmms.is_empty() {
             return Err(Error::InvalidPcsParam(
@@ -168,50 +166,14 @@ where
         let mmcs = poseidon2_merkle_tree::<E>();
 
         let span = entered_span!("to_mles", profiling_3 = true);
-        let (polys, rmm_to_batch_commit, trivial_proofdata, circuit_codeword_index): (
-            BTreeMap<usize, Vec<ArcMultilinearExtension<E>>>,
-            Vec<_>,
-            _,
-            _,
-        ) = rmms.into_iter().enumerate().fold(
-            (BTreeMap::new(), vec![], BTreeMap::new(), BTreeMap::new()),
-            |(
-                mut polys,
-                mut rmm_to_batch_commit,
-                mut trivial_proofdata,
-                mut circuit_codeword_index,
-            ),
-             (index, (_, rmm))| {
-                // attach column-based poly
-                polys.insert(
-                    index,
-                    rmm.to_mles().into_iter().map(|p| p.into()).collect_vec(),
-                );
-
-                // for smaller polys, we commit it separately as prover will send it as a whole without blowing factor
-                if rmm.num_vars() <= Spec::get_basecode_msg_size_log() {
-                    let rmm = rmm.into_default_padded_p3_rmm(None);
-                    trivial_proofdata.insert(index, mmcs.commit_matrix(rmm));
-                } else {
-                    rmm_to_batch_commit.push(rmm);
-                    circuit_codeword_index.insert(index, rmm_to_batch_commit.len() - 1);
-                }
-                (
-                    polys,
-                    rmm_to_batch_commit,
-                    trivial_proofdata,
-                    circuit_codeword_index,
-                )
-            },
-        );
+        let polys: Vec<Vec<ArcMultilinearExtension<E>>> = rmms
+            .iter()
+            .map(|rmm| rmm.to_mles().into_iter().map(|p| p.into()).collect_vec())
+            .collect_vec();
         exit_span!(span);
 
-        if rmm_to_batch_commit.is_empty() {
-            todo!("support all are trivial commitment")
-        }
-
         let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
-        let evals_codewords = rmm_to_batch_commit
+        let evals_codewords = rmms
             .into_iter()
             .map(|rmm| Spec::EncodingScheme::encode(&pp.encoding_params, rmm))
             .collect::<Result<Vec<DenseMatrix<E::BaseField>>, _>>()?;
@@ -220,13 +182,7 @@ where
         let span = entered_span!("build mt", profiling_3 = true);
         let (comm, codeword) = mmcs.commit(evals_codewords);
         exit_span!(span);
-        Ok(BasefoldCommitmentWithWitness::new(
-            comm,
-            codeword,
-            polys,
-            trivial_proofdata,
-            circuit_codeword_index,
-        ))
+        Ok(BasefoldCommitmentWithWitness::new(comm, codeword, polys))
     }
 
     fn write_commitment(
@@ -234,11 +190,6 @@ where
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         write_digest_to_transcript(&comm.commit(), transcript);
-        // write trivial_commits to transcript
-        for (i, trivial_commit) in comm.trivial_commits.iter() {
-            transcript.append_field_element(&E::BaseField::from_canonical_usize(*i));
-            write_digest_to_transcript(trivial_commit, transcript);
-        }
         transcript.append_field_element(&E::BaseField::from_canonical_u64(
             comm.log2_max_codeword_size as u64,
         ));
@@ -281,17 +232,13 @@ where
         for (pcs_data, point_and_evals) in rounds.iter() {
             let matrices = base_mmcs.get_matrices(&pcs_data.codeword);
             // number of point match with number of matrices committed
-            assert_eq!(
-                matrices.len() + pcs_data.trivial_proofdata.len(),
-                point_and_evals.len()
-            );
+            assert_eq!(matrices.len(), point_and_evals.len());
         }
 
         if cfg!(feature = "sanity-check") {
             // check poly evaluated on point equals to the expected value
             for (pcs_data, point_and_evals) in rounds.iter() {
-                for (polys, (point, evals)) in
-                    pcs_data.polys.values().zip_eq(point_and_evals.iter())
+                for (polys, (point, evals)) in pcs_data.polys.iter().zip_eq(point_and_evals.iter())
                 {
                     assert_eq!(polys.len(), evals.len());
                     assert!(
@@ -321,20 +268,6 @@ where
             })
             .max()
             .unwrap();
-
-        // for smaller poly, we pass their merkle tree leafs directly
-        let commit_trivial_span = entered_span!("Basefold::open::commit_trivial");
-        let trivial_proof = rounds
-            .iter()
-            .map(|(pcs_data, _)| {
-                pcs_data
-                    .trivial_proofdata
-                    .values()
-                    .map(|(_, root)| base_mmcs.get_matrices(root)[0].clone())
-                    .collect_vec()
-            })
-            .collect_vec();
-        exit_span!(commit_trivial_span);
 
         // Basefold IOP commit phase
         let commit_phase_span = entered_span!("Basefold::open::commit_phase");

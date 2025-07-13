@@ -2,7 +2,7 @@
 use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{collections::BTreeMap, fmt::Debug};
+use std::fmt::Debug;
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -42,7 +42,7 @@ pub fn pcs_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+    rmms: Vec<RowMajorMatrix<E::BaseField>>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
     Pcs::batch_commit(pp, rmms)
 }
@@ -113,12 +113,12 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+        rmms: Vec<RowMajorMatrix<E::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
-        rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+        rmms: Vec<RowMajorMatrix<E::BaseField>>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
         let comm = Self::batch_commit(pp, rmms)?;
