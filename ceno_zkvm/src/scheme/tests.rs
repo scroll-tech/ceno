@@ -9,6 +9,7 @@ use crate::{
     },
     scheme::{
         cpu::CpuTowerProver,
+        gpu::GpuTowerProver,
         hal::{ProofInput, TowerProverSpec},
         prover::ZkVMCpuProver,
     },
@@ -25,6 +26,7 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::gpu::{GpuBackend, GpuProver};
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
 
 #[cfg(debug_assertions)]
@@ -131,9 +133,12 @@ fn test_rw_lk_expression_combination() {
             .unwrap();
 
         // get proof
-        let backend = CpuBackend::<E, Pcs>::new();
-        let device = CpuProver::new(backend);
-        let prover = ZkVMCpuProver::new(pk, device);
+        // let backend = CpuBackend::<E, Pcs>::new();
+        // let device = CpuProver::new(backend);
+        // let prover = ZkVMCpuProver::new(pk, device);
+        let backend = GpuBackend::<E, Pcs>::new();
+        let device = GpuProver::new(backend);
+        let prover = ZKVMProver::new(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
         let wits_in = rmm.to_mles();
@@ -359,7 +364,7 @@ fn test_tower_proof_various_prod_size() {
         let last_layer_splitted_fanin: Vec<MultilinearExtension<E>> =
             vec![first.to_vec().into_mle(), second.to_vec().into_mle()];
         let layers = infer_tower_product_witness(num_vars, last_layer_splitted_fanin, 2);
-        let (rt_tower_p, tower_proof) = CpuTowerProver::create_proof::<E, WhirDefault<E>>(
+        let (rt_tower_p, tower_proof) = GpuTowerProver::create_proof::<E, WhirDefault<E>>(
             vec![TowerProverSpec {
                 witness: layers.clone(),
             }],
