@@ -284,6 +284,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
+    #[tracing::instrument(
+        skip_all,
+        name = "build_tower_witness",
+        fields(profiling_3),
+        level = "trace"
+    )]
     fn build_tower_witness<'a, 'b>(
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
@@ -556,6 +562,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         (out_evals, records, prod_specs, lookup_specs)
     }
 
+    #[tracing::instrument(
+        skip_all,
+        name = "prove_tower_relation",
+        fields(profiling_3),
+        level = "trace"
+    )]
     fn prove_tower_relation<'a>(
         &self,
         prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
@@ -570,6 +582,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
+    #[tracing::instrument(
+        skip_all,
+        name = "prove_main_constraints",
+        fields(profiling_3),
+        level = "trace"
+    )]
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
@@ -607,9 +625,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 num_var_with_rotation,
                 gkr::GKRCircuitWitness {
                     layers: vec![LayerWitness(
-                        chain!(&input.witness, &input.structural_witness, &input.fixed)
-                            .cloned()
-                            .collect_vec(),
+                        // we skip &input.structural_witness as it will be restored within gkr-iop
+                        chain!(&input.witness, &input.fixed).cloned().collect_vec(),
                     )],
                 },
                 // eval value doesnt matter as it wont be used by prover

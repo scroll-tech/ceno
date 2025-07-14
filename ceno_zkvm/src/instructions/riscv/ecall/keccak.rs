@@ -172,7 +172,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         );
         let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
             config.layout.phase1_witin_rmm_height(steps.len()),
-            num_witin,
+            num_structural_witin,
             InstancePaddingStrategy::Default,
         );
 

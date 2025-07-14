@@ -192,14 +192,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .collect::<Vec<_>>();
         exit_span!(span);
 
+        // `wit` := witin ++ fixed
+        // we concat eq in between `wit` := witin ++ eqs ++ fixed
         let all_witins = wit
             .iter()
+            .take(layer.n_witin)
             .map(|mle| Either::Left(mle.as_ref()))
             .chain(eqs.iter_mut().map(Either::Right))
+            .chain(
+                // fixed, start after `n_witin`
+                wit.iter()
+                    .skip(layer.n_witin)
+                    .map(|mle| Either::Left(mle.as_ref())),
+            )
             .collect_vec();
         assert_eq!(
             all_witins.len(),
-            layer.n_witin + layer.n_structural_witin + layer.n_fixed
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {}",
+            all_witins.len(),
+            layer.n_witin,
+            layer.n_structural_witin,
+            layer.n_fixed,
         );
         let builder =
             VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins);

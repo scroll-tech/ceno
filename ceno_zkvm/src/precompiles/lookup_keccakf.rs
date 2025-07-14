@@ -98,6 +98,7 @@ const LOOKUP_FELTS_PER_ROUND: usize =
 pub const AND_LOOKUPS: usize = AND_LOOKUPS_PER_ROUND;
 pub const XOR_LOOKUPS: usize = XOR_LOOKUPS_PER_ROUND;
 pub const RANGE_LOOKUPS: usize = RANGE_LOOKUPS_PER_ROUND;
+pub const STRUCTURAL_WITIN: usize = 6;
 
 #[derive(Clone, Debug)]
 #[repr(C)]
@@ -161,6 +162,7 @@ pub struct KeccakLayout<E: ExtensionField> {
     pub layer_exprs: KeccakLayer<WitIn, StructuralWitIn>,
     pub n_fixed: usize,
     pub n_committed: usize,
+    pub n_structural_witin: usize,
     pub n_challenges: usize,
 }
 
@@ -178,7 +180,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation_right,
                 eq_rotation,
             ],
-        ): (KeccakWitCols<WitIn>, [StructuralWitIn; 6]) = unsafe {
+        ): (KeccakWitCols<WitIn>, [StructuralWitIn; STRUCTURAL_WITIN]) = unsafe {
             (
                 transmute::<[WitIn; size_of::<KeccakWitCols<u8>>()], KeccakWitCols<WitIn>>(
                     array::from_fn(|id| cb.create_witin(|| format!("keccak_witin_{}", id))),
@@ -206,6 +208,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
             },
             n_fixed: 0,
             n_committed: 0,
+            n_structural_witin: STRUCTURAL_WITIN,
             n_challenges: 0,
         }
     }
@@ -622,7 +625,7 @@ where
         _lk_multiplicity: &mut LkMultiplicity,
     ) {
         // TODO assign eq (selectors) to _structural_wits
-        let [wits, _structural_wits] = wits;
+        let [wits, structural_wits] = wits;
         let KeccakLayer {
             wits:
                 KeccakWitCols {
@@ -639,6 +642,9 @@ where
                     iota_output: iota_output_witin,
                     rc: rc_witin,
                 },
+            eq_zero,
+            eq_mem_read,
+            eq_mem_write,
             ..
         } = self.layer_exprs;
 
@@ -657,8 +663,13 @@ where
         wits.values
             .par_chunks_mut(self.n_committed * ROUNDS.next_power_of_two())
             .take(num_instances)
+            .zip(
+                structural_wits
+                    .values
+                    .par_chunks_mut(self.n_committed * ROUNDS.next_power_of_two()),
+            )
             .zip(&phase1.instances)
-            .for_each(|(wits, KeccakInstance { witin, .. })| {
+            .for_each(|((wits, structural_wits), KeccakInstance { witin, .. })| {
                 let state_32_iter = witin.instance.iter().map(|e| *e as u64);
                 let mut state64 = [[0u64; 5]; 5];
                 zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
@@ -794,6 +805,15 @@ where
                             iota_output8[x][y] = conv64to8(iota_output64[x][y]);
                         }
                     }
+
+                    // set selector
+                    if round == 0 {
+                        set_val!(structural_wits, eq_mem_read, E::BaseField::ONE);
+                    }
+                    if round == ROUNDS - 1 {
+                        set_val!(structural_wits, eq_mem_write, E::BaseField::ONE);
+                    }
+                    set_val!(structural_wits, eq_zero, E::BaseField::ONE);
 
                     // set witness
                     push_instance::<E, _>(
