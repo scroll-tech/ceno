@@ -752,7 +752,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
         witness_data: PCS::CommitmentWithWitness,
         fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
         points: Vec<Point<E>>,
-        mut evals: Vec<Vec<E>>,
+        mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
         circuit_num_polys: &[(usize, usize)],
         num_instances: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
@@ -762,8 +762,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
             &witness_data,
             points
                 .iter()
-                .zip(evals.iter_mut())
-                .zip(num_instances.iter())
+                .zip_eq(evals.iter_mut())
+                .zip_eq(num_instances.iter())
                 .map(|((point, evals), (chip_idx, _))| {
                     let (num_witin, _) = circuit_num_polys[*chip_idx];
                     (point.clone(), evals.drain(..num_witin).collect_vec())
@@ -775,9 +775,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
                 fixed_data,
                 points
                     .iter()
-                    .zip(evals.iter_mut())
-                    .filter(|(_, evals)| !evals.is_empty())
-                    .map(|(point, evals)| (point.clone(), evals.to_vec()))
+                    .zip_eq(evals.iter_mut())
+                    .zip_eq(num_instances.iter())
+                    .filter(|(_, (chip_idx, _))| {
+                        let (_, num_fixed) = circuit_num_polys[*chip_idx];
+                        num_fixed > 0
+                    })
+                    .map(|((point, evals), _)| (point.clone(), evals.to_vec()))
                     .collect_vec(),
             ));
         }
