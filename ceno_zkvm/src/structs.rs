@@ -272,14 +272,14 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    witnesses_opcodes: BTreeMap<String, RMMCollections<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
-    pub fn get_opcode_witness(&self, name: &String) -> Option<&RowMajorMatrix<E::BaseField>> {
+    pub fn get_opcode_witness(&self, name: &String) -> Option<&RMMCollections<E::BaseField>> {
         self.witnesses_opcodes.get(name)
     }
 
@@ -300,8 +300,12 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(self.combined_lk_mlt.is_none());
 
         let cs = cs.get_cs(&OC::name()).unwrap();
-        let (witness, logup_multiplicity) =
-            OC::assign_instances(config, cs.zkvm_v1_css.num_witin as usize, records)?;
+        let (witness, logup_multiplicity) = OC::assign_instances(
+            config,
+            cs.zkvm_v1_css.num_witin as usize,
+            cs.zkvm_v1_css.num_structural_witin as usize,
+            records,
+        )?;
         assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
@@ -376,7 +380,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     ) -> impl Iterator<Item = (String, Vec<RowMajorMatrix<E::BaseField>>)> {
         self.witnesses_opcodes
             .into_iter()
-            .map(|(name, witness)| (name, vec![witness]))
+            .map(|(name, witnesses)| (name, witnesses.into()))
             .chain(
                 self.witnesses_tables
                     .into_iter()

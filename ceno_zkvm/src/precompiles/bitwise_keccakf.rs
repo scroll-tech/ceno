@@ -797,7 +797,7 @@ where
     fn phase1_witness_group(
         &self,
         _phase1: Self::Trace,
-        _wits: &mut RowMajorMatrix<E::BaseField>,
+        _wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         _lk_multiplicity: &mut LkMultiplicity,
     ) {
         // phase1.bits

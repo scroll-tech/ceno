@@ -30,7 +30,7 @@ use crate::{
         KeccakParams, KeccakStateInstance, KeccakTrace, KeccakWitInstance,
     },
     structs::ProgramParams,
-    tables::InsnRecord,
+    tables::{InsnRecord, RMMCollections},
     witness::LkMultiplicity,
 };
 
@@ -149,12 +149,16 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
     fn assign_instances(
         config: &Self::InstructionConfig,
         num_witin: usize,
+        num_structural_witin: usize,
         steps: Vec<StepRecord>,
-    ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
+    ) -> Result<(RMMCollections<E::BaseField>, LkMultiplicity), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
         if steps.is_empty() {
             return Ok((
-                RowMajorMatrix::new(0, num_witin, InstancePaddingStrategy::Default),
+                [
+                    RowMajorMatrix::new(0, num_witin, InstancePaddingStrategy::Default),
+                    RowMajorMatrix::new(0, num_structural_witin, InstancePaddingStrategy::Default),
+                ],
                 lk_multiplicity,
             ));
         }
@@ -162,6 +166,11 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         let num_instance_per_batch = steps.len().div_ceil(nthreads).max(1);
 
         let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+            config.layout.phase1_witin_rmm_height(steps.len()),
+            num_witin,
+            InstancePaddingStrategy::Default,
+        );
+        let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
             config.layout.phase1_witin_rmm_height(steps.len()),
             num_witin,
             InstancePaddingStrategy::Default,
@@ -253,12 +262,13 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
         config.layout.phase1_witness_group(
             KeccakTrace { instances },
-            &mut raw_witin,
+            [&mut raw_witin, &mut raw_structural_witin],
             &mut lk_multiplicity,
         );
 
         raw_witin.padding_by_strategy();
-        Ok((raw_witin, lk_multiplicity))
+        raw_structural_witin.padding_by_strategy();
+        Ok(([raw_witin, raw_structural_witin], lk_multiplicity))
     }
 
     fn assign_instance(

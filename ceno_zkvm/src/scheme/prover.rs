@@ -120,11 +120,8 @@ impl<
             // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
                 .get_opcode_witness(circuit_name)
-                .or_else(|| {
-                    witnesses
-                        .get_table_witness(circuit_name)
-                        .map(|rmms| &rmms[0])
-                })
+                .or_else(|| witnesses.get_table_witness(circuit_name))
+                .map(|rmms| &rmms[0])
                 .map(|rmm| rmm.num_instances())
                 .and_then(|num_instance| {
                     if num_instance > 0 {
@@ -155,6 +152,7 @@ impl<
 
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (circuit_name, mut rmm) in witnesses.into_iter_sorted() {
+            println!("circuit_name {circuit_name}");
             let witness_rmm = rmm.remove(0);
             // only table got structural witness
             let structural_witness_rmm = if !rmm.is_empty() {

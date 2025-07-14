@@ -618,9 +618,11 @@ where
     fn phase1_witness_group(
         &self,
         phase1: Self::Trace,
-        wits: &mut RowMajorMatrix<E::BaseField>,
+        wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         _lk_multiplicity: &mut LkMultiplicity,
     ) {
+        // TODO assign eq (selectors) to _structural_wits
+        let [wits, _structural_wits] = wits;
         let KeccakLayer {
             wits:
                 KeccakWitCols {
@@ -862,7 +864,7 @@ pub struct TestKeccakLayout<E: ExtensionField> {
 }
 
 pub fn setup_gkr_circuit<E: ExtensionField>()
--> Result<(TestKeccakLayout<E>, GKRCircuit<E>, u16), ZKVMError> {
+-> Result<(TestKeccakLayout<E>, GKRCircuit<E>, u16, u16), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "lookup_keccak");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
@@ -904,6 +906,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
         },
         chip.gkr_circuit(),
         cs.num_witin,
+        cs.num_structural_witin,
     ))
 }
 
@@ -914,7 +917,12 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     fields(profiling_1)
 )]
 pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-    (layout, gkr_circuit, num_witin): (TestKeccakLayout<E>, GKRCircuit<E>, u16),
+    (layout, gkr_circuit, num_witin, num_structual_witin): (
+        TestKeccakLayout<E>,
+        GKRCircuit<E>,
+        u16,
+        u16,
+    ),
     states: Vec<[u64; 25]>,
     verify: bool,
     test_outputs: bool,
@@ -976,6 +984,11 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         num_witin as usize,
         InstancePaddingStrategy::Default,
     );
+    let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
+        layout.layout.phase1_witin_rmm_height(states.len()),
+        num_structual_witin as usize,
+        InstancePaddingStrategy::Default,
+    );
     let raw_witin_iter =
         phase1_witness.par_batch_iter_mut(num_instance_per_batch * ROUNDS.next_power_of_two());
     raw_witin_iter
@@ -1035,7 +1048,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
     layout.layout.phase1_witness_group(
         KeccakTrace { instances },
-        &mut phase1_witness,
+        [&mut phase1_witness, &mut structural_witness],
         &mut lk_multiplicity,
     );
 

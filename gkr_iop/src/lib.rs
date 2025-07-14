@@ -64,7 +64,7 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     fn phase1_witness_group(
         &self,
         phase1: Self::Trace,
-        wits: &mut RowMajorMatrix<E::BaseField>,
+        wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         lk_multiplicity: &mut LkMultiplicity,
     );
 

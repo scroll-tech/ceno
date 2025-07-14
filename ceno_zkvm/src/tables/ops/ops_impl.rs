@@ -10,6 +10,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     structs::ROMType,
+    tables::RMMCollections,
 };
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 
@@ -71,7 +72,7 @@ impl OpTableConfig {
         num_structural_witin: usize,
         multiplicity: &HashMap<u64, usize>,
         length: usize,
-    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+    ) -> Result<RMMCollections<F>, CircuitBuilderError> {
         assert_eq!(num_structural_witin, 0);
         let mut witness =
             RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);

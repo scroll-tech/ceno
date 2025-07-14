@@ -9,7 +9,7 @@ use rayon::{
 
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams,
-    witness::LkMultiplicity,
+    tables::RMMCollections, witness::LkMultiplicity,
 };
 
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
@@ -56,8 +56,9 @@ pub trait Instruction<E: ExtensionField> {
     fn assign_instances(
         config: &Self::InstructionConfig,
         num_witin: usize,
+        num_structural_witin: usize,
         steps: Vec<StepRecord>,
-    ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
+    ) -> Result<(RMMCollections<E::BaseField>, LkMultiplicity), ZKVMError> {
         let nthreads = max_usable_threads();
         let num_instance_per_batch = if steps.len() > 256 {
             steps.len().div_ceil(nthreads)
@@ -68,6 +69,8 @@ pub trait Instruction<E: ExtensionField> {
         let lk_multiplicity = LkMultiplicity::default();
         let mut raw_witin =
             RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
+        let mut empty_raw_structual_witin =
+            RowMajorMatrix::<E::BaseField>::new(0, num_structural_witin, Self::padding_strategy());
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
         raw_witin_iter
@@ -85,6 +88,7 @@ pub trait Instruction<E: ExtensionField> {
             .collect::<Result<(), ZKVMError>>()?;
 
         raw_witin.padding_by_strategy();
-        Ok((raw_witin, lk_multiplicity))
+        empty_raw_structual_witin.padding_by_strategy();
+        Ok(([raw_witin, empty_raw_structual_witin], lk_multiplicity))
     }
 }
