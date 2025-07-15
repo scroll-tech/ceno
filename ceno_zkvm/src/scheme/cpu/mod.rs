@@ -284,6 +284,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
+    #[allow(clippy::type_complexity)]
     #[tracing::instrument(
         skip_all,
         name = "build_tower_witness",
@@ -582,6 +583,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
+    #[allow(clippy::type_complexity)]
     #[tracing::instrument(
         skip_all,
         name = "prove_main_constraints",

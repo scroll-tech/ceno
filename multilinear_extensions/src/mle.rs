@@ -6,7 +6,6 @@ use crate::{
     smart_slice::SmartSlice,
     util::ceil_log2,
 };
-use core::hash::Hash;
 use either::Either;
 use ff_ext::{ExtensionField, FromUniformBytes};
 use p3::field::{Field, FieldAlgebra};
@@ -91,7 +90,7 @@ impl<'a, F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<MultilinearExtensi
     }
 }
 
-#[derive(Clone, Hash, Default, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Eq, Debug, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
