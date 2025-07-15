@@ -14,6 +14,7 @@ base64 = "0.22"
 ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
+ceno_gpu_hal.workspace = true
 either.workspace = true
 ff_ext = { path = "../ff_ext" }
 gkr_iop = { path = "../gkr_iop" }

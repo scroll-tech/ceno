@@ -41,6 +41,8 @@ use sumcheck::{
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
 
+use ceno_gpu_hal::gl64::CudaHalGL64;
+
 pub struct GpuTowerProver;
 
 impl GpuTowerProver {
@@ -242,6 +244,7 @@ impl GpuTowerProver {
         (next_rt, proofs)
     }
 }
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
@@ -269,7 +272,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             self.pp = Some(prover_param);
             self.pp.as_ref().unwrap()
         };
-        let pcs_data = PCS::batch_commit(prover_param, traces).unwrap();
+        
+        let pcs_data = PCS::batch_commit(prover_param, traces.clone()).unwrap();
+        let cuda_hal = CudaHalGL64::new().unwrap();
+        let gpu_res = cuda_hal.basefold.batch_commit(traces).unwrap();
+        
         let commit = PCS::get_pure_commitment(&pcs_data);
         let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data)
             .into_par_iter()
