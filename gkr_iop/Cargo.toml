@@ -12,19 +12,26 @@ version.workspace = true
 [dependencies]
 ark-std = { version = "0.5" }
 bincode.workspace = true
+ceno_emul = { path = "../ceno_emul" }
 clap.workspace = true
 either.workspace = true
 ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
+mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
 ndarray.workspace = true
+p3.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
+p3-util.workspace = true
 rand.workspace = true
 rayon.workspace = true
 serde.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
 sumcheck.workspace = true
 thiserror.workspace = true
+thread_local.workspace = true
 tiny-keccak.workspace = true
 tracing.workspace = true
 tracing-forest.workspace = true

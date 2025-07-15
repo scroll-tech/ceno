@@ -13,7 +13,6 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use p3::field::FieldAlgebra;
-use std::collections::HashSet;
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState},
     util::get_challenge_pows,
@@ -24,7 +23,7 @@ use witness::next_pow2_instance_padding;
 use crate::{
     error::ZKVMError,
     scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
-    structs::{PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
+    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec},
 };
 use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with_instance};
@@ -85,44 +84,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         let pi_evals = &vm_proof.pi_evals;
 
-        // make sure circuit index are
-        // 1. unique
-        // 2. less than self.vk.circuit_vks.len()
-        assert!(
-            vm_proof
-                .num_instances
-                .iter()
-                .fold(None, |prev, &(circuit_index, _)| {
-                    (circuit_index < self.vk.circuit_vks.len()
-                        && prev.is_none_or(|p| p < circuit_index))
-                    .then_some(circuit_index)
-                })
-                .is_some(),
-            "num_instances validity check failed"
-        );
-
-        assert_eq!(
-            vm_proof
-                .num_instances
-                .iter()
-                .map(|(x, _)| x)
-                .collect::<HashSet<&usize>>(),
-            vm_proof
-                .opcode_proofs
-                .keys()
-                .chain(vm_proof.table_proofs.keys())
-                .collect::<HashSet<_>>(),
-            "num_instance circuit index exactly equal with provided proofs"
-        );
-
-        assert!(
-            vm_proof
-                .opcode_proofs
-                .keys()
-                .collect::<HashSet<_>>()
-                .is_disjoint(&vm_proof.table_proofs.keys().collect::<HashSet<_>>()),
-            "there is duplicated circuit index"
-        );
+        // make sure circuit index of chip proofs are
+        // subset of that of self.vk.circuit_vks
+        for chip_idx in vm_proof.chip_proofs.keys() {
+            if *chip_idx >= self.vk.circuit_vks.len() {
+                return Err(ZKVMError::VKNotFound(format!(
+                    "chip index {chip_idx} not found in vk set [0..{})",
+                    self.vk.circuit_vks.len()
+                )));
+            }
+        }
 
         // TODO fix soundness: construct raw public input by ourself and trustless from proof
         // including raw public input to transcript
@@ -152,14 +123,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
-        // write (circuit_size, num_var) to transcript
-        for (circuit_size, num_var) in &vm_proof.num_instances {
-            transcript.append_message(&circuit_size.to_le_bytes());
-            transcript.append_message(&num_var.to_le_bytes());
+        // write (circuit_idx, num_instance) to transcript
+        for (circuit_idx, proof) in &vm_proof.chip_proofs {
+            transcript.append_message(&circuit_idx.to_le_bytes());
+            transcript.append_message(&proof.num_instances.to_le_bytes());
         }
-
-        let circuit_vks: Vec<&VerifyingKey<E>> = self.vk.circuit_vks.values().collect_vec();
-        let circuit_names: Vec<&String> = self.vk.circuit_vks.keys().collect_vec();
 
         // write witin commitment to transcript
         PCS::write_commitment(&vm_proof.witin_commit, &mut transcript)
@@ -182,100 +150,106 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
         let point_eval = PointAndEval::default();
-        let mut rt_points = Vec::with_capacity(vm_proof.num_instances.len());
-        let mut evaluations = Vec::with_capacity(2 * vm_proof.num_instances.len()); // witin + fixed thus *2
-        for (index, num_instances) in &vm_proof.num_instances {
-            let circuit_vk = circuit_vks[*index];
-            let name = circuit_names[*index];
-            if let Some(opcode_proof) = vm_proof.opcode_proofs.get(index) {
-                transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
-                let input_opening_point = self.verify_opcode_proof(
-                    name,
+        let mut rt_points = Vec::with_capacity(vm_proof.chip_proofs.len());
+        let mut evaluations = Vec::with_capacity(vm_proof.chip_proofs.len());
+        let mut witin_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
+        let mut fixed_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
+        for (index, proof) in &vm_proof.chip_proofs {
+            let circuit_name = &self.vk.circuit_index_to_name[index];
+            let circuit_vk = &self.vk.circuit_vks[circuit_name];
+
+            // check chip proof is well-formed
+            if proof.wits_in_evals.len() != circuit_vk.get_cs().num_witin()
+                || proof.fixed_in_evals.len() != circuit_vk.get_cs().num_fixed()
+            {
+                return Err(ZKVMError::InvalidProof(format!(
+                    "witness/fixed evaluations length mismatch: ({}, {}) != ({}, {})",
+                    proof.wits_in_evals.len(),
+                    proof.fixed_in_evals.len(),
+                    circuit_vk.get_cs().num_witin(),
+                    circuit_vk.get_cs().num_fixed(),
+                )));
+            }
+            if proof.r_out_evals.len() != circuit_vk.get_cs().num_reads()
+                || proof.w_out_evals.len() != circuit_vk.get_cs().num_writes()
+            {
+                return Err(ZKVMError::InvalidProof(format!(
+                    "read/write evaluations length mismatch: ({}, {}) != ({}, {})",
+                    proof.r_out_evals.len(),
+                    proof.w_out_evals.len(),
+                    circuit_vk.get_cs().num_reads(),
+                    circuit_vk.get_cs().num_writes(),
+                )));
+            }
+            if proof.lk_out_evals.len() != circuit_vk.get_cs().num_lks() {
+                return Err(ZKVMError::InvalidProof(format!(
+                    "lookup evaluations length mismatch: {} != {}",
+                    proof.lk_out_evals.len(),
+                    circuit_vk.get_cs().num_lks(),
+                )));
+            }
+
+            let chip_logup_sum = proof
+                .lk_out_evals
+                .iter()
+                .map(|evals| {
+                    let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
+                    p1 * q1.inverse() + p2 * q2.inverse()
+                })
+                .sum::<E>();
+
+            transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
+            let input_opening_point = if circuit_vk.get_cs().is_opcode_circuit() {
+                // getting the number of dummy padding item that we used in this opcode circuit
+                let num_lks = circuit_vk.get_cs().num_lks();
+                let num_padded_instance =
+                    next_pow2_instance_padding(proof.num_instances) - proof.num_instances;
+                dummy_table_item_multiplicity += num_lks * num_padded_instance;
+
+                logup_sum += chip_logup_sum;
+                self.verify_opcode_proof(
+                    circuit_name,
                     circuit_vk,
-                    opcode_proof,
-                    *num_instances,
+                    proof,
                     pi_evals,
                     &mut transcript,
                     NUM_FANIN,
                     &point_eval,
                     &challenges,
-                )?;
-                rt_points.push(input_opening_point);
-                evaluations.push(opcode_proof.wits_in_evals.clone());
-                tracing::debug!("verified proof for opcode {}", name);
-
-                // getting the number of dummy padding item that we used in this opcode circuit
-                let num_lks = circuit_vk.get_cs().lk_expressions.len();
-                let num_padded_instance =
-                    next_pow2_instance_padding(*num_instances) - num_instances;
-                dummy_table_item_multiplicity += num_lks * num_padded_instance;
-
-                prod_r *= opcode_proof
-                    .r_out_evals
-                    .iter()
-                    .flatten()
-                    .fold(E::ONE, |acc, e| acc * *e);
-                prod_w *= opcode_proof
-                    .w_out_evals
-                    .iter()
-                    .flatten()
-                    .fold(E::ONE, |acc, e| acc * *e);
-
-                for evals in opcode_proof.lk_out_evals.iter() {
-                    // TODO: return error instead of panic
-                    assert_eq!(evals.len(), 4);
-
-                    let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
-
-                    logup_sum += p1 * q1.inverse();
-                    logup_sum += p2 * q2.inverse();
-                }
-            } else if let Some(table_proof) = vm_proof.table_proofs.get(index) {
-                transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
-
-                let input_opening_point = self.verify_table_proof(
-                    name,
+                )?
+            } else {
+                logup_sum -= chip_logup_sum;
+                self.verify_table_proof(
+                    circuit_name,
                     circuit_vk,
-                    table_proof,
-                    *num_instances,
+                    proof,
                     &vm_proof.raw_pi,
                     &vm_proof.pi_evals,
                     &mut transcript,
                     NUM_FANIN_LOGUP,
                     &point_eval,
                     &challenges,
-                )?;
-                rt_points.push(input_opening_point);
-                evaluations.push(table_proof.wits_in_evals.clone());
-                if circuit_vk.cs.num_fixed > 0 {
-                    evaluations.push(table_proof.fixed_in_evals.clone());
-                }
-                tracing::debug!("verified proof for table {}", name);
-
-                logup_sum = table_proof
-                    .lk_out_evals
-                    .iter()
-                    .fold(logup_sum, |acc, evals| {
-                        let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
-
-                        acc - p1 * q1.inverse() - p2 * q2.inverse()
-                    });
-
-                prod_w *= table_proof
-                    .w_out_evals
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .product::<E>();
-                prod_r *= table_proof
-                    .r_out_evals
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .product::<E>();
-            } else {
-                unreachable!("respective proof of index {} should exist", index)
+                )?
+            };
+            rt_points.push((*index, input_opening_point.clone()));
+            evaluations.push((
+                *index,
+                [proof.wits_in_evals.clone(), proof.fixed_in_evals.clone()].concat(),
+            ));
+            witin_openings.push((
+                input_opening_point.len(),
+                (input_opening_point.clone(), proof.wits_in_evals.clone()),
+            ));
+            if !proof.fixed_in_evals.is_empty() {
+                fixed_openings.push((
+                    input_opening_point.len(),
+                    (input_opening_point.clone(), proof.fixed_in_evals.clone()),
+                ));
             }
+
+            prod_w *= proof.w_out_evals.iter().flatten().copied().product::<E>();
+            prod_r *= proof.r_out_evals.iter().flatten().copied().product::<E>();
+            tracing::debug!("verified proof for circuit {}", circuit_name);
         }
         logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
             * dummy_table_item.inverse();
@@ -296,15 +270,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // verify mpcs
+        let mut rounds = vec![(vm_proof.witin_commit.clone(), witin_openings)];
+        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
+            rounds.push((fixed_commit.clone(), fixed_openings));
+        }
         PCS::batch_verify(
             &self.vk.vp,
-            &vm_proof.num_instances,
-            &rt_points,
-            self.vk.fixed_commit.as_ref(),
-            &vm_proof.witin_commit,
-            &evaluations,
-            &vm_proof.fixed_witin_opening_proof,
-            &self.vk.circuit_num_polys,
+            rounds,
+            &vm_proof.opening_proof,
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;
@@ -349,14 +322,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _name: &str,
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMChipProof<E>,
-        num_instances: usize,
         pi: &[E],
         transcript: &mut impl Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
-        let cs = circuit_vk.get_cs();
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        } = circuit_vk.get_cs();
+        let num_instances = proof.num_instances;
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len(),
             cs.w_expressions.len(),
@@ -531,7 +506,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         name: &str,
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMChipProof<E>,
-        num_instances: usize,
         raw_pi: &[Vec<E::BaseField>],
         pi: &[E],
         transcript: &mut impl Transcript<E>,
@@ -539,7 +513,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2],
     ) -> Result<Point<E>, ZKVMError> {
-        let cs = circuit_vk.get_cs();
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        } = circuit_vk.get_cs();
         debug_assert!(
             cs.r_table_expressions
                 .iter()
@@ -547,7 +523,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
 
-        let log2_num_instances = next_pow2_instance_padding(num_instances).ilog2() as usize;
+        let log2_num_instances = next_pow2_instance_padding(proof.num_instances).ilog2() as usize;
 
         // in table proof, we always skip same point sumcheck for now
         // as tower sumcheck batch product argument/logup in same length

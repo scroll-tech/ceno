@@ -10,6 +10,7 @@ use crate::{
         Instruction,
         riscv::{constants::UInt, j_insn::JInstructionConfig},
     },
+    structs::ProgramParams,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
@@ -42,6 +43,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<JalConfig<E>, ZKVMError> {
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 

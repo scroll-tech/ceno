@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -8,16 +8,15 @@ use crate::{
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
     scheme::{
-        cpu::{CpuBackend, CpuProver, CpuTowerProver},
+        cpu::CpuTowerProver,
         hal::{ProofInput, TowerProverSpec},
         prover::ZkVMCpuProver,
     },
-    set_val,
     structs::{
-        PointAndEval, RAMType::Register, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
+        PointAndEval, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
     },
     tables::{ProgramTableCircuit, U16TableCircuit},
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{
     CENO_PLATFORM,
@@ -25,6 +24,7 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
+use gkr_iop::cpu::{CpuBackend, CpuProver};
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
 
 #[cfg(debug_assertions)]
@@ -59,12 +59,15 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
         "TEST".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         let reg_id = cb.create_witin(|| "reg_id");
         (0..RW).try_for_each(|_| {
             let record = vec![1.into(), reg_id.expr()];
-            cb.read_record(|| "read", Register, record.clone())?;
-            cb.write_record(|| "write", Register, record)?;
+            cb.read_record(|| "read", RAMType::Register, record.clone())?;
+            cb.write_record(|| "write", RAMType::Register, record)?;
             Result::<(), ZKVMError>::Ok(())
         })?;
         (0..L).try_for_each(|_| {
@@ -135,12 +138,8 @@ fn test_rw_lk_expression_combination() {
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
         let wits_in = rmm.to_mles();
         // commit to main traces
-        let commit_with_witness = Pcs::batch_commit_and_write(
-            &prover.pk.pp,
-            vec![(0, rmm)].into_iter().collect::<BTreeMap<_, _>>(),
-            &mut transcript,
-        )
-        .unwrap();
+        let commit_with_witness =
+            Pcs::batch_commit_and_write(&prover.pk.pp, vec![rmm], &mut transcript).unwrap();
         let witin_commit = Pcs::get_pure_commitment(&commit_with_witness);
 
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
@@ -186,7 +185,6 @@ fn test_rw_lk_expression_combination() {
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
-                num_instances,
                 &[],
                 &mut v_transcript,
                 NUM_FANIN,

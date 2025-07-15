@@ -8,29 +8,34 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 
-use crate::{error::BackendError, evaluation::EvalExpression};
+use crate::{
+    error::BackendError,
+    hal::{ProverBackend, ProverDevice},
+};
 
 pub(super) mod booleanhypercube;
 pub mod layer;
+pub mod layer_constraint_system;
 pub mod mock;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct GKRCircuit<E: ExtensionField> {
     pub layers: Vec<Layer<E>>,
+    pub final_out_evals: Vec<usize>,
 
     pub n_challenges: usize,
     pub n_evaluations: usize,
-    pub openings: Vec<(usize, EvalExpression<E>)>,
+    pub n_nonzero_out_evals: usize,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct GKRCircuitWitness<'a, E: ExtensionField> {
-    pub layers: Vec<LayerWitness<'a, E>>,
+#[derive(Clone, Debug)]
+pub struct GKRCircuitWitness<'a, PB: ProverBackend> {
+    pub layers: Vec<LayerWitness<'a, PB>>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct GKRCircuitOutput<'a, E: ExtensionField>(pub LayerWitness<'a, E>);
+#[derive(Clone, Debug)]
+pub struct GKRCircuitOutput<'a, PB: ProverBackend>(pub LayerWitness<'a, PB>);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -63,11 +68,11 @@ pub struct Evaluation<E: ExtensionField> {
 pub struct GKRClaims<Evaluation>(pub Vec<Evaluation>);
 
 impl<E: ExtensionField> GKRCircuit<E> {
-    pub fn prove(
+    pub fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        circuit_wit: GKRCircuitWitness<E>,
+        circuit_wit: GKRCircuitWitness<PB>,
         out_evals: &[PointAndEval<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
@@ -82,7 +87,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
             .map(|(i, (layer, layer_wit))| {
                 tracing::info!("prove layer {i} layer with layer name {}", layer.name);
                 let span = entered_span!("per_layer_proof", profiling_3 = true);
-                let res = layer.prove(
+                let res = layer.prove::<_, PB, PD>(
                     num_threads,
                     max_num_variables,
                     layer_wit,
@@ -96,7 +101,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
             .collect_vec();
         exit_span!(span);
 
-        let opening_evaluations = self.opening_evaluations(&running_evals, &challenges);
+        let opening_evaluations = self.opening_evaluations(&running_evals);
 
         Ok(GKRProverOutput {
             gkr_proof: GKRProof(sumcheck_proofs),
@@ -131,21 +136,18 @@ impl<E: ExtensionField> GKRCircuit<E> {
             )?;
         }
 
-        Ok(GKRClaims(
-            self.opening_evaluations(&evaluations, &challenges),
-        ))
+        Ok(GKRClaims(self.opening_evaluations(&evaluations)))
     }
 
-    fn opening_evaluations(
-        &self,
-        evaluations: &[PointAndEval<E>],
-        challenges: &[E],
-    ) -> Vec<Evaluation<E>> {
-        self.openings
+    /// Output opening evaluations. First witin and then fixed.
+    fn opening_evaluations(&self, evaluations: &[PointAndEval<E>]) -> Vec<Evaluation<E>> {
+        let input_layer = self.layers.last().unwrap();
+        input_layer
+            .in_eval_expr
             .iter()
+            .enumerate()
             .map(|(poly, eval)| {
-                let poly = *poly;
-                let PointAndEval { point, eval: value } = eval.evaluate(evaluations, challenges);
+                let PointAndEval { point, eval: value } = evaluations[*eval].clone();
                 Evaluation { value, point, poly }
             })
             .collect_vec()

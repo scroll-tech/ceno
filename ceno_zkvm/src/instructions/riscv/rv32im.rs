@@ -8,6 +8,7 @@ use crate::{
                 BeqInstruction, BgeInstruction, BgeuInstruction, BltInstruction, BneInstruction,
             },
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
+            ecall::KeccakInstruction,
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
             mul::MulhuInstruction,
@@ -107,6 +108,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
 
     // Ecall Opcodes
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
     // Tables.
     pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
@@ -177,6 +179,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // ecall opcodes
         let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
+        let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
+
         // tables
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
         let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
@@ -239,6 +243,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             lb_config,
             // ecall opcodes
             halt_config,
+            keccak_config,
             // tables
             u16_range_config,
             u14_range_config,
@@ -307,6 +312,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<LbInstruction<E>>(cs);
 
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs);
 
         fixed.register_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
         fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
@@ -329,12 +335,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             .map(|insn_kind| (insn_kind, Vec::new()))
             .collect();
         let mut halt_records = Vec::new();
+        let mut keccak_records = Vec::new();
         steps.into_iter().for_each(|record| {
             let insn_kind = record.insn.kind;
             match insn_kind {
                 // ecall / halt
                 InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
                     halt_records.push(record);
+                }
+                InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => {
+                    keccak_records.push(record);
                 }
                 // other type of ecalls are handled by dummy ecall instruction
                 _ => {
@@ -410,6 +420,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // ecall / halt
         witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
+        witness.assign_opcode_circuit::<KeccakInstruction<E>>(
+            cs,
+            &self.keccak_config,
+            keccak_records,
+        )?;
 
         // assert_eq!(
         //     all_records.keys().cloned().collect::<BTreeSet<_>>(),
@@ -444,7 +459,6 @@ pub struct GroupedSteps(BTreeMap<InsnKind, Vec<StepRecord>>);
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {
     ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
-    keccak_config: <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
     secp256k1_add_config:
         <LargeEcallDummy<E, Secp256k1AddSpec> as Instruction<E>>::InstructionConfig,
     secp256k1_double_config:
@@ -466,7 +480,6 @@ pub struct DummyExtraConfig<E: ExtensionField> {
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
-        let keccak_config = cs.register_keccakf_circuit();
         let secp256k1_add_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>();
         let secp256k1_double_config =
@@ -489,7 +502,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
 
         Self {
             ecall_config,
-            keccak_config,
             secp256k1_add_config,
             secp256k1_double_config,
             secp256k1_decompress_config,
@@ -530,7 +542,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
     ) -> Result<(), ZKVMError> {
         let mut steps = steps.0;
 
-        let mut keccak_steps = Vec::new();
         let mut secp256k1_add_steps = Vec::new();
         let mut secp256k1_double_steps = Vec::new();
         let mut secp256k1_decompress_steps = Vec::new();
@@ -546,7 +557,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         if let Some(ecall_steps) = steps.remove(&ECALL) {
             for step in ecall_steps {
                 match step.rs1().unwrap().value {
-                    KeccakSpec::CODE => keccak_steps.push(step),
                     Secp256k1AddSpec::CODE => secp256k1_add_steps.push(step),
                     Secp256k1DoubleSpec::CODE => secp256k1_double_steps.push(step),
                     Secp256k1DecompressSpec::CODE => secp256k1_decompress_steps.push(step),
@@ -562,7 +572,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             }
         }
 
-        witness.assign_keccakf_circuit(cs, &self.keccak_config, keccak_steps)?;
+        // witness.assign_keccakf_circuit(cs, &self.keccak_config, keccak_steps)?;
 
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(
             cs,

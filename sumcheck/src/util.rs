@@ -8,7 +8,10 @@ use std::{
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
-    mle::MultilinearExtension, op_mle, util::max_usable_threads, virtual_poly::VirtualPolynomial,
+    mle::MultilinearExtension,
+    op_mle,
+    util::{ceil_log2, max_usable_threads},
+    virtual_poly::VirtualPolynomial,
     virtual_polys::PolyMeta,
 };
 use p3::field::Field;
@@ -205,14 +208,6 @@ pub fn extrapolate_uni_poly<F: Field>(p: &[F], eval_at: F) -> F {
         5 => extrapolate_uni_poly_deg_4(p.try_into().unwrap(), eval_at),
         _ => unimplemented!("Extrapolation for degree {} not implemented", p.len() - 1),
     }
-}
-
-/// log2 ceil of x
-pub fn ceil_log2(x: usize) -> usize {
-    assert!(x > 0, "ceil_log2: x must be positive");
-    // Calculate the number of bits in usize
-    let usize_bits = std::mem::size_of::<usize>() * 8;
-    usize_bits - (x - 1).leading_zeros() as usize
 }
 
 /// merge vector of virtual poly into single virtual poly

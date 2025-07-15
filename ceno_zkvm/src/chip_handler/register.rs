@@ -1,7 +1,8 @@
 use ff_ext::ExtensionField;
+use gkr_iop::error::CircuitBuilderError;
 
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::AssertLtConfig,
+    circuit_builder::CircuitBuilder, gadgets::AssertLtConfig,
     instructions::riscv::constants::UINT_LIMBS, structs::RAMType,
 };
 use multilinear_extensions::{Expression, ToExpr};
@@ -18,7 +19,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError> {
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = [
@@ -62,7 +63,7 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError> {
+    ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError> {
         assert!(register_id.expr().degree() <= 1);
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
@@ -96,8 +97,9 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> RegisterChipOperati
 
             #[cfg(test)]
             {
-                use crate::chip_handler::{test::DebugIndex, utils::power_sequence};
+                use gkr_iop::circuit_builder::DebugIndex;
                 use itertools::izip;
+                use multilinear_extensions::power_sequence;
                 let pow_u16 = power_sequence((1 << u16::BITS as u64).into());
                 cb.register_debug_expr(
                     DebugIndex::RdWrite as usize,

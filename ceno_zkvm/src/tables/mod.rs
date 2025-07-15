@@ -1,4 +1,4 @@
-use crate::{circuit_builder::CircuitBuilder, error::ZKVMError};
+use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams};
 use ff_ext::ExtensionField;
 use std::collections::HashMap;
 use witness::RowMajorMatrix;
@@ -26,6 +26,7 @@ pub trait TableCircuit<E: ExtensionField> {
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
     ) -> Result<Self::TableConfig, ZKVMError>;
 
     fn generate_fixed_traces(

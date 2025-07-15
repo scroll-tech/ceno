@@ -1,11 +1,16 @@
 use ff_ext::ExtensionField;
+use gkr_iop::{
+    cpu::{CpuBackend, CpuProver},
+    hal::ProverBackend,
+};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
     sync::Arc,
 };
 
-use crate::scheme::hal::{MainSumcheckEvals, MultilinearPolynomial};
+use crate::scheme::hal::MainSumcheckEvals;
+use gkr_iop::hal::MultilinearPolynomial;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -27,11 +32,7 @@ use crate::{
     structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
-use super::{
-    PublicValues, ZKVMChipProof, ZKVMProof,
-    cpu::{CpuBackend, CpuProver},
-    hal::{ProverBackend, ProverDevice},
-};
+use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 
 type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
 
@@ -83,8 +84,7 @@ impl<
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let raw_pi = pi.to_vec::<E>();
         let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
-        let mut opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
-        let mut table_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
+        let mut chip_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
 
         let span = entered_span!("commit_to_pi", profiling_1 = true);
         // including raw public input to transcript
@@ -198,7 +198,7 @@ impl<
                 // TODO: add an enum for circuit type either in constraint_system or vk
                 let cs = pk.get_cs();
                 let witness_mle = witness_mles
-                    .drain(..cs.num_witin as usize)
+                    .drain(..cs.num_witin())
                     .map(|mle| mle.into())
                     .collect_vec();
                 let structural_witness = self.device.transport_mles(
@@ -207,7 +207,7 @@ impl<
                         .map(|(sw, _)| sw)
                         .unwrap_or(vec![]),
                 );
-                let fixed = fixed_mles.drain(..cs.num_fixed).collect_vec();
+                let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
                 let public_input = self.device.transport_mles(pi.clone());
                 let mut input = ProofInput {
                     witness: witness_mle,
@@ -217,19 +217,7 @@ impl<
                     num_instances,
                 };
 
-                let is_opcode_circuit = cs.lk_table_expressions.is_empty()
-                    && cs.r_table_expressions.is_empty()
-                    && cs.w_table_expressions.is_empty();
-                if is_opcode_circuit {
-                    tracing::trace!(
-                        "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
-                        circuit_name,
-                        cs.num_witin,
-                        cs.r_expressions.len(),
-                        cs.w_expressions.len(),
-                        cs.lk_expressions.len(),
-                    );
-
+                if cs.is_opcode_circuit() {
                     let (opcode_proof, _, input_opening_point) = self.create_chip_proof(
                         circuit_name,
                         pk,
@@ -244,23 +232,23 @@ impl<
                     );
                     points.push(input_opening_point);
                     evaluations.push(opcode_proof.wits_in_evals.clone());
-                    opcode_proofs.insert(index, opcode_proof);
+                    chip_proofs.insert(index, opcode_proof);
                 } else {
                     // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
                     input.num_instances = 1 << input.log2_num_instances();
-                    let (table_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
-                        circuit_name,
-                        pk,
-                        input,
-                        &mut transcript,
-                        &challenges,
-                    )?;
+                    let (mut table_proof, pi_in_evals, input_opening_point) = self
+                        .create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
                     points.push(input_opening_point);
-                    evaluations.push(table_proof.wits_in_evals.clone());
-                    if cs.num_fixed > 0 {
-                        evaluations.push(table_proof.fixed_in_evals.clone());
-                    }
-                    table_proofs.insert(index, table_proof);
+                    evaluations.push(
+                        [
+                            table_proof.wits_in_evals.clone(),
+                            table_proof.fixed_in_evals.clone(),
+                        ]
+                        .concat(),
+                    );
+                    // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
+                    table_proof.num_instances = num_instances;
+                    chip_proofs.insert(index, table_proof);
                     for (idx, eval) in pi_in_evals {
                         pi_evals[idx] = eval;
                     }
@@ -275,7 +263,7 @@ impl<
             .pk
             .circuit_pks
             .values()
-            .map(|pk| (pk.get_cs().num_witin as usize, pk.get_cs().num_fixed))
+            .map(|pk| (pk.get_cs().num_witin(), pk.get_cs().num_fixed()))
             .collect_vec();
         let pcs_opening = entered_span!("pcs_opening");
         let mpcs_opening_proof = self.device.open(
@@ -293,12 +281,9 @@ impl<
         let vm_proof = ZKVMProof::new(
             raw_pi,
             pi_evals,
-            opcode_proofs,
-            table_proofs,
+            chip_proofs,
             witin_commit,
             mpcs_opening_proof,
-            // verifier need this information from prover to achieve non-uniform design.
-            num_instances,
         );
         exit_span!(main_proofs_span);
 
@@ -322,6 +307,8 @@ impl<
         let log2_num_instances = input.log2_num_instances();
 
         // build tower witness
+        // assume we already extract gkr-circuit information into zkvm_v1_css
+        // thus we can skip calling gkr-circuit.gkr_witness() as tower witness generate the witness correctly
         let (mut out_evals, records, prod_specs, lookup_specs) =
             self.device.build_tower_witness(cs, &input, challenges);
 
@@ -351,9 +338,9 @@ impl<
 
         // evaluate pi if there is instance query
         let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
-        if !cs.instance_name_map.is_empty() {
+        if !cs.instance_name_map().is_empty() {
             let span = entered_span!("pi::evals");
-            for &Instance(idx) in cs.instance_name_map.keys() {
+            for &Instance(idx) in cs.instance_name_map().keys() {
                 let poly = &input.public_input[idx];
                 pi_in_evals.insert(
                     idx,
@@ -372,6 +359,7 @@ impl<
                 tower_proof,
                 fixed_in_evals,
                 wits_in_evals,
+                num_instances: input.num_instances,
             },
             pi_in_evals,
             input_opening_point,

@@ -3,7 +3,6 @@ use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
-        cpu::{CpuBackend, CpuProver},
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
         verifier::ZKVMVerifier,
@@ -23,6 +22,7 @@ use clap::ValueEnum;
 use ff_ext::{BabyBearExt4, ExtensionField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
+use gkr_iop::cpu::{CpuBackend, CpuProver};
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
 use p3::{babybear::BabyBear, goldilocks::Goldilocks};
@@ -717,7 +717,7 @@ pub fn run_e2e_with_checkpoint<
 
     // proving
     let backend: CpuBackend<E, PCS> = CpuBackend::new();
-    let device: CpuProver<CpuBackend<E, PCS>> = CpuProver::new(backend);
+    let device = CpuProver::new(backend);
     let mut prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {
@@ -791,7 +791,7 @@ pub fn run_e2e_proof<
 
     // proving
     let backend: CpuBackend<E, PCS> = CpuBackend::new();
-    let device: CpuProver<CpuBackend<E, PCS>> = CpuProver::new(backend);
+    let device = CpuProver::new(backend);
     let mut prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {

@@ -1,10 +1,14 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{mle::Point, utils::eval_by_expr_with_instance};
-use sumcheck::structs::{IOPProof, VerifierError};
+use sumcheck::structs::VerifierError;
 use transcript::Transcript;
 
-use crate::{error::BackendError, gkr::layer::sumcheck_layer::SumcheckLayerProof};
+use crate::{
+    error::BackendError,
+    gkr::layer::{hal::LinearLayerProver, sumcheck_layer::SumcheckLayerProof},
+    hal::{ProverBackend, ProverDevice},
+};
 
 use super::{Layer, LayerWitness, sumcheck_layer::LayerProof};
 
@@ -13,12 +17,12 @@ pub struct LayerClaims<E: ExtensionField> {
     pub evals: Vec<E>,
 }
 pub trait LinearLayer<E: ExtensionField> {
-    fn prove(
+    fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
-        wit: LayerWitness<E>,
-        out_point: &Point<E>,
-        transcript: &mut impl Transcript<E>,
-    ) -> LayerProof<E>;
+        wit: LayerWitness<PB>,
+        out_point: &Point<PB::E>,
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> LayerProof<PB::E>;
 
     fn verify(
         &self,
@@ -31,27 +35,13 @@ pub trait LinearLayer<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
-    fn prove(
+    fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
-        wit: LayerWitness<E>,
-        out_point: &Point<E>,
-        transcript: &mut impl Transcript<E>,
-    ) -> LayerProof<E> {
-        let evals = wit
-            .wits
-            .iter()
-            .map(|base| base.evaluate(out_point))
-            .collect_vec();
-
-        transcript.append_field_element_exts(&evals);
-
-        LayerProof {
-            main: SumcheckLayerProof {
-                proof: IOPProof { proofs: vec![] },
-                evals,
-            },
-            rotation: None,
-        }
+        wit: LayerWitness<PB>,
+        out_point: &Point<PB::E>,
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> LayerProof<PB::E> {
+        <PD as LinearLayerProver<PB>>::prove(self, wit, out_point, transcript)
     }
 
     fn verify(

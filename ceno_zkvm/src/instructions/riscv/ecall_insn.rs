@@ -1,13 +1,13 @@
 use crate::{
     chip_handler::{
         GlobalStateRegisterMachineChipOperations, RegisterChipOperations, RegisterExpr,
+        general::InstFetch,
     },
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     gadgets::AssertLtConfig,
-    set_val,
     tables::InsnRecord,
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{InsnKind::ECALL, PC_STEP_SIZE, Platform, StepRecord, Tracer};
 use ff_ext::{ExtensionField, FieldInto};

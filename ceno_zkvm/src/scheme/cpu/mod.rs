@@ -1,9 +1,7 @@
 use super::hal::{
-    DeviceTransporter, MainSumcheckProver, MultilinearPolynomial, OpeningProver, ProverBackend,
-    ProverDevice, TowerProver, TraceCommitter,
+    DeviceTransporter, MainSumcheckProver, OpeningProver, ProverDevice, TowerProver, TraceCommitter,
 };
 use crate::{
-    circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP},
@@ -13,90 +11,35 @@ use crate::{
             wit_infer_by_expr,
         },
     },
-    structs::TowerProofs,
+    structs::{ComposedConstrainSystem, TowerProofs},
 };
 use either::Either;
 use ff_ext::ExtensionField;
+use gkr_iop::{
+    cpu::{CpuBackend, CpuProver},
+    hal::ProverBackend,
+};
 use itertools::{Itertools, chain};
-use mpcs::{Point, PolynomialCommitmentScheme, SecurityLevel};
+use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression, Instance,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     monomial::Term,
+    util::ceil_log2,
     utils::eval_by_expr_with_instance,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use p3::{
-    field::{FieldAlgebra, TwoAdicField},
-    matrix::dense::RowMajorMatrix,
-};
+use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
-    util::{ceil_log2, get_challenge_pows, optimal_sumcheck_threads},
+    util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
-
-pub struct CpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub param: PCS::Param,
-    _marker: std::marker::PhantomData<E>,
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for CpuBackend<E, PCS> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> CpuBackend<E, PCS> {
-    pub fn new() -> Self {
-        let param =
-            PCS::setup(<E as ExtensionField>::TWO_ADICITY, SecurityLevel::Conjecture100bits).unwrap();
-        Self {
-            param,
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtension<'a, E> {
-    fn num_vars(&self) -> usize {
-        self.num_vars()
-    }
-
-    fn eval(&self, point: Point<E>) -> E {
-        self.evaluate(&point)
-    }
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for CpuBackend<E, PCS> {
-    type E = E;
-    type Pcs = PCS;
-    type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
-    type Matrix = RowMajorMatrix<E::BaseField>;
-    type PcsData = PCS::CommitmentWithWitness;
-}
-
-/// CPU prover for CPU backend
-pub struct CpuProver<PB: ProverBackend> {
-    backend: PB,
-    pp: Option<<<PB as ProverBackend>::Pcs as PolynomialCommitmentScheme<PB::E>>::ProverParam>,
-    largest_poly_size: Option<usize>,
-}
-
-impl<PB: ProverBackend> CpuProver<PB> {
-    pub fn new(backend: PB) -> Self {
-        Self {
-            backend,
-            pp: None,
-            largest_poly_size: None,
-        }
-    }
-}
 
 pub struct CpuTowerProver;
 
@@ -326,7 +269,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
             self.pp = Some(prover_param);
             self.pp.as_ref().unwrap()
         };
-        let pcs_data = PCS::batch_commit(prover_param, traces).unwrap();
+        let pcs_data = PCS::batch_commit(prover_param, traces.into_values().collect_vec()).unwrap();
         let commit = PCS::get_pure_commitment(&pcs_data);
         let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data)
             .into_par_iter()
@@ -342,7 +285,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 {
     fn build_tower_witness<'a, 'b>(
         &self,
-        cs: &ConstraintSystem<E>,
+        ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        }: &ComposedConstrainSystem<E>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
         challenges: &[E; 2],
     ) -> (
@@ -614,7 +559,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         rt_tower: Vec<E>,
         _records: Vec<ArcMultilinearExtension<'b, E>>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
-        cs: &ConstraintSystem<E>,
+        ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        }: &ComposedConstrainSystem<E>,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> Result<
@@ -805,22 +752,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
         witness_data: PCS::CommitmentWithWitness,
         fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
         points: Vec<Point<E>>,
-        evals: Vec<Vec<E>>,
+        mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
         circuit_num_polys: &[(usize, usize)],
         num_instances: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> PCS::Proof {
-        PCS::batch_open(
-            self.pp.as_ref().unwrap(),
-            num_instances,
-            fixed_data.as_ref().map(|f| f.as_ref()),
+        let mut rounds = vec![];
+        rounds.push((
             &witness_data,
-            &points,
-            &evals,
-            circuit_num_polys,
-            transcript,
-        )
-        .unwrap()
+            points
+                .iter()
+                .zip_eq(evals.iter_mut())
+                .zip_eq(num_instances.iter())
+                .map(|((point, evals), (chip_idx, _))| {
+                    let (num_witin, _) = circuit_num_polys[*chip_idx];
+                    (point.clone(), evals.drain(..num_witin).collect_vec())
+                })
+                .collect_vec(),
+        ));
+        if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
+            rounds.push((
+                fixed_data,
+                points
+                    .iter()
+                    .zip_eq(evals.iter_mut())
+                    .zip_eq(num_instances.iter())
+                    .filter(|(_, (chip_idx, _))| {
+                        let (_, num_fixed) = circuit_num_polys[*chip_idx];
+                        num_fixed > 0
+                    })
+                    .map(|((point, evals), _)| (point.clone(), evals.to_vec()))
+                    .collect_vec(),
+            ));
+        }
+        PCS::batch_open(self.pp.as_ref().unwrap(), rounds, transcript).unwrap()
     }
 }
 

@@ -1,13 +1,9 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
-    scheme::{
-        cpu::{CpuBackend, CpuProver},
-        hal::ProofInput,
-        prover::ZKVMProver,
-    },
+    scheme::{hal::ProofInput, prover::ZKVMProver},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
 mod alloc;
@@ -15,6 +11,7 @@ use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
+use gkr_iop::cpu::{CpuBackend, CpuProver};
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
 
 use rand::rngs::OsRng;
@@ -64,7 +61,7 @@ fn bench_add(c: &mut Criterion) {
         .circuit_pks
         .get(&AddInstruction::<E>::name())
         .unwrap();
-    let num_witin = circuit_pk.get_cs().num_witin;
+    let num_witin = circuit_pk.get_cs().num_witin();
 
     for instance_num_vars in 20..22 {
         // expand more input size once runtime is acceptable
@@ -80,10 +77,7 @@ fn bench_add(c: &mut Criterion) {
                     for _ in 0..iters {
                         // generate mock witness
                         let num_instances = 1 << instance_num_vars;
-                        let rmms = BTreeMap::from([(
-                            0,
-                            RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin as usize),
-                        )]);
+                        let rmms = vec![RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin)];
 
                         let instant = std::time::Instant::now();
                         let num_instances = 1 << instance_num_vars;

@@ -49,6 +49,7 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 
     pub tower_proof: TowerProofs<E>,
 
+    pub num_instances: usize,
     pub fixed_in_evals: Vec<E>,
     pub wits_in_evals: Vec<E>,
 }
@@ -114,32 +115,25 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub raw_pi: Vec<Vec<E::BaseField>>,
     // the evaluation of raw_pi.
     pub pi_evals: Vec<E>,
-    // circuit size -> instance mapping
-    pub num_instances: Vec<(usize, usize)>,
-    pub opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
-    pub table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+    pub chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
     pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
-    pub fixed_witin_opening_proof: PCS::Proof,
+    pub opening_proof: PCS::Proof,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
         raw_pi: Vec<Vec<E::BaseField>>,
         pi_evals: Vec<E>,
-        opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
-        table_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+        chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
-        fixed_witin_opening_proof: PCS::Proof,
-        num_instances: Vec<(usize, usize)>,
+        opening_proof: PCS::Proof,
     ) -> Self {
         Self {
             raw_pi,
             pi_evals,
-            opcode_proofs,
-            table_proofs,
+            chip_proofs,
             witin_commit,
-            fixed_witin_opening_proof,
-            num_instances,
+            opening_proof,
         }
     }
 
@@ -164,23 +158,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     }
 
     pub fn num_circuits(&self) -> usize {
-        self.opcode_proofs.len() + self.table_proofs.len()
+        self.chip_proofs.len()
     }
 
     pub fn has_halt(&self, vk: &ZKVMVerifyingKey<E, PCS>) -> bool {
+        let halt_circuit_index = vk
+            .circuit_vks
+            .keys()
+            .position(|circuit_name| *circuit_name == HaltInstruction::<E>::name())
+            .expect("halt circuit not exist");
         let halt_instance_count = self
-            .num_instances
-            .iter()
-            .find_map(|(circuit_index, num_instances)| {
-                (*circuit_index
-                    == vk
-                        .circuit_vks
-                        .keys()
-                        .position(|circuit_name| *circuit_name == HaltInstruction::<E>::name())
-                        .expect("halt circuit not exist"))
-                .then_some(*num_instances)
-            })
-            .unwrap_or(0);
+            .chip_proofs
+            .get(&halt_circuit_index)
+            .map_or(0, |proof| proof.num_instances);
         if halt_instance_count > 0 {
             assert_eq!(
                 halt_instance_count, 1,
@@ -203,11 +193,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let mpcs_opcode_commitment =
             bincode::serialized_size(&self.witin_commit).expect("serialization error");
         let mpcs_opcode_opening =
-            bincode::serialized_size(&self.fixed_witin_opening_proof).expect("serialization error");
+            bincode::serialized_size(&self.opening_proof).expect("serialization error");
 
-        // opcode circuit for tower proof size
-        let tower_proof_opcode = self
-            .opcode_proofs
+        // tower proof size
+        let tower_proof = self
+            .chip_proofs
             .iter()
             .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.tower_proof);
@@ -219,37 +209,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             .expect("serialization error")
             .iter()
             .sum::<u64>();
-        // opcode circuit main sumcheck
-        let main_sumcheck_opcode = self
-            .opcode_proofs
-            .iter()
-            .map(|(circuit_index, proof)| {
-                let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
-                size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
-                })
-            })
-            .collect::<Result<Vec<u64>, _>>()
-            .expect("serialization error")
-            .iter()
-            .sum::<u64>();
-        // table circuit for tower proof size
-        let tower_proof_table = self
-            .table_proofs
-            .iter()
-            .map(|(circuit_index, proof)| {
-                let size = bincode::serialized_size(&proof.tower_proof);
-                size.inspect(|size| {
-                    *by_circuitname_stats.entry(circuit_index).or_insert(0) += size;
-                })
-            })
-            .collect::<Result<Vec<u64>, _>>()
-            .expect("serialization error")
-            .iter()
-            .sum::<u64>();
-        // table circuit same r sumcheck
-        let same_r_sumcheck_table = self
-            .table_proofs
+        // main sumcheck
+        let main_sumcheck = self
+            .chip_proofs
             .iter()
             .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
@@ -286,20 +248,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             "overall_size {:.2}mb. \n\
             mpcs commitment {:?}% \n\
             mpcs opening {:?}% \n\
-            opcode tower proof {:?}% \n\
-            opcode main sumcheck proof {:?}% \n\
-            table tower proof {:?}% \n\
-            table same r sumcheck proof {:?}% \n\n\
+            tower proof {:?}% \n\
+            main sumcheck proof {:?}% \n\
             by circuit_name break down: \n\
             {}
             ",
             byte_to_mb(overall_size),
             (mpcs_opcode_commitment * 100).div(overall_size),
             (mpcs_opcode_opening * 100).div(overall_size),
-            (tower_proof_opcode * 100).div(overall_size),
-            (main_sumcheck_opcode * 100).div(overall_size),
-            (tower_proof_table * 100).div(overall_size),
-            (same_r_sumcheck_table * 100).div(overall_size),
+            (tower_proof * 100).div(overall_size),
+            (main_sumcheck * 100).div(overall_size),
             by_circuitname_stats,
         )
     }

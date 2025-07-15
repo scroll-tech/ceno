@@ -6,15 +6,16 @@ pub mod util;
 use crate::{
     chip_handler::{AddressExpr, MemoryExpr, RegisterExpr},
     circuit_builder::CircuitBuilder,
-    error::{UtilError, ZKVMError},
+    error::UtilError,
     gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::riscv::constants::UInt,
     utils::add_one_to_big_num,
     witness::LkMultiplicity,
 };
 use ff_ext::{ExtensionField, SmallField};
+use gkr_iop::error::CircuitBuilderError;
 use itertools::{Itertools, enumerate};
-use multilinear_extensions::{Expression, ToExpr, WitIn};
+use multilinear_extensions::{Expression, ToExpr, WitIn, util::ceil_log2};
 use p3::field::FieldAlgebra;
 use std::{
     borrow::Cow,
@@ -23,7 +24,6 @@ use std::{
 };
 pub use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
-use sumcheck::util::ceil_log2;
 use util::max_carry_word_for_multiplication;
 
 #[derive(Clone, EnumIter, Debug)]
@@ -88,14 +88,14 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn new<NR: Into<String>, N: FnOnce() -> NR>(
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         Self::new_maybe_unchecked(name_fn, circuit_builder, true)
     }
 
     pub fn new_unchecked<NR: Into<String>, N: FnOnce() -> NR>(
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         Self::new_maybe_unchecked(name_fn, circuit_builder, false)
     }
 
@@ -103,7 +103,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
         is_check: bool,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         circuit_builder.namespace(name_fn, |cb| {
             Ok(UIntLimbs {
                 limbs: UintLimb::WitIn(
@@ -116,7 +116,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                             // skip range check
                             Ok(w)
                         })
-                        .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
+                        .collect::<Result<Vec<WitIn>, CircuitBuilderError>>()?,
                 ),
                 carries: None,
                 carries_auxiliary_lt_config: None,
@@ -216,7 +216,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         value: &ValueMul,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), CircuitBuilderError> {
         self.assign_limbs(instance, &value.limbs);
         self.assign_carries(instance, &value.carries);
         self.assign_carries_auxiliary(instance, lkm, &value.carries, value.max_carry_value)
@@ -273,7 +273,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         lkm: &mut LkMultiplicity,
         carry_values: &[T],
         max_carry: u64,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), CircuitBuilderError> {
         assert!(
             carry_values.len()
                 <= self
@@ -294,7 +294,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     /// conversion is needed for lt/ltu
     /// TODO: add general conversion between any two limb sizes C1 <-> C2
-    pub fn from_u8_limbs(x: &UIntLimbs<M, 8, E>) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
+    pub fn from_u8_limbs(
+        x: &UIntLimbs<M, 8, E>,
+    ) -> Result<UIntLimbs<M, C, E>, CircuitBuilderError> {
         assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
         assert!(x.carries.is_none());
         let k = C / 8;
@@ -380,7 +382,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         &mut self,
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), CircuitBuilderError> {
         if let UintLimb::Expression(_) = self.limbs {
             circuit_builder.namespace(name_fn, |cb| {
                 self.limbs = UintLimb::WitIn(
@@ -390,7 +392,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                             cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
                             Ok(w)
                         })
-                        .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
+                        .collect::<Result<Vec<WitIn>, CircuitBuilderError>>()?,
                 );
                 Ok(())
             })?;
@@ -405,7 +407,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         with_overflow: bool,
         num_carries: usize,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), CircuitBuilderError> {
         if self.carries.is_none() {
             circuit_builder.namespace(name_fn, |cb| {
                 let carries_len = if with_overflow {
@@ -419,7 +421,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                             let c = cb.create_witin(|| format!("carry_{i}"));
                             Ok(c)
                         })
-                        .collect::<Result<Vec<WitIn>, ZKVMError>>()?,
+                        .collect::<Result<Vec<WitIn>, CircuitBuilderError>>()?,
                 );
                 Ok(())
             })?;
@@ -467,7 +469,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     /// split into 2 UIntLimbs with each taking half size of limbs
     pub fn as_lo_hi<const M2: usize>(
         &self,
-    ) -> Result<(UIntLimbs<M2, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
+    ) -> Result<(UIntLimbs<M2, C, E>, UIntLimbs<M2, C, E>), CircuitBuilderError> {
         assert!(M == 2 * M2);
         let mut self_lo = self.expr();
         let self_hi = self_lo.split_off(self_lo.len() / 2);
@@ -492,7 +494,7 @@ impl<E: ExtensionField> UInt<E> {
     pub fn is_negative(
         &self,
         cb: &mut CircuitBuilder<E>,
-    ) -> Result<SignedExtendConfig<E>, ZKVMError> {
+    ) -> Result<SignedExtendConfig<E>, CircuitBuilderError> {
         SignedExtendConfig::<E>::construct_limb(cb, self.limbs.iter().last().unwrap().expr())
     }
 }

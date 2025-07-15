@@ -1,19 +1,17 @@
 use std::marker::PhantomData;
 
-use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use multilinear_extensions::{
-    utils::eval_by_expr_with_instance, virtual_poly::VPAuxInfo,
-    virtual_polys::VirtualPolynomialsBuilder,
-};
+use multilinear_extensions::{utils::eval_by_expr_with_instance, virtual_poly::VPAuxInfo};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sumcheck::structs::{
-    IOPProof, IOPProverState, IOPVerifierState, SumCheckSubClaim, VerifierError,
-};
+use sumcheck::structs::{IOPProof, IOPVerifierState, SumCheckSubClaim, VerifierError};
 use transcript::Transcript;
 
-use crate::error::BackendError;
+use crate::{
+    error::BackendError,
+    gkr::layer::hal::SumcheckLayerProver,
+    hal::{ProverBackend, ProverDevice},
+};
 
 use super::{Layer, LayerWitness, linear_layer::LayerClaims};
 
@@ -39,14 +37,14 @@ pub struct SumcheckLayerProof<E: ExtensionField> {
 
 pub trait SumcheckLayer<E: ExtensionField> {
     #[allow(clippy::too_many_arguments)]
-    fn prove(
+    fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        wit: LayerWitness<'_, E>,
-        challenges: &[E],
-        transcript: &mut impl Transcript<E>,
-    ) -> LayerProof<E>;
+        wit: LayerWitness<PB>,
+        challenges: &[PB::E],
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> LayerProof<PB::E>;
 
     fn verify(
         &self,
@@ -59,33 +57,22 @@ pub trait SumcheckLayer<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
-    fn prove(
+    fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        wit: LayerWitness<'_, E>,
-        challenges: &[E],
-        transcript: &mut impl Transcript<E>,
-    ) -> LayerProof<E> {
-        let builder = VirtualPolynomialsBuilder::new_with_mles(
+        wit: LayerWitness<PB>,
+        challenges: &[PB::E],
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> LayerProof<PB::E> {
+        <PD as SumcheckLayerProver<PB>>::prove(
+            self,
             num_threads,
             max_num_variables,
-            wit.wits
-                .iter()
-                .map(|mle| Either::Left(mle.as_ref()))
-                .collect_vec(),
-        );
-        let (proof, prover_state) = IOPProverState::prove(
-            builder.to_virtual_polys(&[self.exprs[0].clone()], challenges),
+            wit,
+            challenges,
             transcript,
-        );
-        LayerProof {
-            main: SumcheckLayerProof {
-                proof,
-                evals: prover_state.get_mle_flatten_final_evaluations(),
-            },
-            rotation: None,
-        }
+        )
     }
 
     fn verify(

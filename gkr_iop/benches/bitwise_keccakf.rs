@@ -2,9 +2,10 @@ use std::time::Duration;
 
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-use gkr_iop::precompiles::{run_keccakf, setup_keccak_bitwise_circuit};
+use gkr_iop::precompiles::{run_bitwise_keccakf, setup_bitwise_keccak_gkr_circuit};
 use itertools::Itertools;
-use rand::{Rng, SeedableRng};
+use mpcs::BasefoldDefault;
+use rand::{RngCore, SeedableRng};
 mod alloc;
 criterion_group!(benches, keccak_f_fn);
 criterion_main!(benches);
@@ -28,14 +29,18 @@ fn keccak_f_fn(c: &mut Criterion) {
                         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
                         let states: Vec<[u64; 25]> = (0..num_instance)
-                            .map(|_| std::array::from_fn(|_| rng.gen()))
+                            .map(|_| std::array::from_fn(|_| rng.next_u64()))
                             .collect_vec();
 
                         let instant = std::time::Instant::now();
 
-                        let circuit = setup_keccak_bitwise_circuit();
                         #[allow(clippy::unit_arg)]
-                        run_keccakf::<GoldilocksExt2>(circuit, black_box(states), false, false);
+                        run_bitwise_keccakf::<GoldilocksExt2, BasefoldDefault<GoldilocksExt2>>(
+                            setup_bitwise_keccak_gkr_circuit(),
+                            black_box(states),
+                            false,
+                            false,
+                        );
                         let elapsed = instant.elapsed();
                         println!(
                             "keccak_f::create_proof, instances = {}, time = {}",

@@ -1,7 +1,9 @@
-use ff_ext::ExtensionField;
+pub mod lk_multiplicity;
+
+use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, izip};
 use multilinear_extensions::{
-    Expression,
+    Expression, Fixed, WitIn, WitnessId,
     mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
@@ -30,7 +32,7 @@ where
     E: ExtensionField,
 {
     let out_evals: Vec<_> = layer
-        .expr_evals
+        .out_eq_and_eval_exprs
         .iter()
         .flat_map(|(_, out_eval)| out_eval.iter())
         .collect();
@@ -39,14 +41,11 @@ where
         .par_iter()
         .zip_eq(layer.expr_names.par_iter())
         .zip_eq(out_evals.par_iter())
-        .map(|((expr, expr_name), out_eval)| match out_eval {
-            EvalExpression::Single(_) => {
-                wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr)
-            }
-            EvalExpression::Zero => {
+        .map(|((expr, expr_name), out_eval)| {
+            let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
+            if let EvalExpression::Zero = out_eval {
                 // sanity check: zero mle
                 if cfg!(debug_assertions) {
-                    let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
                     let all_zero = match out_mle.evaluations() {
                         multilinear_extensions::mle::FieldType::Base(smart_slice) => {
                             smart_slice.iter().copied().all(|v| v == E::BaseField::ZERO)
@@ -63,9 +62,8 @@ where
                         );
                     }
                 }
-                MultilinearExtension::default().into()
-            }
-            _ => unimplemented!(),
+            };
+            out_mle
         })
         .collect::<Vec<_>>()
 }
@@ -76,8 +74,8 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
 ) -> Vec<Expression<E>> {
     let mut alpha_pows_iter = alpha_pows.iter();
     let mut expr_iter = layer.exprs.iter();
-    let mut zero_check_exprs = Vec::with_capacity(layer.expr_evals.len());
-    for (eq_expr, out_evals) in layer.expr_evals.iter() {
+    let mut zero_check_exprs = Vec::with_capacity(layer.out_eq_and_eval_exprs.len());
+    for (eq_expr, out_evals) in layer.out_eq_and_eval_exprs.iter() {
         let group_length = out_evals.len();
         let zero_check_expr = expr_iter
             .by_ref()
@@ -228,6 +226,63 @@ pub fn rotation_selector_eval<E: ExtensionField>(
         &out_point[cyclic_group_log2_size..],
         &in_point[cyclic_group_log2_size..],
     )
+}
+
+pub fn i64_to_base<F: SmallField>(x: i64) -> F {
+    if x >= 0 {
+        F::from_canonical_u64(x as u64)
+    } else {
+        -F::from_canonical_u64((-x) as u64)
+    }
+}
+
+/// Returns `[0 + offset, ..., N - 1 + offset]`.
+#[must_use]
+pub const fn indices_arr_with_offset<const N: usize, const OFFSET: usize>() -> [usize; N] {
+    let mut indices_arr = [0; N];
+    let mut i = 0;
+    while i < N {
+        indices_arr[i] = i + OFFSET;
+        i += 1;
+    }
+    indices_arr
+}
+
+pub fn indices_arr_with_offset_non_const<const N: usize>(offset: usize) -> [usize; N] {
+    let mut indices_arr = [0; N];
+    let mut i = 0;
+    while i < N {
+        indices_arr[i] = i + offset;
+        i += 1;
+    }
+    indices_arr
+}
+
+/// Returns `[WitIn(0), ..., WitIn(N - 1)], [Fixed(N), Fixed(N + 1), ..., Fixed(N + M)], [WitIn(N + M + 1), ...]`.
+#[must_use]
+pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>()
+-> ([WitIn; N], [Fixed; M], [WitIn; Q]) {
+    let mut wits = [WitIn { id: 0 }; N];
+    let mut i = 0;
+    while i < N {
+        wits[i] = WitIn { id: i as WitnessId };
+        i += 1;
+    }
+    let mut i = 0;
+    let mut fixed = [Fixed(0); M];
+    while i < M {
+        fixed[i] = Fixed(i);
+        i += 1;
+    }
+    let mut i = 0;
+    let mut eqs = [WitIn { id: 0 }; Q];
+    while i < Q {
+        eqs[i] = WitIn {
+            id: (i + N + M) as WitnessId,
+        };
+        i += 1;
+    }
+    (wits, fixed, eqs)
 }
 
 #[cfg(test)]
