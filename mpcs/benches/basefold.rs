@@ -8,7 +8,6 @@ use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel,
     test_util::{get_point_from_challenge, setup_pcs},
 };
-use std::collections::BTreeMap;
 
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
@@ -45,7 +44,7 @@ fn bench_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>(
 
         let mut transcript = T::new(b"BaseFold");
         let mut rng = rand::thread_rng();
-        let rmms = BTreeMap::from([(0, RowMajorMatrix::rand(&mut rng, 1 << num_vars, 1))]);
+        let rmms = vec![RowMajorMatrix::rand(&mut rng, 1 << num_vars, 1)];
         let comm = Pcs::batch_commit_and_write(&pp, rmms.clone(), &mut transcript).unwrap();
         let poly = Pcs::get_arc_mle_witness_from_commitment(&comm).remove(0);
 
@@ -109,15 +108,12 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
     for num_vars in NUM_VARS_START..=NUM_VARS_END {
         for batch_size_log in BATCH_SIZE_LOG_START..=BATCH_SIZE_LOG_END {
             let batch_size = 1 << batch_size_log;
-            let num_instances = vec![(0, 1 << num_vars)];
-            let circuit_num_polys = vec![(batch_size, 0)];
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
             let mut transcript = T::new(b"BaseFold");
             let mut rng = rand::thread_rng();
-            let rmms =
-                BTreeMap::from([(0, RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size))]);
+            let rmms = vec![RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size)];
 
-            let polys = rmms[&0].to_mles();
+            let polys = rmms[0].to_mles();
             let comm = Pcs::batch_commit_and_write(&pp, rmms.clone(), &mut transcript).unwrap();
 
             group.bench_function(
@@ -144,12 +140,7 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
             let transcript_for_bench = transcript.clone();
             let proof = Pcs::batch_open(
                 &pp,
-                &num_instances,
-                None,
-                &comm,
-                &[point.clone()],
-                &[evals.clone()],
-                &circuit_num_polys,
+                vec![(&comm, vec![(point.clone(), evals.clone())])],
                 &mut transcript,
             )
             .unwrap();
@@ -162,12 +153,7 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                         |mut transcript| {
                             Pcs::batch_open(
                                 &pp,
-                                &num_instances,
-                                None,
-                                &comm,
-                                &[point.clone()],
-                                &[evals.clone()],
-                                &circuit_num_polys,
+                                vec![(&comm, vec![(point.clone(), evals.clone())])],
                                 &mut transcript,
                             )
                             .unwrap();
@@ -188,13 +174,11 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
 
             Pcs::batch_verify(
                 &vp,
-                &num_instances,
-                &[point.clone()],
-                None,
-                &comm,
-                &[evals.clone()],
+                vec![(
+                    comm.clone(),
+                    vec![(point.len(), (point.clone(), evals.clone()))],
+                )],
                 &proof,
-                &circuit_num_polys,
                 &mut transcript,
             )
             .unwrap();
@@ -207,13 +191,11 @@ fn bench_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentScheme<E>>
                         |mut transcript| {
                             Pcs::batch_verify(
                                 &vp,
-                                &num_instances,
-                                &[point.clone()],
-                                None,
-                                &comm,
-                                &[evals.clone()],
+                                vec![(
+                                    comm.clone(),
+                                    vec![(point.len(), (point.clone(), evals.clone()))],
+                                )],
                                 &proof,
-                                &circuit_num_polys,
                                 &mut transcript,
                             )
                             .unwrap();

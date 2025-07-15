@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 use ceno_zkvm::{
     self,
@@ -77,10 +77,7 @@ fn bench_add(c: &mut Criterion) {
                     for _ in 0..iters {
                         // generate mock witness
                         let num_instances = 1 << instance_num_vars;
-                        let rmms = BTreeMap::from([(
-                            0,
-                            RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin),
-                        )]);
+                        let rmms = vec![RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin)];
 
                         let instant = std::time::Instant::now();
                         let num_instances = 1 << instance_num_vars;

@@ -113,6 +113,14 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.num_fixed
     }
 
+    pub fn num_reads(&self) -> usize {
+        self.zkvm_v1_css.r_expressions.len() + self.zkvm_v1_css.r_table_expressions.len()
+    }
+
+    pub fn num_writes(&self) -> usize {
+        self.zkvm_v1_css.w_expressions.len() + self.zkvm_v1_css.w_table_expressions.len()
+    }
+
     pub fn instance_name_map(&self) -> &HashMap<Instance, String> {
         &self.zkvm_v1_css.instance_name_map
     }
@@ -125,7 +133,7 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
 
     /// return number of lookup operation
     pub fn num_lks(&self) -> usize {
-        self.zkvm_v1_css.lk_expressions.len()
+        self.zkvm_v1_css.lk_expressions.len() + self.zkvm_v1_css.lk_table_expressions.len()
     }
 
     /// return num_vars belongs to rotation
@@ -422,7 +430,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     ) -> Result<(), ZKVMError> {
         if !fixed_traces.is_empty() {
             let fixed_commit_wd =
-                PCS::batch_commit(&self.pp, fixed_traces).map_err(ZKVMError::PCSError)?;
+                PCS::batch_commit(&self.pp, fixed_traces.into_values().collect_vec())
+                    .map_err(ZKVMError::PCSError)?;
             let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
             self.fixed_commit_wd = Some(Arc::new(fixed_commit_wd));
             self.fixed_commit = Some(fixed_commit);
@@ -447,11 +456,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
             finalize_global_state_expr: self.finalize_global_state_expr.clone(),
-            circuit_num_polys: self
+            circuit_index_to_name: self
                 .circuit_pks
-                .values()
-                .map(|pk| (pk.vk.get_cs().num_witin(), pk.vk.get_cs().num_fixed()))
-                .collect_vec(),
+                .keys()
+                .enumerate()
+                .map(|(index, name)| (index, name.clone()))
+                .collect(),
         }
     }
 }
@@ -469,6 +479,7 @@ pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
     pub finalize_global_state_expr: Expression<E>,
-    // circuit index -> (witin num_polys, fixed_num_polys)
-    pub circuit_num_polys: Vec<(usize, usize)>,
+    // circuit index -> circuit name
+    // mainly used for debugging
+    pub circuit_index_to_name: BTreeMap<usize, String>,
 }

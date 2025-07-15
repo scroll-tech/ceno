@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 use criterion::*;
 use ff_ext::GoldilocksExt2;
@@ -107,8 +107,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             let batch_size = 1 << batch_size_log;
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
-            let rmms =
-                BTreeMap::from([(0, RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size))]);
+            let rmms = vec![RowMajorMatrix::rand(&mut rng, 1 << num_vars, batch_size)];
 
             group.bench_function(
                 BenchmarkId::new("batch_commit", format!("{}-{}", num_vars, batch_size)),
@@ -129,7 +128,7 @@ fn bench_simple_batch_commit_open_verify_goldilocks<Pcs: PolynomialCommitmentSch
             );
 
             let mut transcript = T::new(b"BaseFold");
-            let polys = rmms[&0].to_mles();
+            let polys = rmms[0].to_mles();
             let comm = Pcs::batch_commit_and_write(&pp, rmms, &mut transcript).unwrap();
             let point = get_point_from_challenge(num_vars, &mut transcript);
             let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
