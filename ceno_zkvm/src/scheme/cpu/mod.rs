@@ -627,8 +627,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 num_var_with_rotation,
                 gkr::GKRCircuitWitness {
                     layers: vec![LayerWitness(
-                        // we skip &input.structural_witness as it will be restored within gkr-iop
-                        chain!(&input.witness, &input.fixed).cloned().collect_vec(),
+                        chain!(&input.witness, &input.structural_witness, &input.fixed)
+                            .cloned()
+                            .collect_vec(),
                     )],
                 },
                 // eval value doesnt matter as it wont be used by prover

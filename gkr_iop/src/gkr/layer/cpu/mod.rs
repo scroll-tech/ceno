@@ -202,7 +202,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .chain(
                 // fixed, start after `n_witin`
                 wit.iter()
-                    .skip(layer.n_witin)
+                    .skip(layer.n_witin + layer.n_structural_witin)
                     .map(|mle| Either::Left(mle.as_ref())),
             )
             .collect_vec();
