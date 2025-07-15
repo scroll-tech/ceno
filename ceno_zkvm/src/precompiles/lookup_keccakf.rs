@@ -1,12 +1,22 @@
 use std::{array, mem::transmute};
 
-use crate::{
-    error::ZKVMError,
-    instructions::riscv::insn_base::{StateInOut, WriteMEM},
-};
 use ceno_emul::{ByteAddr, Change, Cycle, MemOp, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::{
+    ProtocolBuilder, ProtocolWitnessGenerator,
+    chip::Chip,
+    circuit_builder::{
+        CircuitBuilder, ConstraintSystem, RotationParams, expansion_expr, rotation_split,
+    },
+    cpu::{CpuBackend, CpuProver},
+    error::{BackendError, CircuitBuilderError},
+    gkr::{
+        GKRCircuit, GKRProof, GKRProverOutput, booleanhypercube::BooleanHypercube, layer::Layer,
+        mock::MockProver,
+    },
+    selector::SelectorType,
+    utils::lk_multiplicity::LkMultiplicity,
+};
 use itertools::{Itertools, iproduct, izip, zip_eq};
 use keccakf::Permutation;
 use mpcs::PolynomialCommitmentScheme;
@@ -28,21 +38,12 @@ use sumcheck::{
 use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
-use crate::precompiles::utils::{
-    MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance,
-};
-use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    chip::Chip,
-    circuit_builder::{
-        CircuitBuilder, ConstraintSystem, RotationParams, expansion_expr, rotation_split,
+use crate::{
+    error::ZKVMError,
+    instructions::riscv::insn_base::{StateInOut, WriteMEM},
+    precompiles::utils::{
+        MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance,
     },
-    error::{BackendError, CircuitBuilderError},
-    gkr::{
-        GKRCircuit, GKRProof, GKRProverOutput, booleanhypercube::BooleanHypercube, layer::Layer,
-        mock::MockProver,
-    },
-    utils::lk_multiplicity::LkMultiplicity,
 };
 
 pub const ROUNDS: usize = 24;
@@ -149,8 +150,8 @@ pub struct KeccakLayer<WitT, EqT> {
     pub wits: KeccakWitCols<WitT>,
     //  pub fixed: KeccakFixedCols<FixedT>,
     pub eq_zero: EqT,
-    pub eq_mem_read: EqT,
-    pub eq_mem_write: EqT,
+    pub sel_mem_read: EqT,
+    pub sel_mem_write: EqT,
     pub eq_rotation_left: EqT,
     pub eq_rotation_right: EqT,
     pub eq_rotation: EqT,
@@ -174,8 +175,8 @@ impl<E: ExtensionField> KeccakLayout<E> {
             // fixed,
             [
                 eq_zero,
-                eq_mem_write,
-                eq_mem_read,
+                sel_mem_write,
+                sel_mem_read,
                 eq_rotation_left,
                 eq_rotation_right,
                 eq_rotation,
@@ -200,8 +201,8 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 wits,
                 // fixed,
                 eq_zero,
-                eq_mem_read,
-                eq_mem_write,
+                sel_mem_read,
+                sel_mem_write,
                 eq_rotation_left,
                 eq_rotation_right,
                 eq_rotation,
@@ -499,10 +500,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         layout.n_committed = chip.n_committed;
         layout.n_challenges = chip.n_challenges;
 
-        let read_eq = Some(layout.layer_exprs.eq_mem_read.expr());
-        let write_eq = Some(layout.layer_exprs.eq_mem_write.expr());
-        let lk_eq = Some(layout.layer_exprs.eq_zero.expr()); // lk eq shared with zero
-        let zero_eq = Some(layout.layer_exprs.eq_zero.expr());
+        let read_eq = layout.layer_exprs.sel_mem_read.expr();
+        let write_eq = layout.layer_exprs.sel_mem_write.expr();
+        let lk_eq = layout.layer_exprs.eq_zero.expr(); // lk eq shared with zero
+        let zero_eq = layout.layer_exprs.eq_zero.expr();
 
         let w_len = system.cs.w_expressions.len();
         let r_len = system.cs.r_expressions.len();
@@ -511,10 +512,21 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             + system.cs.assert_zero_sumcheck_expressions.len();
 
         // prepare selector for each
-        let r_records_eval = (0..r_len).map(|id| (read_eq.clone(), id));
-        let w_records_eval = (r_len..r_len + w_len).map(|id| (write_eq.clone(), id));
-        let lk_eval = (r_len + w_len..r_len + w_len + lk_len).map(|id| (lk_eq.clone(), id));
-        let zero_eval = (0..zero_len).map(|_| zero_eq.clone());
+        let r_records_eval = (0..r_len).map(|id| {
+            (
+                SelectorType::KeccakRound(0, E::BaseField::ONE, read_eq.clone()),
+                id,
+            )
+        });
+        let w_records_eval = (r_len..r_len + w_len).map(|id| {
+            (
+                SelectorType::KeccakRound(23, E::BaseField::ONE, write_eq.clone()),
+                id,
+            )
+        });
+        let lk_eval = (r_len + w_len..r_len + w_len + lk_len)
+            .map(|id| (SelectorType::Whole(lk_eq.clone()), id));
+        let zero_eval = (0..zero_len).map(|_| SelectorType::Whole(zero_eq.clone()));
 
         let layer = Layer::from_circuit_builder(
             &*system,
@@ -622,10 +634,10 @@ where
         &self,
         phase1: Self::Trace,
         wits: [&mut RowMajorMatrix<E::BaseField>; 2],
-        _lk_multiplicity: &mut LkMultiplicity,
+        lk_multiplicity: &mut LkMultiplicity,
     ) {
         // TODO assign eq (selectors) to _structural_wits
-        let [wits, structural_wits] = wits;
+        let [wits, _structural_wits] = wits;
         let KeccakLayer {
             wits:
                 KeccakWitCols {
@@ -642,9 +654,6 @@ where
                     iota_output: iota_output_witin,
                     rc: rc_witin,
                 },
-            eq_zero,
-            eq_mem_read,
-            eq_mem_write,
             ..
         } = self.layer_exprs;
 
@@ -663,14 +672,9 @@ where
         wits.values
             .par_chunks_mut(self.n_committed * ROUNDS.next_power_of_two())
             .take(num_instances)
-            .zip(
-                structural_wits
-                    .values
-                    .par_chunks_mut(self.n_committed * ROUNDS.next_power_of_two()),
-            )
             .zip(&phase1.instances)
-            .for_each(|((wits, structural_wits), KeccakInstance { witin, .. })| {
-                let mut lk_multiplicity = _lk_multiplicity.clone();
+            .for_each(|(wits, KeccakInstance { witin, .. })| {
+                let mut lk_multiplicity = lk_multiplicity.clone();
                 let state_32_iter = witin.instance.iter().map(|e| *e as u64);
                 let mut state64 = [[0u64; 5]; 5];
                 zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
@@ -844,15 +848,6 @@ where
                             iota_output8[x][y] = conv64to8(iota_output64[x][y]);
                         }
                     }
-
-                    // set selector
-                    if round == 0 {
-                        set_val!(structural_wits, eq_mem_read, E::BaseField::ONE);
-                    }
-                    if round == ROUNDS - 1 {
-                        set_val!(structural_wits, eq_mem_write, E::BaseField::ONE);
-                    }
-                    set_val!(structural_wits, eq_zero, E::BaseField::ONE);
 
                     // set witness
                     push_instance::<E, _>(
@@ -1198,10 +1193,11 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         // mock prover
         let out_wits = gkr_output.0.0.clone();
         MockProver::check(
-            gkr_circuit.clone(),
+            &gkr_circuit,
             &gkr_witness,
             out_wits,
             challenges.to_vec(),
+            num_instances,
         )
         .expect("mock prover failed");
     }
@@ -1215,6 +1211,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             &out_evals,
             &challenges,
             &mut prover_transcript,
+            num_instances,
         )
         .expect("Failed to prove phase");
     exit_span!(span);
@@ -1242,6 +1239,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     &out_evals,
                     &challenges,
                     &mut verifier_transcript,
+                    num_instances,
                 )
                 .expect("GKR verify failed");
 

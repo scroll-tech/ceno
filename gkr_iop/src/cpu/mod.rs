@@ -5,13 +5,12 @@ use crate::{
     evaluation::EvalExpression,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
-    infer_layer_witness,
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use mpcs::{Point, PolynomialCommitmentScheme, SecurityLevel};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::{
-    mle::{IntoMLE, MultilinearExtension},
+    mle::{IntoMLE, MultilinearExtension, Point},
     op_mle,
     utils::eval_by_expr_constant,
 };
@@ -166,12 +165,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // infer current layer output
             let current_layer_output: Vec<
                 Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
-            > = infer_layer_witness(layer, &current_layer_wits, challenges);
+            > = layer.layer_witness(&current_layer_wits, challenges, num_instances);
             layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
             // process out to prepare output witness
             layer
-                .out_eq_and_eval_exprs
+                .out_sel_and_eval_exprs
                 .iter()
                 .flat_map(|(_, out_eval)| out_eval)
                 .zip_eq(&current_layer_output)

@@ -1,6 +1,7 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::Point;
+use p3_field::FieldAlgebra;
 
 const BH_MAX_NUM_VAR: usize = 5;
 
@@ -9,7 +10,7 @@ pub struct BooleanHypercube {
 }
 
 // 2^5-1 cyclic group
-const CYCLIC_POW2_5: [u64; 32] = [
+pub const CYCLIC_POW2_5: [u64; 32] = [
     0b00001, // 0 = decimal 1
     0b00010, // 1 = decimal 2
     0b00100, // 2 = decimal 4
@@ -101,6 +102,12 @@ impl IntoIterator for &BooleanHypercube {
             _ => unimplemented!(),
         }
     }
+}
+
+pub fn u5_to_binary_vec<F: FieldAlgebra>(x: u64) -> Vec<F> {
+    (0..5)
+        .map(|i| F::from_canonical_u64((x >> i) & 1))
+        .collect()
 }
 
 #[cfg(test)]

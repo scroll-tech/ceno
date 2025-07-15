@@ -66,8 +66,8 @@ fn main() {
     let random_u64: u64 = rand::random();
     // Use seeded rng for debugging convenience
     let mut rng = rand::rngs::StdRng::seed_from_u64(random_u64);
-    let num_instance = 1024;
-    let states: Vec<[u64; 25]> = (0..num_instance)
+    let num_instances = 1024;
+    let states: Vec<[u64; 25]> = (0..num_instances)
         .map(|_| std::array::from_fn(|_| rng.next_u64()))
         .collect_vec();
     run_bitwise_keccakf::<E, Pcs>(

@@ -29,6 +29,7 @@ use gkr_iop::{
         layer::Layer,
         layer_constraint_system::{LayerConstraintSystem, expansion_expr},
     },
+    selector::SelectorType,
     utils::{indices_arr_with_offset, lk_multiplicity::LkMultiplicity, wits_fixed_and_eqs},
 };
 
@@ -140,8 +141,8 @@ const KECCAK_INPUT32_SIZE: usize = 50;
 const KECCAK_OUT_EVAL_SIZE: usize = size_of::<KeccakOutEvals<u8>>();
 const KECCAK_ALL_IN_EVAL_SIZE: usize = size_of::<KeccakInEvals<u8>>();
 
-#[derive(Clone, Debug, Default)]
-pub struct KeccakParams {}
+#[derive(Clone, Debug)]
+pub struct KeccakParams;
 
 #[derive(Clone, Debug)]
 #[repr(C)]
@@ -152,8 +153,9 @@ pub struct KeccakOutEvals<T> {
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub struct Output32Layer<WitT> {
+pub struct Output32Layer<WitT, EqT> {
     output: [WitT; STATE_SIZE],
+    sel: EqT,
 }
 
 #[derive(Clone, Debug)]
@@ -192,7 +194,7 @@ pub struct ThetaFirstLayer<WitT, EqT, OptionEqT> {
     round_input: [WitT; STATE_SIZE],
     eq_c: EqT,
     eq_copy: EqT,
-    eq_keccak_out: OptionEqT,
+    sel_keccak_out: OptionEqT,
 }
 
 #[derive(Clone, Debug)]
@@ -205,7 +207,7 @@ pub struct KeccakRound<WitT, EqT, OptionEqT> {
     theta_first: ThetaFirstLayer<WitT, EqT, OptionEqT>,
 }
 
-const OUTPUT32_WIT_SIZE: usize = size_of::<Output32Layer<u8>>();
+const OUTPUT32_WIT_SIZE: usize = size_of::<Output32Layer<u8, ()>>();
 const IOTA_WIT_SIZE: usize = size_of::<IotaLayer<u8, ()>>();
 const RHO_PI_AND_CHI_WIT_SIZE: usize = size_of::<RhoPiAndChiLayer<u8, ()>>();
 const THETA_THIRD_WIT_SIZE: usize = size_of::<ThetaThirdLayer<u8, ()>>();
@@ -224,7 +226,7 @@ pub struct KeccakRoundEval<T> {
 
 #[derive(Clone, Debug)]
 pub struct KeccakLayers<WitT, EqT> {
-    pub output32: Output32Layer<WitT>,
+    pub output32: Output32Layer<WitT, EqT>,
     pub inner_rounds: [KeccakRound<WitT, EqT, ()>; 23],
     pub first_round: KeccakRound<WitT, EqT, EqT>,
 }
@@ -307,8 +309,8 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
 
         // allocate witnesses, fixed, and eqs
         let layers = {
-            let (output, _, _) = wits_fixed_and_eqs::<OUTPUT32_WIT_SIZE, 0, 0>();
-            let output32 = Output32Layer { output };
+            let (output, _, [sel]) = wits_fixed_and_eqs::<OUTPUT32_WIT_SIZE, 0, 1>();
+            let output32 = Output32Layer { output, sel };
             let inner_rounds = from_fn(|_| {
                 allocate_round(|| {
                     const THETA_FIRST_EQ_SIZE: usize = size_of::<ThetaFirstLayer<(), u8, ()>>();
@@ -319,7 +321,7 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
                         round_input,
                         eq_c,
                         eq_copy,
-                        eq_keccak_out: (),
+                        sel_keccak_out: (),
                     }
                 })
             });
@@ -327,12 +329,12 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
                 const KECCAK_FIRST_EQ_SIZE: usize = size_of::<ThetaFirstLayer<(), u8, u8>>();
                 let (round_input, _, eqs) =
                     wits_fixed_and_eqs::<THETA_FIRST_WIT_SIZE, 0, KECCAK_FIRST_EQ_SIZE>();
-                let (eq_c, eq_copy, eq_keccak_out) = unsafe { transmute(eqs) };
+                let (eq_c, eq_copy, sel_keccak_out) = unsafe { transmute(eqs) };
                 ThetaFirstLayer {
                     round_input,
                     eq_c,
                     eq_copy,
-                    eq_keccak_out,
+                    sel_keccak_out,
                 }
             });
             KeccakLayers {
@@ -353,7 +355,7 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
 }
 
 fn output32_layer<E: ExtensionField>(
-    layer: &Output32Layer<WitIn>,
+    layer: &Output32Layer<WitIn, WitIn>,
     out_evals: &[usize],
     in_evals: &[usize],
     alpha: Expression<E>,
@@ -365,6 +367,7 @@ fn output32_layer<E: ExtensionField>(
     let mut keccak_output32_iter = out_evals.iter().map(|x| EvalExpression::Single(*x));
 
     // process keccak output
+    let sel_type = SelectorType::KeccakRound(23, E::BaseField::ONE, layer.sel.expr());
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {
@@ -377,7 +380,7 @@ fn output32_layer<E: ExtensionField>(
                 );
                 system.add_non_zero_constraint(
                     expr,
-                    (None, keccak_output32_iter.next().unwrap()),
+                    (sel_type.clone(), keccak_output32_iter.next().unwrap()),
                     format!("build 32-bit output: {x}, {y}, {k}"),
                 );
             }
@@ -400,6 +403,7 @@ fn iota_layer<E: ExtensionField>(
 
     let bits = layer.chi_output.iter().map(|e| e.expr()).collect_vec();
     let round_value = RC[round_id];
+    let sel_type = SelectorType::Whole(layer.eq.expr());
     iota_out_evals.iter().enumerate().for_each(|(i, out_eval)| {
         let expr = {
             let round_bit = E::BaseField::from_canonical_u64((round_value >> i) & 1).expr();
@@ -407,7 +411,7 @@ fn iota_layer<E: ExtensionField>(
         };
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq.expr()), EvalExpression::Single(*out_eval)),
+            (sel_type.clone(), EvalExpression::Single(*out_eval)),
             format!("Round {round_id}: Iota:: compute output {i}"),
         );
     });
@@ -456,9 +460,10 @@ fn rho_pi_and_chi_layer<E: ExtensionField>(
         } else {
             layer.eq_round_out.expr()
         };
+        let sel_type = SelectorType::Whole(eq);
         system.add_non_zero_constraint(
             chi_expr(i, &permuted),
-            (Some(eq), out_eval_iter.next().unwrap()),
+            (sel_type, out_eval_iter.next().unwrap()),
             format!("Round {round_id}: Chi:: apply rho, pi and chi [{i}]"),
         )
     });
@@ -481,12 +486,13 @@ fn theta_third_layer<E: ExtensionField>(
     let mut system = LayerConstraintSystem::new(D_SIZE + STATE_SIZE, 0, 0, None, alpha, beta);
     // Compute post-theta state using original state and D[][] values
     let mut out_eval_iter = out_evals.iter().map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq.expr());
     (0..STATE_SIZE).for_each(|i| {
         let (x, _, z) = to_xyz(i);
         let expr = xor_expr(layer.state_copy[i].expr(), layer.d[from_xz(x, z)].expr());
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::compute output [{i}]"),
         );
     });
@@ -510,11 +516,12 @@ fn theta_second_layer<E: ExtensionField>(
     // Compute D[][] from C[][] values
     let c = layer.c.iter().map(|c| c.expr()).collect_vec();
     let mut out_eval_iter = out_evals.iter().map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq.expr());
     iproduct!(0..5usize, 0..64usize).for_each(|(x, z)| {
         let expr = d_expr(x, z, &c);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::compute D[{x}][{z}]"),
         );
     });
@@ -540,11 +547,12 @@ fn theta_first_layer<E: ExtensionField>(
 
     // Compute C[][] from state
     let mut out_eval_iter = d_out_evals.iter().map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq_c.expr());
     iproduct!(0..5usize, 0..64usize).for_each(|(x, z)| {
         let expr = c_expr(x, z, &state_wits);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq_c.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::compute C[{x}][{z}]"),
         );
     });
@@ -553,11 +561,12 @@ fn theta_first_layer<E: ExtensionField>(
     let mut out_eval_iter = state_copy_out_evals
         .iter()
         .map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq_copy.expr());
     state_wits.into_iter().enumerate().for_each(|(i, expr)| {
         let (x, y, z) = to_xyz(i);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq_copy.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::copy state[{x}][{y}][{z}]"),
         )
     });
@@ -569,6 +578,7 @@ fn theta_first_layer<E: ExtensionField>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn keccak_first_layer<E: ExtensionField>(
     layer: &ThetaFirstLayer<WitIn, WitIn, WitIn>,
     d_out_evals: &[usize],
@@ -583,11 +593,12 @@ fn keccak_first_layer<E: ExtensionField>(
 
     // Compute C[][] from state
     let mut out_eval_iter = d_out_evals.iter().map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq_c.expr());
     iproduct!(0..5usize, 0..64usize).for_each(|(x, z)| {
         let expr = c_expr(x, z, &state_wits);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq_c.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::compute C[{x}][{z}]"),
         );
     });
@@ -596,17 +607,19 @@ fn keccak_first_layer<E: ExtensionField>(
     let mut out_eval_iter = state_copy_out_evals
         .iter()
         .map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq_copy.expr());
     state_wits.into_iter().enumerate().for_each(|(i, expr)| {
         let (x, y, z) = to_xyz(i);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq_copy.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::copy state[{x}][{y}][{z}]"),
         )
     });
 
     // process keccak output
     let mut out_eval_iter = input32_out_evals.iter().map(|x| EvalExpression::Single(*x));
+    let sel_type = SelectorType::KeccakRound(0, E::BaseField::ONE, layer.sel_keccak_out.expr());
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {
@@ -619,10 +632,7 @@ fn keccak_first_layer<E: ExtensionField>(
                 );
                 system.add_non_zero_constraint(
                     expr,
-                    (
-                        Some(layer.eq_keccak_out.expr()),
-                        out_eval_iter.next().unwrap(),
-                    ),
+                    (sel_type.clone(), out_eval_iter.next().unwrap()),
                     format!("build 32-bit input: {x}, {y}, {k}"),
                 );
             }
@@ -939,6 +949,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
             &out_evals,
             &[],
             &mut prover_transcript,
+            num_instances,
         )
         .expect("Failed to prove phase");
     exit_span!(span);
@@ -958,6 +969,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
                     &out_evals,
                     &[],
                     &mut verifier_transcript,
+                    num_instances,
                 )
                 .expect("GKR verify failed");
 
@@ -986,8 +998,8 @@ mod tests {
         let random_u64: u64 = rand::random();
         // Use seeded rng for debugging convenience
         let mut rng = rand::rngs::StdRng::seed_from_u64(random_u64);
-        let num_instance = 4;
-        let states: Vec<[u64; 25]> = (0..num_instance)
+        let num_instances = 4;
+        let states: Vec<[u64; 25]> = (0..num_instances)
             .map(|_| std::array::from_fn(|_| rng.next_u64()))
             .collect_vec();
         run_keccakf::<E, Pcs>(
