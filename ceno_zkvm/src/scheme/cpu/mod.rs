@@ -269,7 +269,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
             self.pp = Some(prover_param);
             self.pp.as_ref().unwrap()
         };
-        let pcs_data = PCS::batch_commit(prover_param, traces).unwrap();
+        let pcs_data = PCS::batch_commit(prover_param, traces.into_values().collect_vec()).unwrap();
         let commit = PCS::get_pure_commitment(&pcs_data);
         let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data)
             .into_par_iter()
@@ -752,22 +752,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
         witness_data: PCS::CommitmentWithWitness,
         fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
         points: Vec<Point<E>>,
-        evals: Vec<Vec<E>>,
+        mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
         circuit_num_polys: &[(usize, usize)],
         num_instances: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> PCS::Proof {
-        PCS::batch_open(
-            self.pp.as_ref().unwrap(),
-            num_instances,
-            fixed_data.as_ref().map(|f| f.as_ref()),
+        let mut rounds = vec![];
+        rounds.push((
             &witness_data,
-            &points,
-            &evals,
-            circuit_num_polys,
-            transcript,
-        )
-        .unwrap()
+            points
+                .iter()
+                .zip_eq(evals.iter_mut())
+                .zip_eq(num_instances.iter())
+                .map(|((point, evals), (chip_idx, _))| {
+                    let (num_witin, _) = circuit_num_polys[*chip_idx];
+                    (point.clone(), evals.drain(..num_witin).collect_vec())
+                })
+                .collect_vec(),
+        ));
+        if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
+            rounds.push((
+                fixed_data,
+                points
+                    .iter()
+                    .zip_eq(evals.iter_mut())
+                    .zip_eq(num_instances.iter())
+                    .filter(|(_, (chip_idx, _))| {
+                        let (_, num_fixed) = circuit_num_polys[*chip_idx];
+                        num_fixed > 0
+                    })
+                    .map(|((point, evals), _)| (point.clone(), evals.to_vec()))
+                    .collect_vec(),
+            ));
+        }
+        PCS::batch_open(self.pp.as_ref().unwrap(), rounds, transcript).unwrap()
     }
 }
 
