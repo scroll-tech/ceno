@@ -2,7 +2,7 @@
 use clap::ValueEnum;
 use ff_ext::ExtensionField;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{collections::BTreeMap, fmt::Debug};
+use std::fmt::Debug;
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -42,7 +42,7 @@ pub fn pcs_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
 
 pub fn pcs_batch_commit<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     pp: &Pcs::ProverParam,
-    rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+    rmms: Vec<RowMajorMatrix<E::BaseField>>,
 ) -> Result<Pcs::CommitmentWithWitness, Error> {
     Pcs::batch_commit(pp, rmms)
 }
@@ -113,12 +113,12 @@ pub trait PolynomialCommitmentScheme<E: ExtensionField>: Clone {
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+        rmms: Vec<RowMajorMatrix<E::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, Error>;
 
     fn batch_commit_and_write(
         pp: &Self::ProverParam,
-        rmms: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+        rmms: Vec<RowMajorMatrix<E::BaseField>>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
         let comm = Self::batch_commit(pp, rmms)?;
@@ -389,8 +389,6 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
         Standard: Distribution<E::BaseField>,
     {
-        use std::collections::BTreeMap;
-
         use multilinear_extensions::mle::ArcMultilinearExtension;
 
         let mut rng = rand::thread_rng();
@@ -401,9 +399,7 @@ pub mod test_util {
                 let mut transcript = BasicTranscript::new(b"BaseFold");
                 let rmm = RowMajorMatrix::<E::BaseField>::rand(&mut rng, 1 << num_vars, batch_size);
                 let polys = rmm.to_mles();
-                let comm =
-                    Pcs::batch_commit_and_write(&pp, BTreeMap::from([(0, rmm)]), &mut transcript)
-                        .unwrap();
+                let comm = Pcs::batch_commit_and_write(&pp, vec![rmm], &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);
@@ -453,8 +449,6 @@ pub mod test_util {
         Pcs: PolynomialCommitmentScheme<E>,
         Standard: Distribution<E::BaseField>,
     {
-        use std::collections::BTreeMap;
-
         for num_vars in num_vars_start..num_vars_end {
             let (pp, vp) = setup_pcs::<E, Pcs>(num_vars);
 
@@ -465,9 +459,7 @@ pub mod test_util {
 
                 let polys = rmm.to_mles();
 
-                let comm =
-                    Pcs::batch_commit_and_write(&pp, BTreeMap::from([(0, rmm)]), &mut transcript)
-                        .unwrap();
+                let comm = Pcs::batch_commit_and_write(&pp, vec![rmm], &mut transcript).unwrap();
                 let point = get_point_from_challenge(num_vars, &mut transcript);
                 let evals = polys.iter().map(|poly| poly.evaluate(&point)).collect_vec();
                 transcript.append_field_element_exts(&evals);

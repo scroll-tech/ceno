@@ -161,7 +161,6 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                 {
                     let dimensions = batch_opening
                         .iter()
-                        .filter(|(num_var, _)| *num_var >= S::get_basecode_msg_size_log())
                         .map(|(num_var, (_, evals))| {
                             Dimensions {
                                 width: evals.len() * 2, // we pack two rows into one in the mmcs
