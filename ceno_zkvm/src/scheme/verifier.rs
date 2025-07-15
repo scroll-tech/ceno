@@ -31,7 +31,7 @@ use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with
 use super::{ZKVMChipProof, ZKVMProof};
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub(crate) vk: ZKVMVerifyingKey<E, PCS>,
+    pub vk: ZKVMVerifyingKey<E, PCS>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
