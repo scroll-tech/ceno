@@ -194,7 +194,7 @@ pub mod impl_babybear {
     impl ExtensionField for BabyBearExt4 {
         const DEGREE: usize = 4;
         const MULTIPLICATIVE_GENERATOR: Self = <BabyBearExt4 as Field>::GENERATOR;
-        const TWO_ADICITY: usize = BabyBear::TWO_ADICITY;
+        const TWO_ADICITY: usize = 134217728;
         // non-residue is the value w such that the extension field is
         // F[X]/(X^2 - w)
         const NONRESIDUE: Self::BaseField = <BabyBear as BinomiallyExtendable<4>>::W;

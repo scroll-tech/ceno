@@ -115,8 +115,8 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub raw_pi: Vec<Vec<E::BaseField>>,
     // the evaluation of raw_pi.
     pub pi_evals: Vec<E>,
-    chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
-    witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
+    pub chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+    pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub opening_proof: PCS::Proof,
 }
 
