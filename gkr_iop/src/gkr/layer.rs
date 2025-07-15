@@ -1,14 +1,17 @@
-use std::{collections::BTreeMap, ops::Neg, sync::Arc, vec::IntoIter};
+use std::{collections::BTreeMap, iter, ops::Neg, sync::Arc, vec::IntoIter};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
     Expression, Fixed, ToExpr, WitnessId,
-    mle::{Point, PointAndEval},
+    mle::{ArcMultilinearExtension, Point, PointAndEval},
+    wit_infer_by_expr,
 };
 use p3::field::FieldAlgebra;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck_layer::LayerProof;
 use transcript::Transcript;
@@ -19,6 +22,7 @@ use crate::{
     error::BackendError,
     evaluation::EvalExpression,
     hal::{MultilinearPolynomial, ProverBackend, ProverDevice},
+    selector::{SelectorType, select_from_expression_result},
 };
 
 pub mod cpu;
@@ -27,7 +31,7 @@ pub mod linear_layer;
 pub mod sumcheck_layer;
 pub mod zerocheck_layer;
 
-pub type ExprEvalType<E> = Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>;
+pub type ExprEvalType<E> = (SelectorType<E>, Vec<EvalExpression<E>>);
 pub type RotateExprs<E> = (
     Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
     Vec<(Expression<E>, Expression<E>)>,
@@ -74,7 +78,7 @@ pub struct Layer<E: ExtensionField> {
     /// connected to the outputs of this layer.
     /// It format indicated as different output group
     /// first tuple value is optional eq
-    pub out_eq_and_eval_exprs: ExprEvalType<E>,
+    pub out_sel_and_eval_exprs: Vec<ExprEvalType<E>>,
 
     // format: ([eq0, eq1, eq2], Vec<(rotatition_expr, expr)>) such that rotation_expr - expr == 0
     // there got 3 different eq for (left, right, target) during rotation argument
@@ -111,7 +115,7 @@ impl<E: ExtensionField> Layer<E> {
         n_challenges: usize,
         in_eval_expr: Vec<usize>,
         // first tuple value is eq
-        out_eq_and_eval_exprs: ExprEvalType<E>,
+        out_sel_and_eval_exprs: Vec<ExprEvalType<E>>,
         ((rotation_eq, rotation_exprs), rotation_cyclic_group_log2, rotation_cyclic_subgroup_size): (
             RotateExprs<E>,
             usize,
@@ -139,7 +143,7 @@ impl<E: ExtensionField> Layer<E> {
             n_challenges,
             exprs,
             in_eval_expr,
-            out_eq_and_eval_exprs,
+            out_sel_and_eval_exprs,
             rotation_exprs: (rotation_eq, rotation_exprs),
             rotation_cyclic_group_log2,
             rotation_cyclic_subgroup_size,
@@ -156,6 +160,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut T,
+        num_instances: usize,
     ) -> LayerProof<E> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
@@ -174,6 +179,7 @@ impl<E: ExtensionField> Layer<E> {
                     &out_points,
                     challenges,
                     transcript,
+                    num_instances,
                 )
             }
             LayerType::Linear => {
@@ -199,6 +205,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
+        num_instances: usize,
     ) -> Result<(), BackendError> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
@@ -211,6 +218,7 @@ impl<E: ExtensionField> Layer<E> {
                 eval_and_dedup_points,
                 challenges,
                 transcript,
+                num_instances,
             )?,
             LayerType::Linear => {
                 assert_eq!(eval_and_dedup_points.len(), 1);
@@ -237,7 +245,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &[PointAndEval<E>],
         challenges: &[E],
     ) -> Vec<(Vec<E>, Option<Point<E>>)> {
-        self.out_eq_and_eval_exprs
+        self.out_sel_and_eval_exprs
             .iter()
             .map(|(_, out_evals)| {
                 let evals = out_evals
@@ -278,14 +286,49 @@ impl<E: ExtensionField> Layer<E> {
         }
     }
 
+    pub fn layer_witness<'a>(
+        &self,
+        layer_wits: &[ArcMultilinearExtension<'a, E>],
+        challenges: &[E],
+        num_instances: usize,
+    ) -> Vec<ArcMultilinearExtension<'a, E>>
+    where
+        E: ExtensionField,
+    {
+        let out_evals: Vec<_> = self
+            .out_sel_and_eval_exprs
+            .iter()
+            .flat_map(|(sel_type, out_eval)| izip!(iter::once(sel_type), out_eval.iter()))
+            .collect();
+        self.exprs
+            .par_iter()
+            .zip_eq(self.expr_names.par_iter())
+            .zip_eq(out_evals.par_iter())
+            .map(|((expr, expr_name), (sel_type, out_eval))| {
+                let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
+                if let EvalExpression::Zero = out_eval {
+                    // sanity check: zero mle
+                    if cfg!(debug_assertions) {
+                        assert!(
+                            out_mle.evaluations().is_zero(),
+                            "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
+                            self.name
+                        );
+                    }
+                };
+                select_from_expression_result(sel_type, out_mle, num_instances)
+            })
+            .collect::<Vec<_>>()
+    }
+
     pub fn from_circuit_builder(
         cb: &CircuitBuilder<E>,
         layer_name: String,
         n_challenges: usize,
-        w_record_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
-        r_record_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
-        lookup_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
-        zero_evals: impl ExactSizeIterator<Item = Option<Expression<E>>>,
+        w_record_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
+        r_record_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
+        lookup_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
+        zero_evals: impl ExactSizeIterator<Item = SelectorType<E>>,
     ) -> Layer<E> {
         let non_zero_expr_len = cb.cs.w_expressions_namespace_map.len()
             + cb.cs.r_expressions_namespace_map.len()

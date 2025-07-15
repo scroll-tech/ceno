@@ -16,14 +16,14 @@ const NUM_SAMPLES: usize = 10;
 fn keccak_f_fn(c: &mut Criterion) {
     // Benchmark the proving time
     for log_instances in 12..14 {
-        let num_instance = 1 << log_instances;
+        let num_instances = 1 << log_instances;
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("keccak_lookup_f_{}", num_instance));
+        let mut group = c.benchmark_group(format!("keccak_lookup_f_{}", num_instances));
         group.sample_size(NUM_SAMPLES);
         group.bench_function(
             BenchmarkId::new(
                 "keccak_lookup_f",
-                format!("prove_keccak_lookup_f_{}", num_instance),
+                format!("prove_keccak_lookup_f_{}", num_instances),
             ),
             |b| {
                 b.iter_custom(|iters| {
@@ -32,7 +32,7 @@ fn keccak_f_fn(c: &mut Criterion) {
                         // Use seeded rng for debugging convenience
                         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-                        let states: Vec<[u64; 25]> = (0..num_instance)
+                        let states: Vec<[u64; 25]> = (0..num_instances)
                             .map(|_| std::array::from_fn(|_| rng.next_u64()))
                             .collect_vec();
 
@@ -52,7 +52,7 @@ fn keccak_f_fn(c: &mut Criterion) {
                         let elapsed = instant.elapsed();
                         println!(
                             "keccak_f::create_proof, instances = {}, time = {}",
-                            num_instance,
+                            num_instances,
                             elapsed.as_secs_f64()
                         );
                         time += elapsed;

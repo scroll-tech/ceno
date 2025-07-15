@@ -2,12 +2,9 @@ use std::marker::PhantomData;
 
 use either::Either;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use multilinear_extensions::{
-    Expression, WitnessId,
-    mle::Point,
-    utils::eval_by_expr,
-    virtual_poly::{VPAuxInfo, eq_eval},
+    Expression, WitnessId, mle::Point, utils::eval_by_expr, virtual_poly::VPAuxInfo,
 };
 use p3_field::dot_product;
 use sumcheck::{
@@ -53,6 +50,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         out_points: &[Point<PB::E>],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
+        num_instances: usize,
     ) -> (LayerProof<PB::E>, Point<PB::E>);
 
     fn verify(
@@ -62,6 +60,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
+        num_instances: usize,
     ) -> Result<LayerClaims<E>, BackendError>;
 }
 
@@ -74,6 +73,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         out_points: &[Point<PB::E>],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
+        num_instances: usize,
     ) -> (LayerProof<PB::E>, Point<PB::E>) {
         <PD as ZerocheckLayerProver<PB>>::prove(
             self,
@@ -83,6 +83,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             out_points,
             challenges,
             transcript,
+            num_instances,
         )
     }
 
@@ -93,12 +94,13 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         mut eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
+        num_instances: usize,
     ) -> Result<LayerClaims<E>, BackendError> {
         assert_eq!(
-            self.out_eq_and_eval_exprs.len(),
+            self.out_sel_and_eval_exprs.len(),
             eval_and_dedup_points.len(),
             "out eval length {} != with eval_and_dedup_points {}",
-            self.out_eq_and_eval_exprs.len(),
+            self.out_sel_and_eval_exprs.len(),
             eval_and_dedup_points.len(),
         );
         let LayerProof {
@@ -169,18 +171,17 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
         // eval eq and set to respective witin
-        eval_and_dedup_points
-            .iter()
-            .map(|(_, out_point)| eq_eval(out_point.as_ref().unwrap(), &in_point))
-            .zip(&self.out_eq_and_eval_exprs)
-            .for_each(|(eval, (eq_expr, _))| match eq_expr {
-                Some(Expression::WitIn(id)) => {
-                    #[cfg(debug_assertions)]
-                    assert_eq!(main_evals[*id as usize], eval, "eq compute wrong");
-                    main_evals[*id as usize] = eval;
-                }
-                _ => unreachable!(),
-            });
+        izip!(&self.out_sel_and_eval_exprs, &eval_and_dedup_points).for_each(
+            |((sel_type, _), (_, out_point))| {
+                sel_type.evaluate(
+                    &mut main_evals,
+                    out_point.as_ref().unwrap(),
+                    &in_point,
+                    num_instances,
+                    self.n_witin,
+                );
+            },
+        );
 
         let zero_check_exprs = extend_exprs_with_rotation(
             self,

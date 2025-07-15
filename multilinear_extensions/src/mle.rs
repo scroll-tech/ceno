@@ -11,7 +11,8 @@ use ff_ext::{ExtensionField, FromUniformBytes};
 use p3::field::{Field, FieldAlgebra};
 use rand::Rng;
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
@@ -149,7 +150,75 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
     }
 
     pub fn zero(num_vars: usize) -> Self {
-        FieldType::Base(SmartSlice::Owned(vec![E::BaseField::ZERO; 1 << num_vars]))
+        FieldType::Base(SmartSlice::Owned(
+            (0..1 << num_vars)
+                .into_par_iter()
+                .map(|_| E::BaseField::ZERO)
+                .collect(),
+        ))
+    }
+
+    pub fn constant(num_vars: usize, value: &E::BaseField) -> Self {
+        FieldType::Base(SmartSlice::Owned(
+            (0..1 << num_vars).into_par_iter().map(|_| *value).collect(),
+        ))
+    }
+
+    pub fn sum(&self) -> FieldType<'a, E> {
+        match self {
+            FieldType::Base(slice) => {
+                let sum = slice.par_iter().cloned().sum::<E::BaseField>();
+                FieldType::Base(SmartSlice::Owned(vec![sum]))
+            }
+            FieldType::Ext(slice) => {
+                let sum = slice.par_iter().cloned().sum::<E>();
+                FieldType::Ext(SmartSlice::Owned(vec![sum]))
+            }
+            FieldType::Unreachable => FieldType::Unreachable,
+        }
+    }
+
+    pub fn sub_constant(mut self, value: &E::BaseField) -> Self {
+        match &mut self {
+            FieldType::Base(slice) => {
+                slice.to_mut().par_iter_mut().for_each(|v| *v -= *value);
+            }
+            FieldType::Ext(slice) => {
+                slice
+                    .to_mut()
+                    .par_iter_mut()
+                    .for_each(|v| *v -= E::from(*value));
+            }
+            FieldType::Unreachable => panic!("unreachable"),
+        }
+        self
+    }
+
+    pub fn select_prefix(mut self, prefix_len: usize, default: &E::BaseField) -> Self {
+        match &mut self {
+            FieldType::Base(slice) => {
+                slice.to_mut()[prefix_len..].fill(*default);
+            }
+            FieldType::Ext(slice) => {
+                slice.to_mut()[prefix_len..].fill(E::from(*default));
+            }
+            FieldType::Unreachable => panic!("unreachable"),
+        }
+        self
+    }
+
+    pub fn pick_stride_offset(self, stride: usize, offset: usize) -> Self {
+        match self {
+            FieldType::Base(slice) => {
+                let res = slice.iter().cloned().skip(offset).step_by(stride).collect();
+                FieldType::Base(SmartSlice::Owned(res))
+            }
+            FieldType::Ext(slice) => {
+                let res = slice.iter().cloned().skip(offset).step_by(stride).collect();
+                FieldType::Ext(SmartSlice::Owned(res))
+            }
+            FieldType::Unreachable => panic!("unreachable"),
+        }
     }
 }
 
@@ -164,6 +233,16 @@ impl<'a, E: ExtensionField> PartialEq for FieldType<'a, E> {
                 .zip(b.par_iter())
                 .all(|(a, b)| E::from_base(*a) == *b),
             _ => self.is_zero() && other.is_zero(),
+        }
+    }
+}
+
+impl<'a, E: ExtensionField> IntoMLE<MultilinearExtension<'a, E>> for FieldType<'a, E> {
+    fn into_mle(self) -> MultilinearExtension<'a, E> {
+        let num_vars = ceil_log2(self.len());
+        MultilinearExtension {
+            evaluations: self,
+            num_vars,
         }
     }
 }

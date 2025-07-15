@@ -13,9 +13,11 @@ use crate::{
 use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use mpcs::{Point, PolynomialCommitmentScheme};
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, WitnessId, mle::MultilinearExtension, virtual_poly::build_eq_x_r_vec,
+    Expression, WitnessId,
+    mle::{MultilinearExtension, Point},
+    virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use rayon::{
@@ -108,15 +110,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         out_points: &[Point<<CpuBackend<E, PCS> as ProverBackend>::E>],
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
+        num_instances: usize,
     ) -> (
         LayerProof<<CpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) {
         assert_eq!(
-            layer.out_eq_and_eval_exprs.len(),
+            layer.out_sel_and_eval_exprs.len(),
             out_points.len(),
             "out eval length {} != with distinct out_point {}",
-            layer.out_eq_and_eval_exprs.len(),
+            layer.out_sel_and_eval_exprs.len(),
             out_points.len(),
         );
 
@@ -163,11 +166,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 
         let span = entered_span!("build_out_points_eq", profiling_4 = true);
         // zero check eq || rotation eq
-        let mut eqs = out_points
+        let mut eqs = layer
+            .out_sel_and_eval_exprs
             .par_iter()
-            .map(|point| {
-                MultilinearExtension::from_evaluations_ext_vec(point.len(), build_eq_x_r_vec(point))
-            })
+            .zip(out_points.par_iter())
+            .filter_map(|((sel_type, _), point)| sel_type.compute(point, num_instances))
             // for rotation left point
             .chain(rotation_left.par_iter().map(|rotation_left| {
                 MultilinearExtension::from_evaluations_ext_vec(

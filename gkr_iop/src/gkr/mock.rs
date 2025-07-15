@@ -1,22 +1,23 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    WitnessId,
-    mle::{ArcMultilinearExtension, MultilinearExtension, Point},
+    Expression, WitnessId,
+    mle::{ArcMultilinearExtension, FieldType, MultilinearExtension},
+    smart_slice::SmartSlice,
     util::ceil_log2,
-    virtual_poly::build_eq_x_r_vec_with_scalar,
+    wit_infer_by_expr,
 };
-use rand::{rngs::OsRng, thread_rng};
+use rand::{Rng, rngs::OsRng, thread_rng};
 use thiserror::Error;
 
-use crate::{cpu::CpuBackend, evaluation::EvalExpression};
-use multilinear_extensions::{
-    Expression, mle::FieldType, smart_slice::SmartSlice, wit_infer_by_expr,
+use crate::{
+    cpu::CpuBackend,
+    evaluation::EvalExpression,
+    selector::{SelectorType, select_from_expression_result},
 };
-use rand::Rng;
 
 use super::{GKRCircuit, GKRCircuitWitness, layer::LayerType};
 
@@ -35,16 +36,19 @@ pub enum MockProverError<'a, E: ExtensionField> {
     ),
     #[error("zerocheck expression not match, out: {0:?}, expr: {1:?}, expr_name: {2:?}")]
     ZerocheckExpressionNotMatch(Box<EvalExpression<E>>, Box<Expression<E>>, String),
+    #[error("zerocheck expression not match, type: {0:?}, expect: {1:?}. got: {2:?}")]
+    ZerocheckSelectorError(SelectorType<E>, E, E),
     #[error("linear expression not match, out: {0:?}, expr: {1:?}")]
     LinearExpressionNotMatch(Box<EvalExpression<E>>, Box<Expression<E>>),
 }
 
 impl<E: ExtensionField> MockProver<E> {
     pub fn check<'a, 'b, PCS: PolynomialCommitmentScheme<E>>(
-        circuit: GKRCircuit<E>,
+        circuit: &'a GKRCircuit<E>,
         circuit_wit: &'a GKRCircuitWitness<'b, CpuBackend<E, PCS>>,
         mut evaluations: Vec<ArcMultilinearExtension<'b, E>>,
         mut challenges: Vec<E>,
+        num_instances: usize,
     ) -> Result<(), MockProverError<'a, E>>
     where
         'b: 'a,
@@ -54,39 +58,37 @@ impl<E: ExtensionField> MockProver<E> {
         evaluations.resize_with(circuit.n_evaluations, Default::default);
         challenges.resize_with(2 + circuit.n_challenges, || E::random(&mut rng));
         // check the input layer
-        for (layer, layer_wit) in izip!(circuit.layers, &circuit_wit.layers) {
+        for (layer, layer_wit) in izip!(&circuit.layers, &circuit_wit.layers) {
             let num_vars = layer_wit.num_vars();
-            let points = (0..layer.out_eq_and_eval_exprs.len())
-                .map(|_| random_point::<E>(OsRng, num_vars))
-                .collect_vec();
-            let eqs = eq_mles(points.clone(), &vec![E::ONE; points.len()])
-                .into_iter()
-                .map(Arc::new)
-                .collect_vec();
+            let sels = layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .filter_map(|(sel_type, _)| {
+                    let point = random_point::<E>(OsRng, num_vars);
+                    sel_type.compute(&point, num_instances)
+                })
+                .map(|mle| mle.into())
+                .collect::<Vec<_>>();
+
+            let mut wits_and_sels = layer_wit
+                .iter()
+                .map(|mle| mle.as_view().into())
+                .collect::<Vec<_>>();
+            wits_and_sels.extend(sels);
             let gots = layer
                 .exprs
                 .iter()
-                .map(|expr| {
-                    wit_infer_by_expr(
-                        &[],
-                        &layer_wit
-                            .iter()
-                            .map(|mle| mle.as_view().into())
-                            .chain(eqs.clone())
-                            .collect_vec(),
-                        &[],
-                        &[],
-                        &challenges,
-                        expr,
-                    )
-                })
+                .map(|expr| wit_infer_by_expr(&[], &wits_and_sels, &[], &[], &challenges, expr))
                 .collect_vec();
+
             let expects = layer
-                .out_eq_and_eval_exprs
+                .out_sel_and_eval_exprs
                 .iter()
-                .flat_map(|(_, out)| out)
-                .map(|out| out.mock_evaluate(&evaluations, &challenges, num_vars))
-                .collect_vec();
+                .flat_map(|(_sel_type, out)| {
+                    out.iter()
+                        .map(|out| out.mock_evaluate(&evaluations, &challenges, num_vars))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             match layer.ty {
                 LayerType::Zerocheck => {
                     for (got, expect, expr, expr_name, out) in izip!(
@@ -94,8 +96,9 @@ impl<E: ExtensionField> MockProver<E> {
                         expects,
                         &layer.exprs,
                         &layer.expr_names,
-                        &layer.out_eq_and_eval_exprs
+                        &layer.out_sel_and_eval_exprs
                     ) {
+                        let got = select_from_expression_result(&out.0, got, num_instances);
                         if expect != got {
                             return Err(MockProverError::ZerocheckExpressionNotMatch(
                                 Box::new(out.1[0].clone()),
@@ -107,7 +110,7 @@ impl<E: ExtensionField> MockProver<E> {
                 }
                 LayerType::Linear => {
                     for (got, expect, expr, out) in
-                        izip!(gots, expects, &layer.exprs, &layer.out_eq_and_eval_exprs)
+                        izip!(gots, expects, &layer.exprs, &layer.out_sel_and_eval_exprs)
                     {
                         if expect != got {
                             return Err(MockProverError::LinearExpressionNotMatch(
@@ -132,8 +135,8 @@ impl<E: ExtensionField> EvalExpression<E> {
         evals: &[ArcMultilinearExtension<'a, E>],
         challenges: &[E],
         num_vars: usize,
-    ) -> ArcMultilinearExtension<'a, E> {
-        match self {
+    ) -> Result<ArcMultilinearExtension<'a, E>, MockProverError<'a, E>> {
+        let output = match self {
             EvalExpression::Zero => {
                 MultilinearExtension::from_field_type(num_vars, FieldType::zero(num_vars)).into()
             }
@@ -151,7 +154,7 @@ impl<E: ExtensionField> EvalExpression<E> {
                 let parts = parts
                     .iter()
                     .map(|part| part.mock_evaluate(evals, challenges, num_vars))
-                    .collect_vec();
+                    .collect::<Result<Vec<_>, _>>()?;
                 indices
                     .iter()
                     .fold(parts, |acc, (i, _c)| {
@@ -195,22 +198,9 @@ impl<E: ExtensionField> EvalExpression<E> {
                     .pop()
                     .unwrap()
             }
-        }
+        };
+        Ok(output)
     }
-}
-
-fn eq_mles<'a, E: ExtensionField>(
-    points: Vec<Point<E>>,
-    scalars: &[E],
-) -> Vec<MultilinearExtension<'a, E>> {
-    izip!(points, scalars)
-        .map(|(point, scalar)| {
-            MultilinearExtension::from_evaluations_ext_vec(
-                point.len(),
-                build_eq_x_r_vec_with_scalar(&point, *scalar),
-            )
-        })
-        .collect_vec()
 }
 
 fn random_point<E: ExtensionField>(mut rng: impl Rng, num_vars: usize) -> Vec<E> {

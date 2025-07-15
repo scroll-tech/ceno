@@ -14,7 +14,6 @@ use ff_ext::ExtensionField;
 use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
 use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
 use transcript::Transcript;
-use utils::infer_layer_witness;
 use witness::RowMajorMatrix;
 
 use crate::hal::ProverBackend;
@@ -27,6 +26,7 @@ pub mod evaluation;
 pub mod gadgets;
 pub mod gkr;
 pub mod hal;
+pub mod selector;
 pub mod tables;
 pub mod utils;
 

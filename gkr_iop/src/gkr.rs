@@ -67,6 +67,7 @@ pub struct Evaluation<E: ExtensionField> {
 pub struct GKRClaims<Evaluation>(pub Vec<Evaluation>);
 
 impl<E: ExtensionField> GKRCircuit<E> {
+    #[allow(clippy::too_many_arguments)]
     pub fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         num_threads: usize,
@@ -75,6 +76,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         out_evals: &[PointAndEval<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
+        num_instances: usize,
     ) -> Result<GKRProverOutput<E, Evaluation<E>>, BackendError> {
         let mut running_evals = out_evals.to_vec();
         // running evals is a global referable within chip
@@ -93,6 +95,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                     &mut running_evals,
                     &mut challenges,
                     transcript,
+                    num_instances,
                 );
                 exit_span!(span);
                 res
@@ -115,6 +118,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         out_evals: &[PointAndEval<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
+        num_instances: usize,
     ) -> Result<GKRClaims<Evaluation<E>>, BackendError>
     where
         E: ExtensionField,
@@ -132,6 +136,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                 &mut evaluations,
                 &mut challenges,
                 transcript,
+                num_instances,
             )?;
         }
 

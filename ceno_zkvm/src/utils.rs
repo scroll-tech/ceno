@@ -61,56 +61,6 @@ pub fn u64vec<const W: usize, const C: usize>(x: u64) -> [u64; W] {
     ret
 }
 
-/// TODO this is copy from gkr crate
-/// including gkr crate after gkr clippy fix
-///
-/// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
-/// [0..=max_idx]. Specifically, it is an MLE of the following vector:
-///     partial_eq_{\mathbf{x}}(\mathbf{y})
-///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
-pub(crate) fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &[E], b: &[E]) -> E {
-    assert!(a.len() >= b.len());
-    // Compute running product of ( x_i y_i + (1 - x_i)(1 - y_i) )_{0 <= i <= n}
-    let running_product = {
-        let mut running_product = Vec::with_capacity(b.len() + 1);
-        running_product.push(E::ONE);
-        for i in 0..b.len() {
-            let x = running_product[i] * (a[i] * b[i] + (E::ONE - a[i]) * (E::ONE - b[i]));
-            running_product.push(x);
-        }
-        running_product
-    };
-
-    let running_product2 = {
-        let mut running_product = vec![E::ZERO; b.len() + 1];
-        running_product[b.len()] = E::ONE;
-        for i in (0..b.len()).rev() {
-            let bit = E::from_canonical_u64(((max_idx >> i) & 1) as u64);
-            running_product[i] = running_product[i + 1]
-                * (a[i] * b[i] * bit + (E::ONE - a[i]) * (E::ONE - b[i]) * (E::ONE - bit));
-        }
-        running_product
-    };
-
-    // Here is an example of how this works:
-    // Suppose max_idx = (110101)_2
-    // Then ans = eq(a, b)
-    //          - eq(11011, a[1..6], b[1..6])eq(a[0..1], b[0..1])
-    //          - eq(111, a[3..6], b[3..6])eq(a[0..3], b[0..3])
-    let mut ans = running_product[b.len()];
-    for i in 0..b.len() {
-        let bit = (max_idx >> i) & 1;
-        if bit == 1 {
-            continue;
-        }
-        ans -= running_product[i] * running_product2[i + 1] * a[i] * b[i];
-    }
-    for v in a.iter().skip(b.len()) {
-        ans *= E::ONE - *v;
-    }
-    ans
-}
-
 /// evaluate MLE M(x0, x1, x2, ..., xn) address vector with it evaluation format
 /// on r = [r0, r1, r2, ...rn] succinctly
 /// where `M = descending * scaled * M' + offset`
