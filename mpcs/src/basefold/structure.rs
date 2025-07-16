@@ -264,11 +264,11 @@ pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) commits: Vec<Digest<E>>,
-    pub(crate) final_message: Vec<Vec<E>>,
-    pub(crate) query_opening_proof: QueryOpeningProofs<E>,
-    pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
-    pub(crate) pow_witness: E::BaseField,
+    pub commits: Vec<Digest<E>>,
+    pub final_message: Vec<Vec<E>>,
+    pub query_opening_proof: QueryOpeningProofs<E>,
+    pub sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
+    pub pow_witness: E::BaseField,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
