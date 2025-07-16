@@ -14,6 +14,7 @@ pub mod circuit_builder;
 pub mod e2e;
 pub mod gadgets;
 mod keygen;
+pub mod precompiles;
 pub mod state;
 pub mod stats;
 pub mod structs;

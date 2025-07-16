@@ -41,8 +41,8 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
     ) -> Result<Self, CircuitBuilderError> {
         let init_v = (0..NVRAM::V_LIMBS)
             .map(|i| cb.create_fixed(|| format!("init_v_limb_{i}")))
-            .collect::<Result<Vec<Fixed>, CircuitBuilderError>>()?;
-        let addr = cb.create_fixed(|| "addr")?;
+            .collect_vec();
+        let addr = cb.create_fixed(|| "addr");
 
         let final_cycle = cb.create_witin(|| "final_cycle");
         let final_v = if NVRAM::WRITABLE {
@@ -199,7 +199,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     ) -> Result<Self, CircuitBuilderError> {
         assert!(!NVRAM::WRITABLE);
         let init_v = cb.query_public_io()?;
-        let addr = cb.create_fixed(|| "addr")?;
+        let addr = cb.create_fixed(|| "addr");
 
         let final_cycle = cb.create_witin(|| "final_cycle");
 

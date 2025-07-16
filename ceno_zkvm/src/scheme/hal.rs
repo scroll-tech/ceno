@@ -5,7 +5,7 @@ use crate::{
     structs::{ComposedConstrainSystem, TowerProofs, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
-use gkr_iop::hal::ProverBackend;
+use gkr_iop::{gkr::GKRProof, hal::ProverBackend};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
 use sumcheck::structs::IOPProverMessage;
@@ -18,6 +18,7 @@ pub trait ProverDevice<PB>:
     + MainSumcheckProver<PB>
     + OpeningProver<PB>
     + DeviceTransporter<PB>
+// + FixedMLEPadder<PB>
 where
     PB: ProverBackend,
 {
@@ -110,6 +111,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
             Point<PB::E>,
             MainSumcheckEvals<PB::E>,
             Option<Vec<IOPProverMessage<PB::E>>>,
+            Option<GKRProof<PB::E>>,
         ),
         ZKVMError,
     >;
@@ -145,3 +147,14 @@ pub trait DeviceTransporter<PB: ProverBackend> {
         mles: Vec<MultilinearExtension<'a, PB::E>>,
     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
+
+// pub trait FixedMLEPadder<PB: ProverBackend> {
+//     fn padding_fixed_mle<'a, 'b>(
+//         &self,
+//         cs: &ComposedConstrainSystem<PB::E>,
+//         fixed_mles: Vec<Arc<PB::MultilinearPoly<'b>>>,
+//         num_instances: usize,
+//     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>
+//     where
+//         'b: 'a;
+// }

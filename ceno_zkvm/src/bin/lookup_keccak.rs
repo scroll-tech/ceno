@@ -1,6 +1,6 @@
+use ceno_zkvm::precompiles::{run_faster_keccakf, setup_lookup_keccak_gkr_circuit};
 use clap::{Parser, command};
 use ff_ext::GoldilocksExt2;
-use gkr_iop::precompiles::{run_bitwise_keccakf, setup_bitwise_keccak_gkr_circuit};
 use itertools::Itertools;
 use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
@@ -66,9 +66,17 @@ fn main() {
     let random_u64: u64 = rand::random();
     // Use seeded rng for debugging convenience
     let mut rng = rand::rngs::StdRng::seed_from_u64(random_u64);
-    let num_instance = 1024;
+    let num_instance = 8192;
     let states: Vec<[u64; 25]> = (0..num_instance)
         .map(|_| std::array::from_fn(|_| rng.next_u64()))
         .collect_vec();
-    run_bitwise_keccakf::<E, Pcs>(setup_bitwise_keccak_gkr_circuit(), states, false, false);
+    let circuit_setup = setup_lookup_keccak_gkr_circuit();
+    let proof = run_faster_keccakf::<E, Pcs>(
+        circuit_setup.expect("setup circuit error"),
+        states,
+        true,
+        true,
+    )
+    .expect("generate proof");
+    tracing::info!("lookup keccak proof stat: {}", proof);
 }

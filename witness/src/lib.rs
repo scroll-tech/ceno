@@ -173,13 +173,12 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + FieldAlgebra> RowMajorMat
         match &self.padding_strategy {
             InstancePaddingStrategy::Default => (),
             InstancePaddingStrategy::RepeatLast => {
-                if num_instances == 0 {
-                    return;
+                if num_instances > 0 {
+                    let padding_vec = self[num_instances - 1].to_vec();
+                    self.inner.values[start_index..]
+                        .par_chunks_mut(self.inner.width)
+                        .for_each(|instance| instance.copy_from_slice(&padding_vec));
                 }
-                let padding_vec = self[num_instances - 1].to_vec();
-                self.inner.values[start_index..]
-                    .par_chunks_mut(self.inner.width)
-                    .for_each(|instance| instance.copy_from_slice(&padding_vec));
             }
             InstancePaddingStrategy::Custom(fun) => {
                 self.inner.values[start_index..]

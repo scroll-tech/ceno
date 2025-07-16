@@ -71,6 +71,7 @@ where
 pub fn extend_exprs_with_rotation<E: ExtensionField>(
     layer: &Layer<E>,
     alpha_pows: &[Expression<E>],
+    offset_eq_id: WitnessId,
 ) -> Vec<Expression<E>> {
     let mut alpha_pows_iter = alpha_pows.iter();
     let mut expr_iter = layer.exprs.iter();
@@ -84,7 +85,11 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
             .zip_eq(alpha_pows_iter.by_ref().take(group_length))
             .map(|(expr, alpha)| alpha * expr)
             .sum::<Expression<E>>();
-        zero_check_exprs.push(eq_expr.clone().unwrap() * zero_check_expr);
+        let eq_expr = match eq_expr {
+            Some(Expression::StructuralWitIn(id, ..)) => Expression::WitIn(offset_eq_id + *id),
+            invalid => panic!("invalid eq format {:?}", invalid),
+        };
+        zero_check_exprs.push(eq_expr * zero_check_expr);
     }
 
     // prepare rotation expr
@@ -130,6 +135,22 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
         ],
     ) = rotation_eq.as_ref()
     {
+        let (rotation_left_eq_expr, rotation_right_eq_expr, rotation_eq_expr) = match (
+            rotation_left_eq_expr,
+            rotation_right_eq_expr,
+            rotation_eq_expr,
+        ) {
+            (
+                Expression::StructuralWitIn(left_eq_id, ..),
+                Expression::StructuralWitIn(right_eq_id, ..),
+                Expression::StructuralWitIn(eq_id, ..),
+            ) => (
+                Expression::WitIn(offset_eq_id + *left_eq_id),
+                Expression::WitIn(offset_eq_id + *right_eq_id),
+                Expression::WitIn(offset_eq_id + *eq_id),
+            ),
+            invalid => panic!("invalid eq format {:?}", invalid),
+        };
         // add rotation left expr
         zero_check_exprs.push(rotation_left_eq_expr * left_rotation_expr);
         // add rotation right expr
@@ -259,6 +280,7 @@ pub fn indices_arr_with_offset_non_const<const N: usize>(offset: usize) -> [usiz
 }
 
 /// Returns `[WitIn(0), ..., WitIn(N - 1)], [Fixed(N), Fixed(N + 1), ..., Fixed(N + M)], [WitIn(N + M + 1), ...]`.
+/// TODO remove me
 #[must_use]
 pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>()
 -> ([WitIn; N], [Fixed; M], [WitIn; Q]) {
