@@ -24,6 +24,6 @@ syn = { version = "2.0", features = ["full"] }
 nightly-features = ["p3/nightly-features"]
 
 [dev-dependencies]
-ff_ext = { path = "../ff_ext" }
+ff_ext.workspace = true
 multilinear_extensions = { path = "../multilinear_extensions" }
 sumcheck.workspace = true

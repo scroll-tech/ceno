@@ -16,7 +16,7 @@ ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
 ceno_gpu_hal.workspace = true
 either.workspace = true
-ff_ext = { path = "../ff_ext" }
+ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
