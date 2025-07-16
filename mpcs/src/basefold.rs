@@ -17,8 +17,7 @@ use p3::{
     util::log2_strict_usize,
 };
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
-use structure::BasefoldProof;
-pub use structure::{BasefoldSpec, Digest};
+pub use structure::{BasefoldProof, BasefoldSpec, Digest, QueryOpeningProof};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use witness::RowMajorMatrix;

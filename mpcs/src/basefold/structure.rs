@@ -299,7 +299,7 @@ where
     pub sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
     // vec![witness, fixed], where fixed is optional
     pub(crate) trivial_proof: TrivialProof<E>,
-    pub(crate) pow_witness: E::BaseField,
+    pub pow_witness: E::BaseField,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
