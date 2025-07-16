@@ -511,9 +511,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             + system.cs.assert_zero_sumcheck_expressions.len();
 
         // prepare selector for each
-        let w_records_eval = (0..w_len).map(|id| (write_eq.clone(), id));
-        let r_records_eval = (w_len..w_len + r_len).map(|id| (read_eq.clone(), id));
-        let lk_eval = (w_len + r_len..w_len + r_len + lk_len).map(|id| (lk_eq.clone(), id));
+        let r_records_eval = (0..r_len).map(|id| (read_eq.clone(), id));
+        let w_records_eval = (r_len..r_len + w_len).map(|id| (write_eq.clone(), id));
+        let lk_eval = (r_len + w_len..r_len + w_len + lk_len).map(|id| (lk_eq.clone(), id));
         let zero_eval = (0..zero_len).map(|_| zero_eq.clone());
 
         let layer = Layer::from_circuit_builder(
