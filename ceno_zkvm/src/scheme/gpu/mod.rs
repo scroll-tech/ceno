@@ -256,6 +256,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         PCS::CommitmentWithWitness,
         PCS::Commitment,
     ) {
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<p3::goldilocks::Goldilocks>() {
+            panic!("GPU backend only supports Goldilocks base field");
+        }
+
         let largest_poly_size = traces
             .values()
             .map(|trace| next_pow2_instance_padding(trace.num_instances()) << 1)
@@ -274,8 +278,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         };
         
         let pcs_data = PCS::batch_commit(prover_param, traces.clone()).unwrap();
+        println!("using gpu");
         let cuda_hal = CudaHalGL64::new().unwrap();
-        let gpu_res = cuda_hal.basefold.batch_commit(traces).unwrap();
+        let traces_gl64: BTreeMap<usize, witness::RowMajorMatrix<p3::goldilocks::Goldilocks>> = 
+            unsafe { std::mem::transmute(traces) };
+        let gpu_res = cuda_hal.basefold.batch_commit(traces_gl64).unwrap();
+        println!("gpu done");
         
         let commit = PCS::get_pure_commitment(&pcs_data);
         let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data)
