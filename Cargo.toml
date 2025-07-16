@@ -88,6 +88,9 @@ uint = "0.8"
 
 ceno_gpu_hal = { git = "ssh://git@github.com/scroll-tech/ceno-gpu.git", package = "cuda_hal", branch = "dev/integrat-to-ceno" }
 
+[patch."ssh://git@github.com/scroll-tech/ceno-gpu.git"]
+ceno_gpu_hal = { path = "../ceno-gpu/cuda_hal", package = "cuda_hal" }
+
 [profile.dev]
 lto = "thin"
 # We are running our tests with optimizations turned on to make them faster.

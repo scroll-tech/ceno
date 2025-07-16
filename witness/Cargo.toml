@@ -17,6 +17,7 @@ rand.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tracing.workspace = true
+ceno_gpu_hal.workspace = true
 
 [features]
 nightly-features = [

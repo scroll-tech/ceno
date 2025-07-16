@@ -14,6 +14,8 @@ use std::{
     sync::Arc,
 };
 
+use ceno_gpu_hal::gl64::MatrixLike;
+
 // for witness we reserve some space for value vector to extend to avoid allocated + full clone
 pub const CAPACITY_RESERVED_FACTOR: usize = 2;
 
@@ -291,6 +293,30 @@ impl<F: Sync + Send + Copy + FieldAlgebra> Index<usize> for RowMajorMatrix<F> {
     fn index(&self, idx: usize) -> &Self::Output {
         let num_col = self.n_col();
         &self.inner.values[num_col * idx..][..num_col]
+    }
+}
+
+impl<F> MatrixLike<F> for RowMajorMatrix<F> 
+where
+    F: Sized + Sync + Clone + Send + Copy + Default + Field,
+{
+    fn width(&self) -> usize {
+        (&**self).width()
+    }
+    
+    fn height(&self) -> usize {
+        (&**self).height()
+    }
+    
+    fn values(&self) -> &[F] {
+        self.values()
+    }
+    
+    fn to_cols_ext<EF>(&self) -> Vec<Vec<EF>>
+    where
+        EF: ff_ext::ExtensionField<BaseField = F>,
+    {
+        RowMajorMatrix::to_cols_ext::<EF>(self)
     }
 }
 
