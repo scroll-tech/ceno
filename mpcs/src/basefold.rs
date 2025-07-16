@@ -378,26 +378,31 @@ where
             );
         }
 
-        let max_num_var = rounds
+        let (min_num_var, max_num_var) = rounds
             .iter()
-            .map(|(commit, openings)| {
-                let max_num_var = openings
+            .flat_map(|(commit, openings)| {
+                let (min, max) = openings
                     .iter()
                     .map(|(num_vars, _)| *num_vars)
-                    .max()
-                    .unwrap();
-                assert_eq!(
-                    commit.log2_max_codeword_size,
-                    max_num_var + Spec::get_rate_log()
-                );
-                max_num_var
+                    .minmax()
+                    .into_option()
+                    .expect("no openings in round");
+
+                assert_eq!(commit.log2_max_codeword_size, max + Spec::get_rate_log());
+
+                [min, max] // return as iterator
             })
-            .max()
-            .unwrap();
-        if max_num_var < Spec::get_basecode_msg_size_log() {
-            // all the matrices are trivial, so we can skip the folding
-            return Ok(());
-        }
+            .minmax()
+            .into_option()
+            .expect("no num_vars found across all rounds");
+
+        assert!(
+            min_num_var >= Spec::get_basecode_msg_size_log(),
+            "invalid input: min_num_var {} < get_basecode_msg_size_log {}",
+            min_num_var,
+            Spec::get_basecode_msg_size_log()
+        );
+
         let num_rounds = max_num_var - Spec::get_basecode_msg_size_log();
 
         // prepare folding challenges via sumcheck round msg + FRI commitment
