@@ -670,6 +670,7 @@ where
             )
             .zip(&phase1.instances)
             .for_each(|((wits, structural_wits), KeccakInstance { witin, .. })| {
+                let mut lk_multiplicity = _lk_multiplicity.clone();
                 let state_32_iter = witin.instance.iter().map(|e| *e as u64);
                 let mut state64 = [[0u64; 5]; 5];
                 zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
@@ -707,6 +708,10 @@ where
                         c_aux8[i][0] = conv64to8(c_aux64[i][0]);
                         for j in 1..5 {
                             c_aux64[i][j] = state64[j][i] ^ c_aux64[i][j - 1];
+                            for k in 0..8 {
+                                lk_multiplicity
+                                    .lookup_xor_byte(state8[j][i][k], c_aux8[i][j - 1][k]);
+                            }
                             c_aux8[i][j] = conv64to8(c_aux64[i][j]);
                         }
                     }
@@ -722,8 +727,12 @@ where
                     let mut c_temp = [[0u64; 6]; 5];
                     for i in 0..5 {
                         let rep = MaskRepresentation::new(vec![(64, c64[i]).into()])
-                            .convert(vec![16, 15, 1, 16, 15, 1]);
-                        c_temp[i] = rep.values().try_into().unwrap();
+                            .convert(vec![16, 15, 1, 16, 15, 1])
+                            .values();
+                        for (j, size) in [16, 15, 1, 16, 15, 1].iter().enumerate() {
+                            lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
+                        }
+                        c_temp[i] = rep.try_into().unwrap();
                     }
 
                     let mut crot64 = [0u64; 5];
@@ -737,6 +746,12 @@ where
                     let mut d8 = [[0u64; 8]; 5];
                     for x in 0..5 {
                         d64[x] = c64[(x + 4) % 5] ^ c64[(x + 1) % 5].rotate_left(1);
+                        for k in 0..8 {
+                            lk_multiplicity.lookup_xor_byte(
+                                crot8[(x + 1) % 5][k],
+                                c_aux8[(x + 5 - 1) % 5][4][k],
+                            );
+                        }
                         d8[x] = conv64to8(d64[x]);
                     }
 
@@ -747,13 +762,22 @@ where
                     for x in 0..5 {
                         for y in 0..5 {
                             theta_state64[y][x] ^= d64[x];
+                            for k in 0..8 {
+                                lk_multiplicity.lookup_xor_byte(state8[y][x][k], d8[x][k])
+                            }
                             theta_state8[y][x] = conv64to8(theta_state64[y][x]);
 
                             let (sizes, _) = rotation_split(ROTATION_CONSTANTS[y][x]);
                             let rep =
                                 MaskRepresentation::new(vec![(64, theta_state64[y][x]).into()])
-                                    .convert(sizes);
-                            rotation_witness.extend(rep.values());
+                                    .convert(sizes.clone())
+                                    .values();
+                            for (j, size) in sizes.iter().enumerate() {
+                                if *size != 32 {
+                                    lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
+                                }
+                            }
+                            rotation_witness.extend(rep);
                         }
                     }
 
@@ -781,6 +805,12 @@ where
                         for y in 0..5 {
                             nonlinear64[y][x] =
                                 !rhopi_output64[y][(x + 1) % 5] & rhopi_output64[y][(x + 2) % 5];
+                            for k in 0..8 {
+                                lk_multiplicity.lookup_and_byte(
+                                    0xFF - rhopi_output8[y][(x + 1) % 5][k],
+                                    rhopi_output8[y][(x + 2) % 5][k],
+                                );
+                            }
                             nonlinear8[y][x] = conv64to8(nonlinear64[y][x]);
                         }
                     }
@@ -790,6 +820,10 @@ where
                     for x in 0..5 {
                         for y in 0..5 {
                             chi_output64[y][x] = nonlinear64[y][x] ^ rhopi_output64[y][x];
+                            for k in 0..8 {
+                                lk_multiplicity
+                                    .lookup_xor_byte(rhopi_output8[y][x][k], nonlinear8[y][x][k]);
+                            }
                             chi_output8[y][x] = conv64to8(chi_output64[y][x]);
                         }
                     }
@@ -799,6 +833,11 @@ where
                     let mut iota_output8 = [[[0u64; 8]; 5]; 5];
                     // TODO figure out how to deal with RC, since it's not a constant in rotation
                     iota_output64[0][0] ^= RC[round];
+
+                    for k in 0..8 {
+                        let rc8 = conv64to8(RC[round]);
+                        lk_multiplicity.lookup_xor_byte(chi_output8[0][0][k], rc8[k]);
+                    }
 
                     for x in 0..5 {
                         for y in 0..5 {

@@ -147,6 +147,16 @@ impl LkMultiplicity {
         );
     }
 
+    /// assert within range
+    #[inline(always)]
+    pub fn assert_ux_in_u16(&mut self, size: usize, v: u64) {
+        assert!(size <= 16, "{size} > 16");
+        self.assert_ux::<16>(v);
+        if size < 16 {
+            self.assert_ux::<16>(v * (1 << (16 - size)));
+        }
+    }
+
     /// Track a lookup into a logic table (AndTable, etc).
     pub fn logic_u8<OP: OpsTable>(&mut self, a: u64, b: u64) {
         self.increment(OP::ROM_TYPE, OP::pack(a, b));
