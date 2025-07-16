@@ -214,6 +214,21 @@ where
         let span = entered_span!("build mt", profiling_3 = true);
         let (comm, codeword) = mmcs.commit(evals_codewords);
         exit_span!(span);
+
+        #[derive(Debug)]
+        struct DigestGL64([p3::goldilocks::Goldilocks; 4]);
+        // let comm_gl64: DigestGL64 = unsafe { std::mem::transmute(comm) };
+
+        if std::mem::size_of_val(&comm) == std::mem::size_of::<DigestGL64>() {
+            let comm_gl64: DigestGL64 = unsafe { 
+                std::ptr::read(&comm as *const _ as *const DigestGL64)
+            };
+            println!("comm_gl64: {:?}", comm_gl64);
+        } else {
+            panic!("comm size is not equal to DigestGL64");
+        }
+
+
         Ok(BasefoldCommitmentWithWitness::new(
             comm,
             codeword,
