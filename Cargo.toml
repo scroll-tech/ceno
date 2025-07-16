@@ -37,6 +37,7 @@ clap = { version = "4.5", features = ["derive"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5"
 either = { version = "1.15.*", features = ["serde"] }
+ff_ext = { git = "ssh://git@github.com/Velaciela/ff_ext.git", rev = "211d9dc" }
 itertools = "0.13"
 ndarray = "*"
 num-bigint = { version = "0.4.6" }

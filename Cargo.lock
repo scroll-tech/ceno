@@ -989,9 +989,18 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
+source = "git+ssh://git@github.com/Velaciela/ff_ext.git?rev=211d9dc#211d9dcc267a6b9b8af9867f8298b9a2a1715677"
 dependencies = [
  "once_cell",
- "p3",
+ "p3-baby-bear",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-merkle-tree",
+ "p3-poseidon2",
+ "p3-symmetric",
  "rand_core",
  "serde",
 ]

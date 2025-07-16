@@ -13,7 +13,7 @@ version.workspace = true
 anyhow.workspace = true
 ceno_rt = { path = "../ceno_rt" }
 elf = "0.7"
-ff_ext = { version = "0", path = "../ff_ext" }
+ff_ext.workspace = true
 itertools.workspace = true
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 num-bigint.workspace = true
