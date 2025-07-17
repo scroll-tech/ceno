@@ -772,6 +772,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         num_instances: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> PCS::Proof {
+
+        let mut test_transcript = transcript::BasicTranscript::<E>::new(b"BaseFold");
+        let cpu_proof = PCS::batch_open(
+            self.pp.as_ref().unwrap(),
+            num_instances,
+            fixed_data.as_ref().map(|f| f.as_ref()),
+            &witness_data,
+            &points,
+            &evals,
+            circuit_num_polys,
+            &mut test_transcript,
+        )
+        .unwrap();
+
+        use p3::field::extension::BinomialExtensionField;
+        type EGL64 = BinomialExtensionField<p3::goldilocks::Goldilocks, 2>;
+        let mut test_transcript = transcript::BasicTranscript::<EGL64>::new(b"BaseFold");
+        let cuda_hal = CudaHalGL64::new().unwrap();
+        let gpu_proof = cuda_hal
+            .basefold
+            .batch_open(
+                &cuda_hal,
+                self.pp.as_ref().unwrap(),
+                &num_instances,
+                fixed_data.as_ref().map(|f| f.as_ref()),
+                &witness_data,
+                &points,
+                &evals,
+                &circuit_num_polys,
+                &mut test_transcript,
+            )
+            .unwrap();
+
+
         PCS::batch_open(
             self.pp.as_ref().unwrap(),
             num_instances,
