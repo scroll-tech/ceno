@@ -87,7 +87,7 @@ where
 }
 
 #[inline(always)]
-pub(crate) fn codeword_fold_with_challenge<E: ExtensionField>(
+pub fn codeword_fold_with_challenge<E: ExtensionField>(
     codeword: &[E],
     challenge: E,
     coeff: E::BaseField,
@@ -96,8 +96,10 @@ pub(crate) fn codeword_fold_with_challenge<E: ExtensionField>(
     let (left, right) = (codeword[0], codeword[1]);
     // original (left, right) = (lo + hi*x, lo - hi*x), lo, hi are codeword, but after times x it's not codeword
     // recover left & right codeword via (lo, hi) = ((left + right) / 2, (left - right) / 2x)
-    let (lo, hi) = ((left + right) * inv_2, (left - right) * coeff); // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
-    // we do fold on (lo, hi) to get folded = (1-r) * lo + r * hi (with lo, hi are two codewords), as it match perfectly with raw message in lagrange domain fixed variable
+    let (lo, hi) = ((left + right) * inv_2, (left - right) * coeff); 
+    // e.g. coeff = (2 * dit_butterfly)^(-1) in rs code
+    // we do fold on (lo, hi) to get folded = (1-r) * lo + r * hi (with lo, hi are two codewords), 
+    // as it match perfectly with raw message in lagrange domain fixed variable
     lo + challenge * (hi - lo)
 }
 
