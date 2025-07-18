@@ -170,6 +170,7 @@ mod test {
         let (raw_witin, lkm) = SetLessThanInstruction::<_, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
+            cb.cs.num_structural_witin as usize,
             vec![StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,

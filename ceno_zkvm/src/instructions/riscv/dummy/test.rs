@@ -32,8 +32,13 @@ fn test_dummy_ecall() {
 
     let step = StepRecord::new_ecall_any(4, MOCK_PC_START);
     let insn_code = step.insn();
-    let (raw_witin, lkm) =
-        EcallDummy::assign_instances(&config, cb.cs.num_witin as usize, vec![step]).unwrap();
+    let (raw_witin, lkm) = EcallDummy::assign_instances(
+        &config,
+        cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
+        vec![step],
+    )
+    .unwrap();
 
     MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
@@ -56,8 +61,13 @@ fn test_dummy_keccak() {
         .unwrap();
 
     let (step, program) = ceno_emul::test_utils::keccak_step();
-    let (raw_witin, lkm) =
-        KeccakDummy::assign_instances(&config, cb.cs.num_witin as usize, vec![step]).unwrap();
+    let (raw_witin, lkm) = KeccakDummy::assign_instances(
+        &config,
+        cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
+        vec![step],
+    )
+    .unwrap();
 
     MockProver::assert_satisfied_raw(&cb, raw_witin, &program, None, Some(lkm));
 }
@@ -81,6 +91,7 @@ fn test_dummy_r() {
     let (raw_witin, lkm) = AddDummy::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
@@ -115,6 +126,7 @@ fn test_dummy_b() {
     let (raw_witin, lkm) = BeqDummy::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + 8_usize),

@@ -31,7 +31,7 @@ pub trait LinearLayer<E: ExtensionField> {
         out_point: &Point<E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>>;
+    ) -> Result<LayerClaims<E>, BackendError>;
 }
 
 impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
@@ -51,7 +51,7 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
         out_point: &Point<E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>> {
+    ) -> Result<LayerClaims<E>, BackendError> {
         let LayerProof {
             main: SumcheckLayerProof { evals, .. },
             ..
@@ -66,7 +66,7 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
             if *sigma != got {
                 return Err(BackendError::LayerVerificationFailed(
                     self.name.clone(),
-                    VerifierError::<E>::ClaimNotMatch(*sigma, got),
+                    VerifierError::ClaimNotMatch(format!("{}", *sigma), format!("{}", got)),
                 ));
             }
         }

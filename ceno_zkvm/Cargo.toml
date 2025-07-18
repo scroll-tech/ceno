@@ -17,6 +17,7 @@ ceno_host = { path = "../ceno_host" }
 either.workspace = true
 ff_ext = { path = "../ff_ext" }
 gkr_iop = { path = "../gkr_iop" }
+keccakf = "0.1.2"
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 p3.workspace = true
@@ -29,6 +30,7 @@ transcript = { path = "../transcript" }
 witness = { path = "../witness" }
 
 itertools.workspace = true
+ndarray.workspace = true
 num-traits.workspace = true
 paste.workspace = true
 poseidon.workspace = true
@@ -101,3 +103,15 @@ name = "quadratic_sorting"
 [[bench]]
 harness = false
 name = "is_prime"
+
+[[bench]]
+harness = false
+name = "keccak"
+
+[[bench]]
+harness = false
+name = "bitwise_keccakf"
+
+[[bench]]
+harness = false
+name = "lookup_keccakf"

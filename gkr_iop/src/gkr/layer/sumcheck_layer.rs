@@ -53,7 +53,7 @@ pub trait SumcheckLayer<E: ExtensionField> {
         sigma: &E,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>>;
+    ) -> Result<LayerClaims<E>, BackendError>;
 }
 
 impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
@@ -82,7 +82,7 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
         sigma: &E,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>> {
+    ) -> Result<LayerClaims<E>, BackendError> {
         let LayerProof {
             main:
                 SumcheckLayerProof {
@@ -115,7 +115,10 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
         if got_claim != expected_evaluation {
             return Err(BackendError::LayerVerificationFailed(
                 "sumcheck verify failed".to_string(),
-                VerifierError::ClaimNotMatch(expected_evaluation, got_claim),
+                VerifierError::ClaimNotMatch(
+                    format!("{}", expected_evaluation),
+                    format!("{}", got_claim),
+                ),
             ));
         }
 

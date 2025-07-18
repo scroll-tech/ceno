@@ -7,7 +7,10 @@ use crate::{
         ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
         ZKVMWitnesses,
     },
-    tables::{ProgramTableCircuit, RangeTable, TableCircuit, U5Table, U8Table, U14Table, U16Table},
+    tables::{
+        ProgramTableCircuit, RMMCollections, RangeTable, TableCircuit, U5Table, U8Table, U14Table,
+        U16Table,
+    },
     witness::LkMultiplicity,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -41,7 +44,6 @@ use std::{
 };
 use strum::IntoEnumIterator;
 use tiny_keccak::{Hasher, Keccak};
-use witness::RowMajorMatrix;
 
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -754,7 +756,7 @@ Hints:
 
     pub fn assert_satisfied_raw(
         cb: &CircuitBuilder<E>,
-        raw_witin: RowMajorMatrix<E::BaseField>,
+        [raw_witin, _raw_structural_witin]: RMMCollections<E::BaseField>,
         program: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
@@ -824,25 +826,12 @@ Hints:
             },
         ) in &cs.circuit_css
         {
-            let empty_rmm = RowMajorMatrix::empty();
             let is_opcode = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
-            let [witness, structural_witness] = if is_opcode {
-                &[
-                    witnesses
-                        .get_opcode_witness(circuit_name)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            panic!("witness for {} should not be None", circuit_name)
-                        }),
-                    empty_rmm,
-                ]
-            } else {
-                witnesses
-                    .get_table_witness(circuit_name)
-                    .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name))
-            };
+            let [witness, structural_witness] = witnesses
+                .get_table_witness(circuit_name)
+                .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
             let num_rows = witness.num_instances();
 
             if witness.num_instances() == 0 {
@@ -1282,7 +1271,7 @@ mod tests {
     use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::{ToExpr, WitIn, mle::IntoMLE};
     use p3::goldilocks::Goldilocks;
-    use witness::{InstancePaddingStrategy, set_val};
+    use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
     #[derive(Debug)]
     struct AssertZeroCircuit {
@@ -1496,7 +1485,7 @@ mod tests {
 
         MockProver::assert_satisfied_raw(
             &builder,
-            raw_witin,
+            [raw_witin, RowMajorMatrix::empty()],
             &[],
             Some([1.into_f(), 1000.into_f()]),
             None,
@@ -1529,7 +1518,7 @@ mod tests {
 
         MockProver::assert_satisfied_raw(
             &builder,
-            raw_witin,
+            [raw_witin, RowMajorMatrix::empty()],
             &[],
             Some([1.into_f(), 1000.into_f()]),
             None,
@@ -1614,7 +1603,7 @@ mod tests {
 
         MockProver::assert_satisfied_raw(
             &builder,
-            raw_witin,
+            [raw_witin, RowMajorMatrix::empty()],
             &[],
             Some([1.into_f(), 1000.into_f()]),
             None,
@@ -1648,7 +1637,7 @@ mod tests {
 
         MockProver::assert_satisfied_raw(
             &builder,
-            raw_witin,
+            [raw_witin, RowMajorMatrix::empty()],
             &[],
             Some([1.into_f(), 1000.into_f()]),
             None,
