@@ -267,9 +267,6 @@ pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>(
     (wits, fixed, eqs)
 }
 
-/// TODO this is copy from gkr crate
-/// including gkr crate after gkr clippy fix
-///
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
 /// [0..=max_idx]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})

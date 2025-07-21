@@ -2,21 +2,21 @@
 #![feature(strict_overflow_ops)]
 use std::marker::PhantomData;
 
+use crate::chip::Chip;
+use crate::hal::ProverBackend;
+use crate::selector::SelectorType;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::CircuitBuilderError,
     hal::{ProtocolWitnessGeneratorProver, ProverDevice},
     utils::lk_multiplicity::LkMultiplicity,
 };
-use chip::Chip;
 use either::Either;
 use ff_ext::ExtensionField;
-use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
-use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
+use gkr::{layer::LayerWitness, GKRCircuit, GKRCircuitOutput, GKRCircuitWitness};
+use multilinear_extensions::{impl_expr_from_unsigned, mle::ArcMultilinearExtension, Expression};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
-
-use crate::hal::ProverBackend;
 
 pub mod chip;
 pub mod circuit_builder;
@@ -38,10 +38,15 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     /// Create the GKR layers in the reverse order. For each layer, specify the
     /// polynomial expressions, evaluation expressions of outputs and evaluation
     /// positions of the inputs.
-    fn build_gkr_chip(
+    fn build_layer_logic(
         cb: &mut CircuitBuilder<E>,
         params: Self::Params,
-    ) -> Result<(Self, Chip<E>), CircuitBuilderError>;
+    ) -> Result<Self, CircuitBuilderError>;
+
+    fn finalize(
+        &mut self,
+        cb: &CircuitBuilder<E>,
+    ) -> (Vec<(SelectorType<E>, usize)>, Chip<E>);
 
     fn n_committed(&self) -> usize;
     fn n_fixed(&self) -> usize;
@@ -69,7 +74,7 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     );
 
     /// GKR witness.
-    fn gkr_witness<'a, PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
+    fn gkr_witness<'a, PB: ProverBackend<E=E>, PD: ProverDevice<PB>>(
         &self,
         circuit: &GKRCircuit<PB::E>,
         phase1_witness_group: &RowMajorMatrix<

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, iter, ops::Neg, sync::Arc, vec::IntoIter};
 
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
@@ -298,16 +298,64 @@ impl<E: ExtensionField> Layer<E> {
         let out_evals: Vec<_> = self
             .out_sel_and_eval_exprs
             .iter()
-            .flat_map(|(sel_type, out_eval)| izip!(iter::once(sel_type), out_eval.iter()))
+            .flat_map(|(sel_type, out_eval)| izip!(iter::repeat(sel_type), out_eval.iter()))
             .collect();
+        dbg!(num_instances);
         self.exprs
-            .par_iter()
-            .zip_eq(self.expr_names.par_iter())
-            .zip_eq(out_evals.par_iter())
+            .iter()
+            .zip_eq(self.expr_names.iter())
+            .zip_eq(out_evals.iter())
             .map(|((expr, expr_name), (sel_type, out_eval))| {
-                let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
+                let out_mle = select_from_expression_result(
+                    sel_type,
+                    wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr),
+                    num_instances,
+                );
                 if let EvalExpression::Zero = out_eval {
                     // sanity check: zero mle
+                    println!(
+                        "witin id 3 top 4 {:?}",
+                        layer_wits[3].get_base_field_vec()[0..4]
+                            .iter()
+                            .map(|x| format!("{:x}", x.to_canonical_u64()))
+                            .collect_vec()
+                    );
+                    println!(
+                        "witin id 253 top 4 {:?}",
+                        layer_wits[253].get_base_field_vec()[0..4]
+                            .iter()
+                            .map(|x| format!("{:x}", x.to_canonical_u64()))
+                            .collect_vec()
+                    );
+                    println!(
+                        "witin id 254 top 4 {:?}",
+                        layer_wits[254].get_base_field_vec()[0..4]
+                            .iter()
+                            .map(|x| format!("{:x}", x.to_canonical_u64()))
+                            .collect_vec()
+                    );
+                    println!(
+                        "witin id 255 top 4 {:?}",
+                        layer_wits[255].get_base_field_vec()[0..4]
+                            .iter()
+                            .map(|x| format!("{:x}", x.to_canonical_u64()))
+                            .collect_vec()
+                    );
+                    println!(
+                        "witin id 256 top 4 {:?}",
+                        layer_wits[256].get_base_field_vec()[0..4]
+                            .iter()
+                            .map(|x| format!("{:x}", x.to_canonical_u64()))
+                            .collect_vec()
+                    );
+                    println!("expr {expr} expr_name {expr_name}");
+                    println!(
+                        "out_mle top 4 {:?}",
+                        out_mle.get_base_field_vec()[0..4]
+                            .iter()
+                            .map(|x| format!("{:x}", x.to_canonical_u64()))
+                            .collect_vec()
+                    );
                     if cfg!(debug_assertions) {
                         assert!(
                             out_mle.evaluations().is_zero(),
@@ -316,7 +364,7 @@ impl<E: ExtensionField> Layer<E> {
                         );
                     }
                 };
-                select_from_expression_result(sel_type, out_mle, num_instances)
+                out_mle
             })
             .collect::<Vec<_>>()
     }
@@ -325,11 +373,21 @@ impl<E: ExtensionField> Layer<E> {
         cb: &CircuitBuilder<E>,
         layer_name: String,
         n_challenges: usize,
-        w_record_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
-        r_record_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
-        lookup_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
-        zero_evals: impl ExactSizeIterator<Item = SelectorType<E>>,
+        out_evals: Vec<(SelectorType<E>, usize)>,
     ) -> Layer<E> {
+        let w_len = cb.cs.w_expressions.len();
+        let r_len = cb.cs.r_expressions.len();
+        let lk_len = cb.cs.lk_expressions.len();
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
+        let w_record_evals = out_evals[r_len..][..w_len].iter().cloned();
+        let r_record_evals = out_evals[..r_len].iter().cloned();
+        let lookup_evals = out_evals[r_len + w_len..][..lk_len].iter().cloned();
+        let zero_evals = out_evals[r_len + w_len + lk_len..][..zero_len]
+            .iter()
+            .cloned();
+
         let non_zero_expr_len = cb.cs.w_expressions_namespace_map.len()
             + cb.cs.r_expressions_namespace_map.len()
             + cb.cs.lk_expressions.len();
@@ -395,7 +453,7 @@ impl<E: ExtensionField> Layer<E> {
 
         // process zero record
         assert_eq!(zero_evals.len(), zero_expr_len);
-        for (idx, (zero_expr, name), zero_eq) in izip!(
+        for (idx, (zero_expr, name), (zero_eq, _)) in izip!(
             0..,
             chain!(
                 cb.cs

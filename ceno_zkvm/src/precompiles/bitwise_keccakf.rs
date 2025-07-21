@@ -1,12 +1,12 @@
 use std::{array::from_fn, mem::transmute};
 
 use ff_ext::ExtensionField;
-use itertools::{Itertools, iproduct, izip};
+use itertools::{iproduct, izip, Itertools};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    ChallengeId, Expression, ToExpr, WitIn,
-    mle::{MultilinearExtension, Point, PointAndEval},
-    util::ceil_log2,
+    mle::{MultilinearExtension, Point, PointAndEval}, util::ceil_log2, ChallengeId, Expression,
+    ToExpr,
+    WitIn,
 };
 use p3::{field::FieldAlgebra, util::indices_arr};
 use sumcheck::{
@@ -18,19 +18,19 @@ use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    chip::Chip,
-    circuit_builder::{CircuitBuilder, ConstraintSystem},
+    chip::Chip, circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
     error::CircuitBuilderError,
     evaluation::EvalExpression,
     gkr::{
-        GKRCircuit, GKRProverOutput,
-        layer::Layer,
-        layer_constraint_system::{LayerConstraintSystem, expansion_expr},
+        layer::Layer, layer_constraint_system::{expansion_expr, LayerConstraintSystem},
+        GKRCircuit,
+        GKRProverOutput,
     },
     selector::SelectorType,
     utils::{indices_arr_with_offset, lk_multiplicity::LkMultiplicity, wits_fixed_and_eqs},
+    ProtocolBuilder,
+    ProtocolWitnessGenerator,
 };
 
 fn to_xyz(i: usize) -> (usize, usize, usize) {
@@ -646,12 +646,10 @@ fn keccak_first_layer<E: ExtensionField>(
     )
 }
 
-impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
-    type Params = KeccakParams;
-
-    fn build_gkr_chip(
+impl<E: ExtensionField> KeccakLayout<E> {
+    pub fn build_gkr_chip_old(
         _cb: &mut CircuitBuilder<E>,
-        _params: Self::Params,
+        _params: KeccakParams,
     ) -> Result<(Self, Chip<E>), CircuitBuilderError> {
         let layout = Self::default();
         let mut chip = Chip {
@@ -665,7 +663,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     layout.final_out_evals.clone(),
                 )
             }
-            .to_vec(),
+                .to_vec(),
         };
         chip.add_layer(output32_layer(
             &layout.layers.output32,
@@ -721,11 +719,11 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             &layout.layers.inner_rounds,
             &layout.layer_in_evals.inner_rounds
         )
-        .rev()
-        .fold(
-            &layout.layer_in_evals.output32,
-            |round_output, (round_id, round_layers, round_in_evals)| {
-                add_common_layers!(
+            .rev()
+            .fold(
+                &layout.layer_in_evals.output32,
+                |round_output, (round_id, round_layers, round_in_evals)| {
+                    add_common_layers!(
                     round_layers,
                     round_output,
                     round_in_evals,
@@ -733,18 +731,18 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     layout.alpha.clone(),
                     layout.beta.clone()
                 );
-                chip.add_layer(theta_first_layer(
-                    &round_layers.theta_first,
-                    &round_in_evals.theta_second,
-                    &round_in_evals.theta_third[D_SIZE..],
-                    &round_in_evals.theta_first,
-                    round_id,
-                    layout.alpha.clone(),
-                    layout.beta.clone(),
-                ));
-                &round_in_evals.theta_first
-            },
-        );
+                    chip.add_layer(theta_first_layer(
+                        &round_layers.theta_first,
+                        &round_in_evals.theta_second,
+                        &round_in_evals.theta_third[D_SIZE..],
+                        &round_in_evals.theta_first,
+                        round_id,
+                        layout.alpha.clone(),
+                        layout.beta.clone(),
+                    ));
+                    &round_in_evals.theta_first
+                },
+            );
 
         // add Round 0
         let (round_layers, round_in_evals) = (
@@ -772,7 +770,23 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         ));
         Ok((layout, chip))
     }
+}
+impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
+    type Params = KeccakParams;
 
+    fn finalize(
+        &mut self,
+        cb: &CircuitBuilder<E>,
+    ) -> (Vec<(SelectorType<E>, usize)>, Chip<E>) {
+        unimplemented!()
+    }
+
+    fn build_layer_logic(
+        cb: &mut CircuitBuilder<E>,
+        params: Self::Params,
+    ) -> Result<Self, CircuitBuilderError> {
+        unimplemented!()
+    }
     fn n_committed(&self) -> usize {
         STATE_SIZE
     }
@@ -862,11 +876,11 @@ fn rho_and_pi_permutation() -> Vec<usize> {
 }
 
 pub fn setup_gkr_circuit<E: ExtensionField>()
--> Result<(KeccakLayout<E>, GKRCircuit<E>), CircuitBuilderError> {
+    -> Result<(KeccakLayout<E>, GKRCircuit<E>), CircuitBuilderError> {
     let params = KeccakParams {};
     let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
     let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-    let (layout, chip) = KeccakLayout::build_gkr_chip(&mut circuit_builder, params)?;
+    let (layout, chip) = KeccakLayout::build_gkr_chip_old(&mut circuit_builder, params)?;
     Ok((layout, chip.gkr_circuit()))
 }
 

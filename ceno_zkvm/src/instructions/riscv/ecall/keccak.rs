@@ -1,37 +1,41 @@
-use std::{array, marker::PhantomData};
+use std::marker::PhantomData;
 
-use ceno_emul::{ByteAddr, Change, Cycle, InsnKind, Platform, StepRecord};
-use ff_ext::{ExtensionField, FieldInto};
-use gkr_iop::{ProtocolWitnessGenerator, gkr::GKRCircuit};
-use itertools::Itertools;
-use multilinear_extensions::{ToExpr, WitIn, util::max_usable_threads};
+use ceno_emul::{ByteAddr, Cycle, InsnKind, Platform, StepRecord};
+use ff_ext::ExtensionField;
+use gkr_iop::{
+    gkr::{layer::Layer, GKRCircuit}, ProtocolBuilder
+    ,
+    ProtocolWitnessGenerator,
+};
+use itertools::{izip, Itertools};
+use multilinear_extensions::{util::max_usable_threads, ToExpr};
 use p3::{field::FieldAlgebra, matrix::Matrix};
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
-    Value,
     chip_handler::general::InstFetch,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        Instruction,
         riscv::{
             constants::UInt,
             ecall_base::WriteFixedRS,
             insn_base::{StateInOut, WriteMEM},
         },
+        Instruction,
     },
     precompiles::{
-        KECCAK_INPUT32_SIZE, KECCAK_ROUNDS, KeccakInOutCols, KeccakInstance, KeccakLayout,
-        KeccakParams, KeccakStateInstance, KeccakTrace, KeccakWitInstance,
+        KeccakInstance, KeccakLayout, KeccakParams, KeccakStateInstance, KeccakTrace,
+        KeccakWitInstance, KECCAK_ROUNDS,
     },
     structs::ProgramParams,
     tables::{InsnRecord, RMMCollections},
     witness::LkMultiplicity,
+    Value,
 };
 
 #[derive(Debug)]
@@ -41,7 +45,7 @@ pub struct EcallKeccakConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     ecall_id: (WriteFixedRS<E, { Platform::reg_ecall() }>, UInt<E>),
     state_ptr: (WriteFixedRS<E, { Platform::reg_arg0() }>, UInt<E>),
-    mem_rw: Vec<(Change<WitIn>, WriteMEM)>,
+    mem_rw: Vec<WriteMEM>,
 }
 
 /// KeccakInstruction can handle any instruction and produce its side-effects.
@@ -98,11 +102,15 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             E::BaseField::ZERO.expr(),
         ))?;
 
+        let mut layout = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(
+            cb,
+            KeccakParams {},
+        )?;
+
         // memory rw, for we in-place update
-        let mem_rw = (0..KECCAK_INPUT32_SIZE)
-            .map(|i| {
-                let val_before = cb.create_witin(|| format!("mem_before_{}_READ_ARG", i));
-                let val_after = cb.create_witin(|| format!("mem_after_{}_WRITE_ARG", i));
+        let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
+            .enumerate()
+            .map(|(i, (val_before, val_after))| {
                 WriteMEM::construct_circuit(
                     cb,
                     // mem address := state_ptr + i
@@ -112,19 +120,19 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                     val_after.expr(),
                     vm_state.ts,
                 )
-                .map(|writer| (Change::new(val_before, val_after), writer))
             })
-            .collect::<Result<Vec<(Change<WitIn>, WriteMEM)>, _>>()?;
+            .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        // construct keccak gkr-iop circuit
-        let params = KeccakParams {
-            io: KeccakInOutCols {
-                input32: array::from_fn(|i| mem_rw[i].0.before.expr()),
-                output32: array::from_fn(|i| mem_rw[i].0.after.expr()),
-            },
-        };
-        let (layout, chip) =
-            <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_gkr_chip(cb, params)?;
+        let (out_evals, mut chip) = layout.finalize(&cb);
+
+        let layer = Layer::from_circuit_builder(
+            &cb,
+            "Rounds".to_string(),
+            layout.n_challenges(),
+            out_evals,
+        );
+        chip.add_layer(layer);
+
         let circuit = chip.gkr_circuit();
 
         Ok(EcallKeccakConfig {
@@ -219,9 +227,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                                 &ops.reg_ops[1],
                             )?;
                             // assign mem_rw
-                            for ((value, writer), op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
-                                set_val!(instance, value.before, op.value.before as u64);
-                                set_val!(instance, value.after, op.value.after as u64);
+                            for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
                                 writer.assign_op(
                                     instance,
                                     &mut lk_multiplicity,

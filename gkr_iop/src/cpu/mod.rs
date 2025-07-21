@@ -88,7 +88,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 {
     fn gkr_witness<'a>(
         circuit: &GKRCircuit<E>,
-        phase1_witness_group: &RowMajorMatrix<E::BaseField>,
+        phase1_witness_group_rmm: &RowMajorMatrix<E::BaseField>,
         fixed: &RowMajorMatrix<E::BaseField>,
         challenges: &[E],
     ) -> (
@@ -96,10 +96,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         GKRCircuitOutput<'a, CpuBackend<E, PCS>>,
     ) {
         // layer order from output to input
-        let num_instances = phase1_witness_group.num_instances();
+        let num_instances_with_rotation = phase1_witness_group_rmm.num_instances();
         let mut layer_wits =
             Vec::<LayerWitness<CpuBackend<E, PCS>>>::with_capacity(circuit.layers.len() + 1);
-        let phase1_witness_group = phase1_witness_group
+        let phase1_witness_group = phase1_witness_group_rmm
             .to_mles()
             .into_iter()
             .map(Arc::new)
@@ -134,7 +134,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                                 .iter()
                                 .cycle()
                                 .cloned()
-                                .take(num_instances)
+                                .take(num_instances_with_rotation)
                                 .collect_vec()
                                 .into_mle()
                                 .into(),
@@ -149,6 +149,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
             tracing::info!("generating input {i} layer with layer name {}", layer.name);
+            let num_instances = num_instances_with_rotation >> layer.rotation_cyclic_group_log2;
             let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
             // process in_evals to prepare layer witness
             // This should assume the input of the first layer is the phase1 witness of the circuit.

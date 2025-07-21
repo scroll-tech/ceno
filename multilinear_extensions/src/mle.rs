@@ -210,11 +210,11 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
     pub fn pick_stride_offset(self, stride: usize, offset: usize) -> Self {
         match self {
             FieldType::Base(slice) => {
-                let res = slice.iter().cloned().skip(offset).step_by(stride).collect();
+                let res = slice.iter().copied().skip(offset).step_by(stride).collect();
                 FieldType::Base(SmartSlice::Owned(res))
             }
             FieldType::Ext(slice) => {
-                let res = slice.iter().cloned().skip(offset).step_by(stride).collect();
+                let res = slice.iter().copied().skip(offset).step_by(stride).collect();
                 FieldType::Ext(SmartSlice::Owned(res))
             }
             FieldType::Unreachable => panic!("unreachable"),
