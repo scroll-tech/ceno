@@ -10,8 +10,8 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-ff_ext = { path = "../ff_ext" }
-multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "5af7c08" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "5af7c08" }
 p3.workspace = true
 rand.workspace = true
 rayon.workspace = true

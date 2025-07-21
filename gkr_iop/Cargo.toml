@@ -15,10 +15,10 @@ bincode.workspace = true
 ceno_emul = { path = "../ceno_emul" }
 clap.workspace = true
 either.workspace = true
-ff_ext = { path = "../ff_ext" }
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "5af7c08" }
 itertools.workspace = true
-mpcs = { path = "../mpcs" }
-multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
+mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "5af7c08" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "5af7c08" }
 ndarray.workspace = true
 p3.workspace = true
 p3-field.workspace = true
@@ -36,8 +36,8 @@ tiny-keccak.workspace = true
 tracing.workspace = true
 tracing-forest.workspace = true
 tracing-subscriber.workspace = true
-transcript = { path = "../transcript" }
-witness = { path = "../witness" }
+transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "5af7c08" }
+witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "5af7c08" }
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }

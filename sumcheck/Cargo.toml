@@ -12,16 +12,16 @@ version.workspace = true
 [dependencies]
 crossbeam-channel.workspace = true
 either.workspace = true
-ff_ext = { path = "../ff_ext" }
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "5af7c08" }
 itertools.workspace = true
-multilinear_extensions = { path = "../multilinear_extensions", features = ["parallel"] }
+multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", features = ["parallel"], rev = "5af7c08" }
 p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
 sumcheck_macro = { path = "../sumcheck_macro" }
 thiserror.workspace = true
 tracing.workspace = true
-transcript = { path = "../transcript" }
+transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "5af7c08" }
 
 [dev-dependencies]
 criterion.workspace = true

@@ -14,19 +14,20 @@ base64 = "0.22"
 ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
+ceno_gpu.workspace = true
 either.workspace = true
-ff_ext = { path = "../ff_ext" }
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "5af7c08" }
 gkr_iop = { path = "../gkr_iop" }
-mpcs = { path = "../mpcs" }
-multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
+mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "5af7c08" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "5af7c08" }
 p3.workspace = true
 rand_chacha.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sumcheck.workspace = true
-transcript = { path = "../transcript" }
-witness = { path = "../witness" }
+transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "5af7c08" }
+witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "5af7c08" }
 
 itertools.workspace = true
 num-traits.workspace = true

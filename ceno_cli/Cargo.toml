@@ -29,8 +29,8 @@ tikv-jemallocator = { version = "0.6", optional = true }
 ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
 ceno_zkvm = { path = "../ceno_zkvm" }
-ff_ext = { path = "../ff_ext" }
-mpcs = { path = "../mpcs" }
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "5af7c08" }
+mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "5af7c08" }
 
 [build-dependencies]
 vergen-git2 = { version = "1", features = ["build", "cargo", "rustc", "emit_and_set"] }
