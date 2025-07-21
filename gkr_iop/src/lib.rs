@@ -20,6 +20,7 @@ use crate::hal::ProverBackend;
 pub mod chip;
 pub mod circuit_builder;
 pub mod cpu;
+pub mod gpu;
 pub mod error;
 pub mod evaluation;
 pub mod gadgets;

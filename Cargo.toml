@@ -86,6 +86,11 @@ tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uint = "0.8"
 
+ceno_gpu = { git = "ssh://git@github.com/scroll-tech/ceno-gpu.git", package = "cuda_hal", branch = "dev/integrat-to-ceno" }
+
+[patch."ssh://git@github.com/scroll-tech/ceno-gpu.git"]
+ceno_gpu = { path = "../ceno-gpu/cuda_hal", package = "cuda_hal" }
+
 [profile.dev]
 lto = "thin"
 # We are running our tests with optimizations turned on to make them faster.
