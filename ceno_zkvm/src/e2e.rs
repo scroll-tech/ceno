@@ -23,6 +23,7 @@ use ff_ext::ExtensionField;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::gpu::{GpuBackend, GpuProver};
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use std::{
@@ -705,8 +706,8 @@ pub fn run_e2e_with_checkpoint<
     );
 
     // proving
-    let backend: CpuBackend<E, PCS> = CpuBackend::new();
-    let device = CpuProver::new(backend);
+    let backend: GpuBackend<E, PCS> = GpuBackend::new();
+    let device = GpuProver::new(backend);
     let mut prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {
@@ -779,8 +780,8 @@ pub fn run_e2e_proof<
     );
 
     // proving
-    let backend: CpuBackend<E, PCS> = CpuBackend::new();
-    let device = CpuProver::new(backend);
+    let backend: GpuBackend<E, PCS> = GpuBackend::new();
+    let device = GpuProver::new(backend);
     let mut prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {

@@ -9,6 +9,7 @@ use crate::{
     },
     scheme::{
         cpu::CpuTowerProver,
+        gpu::GpuTowerProver,
         hal::{ProofInput, TowerProverSpec},
         prover::ZkVMCpuProver,
     },
@@ -25,13 +26,14 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::gpu::{GpuBackend, GpuProver};
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
 use itertools::Itertools;
-use mpcs::{PolynomialCommitmentScheme, SecurityLevel, WhirDefault};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel, WhirDefault, BasefoldDefault};
 use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
 use p3::field::FieldAlgebra;
 use rand::thread_rng;
@@ -97,11 +99,12 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 fn test_rw_lk_expression_combination() {
     fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
         type E = GoldilocksExt2;
-        type Pcs = WhirDefault<E>;
+        type Pcs = BasefoldDefault<E>;
+        use ceno_gpu::gl64::CudaHalGL64;
 
         // pcs setup
-        Pcs::setup(1 << 8, SecurityLevel::default()).unwrap();
-        let (pp, vp) = Pcs::trim((), 1 << 8).unwrap();
+        let pcs_param = Pcs::setup(1 << 8, SecurityLevel::default()).unwrap();
+        let (pp, vp) = Pcs::trim(pcs_param, 1 << 8).unwrap();
 
         // configure
         let name = TestCircuit::<E, RW, L>::name();
@@ -131,19 +134,28 @@ fn test_rw_lk_expression_combination() {
             .unwrap();
 
         // get proof
-        let backend = CpuBackend::<E, Pcs>::new();
-        let device = CpuProver::new(backend);
-        let prover = ZkVMCpuProver::new(pk, device);
+        // let backend = CpuBackend::<E, Pcs>::new();
+        // let device = CpuProver::new(backend);
+        // let prover = ZkVMCpuProver::new(pk, device);
+        let backend = GpuBackend::<E, Pcs>::new();
+        let device = GpuProver::new(backend);
+        let prover = ZKVMProver::new(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
         let wits_in = rmm.to_mles();
         // commit to main traces
         let commit_with_witness = Pcs::batch_commit_and_write(
             &prover.pk.pp,
-            vec![(0, rmm)].into_iter().collect::<BTreeMap<_, _>>(),
+            vec![(0, rmm.clone())].into_iter().collect::<BTreeMap<_, _>>(),
             &mut transcript,
         )
         .unwrap();
+
+        let rmm_gl64 :witness::RowMajorMatrix<p3::goldilocks::Goldilocks> = unsafe { std::mem::transmute(rmm.clone()) };
+        let traces_gl64 = vec![(0, rmm_gl64)].into_iter().collect::<BTreeMap<_, _>>();
+        let cuda_hal = CudaHalGL64::new().unwrap();
+        let gpu_res = cuda_hal.basefold.batch_commit(traces_gl64).unwrap();
+
         let witin_commit = Pcs::get_pure_commitment(&commit_with_witness);
 
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
@@ -220,11 +232,11 @@ const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [
     encode_rv32(ECALL, 0, 0, 0, 0),
 ];
 
-#[ignore = "this case is already tested in riscv_example as ecall_halt has only one instance"]
+// #[ignore = "this case is already tested in riscv_example as ecall_halt has only one instance"]
 #[test]
 fn test_single_add_instance_e2e() {
     type E = GoldilocksExt2;
-    type Pcs = WhirDefault<E>;
+    type Pcs = BasefoldDefault<E>;
 
     // set up program
     let program = Program::new(
@@ -235,8 +247,8 @@ fn test_single_add_instance_e2e() {
         Default::default(),
     );
 
-    Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).expect("Basefold PCS setup");
-    let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
+    let pcs_param = Pcs::setup(1 << 20, SecurityLevel::default()).expect("Basefold PCS setup");
+    let (pp, vp) = Pcs::trim(pcs_param, 1 << 20).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
@@ -293,8 +305,9 @@ fn test_single_add_instance_e2e() {
     assert_eq!(halt_records.len(), 1);
 
     // proving
-    let backend = CpuBackend::<E, Pcs>::new();
-    let device = CpuProver::new(backend);
+    println!("new gpu prover");
+    let backend = GpuBackend::<E, Pcs>::new();
+    let device = GpuProver::new(backend);
     let mut prover = ZKVMProver::new(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();
@@ -359,7 +372,7 @@ fn test_tower_proof_various_prod_size() {
         let last_layer_splitted_fanin: Vec<MultilinearExtension<E>> =
             vec![first.to_vec().into_mle(), second.to_vec().into_mle()];
         let layers = infer_tower_product_witness(num_vars, last_layer_splitted_fanin, 2);
-        let (rt_tower_p, tower_proof) = CpuTowerProver::create_proof::<E, WhirDefault<E>>(
+        let (rt_tower_p, tower_proof) = GpuTowerProver::create_proof::<E, WhirDefault<E>>(
             vec![TowerProverSpec {
                 witness: layers.clone(),
             }],
