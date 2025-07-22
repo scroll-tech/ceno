@@ -18,7 +18,6 @@ use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 pub struct OpTableConfig {
     abc: [Fixed; 3],
     mlt: WitIn,
-    rom_type: ROMType,
 }
 
 impl OpTableConfig {
@@ -47,7 +46,7 @@ impl OpTableConfig {
             mlt.expr(),
         )?;
 
-        Ok(Self { abc, mlt, rom_type })
+        Ok(Self { abc, mlt })
     }
 
     pub fn generate_fixed_traces<F: SmallField>(
@@ -78,7 +77,6 @@ impl OpTableConfig {
         let mut witness =
             RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
 
-        println!("rom_type {:?}", self.rom_type);
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {
             mlts[*idx as usize] = *mlt;
