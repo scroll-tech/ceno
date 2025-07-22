@@ -93,7 +93,7 @@ impl<E: ExtensionField> SelectorType<E> {
                 )
             }
             SelectorType::KeccakRound(round, _, expr) => {
-                assert!(out_point.len() + 5 == in_point.len());
+                assert_eq!(out_point.len() + 5, in_point.len());
                 let eq_low = eq_eval(
                     &u5_to_binary_vec::<E>(CYCLIC_POW2_5[*round]),
                     &in_point[..5],

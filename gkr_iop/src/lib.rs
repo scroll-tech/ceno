@@ -2,19 +2,18 @@
 #![feature(strict_overflow_ops)]
 use std::marker::PhantomData;
 
-use crate::chip::Chip;
-use crate::hal::ProverBackend;
-use crate::selector::SelectorType;
 use crate::{
+    chip::Chip,
     circuit_builder::CircuitBuilder,
     error::CircuitBuilderError,
-    hal::{ProtocolWitnessGeneratorProver, ProverDevice},
+    hal::{ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
+    selector::SelectorType,
     utils::lk_multiplicity::LkMultiplicity,
 };
 use either::Either;
 use ff_ext::ExtensionField;
-use gkr::{layer::LayerWitness, GKRCircuit, GKRCircuitOutput, GKRCircuitWitness};
-use multilinear_extensions::{impl_expr_from_unsigned, mle::ArcMultilinearExtension, Expression};
+use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
+use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -43,10 +42,7 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
         params: Self::Params,
     ) -> Result<Self, CircuitBuilderError>;
 
-    fn finalize(
-        &mut self,
-        cb: &CircuitBuilder<E>,
-    ) -> (Vec<(SelectorType<E>, usize)>, Chip<E>);
+    fn finalize(&mut self, cb: &CircuitBuilder<E>) -> (Vec<(SelectorType<E>, usize)>, Chip<E>);
 
     fn n_committed(&self) -> usize;
     fn n_fixed(&self) -> usize;
@@ -74,7 +70,7 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     );
 
     /// GKR witness.
-    fn gkr_witness<'a, PB: ProverBackend<E=E>, PD: ProverDevice<PB>>(
+    fn gkr_witness<'a, PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         circuit: &GKRCircuit<PB::E>,
         phase1_witness_group: &RowMajorMatrix<

@@ -3,12 +3,11 @@ use std::marker::PhantomData;
 use ceno_emul::{ByteAddr, Cycle, InsnKind, Platform, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    gkr::{layer::Layer, GKRCircuit}, ProtocolBuilder
-    ,
-    ProtocolWitnessGenerator,
+    ProtocolBuilder, ProtocolWitnessGenerator,
+    gkr::{GKRCircuit, layer::Layer},
 };
-use itertools::{izip, Itertools};
-use multilinear_extensions::{util::max_usable_threads, ToExpr};
+use itertools::{Itertools, izip};
+use multilinear_extensions::{ToExpr, util::max_usable_threads};
 use p3::{field::FieldAlgebra, matrix::Matrix};
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
@@ -17,25 +16,25 @@ use rayon::{
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
+    Value,
     chip_handler::general::InstFetch,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
+        Instruction,
         riscv::{
             constants::UInt,
             ecall_base::WriteFixedRS,
             insn_base::{StateInOut, WriteMEM},
         },
-        Instruction,
     },
     precompiles::{
-        KeccakInstance, KeccakLayout, KeccakParams, KeccakStateInstance, KeccakTrace,
-        KeccakWitInstance, KECCAK_ROUNDS,
+        KECCAK_ROUNDS, KeccakInstance, KeccakLayout, KeccakParams, KeccakStateInstance,
+        KeccakTrace, KeccakWitInstance,
     },
     structs::ProgramParams,
     tables::{InsnRecord, RMMCollections},
     witness::LkMultiplicity,
-    Value,
 };
 
 #[derive(Debug)]
@@ -123,14 +122,10 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        let (out_evals, mut chip) = layout.finalize(&cb);
+        let (out_evals, mut chip) = layout.finalize(cb);
 
-        let layer = Layer::from_circuit_builder(
-            &cb,
-            "Rounds".to_string(),
-            layout.n_challenges(),
-            out_evals,
-        );
+        let layer =
+            Layer::from_circuit_builder(cb, "Rounds".to_string(), layout.n_challenges(), out_evals);
         chip.add_layer(layer);
 
         let circuit = chip.gkr_circuit();

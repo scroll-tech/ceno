@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, iter, ops::Neg, sync::Arc, vec::IntoIter};
 
-use ff_ext::{ExtensionField, SmallField};
+use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
@@ -76,7 +76,7 @@ pub struct Layer<E: ExtensionField> {
     pub in_eval_expr: Vec<usize>,
     /// The expressions of the evaluations from the succeeding layers, which are
     /// connected to the outputs of this layer.
-    /// It format indicated as different output group
+    /// It formats indicated as different output group
     /// first tuple value is optional eq
     pub out_sel_and_eval_exprs: Vec<ExprEvalType<E>>,
 
@@ -300,11 +300,10 @@ impl<E: ExtensionField> Layer<E> {
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(iter::repeat(sel_type), out_eval.iter()))
             .collect();
-        dbg!(num_instances);
         self.exprs
-            .iter()
-            .zip_eq(self.expr_names.iter())
-            .zip_eq(out_evals.iter())
+            .par_iter()
+            .zip_eq(self.expr_names.par_iter())
+            .zip_eq(out_evals.par_iter())
             .map(|((expr, expr_name), (sel_type, out_eval))| {
                 let out_mle = select_from_expression_result(
                     sel_type,
@@ -313,49 +312,6 @@ impl<E: ExtensionField> Layer<E> {
                 );
                 if let EvalExpression::Zero = out_eval {
                     // sanity check: zero mle
-                    println!(
-                        "witin id 3 top 4 {:?}",
-                        layer_wits[3].get_base_field_vec()[0..4]
-                            .iter()
-                            .map(|x| format!("{:x}", x.to_canonical_u64()))
-                            .collect_vec()
-                    );
-                    println!(
-                        "witin id 253 top 4 {:?}",
-                        layer_wits[253].get_base_field_vec()[0..4]
-                            .iter()
-                            .map(|x| format!("{:x}", x.to_canonical_u64()))
-                            .collect_vec()
-                    );
-                    println!(
-                        "witin id 254 top 4 {:?}",
-                        layer_wits[254].get_base_field_vec()[0..4]
-                            .iter()
-                            .map(|x| format!("{:x}", x.to_canonical_u64()))
-                            .collect_vec()
-                    );
-                    println!(
-                        "witin id 255 top 4 {:?}",
-                        layer_wits[255].get_base_field_vec()[0..4]
-                            .iter()
-                            .map(|x| format!("{:x}", x.to_canonical_u64()))
-                            .collect_vec()
-                    );
-                    println!(
-                        "witin id 256 top 4 {:?}",
-                        layer_wits[256].get_base_field_vec()[0..4]
-                            .iter()
-                            .map(|x| format!("{:x}", x.to_canonical_u64()))
-                            .collect_vec()
-                    );
-                    println!("expr {expr} expr_name {expr_name}");
-                    println!(
-                        "out_mle top 4 {:?}",
-                        out_mle.get_base_field_vec()[0..4]
-                            .iter()
-                            .map(|x| format!("{:x}", x.to_canonical_u64()))
-                            .collect_vec()
-                    );
                     if cfg!(debug_assertions) {
                         assert!(
                             out_mle.evaluations().is_zero(),
@@ -511,9 +467,10 @@ impl<E: ExtensionField> Layer<E> {
             gkr_expressions.into_iter()
         )
         .for_each(|((eq, eval), name, expr)| {
-            let (eval_group, names, exprs) = eq_map.entry(eq).or_insert((vec![], vec![], vec![]));
+            let (eval_group, names, exprs) =
+                eq_map.entry(eq.clone()).or_insert((vec![], vec![], vec![]));
             eval_group.push(eval);
-            names.push(name);
+            names.push(name.clone());
             exprs.push(expr);
         });
         let mut expr_evals = vec![];

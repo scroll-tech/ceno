@@ -230,7 +230,7 @@ impl<'a, E: ExtensionField> PartialEq for FieldType<'a, E> {
             (FieldType::Ext(a), FieldType::Ext(b)) => a == b,
             (FieldType::Base(a), FieldType::Ext(b)) | (FieldType::Ext(b), FieldType::Base(a)) => a
                 .par_iter()
-                .zip(b.par_iter())
+                .zip_eq(b.par_iter())
                 .all(|(a, b)| E::from_base(*a) == *b),
             _ => self.is_zero() && other.is_zero(),
         }

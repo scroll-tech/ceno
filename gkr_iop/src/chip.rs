@@ -36,7 +36,7 @@ impl<E: ExtensionField> Chip<E> {
         Self {
             n_fixed: cb.cs.num_fixed,
             n_committed: cb.cs.num_witin as usize,
-            n_challenges: n_challenges,
+            n_challenges,
             n_evaluations: cb.cs.w_expressions.len()
                 + cb.cs.r_expressions.len()
                 + cb.cs.lk_expressions.len()
