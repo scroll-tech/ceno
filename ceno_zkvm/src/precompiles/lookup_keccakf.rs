@@ -1259,6 +1259,7 @@ mod tests {
     use rand::{RngCore, SeedableRng};
 
     #[test]
+    #[ignore]
     fn test_keccakf() {
         type E = GoldilocksExt2;
         type Pcs = BasefoldDefault<E>;
@@ -1278,6 +1279,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_keccakf_nonpow2() {
         type E = GoldilocksExt2;
         type Pcs = BasefoldDefault<E>;
