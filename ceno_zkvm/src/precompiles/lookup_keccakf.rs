@@ -1,5 +1,3 @@
-use std::{array, mem::transmute};
-
 use ceno_emul::{ByteAddr, Change, Cycle, MemOp, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
@@ -33,6 +31,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
+use std::{array, mem::transmute, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
@@ -1104,13 +1103,25 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     ];
 
     let span = entered_span!("gkr_witness", profiling_2 = true);
-    let fixed = layout.layout.fixed_witness_group();
+    let phase1_witness_group = phase1_witness
+        .to_mles()
+        .into_iter()
+        .map(Arc::new)
+        .collect_vec();
+    let fixed = layout
+        .layout
+        .fixed_witness_group()
+        .to_mles()
+        .into_iter()
+        .map(Arc::new)
+        .collect_vec();
     #[allow(clippy::type_complexity)]
     let (gkr_witness, gkr_output) = layout
         .layout
         .gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
             &gkr_circuit,
-            &phase1_witness,
+            phase1_witness.num_instances(),
+            &phase1_witness_group,
             &fixed,
             &challenges,
         );

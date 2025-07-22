@@ -18,7 +18,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
-    hal::ProverBackend,
+    hal::{ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -76,8 +76,8 @@ impl CpuTowerProver {
         // generate alpha challenge
         let alpha_pows = get_challenge_pows(
             prod_specs_len +
-            // logup occupy 2 sumcheck: numerator and denominator
-            logup_specs_len * 2,
+                // logup occupy 2 sumcheck: numerator and denominator
+                logup_specs_len * 2,
             transcript,
         );
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
@@ -295,10 +295,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
+        records: &[ArcMultilinearExtension<'b, E>],
         challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
-        Vec<ArcMultilinearExtension<'b, E>>,
         Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
         Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
     ) {
@@ -307,82 +307,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         } = composed_cs;
         let num_instances = input.num_instances;
         let log2_num_instances = input.log2_num_instances();
-        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
-        let num_instances_with_rotation = num_instances << composed_cs.rotation_vars().unwrap_or(0);
         let chip_record_alpha = challenges[0];
-
-        // opcode must have at least one read/write/lookup
-        let is_opcode_circuit = !cs.lk_expressions.is_empty()
-            || !cs.r_expressions.is_empty()
-            || !cs.w_expressions.is_empty();
-        // table must have at least one read/write/lookup
-        let is_table_circuit = !cs.lk_table_expressions.is_empty()
-            || !cs.r_table_expressions.is_empty()
-            || !cs.w_table_expressions.is_empty();
-
-        // sanity check
-        assert_eq!(input.witness.len(), cs.num_witin as usize);
-
-        // structural witness can be empty. In this case they are `eq`, and will be filled later
-        assert!(
-            input.structural_witness.len() == cs.num_structural_witin as usize
-                || input.structural_witness.is_empty(),
-        );
-        assert_eq!(input.fixed.len(), cs.num_fixed);
-
-        // check all witness size are power of 2
-        assert!(
-            input
-                .witness
-                .iter()
-                .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
-        );
-        if !input.structural_witness.is_empty() {
-            assert!(
-                input
-                    .structural_witness
-                    .iter()
-                    .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
-            );
-        }
-
-        assert!(is_table_circuit || is_opcode_circuit);
-        assert!(
-            cs.r_table_expressions
-                .iter()
-                .zip_eq(cs.w_table_expressions.iter())
-                .all(|(r, w)| r.table_spec.len == w.table_spec.len)
-        );
-
-        let wit_inference_span = entered_span!("wit_inference");
-        // main constraint: lookup denominator and numerator record witness inference
-        let record_span = entered_span!("record");
-        let records: Vec<ArcMultilinearExtension<'_, E>> = cs
-            .r_table_expressions
-            .par_iter()
-            .map(|r| &r.expr)
-            .chain(cs.r_expressions.par_iter())
-            .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
-            .chain(cs.w_expressions.par_iter())
-            .chain(
-                cs.lk_table_expressions
-                    .par_iter()
-                    .map(|lk| &lk.multiplicity),
-            )
-            .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
-            .chain(cs.lk_expressions.par_iter())
-            .map(|expr| {
-                assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(
-                    &input.fixed,
-                    &input.witness,
-                    &input.structural_witness,
-                    &input.public_input,
-                    challenges,
-                    expr,
-                )
-            })
-            .collect();
 
         let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
         let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
@@ -401,16 +326,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             &records[offset..][..cs.lk_expressions.len()]
         };
 
-        exit_span!(record_span);
-
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_last_layer");
         let mut r_set_last_layer = r_set_wit
             .iter()
             .chain(w_set_wit.iter())
-            .map(|wit| {
-                masked_mle_split_to_chunks(wit, num_instances_with_rotation, NUM_FANIN, E::ONE)
-            })
+            .map(|wit| masked_mle_split_to_chunks(wit, num_instances, NUM_FANIN, E::ONE))
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
 
@@ -426,12 +347,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
                 } else {
                     chip_record_alpha
                 };
-                masked_mle_split_to_chunks(
-                    wit,
-                    num_instances_with_rotation,
-                    NUM_FANIN_LOGUP,
-                    default,
-                )
+                masked_mle_split_to_chunks(wit, num_instances, NUM_FANIN_LOGUP, default)
             })
             .collect::<Vec<_>>();
         let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
@@ -441,13 +357,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let r_wit_layers = r_set_last_layer
             .into_iter()
             .map(|last_layer| {
-                infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
+                infer_tower_product_witness(log2_num_instances, last_layer, NUM_FANIN)
             })
             .collect_vec();
         let w_wit_layers = w_set_last_layer
             .into_iter()
             .map(|last_layer| {
-                infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
+                infer_tower_product_witness(log2_num_instances, last_layer, NUM_FANIN)
             })
             .collect_vec();
         let lk_wit_layers = if !lk_numerator_last_layer.is_empty() {
@@ -463,7 +379,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
                 .collect_vec()
         };
         exit_span!(span);
-        exit_span!(wit_inference_span);
 
         if cfg!(test) {
             // sanity check
@@ -560,7 +475,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 
         let out_evals = vec![r_out_evals, w_out_evals, lk_out_evals];
 
-        (out_evals, records, prod_specs, lookup_specs)
+        (out_evals, prod_specs, lookup_specs)
     }
 
     #[tracing::instrument(
@@ -583,6 +498,114 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
+    #[allow(clippy::type_complexity)]
+    #[tracing::instrument(
+        skip_all,
+        name = "build_main_witness",
+        fields(profiling_3),
+        level = "trace"
+    )]
+    fn build_main_witness<'a, 'b>(
+        &self,
+        composed_cs: &ComposedConstrainSystem<E>,
+        input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
+        challenges: &[E; 2],
+    ) -> Vec<ArcMultilinearExtension<'b, E>> {
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit,
+        } = composed_cs;
+        let num_instances = input.num_instances;
+        let log2_num_instances = input.log2_num_instances();
+        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+        let num_instances_with_rotation = num_instances << composed_cs.rotation_vars().unwrap_or(0);
+
+        if let Some(gkr_circuit) = gkr_circuit {
+            let (_, gkr_circuit_out) = Self::gkr_witness(
+                &gkr_circuit,
+                num_instances_with_rotation,
+                &input.witness,
+                &input.fixed,
+                challenges,
+            );
+            gkr_circuit_out.0.0
+        } else {
+            // opcode must have at least one read/write/lookup
+            let is_opcode_circuit = !cs.lk_expressions.is_empty()
+                || !cs.r_expressions.is_empty()
+                || !cs.w_expressions.is_empty();
+            // table must have at least one read/write/lookup
+            let is_table_circuit = !cs.lk_table_expressions.is_empty()
+                || !cs.r_table_expressions.is_empty()
+                || !cs.w_table_expressions.is_empty();
+
+            // sanity check
+            assert_eq!(input.witness.len(), cs.num_witin as usize);
+
+            // structural witness can be empty. In this case they are `eq`, and will be filled later
+            assert!(
+                input.structural_witness.len() == cs.num_structural_witin as usize
+                    || input.structural_witness.is_empty(),
+            );
+            assert_eq!(input.fixed.len(), cs.num_fixed);
+
+            // check all witness size are power of 2
+            assert!(
+                input
+                    .witness
+                    .iter()
+                    .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
+            );
+            if !input.structural_witness.is_empty() {
+                assert!(
+                    input
+                        .structural_witness
+                        .iter()
+                        .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
+                );
+            }
+
+            assert!(is_table_circuit || is_opcode_circuit);
+            assert!(
+                cs.r_table_expressions
+                    .iter()
+                    .zip_eq(cs.w_table_expressions.iter())
+                    .all(|(r, w)| r.table_spec.len == w.table_spec.len)
+            );
+
+            // main constraint: lookup denominator and numerator record witness inference
+            let record_span = entered_span!("record");
+            let records: Vec<ArcMultilinearExtension<'_, E>> = cs
+                .r_table_expressions
+                .par_iter()
+                .map(|r| &r.expr)
+                .chain(cs.r_expressions.par_iter())
+                .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
+                .chain(cs.w_expressions.par_iter())
+                .chain(
+                    cs.lk_table_expressions
+                        .par_iter()
+                        .map(|lk| &lk.multiplicity),
+                )
+                .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
+                .chain(cs.lk_expressions.par_iter())
+                .map(|expr| {
+                    assert_eq!(expr.degree(), 1);
+                    wit_infer_by_expr(
+                        &input.fixed,
+                        &input.witness,
+                        &input.structural_witness,
+                        &input.public_input,
+                        challenges,
+                        expr,
+                    )
+                })
+                .collect();
+            exit_span!(record_span);
+            records
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     #[tracing::instrument(
         skip_all,

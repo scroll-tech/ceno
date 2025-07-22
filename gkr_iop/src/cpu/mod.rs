@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter, sync::Arc};
+use std::{iter, sync::Arc};
 
 use crate::{
     LayerWitness,
@@ -88,24 +88,22 @@ where
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     ProtocolWitnessGeneratorProver<CpuBackend<E, PCS>> for CpuProver<CpuBackend<E, PCS>>
 {
-    fn gkr_witness<'a>(
+    fn gkr_witness<'a, 'b>(
         circuit: &GKRCircuit<E>,
-        phase1_witness_group_rmm: &RowMajorMatrix<E::BaseField>,
-        fixed: &RowMajorMatrix<E::BaseField>,
+        num_instances_with_rotation: usize,
+        phase1_witness_group: &[ArcMultilinearExtension<'b, E>],
+        _fixed: &[ArcMultilinearExtension<'b, E>],
         challenges: &[E],
     ) -> (
         GKRCircuitWitness<'a, CpuBackend<E, PCS>>,
         GKRCircuitOutput<'a, CpuBackend<E, PCS>>,
-    ) {
+    )
+    where
+        'b: 'a,
+    {
         // layer order from output to input
-        let num_instances_with_rotation = phase1_witness_group_rmm.num_instances();
         let mut layer_wits =
             Vec::<LayerWitness<CpuBackend<E, PCS>>>::with_capacity(circuit.layers.len() + 1);
-        let phase1_witness_group = phase1_witness_group_rmm
-            .to_mles()
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
 
         let mut witness_mle_flatten = vec![None; circuit.n_evaluations];
 
@@ -121,31 +119,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
                 });
 
-            // process fixed (and probably short) mle
+            // TODO process fixed (and probably short) mle
+            assert_eq!(
+                first_layer.in_eval_expr.len(),
+                phase1_witness_group.len(),
+                "TODO process fixed (and probably short) mle"
+            );
             // XXX currently fixed poly not support in layers > 1
-            first_layer
-                .in_eval_expr
-                .par_iter()
-                .enumerate()
-                .skip(phase1_witness_group.len())
-                .map(|(index, witin)| {
-                    (
-                        *witin,
-                        Some(
-                            fixed[index - phase1_witness_group.len()]
-                                .iter()
-                                .cycle()
-                                .cloned()
-                                .take(num_instances_with_rotation)
-                                .collect_vec()
-                                .into_mle()
-                                .into(),
-                        ),
-                    )
-                })
-                .collect::<HashMap<_, _>>()
-                .into_iter()
-                .for_each(|(witin, optional_mle)| witness_mle_flatten[witin] = optional_mle);
+            // first_layer
+            //     .in_eval_expr
+            //     .par_iter()
+            //     .enumerate()
+            //     .skip(phase1_witness_group.len())
+            //     .map(|(index, witin)| {
+            //         (
+            //             *witin,
+            //             Some(
+            //                 fixed[index - phase1_witness_group.len()]
+            //                     .iter()
+            //                     .cycle()
+            //                     .cloned()
+            //                     .take(num_instances_with_rotation)
+            //                     .collect_vec()
+            //                     .into_mle()
+            //                     .into(),
+            //             ),
+            //         )
+            //     })
+            //     .collect::<HashMap<_, _>>()
+            //     .into_iter()
+            //     .for_each(|(witin, optional_mle)| witness_mle_flatten[witin] = optional_mle);
         }
 
         // generate all layer witness from input to output

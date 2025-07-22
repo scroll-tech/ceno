@@ -67,10 +67,10 @@ pub trait TowerProver<PB: ProverBackend> {
         &self,
         cs: &ComposedConstrainSystem<PB::E>,
         input: &'b ProofInput<'a, PB>,
+        records: &[Arc<PB::MultilinearPoly<'b>>],
         challenge: &[PB::E; 2],
     ) -> (
         Vec<Vec<Vec<PB::E>>>,
-        Vec<Arc<PB::MultilinearPoly<'b>>>,
         Vec<TowerProverSpec<'b, PB>>,
         Vec<TowerProverSpec<'b, PB>>,
     );
@@ -92,6 +92,13 @@ pub struct MainSumcheckEvals<E: ExtensionField> {
 }
 
 pub trait MainSumcheckProver<PB: ProverBackend> {
+    #[allow(clippy::type_complexity)]
+    fn build_main_witness<'a, 'b>(
+        &self,
+        cs: &ComposedConstrainSystem<PB::E>,
+        input: &'b ProofInput<'a, PB>,
+        challenge: &[PB::E; 2],
+    ) -> Vec<Arc<PB::MultilinearPoly<'b>>>;
     // this prover aims to achieve two goals:
     // 1. the validity of last layer in the tower tree is reduced to
     //    the validity of read/write/logup records through sumchecks;
