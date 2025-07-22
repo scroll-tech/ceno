@@ -7,7 +7,8 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use p3_field::FieldAlgebra;
+use rayon::iter::ParallelIterator;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
@@ -54,9 +55,9 @@ impl<E: ExtensionField> SelectorType<E> {
                 // input(y) - pad = \sum_b ( sel(y; b[5..]) * (record(b) - 1) )
                 let eq = build_eq_x_r_vec(out_point);
                 let selected_id = CYCLIC_POW2_5[*round];
-                let sel: Vec<_> = iproduct!(0..32, eq.iter().enumerate())
-                    .par_bridge()
-                    .map(|(low_id, (hgh_id, s))| {
+                let sel: Vec<_> = iproduct!(eq.iter().enumerate(), 0..32)
+                    .into_iter()
+                    .map(|((hgh_id, s), low_id)| {
                         if low_id == selected_id && hgh_id < num_instances {
                             *s
                         } else {
@@ -124,17 +125,15 @@ pub(crate) fn select_from_expression_result<'a, E: ExtensionField>(
         SelectorType::Prefix(pad, _) => {
             let evals = Arc::try_unwrap(out_mle).unwrap().evaluations_to_owned();
             evals
-                .select_prefix(num_instances, pad)
-                .sub_constant(pad)
+                .select_prefix(num_instances, &E::BaseField::ZERO)
                 .into_mle()
                 .into()
         }
         SelectorType::KeccakRound(round, pad, _) => {
             let evals = Arc::try_unwrap(out_mle).unwrap().evaluations_to_owned();
             evals
-                .pick_stride_offset(32, CYCLIC_POW2_5[*round] as usize)
-                .select_prefix(num_instances, pad)
-                .sub_constant(pad)
+                .pick_stride_offset(CYCLIC_POW2_5.len(), CYCLIC_POW2_5[*round] as usize)
+                .select_prefix(num_instances, &E::BaseField::ZERO)
                 .into_mle()
                 .into()
         }

@@ -44,10 +44,9 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
             .sum::<Expression<E>>();
         let expr = match sel_type {
             SelectorType::None => zero_check_expr,
-            SelectorType::Whole(sel) => match_expr(sel) * zero_check_expr,
-            SelectorType::Prefix(pad, sel) | SelectorType::KeccakRound(_, pad, sel) => {
-                match_expr(sel) * (zero_check_expr - pad.expr())
-            }
+            SelectorType::Whole(sel)
+            | SelectorType::Prefix(_, sel)
+            | SelectorType::KeccakRound(_, _, sel) => match_expr(sel) * zero_check_expr,
         };
         zero_check_exprs.push(expr);
     }

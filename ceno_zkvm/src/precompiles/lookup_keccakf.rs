@@ -147,9 +147,9 @@ pub struct KeccakWitCols<T> {
 pub struct KeccakLayer<WitT, EqT> {
     pub wits: KeccakWitCols<WitT>,
     //  pub fixed: KeccakFixedCols<FixedT>,
-    pub eq_rotation_left: EqT,
-    pub eq_rotation_right: EqT,
-    pub eq_rotation: EqT,
+    pub(crate) eq_rotation_left: EqT,
+    pub(crate) eq_rotation_right: EqT,
+    pub(crate) eq_rotation: EqT,
 }
 
 #[derive(Clone, Debug)]
@@ -217,6 +217,8 @@ impl<E: ExtensionField> KeccakLayout<E> {
                     E::BaseField::ONE,
                     sel_mem_write.expr(),
                 ),
+                // sel_mem_read: SelectorType::Whole(sel_mem_read.expr()),
+                // sel_mem_write: SelectorType::Whole(sel_mem_write.expr()),
                 sel_lookup: SelectorType::Whole(eq_zero.expr()),
                 sel_zero: SelectorType::Whole(eq_zero.expr()),
             },
