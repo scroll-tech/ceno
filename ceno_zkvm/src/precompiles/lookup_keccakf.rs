@@ -147,9 +147,6 @@ pub struct KeccakWitCols<T> {
 pub struct KeccakLayer<WitT, EqT> {
     pub wits: KeccakWitCols<WitT>,
     //  pub fixed: KeccakFixedCols<FixedT>,
-    pub eq_zero: EqT,
-    pub sel_mem_read: EqT,
-    pub sel_mem_write: EqT,
     pub eq_rotation_left: EqT,
     pub eq_rotation_right: EqT,
     pub eq_rotation: EqT,
@@ -209,18 +206,19 @@ impl<E: ExtensionField> KeccakLayout<E> {
             layer_exprs: KeccakLayer {
                 wits,
                 // fixed,
-                eq_zero,
-                sel_mem_read,
-                sel_mem_write,
                 eq_rotation_left,
                 eq_rotation_right,
                 eq_rotation,
             },
             selector_type_layout: SelectorTypeLayout {
-                sel_mem_read: SelectorType::None,
-                sel_mem_write: SelectorType::None,
-                sel_lookup: SelectorType::None,
-                sel_zero: SelectorType::None,
+                sel_mem_read: SelectorType::KeccakRound(0, E::BaseField::ONE, sel_mem_read.expr()),
+                sel_mem_write: SelectorType::KeccakRound(
+                    ROUNDS - 1,
+                    E::BaseField::ONE,
+                    sel_mem_write.expr(),
+                ),
+                sel_lookup: SelectorType::Whole(eq_zero.expr()),
+                sel_zero: SelectorType::Whole(eq_zero.expr()),
             },
             input32_exprs: array::from_fn(|_| Expression::WitIn(0)),
             output32_exprs: array::from_fn(|_| Expression::WitIn(0)),
@@ -484,19 +482,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             rotation_cyclic_group_log2: ROUNDS_CEIL_LOG2,
             rotation_cyclic_subgroup_size: ROUNDS - 1,
         });
-
-        let read_eq = layout.layer_exprs.sel_mem_read.expr();
-        let write_eq = layout.layer_exprs.sel_mem_write.expr();
-        let lk_eq = layout.layer_exprs.eq_zero.expr(); // lk eq shared with zero
-        let zero_eq = layout.layer_exprs.eq_zero.expr();
-
-        // prepare selector
-        layout.selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: SelectorType::KeccakRound(0, E::BaseField::ONE, read_eq.clone()),
-            sel_mem_write: SelectorType::KeccakRound(23, E::BaseField::ONE, write_eq.clone()),
-            sel_lookup: SelectorType::Whole(lk_eq.clone()),
-            sel_zero: SelectorType::Whole(zero_eq.clone()),
-        };
 
         Ok(layout)
     }
@@ -1154,7 +1139,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .0
             .par_iter()
             .map(|wit| {
-                let point = point[..wit.num_vars()].to_vec();
+                let point = point[point.len() - wit.num_vars()..point.len()].to_vec();
                 PointAndEval {
                     point: point.clone(),
                     eval: wit.evaluate(&point),
@@ -1236,7 +1221,6 @@ mod tests {
     use rand::{RngCore, SeedableRng};
 
     #[test]
-    #[ignore]
     fn test_keccakf() {
         type E = GoldilocksExt2;
         type Pcs = BasefoldDefault<E>;
@@ -1256,7 +1240,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_keccakf_nonpow2() {
         type E = GoldilocksExt2;
         type Pcs = BasefoldDefault<E>;
