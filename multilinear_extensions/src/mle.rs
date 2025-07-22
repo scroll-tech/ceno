@@ -6,7 +6,6 @@ use crate::{
     smart_slice::SmartSlice,
     util::ceil_log2,
 };
-use core::hash::Hash;
 use either::Either;
 use ff_ext::{ExtensionField, FromUniformBytes};
 use p3::field::{Field, FieldAlgebra};
@@ -91,7 +90,7 @@ impl<'a, F: Field, E: ExtensionField<BaseField = F>> IntoMLEs<MultilinearExtensi
     }
 }
 
-#[derive(Clone, Hash, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Eq, Debug, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -121,7 +120,7 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
             FieldType::Ext(SmartSlice::Borrowed(slice)) => {
                 FieldType::Ext(SmartSlice::Borrowed(slice))
             }
-            _ => panic!("invalid type"),
+            invalid_type => panic!("invalid type {:?}", invalid_type),
         }
     }
 
@@ -152,8 +151,11 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
     pub fn zero(num_vars: usize) -> Self {
         FieldType::Base(SmartSlice::Owned(vec![E::BaseField::ZERO; 1 << num_vars]))
     }
+}
 
-    pub fn is_equal(&self, other: &Self) -> bool {
+impl<'a, E: ExtensionField> PartialEq for FieldType<'a, E> {
+    /// compares the contents of two slices
+    fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (FieldType::Base(a), FieldType::Base(b)) => a == b,
             (FieldType::Ext(a), FieldType::Ext(b)) => a == b,

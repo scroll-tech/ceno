@@ -5,7 +5,8 @@ use ff_ext::ExtensionField;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use itertools::{Itertools, interleave, izip};
+use gkr_iop::gkr::GKRClaims;
+use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     mle::IntoMLE,
@@ -325,9 +326,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
+        let composed_cs = circuit_vk.get_cs();
         let ComposedConstrainSystem {
-            zkvm_v1_css: cs, ..
-        } = circuit_vk.get_cs();
+            zkvm_v1_css: cs,
+            gkr_circuit,
+        } = &composed_cs;
         let num_instances = proof.num_instances;
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len(),
@@ -339,6 +342,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instance);
+        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -352,7 +356,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .collect_vec(),
             proof.lk_out_evals.clone(),
             tower_proofs,
-            vec![log2_num_instances; num_batched],
+            vec![num_var_with_rotation; num_batched],
             num_product_fanin,
             transcript,
         )?;
@@ -365,136 +369,153 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
 
-        assert!(record_evals.iter().map(|e| &e.point).all_equal());
+        debug_assert!(
+            chain!(&record_evals, &logup_p_evals, &logup_q_evals)
+                .map(|e| &e.point)
+                .all_equal()
+        );
 
         // verify zero statement (degree > 1) + sel sumcheck
         let rt = record_evals[0].point.clone();
         let num_rw_records = r_counts_per_instance + w_counts_per_instance;
 
-        assert_eq!(record_evals.len(), num_rw_records);
+        debug_assert_eq!(record_evals.len(), num_rw_records);
+        debug_assert_eq!(logup_p_evals.len(), lk_counts_per_instance);
+        debug_assert_eq!(logup_q_evals.len(), lk_counts_per_instance);
 
-        let alpha_pow = get_challenge_pows(
-            r_counts_per_instance
-                + w_counts_per_instance
-                + lk_counts_per_instance
-                + cs.assert_zero_sumcheck_expressions.len(),
-            transcript,
-        );
+        if let Some(gkr_circuit) = gkr_circuit {
+            let GKRClaims(opening_evaluations) = gkr_circuit.verify(
+                num_var_with_rotation,
+                proof.gkr_iop_proof.clone().unwrap(),
+                &chain!(record_evals, logup_p_evals, logup_q_evals).collect_vec(),
+                challenges,
+                transcript,
+            )?;
+            Ok(opening_evaluations[0].point.clone())
+        } else {
+            let alpha_pow = get_challenge_pows(
+                r_counts_per_instance
+                    + w_counts_per_instance
+                    + lk_counts_per_instance
+                    + cs.assert_zero_sumcheck_expressions.len(),
+                transcript,
+            );
 
-        // alpha_read * (out_r[rt] - 1) + alpha_write * (out_w[rt] - 1) + alpha_lk * (out_lk_q - chip_record_alpha)
-        // + 0 // 0 come from zero check
-        let claim_sum = izip!(&alpha_pow[0..num_rw_records], record_evals)
-            .map(|(alpha, eval)| *alpha * (eval.eval - E::ONE))
-            .sum::<E>()
-            + izip!(&alpha_pow[num_rw_records..], logup_q_evals)
-                .map(|(alpha, eval)| *alpha * (eval.eval - chip_record_alpha))
-                .sum::<E>();
+            // alpha_read * (out_r[rt] - 1) + alpha_write * (out_w[rt] - 1) + alpha_lk * (out_lk_q - chip_record_alpha)
+            // + 0 // 0 come from zero check
+            let claim_sum = izip!(&alpha_pow[0..num_rw_records], record_evals)
+                .map(|(alpha, eval)| *alpha * (eval.eval - E::ONE))
+                .sum::<E>()
+                + izip!(&alpha_pow[num_rw_records..], logup_q_evals)
+                    .map(|(alpha, eval)| *alpha * (eval.eval - chip_record_alpha))
+                    .sum::<E>();
 
-        let main_sel_subclaim = IOPVerifierState::verify(
-            claim_sum,
-            &IOPProof {
-                proofs: proof.main_sumcheck_proofs.as_ref().unwrap().clone(),
-            },
-            &VPAuxInfo {
-                // + 1 from sel_non_lc_zero_sumcheck
-                max_degree: SEL_DEGREE.max(cs.max_non_lc_degree + 1),
-                max_num_variables: log2_num_instances,
-                phantom: PhantomData,
-            },
-            transcript,
-        );
-        let (input_opening_point, expected_evaluation) = (
-            main_sel_subclaim
-                .point
+            let main_sel_subclaim = IOPVerifierState::verify(
+                claim_sum,
+                &IOPProof {
+                    proofs: proof.main_sumcheck_proofs.as_ref().unwrap().clone(),
+                },
+                &VPAuxInfo {
+                    // + 1 from sel_non_lc_zero_sumcheck
+                    max_degree: SEL_DEGREE.max(cs.max_non_lc_degree + 1),
+                    max_num_variables: log2_num_instances,
+                    phantom: PhantomData,
+                },
+                transcript,
+            );
+            let (input_opening_point, expected_evaluation) = (
+                main_sel_subclaim
+                    .point
+                    .iter()
+                    .map(|c| c.elements)
+                    .collect_vec(),
+                main_sel_subclaim.expected_evaluation,
+            );
+
+            // sel(rt, t)
+            let sel = eq_eval_less_or_equal_than(num_instances - 1, &input_opening_point, &rt);
+
+            // derive r_records, w_records, lk_records from witness's evaluations
+            let expected_evals = cs
+                .r_expressions
                 .iter()
-                .map(|c| c.elements)
-                .collect_vec(),
-            main_sel_subclaim.expected_evaluation,
-        );
+                .chain(cs.w_expressions.iter())
+                .chain(cs.lk_expressions.iter())
+                .map(|expr| {
+                    eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
+                        .right()
+                        .unwrap()
+                })
+                .collect_vec();
 
-        // sel(rt, t)
-        let sel = eq_eval_less_or_equal_than(num_instances - 1, &input_opening_point, &rt);
-
-        // derive r_records, w_records, lk_records from witness's evaluations
-        let expected_evals = cs
-            .r_expressions
+            let computed_evals = [
+                // read
+                sel * izip!(
+                    &alpha_pow[0..r_counts_per_instance],
+                    &expected_evals[0..r_counts_per_instance]
+                )
+                .map(|(alpha, in_eval)| *alpha * (*in_eval - E::ONE))
+                .sum::<E>(),
+                // write
+                sel * izip!(
+                    &alpha_pow[r_counts_per_instance..num_rw_records],
+                    &expected_evals[r_counts_per_instance..num_rw_records],
+                )
+                .map(|(alpha, in_eval)| *alpha * (*in_eval - E::ONE))
+                .sum::<E>(),
+                // lookup
+                sel * izip!(
+                    &alpha_pow[num_rw_records..],
+                    &expected_evals[num_rw_records..]
+                )
+                .map(|(alpha, in_eval)| *alpha * (*in_eval - chip_record_alpha))
+                .sum::<E>(),
+                // degree > 1 zero exp sumcheck
+                {
+                    // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))
+                    sel * cs
+                        .assert_zero_sumcheck_expressions
+                        .iter()
+                        .zip_eq(&alpha_pow[(num_rw_records + lk_counts_per_instance)..])
+                        .map(|(expr, alpha)| {
+                            // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
+                            *alpha
+                                * eval_by_expr_with_instance(
+                                    &[],
+                                    &proof.wits_in_evals,
+                                    &[],
+                                    pi,
+                                    challenges,
+                                    expr,
+                                )
+                                .right()
+                                .unwrap()
+                        })
+                        .sum::<E>()
+                },
+            ]
             .iter()
-            .chain(cs.w_expressions.iter())
-            .chain(cs.lk_expressions.iter())
-            .map(|expr| {
+            .copied()
+            .sum::<E>();
+
+            if computed_evals != expected_evaluation {
+                return Err(ZKVMError::VerifyError(
+                    "main + sel evaluation verify failed".into(),
+                ));
+            }
+
+            // verify zero expression (degree = 1) statement, thus no sumcheck
+            if cs.assert_zero_expressions.iter().any(|expr| {
                 eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
                     .right()
                     .unwrap()
-            })
-            .collect_vec();
+                    != E::ZERO
+            }) {
+                return Err(ZKVMError::VerifyError("zero expression != 0".into()));
+            }
 
-        let computed_evals = [
-            // read
-            sel * izip!(
-                &alpha_pow[0..r_counts_per_instance],
-                &expected_evals[0..r_counts_per_instance]
-            )
-            .map(|(alpha, in_eval)| *alpha * (*in_eval - E::ONE))
-            .sum::<E>(),
-            // write
-            sel * izip!(
-                &alpha_pow[r_counts_per_instance..num_rw_records],
-                &expected_evals[r_counts_per_instance..num_rw_records],
-            )
-            .map(|(alpha, in_eval)| *alpha * (*in_eval - E::ONE))
-            .sum::<E>(),
-            // lookup
-            sel * izip!(
-                &alpha_pow[num_rw_records..],
-                &expected_evals[num_rw_records..]
-            )
-            .map(|(alpha, in_eval)| *alpha * (*in_eval - chip_record_alpha))
-            .sum::<E>(),
-            // degree > 1 zero exp sumcheck
-            {
-                // sel(rt_non_lc_sumcheck, main_sel_eval_point) * \sum_j (alpha{j} * expr(main_sel_eval_point))
-                sel * cs
-                    .assert_zero_sumcheck_expressions
-                    .iter()
-                    .zip_eq(&alpha_pow[(num_rw_records + lk_counts_per_instance)..])
-                    .map(|(expr, alpha)| {
-                        // evaluate zero expression by all wits_in_evals because they share the unique input_opening_point opening
-                        *alpha
-                            * eval_by_expr_with_instance(
-                                &[],
-                                &proof.wits_in_evals,
-                                &[],
-                                pi,
-                                challenges,
-                                expr,
-                            )
-                            .right()
-                            .unwrap()
-                    })
-                    .sum::<E>()
-            },
-        ]
-        .iter()
-        .copied()
-        .sum::<E>();
-
-        if computed_evals != expected_evaluation {
-            return Err(ZKVMError::VerifyError(
-                "main + sel evaluation verify failed".into(),
-            ));
+            Ok(input_opening_point)
         }
-
-        // verify zero expression (degree = 1) statement, thus no sumcheck
-        if cs.assert_zero_expressions.iter().any(|expr| {
-            eval_by_expr_with_instance(&[], &proof.wits_in_evals, &[], pi, challenges, expr)
-                .right()
-                .unwrap()
-                != E::ZERO
-        }) {
-            return Err(ZKVMError::VerifyError("zero expression != 0".into()));
-        }
-
-        Ok(input_opening_point)
     }
 
     #[allow(clippy::too_many_arguments)]
