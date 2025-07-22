@@ -159,6 +159,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         .map(|r| Expression::Constant(Either::Right(r)))
         .collect_vec();
 
+        dbg!(alpha_pows[1].clone());
+
         let span = entered_span!("gen_expr", profiling_4 = true);
         let zero_check_exprs =
             extend_exprs_with_rotation(layer, &alpha_pows, layer.n_witin as WitnessId);
