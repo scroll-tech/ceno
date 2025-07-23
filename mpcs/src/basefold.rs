@@ -17,11 +17,11 @@ use witness::RowMajorMatrix;
 use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
 
-mod structure;
+pub mod structure;
 pub use structure::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
     BasefoldProof, BasefoldProverParams, BasefoldRSParams, BasefoldVerifierParams,
-    QueryOpeningProofs,
+    QueryOpeningProof, QueryOpeningProofs,
 };
 mod commit_phase;
 use commit_phase::batch_commit_phase;
