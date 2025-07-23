@@ -46,6 +46,7 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub lk_out_evals: Vec<Vec<E>>,
 
     pub main_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
+    pub gkr_iop_proof: Option<GKRProof<E>>,
 
     pub tower_proof: TowerProofs<E>,
 

@@ -25,7 +25,11 @@ pub(crate) fn masked_mle_split_to_chunks<'a, 'b, E: ExtensionField>(
     default: E,
 ) -> Vec<MultilinearExtension<'b, E>> {
     assert!(num_chunks.is_power_of_two());
-    assert!(num_instance <= mle.evaluations().len());
+    assert!(
+        num_instance <= mle.evaluations().len(),
+        "num_instance {num_instance} > {}",
+        mle.evaluations().len()
+    );
 
     // TODO: when mle.len() is two's power, we should avoid the clone
     (0..num_chunks)

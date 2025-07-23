@@ -33,6 +33,7 @@ fn test_opcode_and() {
     let (raw_witin, lkm) = AndInstruction::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
@@ -74,6 +75,7 @@ fn test_opcode_or() {
     let (raw_witin, lkm) = OrInstruction::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
@@ -115,6 +117,7 @@ fn test_opcode_xor() {
     let (raw_witin, lkm) = XorInstruction::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,

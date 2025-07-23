@@ -8,8 +8,7 @@ use multilinear_extensions::{
     mle::{MultilinearExtension, Point, PointAndEval},
     util::ceil_log2,
 };
-use p3_field::FieldAlgebra;
-use p3_util::indices_arr;
+use p3::{field::FieldAlgebra, util::indices_arr};
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
@@ -18,10 +17,12 @@ use tiny_keccak::keccakf;
 use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
-use crate::{
+use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
+    error::CircuitBuilderError,
     evaluation::EvalExpression,
     gkr::{
         GKRCircuit, GKRProverOutput,
@@ -638,31 +639,30 @@ fn keccak_first_layer<E: ExtensionField>(
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     type Params = KeccakParams;
 
-    fn init(_params: Self::Params) -> Self {
-        Self::default()
-    }
-
-    fn build_gkr_chip(&self) -> Chip<E> {
+    fn build_gkr_chip(
+        _cb: &mut CircuitBuilder<E>,
+        _params: Self::Params,
+    ) -> Result<(Self, Chip<E>), CircuitBuilderError> {
+        let layout = Self::default();
         let mut chip = Chip {
-            n_fixed: self.n_fixed(),
-            n_committed: self.n_committed(),
-            n_challenges: self.n_challenges(),
-            n_evaluations: self.n_evaluations(),
-            n_nonzero_out_evals: self.n_nonzero_out_evals(),
+            n_fixed: layout.n_fixed(),
+            n_committed: layout.n_committed(),
+            n_challenges: layout.n_challenges(),
+            n_evaluations: layout.n_evaluations(),
             layers: vec![],
             final_out_evals: unsafe {
                 transmute::<KeccakOutEvals<usize>, [usize; KECCAK_OUT_EVAL_SIZE]>(
-                    self.final_out_evals.clone(),
+                    layout.final_out_evals.clone(),
                 )
             }
             .to_vec(),
         };
         chip.add_layer(output32_layer(
-            &self.layers.output32,
-            &self.final_out_evals.output32,
-            &self.layer_in_evals.output32,
-            self.alpha.clone(),
-            self.beta.clone(),
+            &layout.layers.output32,
+            &layout.final_out_evals.output32,
+            &layout.layer_in_evals.output32,
+            layout.alpha.clone(),
+            layout.beta.clone(),
         ));
 
         macro_rules! add_common_layers {
@@ -708,20 +708,20 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // add Round 1..24
         let round_output = izip!(
             (1..ROUNDS),
-            &self.layers.inner_rounds,
-            &self.layer_in_evals.inner_rounds
+            &layout.layers.inner_rounds,
+            &layout.layer_in_evals.inner_rounds
         )
         .rev()
         .fold(
-            &self.layer_in_evals.output32,
+            &layout.layer_in_evals.output32,
             |round_output, (round_id, round_layers, round_in_evals)| {
                 add_common_layers!(
                     round_layers,
                     round_output,
                     round_in_evals,
                     round_id,
-                    self.alpha.clone(),
-                    self.beta.clone()
+                    layout.alpha.clone(),
+                    layout.beta.clone()
                 );
                 chip.add_layer(theta_first_layer(
                     &round_layers.theta_first,
@@ -729,36 +729,38 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     &round_in_evals.theta_third[D_SIZE..],
                     &round_in_evals.theta_first,
                     round_id,
-                    self.alpha.clone(),
-                    self.beta.clone(),
+                    layout.alpha.clone(),
+                    layout.beta.clone(),
                 ));
                 &round_in_evals.theta_first
             },
         );
 
         // add Round 0
-        let (round_layers, round_in_evals) =
-            (&self.layers.first_round, &self.layer_in_evals.first_round);
+        let (round_layers, round_in_evals) = (
+            &layout.layers.first_round,
+            &layout.layer_in_evals.first_round,
+        );
 
         add_common_layers!(
             round_layers,
             round_output,
             round_in_evals,
             0,
-            self.alpha.clone(),
-            self.beta.clone()
+            layout.alpha.clone(),
+            layout.beta.clone()
         );
 
         chip.add_layer(keccak_first_layer(
             &round_layers.theta_first,
             &round_in_evals.theta_second,
             &round_in_evals.theta_third[D_SIZE..],
-            &self.final_out_evals.input32,
+            &layout.final_out_evals.input32,
             &round_in_evals.theta_first,
-            self.alpha.clone(),
-            self.beta.clone(),
+            layout.alpha.clone(),
+            layout.beta.clone(),
         ));
-        chip
+        Ok((layout, chip))
     }
 
     fn n_committed(&self) -> usize {
@@ -771,10 +773,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
     fn n_challenges(&self) -> usize {
         0
-    }
-
-    fn n_nonzero_out_evals(&self) -> usize {
-        KECCAK_INPUT32_SIZE + KECCAK_OUTPUT32_SIZE
     }
 
     fn n_layers(&self) -> usize {
@@ -795,12 +793,22 @@ where
     E: ExtensionField,
 {
     type Trace = KeccakTrace<E>;
+
     fn phase1_witness_group(
         &self,
-        phase1: Self::Trace,
+        _phase1: Self::Trace,
+        _wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         _lk_multiplicity: &mut LkMultiplicity,
-    ) -> RowMajorMatrix<E::BaseField> {
-        phase1.bits
+    ) {
+        // phase1.bits
+    }
+
+    fn phase1_witin_rmm_height(&self, _num_instances: usize) -> usize {
+        0
+    }
+
+    fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::new_by_values(vec![], 1, InstancePaddingStrategy::Default)
     }
 }
 
@@ -843,10 +851,13 @@ fn rho_and_pi_permutation() -> Vec<usize> {
     pi(&rho(&perm))
 }
 
-pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>) {
+pub fn setup_gkr_circuit<E: ExtensionField>()
+-> Result<(KeccakLayout<E>, GKRCircuit<E>), CircuitBuilderError> {
     let params = KeccakParams {};
-    let (layout, chip) = KeccakLayout::build(params);
-    (layout, chip.gkr_circuit())
+    let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
+    let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+    let (layout, chip) = KeccakLayout::build_gkr_chip(&mut circuit_builder, params)?;
+    Ok((layout, chip.gkr_circuit()))
 }
 
 pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
@@ -863,8 +874,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let bits = keccak_phase1_witness::<E>(&states);
     exit_span!(span);
     let span = entered_span!("phase1_witness_group", profiling_1 = true);
-    let mut lk_multiplicity = LkMultiplicity::default();
-    let phase1_witness = layout.phase1_witness_group(KeccakTrace { bits }, &mut lk_multiplicity);
+    let phase1_witness = bits;
     exit_span!(span);
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
@@ -874,7 +884,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
         &gkr_circuit,
         &phase1_witness,
-        &[],
+        &layout.fixed_witness_group(),
         &[],
     );
     exit_span!(span);
@@ -980,6 +990,11 @@ mod tests {
         let states: Vec<[u64; 25]> = (0..num_instance)
             .map(|_| std::array::from_fn(|_| rng.next_u64()))
             .collect_vec();
-        run_keccakf::<E, Pcs>(setup_gkr_circuit(), states, false, true); // `verify` is temporarily false because the error `Extrapolation for degree 6 not implemented`.
+        run_keccakf::<E, Pcs>(
+            setup_gkr_circuit().expect("setup gkr circuit error"),
+            states,
+            false,
+            true,
+        ); // `verify` is temporarily false because the error `Extrapolation for degree 6 not implemented`.
     }
 }
