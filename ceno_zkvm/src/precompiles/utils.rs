@@ -13,7 +13,7 @@ where
     I: IntoIterator<Item = u64>,
 {
     for (i, word) in iter.into_iter().enumerate() {
-        dst[start_index + i] = E::BaseField::from_canonical_u64(word);
+        dst[start_index + i] = E::BaseField::from_wrapped_u64(word);
     }
 }
 

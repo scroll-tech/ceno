@@ -1,11 +1,11 @@
+use either::Either;
+use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
     Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn, WitnessId, rlc_chip_record,
 };
 use serde::de::DeserializeOwned;
 use std::{cmp::Ordering, collections::HashMap, iter::once, marker::PhantomData};
-
-use ff_ext::ExtensionField;
 
 use crate::{
     RAMType, error::CircuitBuilderError, gkr::layer::ROTATION_OPENING_COUNT, tables::LookupTable,
@@ -1236,7 +1236,8 @@ pub fn expansion_expr<E: ExtensionField, const SIZE: usize>(
             .fold((0, E::BaseField::ZERO.expr()), |acc, (sz, felt)| {
                 (
                     acc.0 + sz,
-                    acc.1 * E::BaseField::from_canonical_u64(1 << sz).expr() + felt.expr(),
+                    acc.1 * Expression::Constant(Either::Right(E::from_wrapped_u64(1 << sz)))
+                        + felt.expr(),
                 )
             });
 

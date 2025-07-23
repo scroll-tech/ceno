@@ -26,6 +26,7 @@ use multilinear_extensions::{
     Expression, Instance,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     monomial::Term,
+    op_mle,
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
     virtual_poly::build_eq_x_r_vec,
@@ -40,7 +41,7 @@ use sumcheck::{
     util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
-use witness::next_pow2_instance_padding;
+use witness::{InstancePaddingStrategy::Default, next_pow2_instance_padding};
 
 pub struct CpuTowerProver;
 
@@ -724,19 +725,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                                 &challenges,
                                 expr,
                             );
-                            let top_100_errors = expected_zero_poly
-                                .get_base_field_vec()
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, v)| **v != E::BaseField::ZERO)
-                                .take(100)
-                                .collect_vec();
-                            if !top_100_errors.is_empty() {
-                                return Err(ZKVMError::InvalidWitness(format!(
-                                    "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
-                                    top_100_errors.into_iter().map(|(i, _)| i).join(",")
-                                )));
-                            }
+                            op_mle!(expected_zero_poly, |expected_zero_poly| {
+                                let top_100_errors = expected_zero_poly
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, v)| **v != E::BaseField::ZERO.into())
+                                    .take(100)
+                                    .collect_vec();
+                                if !top_100_errors.is_empty() {
+                                    Err(ZKVMError::InvalidWitness(format!(
+                                        "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
+                                        top_100_errors.into_iter().map(|(i, _)| i).join(",")
+                                    )))
+                                } else {
+                                    Ok(())
+                                }
+                            })?;
                         }
                     }
                 }

@@ -33,8 +33,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for CpuBacke
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> CpuBackend<E, PCS> {
     pub fn new() -> Self {
-        let param =
-            PCS::setup(E::BaseField::TWO_ADICITY, SecurityLevel::Conjecture100bits).unwrap();
+        let param = PCS::setup(
+            1 << E::BaseField::TWO_ADICITY,
+            SecurityLevel::Conjecture100bits,
+        )
+        .unwrap();
         Self {
             param,
             _marker: std::marker::PhantomData,

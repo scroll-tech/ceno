@@ -251,9 +251,9 @@ pub fn rotation_selector_eval<E: ExtensionField>(
 
 pub fn i64_to_base<F: SmallField>(x: i64) -> F {
     if x >= 0 {
-        F::from_canonical_u64(x as u64)
+        F::from_wrapped_u64(x as u64)
     } else {
-        -F::from_canonical_u64((-x) as u64)
+        -F::from_wrapped_u64((-x) as u64)
     }
 }
 

@@ -59,7 +59,7 @@ impl OpTableConfig {
 
         fixed.par_rows_mut().zip(content).for_each(|(row, abc)| {
             for (col, val) in self.abc.iter().zip(abc.iter()) {
-                set_fixed_val!(row, *col, F::from_v(*val));
+                set_fixed_val!(row, *col, F::from_wrapped_u64(*val));
             }
         });
 

@@ -153,8 +153,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
         if let Some(equal) = &config.is_equal {
             equal.assign_instance(
                 instance,
-                E::BaseField::from_canonical_u64(rs2.as_u64()),
-                E::BaseField::from_canonical_u64(rs1.as_u64()),
+                E::BaseField::from_wrapped_u64(rs2.as_u64()),
+                E::BaseField::from_wrapped_u64(rs1.as_u64()),
             )?;
         }
 
