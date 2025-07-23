@@ -1,12 +1,10 @@
 use std::{cmp::Ordering, collections::BTreeMap};
 
 use crate::{
-    RAMType,
     evaluation::EvalExpression,
     gkr::layer::{Layer, LayerType, ROTATION_OPENING_COUNT},
     tables::LookupTable,
 };
-use ceno_emul::Tracer;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitnessId, rlc_chip_record};
@@ -147,71 +145,6 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                 self.beta.clone(),
             );
             self.range_lookups.push(rlc_record)
-        }
-    }
-
-    /// records RAM write operations into the `ram_write` trace vector using RLC encoding.
-    ///
-    /// this function appends one RLC-encoded record per word written to memory,
-    /// starting from `mem_start_addr`. Each record includes:
-    /// - The operation type (assumed to be `RAMType::Memory`)
-    /// - The memory address of the word (adjusted by `4 * index`)
-    /// - The value being written
-    /// - The timestamp of the write
-    pub fn ram_write_record(
-        &mut self,
-        mem_start_addr: Expression<E>,
-        values: Vec<Expression<E>>,
-        cur_ts: Expression<E>,
-    ) {
-        for (idx, value) in values.into_iter().enumerate() {
-            let rlc_record = rlc_chip_record(
-                vec![
-                    E::BaseField::from_canonical_u64(RAMType::Memory as u64).expr(),
-                    mem_start_addr.clone()
-                    // `4` is num bytes per word
-                    // TODO fetch from constant
-                        + E::BaseField::from_canonical_u64((4 * idx) as u64).expr(),
-                    value,
-                    cur_ts.clone() + E::BaseField::from_canonical_u64(Tracer::SUBCYCLE_MEM).expr(),
-                ],
-                self.alpha.clone(),
-                self.beta.clone(),
-            );
-            self.ram_write.push(rlc_record);
-        }
-    }
-
-    /// records RAM read operations into the `ram_read` trace vector using RLC encoding.
-    ///
-    /// this function appends one RLC-encoded record per word written to memory,
-    /// starting from `mem_start_addr`. Each record includes:
-    /// - The operation type (assumed to be `RAMType::Memory`)
-    /// - The memory address of the word (adjusted by `4 * index`)
-    /// - The value being read
-    /// - The ts corresponding to each value
-    pub fn ram_read_record(
-        &mut self,
-        mem_start_addr: Expression<E>,
-        values: Vec<Expression<E>>,
-        ts: Vec<Expression<E>>,
-    ) {
-        assert_eq!(values.len(), ts.len());
-        for (idx, (value, ts)) in izip!(values, ts).enumerate() {
-            let rlc_record = rlc_chip_record(
-                vec![
-                    E::BaseField::from_canonical_u64(RAMType::Memory as u64).expr(),
-                    mem_start_addr.clone()
-                    // `4` is num bytes per word
-                    // TODO fetch from constant
-                        + E::BaseField::from_canonical_u64((4 * idx) as u64).expr(),
-                    value,
-                    ts,
-                ],
-                self.alpha.clone(),
-                self.beta.clone(),
-            );
-            self.ram_read.push(rlc_record);
         }
     }
 
@@ -470,6 +403,9 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             Layer::new(
                 layer_name,
                 layer_type,
+                self.num_witin,
+                0,
+                self.num_fixed,
                 expressions,
                 n_challenges,
                 in_eval_expr,
@@ -489,6 +425,9 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             Layer::new(
                 layer_name,
                 layer_type,
+                self.num_witin,
+                0,
+                self.num_fixed,
                 expressions,
                 n_challenges,
                 in_eval_expr,
