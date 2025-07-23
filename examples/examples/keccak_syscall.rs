@@ -12,7 +12,7 @@ fn main() {
 
     for _ in 0..ITERATIONS {
         syscall_keccak_permute(&mut state);
-        log_state(&state);
+        // log_state(&state);
     }
 }
 

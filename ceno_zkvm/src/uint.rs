@@ -12,6 +12,7 @@ use crate::{
     utils::add_one_to_big_num,
     witness::LkMultiplicity,
 };
+use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::{Itertools, enumerate};
@@ -482,7 +483,8 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn to_field_expr(&self, is_neg: Expression<E>) -> Expression<E> {
         // Convert two's complement representation into field arithmetic.
         // Example: 0xFFFF_FFFF = 2^32 - 1  -->  shift  -->  -1
-        self.value() - is_neg * (1_u64 << 32)
+        self.value()
+            - is_neg * Expression::Constant(Either::Right(E::from_wrapped_u64(1_u64 << 32)))
     }
 }
 

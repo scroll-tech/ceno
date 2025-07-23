@@ -76,13 +76,13 @@ pub mod impl_babybear {
 
     impl FieldFrom<u64> for BabyBear {
         fn from_v(v: u64) -> Self {
-            Self::from_canonical_u64(v)
+            Self::from_wrapped_u64(v)
         }
     }
 
     impl FieldFrom<u64> for BabyBearExt4 {
         fn from_v(v: u64) -> Self {
-            Self::from_canonical_u64(v)
+            Self::from_wrapped_u64(v)
         }
     }
 
