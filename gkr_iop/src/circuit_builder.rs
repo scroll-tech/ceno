@@ -3,13 +3,24 @@ use multilinear_extensions::{
     Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn, WitnessId, rlc_chip_record,
 };
 use serde::de::DeserializeOwned;
-use std::{collections::HashMap, iter::once, marker::PhantomData};
+use std::{cmp::Ordering, collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
 
-use crate::{RAMType, error::CircuitBuilderError, tables::LookupTable};
+use crate::{
+    RAMType, error::CircuitBuilderError, gkr::layer::ROTATION_OPENING_COUNT, tables::LookupTable,
+};
 use multilinear_extensions::monomial::Term;
 use p3::field::FieldAlgebra;
+pub mod ram;
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned")]
+pub struct RotationParams<E: ExtensionField> {
+    pub rotation_eqs: Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
+    pub rotation_cyclic_group_log2: usize,
+    pub rotation_cyclic_subgroup_size: usize,
+}
 
 /// namespace used for annotation, preserve meta info during circuit construction
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -125,6 +136,10 @@ pub struct ConstraintSystem<E: ExtensionField> {
     /// max zero sumcheck degree
     pub max_non_lc_degree: usize,
 
+    /// rotation argumment
+    pub rotations: Vec<(Expression<E>, Expression<E>)>,
+    pub rotation_params: Option<RotationParams<E>>,
+
     // alpha, beta challenge for chip record
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
@@ -172,6 +187,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             assert_zero_sumcheck_expressions: vec![],
             assert_zero_sumcheck_expressions_namespace_map: vec![],
             max_non_lc_degree: 0,
+            rotations: vec![],
+            rotation_params: None,
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
 
@@ -218,17 +235,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         wit_in
     }
 
-    pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(
-        &mut self,
-        n: N,
-    ) -> Result<Fixed, CircuitBuilderError> {
+    pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> Fixed {
         let f = Fixed(self.num_fixed);
         self.num_fixed += 1;
 
         let path = self.ns.compute_path(n().into());
         self.fixed_namespace_map.push(path);
 
-        Ok(f)
+        f
     }
 
     pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
@@ -622,7 +636,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             .create_structural_witin(name_fn, max_len, offset, multi_factor, descending)
     }
 
-    pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Result<Fixed, CircuitBuilderError>
+    pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Fixed
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
@@ -853,6 +867,33 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         }
     }
 
+    /// Generates U16 lookups to prove that `value` fits on `size < 16` bits.
+    /// In general it can be done by two U16 checks: one for `value` and one for
+    /// `value << (16 - size)`.
+    pub fn assert_ux_in_u16<NR, N>(
+        &mut self,
+        name_fn: N,
+        size: usize,
+        expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: Fn() -> NR,
+    {
+        assert!(size <= 16, "{size} > 16");
+        self.assert_u16(
+            || format!("assert_ux_in_u16_{}_check1", name_fn().into()),
+            expr.clone(),
+        )?;
+        if size < 16 {
+            self.assert_u16(
+                || format!("assert_ux_in_u16_{}_check2", name_fn().into()),
+                expr * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
+            )?;
+        }
+        Ok(())
+    }
+
     fn assert_u5<NR, N>(
         &mut self,
         name_fn: N,
@@ -999,9 +1040,208 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok((is_eq, diff_inverse))
     }
 
+    // Constrains that lhs and rhs encode the same value of SIZE bits
+    // WARNING: Assumes that forall i, (lhs[i].1 < (2 ^ lhs[i].0))
+    // This needs to be constrained separately
+    fn require_reps_equal<const SIZE: usize, NR, N>(
+        &mut self,
+        name_fn: N,
+        lhs: &[(usize, Expression<E>)],
+        rhs: &[(usize, Expression<E>)],
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.require_zero(
+            name_fn,
+            expansion_expr::<E, SIZE>(lhs) - expansion_expr::<E, SIZE>(rhs),
+        )
+    }
+
+    /// Checks that `rot8` is equal to `input8` left-rotated by `delta`.
+    /// `rot8` and `input8` each consist of 8 chunks of 8-bits.
+    ///
+    /// `split_rep` is a chunk representation of the input which
+    /// allows to reduce the required rotation to an array rotation. It may use
+    /// non-uniform chunks.
+    ///
+    /// For example, when `delta = 2`, the 64 bits are split into chunks of
+    /// sizes `[16a, 14b, 2c, 16d, 14e, 2f]` (here the first chunks contains the
+    /// least significant bits so a left rotation will become a right rotation
+    /// of the array). To perform the required rotation, we can
+    /// simply rotate the array: [2f, 16a, 14b, 2c, 16d, 14e].
+    ///
+    /// In the first step, we check that `rot8` and `split_rep` represent the
+    /// same 64 bits. In the second step we check that `rot8` and the appropiate
+    /// array rotation of `split_rep` represent the same 64 bits.
+    ///
+    /// This type of representation-equality check is done by packing chunks
+    /// into sizes of exactly 32 (so for `delta = 2` we compare [16a, 14b,
+    /// 2c] to the first 4 elements of `rot8`). In addition, we do range
+    /// checks on `split_rep` which check that the felts meet the required
+    /// sizes.
+    ///
+    /// This algorithm imposes the following general requirements for
+    /// `split_rep`:
+    /// - There exists a suffix of `split_rep` which sums to exactly `delta`.
+    ///   This suffix can contain several elements.
+    /// - Chunk sizes are at most 16 (so they can be range-checked) or they are
+    ///   exactly equal to 32.
+    /// - There exists a prefix of chunks which sums exactly to 32. This must
+    ///   hold for the rotated array as well.
+    /// - The number of chunks should be as small as possible.
+    ///
+    /// Consult the method `rotation_split` to see how splits are computed for a
+    /// given `delta
+    ///
+    /// Note that the function imposes range checks on chunk values, but it
+    /// makes two exceptions:
+    ///     1. It doesn't check the 8-bit reps (input and output). This is
+    ///        because all 8-bit reps in the global circuit are implicitly
+    ///        range-checked because they are lookup arguments.
+    ///     2. It doesn't range-check 32-bit chunks. This is because a 32-bit
+    ///        chunk value is checked to be equal to the composition of 4 8-bit
+    ///        chunks. As mentioned in 1., these can be trusted to be range
+    ///        checked, so the resulting 32-bit is correct by construction as
+    ///        well.
+    pub fn require_left_rotation64<NR, N>(
+        &mut self,
+        name: N,
+        input8: &[Expression<E>],
+        split_rep: &[(usize, Expression<E>)],
+        rot8: &[Expression<E>],
+        delta: usize,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: Fn() -> NR,
+    {
+        assert_eq!(input8.len(), 8);
+        assert_eq!(rot8.len(), 8);
+
+        // Assert that the given split witnesses are correct for this delta
+        let (sizes, chunks_rotation) = rotation_split(delta);
+        assert_eq!(sizes, split_rep.iter().map(|e| e.0).collect_vec());
+
+        // Lookup ranges
+        for (i, (size, elem)) in split_rep.iter().enumerate() {
+            if *size != 32 {
+                self.assert_ux_in_u16(|| format!("{}_{}", name().into(), i), *size, elem.clone())?;
+            }
+        }
+
+        // constrain the fact that rep8 and repX.rotate_left(chunks_rotation) are
+        // the same 64 bitstring
+        let mut helper = |rep8: &[Expression<E>],
+                          rep_x: &[(usize, Expression<E>)],
+                          chunks_rotation: usize|
+         -> Result<(), CircuitBuilderError> {
+            // Do the same thing for the two 32-bit halves
+            let mut rep_x = rep_x.to_owned();
+            rep_x.rotate_right(chunks_rotation);
+
+            for i in 0..2 {
+                // The respective 4 elements in the byte representation
+                let lhs = rep8[4 * i..4 * (i + 1)]
+                    .iter()
+                    .map(|wit| (8, wit.expr()))
+                    .collect_vec();
+                let cnt = rep_x.len() / 2;
+                let rhs = &rep_x[cnt * i..cnt * (i + 1)];
+
+                assert_eq!(rhs.iter().map(|e| e.0).sum::<usize>(), 32);
+
+                self.require_reps_equal::<32, _, _>(
+                    ||format!(
+                        "rotation internal {}, round {i}, rot: {chunks_rotation}, delta: {delta}, {:?}",
+                        name().into(),
+                        sizes
+                    ),
+                    &lhs,
+                    rhs,
+                )?;
+            }
+            Ok(())
+        };
+
+        helper(input8, split_rep, 0)?;
+        helper(rot8, split_rep, chunks_rotation)?;
+
+        Ok(())
+    }
+
+    pub fn set_rotation_params(&mut self, params: RotationParams<E>) {
+        assert!(self.cs.rotation_params.is_none());
+        self.cs.rotation_params = Some(params);
+    }
+
+    pub fn rotate_and_assert_eq(&mut self, a: Expression<E>, b: Expression<E>) {
+        self.cs.rotations.push((a, b));
+    }
+
     pub fn finalize(&mut self) {
         self.cs.finalize_backend_monomial_expression();
     }
+}
+
+/// Compute an adequate split of 64-bits into chunks for performing a rotation
+/// by `delta`. The first element of the return value is the vec of chunk sizes.
+/// The second one is the length of its suffix that needs to be rotated
+pub fn rotation_split(delta: usize) -> (Vec<usize>, usize) {
+    let delta = delta % 64;
+
+    if delta == 0 {
+        return (vec![32, 32], 0);
+    }
+
+    // This split meets all requirements except for <= 16 sizes
+    let split32 = match delta.cmp(&32) {
+        Ordering::Less => vec![32 - delta, delta, 32 - delta, delta],
+        Ordering::Equal => vec![32, 32],
+        Ordering::Greater => vec![32 - (delta - 32), delta - 32, 32 - (delta - 32), delta - 32],
+    };
+
+    // Split off large chunks
+    let split16 = split32
+        .into_iter()
+        .flat_map(|size| {
+            assert!(size < 32);
+            if size <= 16 {
+                vec![size]
+            } else {
+                vec![16, size - 16]
+            }
+        })
+        .collect_vec();
+
+    let mut sum = 0;
+    for (i, size) in split16.iter().rev().enumerate() {
+        sum += size;
+        if sum == delta {
+            return (split16, i + 1);
+        }
+    }
+
+    panic!();
+}
+
+pub fn expansion_expr<E: ExtensionField, const SIZE: usize>(
+    expansion: &[(usize, Expression<E>)],
+) -> Expression<E> {
+    let (total, ret) =
+        expansion
+            .iter()
+            .rev()
+            .fold((0, E::BaseField::ZERO.expr()), |acc, (sz, felt)| {
+                (
+                    acc.0 + sz,
+                    acc.1 * E::BaseField::from_canonical_u64(1 << sz).expr() + felt.expr(),
+                )
+            });
+
+    assert_eq!(total, SIZE);
+    ret
 }
 
 pub enum DebugIndex {

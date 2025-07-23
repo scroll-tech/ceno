@@ -1,9 +1,8 @@
 use std::time::Duration;
 
+use ceno_zkvm::precompiles::{run_bitwise_keccakf, setup_bitwise_keccak_gkr_circuit};
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-use gkr_iop::precompiles::{run_faster_keccakf, setup_lookup_keccak_gkr_circuit};
-
 use itertools::Itertools;
 use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
@@ -15,16 +14,13 @@ const NUM_SAMPLES: usize = 10;
 
 fn keccak_f_fn(c: &mut Criterion) {
     // Benchmark the proving time
-    for log_instances in 12..14 {
+    for log_instances in 10..12 {
         let num_instance = 1 << log_instances;
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("keccak_lookup_f_{}", num_instance));
+        let mut group = c.benchmark_group(format!("keccak_f_{}", num_instance));
         group.sample_size(NUM_SAMPLES);
         group.bench_function(
-            BenchmarkId::new(
-                "keccak_lookup_f",
-                format!("prove_keccak_lookup_f_{}", num_instance),
-            ),
+            BenchmarkId::new("keccak_f", format!("prove_keccek_f_{}", num_instance)),
             |b| {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
@@ -38,16 +34,13 @@ fn keccak_f_fn(c: &mut Criterion) {
 
                         let instant = std::time::Instant::now();
 
-                        let circuit = setup_lookup_keccak_gkr_circuit();
                         #[allow(clippy::unit_arg)]
-                        let _ =
-                            run_faster_keccakf::<GoldilocksExt2, BasefoldDefault<GoldilocksExt2>>(
-                                circuit,
-                                black_box(states),
-                                false,
-                                false,
-                            )
-                            .expect("unable to get proof");
+                        run_bitwise_keccakf::<GoldilocksExt2, BasefoldDefault<GoldilocksExt2>>(
+                            setup_bitwise_keccak_gkr_circuit().expect("setup circuit error"),
+                            black_box(states),
+                            false,
+                            false,
+                        );
                         let elapsed = instant.elapsed();
                         println!(
                             "keccak_f::create_proof, instances = {}, time = {}",

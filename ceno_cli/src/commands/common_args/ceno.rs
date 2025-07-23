@@ -319,7 +319,7 @@ impl CenoOptions {
 
 fn run_elf_inner<
     E: ExtensionField + LkMultiplicityKey,
-    PCS: PolynomialCommitmentScheme<E> + 'static,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
     P: AsRef<Path>,
 >(
     options: &CenoOptions,

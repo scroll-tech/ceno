@@ -1,12 +1,12 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
-    instructions::{Instruction, riscv::dummy::LargeEcallDummy},
+    instructions::Instruction,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
-use ceno_emul::{CENO_PLATFORM, KeccakSpec, Platform, StepRecord};
+use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable};
 use itertools::Itertools;
@@ -135,6 +135,14 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     pub fn num_lks(&self) -> usize {
         self.zkvm_v1_css.lk_expressions.len() + self.zkvm_v1_css.lk_table_expressions.len()
     }
+
+    /// return num_vars belongs to rotation
+    pub fn rotation_vars(&self) -> Option<usize> {
+        self.zkvm_v1_css
+            .rotation_params
+            .as_ref()
+            .map(|param| param.rotation_cyclic_group_log2)
+    }
 }
 
 #[derive(Clone)]
@@ -232,16 +240,20 @@ pub struct ZKVMFixedTraces<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ZKVMFixedTraces<E> {
-    pub fn register_keccakf_circuit(&mut self, _cs: &ZKVMConstraintSystem<E>) {
+    pub fn register_opcode_circuit<OC: Instruction<E>>(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        config: &OC::InstructionConfig,
+    ) {
+        let cs = cs.get_cs(&OC::name()).expect("cs not found");
         assert!(
             self.circuit_fixed_traces
-                .insert(LargeEcallDummy::<E, KeccakSpec>::name(), None)
+                .insert(
+                    OC::name(),
+                    OC::generate_fixed_traces(config, cs.zkvm_v1_css.num_fixed,)
+                )
                 .is_none()
         );
-    }
-
-    pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self, _cs: &ZKVMConstraintSystem<E>) {
-        assert!(self.circuit_fixed_traces.insert(OC::name(), None).is_none());
     }
 
     pub fn register_table_circuit<TC: TableCircuit<E>>(
@@ -268,14 +280,14 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    witnesses_opcodes: BTreeMap<String, RowMajorMatrix<E::BaseField>>,
+    witnesses_opcodes: BTreeMap<String, RMMCollections<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, LkMultiplicity>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
-    pub fn get_opcode_witness(&self, name: &String) -> Option<&RowMajorMatrix<E::BaseField>> {
+    pub fn get_opcode_witness(&self, name: &String) -> Option<&RMMCollections<E::BaseField>> {
         self.witnesses_opcodes.get(name)
     }
 
@@ -296,8 +308,12 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(self.combined_lk_mlt.is_none());
 
         let cs = cs.get_cs(&OC::name()).unwrap();
-        let (witness, logup_multiplicity) =
-            OC::assign_instances(config, cs.zkvm_v1_css.num_witin as usize, records)?;
+        let (witness, logup_multiplicity) = OC::assign_instances(
+            config,
+            cs.zkvm_v1_css.num_witin as usize,
+            cs.zkvm_v1_css.num_structural_witin as usize,
+            records,
+        )?;
         assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
@@ -372,7 +388,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     ) -> impl Iterator<Item = (String, Vec<RowMajorMatrix<E::BaseField>>)> {
         self.witnesses_opcodes
             .into_iter()
-            .map(|(name, witness)| (name, vec![witness]))
+            .map(|(name, witnesses)| (name, witnesses.into()))
             .chain(
                 self.witnesses_tables
                     .into_iter()

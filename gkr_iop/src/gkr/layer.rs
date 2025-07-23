@@ -1,12 +1,13 @@
-use std::{sync::Arc, vec::IntoIter};
+use std::{collections::BTreeMap, ops::Neg, sync::Arc, vec::IntoIter};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
-    Expression,
+    Expression, Fixed, ToExpr, WitnessId,
     mle::{Point, PointAndEval},
 };
+use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck_layer::LayerProof;
@@ -14,6 +15,7 @@ use transcript::Transcript;
 use zerocheck_layer::ZerocheckLayer;
 
 use crate::{
+    circuit_builder::{CircuitBuilder, ConstraintSystem, RotationParams},
     error::BackendError,
     evaluation::EvalExpression,
     hal::{MultilinearPolynomial, ProverBackend, ProverDevice},
@@ -49,6 +51,9 @@ pub enum LayerType {
 pub struct Layer<E: ExtensionField> {
     pub name: String,
     pub ty: LayerType,
+    pub n_witin: usize,
+    pub n_structural_witin: usize,
+    pub n_fixed: usize,
     pub max_expr_degree: usize,
     /// num challenges dedicated to this layer.
     pub n_challenges: usize,
@@ -98,6 +103,9 @@ impl<E: ExtensionField> Layer<E> {
     pub fn new(
         name: String,
         ty: LayerType,
+        n_witin: usize,
+        n_structural_witin: usize,
+        n_fixed: usize,
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
         n_challenges: usize,
@@ -124,6 +132,9 @@ impl<E: ExtensionField> Layer<E> {
         Self {
             name,
             ty,
+            n_witin,
+            n_structural_witin,
+            n_fixed,
             max_expr_degree,
             n_challenges,
             exprs,
@@ -188,7 +199,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
-    ) -> Result<(), BackendError<E>> {
+    ) -> Result<(), BackendError> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
@@ -264,6 +275,206 @@ impl<E: ExtensionField> Layer<E> {
                 point: point.clone(),
                 eval: *value,
             };
+        }
+    }
+
+    pub fn from_circuit_builder(
+        cb: &CircuitBuilder<E>,
+        layer_name: String,
+        n_challenges: usize,
+        w_record_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
+        r_record_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
+        lookup_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
+        zero_evals: impl ExactSizeIterator<Item = Option<Expression<E>>>,
+    ) -> Layer<E> {
+        let non_zero_expr_len = cb.cs.w_expressions_namespace_map.len()
+            + cb.cs.r_expressions_namespace_map.len()
+            + cb.cs.lk_expressions.len();
+        let zero_expr_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+        let mut gkr_expressions = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
+        let mut gkr_expressions_eval = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
+        let mut gkr_expressions_name = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
+
+        assert_eq!(
+            w_record_evals.len() + r_record_evals.len(),
+            cb.cs.w_expressions.len() + cb.cs.r_expressions.len()
+        );
+        for (idx, (ram_expr, name), ram_eval) in izip!(
+            0..,
+            chain!(
+                cb.cs
+                    .w_expressions
+                    .iter()
+                    .zip_eq(&cb.cs.w_expressions_namespace_map),
+                cb.cs
+                    .r_expressions
+                    .iter()
+                    .zip_eq(&cb.cs.r_expressions_namespace_map),
+            ),
+            w_record_evals.chain(r_record_evals)
+        ) {
+            gkr_expressions.push(ram_expr - E::BaseField::ONE.expr()); // ONE is for padding;
+            gkr_expressions_eval.push((
+                ram_eval.0,
+                EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - one (padding)
+                    ram_eval.1,
+                    E::BaseField::ONE.expr().into(),
+                    E::BaseField::ONE.neg().expr().into(),
+                ),
+            ));
+            gkr_expressions_name.push(format!("{}/{idx}", name));
+        }
+
+        // process lookup records
+        assert_eq!(lookup_evals.len(), cb.cs.lk_expressions.len());
+        for (idx, (lookup, name), lookup_eval) in izip!(
+            0..,
+            cb.cs
+                .lk_expressions
+                .iter()
+                .zip_eq(&cb.cs.lk_expressions_namespace_map),
+            lookup_evals
+        ) {
+            gkr_expressions.push(lookup - cb.cs.chip_record_alpha.clone()); // alpha is for padding;
+            gkr_expressions_eval.push((
+                lookup_eval.0,
+                EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - alpha (padding)
+                    lookup_eval.1,
+                    E::BaseField::ONE.expr().into(),
+                    cb.cs.chip_record_alpha.clone().neg().into(),
+                ),
+            ));
+            gkr_expressions_name.push(format!("{}/{idx}", name));
+        }
+
+        // process zero record
+        assert_eq!(zero_evals.len(), zero_expr_len);
+        for (idx, (zero_expr, name), zero_eq) in izip!(
+            0..,
+            chain!(
+                cb.cs
+                    .assert_zero_expressions
+                    .iter()
+                    .zip_eq(&cb.cs.assert_zero_expressions_namespace_map),
+                cb.cs
+                    .assert_zero_sumcheck_expressions
+                    .iter()
+                    .zip_eq(&cb.cs.assert_zero_sumcheck_expressions_namespace_map)
+            ),
+            zero_evals
+        ) {
+            gkr_expressions.push(zero_expr.clone());
+            gkr_expressions_eval.push((zero_eq, EvalExpression::Zero));
+            gkr_expressions_name.push(format!("{}/{idx}", name));
+        }
+
+        let witin_offset = 0 as WitnessId;
+        let structural_witin_offset = witin_offset + (cb.cs.num_witin as WitnessId);
+        let fixed_offset = structural_witin_offset + (cb.cs.num_structural_witin as WitnessId);
+
+        // Sort expressions, expr_names, and evals according to eval.0 and classify evals.
+        let ConstraintSystem {
+            rotation_params,
+            rotations,
+            ..
+        } = &cb.cs;
+
+        let mut is_layer_linear =
+            gkr_expressions
+                .iter_mut()
+                .fold(rotations.is_empty(), |is_linear_so_far, t| {
+                    // replace `Fixed` and `StructuralWitIn` with `WitIn`, keep other unchanged
+                    *t = t.transform_all(
+                        &|Fixed(fixed_id)| {
+                            Expression::WitIn(fixed_offset + (*fixed_id as WitnessId))
+                        },
+                        &|id| Expression::WitIn(id),
+                        &|structural_wit_id, _, _, _| {
+                            Expression::WitIn(structural_witin_offset + structural_wit_id)
+                        },
+                        &|i| Expression::Instance(i),
+                        &|c| Expression::Constant(c),
+                        &|cid, pow, s, o| Expression::Challenge(cid, pow, s, o),
+                    );
+                    is_linear_so_far && t.is_linear()
+                });
+
+        // process evaluation group by eq expression
+        let mut eq_map = BTreeMap::new();
+        izip!(
+            gkr_expressions_eval.into_iter(),
+            gkr_expressions_name.into_iter(),
+            gkr_expressions.into_iter()
+        )
+        .for_each(|((eq, eval), name, expr)| {
+            let (eval_group, names, exprs) = eq_map.entry(eq).or_insert((vec![], vec![], vec![]));
+            eval_group.push(eval);
+            names.push(name);
+            exprs.push(expr);
+        });
+        let mut expr_evals = vec![];
+        let mut expr_names = vec![];
+        let mut expressions = vec![];
+        eq_map.into_iter().for_each(|(eq, (evals, names, exprs))| {
+            expr_evals.push((eq, evals));
+            expr_names.extend(names);
+            expressions.extend(exprs);
+        });
+
+        is_layer_linear = is_layer_linear && expr_evals.len() == 1;
+
+        let layer_type = if is_layer_linear {
+            LayerType::Linear
+        } else {
+            LayerType::Zerocheck
+        };
+
+        let in_eval_expr = (non_zero_expr_len..)
+            .take(cb.cs.num_witin as usize + cb.cs.num_fixed)
+            .collect_vec();
+        if rotations.is_empty() {
+            Layer::new(
+                layer_name,
+                layer_type,
+                cb.cs.num_witin as usize,
+                cb.cs.num_structural_witin as usize,
+                cb.cs.num_fixed,
+                expressions,
+                n_challenges,
+                in_eval_expr,
+                expr_evals,
+                ((None, vec![]), 0, 0),
+                expr_names,
+            )
+        } else {
+            let Some(RotationParams {
+                rotation_eqs,
+                rotation_cyclic_group_log2,
+                rotation_cyclic_subgroup_size,
+            }) = rotation_params
+            else {
+                panic!("rotation params not set");
+            };
+            Layer::new(
+                layer_name,
+                layer_type,
+                cb.cs.num_witin as usize,
+                cb.cs.num_structural_witin as usize,
+                cb.cs.num_fixed,
+                expressions,
+                n_challenges,
+                in_eval_expr,
+                expr_evals,
+                (
+                    (rotation_eqs.clone(), rotations.clone()),
+                    *rotation_cyclic_group_log2,
+                    *rotation_cyclic_subgroup_size,
+                ),
+                expr_names,
+            )
         }
     }
 }

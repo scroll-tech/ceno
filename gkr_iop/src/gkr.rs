@@ -13,7 +13,7 @@ use crate::{
     hal::{ProverBackend, ProverDevice},
 };
 
-pub(super) mod booleanhypercube;
+pub mod booleanhypercube;
 pub mod layer;
 pub mod layer_constraint_system;
 pub mod mock;
@@ -26,7 +26,6 @@ pub struct GKRCircuit<E: ExtensionField> {
 
     pub n_challenges: usize,
     pub n_evaluations: usize,
-    pub n_nonzero_out_evals: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -76,7 +75,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         out_evals: &[PointAndEval<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<GKRProverOutput<E, Evaluation<E>>, BackendError<E>> {
+    ) -> Result<GKRProverOutput<E, Evaluation<E>>, BackendError> {
         let mut running_evals = out_evals.to_vec();
         // running evals is a global referable within chip
         running_evals.resize(self.n_evaluations, PointAndEval::default());
@@ -116,7 +115,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         out_evals: &[PointAndEval<E>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<GKRClaims<Evaluation<E>>, BackendError<E>>
+    ) -> Result<GKRClaims<Evaluation<E>>, BackendError>
     where
         E: ExtensionField,
     {

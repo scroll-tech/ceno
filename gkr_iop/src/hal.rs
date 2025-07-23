@@ -45,7 +45,7 @@ pub trait ProtocolWitnessGeneratorProver<PB: ProverBackend> {
         phase1_witness_group: &RowMajorMatrix<
             <<PB as ProverBackend>::E as ExtensionField>::BaseField,
         >,
-        fixed: &[Vec<<<PB as ProverBackend>::E as ExtensionField>::BaseField>],
+        fixed: &RowMajorMatrix<<<PB as ProverBackend>::E as ExtensionField>::BaseField>,
         challenges: &[PB::E],
     ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>);
 }

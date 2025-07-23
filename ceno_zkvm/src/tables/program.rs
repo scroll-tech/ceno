@@ -97,12 +97,12 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         params: &ProgramParams,
     ) -> Result<ProgramTableConfig, ZKVMError> {
         let record = InsnRecord([
-            cb.create_fixed(|| "pc")?,
-            cb.create_fixed(|| "kind")?,
-            cb.create_fixed(|| "rd")?,
-            cb.create_fixed(|| "rs1")?,
-            cb.create_fixed(|| "rs2")?,
-            cb.create_fixed(|| "imm_internal")?,
+            cb.create_fixed(|| "pc"),
+            cb.create_fixed(|| "kind"),
+            cb.create_fixed(|| "rd"),
+            cb.create_fixed(|| "rs1"),
+            cb.create_fixed(|| "rs2"),
+            cb.create_fixed(|| "imm_internal"),
         ]);
 
         let mlt = cb.create_witin(|| "mlt");

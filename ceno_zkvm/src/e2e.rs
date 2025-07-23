@@ -26,6 +26,7 @@ use gkr_iop::cpu::{CpuBackend, CpuProver};
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
 use p3::{babybear::BabyBear, goldilocks::Goldilocks};
+use serde::Serialize;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
@@ -645,7 +646,7 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
 #[allow(clippy::too_many_arguments)]
 pub fn run_e2e_with_checkpoint<
     E: ExtensionField + LkMultiplicityKey + serde::de::DeserializeOwned,
-    PCS: PolynomialCommitmentScheme<E> + 'static,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
 >(
     program: Program,
     platform: Platform,
@@ -739,6 +740,7 @@ pub fn run_e2e_with_checkpoint<
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
     tracing::debug!("proof created in {:?}", start.elapsed());
+    tracing::info!("e2e proof stat: {}", zkvm_proof);
 
     let verifier = ZKVMVerifier::new(vk.clone());
 
@@ -890,8 +892,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
         transcript,
         zkvm_proof.has_halt(&verifier.vk),
     )?;
-    // print verification statistics like proof size and hash count
-    tracing::info!("e2e proof stat: {}", zkvm_proof);
+    // print verification statistics such as hash count
     #[cfg(debug_assertions)]
     {
         tracing::debug!(
