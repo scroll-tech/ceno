@@ -3,7 +3,7 @@ pub mod lk_multiplicity;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, izip};
 use multilinear_extensions::{
-    Expression, Fixed, ToExpr, WitIn, WitnessId,
+    Expression, Fixed, WitIn, WitnessId,
     mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
@@ -46,7 +46,7 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
             SelectorType::None => zero_check_expr,
             SelectorType::Whole(sel)
             | SelectorType::Prefix(_, sel)
-            | SelectorType::KeccakRound(_, _, sel) => match_expr(sel) * zero_check_expr,
+            | SelectorType::KeccakRound(_, sel) => match_expr(sel) * zero_check_expr,
         };
         zero_check_exprs.push(expr);
     }

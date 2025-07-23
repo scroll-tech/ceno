@@ -18,7 +18,7 @@ use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
+    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
@@ -367,7 +367,7 @@ fn output32_layer<E: ExtensionField>(
     let mut keccak_output32_iter = out_evals.iter().map(|x| EvalExpression::Single(*x));
 
     // process keccak output
-    let sel_type = SelectorType::KeccakRound(23, E::BaseField::ONE, layer.sel.expr());
+    let sel_type = SelectorType::KeccakRound(23, layer.sel.expr());
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {
@@ -619,7 +619,7 @@ fn keccak_first_layer<E: ExtensionField>(
 
     // process keccak output
     let mut out_eval_iter = input32_out_evals.iter().map(|x| EvalExpression::Single(*x));
-    let sel_type = SelectorType::KeccakRound(0, E::BaseField::ONE, layer.sel_keccak_out.expr());
+    let sel_type = SelectorType::KeccakRound(0, layer.sel_keccak_out.expr());
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {
@@ -774,7 +774,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     type Params = KeccakParams;
 
-    fn finalize(&mut self, _cb: &CircuitBuilder<E>) -> (Vec<(SelectorType<E>, usize)>, Chip<E>) {
+    fn finalize(&mut self, _cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>) {
         unimplemented!()
     }
 

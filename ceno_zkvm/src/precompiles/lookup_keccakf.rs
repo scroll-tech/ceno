@@ -3,7 +3,7 @@ use std::{array, mem::transmute};
 use ceno_emul::{ByteAddr, Change, Cycle, MemOp, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
+    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     circuit_builder::{
         CircuitBuilder, ConstraintSystem, RotationParams, expansion_expr, rotation_split,
@@ -17,7 +17,7 @@ use gkr_iop::{
     selector::SelectorType,
     utils::lk_multiplicity::LkMultiplicity,
 };
-use itertools::{Itertools, chain, iproduct, izip, zip_eq};
+use itertools::{Itertools, iproduct, izip, zip_eq};
 use keccakf::Permutation;
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
@@ -211,14 +211,8 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation,
             },
             selector_type_layout: SelectorTypeLayout {
-                sel_mem_read: SelectorType::KeccakRound(0, E::BaseField::ONE, sel_mem_read.expr()),
-                sel_mem_write: SelectorType::KeccakRound(
-                    ROUNDS - 1,
-                    E::BaseField::ONE,
-                    sel_mem_write.expr(),
-                ),
-                // sel_mem_read: SelectorType::Whole(sel_mem_read.expr()),
-                // sel_mem_write: SelectorType::Whole(sel_mem_write.expr()),
+                sel_mem_read: SelectorType::KeccakRound(0, sel_mem_read.expr()),
+                sel_mem_write: SelectorType::KeccakRound(ROUNDS - 1, sel_mem_write.expr()),
                 sel_lookup: SelectorType::Whole(eq_zero.expr()),
                 sel_zero: SelectorType::Whole(eq_zero.expr()),
             },
@@ -487,7 +481,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
         Ok(layout)
     }
-    fn finalize(&mut self, cb: &CircuitBuilder<E>) -> (Vec<(SelectorType<E>, usize)>, Chip<E>) {
+
+    fn finalize(&mut self, cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>) {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_challenges = self.n_challenges();
@@ -498,19 +493,28 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         let zero_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
         (
-            chain!(
+            [
                 // r_record
-                (0..r_len).map(|id| { (self.selector_type_layout.sel_mem_read.clone(), id,) }),
+                (
+                    self.selector_type_layout.sel_mem_read.clone(),
+                    (0..r_len).collect_vec(),
+                ),
                 // w_record
-                (r_len..r_len + w_len)
-                    .map(|id| { (self.selector_type_layout.sel_mem_write.clone(), id,) }),
+                (
+                    self.selector_type_layout.sel_mem_write.clone(),
+                    (r_len..r_len + w_len).collect_vec(),
+                ),
                 // lk_record
-                (r_len + w_len..r_len + w_len + lk_len)
-                    .map(|id| (self.selector_type_layout.sel_lookup.clone(), id)),
+                (
+                    self.selector_type_layout.sel_lookup.clone(),
+                    (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
+                ),
                 // zero_record
-                (0..zero_len).map(|_| (self.selector_type_layout.sel_zero.clone(), 0))
-            )
-            .collect_vec(),
+                (
+                    self.selector_type_layout.sel_zero.clone(),
+                    (0..zero_len).collect_vec(),
+                ),
+            ],
             Chip::new_from_cb(cb, self.n_challenges()),
         )
     }

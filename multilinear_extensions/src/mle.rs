@@ -10,9 +10,12 @@ use either::Either;
 use ff_ext::{ExtensionField, FromUniformBytes};
 use p3::field::{Field, FieldAlgebra};
 use rand::Rng;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-    IntoParallelRefMutIterator, ParallelIterator,
+use rayon::{
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+        IntoParallelRefMutIterator, ParallelIterator,
+    },
+    slice::ParallelSlice,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
@@ -178,22 +181,6 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
         }
     }
 
-    pub fn sub_constant(mut self, value: &E::BaseField) -> Self {
-        match &mut self {
-            FieldType::Base(slice) => {
-                slice.to_mut().par_iter_mut().for_each(|v| *v -= *value);
-            }
-            FieldType::Ext(slice) => {
-                slice
-                    .to_mut()
-                    .par_iter_mut()
-                    .for_each(|v| *v -= E::from(*value));
-            }
-            FieldType::Unreachable => panic!("unreachable"),
-        }
-        self
-    }
-
     pub fn select_prefix(mut self, prefix_len: usize, default: &E::BaseField) -> Self {
         match &mut self {
             FieldType::Base(slice) => {
@@ -207,14 +194,48 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
         self
     }
 
-    pub fn pick_stride_offset(self, stride: usize, offset: usize) -> Self {
+    pub fn pick_index_within_chunk(
+        self,
+        chunk_size: usize,
+        valid_chunk_index: usize,
+        pick_idx: usize,
+        default: &E::BaseField,
+    ) -> Self {
         match self {
             FieldType::Base(slice) => {
-                let res = slice.iter().copied().skip(offset).step_by(stride).collect();
+                let res = slice
+                    .par_chunks(chunk_size)
+                    .enumerate()
+                    .flat_map_iter(|(chunk_index, chunk)| {
+                        (0..chunk.len())
+                            .map(|i| {
+                                if i == pick_idx && chunk_index < valid_chunk_index {
+                                    chunk[i]
+                                } else {
+                                    *default
+                                }
+                            })
+                            .collect::<Vec<_>>() // convert this chunk into a Vec
+                    })
+                    .collect();
                 FieldType::Base(SmartSlice::Owned(res))
             }
             FieldType::Ext(slice) => {
-                let res = slice.iter().copied().skip(offset).step_by(stride).collect();
+                let res = slice
+                    .par_chunks(chunk_size)
+                    .enumerate()
+                    .flat_map_iter(|(chunk_index, chunk)| {
+                        (0..chunk.len())
+                            .map(|i| {
+                                if i == pick_idx && chunk_index < valid_chunk_index {
+                                    chunk[i]
+                                } else {
+                                    E::from(*default)
+                                }
+                            })
+                            .collect::<Vec<_>>() // convert this chunk into a Vec
+                    })
+                    .collect();
                 FieldType::Ext(SmartSlice::Owned(res))
             }
             FieldType::Unreachable => panic!("unreachable"),

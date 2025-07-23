@@ -31,6 +31,9 @@ pub mod utils;
 
 pub type Phase1WitnessGroup<'a, E> = Vec<ArcMultilinearExtension<'a, E>>;
 
+// format: [r_records, w_records, lk_records, zero_records]
+pub type OutEvalGroups<E> = [(SelectorType<E>, Vec<usize>); 4];
+
 pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     type Params;
 
@@ -42,7 +45,7 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
         params: Self::Params,
     ) -> Result<Self, CircuitBuilderError>;
 
-    fn finalize(&mut self, cb: &CircuitBuilder<E>) -> (Vec<(SelectorType<E>, usize)>, Chip<E>);
+    fn finalize(&mut self, cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>);
 
     fn n_committed(&self) -> usize;
     fn n_fixed(&self) -> usize;

@@ -1,14 +1,14 @@
+use rayon::iter::IndexedParallelIterator;
 use std::sync::Arc;
 
 use ff_ext::ExtensionField;
-use itertools::iproduct;
 use multilinear_extensions::{
     Expression,
     mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
 use p3_field::FieldAlgebra;
-use rayon::iter::ParallelIterator;
+use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
@@ -27,8 +27,8 @@ pub enum SelectorType<E: ExtensionField> {
     Whole(Expression<E>),
     /// Select a prefix as the instances, padded with a field element.
     Prefix(E::BaseField, Expression<E>),
-    /// Select a prefix as the instances, for each instance select the 1st or the last round, padded with a field element.
-    KeccakRound(usize, E::BaseField, Expression<E>),
+    /// Select a prefix as the instances, for each instance select the 1st or the last round.
+    KeccakRound(usize, Expression<E>),
 }
 
 impl<E: ExtensionField> SelectorType<E> {
@@ -51,21 +51,18 @@ impl<E: ExtensionField> SelectorType<E> {
                 }
                 Some(sel.into_mle())
             }
-            SelectorType::KeccakRound(round, _, _expr) => {
-                // input(y) - pad = \sum_b ( sel(y; b[5..]) * (record(b) - 1) )
-                let eq = build_eq_x_r_vec(out_point);
-                let selected_id = CYCLIC_POW2_5[*round];
-                let sel: Vec<_> = iproduct!(eq.iter().enumerate(), 0..32)
-                    .into_iter()
-                    .map(|((hgh_id, s), low_id)| {
-                        if low_id == selected_id && hgh_id < num_instances {
-                            *s
-                        } else {
-                            E::ZERO
-                        }
-                    })
-                    .collect();
-
+            SelectorType::KeccakRound(round, _expr) => {
+                let mut sel = build_eq_x_r_vec(out_point);
+                let selected_id = CYCLIC_POW2_5[*round] as usize;
+                sel.par_chunks_exact_mut(CYCLIC_POW2_5.len())
+                    .enumerate()
+                    .for_each(|(chunk_index, chunk)| {
+                        chunk.iter_mut().enumerate().for_each(|(i, e)| {
+                            if i != selected_id || chunk_index >= num_instances {
+                                *e = E::ZERO
+                            }
+                        });
+                    });
                 Some(sel.into_mle())
             }
         }
@@ -93,14 +90,18 @@ impl<E: ExtensionField> SelectorType<E> {
                     eq_eval_less_or_equal_than(num_instances - 1, out_point, in_point),
                 )
             }
-            SelectorType::KeccakRound(round, _, expr) => {
-                assert_eq!(out_point.len() + 5, in_point.len());
-                let eq_low = eq_eval(
+            SelectorType::KeccakRound(round, expr) => {
+                let eq_low_in = eq_eval(
                     &u5_to_binary_vec::<E>(CYCLIC_POW2_5[*round]),
                     &in_point[..5],
                 );
-                let sel = eq_eval_less_or_equal_than(num_instances - 1, out_point, &in_point[5..]);
-                (expr, eq_low * sel)
+                let eq_low_out = eq_eval(
+                    &u5_to_binary_vec::<E>(CYCLIC_POW2_5[*round]),
+                    &out_point[..5],
+                );
+                let sel =
+                    eq_eval_less_or_equal_than(num_instances - 1, &out_point[5..], &in_point[5..]);
+                (expr, eq_low_in * eq_low_out * sel)
             }
         };
         let Expression::StructuralWitIn(wit_id, _, _, _) = expr else {
@@ -122,18 +123,22 @@ pub(crate) fn select_from_expression_result<'a, E: ExtensionField>(
     match sel_type {
         SelectorType::None => out_mle.evaluations.sum().into_mle().into(),
         SelectorType::Whole(_) => out_mle,
-        SelectorType::Prefix(pad, _) => {
+        SelectorType::Prefix(_pad, _) => {
             let evals = Arc::try_unwrap(out_mle).unwrap().evaluations_to_owned();
             evals
                 .select_prefix(num_instances, &E::BaseField::ZERO)
                 .into_mle()
                 .into()
         }
-        SelectorType::KeccakRound(round, pad, _) => {
+        SelectorType::KeccakRound(round, _) => {
             let evals = Arc::try_unwrap(out_mle).unwrap().evaluations_to_owned();
             evals
-                .pick_stride_offset(CYCLIC_POW2_5.len(), CYCLIC_POW2_5[*round] as usize)
-                .select_prefix(num_instances, &E::BaseField::ZERO)
+                .pick_index_within_chunk(
+                    CYCLIC_POW2_5.len(),
+                    num_instances,
+                    CYCLIC_POW2_5[*round] as usize,
+                    &E::BaseField::ZERO,
+                )
                 .into_mle()
                 .into()
         }
