@@ -261,10 +261,11 @@ pub enum Error {
     WhirError(whir_external::error::Error),
 }
 
-mod basefold;
+pub mod basefold;
 pub use basefold::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
-    BasefoldProof, BasefoldRSParams, BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,
+    BasefoldProof, BasefoldRSParams, BasefoldSpec, EncodingScheme, QueryOpeningProof, RSCode,
+    RSCodeDefaultSpec,
 };
 extern crate whir as whir_external;
 mod whir;

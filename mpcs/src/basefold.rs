@@ -9,7 +9,7 @@ pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use p3::{commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
-pub use structure::{BasefoldProof, BasefoldSpec, Digest};
+pub use structure::{BasefoldProof, BasefoldSpec, Digest, QueryOpeningProof};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
