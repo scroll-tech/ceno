@@ -198,7 +198,7 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
         self,
         chunk_size: usize,
         valid_chunk_index: usize,
-        pick_idx: usize,
+        indices: &[usize],
         default: &E::BaseField,
     ) -> Self {
         match self {
@@ -207,15 +207,27 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
                     .par_chunks(chunk_size)
                     .enumerate()
                     .flat_map_iter(|(chunk_index, chunk)| {
-                        (0..chunk.len())
-                            .map(|i| {
-                                if i == pick_idx && chunk_index < valid_chunk_index {
-                                    chunk[i]
-                                } else {
-                                    *default
+                        if chunk_index >= valid_chunk_index {
+                            // fill entire chunk with default
+                            return vec![*default; chunk.len()];
+                        }
+
+                        let mut result = Vec::with_capacity(chunk.len());
+
+                        let mut indices_iter = indices.iter().copied();
+                        let mut next_idx = indices_iter.next();
+
+                        for (i, value) in chunk.iter().enumerate() {
+                            match next_idx {
+                                Some(keep_i) if i == keep_i => {
+                                    result.push(*value);
+                                    next_idx = indices_iter.next();
                                 }
-                            })
-                            .collect::<Vec<_>>() // convert this chunk into a Vec
+                                _ => result.push(*default),
+                            }
+                        }
+
+                        result
                     })
                     .collect();
                 FieldType::Base(SmartSlice::Owned(res))
@@ -225,15 +237,27 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
                     .par_chunks(chunk_size)
                     .enumerate()
                     .flat_map_iter(|(chunk_index, chunk)| {
-                        (0..chunk.len())
-                            .map(|i| {
-                                if i == pick_idx && chunk_index < valid_chunk_index {
-                                    chunk[i]
-                                } else {
-                                    E::from(*default)
+                        if chunk_index >= valid_chunk_index {
+                            // Fill entire chunk with default
+                            return vec![E::from(*default); chunk.len()];
+                        }
+
+                        let mut result = Vec::with_capacity(chunk.len());
+
+                        let mut indices_iter = indices.iter().copied();
+                        let mut next_idx = indices_iter.next();
+
+                        for (i, value) in chunk.iter().enumerate() {
+                            match next_idx {
+                                Some(keep_i) if i == keep_i => {
+                                    result.push(*value);
+                                    next_idx = indices_iter.next();
                                 }
-                            })
-                            .collect::<Vec<_>>() // convert this chunk into a Vec
+                                _ => result.push(E::from(*default)),
+                            }
+                        }
+
+                        result
                     })
                     .collect();
                 FieldType::Ext(SmartSlice::Owned(res))

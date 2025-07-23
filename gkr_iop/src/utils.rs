@@ -46,7 +46,9 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
             SelectorType::None => zero_check_expr,
             SelectorType::Whole(sel)
             | SelectorType::Prefix(_, sel)
-            | SelectorType::KeccakRound(_, sel) => match_expr(sel) * zero_check_expr,
+            | SelectorType::OrderedSparse32 {
+                expression: sel, ..
+            } => match_expr(sel) * zero_check_expr,
         };
         zero_check_exprs.push(expr);
     }

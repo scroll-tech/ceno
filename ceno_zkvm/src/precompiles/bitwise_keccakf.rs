@@ -26,6 +26,7 @@ use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{
         GKRCircuit, GKRProverOutput,
+        booleanhypercube::CYCLIC_POW2_5,
         layer::Layer,
         layer_constraint_system::{LayerConstraintSystem, expansion_expr},
     },
@@ -367,7 +368,10 @@ fn output32_layer<E: ExtensionField>(
     let mut keccak_output32_iter = out_evals.iter().map(|x| EvalExpression::Single(*x));
 
     // process keccak output
-    let sel_type = SelectorType::KeccakRound(23, layer.sel.expr());
+    let sel_type = SelectorType::OrderedSparse32 {
+        indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
+        expression: layer.sel.expr(),
+    };
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {
@@ -619,7 +623,10 @@ fn keccak_first_layer<E: ExtensionField>(
 
     // process keccak output
     let mut out_eval_iter = input32_out_evals.iter().map(|x| EvalExpression::Single(*x));
-    let sel_type = SelectorType::KeccakRound(0, layer.sel_keccak_out.expr());
+    let sel_type = SelectorType::OrderedSparse32 {
+        indices: vec![CYCLIC_POW2_5[0] as usize],
+        expression: layer.sel_keccak_out.expr(),
+    };
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {

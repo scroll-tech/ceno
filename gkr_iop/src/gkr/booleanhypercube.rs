@@ -1,7 +1,6 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::mle::Point;
-use p3_field::FieldAlgebra;
 
 const BH_MAX_NUM_VAR: usize = 5;
 
@@ -102,12 +101,6 @@ impl IntoIterator for &BooleanHypercube {
             _ => unimplemented!(),
         }
     }
-}
-
-pub fn u5_to_binary_vec<F: FieldAlgebra>(x: u64) -> Vec<F> {
-    (0..5)
-        .map(|i| F::from_canonical_u64((x >> i) & 1))
-        .collect()
 }
 
 #[cfg(test)]

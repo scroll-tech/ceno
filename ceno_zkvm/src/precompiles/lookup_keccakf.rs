@@ -11,7 +11,9 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     error::{BackendError, CircuitBuilderError},
     gkr::{
-        GKRCircuit, GKRProof, GKRProverOutput, booleanhypercube::BooleanHypercube, layer::Layer,
+        GKRCircuit, GKRProof, GKRProverOutput,
+        booleanhypercube::{BooleanHypercube, CYCLIC_POW2_5},
+        layer::Layer,
         mock::MockProver,
     },
     selector::SelectorType,
@@ -201,6 +203,14 @@ impl<E: ExtensionField> KeccakLayout<E> {
             )
         };
 
+        // indices to activate zero/lookup constraints
+        let checked_indices = CYCLIC_POW2_5
+            .iter()
+            .take(ROUNDS)
+            .sorted()
+            .copied()
+            .map(|v| v as usize)
+            .collect_vec();
         Self {
             params,
             layer_exprs: KeccakLayer {
@@ -211,10 +221,22 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation,
             },
             selector_type_layout: SelectorTypeLayout {
-                sel_mem_read: SelectorType::KeccakRound(0, sel_mem_read.expr()),
-                sel_mem_write: SelectorType::KeccakRound(ROUNDS - 1, sel_mem_write.expr()),
-                sel_lookup: SelectorType::Whole(eq_zero.expr()),
-                sel_zero: SelectorType::Whole(eq_zero.expr()),
+                sel_mem_read: SelectorType::OrderedSparse32 {
+                    indices: vec![CYCLIC_POW2_5[0] as usize],
+                    expression: sel_mem_read.expr(),
+                },
+                sel_mem_write: SelectorType::OrderedSparse32 {
+                    indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
+                    expression: sel_mem_write.expr(),
+                },
+                sel_lookup: SelectorType::OrderedSparse32 {
+                    indices: checked_indices.clone(),
+                    expression: eq_zero.expr(),
+                },
+                sel_zero: SelectorType::OrderedSparse32 {
+                    indices: checked_indices,
+                    expression: eq_zero.expr(),
+                },
             },
             input32_exprs: array::from_fn(|_| Expression::WitIn(0)),
             output32_exprs: array::from_fn(|_| Expression::WitIn(0)),
