@@ -273,14 +273,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<SraInstruction<E>>(cs, &self.sra_config);
         fixed.register_opcode_circuit::<SltInstruction<E>>(cs, &self.slt_config);
         fixed.register_opcode_circuit::<SltuInstruction<E>>(cs, &self.sltu_config);
-        fixed.register_opcode_circuit::<MulInstruction<E>>(cs, &self.mul_config);
-        fixed.register_opcode_circuit::<MulhInstruction<E>>(cs, &self.mulh_config);
-        fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs, &self.mulhsu_config);
-        fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs, &self.mulhu_config);
-        fixed.register_opcode_circuit::<DivuInstruction<E>>(cs, &self.divu_config);
-        fixed.register_opcode_circuit::<RemuInstruction<E>>(cs, &self.remu_config);
-        fixed.register_opcode_circuit::<DivInstruction<E>>(cs, &self.div_config);
-        fixed.register_opcode_circuit::<RemInstruction<E>>(cs, &self.rem_config);
+        // fixed.register_opcode_circuit::<MulInstruction<E>>(cs, &self.mul_config);
+        // fixed.register_opcode_circuit::<MulhInstruction<E>>(cs, &self.mulh_config);
+        // fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs, &self.mulhsu_config);
+        // fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs, &self.mulhu_config);
+        // fixed.register_opcode_circuit::<DivuInstruction<E>>(cs, &self.divu_config);
+        // fixed.register_opcode_circuit::<RemuInstruction<E>>(cs, &self.remu_config);
+        // fixed.register_opcode_circuit::<DivInstruction<E>>(cs, &self.div_config);
+        // fixed.register_opcode_circuit::<RemInstruction<E>>(cs, &self.rem_config);
         // alu with imm
         fixed.register_opcode_circuit::<AddiInstruction<E>>(cs, &self.addi_config);
         fixed.register_opcode_circuit::<AndiInstruction<E>>(cs, &self.andi_config);
