@@ -984,8 +984,6 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     let log2_num_instance_rounds = ceil_log2(num_instances_rounds);
     let num_threads = optimal_sumcheck_threads(log2_num_instance_rounds);
     let mut instances = Vec::with_capacity(num_instances);
-    let mut instances_outputu32: Vec<[u32; KECCAK_OUTPUT32_SIZE]> =
-        Vec::with_capacity(num_instances);
 
     let span = entered_span!("instances", profiling_2 = true);
     for state in &states {
@@ -1009,20 +1007,6 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             },
         };
         instances.push(instance);
-        instances_outputu32.push({
-            let mut state = *state;
-            state.permute();
-            let state_mask64 =
-                MaskRepresentation::from(state.iter().map(|e| (64, *e)).collect_vec());
-            let state_mask32 = state_mask64.convert(vec![32; 50]);
-            state_mask32
-                .values()
-                .iter()
-                .map(|e| *e as u32)
-                .collect_vec()
-                .try_into()
-                .unwrap()
-        })
     }
     exit_span!(span);
 
@@ -1045,14 +1029,12 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         phase1_witness.par_batch_iter_mut(num_instance_per_batch * ROUNDS.next_power_of_two());
     raw_witin_iter
         .zip_eq(instances.par_chunks(num_instance_per_batch))
-        .zip_eq(instances_outputu32.par_chunks(num_instance_per_batch))
-        .for_each(|((instances, steps), out32s)| {
+        .for_each(|(instances, steps)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
                 .chunks_mut(num_witin as usize * ROUNDS.next_power_of_two())
                 .zip_eq(steps)
-                .zip_eq(out32s)
-                .for_each(|((instance_with_rotation, step), out32)| {
+                .for_each(|(instance_with_rotation, step)| {
                     // assign full rotation with same witness
                     for instance in instance_with_rotation.chunks_mut(num_witin as usize) {
                         layout
@@ -1062,12 +1044,8 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                                 &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
                             )
                             .expect("assign vm_state error");
-                        layout
-                            .mem_rw
-                            .iter()
-                            .zip_eq(step.witin.instance)
-                            .zip_eq(out32.iter())
-                            .for_each(|((mem_config, input_32), output_32)| {
+                        layout.mem_rw.iter().zip_eq(step.witin.instance).for_each(
+                            |(mem_config, input_32)| {
                                 mem_config
                                     .assign_op(
                                         instance,
@@ -1077,13 +1055,14 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                                             previous_cycle: 0,
                                             addr: ByteAddr::from(0).waddr(),
                                             value: Change {
-                                                before: input_32,
-                                                after: *output_32,
+                                                before: 0,
+                                                after: 0,
                                             },
                                         },
                                     )
                                     .expect("assign error");
-                            });
+                            },
+                        );
                     }
                 })
         });
