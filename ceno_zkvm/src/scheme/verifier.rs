@@ -157,7 +157,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut fixed_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
         for (index, proof) in &vm_proof.chip_proofs {
             let circuit_name = &self.vk.circuit_index_to_name[index];
-            dbg!(circuit_name);
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
             // check chip proof is well-formed
@@ -389,7 +388,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let GKRClaims(opening_evaluations) = gkr_circuit.verify(
                 num_var_with_rotation,
                 proof.gkr_iop_proof.clone().unwrap(),
-                &chain!(record_evals, logup_p_evals, logup_q_evals).collect_vec(),
+                &chain!(record_evals, logup_q_evals).collect_vec(),
                 challenges,
                 transcript,
                 num_instances,
@@ -849,7 +848,6 @@ impl TowerVerify {
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
-        dbg!(alpha_pows[1].clone());
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])
@@ -892,7 +890,6 @@ impl TowerVerify {
             .sum::<E>();
 
         let max_num_variables = num_variables.iter().max().unwrap();
-        dbg!(max_num_variables);
 
         let (next_rt, _) = (0..(max_num_variables-1)).try_fold(
             (
@@ -903,7 +900,6 @@ impl TowerVerify {
                 alpha_pows,
             ),
             |(point_and_eval, alpha_pows), round| {
-                dbg!(round);
                 let (out_rt, out_claim) = (&point_and_eval.point, &point_and_eval.eval);
                 let sumcheck_claim = IOPVerifierState::verify(
                     *out_claim,

@@ -80,7 +80,6 @@ impl CpuTowerProver {
                 logup_specs_len * 2,
             transcript,
         );
-        dbg!(alpha_pows[1].clone());
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
         let (mut out_rt, mut alpha_pows) = (initial_rt, alpha_pows);
 
@@ -306,8 +305,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = composed_cs;
-        let num_instances = input.num_instances;
-        let log2_num_instances = input.log2_num_instances();
+        let num_instances_with_rotation =
+            input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
+        let num_var_with_rotation =
+            input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
+
         let chip_record_alpha = challenges[0];
 
         let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
@@ -332,7 +334,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let mut r_set_last_layer = r_set_wit
             .iter()
             .chain(w_set_wit.iter())
-            .map(|wit| masked_mle_split_to_chunks(wit, num_instances, NUM_FANIN, E::ONE))
+            .map(|wit| {
+                masked_mle_split_to_chunks(wit, num_instances_with_rotation, NUM_FANIN, E::ONE)
+            })
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
 
@@ -348,7 +352,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
                 } else {
                     chip_record_alpha
                 };
-                masked_mle_split_to_chunks(wit, num_instances, NUM_FANIN_LOGUP, default)
+                masked_mle_split_to_chunks(
+                    wit,
+                    num_instances_with_rotation,
+                    NUM_FANIN_LOGUP,
+                    default,
+                )
             })
             .collect::<Vec<_>>();
         let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
@@ -358,13 +367,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let r_wit_layers = r_set_last_layer
             .into_iter()
             .map(|last_layer| {
-                infer_tower_product_witness(log2_num_instances, last_layer, NUM_FANIN)
+                infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
             })
             .collect_vec();
         let w_wit_layers = w_set_last_layer
             .into_iter()
             .map(|last_layer| {
-                infer_tower_product_witness(log2_num_instances, last_layer, NUM_FANIN)
+                infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
             })
             .collect_vec();
         let lk_wit_layers = if !lk_numerator_last_layer.is_empty() {
@@ -523,7 +532,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
 
         if let Some(gkr_circuit) = gkr_circuit {
             let (_, gkr_circuit_out) = Self::gkr_witness(
-                &gkr_circuit,
+                gkr_circuit,
                 num_instances_with_rotation,
                 &input.witness,
                 &input.fixed,
