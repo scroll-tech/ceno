@@ -1,19 +1,16 @@
+use rayon::iter::IndexedParallelIterator;
 use std::sync::Arc;
 
 use ff_ext::ExtensionField;
-use itertools::iproduct;
 use multilinear_extensions::{
     Expression,
     mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::{
-    gkr::booleanhypercube::{CYCLIC_POW2_5, u5_to_binary_vec},
-    utils::eq_eval_less_or_equal_than,
-};
+use crate::{gkr::booleanhypercube::CYCLIC_POW2_5, utils::eq_eval_less_or_equal_than};
 
 /// Selector selects part of the witnesses in the sumcheck protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -26,8 +23,13 @@ pub enum SelectorType<E: ExtensionField> {
     Whole(Expression<E>),
     /// Select a prefix as the instances, padded with a field element.
     Prefix(E::BaseField, Expression<E>),
-    /// Select a prefix as the instances, for each instance select the 1st or the last round, padded with a field element.
-    KeccakRound(usize, E::BaseField, Expression<E>),
+    /// selector activates on the specified `indices`, which are assumed to be in ascending order.
+    /// each index corresponds to a position within a fixed-size chunk (e.g., size 32),
+    /// and the same `expression` is applied at those positions across all chunks.
+    OrderedSparse32 {
+        indices: Vec<usize>,
+        expression: Expression<E>,
+    },
 }
 
 impl<E: ExtensionField> SelectorType<E> {
@@ -50,21 +52,29 @@ impl<E: ExtensionField> SelectorType<E> {
                 }
                 Some(sel.into_mle())
             }
-            SelectorType::KeccakRound(round, _, _expr) => {
-                // input(y) - pad = \sum_b ( sel(y; b[5..]) * (record(b) - 1) )
-                let eq = build_eq_x_r_vec(out_point);
-                let selected_id = CYCLIC_POW2_5[*round];
-                let sel: Vec<_> = iproduct!(0..32, eq.iter().enumerate())
-                    .par_bridge()
-                    .map(|(low_id, (hgh_id, s))| {
-                        if low_id == selected_id && hgh_id < num_instances {
-                            *s
-                        } else {
-                            E::ZERO
+            SelectorType::OrderedSparse32 { indices, .. } => {
+                let mut sel = build_eq_x_r_vec(out_point);
+                sel.par_chunks_exact_mut(CYCLIC_POW2_5.len())
+                    .enumerate()
+                    .for_each(|(chunk_index, chunk)| {
+                        if chunk_index >= num_instances {
+                            // Zero out the entire chunk if out of instance range
+                            chunk.iter_mut().for_each(|e| *e = E::ZERO);
+                            return;
                         }
-                    })
-                    .collect();
 
+                        let mut indices_iter = indices.iter().copied();
+                        let mut next_keep = indices_iter.next();
+
+                        for (i, e) in chunk.iter_mut().enumerate() {
+                            match next_keep {
+                                Some(idx) if i == idx => {
+                                    next_keep = indices_iter.next(); // Keep this one
+                                }
+                                _ => *e = E::ZERO, // Not in indices
+                            }
+                        }
+                    });
                 Some(sel.into_mle())
             }
         }
@@ -92,14 +102,19 @@ impl<E: ExtensionField> SelectorType<E> {
                     eq_eval_less_or_equal_than(num_instances - 1, out_point, in_point),
                 )
             }
-            SelectorType::KeccakRound(round, _, expr) => {
-                assert!(out_point.len() + 5 == in_point.len());
-                let eq_low = eq_eval(
-                    &u5_to_binary_vec::<E>(CYCLIC_POW2_5[*round]),
-                    &in_point[..5],
-                );
-                let sel = eq_eval_less_or_equal_than(num_instances - 1, out_point, &in_point[5..]);
-                (expr, eq_low * sel)
+            SelectorType::OrderedSparse32 {
+                indices,
+                expression,
+            } => {
+                let out_subgroup_eq = build_eq_x_r_vec(&out_point[..5]);
+                let in_subgroup_eq = build_eq_x_r_vec(&in_point[..5]);
+                let mut eval = E::ZERO;
+                for index in indices {
+                    eval += out_subgroup_eq[*index] * in_subgroup_eq[*index];
+                }
+                let sel =
+                    eq_eval_less_or_equal_than(num_instances - 1, &out_point[5..], &in_point[5..]);
+                (expression, eval * sel)
             }
         };
         let Expression::StructuralWitIn(wit_id, _, _, _) = expr else {
@@ -121,22 +136,17 @@ pub(crate) fn select_from_expression_result<'a, E: ExtensionField>(
     match sel_type {
         SelectorType::None => out_mle.evaluations.sum().into_mle().into(),
         SelectorType::Whole(_) => out_mle,
-        SelectorType::Prefix(pad, _) => {
-            let evals = Arc::try_unwrap(out_mle).unwrap().evaluations_to_owned();
-            evals
-                .select_prefix(num_instances, pad)
-                .sub_constant(pad)
-                .into_mle()
-                .into()
-        }
-        SelectorType::KeccakRound(round, pad, _) => {
-            let evals = Arc::try_unwrap(out_mle).unwrap().evaluations_to_owned();
-            evals
-                .pick_stride_offset(32, CYCLIC_POW2_5[*round] as usize)
-                .select_prefix(num_instances, pad)
-                .sub_constant(pad)
-                .into_mle()
-                .into()
-        }
+        SelectorType::Prefix(_pad, _) => Arc::try_unwrap(out_mle)
+            .unwrap()
+            .evaluations_to_owned()
+            .select_prefix(num_instances)
+            .into_mle()
+            .into(),
+        SelectorType::OrderedSparse32 { indices, .. } => Arc::try_unwrap(out_mle)
+            .unwrap()
+            .evaluations_to_owned()
+            .pick_indices_within_chunk(CYCLIC_POW2_5.len(), num_instances, indices)
+            .into_mle()
+            .into(),
     }
 }

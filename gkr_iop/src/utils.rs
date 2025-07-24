@@ -3,7 +3,7 @@ pub mod lk_multiplicity;
 use ff_ext::{ExtensionField, SmallField};
 use itertools::{Itertools, izip};
 use multilinear_extensions::{
-    Expression, Fixed, ToExpr, WitIn, WitnessId,
+    Expression, Fixed, WitIn, WitnessId,
     mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
@@ -44,10 +44,11 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
             .sum::<Expression<E>>();
         let expr = match sel_type {
             SelectorType::None => zero_check_expr,
-            SelectorType::Whole(sel) => match_expr(sel) * zero_check_expr,
-            SelectorType::Prefix(pad, sel) | SelectorType::KeccakRound(_, pad, sel) => {
-                match_expr(sel) * (zero_check_expr - pad.expr())
-            }
+            SelectorType::Whole(sel)
+            | SelectorType::Prefix(_, sel)
+            | SelectorType::OrderedSparse32 {
+                expression: sel, ..
+            } => match_expr(sel) * zero_check_expr,
         };
         zero_check_exprs.push(expr);
     }
@@ -267,9 +268,6 @@ pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>(
     (wits, fixed, eqs)
 }
 
-/// TODO this is copy from gkr crate
-/// including gkr crate after gkr clippy fix
-///
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
 /// [0..=max_idx]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})

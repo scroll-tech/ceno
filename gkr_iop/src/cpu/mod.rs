@@ -1,18 +1,20 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, iter, sync::Arc};
 
 use crate::{
     LayerWitness,
     evaluation::EvalExpression,
-    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
+    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::Layer},
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
+    selector::select_from_expression_result,
 };
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::{
-    mle::{IntoMLE, MultilinearExtension, Point},
+    mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
     op_mle,
     utils::eval_by_expr_constant,
+    wit_infer_by_expr,
 };
 use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -88,7 +90,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 {
     fn gkr_witness<'a>(
         circuit: &GKRCircuit<E>,
-        phase1_witness_group: &RowMajorMatrix<E::BaseField>,
+        phase1_witness_group_rmm: &RowMajorMatrix<E::BaseField>,
         fixed: &RowMajorMatrix<E::BaseField>,
         challenges: &[E],
     ) -> (
@@ -96,10 +98,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         GKRCircuitOutput<'a, CpuBackend<E, PCS>>,
     ) {
         // layer order from output to input
-        let num_instances = phase1_witness_group.num_instances();
+        let num_instances_with_rotation = phase1_witness_group_rmm.num_instances();
         let mut layer_wits =
             Vec::<LayerWitness<CpuBackend<E, PCS>>>::with_capacity(circuit.layers.len() + 1);
-        let phase1_witness_group = phase1_witness_group
+        let phase1_witness_group = phase1_witness_group_rmm
             .to_mles()
             .into_iter()
             .map(Arc::new)
@@ -134,7 +136,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                                 .iter()
                                 .cycle()
                                 .cloned()
-                                .take(num_instances)
+                                .take(num_instances_with_rotation)
                                 .collect_vec()
                                 .into_mle()
                                 .into(),
@@ -149,6 +151,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
             tracing::info!("generating input {i} layer with layer name {}", layer.name);
+            let num_instances = num_instances_with_rotation >> layer.rotation_cyclic_group_log2;
             let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
             // process in_evals to prepare layer witness
             // This should assume the input of the first layer is the phase1 witness of the circuit.
@@ -165,7 +168,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // infer current layer output
             let current_layer_output: Vec<
                 Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
-            > = layer.layer_witness(&current_layer_wits, challenges, num_instances);
+            > = layer_witness(layer, &current_layer_wits, challenges, num_instances);
             layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
             // process out to prepare output witness
@@ -210,4 +213,44 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             GKRCircuitOutput(LayerWitness(gkr_out_well_order)),
         )
     }
+}
+
+pub fn layer_witness<'a, E>(
+    layer: &Layer<E>,
+    layer_wits: &[ArcMultilinearExtension<'a, E>],
+    challenges: &[E],
+    num_instances: usize,
+) -> Vec<ArcMultilinearExtension<'a, E>>
+where
+    E: ExtensionField,
+{
+    let out_evals: Vec<_> = layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .flat_map(|(sel_type, out_eval)| izip!(iter::repeat(sel_type), out_eval.iter()))
+        .collect();
+    layer
+        .exprs
+        .par_iter()
+        .zip_eq(layer.expr_names.par_iter())
+        .zip_eq(out_evals.par_iter())
+        .map(|((expr, expr_name), (sel_type, out_eval))| {
+            let out_mle = select_from_expression_result(
+                sel_type,
+                wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr),
+                num_instances,
+            );
+            if let EvalExpression::Zero = out_eval {
+                // sanity check: zero mle
+                if cfg!(debug_assertions) {
+                    assert!(
+                        out_mle.evaluations().is_zero(),
+                        "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
+                        layer.name
+                    );
+                }
+            };
+            out_mle
+        })
+        .collect::<Vec<_>>()
 }

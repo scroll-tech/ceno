@@ -1,6 +1,7 @@
 use std::{any::TypeId, borrow::Cow, mem, sync::Arc};
 
 use crate::{
+    field_type_mut_map,
     macros::{entered_span, exit_span},
     op_mle,
     smart_slice::SmartSlice,
@@ -10,9 +11,12 @@ use either::Either;
 use ff_ext::{ExtensionField, FromUniformBytes};
 use p3::field::{Field, FieldAlgebra};
 use rand::Rng;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-    IntoParallelRefMutIterator, ParallelIterator,
+use rayon::{
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+        IntoParallelRefMutIterator, ParallelIterator,
+    },
+    slice::ParallelSliceMut,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
@@ -178,47 +182,45 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
         }
     }
 
-    pub fn sub_constant(mut self, value: &E::BaseField) -> Self {
-        match &mut self {
-            FieldType::Base(slice) => {
-                slice.to_mut().par_iter_mut().for_each(|v| *v -= *value);
-            }
-            FieldType::Ext(slice) => {
-                slice
-                    .to_mut()
-                    .par_iter_mut()
-                    .for_each(|v| *v -= E::from(*value));
-            }
-            FieldType::Unreachable => panic!("unreachable"),
-        }
-        self
+    pub fn select_prefix(self, prefix_len: usize) -> Self {
+        field_type_mut_map!(self, |slice| {
+            slice.to_mut()[prefix_len..].fill(Default::default());
+            slice
+        })
     }
 
-    pub fn select_prefix(mut self, prefix_len: usize, default: &E::BaseField) -> Self {
-        match &mut self {
-            FieldType::Base(slice) => {
-                slice.to_mut()[prefix_len..].fill(*default);
-            }
-            FieldType::Ext(slice) => {
-                slice.to_mut()[prefix_len..].fill(E::from(*default));
-            }
-            FieldType::Unreachable => panic!("unreachable"),
-        }
-        self
-    }
+    // pick indice within chunk, and fill default for others value
+    pub fn pick_indices_within_chunk(
+        self,
+        chunk_size: usize,
+        valid_chunk_index: usize,
+        indices: &[usize],
+    ) -> Self {
+        field_type_mut_map!(self, |slice| {
+            slice
+                .par_chunks_mut(chunk_size)
+                .enumerate()
+                .for_each(|(chunk_index, chunk)| {
+                    if chunk_index >= valid_chunk_index {
+                        // Entire chunk is invalid — fill all with default
+                        chunk.fill(Default::default());
+                        return;
+                    }
 
-    pub fn pick_stride_offset(self, stride: usize, offset: usize) -> Self {
-        match self {
-            FieldType::Base(slice) => {
-                let res = slice.iter().cloned().skip(offset).step_by(stride).collect();
-                FieldType::Base(SmartSlice::Owned(res))
-            }
-            FieldType::Ext(slice) => {
-                let res = slice.iter().cloned().skip(offset).step_by(stride).collect();
-                FieldType::Ext(SmartSlice::Owned(res))
-            }
-            FieldType::Unreachable => panic!("unreachable"),
-        }
+                    // Only keep values at `indices`, zero out others
+                    let mut indices_iter = indices.iter().copied();
+                    let mut next_idx = indices_iter.next();
+
+                    for (i, value) in chunk.iter_mut().enumerate() {
+                        if Some(i) == next_idx {
+                            next_idx = indices_iter.next(); // keep this one
+                        } else {
+                            *value = Default::default(); // reset others
+                        }
+                    }
+                });
+            slice
+        })
     }
 }
 
@@ -230,7 +232,7 @@ impl<'a, E: ExtensionField> PartialEq for FieldType<'a, E> {
             (FieldType::Ext(a), FieldType::Ext(b)) => a == b,
             (FieldType::Base(a), FieldType::Ext(b)) | (FieldType::Ext(b), FieldType::Base(a)) => a
                 .par_iter()
-                .zip(b.par_iter())
+                .zip_eq(b.par_iter())
                 .all(|(a, b)| E::from_base(*a) == *b),
             _ => self.is_zero() && other.is_zero(),
         }
@@ -1053,6 +1055,31 @@ macro_rules! op_mle {
     };
     (|$a:ident| $op:expr) => {
         op_mle!(|$a| $op, |out| out)
+    };
+}
+
+#[macro_export]
+macro_rules! field_type_mut_map {
+    ($a:ident, |$tmp_a:ident| $op:expr) => {
+        match $a {
+            $crate::mle::FieldType::Base(a) => {
+                let mut $tmp_a = a;
+                let out = $op;
+                $crate::mle::FieldType::Base(out)
+            }
+            $crate::mle::FieldType::Ext(a) => {
+                let mut $tmp_a = a;
+                let out = $op;
+                $crate::mle::FieldType::Ext(out)
+            }
+            _ => unreachable!(),
+        }
+    };
+    ($a:ident, |$tmp_a:ident| $op:expr) => {
+        field_type_mut_map!($a, |$tmp_a| $op)
+    };
+    (|$a:ident| $op:expr) => {
+        field_type_mut_map!($a, |$a| $op)
     };
 }
 

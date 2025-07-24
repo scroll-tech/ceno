@@ -18,7 +18,7 @@ use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
+    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
@@ -26,6 +26,7 @@ use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{
         GKRCircuit, GKRProverOutput,
+        booleanhypercube::CYCLIC_POW2_5,
         layer::Layer,
         layer_constraint_system::{LayerConstraintSystem, expansion_expr},
     },
@@ -367,7 +368,10 @@ fn output32_layer<E: ExtensionField>(
     let mut keccak_output32_iter = out_evals.iter().map(|x| EvalExpression::Single(*x));
 
     // process keccak output
-    let sel_type = SelectorType::KeccakRound(23, E::BaseField::ONE, layer.sel.expr());
+    let sel_type = SelectorType::OrderedSparse32 {
+        indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
+        expression: layer.sel.expr(),
+    };
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {
@@ -619,7 +623,10 @@ fn keccak_first_layer<E: ExtensionField>(
 
     // process keccak output
     let mut out_eval_iter = input32_out_evals.iter().map(|x| EvalExpression::Single(*x));
-    let sel_type = SelectorType::KeccakRound(0, E::BaseField::ONE, layer.sel_keccak_out.expr());
+    let sel_type = SelectorType::OrderedSparse32 {
+        indices: vec![CYCLIC_POW2_5[0] as usize],
+        expression: layer.sel_keccak_out.expr(),
+    };
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {
@@ -646,12 +653,10 @@ fn keccak_first_layer<E: ExtensionField>(
     )
 }
 
-impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
-    type Params = KeccakParams;
-
-    fn build_gkr_chip(
+impl<E: ExtensionField> KeccakLayout<E> {
+    pub fn build_gkr_chip_old(
         _cb: &mut CircuitBuilder<E>,
-        _params: Self::Params,
+        _params: KeccakParams,
     ) -> Result<(Self, Chip<E>), CircuitBuilderError> {
         let layout = Self::default();
         let mut chip = Chip {
@@ -772,7 +777,20 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         ));
         Ok((layout, chip))
     }
+}
+impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
+    type Params = KeccakParams;
 
+    fn finalize(&mut self, _cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>) {
+        unimplemented!()
+    }
+
+    fn build_layer_logic(
+        _cb: &mut CircuitBuilder<E>,
+        _params: Self::Params,
+    ) -> Result<Self, CircuitBuilderError> {
+        unimplemented!()
+    }
     fn n_committed(&self) -> usize {
         STATE_SIZE
     }
@@ -866,7 +884,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     let params = KeccakParams {};
     let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
     let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-    let (layout, chip) = KeccakLayout::build_gkr_chip(&mut circuit_builder, params)?;
+    let (layout, chip) = KeccakLayout::build_gkr_chip_old(&mut circuit_builder, params)?;
     Ok((layout, chip.gkr_circuit()))
 }
 

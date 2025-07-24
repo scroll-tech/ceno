@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{iter, marker::PhantomData};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
@@ -10,7 +10,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     wit_infer_by_expr,
 };
-use rand::{Rng, rngs::OsRng, thread_rng};
+use rand::thread_rng;
 use thiserror::Error;
 
 use crate::{
@@ -60,48 +60,40 @@ impl<E: ExtensionField> MockProver<E> {
         // check the input layer
         for (layer, layer_wit) in izip!(&circuit.layers, &circuit_wit.layers) {
             let num_vars = layer_wit.num_vars();
-            let sels = layer
-                .out_sel_and_eval_exprs
-                .iter()
-                .filter_map(|(sel_type, _)| {
-                    let point = random_point::<E>(OsRng, num_vars);
-                    sel_type.compute(&point, num_instances)
-                })
-                .map(|mle| mle.into())
-                .collect::<Vec<_>>();
-
-            let mut wits_and_sels = layer_wit
+            let wits = layer_wit
                 .iter()
                 .map(|mle| mle.as_view().into())
                 .collect::<Vec<_>>();
-            wits_and_sels.extend(sels);
             let gots = layer
                 .exprs
                 .iter()
-                .map(|expr| wit_infer_by_expr(&[], &wits_and_sels, &[], &[], &challenges, expr))
+                .map(|expr| wit_infer_by_expr(&[], &wits, &[], &[], &challenges, expr))
                 .collect_vec();
 
             let expects = layer
                 .out_sel_and_eval_exprs
                 .iter()
-                .flat_map(|(_sel_type, out)| {
+                .flat_map(|(_, out)| {
                     out.iter()
                         .map(|out| out.mock_evaluate(&evaluations, &challenges, num_vars))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             match layer.ty {
                 LayerType::Zerocheck => {
-                    for (got, expect, expr, expr_name, out) in izip!(
+                    for (got, expect, expr, expr_name, (sel_type, out_eval)) in izip!(
                         gots,
                         expects,
                         &layer.exprs,
                         &layer.expr_names,
-                        &layer.out_sel_and_eval_exprs
+                        layer
+                            .out_sel_and_eval_exprs
+                            .iter()
+                            .flat_map(|(sel_type, out)| izip!(iter::repeat(sel_type), out))
                     ) {
-                        let got = select_from_expression_result(&out.0, got, num_instances);
+                        let got = select_from_expression_result(sel_type, got, num_instances);
                         if expect != got {
                             return Err(MockProverError::ZerocheckExpressionNotMatch(
-                                Box::new(out.1[0].clone()),
+                                Box::new(out_eval.clone()),
                                 Box::new(expr.clone()),
                                 expr_name.to_string(),
                             ));
@@ -201,8 +193,4 @@ impl<E: ExtensionField> EvalExpression<E> {
         };
         Ok(output)
     }
-}
-
-fn random_point<E: ExtensionField>(mut rng: impl Rng, num_vars: usize) -> Vec<E> {
-    (0..num_vars).map(|_| E::random(&mut rng)).collect_vec()
 }
