@@ -203,6 +203,7 @@ impl<
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
             (vec![], vec![]),
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
+                dbg!(circuit_name);
                 let num_instances = *wits_instances
                     .get(circuit_name)
                     .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
@@ -249,6 +250,7 @@ impl<
                         circuit_name,
                         num_instances
                     );
+                    println!("circuit name {circuit_name} num_instances {num_instances}");
                     points.push(input_opening_point);
                     evaluations.push(opcode_proof.wits_in_evals.clone());
                     chip_proofs.insert(index, opcode_proof);

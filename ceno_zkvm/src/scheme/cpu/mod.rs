@@ -58,7 +58,7 @@ impl CpuTowerProver {
         }
 
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
-        // TODO mayber give a better naming?
+        // TODO maybe give a better naming?
         assert_eq!(num_fanin, 2);
 
         let (prod_specs_len, logup_specs_len) = (prod_specs.len(), logup_specs.len());
@@ -80,6 +80,7 @@ impl CpuTowerProver {
                 logup_specs_len * 2,
             transcript,
         );
+        dbg!(alpha_pows[1].clone());
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
         let (mut out_rt, mut alpha_pows) = (initial_rt, alpha_pows);
 
@@ -527,6 +528,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 &input.witness,
                 &input.fixed,
                 challenges,
+            );
+            dbg!(
+                "gkr_circuit_out.0.0[0] num_var {}",
+                gkr_circuit_out.0.0[0].num_vars()
             );
             gkr_circuit_out.0.0
         } else {
