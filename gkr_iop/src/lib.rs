@@ -3,21 +3,19 @@
 use std::marker::PhantomData;
 
 use crate::{
+    chip::Chip,
     circuit_builder::CircuitBuilder,
     error::CircuitBuilderError,
-    hal::{ProtocolWitnessGeneratorProver, ProverDevice},
+    hal::{ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
+    selector::SelectorType,
     utils::lk_multiplicity::LkMultiplicity,
 };
-use chip::Chip;
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
 use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
 use transcript::Transcript;
-use utils::infer_layer_witness;
 use witness::RowMajorMatrix;
-
-use crate::hal::ProverBackend;
 
 pub mod chip;
 pub mod circuit_builder;
@@ -27,10 +25,14 @@ pub mod evaluation;
 pub mod gadgets;
 pub mod gkr;
 pub mod hal;
+pub mod selector;
 pub mod tables;
 pub mod utils;
 
 pub type Phase1WitnessGroup<'a, E> = Vec<ArcMultilinearExtension<'a, E>>;
+
+// format: [r_records, w_records, lk_records, zero_records]
+pub type OutEvalGroups<E> = [(SelectorType<E>, Vec<usize>); 4];
 
 pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     type Params;
@@ -38,10 +40,12 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     /// Create the GKR layers in the reverse order. For each layer, specify the
     /// polynomial expressions, evaluation expressions of outputs and evaluation
     /// positions of the inputs.
-    fn build_gkr_chip(
+    fn build_layer_logic(
         cb: &mut CircuitBuilder<E>,
         params: Self::Params,
-    ) -> Result<(Self, Chip<E>), CircuitBuilderError>;
+    ) -> Result<Self, CircuitBuilderError>;
+
+    fn finalize(&mut self, cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>);
 
     fn n_committed(&self) -> usize;
     fn n_fixed(&self) -> usize;

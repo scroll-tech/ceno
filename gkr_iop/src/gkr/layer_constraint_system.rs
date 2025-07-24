@@ -3,6 +3,7 @@ use std::{cmp::Ordering, collections::BTreeMap};
 use crate::{
     evaluation::EvalExpression,
     gkr::layer::{Layer, LayerType, ROTATION_OPENING_COUNT},
+    selector::SelectorType,
     tables::LookupTable,
 };
 use ff_ext::ExtensionField;
@@ -17,6 +18,7 @@ pub struct RotationParams<E: ExtensionField> {
     pub rotation_cyclic_subgroup_size: usize,
 }
 
+#[allow(clippy::type_complexity)]
 pub struct LayerConstraintSystem<E: ExtensionField> {
     num_witin: usize,
     num_structural_witin: usize,
@@ -29,7 +31,7 @@ pub struct LayerConstraintSystem<E: ExtensionField> {
     // TODO we should define an Zero enum for it
     pub expressions: Vec<Expression<E>>,
     pub expr_names: Vec<String>,
-    pub evals: Vec<(Option<Expression<E>>, EvalExpression<E>)>,
+    pub evals: Vec<(SelectorType<E>, EvalExpression<E>)>,
 
     pub rotations: Vec<(Expression<E>, Expression<E>)>,
     pub rotation_params: Option<RotationParams<E>>,
@@ -76,16 +78,19 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
     }
 
     pub fn add_zero_constraint(&mut self, expr: Expression<E>, name: String) {
+        assert!(self.eq_zero.is_some());
         self.expressions.push(expr);
-        self.evals
-            .push((self.eq_zero.clone(), EvalExpression::Zero));
+        self.evals.push((
+            SelectorType::Whole(self.eq_zero.clone().unwrap()),
+            EvalExpression::Zero,
+        ));
         self.expr_names.push(name);
     }
 
     pub fn add_non_zero_constraint(
         &mut self,
         expr: Expression<E>,
-        eval: (Option<Expression<E>>, EvalExpression<E>),
+        eval: (SelectorType<E>, EvalExpression<E>),
         name: String,
     ) {
         self.expressions.push(expr);
@@ -284,9 +289,9 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         layer_name: String,
         in_expr_evals: Vec<usize>,
         n_challenges: usize,
-        ram_write_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
-        ram_read_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
-        lookup_evals: impl ExactSizeIterator<Item = (Option<Expression<E>>, usize)>,
+        ram_write_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
+        ram_read_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
+        lookup_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
     ) -> Layer<E> {
         // process ram read/write record
         assert_eq!(ram_write_evals.len(), self.ram_write.len(),);
@@ -376,8 +381,9 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             expr_names.into_iter(),
             expressions.into_iter()
         )
-        .for_each(|((eq, eval), name, expr)| {
-            let (eval_group, names, exprs) = eq_map.entry(eq).or_insert((vec![], vec![], vec![]));
+        .for_each(|((sel_type, eval), name, expr)| {
+            let (eval_group, names, exprs) =
+                eq_map.entry(sel_type).or_insert((vec![], vec![], vec![]));
             eval_group.push(eval);
             names.push(name);
             exprs.push(expr);
@@ -385,11 +391,13 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         let mut expr_evals = vec![];
         let mut expr_names = vec![];
         let mut expressions = vec![];
-        eq_map.into_iter().for_each(|(eq, (evals, names, exprs))| {
-            expr_evals.push((eq, evals));
-            expr_names.extend(names);
-            expressions.extend(exprs);
-        });
+        eq_map
+            .into_iter()
+            .for_each(|(sel_type, (evals, names, exprs))| {
+                expr_evals.push((sel_type, evals));
+                expr_names.extend(names);
+                expressions.extend(exprs);
+            });
 
         is_layer_linear = is_layer_linear && expr_evals.len() == 1;
 
