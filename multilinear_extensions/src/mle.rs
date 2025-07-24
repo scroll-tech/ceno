@@ -15,7 +15,7 @@ use rayon::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
         IntoParallelRefMutIterator, ParallelIterator,
     },
-    slice::ParallelSlice,
+    slice::ParallelSliceMut,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt::Debug;
@@ -202,65 +202,56 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
         default: &E::BaseField,
     ) -> Self {
         match self {
-            FieldType::Base(slice) => {
-                let res = slice
-                    .par_chunks(chunk_size)
+            FieldType::Base(mut slice) => {
+                slice
+                    .par_chunks_mut(chunk_size)
                     .enumerate()
-                    .flat_map_iter(|(chunk_index, chunk)| {
+                    .for_each(|(chunk_index, chunk)| {
                         if chunk_index >= valid_chunk_index {
-                            // fill entire chunk with default
-                            return vec![*default; chunk.len()];
+                            // Entire chunk is invalid — fill all with default
+                            chunk.fill(*default);
+                            return;
                         }
 
-                        let mut result = Vec::with_capacity(chunk.len());
-
+                        // Only keep values at `indices`, zero out others
                         let mut indices_iter = indices.iter().copied();
                         let mut next_idx = indices_iter.next();
 
-                        for (i, value) in chunk.iter().enumerate() {
-                            match next_idx {
-                                Some(keep_i) if i == keep_i => {
-                                    result.push(*value);
-                                    next_idx = indices_iter.next();
-                                }
-                                _ => result.push(*default),
+                        for (i, value) in chunk.iter_mut().enumerate() {
+                            if Some(i) == next_idx {
+                                next_idx = indices_iter.next(); // keep this one
+                            } else {
+                                *value = *default; // reset others
                             }
                         }
-
-                        result
-                    })
-                    .collect();
-                FieldType::Base(SmartSlice::Owned(res))
+                    });
+                FieldType::Base(slice)
             }
-            FieldType::Ext(slice) => {
-                let res = slice
-                    .par_chunks(chunk_size)
+            FieldType::Ext(mut slice) => {
+                slice
+                    .par_chunks_mut(chunk_size)
                     .enumerate()
-                    .flat_map_iter(|(chunk_index, chunk)| {
+                    .for_each(|(chunk_index, chunk)| {
                         if chunk_index >= valid_chunk_index {
-                            // Fill entire chunk with default
-                            return vec![E::from(*default); chunk.len()];
+                            // Entire chunk is invalid — fill all with default
+                            chunk.fill(E::from(*default));
+                            return;
                         }
 
-                        let mut result = Vec::with_capacity(chunk.len());
-
+                        // Only keep values at `indices`, zero out others
                         let mut indices_iter = indices.iter().copied();
                         let mut next_idx = indices_iter.next();
 
-                        for (i, value) in chunk.iter().enumerate() {
-                            match next_idx {
-                                Some(keep_i) if i == keep_i => {
-                                    result.push(*value);
-                                    next_idx = indices_iter.next();
-                                }
-                                _ => result.push(E::from(*default)),
+                        for (i, value) in chunk.iter_mut().enumerate() {
+                            if Some(i) == next_idx {
+                                next_idx = indices_iter.next(); // keep this one
+                            } else {
+                                *value = E::from(*default); // reset others
                             }
                         }
+                    });
 
-                        result
-                    })
-                    .collect();
-                FieldType::Ext(SmartSlice::Owned(res))
+                FieldType::Ext(slice)
             }
             FieldType::Unreachable => panic!("unreachable"),
         }

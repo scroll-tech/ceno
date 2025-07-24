@@ -1,17 +1,14 @@
-use std::{iter, ops::Neg, sync::Arc, vec::IntoIter};
+use std::{ops::Neg, sync::Arc, vec::IntoIter};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
     Expression, Fixed, ToExpr, WitnessId,
-    mle::{ArcMultilinearExtension, Point, PointAndEval},
-    wit_infer_by_expr,
+    mle::{Point, PointAndEval},
 };
 use p3::field::FieldAlgebra;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
-};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck_layer::LayerProof;
 use transcript::Transcript;
@@ -23,7 +20,7 @@ use crate::{
     error::BackendError,
     evaluation::EvalExpression,
     hal::{MultilinearPolynomial, ProverBackend, ProverDevice},
-    selector::{SelectorType, select_from_expression_result},
+    selector::SelectorType,
 };
 
 pub mod cpu;
@@ -285,45 +282,6 @@ impl<E: ExtensionField> Layer<E> {
                 eval: *value,
             };
         }
-    }
-
-    pub fn layer_witness<'a>(
-        &self,
-        layer_wits: &[ArcMultilinearExtension<'a, E>],
-        challenges: &[E],
-        num_instances: usize,
-    ) -> Vec<ArcMultilinearExtension<'a, E>>
-    where
-        E: ExtensionField,
-    {
-        let out_evals: Vec<_> = self
-            .out_sel_and_eval_exprs
-            .iter()
-            .flat_map(|(sel_type, out_eval)| izip!(iter::repeat(sel_type), out_eval.iter()))
-            .collect();
-        self.exprs
-            .par_iter()
-            .zip_eq(self.expr_names.par_iter())
-            .zip_eq(out_evals.par_iter())
-            .map(|((expr, expr_name), (sel_type, out_eval))| {
-                let out_mle = select_from_expression_result(
-                    sel_type,
-                    wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr),
-                    num_instances,
-                );
-                if let EvalExpression::Zero = out_eval {
-                    // sanity check: zero mle
-                    if cfg!(debug_assertions) {
-                        assert!(
-                            out_mle.evaluations().is_zero(),
-                            "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
-                            self.name
-                        );
-                    }
-                };
-                out_mle
-            })
-            .collect::<Vec<_>>()
     }
 
     pub fn from_circuit_builder(
