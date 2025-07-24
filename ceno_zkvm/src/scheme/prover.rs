@@ -80,7 +80,7 @@ impl<
         &mut self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
-        mut transcript: impl Transcript<E>,
+        mut transcript: (impl Transcript<E> + 'static),
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let raw_pi = pi.to_vec::<E>();
         let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);

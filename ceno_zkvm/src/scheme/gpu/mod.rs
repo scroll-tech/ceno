@@ -38,7 +38,7 @@ use sumcheck::{
     structs::{IOPProverMessage, IOPProverState},
     util::{get_challenge_pows, optimal_sumcheck_threads},
 };
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
 use ceno_gpu::gl64::CudaHalGL64;
@@ -802,34 +802,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         evals: Vec<Vec<E>>,
         circuit_num_polys: &[(usize, usize)],
         num_instances: &[(usize, usize)],
-        transcript: &mut impl Transcript<E>,
+        transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
 
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<p3::goldilocks::Goldilocks>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 
-        let mut test_transcript = transcript::BasicTranscript::<E>::new(b"BaseFold");
-        let challenge = test_transcript.sample_and_append_challenge(b"init tset");
-        println!("[CPU] inti challenge: {:?}", challenge.elements);
-        let cpu_proof = PCS::batch_open(
-            self.pp.as_ref().unwrap(),
-            num_instances,
-            fixed_data.as_ref().map(|f| f.as_ref()),
-            &witness_data,
-            &points,
-            &evals,
-            circuit_num_polys,
-            &mut test_transcript,
-        )
-        .unwrap();
-
         use p3::field::extension::BinomialExtensionField;
         type EGL64 = BinomialExtensionField<p3::goldilocks::Goldilocks, 2>;
         let mut test_transcript = transcript::BasicTranscript::<EGL64>::new(b"BaseFold");
         let cuda_hal = CudaHalGL64::new().unwrap();
-        let challenge = test_transcript.sample_and_append_challenge(b"init tset");
-        println!("[GPU] inti challenge: {:?}", challenge.elements);
 
         // Type conversions using unsafe transmute
         let pp_gl64: &mpcs::basefold::structure::BasefoldProverParams<EGL64, mpcs::BasefoldRSParams> = unsafe { std::mem::transmute(self.pp.as_ref().unwrap()) };
@@ -839,45 +822,89 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
             unsafe { std::mem::transmute(&witness_data) };
         let points_gl64: &[Vec<EGL64>] = unsafe { std::mem::transmute(points.as_slice()) };
         let evals_gl64: &[Vec<EGL64>] = unsafe { std::mem::transmute(evals.as_slice()) };
-        
-        let gpu_proof = cuda_hal
-            .basefold
-            .batch_open(
-                &cuda_hal,
-                pp_gl64,
-                &num_instances,
-                fixed_data_gl64,
-                witness_data_gl64,
-                points_gl64,
-                evals_gl64,
-                &circuit_num_polys,
-                &mut test_transcript,
-            )
-            .unwrap();
 
-        let cpu_proof_basefold: &mpcs::basefold::structure::BasefoldProof<E> = 
-            unsafe { std::mem::transmute(&cpu_proof) };
+        // let gpu_proof = cuda_hal
+        //     .basefold
+        //     .batch_open_e2e(
+        //         &cuda_hal,
+        //         pp_gl64,
+        //         &num_instances,
+        //         fixed_data_gl64,
+        //         witness_data_gl64,
+        //         points_gl64,
+        //         evals_gl64,
+        //         &circuit_num_polys,
+        //         &mut test_transcript,
+        //     )
+        //     .unwrap();
+
+        // let mut test_transcript = transcript::BasicTranscript::<E>::new(b"BaseFold");
+        // let cpu_proof = PCS::batch_open(
+        //     self.pp.as_ref().unwrap(),
+        //     num_instances,
+        //     fixed_data.as_ref().map(|f| f.as_ref()),
+        //     &witness_data,
+        //     &points,
+        //     &evals,
+        //     circuit_num_polys,
+        //     &mut test_transcript,
+        // )
+        // .unwrap();
+
+        // let cpu_proof_basefold: &mpcs::basefold::structure::BasefoldProof<E> = 
+        //     unsafe { std::mem::transmute(&cpu_proof) };
+        // assert_eq!(cpu_proof_basefold.commits.len(), gpu_proof.commits.len());
+        // for i in 0..cpu_proof_basefold.commits.len() {
+        //     let cpu_commit_as_array: &[E::BaseField; 4] = unsafe { std::mem::transmute(&cpu_proof_basefold.commits[i]) };
+        //     let gpu_commit_as_array: &[E::BaseField; 4] = unsafe { std::mem::transmute(&gpu_proof.commits[i]) };
+        //     assert_eq!(cpu_commit_as_array, gpu_commit_as_array, "commits mismatch at index [{}]", i);
+        // }
         
-        assert_eq!(cpu_proof_basefold.commits.len(), gpu_proof.commits.len());
-        for i in 0..cpu_proof_basefold.commits.len() {
-            let cpu_commit_as_array: &[E::BaseField; 4] = unsafe { std::mem::transmute(&cpu_proof_basefold.commits[i]) };
-            let gpu_commit_as_array: &[E::BaseField; 4] = unsafe { std::mem::transmute(&gpu_proof.commits[i]) };
-            assert_eq!(cpu_commit_as_array, gpu_commit_as_array, "commits mismatch at index [{}]", i);
-        }
-        
-        println!("GPU proof verification passed, returning CPU proof");
-        
-        PCS::batch_open(
-            self.pp.as_ref().unwrap(),
-            num_instances,
-            fixed_data.as_ref().map(|f| f.as_ref()),
-            &witness_data,
-            &points,
-            &evals,
-            circuit_num_polys,
-            transcript,
-        )
-        .unwrap()
+        // println!("GPU proof verification passed, returning CPU proof");
+
+
+    
+        let gpu_proof = if std::any::TypeId::of::<E>() == std::any::TypeId::of::<GoldilocksExt2>() {
+                let transcript_any = transcript as &mut dyn std::any::Any;
+                let basic_transcript = transcript_any.downcast_mut::<BasicTranscript<GoldilocksExt2>>().expect("Type should match");
+                let gpu_proof_basefold = cuda_hal
+                    .basefold
+                    .batch_open_e2e(
+                        &cuda_hal,
+                        pp_gl64,
+                        &num_instances,
+                        fixed_data_gl64,
+                        witness_data_gl64,
+                        points_gl64,
+                        evals_gl64,
+                        &circuit_num_polys,
+                        basic_transcript,
+                    )
+                    .unwrap();
+
+                let gpu_proof: PCS::Proof = unsafe {
+                    std::mem::transmute_copy(&gpu_proof_basefold)
+                };
+                std::mem::forget(gpu_proof_basefold);
+                println!("construct cpu commitment from gpu data");
+                gpu_proof
+            } else {
+                panic!("GPU backend only supports Goldilocks base field");
+            };
+        gpu_proof
+
+
+        // PCS::batch_open(
+        //     self.pp.as_ref().unwrap(),
+        //     num_instances,
+        //     fixed_data.as_ref().map(|f| f.as_ref()),
+        //     &witness_data,
+        //     &points,
+        //     &evals,
+        //     circuit_num_polys,
+        //     transcript,
+        // )
+        // .unwrap()
     }
 }
 
