@@ -830,7 +830,8 @@ Hints:
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
             let [witness, structural_witness] = witnesses
-                .get_table_witness(circuit_name)
+                .get_opcode_witness(circuit_name)
+                .or_else(|| witnesses.get_table_witness(circuit_name))
                 .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
             let num_rows = witness.num_instances();
 
