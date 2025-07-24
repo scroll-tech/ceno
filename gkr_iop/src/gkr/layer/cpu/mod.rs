@@ -165,7 +165,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         exit_span!(span);
 
         let span = entered_span!("build_out_points_eq", profiling_4 = true);
-        dbg!(num_instances);
         // zero check eq || rotation eq
         let mut eqs = layer
             .out_sel_and_eval_exprs

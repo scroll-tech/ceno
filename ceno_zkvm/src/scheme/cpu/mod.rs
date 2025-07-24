@@ -538,10 +538,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 &input.fixed,
                 challenges,
             );
-            dbg!(
-                "gkr_circuit_out.0.0[0] num_var {}",
-                gkr_circuit_out.0.0[0].num_vars()
-            );
             gkr_circuit_out.0.0
         } else {
             // opcode must have at least one read/write/lookup
