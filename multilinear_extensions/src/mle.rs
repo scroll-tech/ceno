@@ -1,6 +1,7 @@
 use std::{any::TypeId, borrow::Cow, mem, sync::Arc};
 
 use crate::{
+    field_type_mut_map,
     macros::{entered_span, exit_span},
     op_mle,
     smart_slice::SmartSlice,
@@ -181,80 +182,45 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
         }
     }
 
-    pub fn select_prefix(mut self, prefix_len: usize, default: &E::BaseField) -> Self {
-        match &mut self {
-            FieldType::Base(slice) => {
-                slice.to_mut()[prefix_len..].fill(*default);
-            }
-            FieldType::Ext(slice) => {
-                slice.to_mut()[prefix_len..].fill(E::from(*default));
-            }
-            FieldType::Unreachable => panic!("unreachable"),
-        }
-        self
+    pub fn select_prefix(self, prefix_len: usize) -> Self {
+        field_type_mut_map!(self, |slice| {
+            slice.to_mut()[prefix_len..].fill(Default::default());
+            slice
+        })
     }
 
-    pub fn pick_index_within_chunk(
+    // pick indice within chunk, and fill default for others value
+    pub fn pick_indices_within_chunk(
         self,
         chunk_size: usize,
         valid_chunk_index: usize,
         indices: &[usize],
-        default: &E::BaseField,
     ) -> Self {
-        match self {
-            FieldType::Base(mut slice) => {
-                slice
-                    .par_chunks_mut(chunk_size)
-                    .enumerate()
-                    .for_each(|(chunk_index, chunk)| {
-                        if chunk_index >= valid_chunk_index {
-                            // Entire chunk is invalid — fill all with default
-                            chunk.fill(*default);
-                            return;
+        field_type_mut_map!(self, |slice| {
+            slice
+                .par_chunks_mut(chunk_size)
+                .enumerate()
+                .for_each(|(chunk_index, chunk)| {
+                    if chunk_index >= valid_chunk_index {
+                        // Entire chunk is invalid — fill all with default
+                        chunk.fill(Default::default());
+                        return;
+                    }
+
+                    // Only keep values at `indices`, zero out others
+                    let mut indices_iter = indices.iter().copied();
+                    let mut next_idx = indices_iter.next();
+
+                    for (i, value) in chunk.iter_mut().enumerate() {
+                        if Some(i) == next_idx {
+                            next_idx = indices_iter.next(); // keep this one
+                        } else {
+                            *value = Default::default(); // reset others
                         }
-
-                        // Only keep values at `indices`, zero out others
-                        let mut indices_iter = indices.iter().copied();
-                        let mut next_idx = indices_iter.next();
-
-                        for (i, value) in chunk.iter_mut().enumerate() {
-                            if Some(i) == next_idx {
-                                next_idx = indices_iter.next(); // keep this one
-                            } else {
-                                *value = *default; // reset others
-                            }
-                        }
-                    });
-                FieldType::Base(slice)
-            }
-            FieldType::Ext(mut slice) => {
-                slice
-                    .par_chunks_mut(chunk_size)
-                    .enumerate()
-                    .for_each(|(chunk_index, chunk)| {
-                        if chunk_index >= valid_chunk_index {
-                            // Entire chunk is invalid — fill all with default
-                            chunk.fill(E::from(*default));
-                            return;
-                        }
-
-                        // Only keep values at `indices`, zero out others
-                        let mut indices_iter = indices.iter().copied();
-                        let mut next_idx = indices_iter.next();
-
-                        for (i, value) in chunk.iter_mut().enumerate() {
-                            if Some(i) == next_idx {
-                                next_idx = indices_iter.next(); // keep this one
-                            } else {
-                                *value = E::from(*default); // reset others
-                            }
-                        }
-                    });
-
-                FieldType::Ext(slice)
-            }
-            FieldType::Unreachable => panic!("unreachable"),
-        }
+                    }
+                });
+            slice
+        })
     }
 }
 
@@ -1089,6 +1055,31 @@ macro_rules! op_mle {
     };
     (|$a:ident| $op:expr) => {
         op_mle!(|$a| $op, |out| out)
+    };
+}
+
+#[macro_export]
+macro_rules! field_type_mut_map {
+    ($a:ident, |$tmp_a:ident| $op:expr) => {
+        match $a {
+            $crate::mle::FieldType::Base(a) => {
+                let mut $tmp_a = a;
+                let out = $op;
+                $crate::mle::FieldType::Base(out)
+            }
+            $crate::mle::FieldType::Ext(a) => {
+                let mut $tmp_a = a;
+                let out = $op;
+                $crate::mle::FieldType::Ext(out)
+            }
+            _ => unreachable!(),
+        }
+    };
+    ($a:ident, |$tmp_a:ident| $op:expr) => {
+        field_type_mut_map!($a, |$tmp_a| $op)
+    };
+    (|$a:ident| $op:expr) => {
+        field_type_mut_map!($a, |$a| $op)
     };
 }
 

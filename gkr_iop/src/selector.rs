@@ -7,7 +7,6 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
-use p3_field::FieldAlgebra;
 use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -137,24 +136,17 @@ pub(crate) fn select_from_expression_result<'a, E: ExtensionField>(
     match sel_type {
         SelectorType::None => out_mle.evaluations.sum().into_mle().into(),
         SelectorType::Whole(_) => out_mle,
-        SelectorType::Prefix(_pad, _) => {
-            let evals = Arc::try_unwrap(out_mle).unwrap().evaluations_to_owned();
-            evals
-                .select_prefix(num_instances, &E::BaseField::ZERO)
-                .into_mle()
-                .into()
-        }
-        SelectorType::OrderedSparse32 { indices, .. } => {
-            let evals = Arc::try_unwrap(out_mle).unwrap().evaluations_to_owned();
-            evals
-                .pick_index_within_chunk(
-                    CYCLIC_POW2_5.len(),
-                    num_instances,
-                    indices,
-                    &E::BaseField::ZERO,
-                )
-                .into_mle()
-                .into()
-        }
+        SelectorType::Prefix(_pad, _) => Arc::try_unwrap(out_mle)
+            .unwrap()
+            .evaluations_to_owned()
+            .select_prefix(num_instances)
+            .into_mle()
+            .into(),
+        SelectorType::OrderedSparse32 { indices, .. } => Arc::try_unwrap(out_mle)
+            .unwrap()
+            .evaluations_to_owned()
+            .pick_indices_within_chunk(CYCLIC_POW2_5.len(), num_instances, indices)
+            .into_mle()
+            .into(),
     }
 }

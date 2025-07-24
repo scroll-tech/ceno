@@ -168,7 +168,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // infer current layer output
             let current_layer_output: Vec<
                 Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
-            > = layer_witness(&layer, &current_layer_wits, challenges, num_instances);
+            > = layer_witness(layer, &current_layer_wits, challenges, num_instances);
             layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
             // process out to prepare output witness
@@ -215,7 +215,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     }
 }
 
-pub fn layer_witness<'a, E: ExtensionField>(
+pub fn layer_witness<'a, E>(
     layer: &Layer<E>,
     layer_wits: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E],
