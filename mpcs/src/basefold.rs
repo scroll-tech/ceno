@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::{
     Error, PCSFriParam, Point, PolynomialCommitmentScheme, SecurityLevel,
     util::{
@@ -11,13 +9,13 @@ pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use p3::{commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
-use structure::{BasefoldProof, CircuitIndexMeta};
+use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
-use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
+use witness::RowMajorMatrix;
 
-use itertools::{Itertools, izip};
+use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
 
 mod structure;
@@ -151,7 +149,7 @@ where
 
     fn batch_commit(
         pp: &Self::ProverParam,
-        rmms: BTreeMap<usize, witness::RowMajorMatrix<<E as ff_ext::ExtensionField>::BaseField>>,
+        rmms: Vec<RowMajorMatrix<E::BaseField>>,
     ) -> Result<Self::CommitmentWithWitness, Error> {
         if rmms.is_empty() {
             return Err(Error::InvalidPcsParam(
@@ -162,50 +160,14 @@ where
         let mmcs = poseidon2_merkle_tree::<E>();
 
         let span = entered_span!("to_mles", profiling_3 = true);
-        let (polys, rmm_to_batch_commit, trivial_proofdata, circuit_codeword_index): (
-            BTreeMap<usize, Vec<ArcMultilinearExtension<E>>>,
-            Vec<_>,
-            _,
-            _,
-        ) = rmms.into_iter().fold(
-            (BTreeMap::new(), vec![], BTreeMap::new(), BTreeMap::new()),
-            |(
-                mut polys,
-                mut rmm_to_batch_commit,
-                mut trivial_proofdata,
-                mut circuit_codeword_index,
-            ),
-             (index, rmm)| {
-                // attach column-based poly
-                polys.insert(
-                    index,
-                    rmm.to_mles().into_iter().map(|p| p.into()).collect_vec(),
-                );
-
-                // for smaller polys, we commit it separately as prover will send it as a whole without blowing factor
-                if rmm.num_vars() <= Spec::get_basecode_msg_size_log() {
-                    let rmm = rmm.into_default_padded_p3_rmm(None);
-                    trivial_proofdata.insert(index, mmcs.commit_matrix(rmm));
-                } else {
-                    rmm_to_batch_commit.push(rmm);
-                    circuit_codeword_index.insert(index, rmm_to_batch_commit.len() - 1);
-                }
-                (
-                    polys,
-                    rmm_to_batch_commit,
-                    trivial_proofdata,
-                    circuit_codeword_index,
-                )
-            },
-        );
+        let polys: Vec<Vec<ArcMultilinearExtension<E>>> = rmms
+            .iter()
+            .map(|rmm| rmm.to_mles().into_iter().map(|p| p.into()).collect_vec())
+            .collect_vec();
         exit_span!(span);
 
-        if rmm_to_batch_commit.is_empty() {
-            todo!("support all are trivial commitment")
-        }
-
         let span = entered_span!("encode_codeword_and_mle", profiling_3 = true);
-        let evals_codewords = rmm_to_batch_commit
+        let evals_codewords = rmms
             .into_iter()
             .map(|rmm| Spec::EncodingScheme::encode(&pp.encoding_params, rmm))
             .collect::<Result<Vec<DenseMatrix<E::BaseField>>, _>>()?;
@@ -214,28 +176,7 @@ where
         let span = entered_span!("build mt", profiling_3 = true);
         let (comm, codeword) = mmcs.commit(evals_codewords);
         exit_span!(span);
-
-        println!("[cpu] batch commit");
-        #[derive(Debug)]
-        struct DigestGL64([p3::goldilocks::Goldilocks; 4]);
-
-        if std::mem::size_of_val(&comm) == std::mem::size_of::<DigestGL64>() {
-            let comm_gl64: DigestGL64 = unsafe { 
-                std::ptr::read(&comm as *const _ as *const DigestGL64)
-            };
-            println!("[cpu] commit root: {:?}", comm_gl64);
-        } else {
-            panic!("comm size is not equal to DigestGL64");
-        }
-
-
-        Ok(BasefoldCommitmentWithWitness::new(
-            comm,
-            codeword,
-            polys,
-            trivial_proofdata,
-            circuit_codeword_index,
-        ))
+        Ok(BasefoldCommitmentWithWitness::new(comm, codeword, polys))
     }
 
     fn write_commitment(
@@ -243,10 +184,6 @@ where
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
         write_digest_to_transcript(&comm.commit(), transcript);
-        // write trivial_commits to transcript
-        for trivial_commit in &comm.trivial_commits {
-            write_digest_to_transcript(trivial_commit, transcript);
-        }
         transcript.append_field_element(&E::BaseField::from_canonical_u64(
             comm.log2_max_codeword_size as u64,
         ));
@@ -274,84 +211,48 @@ where
     /// Open a batch of polynomial commitments at several points.
     fn batch_open(
         pp: &Self::ProverParam,
-        num_instances: &[(usize, usize)],
-        fixed_comms: Option<&Self::CommitmentWithWitness>,
-        witin_comms: &Self::CommitmentWithWitness,
-        points: &[Point<E>],
-        // TODO this is only for debug purpose
-        evals: &[Vec<E>],
-        circuit_num_polys: &[(usize, usize)],
+        rounds: Vec<(
+            &Self::CommitmentWithWitness,
+            // for each matrix open at one point
+            Vec<(Point<E>, Vec<E>)>,
+        )>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<Self::Proof, Error> {
         let span = entered_span!("Basefold::batch_open");
 
-        // sanity check
-        // number of point match with commitment length, assuming each commitment are opening under same point
-        assert!([points.len(), witin_comms.polys.len(),].iter().all_equal());
-        assert!(izip!(&witin_comms.polys, num_instances).all(
-            |((circuit_index, witin_polys), (_, num_instance))| {
-                // check num_vars & num_poly match
-                let (expected_witin_num_polys, expected_fixed_num_polys) =
-                    circuit_num_polys[*circuit_index];
-                let num_var = next_pow2_instance_padding(*num_instance).ilog2() as usize;
-                witin_polys
-                    .iter()
-                    .chain(
-                        fixed_comms
-                            .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
-                            .into_iter()
-                            .flatten(),
-                    )
-                    .all(|p| p.num_vars() == num_var)
-                    && witin_polys.len() == expected_witin_num_polys
-                    && fixed_comms
-                        .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
-                        .map(|fixed_polys| fixed_polys.len() == expected_fixed_num_polys)
-                        .unwrap_or(true)
-            },
-        ));
-        assert_eq!(num_instances.len(), witin_comms.polys.len());
+        let base_mmcs = poseidon2_merkle_tree::<E>();
 
-        if cfg!(feature = "sanity-check") {
-            // check poly evaluation on point equal eval
-            let point_poly_pair = witin_comms
-                .polys
-                .iter()
-                .zip_eq(points)
-                .flat_map(|((circuit_index, witin_polys), point)| {
-                    let fixed_iter = fixed_comms
-                        .and_then(|fixed_comms| fixed_comms.polys.get(circuit_index))
-                        .into_iter()
-                        .flatten()
-                        .cloned();
-                    let flatten_polys = witin_polys
-                        .iter()
-                        .cloned()
-                        .chain(fixed_iter)
-                        .collect::<Vec<ArcMultilinearExtension<E>>>();
-                    let points = vec![point.clone(); flatten_polys.len()];
-                    izip!(points, flatten_polys)
-                })
-                .collect::<Vec<(Point<E>, ArcMultilinearExtension<E>)>>();
-            assert!(
-                point_poly_pair
-                    .into_iter()
-                    .zip_eq(evals.iter().flatten())
-                    .all(|((point, poly), eval)| poly.evaluate(&point) == *eval)
-            );
+        // sanity check
+        for (pcs_data, point_and_evals) in rounds.iter() {
+            let matrices = base_mmcs.get_matrices(&pcs_data.codeword);
+            // number of point match with number of matrices committed
+            assert_eq!(matrices.len(), point_and_evals.len());
         }
 
-        // identify trivial/non trivial based on size
-        let (trivial_witin_polys_and_meta, witin_polys_and_meta): (Vec<_>, _) =
-            izip!(points, &witin_comms.polys)
-                .map(|(point, (circuit_index, polys))| (point, (*circuit_index, polys)))
-                .partition(|(_, (_, polys))| {
-                    polys[0].num_vars() <= Spec::get_basecode_msg_size_log()
-                });
+        if cfg!(feature = "sanity-check") {
+            // check poly evaluated on point equals to the expected value
+            for (pcs_data, point_and_evals) in rounds.iter() {
+                for (polys, (point, evals)) in pcs_data.polys.iter().zip_eq(point_and_evals.iter())
+                {
+                    assert_eq!(polys.len(), evals.len());
+                    assert!(
+                        polys.iter().all(|poly| poly.num_vars() == point.len()),
+                        "all polys must have the same number of variables as the point"
+                    );
+                    assert!(
+                        polys
+                            .iter()
+                            .zip_eq(evals.iter())
+                            .all(|(poly, eval)| poly.evaluate(point) == *eval),
+                        "all polys must evaluate to the same value at the point"
+                    )
+                }
+            }
+        }
 
-        let max_num_vars = witin_polys_and_meta
+        let max_num_var = rounds
             .iter()
-            .map(|(_, (_, polys))| polys[0].num_vars())
+            .map(|(pcs_data, _)| pcs_data.log2_max_codeword_size - Spec::get_rate_log())
             .max()
             .unwrap();
 
@@ -359,47 +260,12 @@ where
         let commit_phase_span = entered_span!("Basefold::open::commit_phase");
         let (trees, commit_phase_proof) = batch_commit_phase::<E, Spec>(
             &pp.encoding_params,
-            fixed_comms,
-            &witin_comms.codeword,
-            witin_polys_and_meta,
+            &rounds,
+            max_num_var,
+            max_num_var - Spec::get_basecode_msg_size_log(),
             transcript,
-            max_num_vars,
-            max_num_vars - Spec::get_basecode_msg_size_log(),
-            circuit_num_polys,
         );
         exit_span!(commit_phase_span);
-
-        // for smaller poly, we pass their merkle tree leafs directly
-        let commit_trivial_span = entered_span!("Basefold::open::commit_trivial");
-        let trivial_proof = if !trivial_witin_polys_and_meta.is_empty() {
-            let mmcs = poseidon2_merkle_tree::<E>();
-            Some(
-                trivial_witin_polys_and_meta
-                    .iter()
-                    .map(|(_, (circuit_index, _))| {
-                        mmcs.get_matrices(&witin_comms.trivial_proofdata[circuit_index].1)
-                            .into_iter()
-                            .take(1)
-                            .chain(
-                                // fixed proof is optional
-                                fixed_comms
-                                    .and_then(|fixed_comms| {
-                                        fixed_comms.trivial_proofdata.get(circuit_index)
-                                    })
-                                    .iter()
-                                    .flat_map(|(_, proof_data)| {
-                                        mmcs.get_matrices(proof_data).into_iter().take(1)
-                                    }),
-                            )
-                            .cloned()
-                            .collect_vec()
-                    })
-                    .collect_vec(),
-            )
-        } else {
-            None
-        };
-        exit_span!(commit_trivial_span);
 
         let pow_bits = pp.get_pow_bits_by_level(crate::PowStrategy::FriPow);
         let pow_witness = if pow_bits > 0 {
@@ -415,11 +281,11 @@ where
         // Each entry in queried_els stores a list of triples (F, F, i) indicating the
         // position opened at each round and the two values at that round
         let query_opening_proof = batch_query_phase(
-            transcript,
-            fixed_comms,
-            witin_comms,
+            rounds.iter().map(|(pcs_data, _)| *pcs_data).collect_vec(),
             &trees,
             Spec::get_number_queries(),
+            max_num_var + Spec::get_rate_log(),
+            transcript,
         );
         exit_span!(query_span);
 
@@ -429,7 +295,6 @@ where
             final_message: commit_phase_proof.final_message,
             query_opening_proof,
             sumcheck_proof: Some(commit_phase_proof.sumcheck_messages),
-            trivial_proof,
             pow_witness,
         })
     }
@@ -463,187 +328,46 @@ where
 
     fn batch_verify(
         vp: &Self::VerifierParam,
-        num_instances: &[(usize, usize)],
-        points: &[Point<E>],
-        fixed_comms: Option<&Self::Commitment>,
-        witin_comms: &Self::Commitment,
-        evals: &[Vec<E>],
+        rounds: Vec<(
+            Self::Commitment,
+            // for each matrix:
+            Vec<(
+                // its num_vars,
+                usize,
+                (
+                    // the point,
+                    Point<E>,
+                    // values at the point
+                    Vec<E>,
+                ),
+            )>,
+        )>,
         proof: &Self::Proof,
-        circuit_num_polys: &[(usize, usize)],
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), Error> {
-        let mmcs = poseidon2_merkle_tree::<E>();
-
-        assert_eq!(num_instances.len(), points.len());
-
-        let circuit_num_vars = num_instances
-            .iter()
-            .map(|(index, num_instance)| {
-                (
-                    *index,
-                    next_pow2_instance_padding(*num_instance).ilog2() as usize,
-                )
-            })
-            .collect_vec();
-
         assert!(
-            izip!(&circuit_num_vars, points)
-                .all(|((_, circuit_num_var), point)| point.len() == *circuit_num_var)
+            !proof.final_message.is_empty()
+                && proof
+                    .final_message
+                    .iter()
+                    .map(|final_message| { final_message.len() })
+                    .chain(std::iter::once(1 << Spec::get_basecode_msg_size_log()))
+                    .all_equal(),
+            "final message size should be equal to 1 << Spec::get_basecode_msg_size_log()"
         );
-
-        // preprocess data into respective group, in particularly, trivials vs non-trivials
-        let mut circuit_metas = vec![];
-        let mut circuit_trivial_metas = vec![];
-        let mut evals_iter = evals.iter().cloned();
-        let (trivial_point_evals, point_evals) = izip!(&circuit_num_vars, points).fold(
-            (vec![], vec![]),
-            |(mut trivial_point_evals, mut point_evals), ((circuit_index, num_var), point)| {
-                let (expected_witins_num_poly, expected_fixed_num_poly) =
-                    &circuit_num_polys[*circuit_index];
-                let mut circuit_meta = CircuitIndexMeta {
-                    witin_num_vars: *num_var,
-                    witin_num_polys: *expected_witins_num_poly,
-                    ..Default::default()
-                };
-                // NOTE: for evals, we concat witin with fixed to make process easier
-                if *num_var <= Spec::get_basecode_msg_size_log() {
-                    trivial_point_evals.push((
-                        point.clone(),
-                        evals_iter.next().unwrap()[0..*expected_witins_num_poly].to_vec(),
-                    ));
-                    if *expected_fixed_num_poly > 0 {
-                        circuit_meta.fixed_num_vars = *num_var;
-                        circuit_meta.fixed_num_polys = *expected_fixed_num_poly;
-                        trivial_point_evals.last_mut().unwrap().1.extend(
-                            evals_iter.next().unwrap()[0..*expected_fixed_num_poly].to_vec(),
-                        )
-                    }
-                    circuit_trivial_metas.push(circuit_meta);
-                } else {
-                    point_evals.push((
-                        point.clone(),
-                        evals_iter.next().unwrap()[0..*expected_witins_num_poly].to_vec(),
-                    ));
-                    if *expected_fixed_num_poly > 0 {
-                        circuit_meta.fixed_num_vars = *num_var;
-                        circuit_meta.fixed_num_polys = *expected_fixed_num_poly;
-                        point_evals.last_mut().unwrap().1.extend(
-                            evals_iter.next().unwrap()[0..*expected_fixed_num_poly].to_vec(),
-                        );
-                    }
-                    circuit_metas.push(circuit_meta);
-                }
-
-                (trivial_point_evals, point_evals)
-            },
-        );
-        assert!(evals_iter.next().is_none());
-
-        // check trivial proofs
-        if !circuit_trivial_metas.is_empty() {
-            let mut trivial_fixed_commit = fixed_comms
-                .as_ref()
-                .map(|fc| fc.trivial_commits.iter().cloned())
-                .unwrap_or_default();
-            assert!(proof.trivial_proof.is_some());
-            assert!(
-                [
-                    circuit_trivial_metas.len(),
-                    proof.trivial_proof.as_ref().unwrap().len(),
-                    witin_comms.trivial_commits.len()
-                ]
-                .iter()
-                .all_equal()
-            );
-
-            // 1. check mmcs verify opening
-            // 2. check mle.evaluate(point) == evals
-            circuit_trivial_metas
-                .iter()
-                .zip_eq(proof.trivial_proof.as_ref().unwrap())
-                .zip_eq(&trivial_point_evals)
-                .zip_eq(&witin_comms.trivial_commits)
-                .try_for_each(
-                    |(
-                        (
-                            (
-                                CircuitIndexMeta {
-                                    fixed_num_polys, ..
-                                },
-                                proof,
-                            ),
-                            (point, witin_fixed_evals),
-                        ),
-                        witin_commit,
-                    )| {
-                        let witin_rmm = proof[0].clone();
-                        let (commit, _) = mmcs.commit_matrix(witin_rmm.clone());
-                        if commit != *witin_commit {
-                            Err(Error::MerkleRootMismatch)?;
-                        }
-                        let mut mles = RowMajorMatrix::new_by_inner_matrix(
-                            witin_rmm,
-                            InstancePaddingStrategy::Default,
-                        )
-                        .to_mles();
-
-                        if *fixed_num_polys > 0 {
-                            let fixed_rmm = proof[1].clone();
-                            let fixed_commit =
-                                trivial_fixed_commit.next().expect("proof must exist");
-                            // NOTE rmm clone here is ok since trivial proof is relatively small
-                            let (commit, _) = mmcs.commit_matrix(fixed_rmm.clone());
-                            if commit != fixed_commit {
-                                Err(Error::MerkleRootMismatch)?;
-                            }
-                            mles.extend(
-                                RowMajorMatrix::new_by_inner_matrix(
-                                    fixed_rmm,
-                                    InstancePaddingStrategy::Default,
-                                )
-                                .to_mles(),
-                            );
-                        }
-
-                        mles.iter()
-                            .zip_eq(witin_fixed_evals)
-                            .all(|(mle, eval)| mle.evaluate(point) == *eval)
-                            .then_some(())
-                            .ok_or_else(|| {
-                                Error::PointEvalMismatch("trivial point eval mismatch".to_string())
-                            })
-                    },
-                )?;
-            #[cfg(debug_assertions)]
-            {
-                Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
-                    "batch_verify::trivial_verify",
-                );
-            }
-        }
-
-        if circuit_metas.is_empty() {
-            return Ok(());
-        } else {
-            assert!(
-                !proof.final_message.is_empty()
-                    && proof
-                        .final_message
-                        .iter()
-                        .map(|final_message| { final_message.len() })
-                        .chain(std::iter::once(1 << Spec::get_basecode_msg_size_log()))
-                        .all_equal(),
-                "final message size should be equal to 1 << Spec::get_basecode_msg_size_log()"
-            );
-            assert!(proof.sumcheck_proof.is_some(), "sumcheck proof must exist");
-            assert_eq!(proof.query_opening_proof.len(), Spec::get_number_queries())
-        }
+        assert!(proof.sumcheck_proof.is_some(), "sumcheck proof must exist");
+        assert_eq!(proof.query_opening_proof.len(), Spec::get_number_queries());
 
         // verify non trivial proof
-        let total_num_polys = circuit_metas
+        let total_num_polys = rounds
             .iter()
-            .map(|circuit_meta| circuit_meta.witin_num_polys + circuit_meta.fixed_num_polys)
-            .sum();
+            .map(|(_, openings)| {
+                openings
+                    .iter()
+                    .map(|(_, (_, evals))| evals.len())
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
         let batch_coeffs =
             &transcript.sample_and_append_challenge_pows(total_num_polys, b"batch coeffs");
 
@@ -654,7 +378,26 @@ where
             );
         }
 
-        let max_num_var = *circuit_num_vars.iter().map(|(_, n)| n).max().unwrap();
+        let max_num_var = rounds
+            .iter()
+            .map(|(commit, openings)| {
+                let max_num_var = openings
+                    .iter()
+                    .map(|(num_vars, _)| *num_vars)
+                    .max()
+                    .unwrap();
+                assert_eq!(
+                    commit.log2_max_codeword_size,
+                    max_num_var + Spec::get_rate_log()
+                );
+                max_num_var
+            })
+            .max()
+            .unwrap();
+        if max_num_var < Spec::get_basecode_msg_size_log() {
+            // all the matrices are trivial, so we can skip the folding
+            return Ok(());
+        }
         let num_rounds = max_num_var - Spec::get_basecode_msg_size_log();
 
         // prepare folding challenges via sumcheck round msg + FRI commitment
@@ -678,7 +421,6 @@ where
                 "batch_verify::interleaving_folding",
             );
         }
-        let final_message = &proof.final_message;
         transcript.append_field_element_exts_iter(proof.final_message.iter().flatten());
 
         // check pow
@@ -700,20 +442,14 @@ where
         }
 
         // verify basefold sumcheck + FRI codeword query
-        batch_verifier_query_phase::<E, Spec>(
-            max_num_var,
-            &queries,
+        batch_verifier_query_phase::<E, Spec::EncodingScheme>(
             &vp.encoding_params,
-            final_message,
+            max_num_var,
             batch_coeffs,
-            &proof.query_opening_proof,
-            fixed_comms,
-            witin_comms,
-            &circuit_metas,
-            &proof.commits,
             &fold_challenges,
-            sumcheck_messages,
-            &point_evals,
+            &queries,
+            proof,
+            &rounds,
         );
 
         #[cfg(debug_assertions)]
@@ -740,7 +476,7 @@ where
     fn get_arc_mle_witness_from_commitment(
         commitment: &Self::CommitmentWithWitness,
     ) -> Vec<ArcMultilinearExtension<'static, E>> {
-        commitment.polys.values().flatten().cloned().collect_vec()
+        commitment.polys.iter().flatten().cloned().collect_vec()
     }
 }
 

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 use ceno_zkvm::{
     self,
@@ -41,9 +41,9 @@ const NUM_SAMPLES: usize = 10;
 fn bench_add(c: &mut Criterion) {
     type Pcs = BasefoldDefault<E>;
     let mut zkvm_cs = ZKVMConstraintSystem::default();
-    let _ = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
+    let config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &config);
 
     let param = Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).unwrap();
     let (pp, vp) = Pcs::trim(param, 1 << MAX_NUM_VARIABLES).unwrap();
@@ -77,10 +77,7 @@ fn bench_add(c: &mut Criterion) {
                     for _ in 0..iters {
                         // generate mock witness
                         let num_instances = 1 << instance_num_vars;
-                        let rmms = BTreeMap::from([(
-                            0,
-                            RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin),
-                        )]);
+                        let rmms = vec![RowMajorMatrix::rand(&mut OsRng, num_instances, num_witin)];
 
                         let instant = std::time::Instant::now();
                         let num_instances = 1 << instance_num_vars;

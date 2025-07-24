@@ -1,30 +1,39 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{ByteAddr, InsnKind, PC_STEP_SIZE, StepRecord, Tracer};
+use ceno_emul::{ByteAddr, Cycle, InsnKind, Platform, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    ProtocolWitnessGenerator,
-    gkr::GKRCircuit,
-    precompiles::{KECCAK_INPUT32_SIZE, KeccakLayout, KeccakTrace},
+    ProtocolBuilder, ProtocolWitnessGenerator,
+    gkr::{GKRCircuit, layer::Layer},
 };
-use itertools::Itertools;
-use multilinear_extensions::ToExpr;
-use p3::field::FieldAlgebra;
-use witness::RowMajorMatrix;
+use itertools::{Itertools, izip};
+use multilinear_extensions::{ToExpr, util::max_usable_threads};
+use p3::{field::FieldAlgebra, matrix::Matrix};
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSlice,
+};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
-    chip_handler::{GlobalStateRegisterMachineChipOperations, general::InstFetch},
+    Value,
+    chip_handler::general::InstFetch,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
         Instruction,
         riscv::{
             constants::UInt,
-            insn_base::{ReadRS1, ReadRS2},
+            ecall_base::WriteFixedRS,
+            insn_base::{StateInOut, WriteMEM},
         },
     },
+    precompiles::{
+        KECCAK_ROUNDS, KeccakInstance, KeccakLayout, KeccakParams, KeccakStateInstance,
+        KeccakTrace, KeccakWitInstance,
+    },
     structs::ProgramParams,
-    tables::InsnRecord,
+    tables::{InsnRecord, RMMCollections},
     witness::LkMultiplicity,
 };
 
@@ -32,6 +41,10 @@ use crate::{
 pub struct EcallKeccakConfig<E: ExtensionField> {
     pub circuit: GKRCircuit<E>,
     pub layout: KeccakLayout<E>,
+    vm_state: StateInOut<E>,
+    ecall_id: (WriteFixedRS<E, { Platform::reg_ecall() }>, UInt<E>),
+    state_ptr: (WriteFixedRS<E, { Platform::reg_arg0() }>, UInt<E>),
+    mem_rw: Vec<WriteMEM>,
 }
 
 /// KeccakInstruction can handle any instruction and produce its side-effects.
@@ -55,25 +68,32 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        // construct keccak gkr-iop circuit
-        let params = gkr_iop::precompiles::KeccakParams {};
-        let (layout, chip) = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build(params);
-        let circuit = chip.gkr_circuit();
-
-        // TODO FIXME below circuit construction are out-of-sync with gkr-iop circuit, because both constrain system are separated
-        // TODO FIXME and manage constrains/witness in isolated struct
         // constrain vmstate
-        // state in and out
-        let cur_ts = layout.layer_exprs.wits.cur_ts[0].expr();
-        let next_ts = cur_ts.clone() + Tracer::SUBCYCLES_PER_INSN;
-        let pc = layout.layer_exprs.wits.pc[0].expr();
-        let next_pc = pc.expr() + PC_STEP_SIZE;
-        cb.state_in(pc.clone(), cur_ts.clone())?;
-        cb.state_out(next_pc, next_ts)?;
+        let vm_state = StateInOut::construct_circuit(cb, false)?;
+
+        let ecall_id_value = UInt::new_unchecked(|| "ecall_id", cb)?;
+        let state_ptr_value = UInt::new_unchecked(|| "state_ptr", cb)?;
+
+        let ecall_id = (
+            WriteFixedRS::<_, { Platform::reg_ecall() }>::construct_circuit(
+                cb,
+                ecall_id_value.register_expr(),
+                vm_state.ts,
+            )?,
+            ecall_id_value,
+        );
+        let state_ptr = (
+            WriteFixedRS::<_, { Platform::reg_arg0() }>::construct_circuit(
+                cb,
+                state_ptr_value.register_expr(),
+                vm_state.ts,
+            )?,
+            state_ptr_value,
+        );
 
         // fetch
         cb.lk_fetch(&InsnRecord::new(
-            pc.clone(),
+            vm_state.pc.expr(),
             InsnKind::ECALL.into(),
             Some(E::BaseField::ZERO.expr()),
             E::BaseField::ZERO.expr(),
@@ -81,59 +101,175 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             E::BaseField::ZERO.expr(),
         ))?;
 
-        // TODO register read are not under same constrain system
-        // rs1: ecall code
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let _rs1_op = ReadRS1::construct_circuit(
+        let mut layout = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(
             cb,
-            rs1_read.register_expr(),
-            layout.layer_exprs.wits.cur_ts[0],
+            KeccakParams {},
         )?;
 
-        // rs2: state ptr
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
-        let _rs2_op = ReadRS2::construct_circuit(
-            cb,
-            rs2_read.register_expr(),
-            layout.layer_exprs.wits.cur_ts[0],
-        )?;
+        // memory rw, for we in-place update
+        let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
+            .enumerate()
+            .map(|(i, (val_before, val_after))| {
+                WriteMEM::construct_circuit(
+                    cb,
+                    // mem address := state_ptr + i
+                    state_ptr.0.prev_value.value()
+                        + E::BaseField::from_canonical_u32(i as u32).expr(),
+                    val_before.expr(),
+                    val_after.expr(),
+                    vm_state.ts,
+                )
+            })
+            .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        Ok(EcallKeccakConfig { circuit, layout })
+        let (out_evals, mut chip) = layout.finalize(cb);
+
+        let layer =
+            Layer::from_circuit_builder(cb, "Rounds".to_string(), layout.n_challenges(), out_evals);
+        chip.add_layer(layer);
+
+        let circuit = chip.gkr_circuit();
+
+        Ok(EcallKeccakConfig {
+            circuit,
+            layout,
+            vm_state,
+            ecall_id,
+            state_ptr,
+            mem_rw,
+        })
+    }
+
+    fn generate_fixed_traces(
+        config: &Self::InstructionConfig,
+        num_fixed: usize,
+    ) -> Option<RowMajorMatrix<E::BaseField>> {
+        let fixed = config.layout.fixed_witness_group();
+        assert_eq!(fixed.width(), num_fixed);
+        Some(fixed)
     }
 
     fn assign_instances(
         config: &Self::InstructionConfig,
-        _num_witin: usize,
+        num_witin: usize,
+        num_structural_witin: usize,
         steps: Vec<StepRecord>,
-    ) -> Result<(RowMajorMatrix<E::BaseField>, LkMultiplicity), ZKVMError> {
+    ) -> Result<(RMMCollections<E::BaseField>, LkMultiplicity), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
-        let instances = steps
+        if steps.is_empty() {
+            return Ok((
+                [
+                    RowMajorMatrix::new(0, num_witin, InstancePaddingStrategy::Default),
+                    RowMajorMatrix::new(0, num_structural_witin, InstancePaddingStrategy::Default),
+                ],
+                lk_multiplicity,
+            ));
+        }
+        let nthreads = max_usable_threads();
+        let num_instance_per_batch = steps.len().div_ceil(nthreads).max(1);
+
+        let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+            config.layout.phase1_witin_rmm_height(steps.len()),
+            num_witin,
+            InstancePaddingStrategy::Default,
+        );
+        let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
+            config.layout.phase1_witin_rmm_height(steps.len()),
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
+
+        // each instance are composed of KECCAK_ROUNDS.next_power_of_two()
+        let raw_witin_iter = raw_witin
+            .par_batch_iter_mut(num_instance_per_batch * KECCAK_ROUNDS.next_power_of_two());
+
+        // 1st pass: assign witness outside of gkr-iop scope
+        raw_witin_iter
+            .zip_eq(steps.par_chunks(num_instance_per_batch))
+            .flat_map(|(instances, steps)| {
+                let mut lk_multiplicity = lk_multiplicity.clone();
+                instances
+                    .chunks_mut(num_witin * KECCAK_ROUNDS.next_power_of_two())
+                    .zip_eq(steps)
+                    .map(|(instance_with_rotation, step)| {
+                        let ops = &step.syscall().expect("syscall step");
+
+                        // assign full rotation with same witness
+                        for instance in instance_with_rotation.chunks_mut(num_witin) {
+                            // vm_state
+                            config.vm_state.assign_instance(instance, step)?;
+
+                            //  assign ecall_id
+                            config.ecall_id.1.assign_value(
+                                instance,
+                                Value::new_unchecked(ops.reg_ops[0].value.after),
+                            );
+                            config.ecall_id.0.assign_op(
+                                instance,
+                                &mut lk_multiplicity,
+                                step.cycle(),
+                                &ops.reg_ops[0],
+                            )?;
+                            //  assign state_ptr
+                            config.state_ptr.1.assign_value(
+                                instance,
+                                Value::new_unchecked(ops.reg_ops[1].value.after),
+                            );
+                            config.state_ptr.0.assign_op(
+                                instance,
+                                &mut lk_multiplicity,
+                                step.cycle(),
+                                &ops.reg_ops[1],
+                            )?;
+                            // assign mem_rw
+                            for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
+                                writer.assign_op(
+                                    instance,
+                                    &mut lk_multiplicity,
+                                    step.cycle(),
+                                    op,
+                                )?;
+                            }
+                        }
+                        Ok(())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Result<(), ZKVMError>>()?;
+
+        // second pass
+        let instances: Vec<KeccakInstance> = steps
             .iter()
-            .map(|step| {
-                step.syscall()
+            .map(|step| -> KeccakInstance {
+                let (instance, prev_ts): (Vec<u32>, Vec<Cycle>) = step
+                    .syscall()
                     .unwrap()
                     .mem_ops
                     .iter()
-                    .map(|op| op.value.before)
-                    .collect_vec()
-                    .try_into()
-                    .unwrap()
+                    .map(|op| (op.value.before, op.previous_cycle))
+                    .unzip();
+                KeccakInstance {
+                    state: KeccakStateInstance {
+                        state_ptr_address: ByteAddr::from(step.rs1().unwrap().value),
+                        cur_ts: step.cycle(),
+                        read_ts: prev_ts.try_into().unwrap(),
+                    },
+                    witin: KeccakWitInstance {
+                        instance: instance.try_into().unwrap(),
+                    },
+                }
             })
             .collect_vec();
-        let num_instances = instances.len();
 
-        let mut raw_witin = config.layout.phase1_witness_group(
-            KeccakTrace {
-                instances,
-                ram_start_addr: vec![ByteAddr::from(0); num_instances],
-                read_ts: vec![[0; KECCAK_INPUT32_SIZE]; num_instances],
-                cur_ts: vec![0; num_instances],
-            },
+        config.layout.phase1_witness_group(
+            KeccakTrace { instances },
+            [&mut raw_witin, &mut raw_structural_witin],
             &mut lk_multiplicity,
         );
 
         raw_witin.padding_by_strategy();
-        Ok((raw_witin, lk_multiplicity))
+        raw_structural_witin.padding_by_strategy();
+        Ok(([raw_witin, raw_structural_witin], lk_multiplicity))
     }
 
     fn assign_instance(

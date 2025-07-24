@@ -13,9 +13,11 @@ use crate::{
 use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use mpcs::{Point, PolynomialCommitmentScheme};
+use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, WitnessId, mle::MultilinearExtension, virtual_poly::build_eq_x_r_vec,
+    Expression, WitnessId,
+    mle::{MultilinearExtension, Point},
+    virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use rayon::{
@@ -108,15 +110,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         out_points: &[Point<<CpuBackend<E, PCS> as ProverBackend>::E>],
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
+        num_instances: usize,
     ) -> (
         LayerProof<<CpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) {
         assert_eq!(
-            layer.out_eq_and_eval_exprs.len(),
+            layer.out_sel_and_eval_exprs.len(),
             out_points.len(),
             "out eval length {} != with distinct out_point {}",
-            layer.out_eq_and_eval_exprs.len(),
+            layer.out_sel_and_eval_exprs.len(),
             out_points.len(),
         );
 
@@ -157,16 +160,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         .collect_vec();
 
         let span = entered_span!("gen_expr", profiling_4 = true);
-        let zero_check_exprs = extend_exprs_with_rotation(layer, &alpha_pows);
+        let zero_check_exprs =
+            extend_exprs_with_rotation(layer, &alpha_pows, layer.n_witin as WitnessId);
         exit_span!(span);
 
         let span = entered_span!("build_out_points_eq", profiling_4 = true);
         // zero check eq || rotation eq
-        let mut eqs = out_points
+        let mut eqs = layer
+            .out_sel_and_eval_exprs
             .par_iter()
-            .map(|point| {
-                MultilinearExtension::from_evaluations_ext_vec(point.len(), build_eq_x_r_vec(point))
-            })
+            .zip(out_points.par_iter())
+            .filter_map(|((sel_type, _), point)| sel_type.compute(point, num_instances))
             // for rotation left point
             .chain(rotation_left.par_iter().map(|rotation_left| {
                 MultilinearExtension::from_evaluations_ext_vec(
@@ -191,14 +195,31 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .collect::<Vec<_>>();
         exit_span!(span);
 
-        let builder = VirtualPolynomialsBuilder::new_with_mles(
-            num_threads,
-            max_num_variables,
-            wit.iter()
-                .map(|mle| Either::Left(mle.as_ref()))
-                .chain(eqs.iter_mut().map(Either::Right))
-                .collect_vec(),
+        // `wit` := witin ++ fixed
+        // we concat eq in between `wit` := witin ++ eqs ++ fixed
+        let all_witins = wit
+            .iter()
+            .take(layer.n_witin)
+            .map(|mle| Either::Left(mle.as_ref()))
+            .chain(eqs.iter_mut().map(Either::Right))
+            .chain(
+                // fixed, start after `n_witin`
+                wit.iter()
+                    .skip(layer.n_witin + layer.n_structural_witin)
+                    .map(|mle| Either::Left(mle.as_ref())),
+            )
+            .collect_vec();
+        assert_eq!(
+            all_witins.len(),
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {}",
+            all_witins.len(),
+            layer.n_witin,
+            layer.n_structural_witin,
+            layer.n_fixed,
         );
+        let builder =
+            VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins);
 
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
         let zero_check_expr: Expression<E> = zero_check_exprs.into_iter().sum();

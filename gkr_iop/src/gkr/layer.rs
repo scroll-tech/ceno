@@ -1,12 +1,13 @@
-use std::{sync::Arc, vec::IntoIter};
+use std::{ops::Neg, sync::Arc, vec::IntoIter};
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
-    Expression,
+    Expression, Fixed, ToExpr, WitnessId,
     mle::{Point, PointAndEval},
 };
+use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sumcheck_layer::LayerProof;
@@ -14,9 +15,12 @@ use transcript::Transcript;
 use zerocheck_layer::ZerocheckLayer;
 
 use crate::{
+    OutEvalGroups,
+    circuit_builder::{CircuitBuilder, ConstraintSystem, RotationParams},
     error::BackendError,
     evaluation::EvalExpression,
     hal::{MultilinearPolynomial, ProverBackend, ProverDevice},
+    selector::SelectorType,
 };
 
 pub mod cpu;
@@ -26,7 +30,7 @@ pub mod linear_layer;
 pub mod sumcheck_layer;
 pub mod zerocheck_layer;
 
-pub type ExprEvalType<E> = Vec<(Option<Expression<E>>, Vec<EvalExpression<E>>)>;
+pub type ExprEvalType<E> = (SelectorType<E>, Vec<EvalExpression<E>>);
 pub type RotateExprs<E> = (
     Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
     Vec<(Expression<E>, Expression<E>)>,
@@ -50,6 +54,9 @@ pub enum LayerType {
 pub struct Layer<E: ExtensionField> {
     pub name: String,
     pub ty: LayerType,
+    pub n_witin: usize,
+    pub n_structural_witin: usize,
+    pub n_fixed: usize,
     pub max_expr_degree: usize,
     /// num challenges dedicated to this layer.
     pub n_challenges: usize,
@@ -68,9 +75,9 @@ pub struct Layer<E: ExtensionField> {
     pub in_eval_expr: Vec<usize>,
     /// The expressions of the evaluations from the succeeding layers, which are
     /// connected to the outputs of this layer.
-    /// It format indicated as different output group
+    /// It formats indicated as different output group
     /// first tuple value is optional eq
-    pub out_eq_and_eval_exprs: ExprEvalType<E>,
+    pub out_sel_and_eval_exprs: Vec<ExprEvalType<E>>,
 
     // format: ([eq0, eq1, eq2], Vec<(rotatition_expr, expr)>) such that rotation_expr - expr == 0
     // there got 3 different eq for (left, right, target) during rotation argument
@@ -99,12 +106,15 @@ impl<E: ExtensionField> Layer<E> {
     pub fn new(
         name: String,
         ty: LayerType,
+        n_witin: usize,
+        n_structural_witin: usize,
+        n_fixed: usize,
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
         n_challenges: usize,
         in_eval_expr: Vec<usize>,
         // first tuple value is eq
-        out_eq_and_eval_exprs: ExprEvalType<E>,
+        out_sel_and_eval_exprs: Vec<ExprEvalType<E>>,
         ((rotation_eq, rotation_exprs), rotation_cyclic_group_log2, rotation_cyclic_subgroup_size): (
             RotateExprs<E>,
             usize,
@@ -125,11 +135,14 @@ impl<E: ExtensionField> Layer<E> {
         Self {
             name,
             ty,
+            n_witin,
+            n_structural_witin,
+            n_fixed,
             max_expr_degree,
             n_challenges,
             exprs,
             in_eval_expr,
-            out_eq_and_eval_exprs,
+            out_sel_and_eval_exprs,
             rotation_exprs: (rotation_eq, rotation_exprs),
             rotation_cyclic_group_log2,
             rotation_cyclic_subgroup_size,
@@ -146,6 +159,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut T,
+        num_instances: usize,
     ) -> LayerProof<E> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
@@ -164,6 +178,7 @@ impl<E: ExtensionField> Layer<E> {
                     &out_points,
                     challenges,
                     transcript,
+                    num_instances,
                 )
             }
             LayerType::Linear => {
@@ -189,7 +204,8 @@ impl<E: ExtensionField> Layer<E> {
         claims: &mut [PointAndEval<E>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
-    ) -> Result<(), BackendError<E>> {
+        num_instances: usize,
+    ) -> Result<(), BackendError> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
@@ -201,6 +217,7 @@ impl<E: ExtensionField> Layer<E> {
                 eval_and_dedup_points,
                 challenges,
                 transcript,
+                num_instances,
             )?,
             LayerType::Linear => {
                 assert_eq!(eval_and_dedup_points.len(), 1);
@@ -227,7 +244,7 @@ impl<E: ExtensionField> Layer<E> {
         claims: &[PointAndEval<E>],
         challenges: &[E],
     ) -> Vec<(Vec<E>, Option<Point<E>>)> {
-        self.out_eq_and_eval_exprs
+        self.out_sel_and_eval_exprs
             .iter()
             .map(|(_, out_evals)| {
                 let evals = out_evals
@@ -265,6 +282,207 @@ impl<E: ExtensionField> Layer<E> {
                 point: point.clone(),
                 eval: *value,
             };
+        }
+    }
+
+    pub fn from_circuit_builder(
+        cb: &CircuitBuilder<E>,
+        layer_name: String,
+        n_challenges: usize,
+        out_evals: OutEvalGroups<E>,
+    ) -> Layer<E> {
+        let w_len = cb.cs.w_expressions.len();
+        let r_len = cb.cs.r_expressions.len();
+        let lk_len = cb.cs.lk_expressions.len();
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
+        let [r_record_evals, w_record_evals, lookup_evals, zero_evals] = out_evals;
+        assert_eq!(r_record_evals.1.len(), r_len);
+        assert_eq!(w_record_evals.1.len(), w_len);
+        assert_eq!(lookup_evals.1.len(), lk_len);
+        assert_eq!(zero_evals.1.len(), zero_len);
+
+        let non_zero_expr_len = cb.cs.w_expressions_namespace_map.len()
+            + cb.cs.r_expressions_namespace_map.len()
+            + cb.cs.lk_expressions.len();
+        let zero_expr_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
+        let mut expr_evals = Vec::with_capacity(4);
+        let mut expr_names = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
+        let mut expressions = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
+
+        // process r_record
+        let mut evals = vec![];
+        for (idx, ((ram_expr, name), ram_eval)) in cb
+            .cs
+            .r_expressions
+            .iter()
+            .zip_eq(&cb.cs.r_expressions_namespace_map)
+            .zip_eq(&r_record_evals.1)
+            .enumerate()
+        {
+            expressions.push(ram_expr - E::BaseField::ONE.expr());
+            evals.push(EvalExpression::<E>::Linear(
+                // evaluation = claim * one - one (padding)
+                *ram_eval,
+                E::BaseField::ONE.expr().into(),
+                E::BaseField::ONE.neg().expr().into(),
+            ));
+            expr_names.push(format!("{}/{idx}", name));
+        }
+        expr_evals.push((r_record_evals.0.clone(), evals));
+
+        // process w_record
+        let mut evals = vec![];
+        for (idx, ((ram_expr, name), ram_eval)) in cb
+            .cs
+            .w_expressions
+            .iter()
+            .zip_eq(&cb.cs.w_expressions_namespace_map)
+            .zip_eq(&w_record_evals.1)
+            .enumerate()
+        {
+            expressions.push(ram_expr - E::BaseField::ONE.expr());
+            evals.push(EvalExpression::<E>::Linear(
+                // evaluation = claim * one - one (padding)
+                *ram_eval,
+                E::BaseField::ONE.expr().into(),
+                E::BaseField::ONE.neg().expr().into(),
+            ));
+            expr_names.push(format!("{}/{idx}", name));
+        }
+        expr_evals.push((w_record_evals.0.clone(), evals));
+
+        // process lookup records
+        let mut evals = vec![];
+        for (idx, ((lookup, name), lookup_eval)) in cb
+            .cs
+            .lk_expressions
+            .iter()
+            .zip_eq(&cb.cs.lk_expressions_namespace_map)
+            .zip_eq(&lookup_evals.1)
+            .enumerate()
+        {
+            expressions.push(lookup - cb.cs.chip_record_alpha.clone());
+            evals.push(EvalExpression::<E>::Linear(
+                // evaluation = claim * one - alpha (padding)
+                *lookup_eval,
+                E::BaseField::ONE.expr().into(),
+                cb.cs.chip_record_alpha.clone().neg().into(),
+            ));
+            expr_names.push(format!("{}/{idx}", name));
+        }
+        expr_evals.push((lookup_evals.0.clone(), evals));
+
+        // sanity check
+        assert_eq!(
+            lookup_evals.0, zero_evals.0,
+            "require lookup selector be the same as zero selector"
+        );
+        // process zero_record
+        let (_, ref mut evals) = expr_evals.last_mut().unwrap();
+        for (idx, (zero_expr, name)) in izip!(
+            0..,
+            chain!(
+                cb.cs
+                    .assert_zero_expressions
+                    .iter()
+                    .zip_eq(&cb.cs.assert_zero_expressions_namespace_map),
+                cb.cs
+                    .assert_zero_sumcheck_expressions
+                    .iter()
+                    .zip_eq(&cb.cs.assert_zero_sumcheck_expressions_namespace_map)
+            )
+        ) {
+            expressions.push(zero_expr.clone());
+            evals.push(EvalExpression::Zero);
+            expr_names.push(format!("{}/{idx}", name));
+        }
+
+        let witin_offset = 0 as WitnessId;
+        let structural_witin_offset = witin_offset + (cb.cs.num_witin as WitnessId);
+        let fixed_offset = structural_witin_offset + (cb.cs.num_structural_witin as WitnessId);
+
+        // Sort expressions, expr_names, and evals according to eval.0 and classify evals.
+        let ConstraintSystem {
+            rotation_params,
+            rotations,
+            ..
+        } = &cb.cs;
+
+        let mut is_layer_linear =
+            expressions
+                .iter_mut()
+                .fold(rotations.is_empty(), |is_linear_so_far, t| {
+                    // replace `Fixed` and `StructuralWitIn` with `WitIn`, keep other unchanged
+                    *t = t.transform_all(
+                        &|Fixed(fixed_id)| {
+                            Expression::WitIn(fixed_offset + (*fixed_id as WitnessId))
+                        },
+                        &|id| Expression::WitIn(id),
+                        &|structural_wit_id, _, _, _| {
+                            Expression::WitIn(structural_witin_offset + structural_wit_id)
+                        },
+                        &|i| Expression::Instance(i),
+                        &|c| Expression::Constant(c),
+                        &|cid, pow, s, o| Expression::Challenge(cid, pow, s, o),
+                    );
+                    is_linear_so_far && t.is_linear()
+                });
+
+        is_layer_linear = is_layer_linear && expr_evals.len() == 1;
+
+        let layer_type = if is_layer_linear {
+            LayerType::Linear
+        } else {
+            LayerType::Zerocheck
+        };
+
+        let in_eval_expr = (non_zero_expr_len..)
+            .take(cb.cs.num_witin as usize + cb.cs.num_fixed)
+            .collect_vec();
+        if rotations.is_empty() {
+            Layer::new(
+                layer_name,
+                layer_type,
+                cb.cs.num_witin as usize,
+                cb.cs.num_structural_witin as usize,
+                cb.cs.num_fixed,
+                expressions,
+                n_challenges,
+                in_eval_expr,
+                expr_evals,
+                ((None, vec![]), 0, 0),
+                expr_names,
+            )
+        } else {
+            let Some(RotationParams {
+                rotation_eqs,
+                rotation_cyclic_group_log2,
+                rotation_cyclic_subgroup_size,
+            }) = rotation_params
+            else {
+                panic!("rotation params not set");
+            };
+            Layer::new(
+                layer_name,
+                layer_type,
+                cb.cs.num_witin as usize,
+                cb.cs.num_structural_witin as usize,
+                cb.cs.num_fixed,
+                expressions,
+                n_challenges,
+                in_eval_expr,
+                expr_evals,
+                (
+                    (rotation_eqs.clone(), rotations.clone()),
+                    *rotation_cyclic_group_log2,
+                    *rotation_cyclic_subgroup_size,
+                ),
+                expr_names,
+            )
         }
     }
 }

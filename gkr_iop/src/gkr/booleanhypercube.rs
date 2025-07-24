@@ -9,7 +9,7 @@ pub struct BooleanHypercube {
 }
 
 // 2^5-1 cyclic group
-const CYCLIC_POW2_5: [u64; 32] = [
+pub const CYCLIC_POW2_5: [u64; 32] = [
     0b00001, // 0 = decimal 1
     0b00010, // 1 = decimal 2
     0b00100, // 2 = decimal 4

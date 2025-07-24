@@ -18,6 +18,7 @@ ceno_gpu.workspace = true
 either.workspace = true
 ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "5af7c08" }
 gkr_iop = { path = "../gkr_iop" }
+keccakf = "0.1.2"
 mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "5af7c08" }
 multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "5af7c08" }
 p3.workspace = true
@@ -30,6 +31,7 @@ transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcrip
 witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "5af7c08" }
 
 itertools.workspace = true
+ndarray.workspace = true
 num-traits.workspace = true
 paste.workspace = true
 poseidon.workspace = true
@@ -102,3 +104,15 @@ name = "quadratic_sorting"
 [[bench]]
 harness = false
 name = "is_prime"
+
+[[bench]]
+harness = false
+name = "keccak"
+
+[[bench]]
+harness = false
+name = "bitwise_keccakf"
+
+[[bench]]
+harness = false
+name = "lookup_keccakf"

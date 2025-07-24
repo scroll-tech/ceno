@@ -8,8 +8,7 @@ use multilinear_extensions::{
     mle::{MultilinearExtension, Point, PointAndEval},
     util::ceil_log2,
 };
-use p3_field::FieldAlgebra;
-use p3_util::indices_arr;
+use p3::{field::FieldAlgebra, util::indices_arr};
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
@@ -18,16 +17,20 @@ use tiny_keccak::keccakf;
 use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
-use crate::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
+use gkr_iop::{
+    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
+    error::CircuitBuilderError,
     evaluation::EvalExpression,
     gkr::{
         GKRCircuit, GKRProverOutput,
+        booleanhypercube::CYCLIC_POW2_5,
         layer::Layer,
         layer_constraint_system::{LayerConstraintSystem, expansion_expr},
     },
+    selector::SelectorType,
     utils::{indices_arr_with_offset, lk_multiplicity::LkMultiplicity, wits_fixed_and_eqs},
 };
 
@@ -139,8 +142,8 @@ const KECCAK_INPUT32_SIZE: usize = 50;
 const KECCAK_OUT_EVAL_SIZE: usize = size_of::<KeccakOutEvals<u8>>();
 const KECCAK_ALL_IN_EVAL_SIZE: usize = size_of::<KeccakInEvals<u8>>();
 
-#[derive(Clone, Debug, Default)]
-pub struct KeccakParams {}
+#[derive(Clone, Debug)]
+pub struct KeccakParams;
 
 #[derive(Clone, Debug)]
 #[repr(C)]
@@ -151,8 +154,9 @@ pub struct KeccakOutEvals<T> {
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub struct Output32Layer<WitT> {
+pub struct Output32Layer<WitT, EqT> {
     output: [WitT; STATE_SIZE],
+    sel: EqT,
 }
 
 #[derive(Clone, Debug)]
@@ -191,7 +195,7 @@ pub struct ThetaFirstLayer<WitT, EqT, OptionEqT> {
     round_input: [WitT; STATE_SIZE],
     eq_c: EqT,
     eq_copy: EqT,
-    eq_keccak_out: OptionEqT,
+    sel_keccak_out: OptionEqT,
 }
 
 #[derive(Clone, Debug)]
@@ -204,7 +208,7 @@ pub struct KeccakRound<WitT, EqT, OptionEqT> {
     theta_first: ThetaFirstLayer<WitT, EqT, OptionEqT>,
 }
 
-const OUTPUT32_WIT_SIZE: usize = size_of::<Output32Layer<u8>>();
+const OUTPUT32_WIT_SIZE: usize = size_of::<Output32Layer<u8, ()>>();
 const IOTA_WIT_SIZE: usize = size_of::<IotaLayer<u8, ()>>();
 const RHO_PI_AND_CHI_WIT_SIZE: usize = size_of::<RhoPiAndChiLayer<u8, ()>>();
 const THETA_THIRD_WIT_SIZE: usize = size_of::<ThetaThirdLayer<u8, ()>>();
@@ -223,7 +227,7 @@ pub struct KeccakRoundEval<T> {
 
 #[derive(Clone, Debug)]
 pub struct KeccakLayers<WitT, EqT> {
-    pub output32: Output32Layer<WitT>,
+    pub output32: Output32Layer<WitT, EqT>,
     pub inner_rounds: [KeccakRound<WitT, EqT, ()>; 23],
     pub first_round: KeccakRound<WitT, EqT, EqT>,
 }
@@ -306,8 +310,8 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
 
         // allocate witnesses, fixed, and eqs
         let layers = {
-            let (output, _, _) = wits_fixed_and_eqs::<OUTPUT32_WIT_SIZE, 0, 0>();
-            let output32 = Output32Layer { output };
+            let (output, _, [sel]) = wits_fixed_and_eqs::<OUTPUT32_WIT_SIZE, 0, 1>();
+            let output32 = Output32Layer { output, sel };
             let inner_rounds = from_fn(|_| {
                 allocate_round(|| {
                     const THETA_FIRST_EQ_SIZE: usize = size_of::<ThetaFirstLayer<(), u8, ()>>();
@@ -318,7 +322,7 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
                         round_input,
                         eq_c,
                         eq_copy,
-                        eq_keccak_out: (),
+                        sel_keccak_out: (),
                     }
                 })
             });
@@ -326,12 +330,12 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
                 const KECCAK_FIRST_EQ_SIZE: usize = size_of::<ThetaFirstLayer<(), u8, u8>>();
                 let (round_input, _, eqs) =
                     wits_fixed_and_eqs::<THETA_FIRST_WIT_SIZE, 0, KECCAK_FIRST_EQ_SIZE>();
-                let (eq_c, eq_copy, eq_keccak_out) = unsafe { transmute(eqs) };
+                let (eq_c, eq_copy, sel_keccak_out) = unsafe { transmute(eqs) };
                 ThetaFirstLayer {
                     round_input,
                     eq_c,
                     eq_copy,
-                    eq_keccak_out,
+                    sel_keccak_out,
                 }
             });
             KeccakLayers {
@@ -352,7 +356,7 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
 }
 
 fn output32_layer<E: ExtensionField>(
-    layer: &Output32Layer<WitIn>,
+    layer: &Output32Layer<WitIn, WitIn>,
     out_evals: &[usize],
     in_evals: &[usize],
     alpha: Expression<E>,
@@ -364,6 +368,10 @@ fn output32_layer<E: ExtensionField>(
     let mut keccak_output32_iter = out_evals.iter().map(|x| EvalExpression::Single(*x));
 
     // process keccak output
+    let sel_type = SelectorType::OrderedSparse32 {
+        indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
+        expression: layer.sel.expr(),
+    };
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {
@@ -376,7 +384,7 @@ fn output32_layer<E: ExtensionField>(
                 );
                 system.add_non_zero_constraint(
                     expr,
-                    (None, keccak_output32_iter.next().unwrap()),
+                    (sel_type.clone(), keccak_output32_iter.next().unwrap()),
                     format!("build 32-bit output: {x}, {y}, {k}"),
                 );
             }
@@ -399,6 +407,7 @@ fn iota_layer<E: ExtensionField>(
 
     let bits = layer.chi_output.iter().map(|e| e.expr()).collect_vec();
     let round_value = RC[round_id];
+    let sel_type = SelectorType::Whole(layer.eq.expr());
     iota_out_evals.iter().enumerate().for_each(|(i, out_eval)| {
         let expr = {
             let round_bit = E::BaseField::from_canonical_u64((round_value >> i) & 1).expr();
@@ -406,7 +415,7 @@ fn iota_layer<E: ExtensionField>(
         };
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq.expr()), EvalExpression::Single(*out_eval)),
+            (sel_type.clone(), EvalExpression::Single(*out_eval)),
             format!("Round {round_id}: Iota:: compute output {i}"),
         );
     });
@@ -455,9 +464,10 @@ fn rho_pi_and_chi_layer<E: ExtensionField>(
         } else {
             layer.eq_round_out.expr()
         };
+        let sel_type = SelectorType::Whole(eq);
         system.add_non_zero_constraint(
             chi_expr(i, &permuted),
-            (Some(eq), out_eval_iter.next().unwrap()),
+            (sel_type, out_eval_iter.next().unwrap()),
             format!("Round {round_id}: Chi:: apply rho, pi and chi [{i}]"),
         )
     });
@@ -480,12 +490,13 @@ fn theta_third_layer<E: ExtensionField>(
     let mut system = LayerConstraintSystem::new(D_SIZE + STATE_SIZE, 0, 0, None, alpha, beta);
     // Compute post-theta state using original state and D[][] values
     let mut out_eval_iter = out_evals.iter().map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq.expr());
     (0..STATE_SIZE).for_each(|i| {
         let (x, _, z) = to_xyz(i);
         let expr = xor_expr(layer.state_copy[i].expr(), layer.d[from_xz(x, z)].expr());
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::compute output [{i}]"),
         );
     });
@@ -509,11 +520,12 @@ fn theta_second_layer<E: ExtensionField>(
     // Compute D[][] from C[][] values
     let c = layer.c.iter().map(|c| c.expr()).collect_vec();
     let mut out_eval_iter = out_evals.iter().map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq.expr());
     iproduct!(0..5usize, 0..64usize).for_each(|(x, z)| {
         let expr = d_expr(x, z, &c);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::compute D[{x}][{z}]"),
         );
     });
@@ -539,11 +551,12 @@ fn theta_first_layer<E: ExtensionField>(
 
     // Compute C[][] from state
     let mut out_eval_iter = d_out_evals.iter().map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq_c.expr());
     iproduct!(0..5usize, 0..64usize).for_each(|(x, z)| {
         let expr = c_expr(x, z, &state_wits);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq_c.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::compute C[{x}][{z}]"),
         );
     });
@@ -552,11 +565,12 @@ fn theta_first_layer<E: ExtensionField>(
     let mut out_eval_iter = state_copy_out_evals
         .iter()
         .map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq_copy.expr());
     state_wits.into_iter().enumerate().for_each(|(i, expr)| {
         let (x, y, z) = to_xyz(i);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq_copy.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::copy state[{x}][{y}][{z}]"),
         )
     });
@@ -568,6 +582,7 @@ fn theta_first_layer<E: ExtensionField>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn keccak_first_layer<E: ExtensionField>(
     layer: &ThetaFirstLayer<WitIn, WitIn, WitIn>,
     d_out_evals: &[usize],
@@ -582,11 +597,12 @@ fn keccak_first_layer<E: ExtensionField>(
 
     // Compute C[][] from state
     let mut out_eval_iter = d_out_evals.iter().map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq_c.expr());
     iproduct!(0..5usize, 0..64usize).for_each(|(x, z)| {
         let expr = c_expr(x, z, &state_wits);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq_c.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::compute C[{x}][{z}]"),
         );
     });
@@ -595,17 +611,22 @@ fn keccak_first_layer<E: ExtensionField>(
     let mut out_eval_iter = state_copy_out_evals
         .iter()
         .map(|o| EvalExpression::Single(*o));
+    let sel_type = SelectorType::Whole(layer.eq_copy.expr());
     state_wits.into_iter().enumerate().for_each(|(i, expr)| {
         let (x, y, z) = to_xyz(i);
         system.add_non_zero_constraint(
             expr,
-            (Some(layer.eq_copy.expr()), out_eval_iter.next().unwrap()),
+            (sel_type.clone(), out_eval_iter.next().unwrap()),
             format!("Theta::copy state[{x}][{y}][{z}]"),
         )
     });
 
     // process keccak output
     let mut out_eval_iter = input32_out_evals.iter().map(|x| EvalExpression::Single(*x));
+    let sel_type = SelectorType::OrderedSparse32 {
+        indices: vec![CYCLIC_POW2_5[0] as usize],
+        expression: layer.sel_keccak_out.expr(),
+    };
     for x in 0..X {
         for y in 0..Y {
             for k in 0..2 {
@@ -618,10 +639,7 @@ fn keccak_first_layer<E: ExtensionField>(
                 );
                 system.add_non_zero_constraint(
                     expr,
-                    (
-                        Some(layer.eq_keccak_out.expr()),
-                        out_eval_iter.next().unwrap(),
-                    ),
+                    (sel_type.clone(), out_eval_iter.next().unwrap()),
                     format!("build 32-bit input: {x}, {y}, {k}"),
                 );
             }
@@ -635,34 +653,31 @@ fn keccak_first_layer<E: ExtensionField>(
     )
 }
 
-impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
-    type Params = KeccakParams;
-
-    fn init(_params: Self::Params) -> Self {
-        Self::default()
-    }
-
-    fn build_gkr_chip(&self) -> Chip<E> {
+impl<E: ExtensionField> KeccakLayout<E> {
+    pub fn build_gkr_chip_old(
+        _cb: &mut CircuitBuilder<E>,
+        _params: KeccakParams,
+    ) -> Result<(Self, Chip<E>), CircuitBuilderError> {
+        let layout = Self::default();
         let mut chip = Chip {
-            n_fixed: self.n_fixed(),
-            n_committed: self.n_committed(),
-            n_challenges: self.n_challenges(),
-            n_evaluations: self.n_evaluations(),
-            n_nonzero_out_evals: self.n_nonzero_out_evals(),
+            n_fixed: layout.n_fixed(),
+            n_committed: layout.n_committed(),
+            n_challenges: layout.n_challenges(),
+            n_evaluations: layout.n_evaluations(),
             layers: vec![],
             final_out_evals: unsafe {
                 transmute::<KeccakOutEvals<usize>, [usize; KECCAK_OUT_EVAL_SIZE]>(
-                    self.final_out_evals.clone(),
+                    layout.final_out_evals.clone(),
                 )
             }
             .to_vec(),
         };
         chip.add_layer(output32_layer(
-            &self.layers.output32,
-            &self.final_out_evals.output32,
-            &self.layer_in_evals.output32,
-            self.alpha.clone(),
-            self.beta.clone(),
+            &layout.layers.output32,
+            &layout.final_out_evals.output32,
+            &layout.layer_in_evals.output32,
+            layout.alpha.clone(),
+            layout.beta.clone(),
         ));
 
         macro_rules! add_common_layers {
@@ -708,20 +723,20 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // add Round 1..24
         let round_output = izip!(
             (1..ROUNDS),
-            &self.layers.inner_rounds,
-            &self.layer_in_evals.inner_rounds
+            &layout.layers.inner_rounds,
+            &layout.layer_in_evals.inner_rounds
         )
         .rev()
         .fold(
-            &self.layer_in_evals.output32,
+            &layout.layer_in_evals.output32,
             |round_output, (round_id, round_layers, round_in_evals)| {
                 add_common_layers!(
                     round_layers,
                     round_output,
                     round_in_evals,
                     round_id,
-                    self.alpha.clone(),
-                    self.beta.clone()
+                    layout.alpha.clone(),
+                    layout.beta.clone()
                 );
                 chip.add_layer(theta_first_layer(
                     &round_layers.theta_first,
@@ -729,38 +744,53 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     &round_in_evals.theta_third[D_SIZE..],
                     &round_in_evals.theta_first,
                     round_id,
-                    self.alpha.clone(),
-                    self.beta.clone(),
+                    layout.alpha.clone(),
+                    layout.beta.clone(),
                 ));
                 &round_in_evals.theta_first
             },
         );
 
         // add Round 0
-        let (round_layers, round_in_evals) =
-            (&self.layers.first_round, &self.layer_in_evals.first_round);
+        let (round_layers, round_in_evals) = (
+            &layout.layers.first_round,
+            &layout.layer_in_evals.first_round,
+        );
 
         add_common_layers!(
             round_layers,
             round_output,
             round_in_evals,
             0,
-            self.alpha.clone(),
-            self.beta.clone()
+            layout.alpha.clone(),
+            layout.beta.clone()
         );
 
         chip.add_layer(keccak_first_layer(
             &round_layers.theta_first,
             &round_in_evals.theta_second,
             &round_in_evals.theta_third[D_SIZE..],
-            &self.final_out_evals.input32,
+            &layout.final_out_evals.input32,
             &round_in_evals.theta_first,
-            self.alpha.clone(),
-            self.beta.clone(),
+            layout.alpha.clone(),
+            layout.beta.clone(),
         ));
-        chip
+        Ok((layout, chip))
+    }
+}
+impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
+    type Params = KeccakParams;
+
+    fn finalize(&mut self, _cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>) {
+        unimplemented!()
     }
 
+    fn build_layer_logic(
+        _cb: &mut CircuitBuilder<E>,
+        _params: Self::Params,
+    ) -> Result<Self, CircuitBuilderError> {
+        unimplemented!()
+    }
     fn n_committed(&self) -> usize {
         STATE_SIZE
     }
@@ -771,10 +801,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
     fn n_challenges(&self) -> usize {
         0
-    }
-
-    fn n_nonzero_out_evals(&self) -> usize {
-        KECCAK_INPUT32_SIZE + KECCAK_OUTPUT32_SIZE
     }
 
     fn n_layers(&self) -> usize {
@@ -795,12 +821,22 @@ where
     E: ExtensionField,
 {
     type Trace = KeccakTrace<E>;
+
     fn phase1_witness_group(
         &self,
-        phase1: Self::Trace,
+        _phase1: Self::Trace,
+        _wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         _lk_multiplicity: &mut LkMultiplicity,
-    ) -> RowMajorMatrix<E::BaseField> {
-        phase1.bits
+    ) {
+        // phase1.bits
+    }
+
+    fn phase1_witin_rmm_height(&self, _num_instances: usize) -> usize {
+        0
+    }
+
+    fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::new_by_values(vec![], 1, InstancePaddingStrategy::Default)
     }
 }
 
@@ -843,10 +879,13 @@ fn rho_and_pi_permutation() -> Vec<usize> {
     pi(&rho(&perm))
 }
 
-pub fn setup_gkr_circuit<E: ExtensionField>() -> (KeccakLayout<E>, GKRCircuit<E>) {
+pub fn setup_gkr_circuit<E: ExtensionField>()
+-> Result<(KeccakLayout<E>, GKRCircuit<E>), CircuitBuilderError> {
     let params = KeccakParams {};
-    let (layout, chip) = KeccakLayout::build(params);
-    (layout, chip.gkr_circuit())
+    let mut cs = ConstraintSystem::new(|| "bitwise_keccak");
+    let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
+    let (layout, chip) = KeccakLayout::build_gkr_chip_old(&mut circuit_builder, params)?;
+    Ok((layout, chip.gkr_circuit()))
 }
 
 pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
@@ -863,8 +902,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let bits = keccak_phase1_witness::<E>(&states);
     exit_span!(span);
     let span = entered_span!("phase1_witness_group", profiling_1 = true);
-    let mut lk_multiplicity = LkMultiplicity::default();
-    let phase1_witness = layout.phase1_witness_group(KeccakTrace { bits }, &mut lk_multiplicity);
+    let phase1_witness = bits;
     exit_span!(span);
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
 
@@ -874,7 +912,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
         &gkr_circuit,
         &phase1_witness,
-        &[],
+        &layout.fixed_witness_group(),
         &[],
     );
     exit_span!(span);
@@ -929,6 +967,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
             &out_evals,
             &[],
             &mut prover_transcript,
+            num_instances,
         )
         .expect("Failed to prove phase");
     exit_span!(span);
@@ -948,6 +987,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
                     &out_evals,
                     &[],
                     &mut verifier_transcript,
+                    num_instances,
                 )
                 .expect("GKR verify failed");
 
@@ -976,10 +1016,15 @@ mod tests {
         let random_u64: u64 = rand::random();
         // Use seeded rng for debugging convenience
         let mut rng = rand::rngs::StdRng::seed_from_u64(random_u64);
-        let num_instance = 4;
-        let states: Vec<[u64; 25]> = (0..num_instance)
+        let num_instances = 4;
+        let states: Vec<[u64; 25]> = (0..num_instances)
             .map(|_| std::array::from_fn(|_| rng.next_u64()))
             .collect_vec();
-        run_keccakf::<E, Pcs>(setup_gkr_circuit(), states, false, true); // `verify` is temporarily false because the error `Extrapolation for degree 6 not implemented`.
+        run_keccakf::<E, Pcs>(
+            setup_gkr_circuit().expect("setup gkr circuit error"),
+            states,
+            false,
+            true,
+        ); // `verify` is temporarily false because the error `Extrapolation for degree 6 not implemented`.
     }
 }

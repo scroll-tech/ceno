@@ -84,8 +84,7 @@ impl<
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let raw_pi = pi.to_vec::<E>();
         let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
-        let mut opcode_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
-        let mut table_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
+        let mut chip_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
 
         let span = entered_span!("commit_to_pi", profiling_1 = true);
         // including raw public input to transcript
@@ -114,14 +113,14 @@ impl<
             .collect::<BTreeMap<_, _>>();
         // only keep track of circuits that have non-zero instances
         let mut num_instances = Vec::with_capacity(self.pk.circuit_pks.len());
-        for (index, (circuit_name, _)) in self.pk.circuit_pks.iter().enumerate() {
+        let mut num_instances_with_rotation = Vec::with_capacity(self.pk.circuit_pks.len());
+        for (index, (circuit_name, ProvingKey { vk, .. })) in self.pk.circuit_pks.iter().enumerate()
+        {
+            // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
                 .get_opcode_witness(circuit_name)
-                .or_else(|| {
-                    witnesses
-                        .get_table_witness(circuit_name)
-                        .map(|rmms| &rmms[0])
-                })
+                .or_else(|| witnesses.get_table_witness(circuit_name))
+                .map(|rmms| &rmms[0])
                 .map(|rmm| rmm.num_instances())
                 .and_then(|num_instance| {
                     if num_instance > 0 {
@@ -131,14 +130,18 @@ impl<
                     }
                 })
             {
-                num_instances.push((index, num_instance));
+                num_instances.push((
+                    index,
+                    num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
+                ));
+                num_instances_with_rotation.push((index, num_instance))
             }
         }
 
         // write (circuit_idx, num_var) to transcript
-        for (circuit_idx, num_var) in &num_instances {
+        for (circuit_idx, num_instance) in &num_instances {
             transcript.append_message(&circuit_idx.to_le_bytes());
-            transcript.append_message(&num_var.to_le_bytes());
+            transcript.append_message(&num_instance.to_le_bytes());
         }
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_2 = true);
@@ -155,8 +158,20 @@ impl<
             } else {
                 RowMajorMatrix::empty()
             };
-            let num_instances = witness_rmm.num_instances();
-            wits_instances.insert(circuit_name.clone(), num_instances);
+            let rotation_vars = self
+                .pk
+                .circuit_pks
+                .get(&circuit_name)
+                .unwrap()
+                .vk
+                .get_cs()
+                .rotation_vars();
+            let num_instances = witness_rmm.num_instances() >> (rotation_vars.unwrap_or(0));
+            assert!(
+                wits_instances
+                    .insert(circuit_name.clone(), num_instances)
+                    .is_none()
+            );
             if num_instances == 0 {
                 continue;
             }
@@ -191,13 +206,16 @@ impl<
                 let num_instances = *wits_instances
                     .get(circuit_name)
                     .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
+                let cs = pk.get_cs();
                 if num_instances == 0 {
-                    // do nothing without point and evaluation insertion
+                    // we need to drain respective fixed when num_instances is 0
+                    if cs.num_fixed() > 0 {
+                        let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
+                    }
                     return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points, evaluations));
                 }
                 transcript.append_field_element(&E::BaseField::from_canonical_u64(index as u64));
                 // TODO: add an enum for circuit type either in constraint_system or vk
-                let cs = pk.get_cs();
                 let witness_mle = witness_mles
                     .drain(..cs.num_witin())
                     .map(|mle| mle.into())
@@ -233,23 +251,23 @@ impl<
                     );
                     points.push(input_opening_point);
                     evaluations.push(opcode_proof.wits_in_evals.clone());
-                    opcode_proofs.insert(index, opcode_proof);
+                    chip_proofs.insert(index, opcode_proof);
                 } else {
                     // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
                     input.num_instances = 1 << input.log2_num_instances();
-                    let (table_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
-                        circuit_name,
-                        pk,
-                        input,
-                        &mut transcript,
-                        &challenges,
-                    )?;
+                    let (mut table_proof, pi_in_evals, input_opening_point) = self
+                        .create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
                     points.push(input_opening_point);
-                    evaluations.push(table_proof.wits_in_evals.clone());
-                    if cs.num_fixed() > 0 {
-                        evaluations.push(table_proof.fixed_in_evals.clone());
-                    }
-                    table_proofs.insert(index, table_proof);
+                    evaluations.push(
+                        [
+                            table_proof.wits_in_evals.clone(),
+                            table_proof.fixed_in_evals.clone(),
+                        ]
+                        .concat(),
+                    );
+                    // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
+                    table_proof.num_instances = num_instances;
+                    chip_proofs.insert(index, table_proof);
                     for (idx, eval) in pi_in_evals {
                         pi_evals[idx] = eval;
                     }
@@ -273,7 +291,7 @@ impl<
             points,
             evaluations,
             &circuit_num_polys,
-            &num_instances,
+            &num_instances_with_rotation,
             &mut transcript,
         );
 
@@ -282,12 +300,9 @@ impl<
         let vm_proof = ZKVMProof::new(
             raw_pi,
             pi_evals,
-            opcode_proofs,
-            table_proofs,
+            chip_proofs,
             witin_commit,
             mpcs_opening_proof,
-            // verifier need this information from prover to achieve non-uniform design.
-            num_instances,
         );
         exit_span!(main_proofs_span);
 
@@ -309,6 +324,7 @@ impl<
     ) -> Result<CreateTableProof<E>, ZKVMError> {
         let cs = circuit_pk.get_cs();
         let log2_num_instances = input.log2_num_instances();
+        let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
         // build tower witness
         // assume we already extract gkr-circuit information into zkvm_v1_css
@@ -327,12 +343,12 @@ impl<
 
         assert_eq!(
             rt_tower.len(), // num var length should equal to max_num_instance
-            log2_num_instances,
+            num_var_with_rotation,
         );
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
-        let (input_opening_point, evals, main_sumcheck_proofs) = self
+        let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) = self
             .device
             .prove_main_constraints(rt_tower, records, &input, cs, challenges, transcript)?;
         let MainSumcheckEvals {
@@ -360,9 +376,11 @@ impl<
                 w_out_evals,
                 lk_out_evals,
                 main_sumcheck_proofs,
+                gkr_iop_proof,
                 tower_proof,
                 fixed_in_evals,
                 wits_in_evals,
+                num_instances: input.num_instances,
             },
             pi_in_evals,
             input_opening_point,

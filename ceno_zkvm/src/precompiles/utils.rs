@@ -1,20 +1,19 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr};
-use p3_field::FieldAlgebra;
+use p3::field::FieldAlgebra;
 
 pub fn not8_expr<E: ExtensionField>(expr: Expression<E>) -> Expression<E> {
     E::BaseField::from_canonical_u8(0xFF).expr() - expr
 }
 
-pub fn set_slice_felts_from_u64<E, I>(dst: &mut [E::BaseField], start_index: &mut usize, iter: I)
+pub fn set_slice_felts_from_u64<E, I>(dst: &mut [E::BaseField], start_index: usize, iter: I)
 where
     E: ExtensionField,
     I: IntoIterator<Item = u64>,
 {
-    for word in iter {
-        dst[*start_index] = E::BaseField::from_canonical_u64(word);
-        *start_index += 1;
+    for (i, word) in iter.into_iter().enumerate() {
+        dst[start_index + i] = E::BaseField::from_canonical_u64(word);
     }
 }
 

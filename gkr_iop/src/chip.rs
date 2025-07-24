@@ -1,7 +1,7 @@
+use crate::{circuit_builder::CircuitBuilder, gkr::layer::Layer};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-
-use crate::gkr::layer::Layer;
 
 pub mod builder;
 pub mod protocol;
@@ -25,11 +25,28 @@ pub struct Chip<E: ExtensionField> {
     /// in a vector and this is the length.
     pub n_evaluations: usize,
 
-    /// The number of output evaluations generated at the end of the protocol.
-    pub n_nonzero_out_evals: usize,
-
     /// The layers of the GKR circuit, in the order outputs-to-inputs.
     pub layers: Vec<Layer<E>>,
     /// The output of the circuit.
     pub final_out_evals: Vec<usize>,
+}
+
+impl<E: ExtensionField> Chip<E> {
+    pub fn new_from_cb(cb: &CircuitBuilder<E>, n_challenges: usize) -> Chip<E> {
+        Self {
+            n_fixed: cb.cs.num_fixed,
+            n_committed: cb.cs.num_witin as usize,
+            n_challenges,
+            n_evaluations: cb.cs.w_expressions.len()
+                + cb.cs.r_expressions.len()
+                + cb.cs.lk_expressions.len()
+                + cb.cs.num_fixed
+                + cb.cs.num_witin as usize,
+            final_out_evals: (0..cb.cs.w_expressions.len()
+                + cb.cs.r_expressions.len()
+                + cb.cs.lk_expressions.len())
+                .collect_vec(),
+            layers: vec![],
+        }
+    }
 }

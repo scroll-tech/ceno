@@ -19,7 +19,6 @@ ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev 
 itertools.workspace = true
 mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "5af7c08" }
 multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "5af7c08" }
-ndarray.workspace = true
 p3.workspace = true
 p3-field.workspace = true
 p3-goldilocks.workspace = true
@@ -45,14 +44,6 @@ tikv-jemallocator = { version = "0.6", optional = true }
 
 [dev-dependencies]
 criterion.workspace = true
-
-[[bench]]
-harness = false
-name = "bitwise_keccakf"
-
-[[bench]]
-harness = false
-name = "lookup_keccakf"
 
 [features]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]

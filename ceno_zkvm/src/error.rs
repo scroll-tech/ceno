@@ -1,4 +1,4 @@
-use gkr_iop::error::CircuitBuilderError;
+use gkr_iop::error::{BackendError, CircuitBuilderError};
 use mpcs::Error;
 
 #[derive(Debug)]
@@ -10,9 +10,11 @@ pub enum UtilError {
 pub enum ZKVMError {
     CircuitError,
     CircuitBuilderError(CircuitBuilderError),
+    BackendError(BackendError),
     UtilError(UtilError),
     WitnessNotFound(String),
     InvalidWitness(String),
+    InvalidProof(String),
     VKNotFound(String),
     FixedTraceNotFound(String),
     VerifyError(String),
@@ -28,5 +30,11 @@ impl From<UtilError> for ZKVMError {
 impl From<CircuitBuilderError> for ZKVMError {
     fn from(e: CircuitBuilderError) -> Self {
         ZKVMError::CircuitBuilderError(e)
+    }
+}
+
+impl From<BackendError> for ZKVMError {
+    fn from(e: BackendError) -> Self {
+        ZKVMError::BackendError(e)
     }
 }

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -113,7 +113,7 @@ fn test_rw_lk_expression_combination() {
 
         // generate fixed traces
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-        zkvm_fixed_traces.register_opcode_circuit::<TestCircuit<E, RW, L>>(&zkvm_cs);
+        zkvm_fixed_traces.register_opcode_circuit::<TestCircuit<E, RW, L>>(&zkvm_cs, &config);
 
         // keygen
         let pk = zkvm_cs
@@ -144,12 +144,8 @@ fn test_rw_lk_expression_combination() {
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
         let wits_in = rmm.to_mles();
         // commit to main traces
-        let commit_with_witness = Pcs::batch_commit_and_write(
-            &prover.pk.pp,
-            vec![(0, rmm.clone())].into_iter().collect::<BTreeMap<_, _>>(),
-            &mut transcript,
-        )
-        .unwrap();
+        let commit_with_witness =
+            Pcs::batch_commit_and_write(&prover.pk.pp, vec![rmm], &mut transcript).unwrap();
 
         let rmm_gl64 :witness::RowMajorMatrix<p3::goldilocks::Goldilocks> = unsafe { std::mem::transmute(rmm.clone()) };
         let traces_gl64 = vec![(0, rmm_gl64)].into_iter().collect::<BTreeMap<_, _>>();
@@ -201,7 +197,6 @@ fn test_rw_lk_expression_combination() {
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
-                num_instances,
                 &[],
                 &mut v_transcript,
                 NUM_FANIN,
@@ -258,8 +253,8 @@ fn test_single_add_instance_e2e() {
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
-    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs);
-    zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs);
+    zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config);
+    zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config);
 
     zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
         &zkvm_cs,

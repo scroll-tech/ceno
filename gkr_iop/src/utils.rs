@@ -7,75 +7,33 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
-    wit_infer_by_expr,
 };
 use p3_field::FieldAlgebra;
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
-        ParallelIterator,
-    },
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
 use crate::{
-    evaluation::EvalExpression,
     gkr::{booleanhypercube::BooleanHypercube, layer::Layer},
+    selector::SelectorType,
 };
-
-pub fn infer_layer_witness<'a, E>(
-    layer: &Layer<E>,
-    layer_wits: &[ArcMultilinearExtension<'a, E>],
-    challenges: &[E],
-) -> Vec<ArcMultilinearExtension<'a, E>>
-where
-    E: ExtensionField,
-{
-    let out_evals: Vec<_> = layer
-        .out_eq_and_eval_exprs
-        .iter()
-        .flat_map(|(_, out_eval)| out_eval.iter())
-        .collect();
-    layer
-        .exprs
-        .par_iter()
-        .zip_eq(layer.expr_names.par_iter())
-        .zip_eq(out_evals.par_iter())
-        .map(|((expr, expr_name), out_eval)| {
-            let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
-            if let EvalExpression::Zero = out_eval {
-                // sanity check: zero mle
-                if cfg!(debug_assertions) {
-                    let all_zero = match out_mle.evaluations() {
-                        multilinear_extensions::mle::FieldType::Base(smart_slice) => {
-                            smart_slice.iter().copied().all(|v| v == E::BaseField::ZERO)
-                        }
-                        multilinear_extensions::mle::FieldType::Ext(smart_slice) => {
-                            smart_slice.iter().copied().all(|v| v == E::ZERO)
-                        }
-                        multilinear_extensions::mle::FieldType::Unreachable => unreachable!(),
-                    };
-                    if !all_zero {
-                        panic!(
-                            "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
-                            layer.name
-                        );
-                    }
-                }
-            };
-            out_mle
-        })
-        .collect::<Vec<_>>()
-}
 
 pub fn extend_exprs_with_rotation<E: ExtensionField>(
     layer: &Layer<E>,
     alpha_pows: &[Expression<E>],
+    offset_eq_id: WitnessId,
 ) -> Vec<Expression<E>> {
     let mut alpha_pows_iter = alpha_pows.iter();
     let mut expr_iter = layer.exprs.iter();
-    let mut zero_check_exprs = Vec::with_capacity(layer.out_eq_and_eval_exprs.len());
-    for (eq_expr, out_evals) in layer.out_eq_and_eval_exprs.iter() {
+    let mut zero_check_exprs = Vec::with_capacity(layer.out_sel_and_eval_exprs.len());
+
+    let match_expr = |sel_expr: &Expression<E>| match sel_expr {
+        Expression::StructuralWitIn(id, ..) => Expression::WitIn(offset_eq_id + *id),
+        invalid => panic!("invalid eq format {:?}", invalid),
+    };
+
+    for (sel_type, out_evals) in layer.out_sel_and_eval_exprs.iter() {
         let group_length = out_evals.len();
         let zero_check_expr = expr_iter
             .by_ref()
@@ -84,7 +42,15 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
             .zip_eq(alpha_pows_iter.by_ref().take(group_length))
             .map(|(expr, alpha)| alpha * expr)
             .sum::<Expression<E>>();
-        zero_check_exprs.push(eq_expr.clone().unwrap() * zero_check_expr);
+        let expr = match sel_type {
+            SelectorType::None => zero_check_expr,
+            SelectorType::Whole(sel)
+            | SelectorType::Prefix(_, sel)
+            | SelectorType::OrderedSparse32 {
+                expression: sel, ..
+            } => match_expr(sel) * zero_check_expr,
+        };
+        zero_check_exprs.push(expr);
     }
 
     // prepare rotation expr
@@ -130,6 +96,22 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
         ],
     ) = rotation_eq.as_ref()
     {
+        let (rotation_left_eq_expr, rotation_right_eq_expr, rotation_eq_expr) = match (
+            rotation_left_eq_expr,
+            rotation_right_eq_expr,
+            rotation_eq_expr,
+        ) {
+            (
+                Expression::StructuralWitIn(left_eq_id, ..),
+                Expression::StructuralWitIn(right_eq_id, ..),
+                Expression::StructuralWitIn(eq_id, ..),
+            ) => (
+                Expression::WitIn(offset_eq_id + *left_eq_id),
+                Expression::WitIn(offset_eq_id + *right_eq_id),
+                Expression::WitIn(offset_eq_id + *eq_id),
+            ),
+            invalid => panic!("invalid eq format {:?}", invalid),
+        };
         // add rotation left expr
         zero_check_exprs.push(rotation_left_eq_expr * left_rotation_expr);
         // add rotation right expr
@@ -259,6 +241,7 @@ pub fn indices_arr_with_offset_non_const<const N: usize>(offset: usize) -> [usiz
 }
 
 /// Returns `[WitIn(0), ..., WitIn(N - 1)], [Fixed(N), Fixed(N + 1), ..., Fixed(N + M)], [WitIn(N + M + 1), ...]`.
+/// TODO remove me
 #[must_use]
 pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>()
 -> ([WitIn; N], [Fixed; M], [WitIn; Q]) {
@@ -283,6 +266,53 @@ pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>(
         i += 1;
     }
     (wits, fixed, eqs)
+}
+
+/// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
+/// [0..=max_idx]. Specifically, it is an MLE of the following vector:
+///     partial_eq_{\mathbf{x}}(\mathbf{y})
+///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
+pub fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &[E], b: &[E]) -> E {
+    assert!(a.len() >= b.len());
+    // Compute running product of ( x_i y_i + (1 - x_i)(1 - y_i) )_{0 <= i <= n}
+    let running_product = {
+        let mut running_product = Vec::with_capacity(b.len() + 1);
+        running_product.push(E::ONE);
+        for i in 0..b.len() {
+            let x = running_product[i] * (a[i] * b[i] + (E::ONE - a[i]) * (E::ONE - b[i]));
+            running_product.push(x);
+        }
+        running_product
+    };
+
+    let running_product2 = {
+        let mut running_product = vec![E::ZERO; b.len() + 1];
+        running_product[b.len()] = E::ONE;
+        for i in (0..b.len()).rev() {
+            let bit = E::from_canonical_u64(((max_idx >> i) & 1) as u64);
+            running_product[i] = running_product[i + 1]
+                * (a[i] * b[i] * bit + (E::ONE - a[i]) * (E::ONE - b[i]) * (E::ONE - bit));
+        }
+        running_product
+    };
+
+    // Here is an example of how this works:
+    // Suppose max_idx = (110101)_2
+    // Then ans = eq(a, b)
+    //          - eq(11011, a[1..6], b[1..6])eq(a[0..1], b[0..1])
+    //          - eq(111, a[3..6], b[3..6])eq(a[0..3], b[0..3])
+    let mut ans = running_product[b.len()];
+    for i in 0..b.len() {
+        let bit = (max_idx >> i) & 1;
+        if bit == 1 {
+            continue;
+        }
+        ans -= running_product[i] * running_product2[i + 1] * a[i] * b[i];
+    }
+    for v in a.iter().skip(b.len()) {
+        ans *= E::ONE - *v;
+    }
+    ans
 }
 
 #[cfg(test)]
