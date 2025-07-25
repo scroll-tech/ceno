@@ -126,6 +126,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 "TODO process fixed (and probably short) mle"
             );
             // XXX currently fixed poly not support in layers > 1
+
             // first_layer
             //     .in_eval_expr
             //     .par_iter()
