@@ -44,7 +44,6 @@ pub(crate) struct RotationClaims<E: ExtensionField> {
 
 pub trait ZerocheckLayer<E: ExtensionField> {
     // static expression on circuit setup
-    // format: (rotation expression, main expression)
     fn build_static_expression(&mut self);
 
     #[allow(clippy::too_many_arguments)]
