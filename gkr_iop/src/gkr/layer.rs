@@ -87,6 +87,12 @@ pub struct Layer<E: ExtensionField> {
 
     // For debugging purposes
     pub expr_names: Vec<String>,
+
+    // static expression, only valid for zerocheck & sumcheck layer
+    pub main_sumcheck_expression: Option<Expression<E>>,
+
+    // rotation sumcheck expression, only optionally valid for zerocheck
+    pub rotation_sumcheck_expression: Option<Expression<E>>,
 }
 
 #[derive(Clone, Debug)]
@@ -121,31 +127,37 @@ impl<E: ExtensionField> Layer<E> {
         ),
         expr_names: Vec<String>,
     ) -> Self {
-        assert!(
-            expr_names.len() == exprs.len(),
-            "there are expr without name"
-        );
+        assert_eq!(expr_names.len(), exprs.len(), "there are expr without name");
         let max_expr_degree = exprs
             .iter()
             .map(|expr| expr.degree())
             .max()
             .expect("empty exprs");
 
-        Self {
-            name,
-            ty,
-            n_witin,
-            n_structural_witin,
-            n_fixed,
-            max_expr_degree,
-            n_challenges,
-            exprs,
-            in_eval_expr,
-            out_sel_and_eval_exprs,
-            rotation_exprs: (rotation_eq, rotation_exprs),
-            rotation_cyclic_group_log2,
-            rotation_cyclic_subgroup_size,
-            expr_names,
+        match ty {
+            LayerType::Zerocheck => {
+                let mut layer = Self {
+                    name,
+                    ty,
+                    n_witin,
+                    n_structural_witin,
+                    n_fixed,
+                    max_expr_degree,
+                    n_challenges,
+                    exprs,
+                    in_eval_expr,
+                    out_sel_and_eval_exprs,
+                    rotation_exprs: (rotation_eq, rotation_exprs),
+                    rotation_cyclic_group_log2,
+                    rotation_cyclic_subgroup_size,
+                    expr_names,
+                    main_sumcheck_expression: None,
+                    rotation_sumcheck_expression: None,
+                };
+                <Self as ZerocheckLayer<E>>::build_static_expression(&mut layer);
+                layer
+            }
+            LayerType::Linear => unimplemented!(""),
         }
     }
 

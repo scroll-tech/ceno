@@ -1,18 +1,21 @@
-use std::marker::PhantomData;
-
-use either::Either;
 use ff_ext::ExtensionField;
-use itertools::{Itertools, izip};
+use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{
-    Expression, WitnessId, mle::Point, utils::eval_by_expr, virtual_poly::VPAuxInfo,
+    ChallengeId, Expression, WitnessId,
+    macros::{entered_span, exit_span},
+    mle::Point,
+    utils::eval_by_expr,
+    virtual_poly::VPAuxInfo,
 };
 use p3_field::dot_product;
+use std::marker::PhantomData;
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState, SumCheckSubClaim, VerifierError},
     util::get_challenge_pows,
 };
 use transcript::Transcript;
 
+use super::{Layer, LayerWitness, linear_layer::LayerClaims, sumcheck_layer::LayerProof};
 use crate::{
     error::BackendError,
     gkr::{
@@ -22,10 +25,9 @@ use crate::{
         },
     },
     hal::{ProverBackend, ProverDevice},
-    utils::{extend_exprs_with_rotation, rotation_selector_eval},
+    selector::SelectorType,
+    utils::rotation_selector_eval,
 };
-
-use super::{Layer, LayerWitness, linear_layer::LayerClaims, sumcheck_layer::LayerProof};
 
 pub(crate) struct RotationPoints<E: ExtensionField> {
     pub left: Point<E>,
@@ -41,6 +43,10 @@ pub(crate) struct RotationClaims<E: ExtensionField> {
 }
 
 pub trait ZerocheckLayer<E: ExtensionField> {
+    // static expression on circuit setup
+    // format: (rotation expression, main expression)
+    fn build_static_expression(&mut self);
+
     #[allow(clippy::too_many_arguments)]
     fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
@@ -65,6 +71,43 @@ pub trait ZerocheckLayer<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
+    fn build_static_expression(&mut self) {
+        let span = entered_span!("gen_expr", profiling_4 = true);
+        // build rotation expression
+        let num_rotations = self.rotation_exprs.1.len();
+        let rotation_expr = if num_rotations > 0 {
+            let alpha_pows_expr = (2..)
+                .take(num_rotations)
+                .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
+                .collect_vec();
+            let rotation_expr = (0..)
+                .tuples()
+                .take(num_rotations)
+                .zip_eq(&alpha_pows_expr)
+                .map(|((rotate_wit_id, target_wit_id), alpha)| {
+                    alpha * (Expression::WitIn(rotate_wit_id) - Expression::WitIn(target_wit_id))
+                })
+                .sum::<Expression<E>>();
+            let rotation_selector_expr = Expression::<E>::WitIn((num_rotations * 2) as WitnessId);
+            Some(rotation_selector_expr * rotation_expr)
+        } else {
+            None
+        };
+
+        // build main sumcheck expression
+        let alpha_pows_expr = (2..)
+            .take(self.exprs.len() + num_rotations * ROTATION_OPENING_COUNT)
+            .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
+            .collect_vec();
+        let zero_expr: Expression<E> =
+            extend_exprs_with_rotation(self, &alpha_pows_expr, self.n_witin as WitnessId)
+                .into_iter()
+                .sum();
+        exit_span!(span);
+        self.rotation_sumcheck_expression = rotation_expr;
+        self.main_sumcheck_expression = Some(zero_expr);
+    }
+
     fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         num_threads: usize,
@@ -130,10 +173,13 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     },
             } = verify_rotation(
                 max_num_variables,
+                self.rotation_exprs.1.len(),
+                self.rotation_sumcheck_expression.as_ref().unwrap(),
                 rotation_proof,
                 self.rotation_cyclic_subgroup_size,
                 self.rotation_cyclic_group_log2,
                 rt,
+                challenges,
                 transcript,
             )?;
             eval_and_dedup_points.push((left_evals, Some(left_point)));
@@ -142,13 +188,17 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         }
 
         let rotation_exprs_len = self.rotation_exprs.1.len();
-        let alpha_pows = get_challenge_pows(
-            self.exprs.len() + rotation_exprs_len * ROTATION_OPENING_COUNT,
-            transcript,
-        );
+        let main_sumcheck_challenges = chain!(
+            challenges.iter().copied(),
+            get_challenge_pows(
+                self.exprs.len() + rotation_exprs_len * ROTATION_OPENING_COUNT,
+                transcript,
+            )
+        )
+        .collect_vec();
 
         let sigma = dot_product(
-            alpha_pows.iter().copied(),
+            main_sumcheck_challenges.iter().skip(2).copied(), // skip first 2 global challenges
             eval_and_dedup_points
                 .iter()
                 .flat_map(|(sigmas, _)| sigmas)
@@ -183,18 +233,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             },
         );
 
-        let zero_check_exprs = extend_exprs_with_rotation(
-            self,
-            &alpha_pows
-                .iter()
-                .cloned()
-                .map(|r| Expression::Constant(Either::Right(r)))
-                .collect_vec(),
-            self.n_witin as WitnessId,
+        let got_claim = eval_by_expr(
+            &main_evals,
+            &[],
+            &main_sumcheck_challenges,
+            self.main_sumcheck_expression.as_ref().unwrap(),
         );
-
-        let zero_check_expr = zero_check_exprs.into_iter().sum::<Expression<E>>();
-        let got_claim = eval_by_expr(&main_evals, &[], challenges, &zero_check_expr);
 
         if got_claim != expected_evaluation {
             return Err(BackendError::LayerVerificationFailed(
@@ -213,19 +257,25 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn verify_rotation<E: ExtensionField>(
     max_num_variables: usize,
+    num_rotations: usize,
+    rotation_sumcheck_expression: &Expression<E>,
     rotation_proof: SumcheckLayerProof<E>,
     rotation_cyclic_subgroup_size: usize,
     rotation_cyclic_group_log2: usize,
     rt: &Point<E>,
+    challenges: &[E],
     transcript: &mut impl Transcript<E>,
 ) -> Result<RotationClaims<E>, BackendError> {
     let SumcheckLayerProof { proof, evals } = rotation_proof;
-    let rotation_expr_len = evals.len() / 3;
-    let rotation_alpha_pows = get_challenge_pows(rotation_expr_len, transcript)
-        .into_iter()
-        .collect_vec();
+    assert_eq!(num_rotations * 3, evals.len());
+    let rotation_challenges = chain!(
+        challenges.iter().copied(),
+        get_challenge_pows(num_rotations, transcript)
+    )
+    .collect_vec();
 
     let sigma = E::ZERO;
 
@@ -258,23 +308,29 @@ fn verify_rotation<E: ExtensionField>(
     let mut left_evals = Vec::with_capacity(evals.len() / 3);
     let mut right_evals = Vec::with_capacity(evals.len() / 3);
     let mut target_evals = Vec::with_capacity(evals.len() / 3);
-    let got_claim = selector_eval
-        * evals
+
+    let got_claim = eval_by_expr(
+        &evals
             .chunks_exact(3)
-            .zip_eq(rotation_alpha_pows.iter())
-            .map(|(evals, alpha)| {
+            .flat_map(|evals| {
                 let [left_eval, right_eval, target_eval] = evals else {
                     unreachable!()
                 };
                 left_evals.push(*left_eval);
                 right_evals.push(*right_eval);
                 target_evals.push(*target_eval);
-                *alpha
-                    * ((E::ONE - origin_point[rotation_cyclic_group_log2 - 1]) * *left_eval
-                        + origin_point[rotation_cyclic_group_log2 - 1] * *right_eval
-                        - *target_eval)
+                [
+                    (E::ONE - origin_point[rotation_cyclic_group_log2 - 1]) * *left_eval
+                        + origin_point[rotation_cyclic_group_log2 - 1] * *right_eval,
+                    *target_eval,
+                ]
             })
-            .sum::<E>();
+            .chain(std::iter::once(selector_eval))
+            .collect_vec(),
+        &[],
+        &rotation_challenges,
+        rotation_sumcheck_expression,
+    );
 
     if got_claim != expected_evaluation {
         return Err(BackendError::LayerVerificationFailed(
@@ -299,4 +355,109 @@ fn verify_rotation<E: ExtensionField>(
             origin: origin_point,
         },
     })
+}
+
+pub fn extend_exprs_with_rotation<E: ExtensionField>(
+    layer: &Layer<E>,
+    alpha_pows: &[Expression<E>],
+    offset_eq_id: WitnessId,
+) -> Vec<Expression<E>> {
+    let mut alpha_pows_iter = alpha_pows.iter();
+    let mut expr_iter = layer.exprs.iter();
+    let mut zero_check_exprs = Vec::with_capacity(layer.out_sel_and_eval_exprs.len());
+
+    let match_expr = |sel_expr: &Expression<E>| match sel_expr {
+        Expression::StructuralWitIn(id, ..) => Expression::WitIn(offset_eq_id + *id),
+        invalid => panic!("invalid eq format {:?}", invalid),
+    };
+
+    for (sel_type, out_evals) in layer.out_sel_and_eval_exprs.iter() {
+        let group_length = out_evals.len();
+        let zero_check_expr = expr_iter
+            .by_ref()
+            .take(group_length)
+            .cloned()
+            .zip_eq(alpha_pows_iter.by_ref().take(group_length))
+            .map(|(expr, alpha)| alpha * expr)
+            .sum::<Expression<E>>();
+        let expr = match sel_type {
+            SelectorType::None => zero_check_expr,
+            SelectorType::Whole(sel)
+            | SelectorType::Prefix(_, sel)
+            | SelectorType::OrderedSparse32 {
+                expression: sel, ..
+            } => match_expr(sel) * zero_check_expr,
+        };
+        zero_check_exprs.push(expr);
+    }
+
+    // prepare rotation expr
+    let (rotation_eq, rotation_exprs) = &layer.rotation_exprs;
+    if rotation_eq.is_none() {
+        return zero_check_exprs;
+    }
+
+    let left_rotation_expr: Expression<E> = izip!(
+        rotation_exprs.iter(),
+        alpha_pows_iter.by_ref().take(rotation_exprs.len())
+    )
+    .map(|((rotate_expr, _), alpha)| {
+        assert!(matches!(rotate_expr, Expression::WitIn(_)));
+        alpha * rotate_expr
+    })
+    .sum();
+    let right_rotation_expr: Expression<E> = izip!(
+        rotation_exprs.iter(),
+        alpha_pows_iter.by_ref().take(rotation_exprs.len())
+    )
+    .map(|((rotate_expr, _), alpha)| {
+        assert!(matches!(rotate_expr, Expression::WitIn(_)));
+        alpha * rotate_expr
+    })
+    .sum();
+    let rotation_expr: Expression<E> = izip!(
+        rotation_exprs.iter(),
+        alpha_pows_iter.by_ref().take(rotation_exprs.len())
+    )
+    .map(|((_, expr), alpha)| {
+        assert!(matches!(expr, Expression::WitIn(_)));
+        alpha * expr
+    })
+    .sum();
+
+    // push rotation expr to zerocheck expr
+    if let Some(
+        [
+            rotation_left_eq_expr,
+            rotation_right_eq_expr,
+            rotation_eq_expr,
+        ],
+    ) = rotation_eq.as_ref()
+    {
+        let (rotation_left_eq_expr, rotation_right_eq_expr, rotation_eq_expr) = match (
+            rotation_left_eq_expr,
+            rotation_right_eq_expr,
+            rotation_eq_expr,
+        ) {
+            (
+                Expression::StructuralWitIn(left_eq_id, ..),
+                Expression::StructuralWitIn(right_eq_id, ..),
+                Expression::StructuralWitIn(eq_id, ..),
+            ) => (
+                Expression::WitIn(offset_eq_id + *left_eq_id),
+                Expression::WitIn(offset_eq_id + *right_eq_id),
+                Expression::WitIn(offset_eq_id + *eq_id),
+            ),
+            invalid => panic!("invalid eq format {:?}", invalid),
+        };
+        // add rotation left expr
+        zero_check_exprs.push(rotation_left_eq_expr * left_rotation_expr);
+        // add rotation right expr
+        zero_check_exprs.push(rotation_right_eq_expr * right_rotation_expr);
+        // add target expr
+        zero_check_exprs.push(rotation_eq_expr * rotation_expr);
+    }
+    assert!(expr_iter.next().is_none() && alpha_pows_iter.next().is_none());
+
+    zero_check_exprs
 }

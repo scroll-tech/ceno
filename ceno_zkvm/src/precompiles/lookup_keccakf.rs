@@ -18,7 +18,6 @@ use gkr_iop::{
     utils::lk_multiplicity::LkMultiplicity,
 };
 use itertools::{Itertools, iproduct, izip, zip_eq};
-use keccakf::Permutation;
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     Expression, StructuralWitIn, ToExpr, WitIn,
@@ -1045,7 +1044,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                             )
                             .expect("assign vm_state error");
                         layout.mem_rw.iter().zip_eq(step.witin.instance).for_each(
-                            |(mem_config, input_32)| {
+                            |(mem_config, _input_32)| {
                                 mem_config
                                     .assign_op(
                                         instance,
