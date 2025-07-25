@@ -188,9 +188,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                         let a_inv = eval_by_expr_constant(challenges, a).inverse();
                         let b = eval_by_expr_constant(challenges, b);
                         let new_wit = op_mle!(|out_mle| out_mle
-                            .iter()
+                            .par_iter()
                             .map(|x| a_inv * (-b + *x))
-                            .collect_vec()
+                            .collect::<Vec<_>>()
                             .into_mle()
                             .into());
                         witness_mle_flatten[*out] = Some(new_wit);
