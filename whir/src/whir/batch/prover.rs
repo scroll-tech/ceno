@@ -145,7 +145,7 @@ where
                     .polys
                     .iter()
                     .zip(&random_coeff)
-                    .map(|(eval, coeff)| E::from_base(&eval[i]) * *coeff)
+                    .map(|(eval, coeff)| E::from_ref_base(&eval[i]) * *coeff)
                     .sum()
             })
             .collect::<Vec<_>>();
@@ -387,7 +387,7 @@ where
                             &round_state.folding_randomness,
                             coset_offset_inv,
                             coset_generator_inv,
-                            E::from_u64(2).inverse(),
+                            E::from_canonical_u64(2).inverse(),
                             self.0.folding_factor.at_round(round_state.round),
                         )
                     },
@@ -516,7 +516,7 @@ where
             witness
                 .polys
                 .par_iter()
-                .map(|poly| poly.par_iter().map(|x| E::from_base(x)).collect())
+                .map(|poly| poly.par_iter().map(|x| E::from_ref_base(x)).collect())
                 .collect(),
             initial_eval_claims,
             &poly_comb_randomness,

@@ -8,14 +8,14 @@ use crate::{
     util::ceil_log2,
 };
 use ff_ext::{ExtensionField, SmallField};
-use itertools::Either;
-use p3::field::PrimeCharacteristicRing;
+use itertools::{Either, izip};
+use p3::field::FieldAlgebra;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::de::DeserializeOwned;
 use std::{
     cmp::max,
-    fmt::Display,
-    iter::{Product, Sum},
+    fmt::{Debug, Display},
+    iter::{Product, Sum, successors},
     ops::{Add, AddAssign, Deref, Mul, MulAssign, Neg, Shl, ShlAssign, Sub, SubAssign},
 };
 
@@ -23,9 +23,7 @@ pub type WitnessId = u16;
 pub type ChallengeId = u16;
 pub const MIN_PAR_SIZE: usize = 64;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub enum Expression<E: ExtensionField> {
     /// WitIn(Id)
@@ -49,6 +47,33 @@ pub enum Expression<E: ExtensionField> {
     ScaledSum(Box<Expression<E>>, Box<Expression<E>>, Box<Expression<E>>),
     /// Challenge(challenge_id, power, scalar, offset)
     Challenge(ChallengeId, usize, E, E),
+}
+
+impl<E: ExtensionField> Debug for Expression<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Expression::WitIn(id) => write!(f, "W[{}]", id),
+            Expression::StructuralWitIn(id, _max_len, _offset, _multi_factor) => {
+                write!(f, "S[{}]", id)
+            }
+            Expression::Fixed(fixed) => write!(f, "F[{}]", fixed.0),
+            Expression::Instance(instance) => write!(f, "I[{}]", instance.0),
+            Expression::Constant(c) => write!(f, "C[{}]", c),
+            Expression::Sum(a, b) => write!(f, "({} + {})", a, b),
+            Expression::Product(a, b) => write!(f, "({} * {})", a, b),
+            Expression::ScaledSum(x, a, b) => write!(f, "{} * {} + {}", x, a, b),
+            Expression::Challenge(challenge_id, pow, scalar, offset) => {
+                write!(
+                    f,
+                    "C({})^{} * {:?} + {:?}",
+                    challenge_id,
+                    pow,
+                    scalar.to_canonical_u64_vec(),
+                    offset.to_canonical_u64_vec(),
+                )
+            }
+        }
+    }
 }
 
 /// this is used as finite state machine state
@@ -111,6 +136,20 @@ impl<E: ExtensionField> Expression<E> {
             product,
             scaled,
         )
+    }
+
+    pub fn evaluate_constant<T>(
+        &self,
+        constant: &impl Fn(Either<E::BaseField, E>) -> T,
+        challenge: &impl Fn(ChallengeId, usize, E, E) -> T,
+    ) -> T {
+        match self {
+            Expression::Constant(either) => constant(*either),
+            Expression::Challenge(challenge_id, pow, scalar, offset) => {
+                challenge(*challenge_id, *pow, *scalar, *offset)
+            }
+            _ => unimplemented!("unsupported"),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -238,6 +277,10 @@ impl<E: ExtensionField> Expression<E> {
         matches!(self, Expression::Constant(_))
     }
 
+    pub fn is_linear(&self) -> bool {
+        self.degree() <= 1
+    }
+
     fn is_zero_expr(expr: &Expression<E>) -> bool {
         match expr {
             Expression::Fixed(_) => false,
@@ -284,6 +327,102 @@ impl<E: ExtensionField> Expression<E> {
             (Expression::ScaledSum(x, a, b), MonomialState::ProductTerm) => {
                 Self::is_zero_expr(x) || Self::is_zero_expr(a) || Self::is_zero_expr(b)
             }
+        }
+    }
+
+    /// recursively transforms an expression tree by allowing custom handlers for each leaf variant.
+    /// this allows rewriting any part of the tree (e.g., replacing `Fixed` with `WitIn`, etc.).
+    /// each closure corresponds to the rewrite a specific leaf node.
+    pub fn transform_all<TF, TW, TS, TI, TC, CH>(
+        &self,
+        fixed_fn: &TF,
+        wit_fn: &TW,
+        struct_wit_fn: &TS,
+        instance_fn: &TI,
+        constant_fn: &TC,
+        challenge_fn: &CH,
+    ) -> Expression<E>
+    where
+        TF: Fn(&Fixed) -> Expression<E>,
+        TW: Fn(WitnessId) -> Expression<E>,
+        TS: Fn(WitnessId, usize, u32, usize) -> Expression<E>,
+        TI: Fn(Instance) -> Expression<E>,
+        TC: Fn(Either<E::BaseField, E>) -> Expression<E>,
+        CH: Fn(ChallengeId, usize, E, E) -> Expression<E>,
+    {
+        match self {
+            Expression::WitIn(id) => wit_fn(*id),
+            Expression::StructuralWitIn(id, len, offset, multi_factor) => {
+                struct_wit_fn(*id, *len, *offset, *multi_factor)
+            }
+            Expression::Fixed(f) => fixed_fn(f),
+            Expression::Instance(i) => instance_fn(*i),
+            Expression::Constant(c) => constant_fn(*c),
+            Expression::Challenge(id, pow, scalar, offset) => {
+                challenge_fn(*id, *pow, *scalar, *offset)
+            }
+            Expression::Sum(a, b) => Expression::Sum(
+                Box::new(a.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+                Box::new(b.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+            ),
+            Expression::Product(a, b) => Expression::Product(
+                Box::new(a.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+                Box::new(b.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+            ),
+            Expression::ScaledSum(x, a, b) => Expression::ScaledSum(
+                Box::new(x.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+                Box::new(a.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+                Box::new(b.transform_all(
+                    fixed_fn,
+                    wit_fn,
+                    struct_wit_fn,
+                    instance_fn,
+                    constant_fn,
+                    challenge_fn,
+                )),
+            ),
         }
     }
 }
@@ -832,11 +971,13 @@ impl<E: ExtensionField> Mul for Expression<E> {
 }
 
 #[derive(Clone, Debug, Copy)]
+#[repr(C)]
 pub struct WitIn {
     pub id: WitnessId,
 }
 
 #[derive(Clone, Debug, Copy, serde::Serialize, serde::Deserialize)]
+#[repr(C)]
 pub struct StructuralWitIn {
     pub id: WitnessId,
     pub max_len: usize,
@@ -844,14 +985,17 @@ pub struct StructuralWitIn {
     pub multi_factor: usize,
     pub descending: bool,
 }
+
 #[derive(
     Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[repr(C)]
 pub struct Fixed(pub usize);
 
 #[derive(
     Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
 )]
+#[repr(C)]
 pub struct Instance(pub usize);
 
 pub trait ToExpr<E: ExtensionField> {
@@ -930,7 +1074,7 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
     challenges: &[E],
     expr: &Expression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate_with_instance::<ArcMultilinearExtension<'_, E>>(
+    expr.evaluate_with_instance::<ArcMultilinearExtension<'a, E>>(
         &|f| fixed[f.0].clone(),
         &|witness_id| witnesses[witness_id as usize].clone(),
         &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
@@ -1053,6 +1197,37 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
     )
 }
 
+pub fn rlc_chip_record<E: ExtensionField>(
+    records: Vec<Expression<E>>,
+    chip_record_alpha: Expression<E>,
+    chip_record_beta: Expression<E>,
+) -> Expression<E> {
+    assert!(!records.is_empty());
+    let beta_pows = power_sequence(chip_record_beta);
+
+    let item_rlc = izip!(records, beta_pows)
+        .map(|(record, beta)| record * beta)
+        .sum::<Expression<E>>();
+
+    item_rlc + chip_record_alpha.clone()
+}
+
+/// derive power sequence [1, base, base^2, ..., base^(len-1)] of base expression
+pub fn power_sequence<E: ExtensionField>(
+    base: Expression<E>,
+) -> impl Iterator<Item = Expression<E>> {
+    assert!(
+        matches!(
+            base,
+            Expression::Constant { .. } | Expression::Challenge { .. }
+        ),
+        "expression must be constant or challenge"
+    );
+    successors(Some(E::BaseField::ONE.expr()), move |prev| {
+        Some(prev.clone() * base.clone())
+    })
+}
+
 macro_rules! impl_from_via_ToExpr {
     ($($t:ty),*) => {
         $(
@@ -1074,7 +1249,7 @@ macro_rules! impl_expr_from_unsigned {
         $(
             impl<F: ff_ext::SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
-                    Expression::Constant(Either::Left(F::from_u64(value as u64)))
+                    Expression::Constant(Either::Left(F::from_canonical_u64(value as u64)))
                 }
             }
         )*
@@ -1089,7 +1264,7 @@ macro_rules! impl_from_signed {
             impl<F: SmallField, E: ExtensionField<BaseField = F>> From<$t> for Expression<E> {
                 fn from(value: $t) -> Self {
                     let reduced = (value as i128).rem_euclid(F::MODULUS_U64 as i128) as u64;
-                    Expression::Constant(Either::Left(F::from_u64(reduced)))
+                    Expression::Constant(Either::Left(F::from_canonical_u64(reduced)))
                 }
             }
         )*
@@ -1105,8 +1280,6 @@ impl<E: ExtensionField> Display for Expression<E> {
 }
 
 pub mod fmt {
-    use crate::mle::ArcMultilinearExtension;
-
     use super::*;
     use std::fmt::Write;
 
@@ -1253,7 +1426,7 @@ mod tests {
     use crate::{expression::WitIn, mle::IntoMLE, wit_infer_by_expr};
     use either::Either;
     use ff_ext::{FieldInto, GoldilocksExt2};
-    use p3::field::PrimeCharacteristicRing;
+    use p3::field::FieldAlgebra;
 
     #[test]
     fn test_expression_arithmetics() {
@@ -1414,9 +1587,9 @@ mod tests {
         let res = wit_infer_by_expr(
             &[],
             &[
-                vec![B::from_u64(1)].into_mle().into(),
-                vec![B::from_u64(2)].into_mle().into(),
-                vec![B::from_u64(3)].into_mle().into(),
+                vec![B::from_canonical_u64(1)].into_mle().into(),
+                vec![B::from_canonical_u64(2)].into_mle().into(),
+                vec![B::from_canonical_u64(3)].into_mle().into(),
             ],
             &[],
             &[],
@@ -1443,9 +1616,9 @@ mod tests {
         let res = wit_infer_by_expr(
             &[],
             &[
-                vec![B::from_u64(1)].into_mle().into(),
-                vec![B::from_u64(2)].into_mle().into(),
-                vec![B::from_u64(3)].into_mle().into(),
+                vec![B::from_canonical_u64(1)].into_mle().into(),
+                vec![B::from_canonical_u64(2)].into_mle().into(),
+                vec![B::from_canonical_u64(3)].into_mle().into(),
             ],
             &[],
             &[],

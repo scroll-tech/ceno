@@ -1,20 +1,17 @@
 use std::marker::PhantomData;
 
-use crate::gkr::layer::zerocheck_layer::RotationProof;
-use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
-use multilinear_extensions::{
-    utils::eval_by_expr_with_instance, virtual_poly::VPAuxInfo,
-    virtual_polys::VirtualPolynomialsBuilder,
-};
+use multilinear_extensions::{utils::eval_by_expr_with_instance, virtual_poly::VPAuxInfo};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sumcheck::structs::{
-    IOPProof, IOPProverState, IOPVerifierState, SumCheckSubClaim, VerifierError,
-};
+use sumcheck::structs::{IOPProof, IOPVerifierState, SumCheckSubClaim, VerifierError};
 use transcript::Transcript;
 
-use crate::error::BackendError;
+use crate::{
+    error::BackendError,
+    gkr::layer::hal::SumcheckLayerProver,
+    hal::{ProverBackend, ProverDevice},
+};
 
 use super::{Layer, LayerWitness, linear_layer::LayerClaims};
 
@@ -23,71 +20,75 @@ use super::{Layer, LayerWitness, linear_layer::LayerClaims};
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
+pub struct LayerProof<E: ExtensionField> {
+    pub rotation: Option<SumcheckLayerProof<E>>,
+    pub main: SumcheckLayerProof<E>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
 pub struct SumcheckLayerProof<E: ExtensionField> {
     pub proof: IOPProof<E>,
-    pub rotation_proof: Option<RotationProof<E>>,
     pub evals: Vec<E>,
 }
+
 pub trait SumcheckLayer<E: ExtensionField> {
     #[allow(clippy::too_many_arguments)]
-    fn prove<'a>(
+    fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        wit: LayerWitness<'a, E>,
-        challenges: &[E],
-        transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E>;
+        wit: LayerWitness<PB>,
+        challenges: &[PB::E],
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> LayerProof<PB::E>;
 
     fn verify(
         &self,
         max_num_variables: usize,
-        proof: SumcheckLayerProof<E>,
+        proof: LayerProof<E>,
         sigma: &E,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>>;
+    ) -> Result<LayerClaims<E>, BackendError>;
 }
 
 impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
-    fn prove<'a>(
+    fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         num_threads: usize,
         max_num_variables: usize,
-        wit: LayerWitness<'a, E>,
-        challenges: &[E],
-        transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E> {
-        let builder = VirtualPolynomialsBuilder::new_with_mles(
+        wit: LayerWitness<PB>,
+        challenges: &[PB::E],
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> LayerProof<PB::E> {
+        <PD as SumcheckLayerProver<PB>>::prove(
+            self,
             num_threads,
             max_num_variables,
-            wit.bases
-                .iter()
-                .map(|mle| Either::Left(mle.as_ref()))
-                .collect_vec(),
-        );
-        let (proof, prover_state) = IOPProverState::prove(
-            builder.to_virtual_polys(&[self.exprs[0].clone()], challenges),
+            wit,
+            challenges,
             transcript,
-        );
-        SumcheckLayerProof {
-            proof,
-            rotation_proof: None,
-            evals: prover_state.get_mle_flatten_final_evaluations(),
-        }
+        )
     }
 
     fn verify(
         &self,
         max_num_variables: usize,
-        proof: SumcheckLayerProof<E>,
+        proof: LayerProof<E>,
         sigma: &E,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>> {
-        let SumcheckLayerProof {
-            proof: IOPProof { proofs, .. },
-            evals,
+    ) -> Result<LayerClaims<E>, BackendError> {
+        let LayerProof {
+            main:
+                SumcheckLayerProof {
+                    proof: IOPProof { proofs, .. },
+                    evals,
+                },
             ..
         } = proof;
 
@@ -115,10 +116,8 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
             return Err(BackendError::LayerVerificationFailed(
                 "sumcheck verify failed".to_string(),
                 VerifierError::ClaimNotMatch(
-                    self.exprs[0].clone(),
-                    expected_evaluation,
-                    got_claim,
-                    self.expr_names[0].clone(),
+                    format!("{}", expected_evaluation),
+                    format!("{}", got_claim),
                 ),
             ));
         }

@@ -5,6 +5,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::Instruction,
     scheme::mock_prover::{MOCK_PC_START, MockProver},
+    structs::ProgramParams,
 };
 
 use super::{JalInstruction, JalrInstruction};
@@ -17,7 +18,10 @@ fn test_opcode_jal() {
         .namespace(
             || "jal",
             |cb| {
-                let config = JalInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                let config = JalInstruction::<GoldilocksExt2>::construct_circuit(
+                    cb,
+                    &ProgramParams::default(),
+                );
                 Ok(config)
             },
         )
@@ -30,6 +34,7 @@ fn test_opcode_jal() {
     let (raw_witin, lkm) = JalInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_j_instruction(
             4,
             Change::new(MOCK_PC_START, new_pc),
@@ -51,7 +56,10 @@ fn test_opcode_jalr() {
         .namespace(
             || "jalr",
             |cb| {
-                let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(cb);
+                let config = JalrInstruction::<GoldilocksExt2>::construct_circuit(
+                    cb,
+                    &ProgramParams::default(),
+                );
                 Ok(config)
             },
         )
@@ -66,6 +74,7 @@ fn test_opcode_jalr() {
     let (raw_witin, lkm) = JalrInstruction::<GoldilocksExt2>::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_i_instruction(
             4,
             Change::new(MOCK_PC_START, new_pc),

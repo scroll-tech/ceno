@@ -24,12 +24,12 @@ impl<E: ExtensionField> Signed<E> {
         name_fn: N,
         unsigned_val: &UInt<E>,
     ) -> Result<Self, ZKVMError> {
-        cb.namespace(name_fn, |cb| {
+        Ok(cb.namespace(name_fn, |cb| {
             let is_negative = unsigned_val.is_negative(cb)?;
             let val = unsigned_val.to_field_expr(is_negative.expr());
 
             Ok(Self { is_negative, val })
-        })
+        })?)
     }
 
     pub fn assign_instance(

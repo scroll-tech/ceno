@@ -9,10 +9,10 @@ use crate::{
             s_insn::SInstructionConfig,
         },
     },
-    set_val,
+    structs::ProgramParams,
     tables::InsnRecord,
     utils::i64_to_base,
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
@@ -62,6 +62,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
@@ -80,8 +81,8 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             const MAX_RAM_ADDR: u32 = u32::MAX - 0x7FF; // max positive imm is 0x7FF
             const MIN_RAM_ADDR: u32 = 0x800; // min negative imm is -0x800
             assert!(
-                !circuit_builder.params.platform.can_write(MAX_RAM_ADDR + 1)
-                    && !circuit_builder.params.platform.can_write(MIN_RAM_ADDR - 1)
+                !params.platform.can_write(MAX_RAM_ADDR + 1)
+                    && !params.platform.can_write(MIN_RAM_ADDR - 1)
             );
         }
         circuit_builder.require_equal(

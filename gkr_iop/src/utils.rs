@@ -1,82 +1,136 @@
-use ff_ext::ExtensionField;
-use itertools::Itertools;
+pub mod lk_multiplicity;
+
+use ff_ext::{ExtensionField, SmallField};
+use itertools::{Itertools, izip};
 use multilinear_extensions::{
+    Expression, Fixed, WitIn, WitnessId,
     mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
-    wit_infer_by_expr,
+    virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
-use p3_field::PrimeCharacteristicRing;
+use p3_field::FieldAlgebra;
 use rayon::{
-    iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelExtend,
-        ParallelIterator,
-    },
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
 use crate::{
-    evaluation::EvalExpression,
     gkr::{booleanhypercube::BooleanHypercube, layer::Layer},
+    selector::SelectorType,
 };
 
-pub fn infer_layer_witness<'a, E>(
+pub fn extend_exprs_with_rotation<E: ExtensionField>(
     layer: &Layer<E>,
-    layer_wits: &[ArcMultilinearExtension<'a, E>],
-    challenges: &[E],
-) -> Vec<ArcMultilinearExtension<'a, E>>
-where
-    E: ExtensionField,
-{
-    let out_evals: Vec<_> = layer
-        .expr_evals
-        .iter()
-        .flat_map(|(_, out_eval)| out_eval.iter())
-        .collect();
-    layer
-        .exprs
-        .par_iter()
-        .zip_eq(layer.expr_names.par_iter())
-        .zip_eq(out_evals.par_iter())
-        .map(|((expr, expr_name), out_eval)| match out_eval {
-            EvalExpression::Single(_) => {
-                wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr)
-            }
-            EvalExpression::Zero => {
-                // sanity check: zero mle
-                if cfg!(debug_assertions) {
-                    let out_mle = wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr);
-                    let all_zero = match out_mle.evaluations() {
-                        multilinear_extensions::mle::FieldType::Base(smart_slice) => {
-                            smart_slice.iter().copied().all(|v| v == E::BaseField::ZERO)
-                        }
-                        multilinear_extensions::mle::FieldType::Ext(smart_slice) => {
-                            smart_slice.iter().copied().all(|v| v == E::ZERO)
-                        }
-                        multilinear_extensions::mle::FieldType::Unreachable => unreachable!(),
-                    };
-                    if !all_zero {
-                        panic!(
-                            "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
-                            layer.name
-                        );
-                    }
-                }
-                MultilinearExtension::default().into()
-            }
-            _ => unimplemented!(),
-        })
-        .collect::<Vec<_>>()
+    alpha_pows: &[Expression<E>],
+    offset_eq_id: WitnessId,
+) -> Vec<Expression<E>> {
+    let mut alpha_pows_iter = alpha_pows.iter();
+    let mut expr_iter = layer.exprs.iter();
+    let mut zero_check_exprs = Vec::with_capacity(layer.out_sel_and_eval_exprs.len());
+
+    let match_expr = |sel_expr: &Expression<E>| match sel_expr {
+        Expression::StructuralWitIn(id, ..) => Expression::WitIn(offset_eq_id + *id),
+        invalid => panic!("invalid eq format {:?}", invalid),
+    };
+
+    for (sel_type, out_evals) in layer.out_sel_and_eval_exprs.iter() {
+        let group_length = out_evals.len();
+        let zero_check_expr = expr_iter
+            .by_ref()
+            .take(group_length)
+            .cloned()
+            .zip_eq(alpha_pows_iter.by_ref().take(group_length))
+            .map(|(expr, alpha)| alpha * expr)
+            .sum::<Expression<E>>();
+        let expr = match sel_type {
+            SelectorType::None => zero_check_expr,
+            SelectorType::Whole(sel)
+            | SelectorType::Prefix(_, sel)
+            | SelectorType::OrderedSparse32 {
+                expression: sel, ..
+            } => match_expr(sel) * zero_check_expr,
+        };
+        zero_check_exprs.push(expr);
+    }
+
+    // prepare rotation expr
+    let (rotation_eq, rotation_exprs) = &layer.rotation_exprs;
+    if rotation_eq.is_none() {
+        return zero_check_exprs;
+    }
+
+    let left_rotation_expr: Expression<E> = izip!(
+        rotation_exprs.iter(),
+        alpha_pows_iter.by_ref().take(rotation_exprs.len())
+    )
+    .map(|((rotate_expr, _), alpha)| {
+        assert!(matches!(rotate_expr, Expression::WitIn(_)));
+        alpha * rotate_expr
+    })
+    .sum();
+    let right_rotation_expr: Expression<E> = izip!(
+        rotation_exprs.iter(),
+        alpha_pows_iter.by_ref().take(rotation_exprs.len())
+    )
+    .map(|((rotate_expr, _), alpha)| {
+        assert!(matches!(rotate_expr, Expression::WitIn(_)));
+        alpha * rotate_expr
+    })
+    .sum();
+    let rotation_expr: Expression<E> = izip!(
+        rotation_exprs.iter(),
+        alpha_pows_iter.by_ref().take(rotation_exprs.len())
+    )
+    .map(|((_, expr), alpha)| {
+        assert!(matches!(expr, Expression::WitIn(_)));
+        alpha * expr
+    })
+    .sum();
+
+    // push rotation expr to zerocheck expr
+    if let Some(
+        [
+            rotation_left_eq_expr,
+            rotation_right_eq_expr,
+            rotation_eq_expr,
+        ],
+    ) = rotation_eq.as_ref()
+    {
+        let (rotation_left_eq_expr, rotation_right_eq_expr, rotation_eq_expr) = match (
+            rotation_left_eq_expr,
+            rotation_right_eq_expr,
+            rotation_eq_expr,
+        ) {
+            (
+                Expression::StructuralWitIn(left_eq_id, ..),
+                Expression::StructuralWitIn(right_eq_id, ..),
+                Expression::StructuralWitIn(eq_id, ..),
+            ) => (
+                Expression::WitIn(offset_eq_id + *left_eq_id),
+                Expression::WitIn(offset_eq_id + *right_eq_id),
+                Expression::WitIn(offset_eq_id + *eq_id),
+            ),
+            invalid => panic!("invalid eq format {:?}", invalid),
+        };
+        // add rotation left expr
+        zero_check_exprs.push(rotation_left_eq_expr * left_rotation_expr);
+        // add rotation right expr
+        zero_check_exprs.push(rotation_right_eq_expr * right_rotation_expr);
+        // add target expr
+        zero_check_exprs.push(rotation_eq_expr * rotation_expr);
+    }
+    assert!(expr_iter.next().is_none() && alpha_pows_iter.next().is_none());
+
+    zero_check_exprs
 }
 
 pub fn rotation_next_base_mle<'a, E: ExtensionField>(
+    bh: &BooleanHypercube,
     mle: &ArcMultilinearExtension<'a, E>,
-    cyclic_subgroup_size: usize,
     cyclic_group_log2_size: usize,
 ) -> MultilinearExtension<'a, E> {
     let cyclic_group_size = 1 << cyclic_group_log2_size;
-    assert!(cyclic_subgroup_size < cyclic_group_size);
-    let bh = BooleanHypercube::new(cyclic_group_log2_size);
-    let rotation_index = bh.into_iter().take(cyclic_subgroup_size + 1).collect_vec();
+    let rotation_index = bh.into_iter().take(cyclic_group_size + 1).collect_vec();
     let mut rotated_mle_evals = Vec::with_capacity(mle.evaluations().len());
     rotated_mle_evals.par_extend(
         (0..mle.evaluations().len())
@@ -94,6 +148,8 @@ pub fn rotation_next_base_mle<'a, E: ExtensionField>(
                 rotate_chunk[last] = original_chunk[first]
             }
 
+            rotate_chunk[0] = original_chunk[0];
+
             for i in (0..rotation_index.len() - 1).rev() {
                 let to = rotation_index[i] as usize;
                 let from = rotation_index[i + 1] as usize;
@@ -104,6 +160,8 @@ pub fn rotation_next_base_mle<'a, E: ExtensionField>(
 }
 
 pub fn rotation_selector<'a, E: ExtensionField>(
+    bh: &BooleanHypercube,
+    eq: &[E],
     cyclic_subgroup_size: usize,
     cyclic_group_log2_size: usize,
     total_len: usize,
@@ -111,26 +169,157 @@ pub fn rotation_selector<'a, E: ExtensionField>(
     assert!(total_len.is_power_of_two());
     let cyclic_group_size = 1 << cyclic_group_log2_size;
     assert!(cyclic_subgroup_size <= cyclic_group_size);
-    let bh = BooleanHypercube::new(cyclic_group_log2_size);
     let rotation_index = bh.into_iter().take(cyclic_subgroup_size).collect_vec();
     let mut rotated_mle_evals = Vec::with_capacity(total_len);
-    rotated_mle_evals.par_extend((0..total_len).into_par_iter().map(|_| E::BaseField::ZERO));
+    rotated_mle_evals.par_extend((0..total_len).into_par_iter().map(|_| E::ZERO));
     rotated_mle_evals
         .par_chunks_mut(cyclic_group_size)
-        .for_each(|rotate_chunk| {
+        .zip_eq(eq.par_chunks(cyclic_group_size))
+        .for_each(|(rotate_chunk, eq_chunk)| {
             for i in (0..rotation_index.len()).rev() {
                 let to = rotation_index[i] as usize;
-                rotate_chunk[to] = E::BaseField::ONE;
+                rotate_chunk[to] = eq_chunk[to];
             }
         });
     MultilinearExtension::from_evaluation_vec_smart(ceil_log2(total_len), rotated_mle_evals)
+}
+
+/// sel(rx)
+/// = (\sum_{b = 0}^{cyclic_subgroup_size - 1} eq(out_point[..cyclic_group_log2_size], b) * eq(in_point[..cyclic_group_log2_size], b))
+///     * \prod_{k = cyclic_group_log2_size}^{n - 1} eq(out_point[k], in_point[k])
+pub fn rotation_selector_eval<E: ExtensionField>(
+    bh: &BooleanHypercube,
+    out_point: &[E],
+    in_point: &[E],
+    cyclic_subgroup_size: usize,
+    cyclic_group_log2_size: usize,
+) -> E {
+    let cyclic_group_size = 1 << cyclic_group_log2_size;
+    assert!(cyclic_subgroup_size <= cyclic_group_size);
+    let rotation_index = bh.into_iter().take(cyclic_subgroup_size).collect_vec();
+    let out_subgroup_eq = build_eq_x_r_vec(&out_point[..cyclic_group_log2_size]);
+    let in_subgroup_eq = build_eq_x_r_vec(&in_point[..cyclic_group_log2_size]);
+    let mut eval = E::ZERO;
+    for b in rotation_index {
+        let b = b as usize;
+        eval += out_subgroup_eq[b] * in_subgroup_eq[b];
+    }
+    eval * eq_eval(
+        &out_point[cyclic_group_log2_size..],
+        &in_point[cyclic_group_log2_size..],
+    )
+}
+
+pub fn i64_to_base<F: SmallField>(x: i64) -> F {
+    if x >= 0 {
+        F::from_canonical_u64(x as u64)
+    } else {
+        -F::from_canonical_u64((-x) as u64)
+    }
+}
+
+/// Returns `[0 + offset, ..., N - 1 + offset]`.
+#[must_use]
+pub const fn indices_arr_with_offset<const N: usize, const OFFSET: usize>() -> [usize; N] {
+    let mut indices_arr = [0; N];
+    let mut i = 0;
+    while i < N {
+        indices_arr[i] = i + OFFSET;
+        i += 1;
+    }
+    indices_arr
+}
+
+pub fn indices_arr_with_offset_non_const<const N: usize>(offset: usize) -> [usize; N] {
+    let mut indices_arr = [0; N];
+    let mut i = 0;
+    while i < N {
+        indices_arr[i] = i + offset;
+        i += 1;
+    }
+    indices_arr
+}
+
+/// Returns `[WitIn(0), ..., WitIn(N - 1)], [Fixed(N), Fixed(N + 1), ..., Fixed(N + M)], [WitIn(N + M + 1), ...]`.
+/// TODO remove me
+#[must_use]
+pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>()
+-> ([WitIn; N], [Fixed; M], [WitIn; Q]) {
+    let mut wits = [WitIn { id: 0 }; N];
+    let mut i = 0;
+    while i < N {
+        wits[i] = WitIn { id: i as WitnessId };
+        i += 1;
+    }
+    let mut i = 0;
+    let mut fixed = [Fixed(0); M];
+    while i < M {
+        fixed[i] = Fixed(i);
+        i += 1;
+    }
+    let mut i = 0;
+    let mut eqs = [WitIn { id: 0 }; Q];
+    while i < Q {
+        eqs[i] = WitIn {
+            id: (i + N + M) as WitnessId,
+        };
+        i += 1;
+    }
+    (wits, fixed, eqs)
+}
+
+/// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
+/// [0..=max_idx]. Specifically, it is an MLE of the following vector:
+///     partial_eq_{\mathbf{x}}(\mathbf{y})
+///         = \sum_{\mathbf{b}=0}^{max_idx} \prod_{i=0}^{n-1} (x_i y_i b_i + (1 - x_i)(1 - y_i)(1 - b_i))
+pub fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &[E], b: &[E]) -> E {
+    assert!(a.len() >= b.len());
+    // Compute running product of ( x_i y_i + (1 - x_i)(1 - y_i) )_{0 <= i <= n}
+    let running_product = {
+        let mut running_product = Vec::with_capacity(b.len() + 1);
+        running_product.push(E::ONE);
+        for i in 0..b.len() {
+            let x = running_product[i] * (a[i] * b[i] + (E::ONE - a[i]) * (E::ONE - b[i]));
+            running_product.push(x);
+        }
+        running_product
+    };
+
+    let running_product2 = {
+        let mut running_product = vec![E::ZERO; b.len() + 1];
+        running_product[b.len()] = E::ONE;
+        for i in (0..b.len()).rev() {
+            let bit = E::from_canonical_u64(((max_idx >> i) & 1) as u64);
+            running_product[i] = running_product[i + 1]
+                * (a[i] * b[i] * bit + (E::ONE - a[i]) * (E::ONE - b[i]) * (E::ONE - bit));
+        }
+        running_product
+    };
+
+    // Here is an example of how this works:
+    // Suppose max_idx = (110101)_2
+    // Then ans = eq(a, b)
+    //          - eq(11011, a[1..6], b[1..6])eq(a[0..1], b[0..1])
+    //          - eq(111, a[3..6], b[3..6])eq(a[0..3], b[0..3])
+    let mut ans = running_product[b.len()];
+    for i in 0..b.len() {
+        let bit = (max_idx >> i) & 1;
+        if bit == 1 {
+            continue;
+        }
+        ans -= running_product[i] * running_product2[i + 1] * a[i] * b[i];
+    }
+    for v in a.iter().skip(b.len()) {
+        ans *= E::ONE - *v;
+    }
+    ans
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::{FromUniformBytes, GoldilocksExt2};
     use p3_goldilocks::Goldilocks;
 
     use super::*;
@@ -145,40 +334,29 @@ mod tests {
     }
 
     #[test]
-    fn test_rotation_next_non_cyclic() {
+    fn test_rotation_next_base_mle_eval() {
         type E = GoldilocksExt2;
-        let mle = make_mle::<E>((0..32u64).map(Goldilocks::from_u64).collect_vec());
-        let full_rotated = rotation_next_base_mle(&mle, 31, 5);
-        assert_eq!(
-            full_rotated
-                .get_base_field_vec()
-                .iter()
-                .filter(|v| **v == Goldilocks::ZERO)
-                .count(),
-            1 // only position 0 not rotate
+        let bh = BooleanHypercube::new(5);
+        let poly = make_mle::<E>(
+            (0..128u64)
+                .map(Goldilocks::from_canonical_u64)
+                .collect_vec(),
         );
+        let rotated = rotation_next_base_mle(&bh, &poly, 5);
 
-        let partial_rotate = rotation_next_base_mle(&mle, 23, 5);
+        let mut rng = rand::thread_rng();
+        let point: Vec<_> = (0..7).map(|_| E::random(&mut rng)).collect();
+        let (left_point, right_point) = bh.get_rotation_points(&point);
+        let rotated_eval = rotated.evaluate(&point);
+        let left_eval = poly.evaluate(&left_point);
+        let right_eval = poly.evaluate(&right_point);
         assert_eq!(
-            partial_rotate
-                .get_base_field_vec()
-                .iter()
-                .filter(|v| **v == Goldilocks::ZERO)
-                .count(),
-            9,
+            rotated_eval,
+            (E::ONE - point[4]) * left_eval + point[4] * right_eval
         );
-    }
-
-    #[test]
-    fn test_rotation_selector() {
-        type E = GoldilocksExt2;
-        let sel = rotation_selector::<E>(23, 5, 32);
         assert_eq!(
-            sel.get_base_field_vec()
-                .iter()
-                .filter(|v| **v == Goldilocks::ZERO)
-                .count(),
-            9,
+            right_eval,
+            bh.get_rotation_right_eval_from_left(rotated_eval, left_eval, &point)
         );
     }
 }

@@ -5,6 +5,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::{Instruction, riscv::constants::UInt8},
     scheme::mock_prover::{MOCK_PC_START, MockProver},
+    structs::ProgramParams,
     utils::split_to_u8,
 };
 
@@ -21,7 +22,7 @@ fn test_opcode_and() {
         .namespace(
             || "and",
             |cb| {
-                let config = AndInstruction::construct_circuit(cb);
+                let config = AndInstruction::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -32,6 +33,7 @@ fn test_opcode_and() {
     let (raw_witin, lkm) = AndInstruction::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
@@ -62,7 +64,7 @@ fn test_opcode_or() {
         .namespace(
             || "or",
             |cb| {
-                let config = OrInstruction::construct_circuit(cb);
+                let config = OrInstruction::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -73,6 +75,7 @@ fn test_opcode_or() {
     let (raw_witin, lkm) = OrInstruction::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
@@ -103,7 +106,7 @@ fn test_opcode_xor() {
         .namespace(
             || "xor",
             |cb| {
-                let config = XorInstruction::construct_circuit(cb);
+                let config = XorInstruction::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -114,6 +117,7 @@ fn test_opcode_xor() {
     let (raw_witin, lkm) = XorInstruction::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,

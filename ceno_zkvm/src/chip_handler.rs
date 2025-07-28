@@ -1,23 +1,23 @@
 use ff_ext::ExtensionField;
+use gkr_iop::{error::CircuitBuilderError, gadgets::AssertLtConfig};
 
-use crate::{
-    error::ZKVMError, gadgets::AssertLtConfig, instructions::riscv::constants::UINT_LIMBS,
-};
+use crate::instructions::riscv::constants::UINT_LIMBS;
 use multilinear_extensions::{Expression, ToExpr};
 
 pub mod general;
 pub mod global_state;
 pub mod memory;
 pub mod register;
-pub mod utils;
-
-#[cfg(test)]
-pub mod test;
 
 pub trait GlobalStateRegisterMachineChipOperations<E: ExtensionField> {
-    fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
+    fn state_in(&mut self, pc: Expression<E>, ts: Expression<E>)
+    -> Result<(), CircuitBuilderError>;
 
-    fn state_out(&mut self, pc: Expression<E>, ts: Expression<E>) -> Result<(), ZKVMError>;
+    fn state_out(
+        &mut self,
+        pc: Expression<E>,
+        ts: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>;
 }
 
 /// The common representation of a register value.
@@ -32,7 +32,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError>;
 
     #[allow(clippy::too_many_arguments)]
     fn register_write(
@@ -43,7 +43,7 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
         ts: Expression<E>,
         prev_values: RegisterExpr<E>,
         value: RegisterExpr<E>,
-    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError>;
 }
 
 /// The common representation of a memory address.
@@ -60,7 +60,7 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         prev_ts: Expression<E>,
         ts: Expression<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError>;
 
     #[allow(clippy::too_many_arguments)]
     fn memory_write(
@@ -71,5 +71,5 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
-    ) -> Result<(Expression<E>, AssertLtConfig), ZKVMError>;
+    ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError>;
 }

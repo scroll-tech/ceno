@@ -1,14 +1,13 @@
 //! The implementation of range tables. No generics.
 
 use ff_ext::{ExtensionField, SmallField};
+use gkr_iop::error::CircuitBuilderError;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::collections::HashMap;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
-    error::ZKVMError,
-    set_val,
     structs::ROMType,
 };
 use multilinear_extensions::{StructuralWitIn, ToExpr, WitIn};
@@ -24,7 +23,7 @@ impl RangeTableConfig {
         cb: &mut CircuitBuilder<E>,
         rom_type: ROMType,
         table_len: usize,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         let range = cb.create_structural_witin(|| "structural range witin", table_len, 0, 1, false);
         let mlt = cb.create_witin(|| "mlt");
 
@@ -51,7 +50,7 @@ impl RangeTableConfig {
         multiplicity: &HashMap<u64, usize>,
         content: Vec<u64>,
         length: usize,
-    ) -> Result<[RowMajorMatrix<F>; 2], ZKVMError> {
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         let mut witness: RowMajorMatrix<F> =
             RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
         let mut structural_witness = RowMajorMatrix::<F>::new(
@@ -71,8 +70,8 @@ impl RangeTableConfig {
             .zip(mlts)
             .zip(content)
             .for_each(|(((row, structural_row), mlt), i)| {
-                set_val!(row, self.mlt, F::from_u64(mlt as u64));
-                set_val!(structural_row, self.range, F::from_u64(i));
+                set_val!(row, self.mlt, F::from_canonical_u64(mlt as u64));
+                set_val!(structural_row, self.range, F::from_canonical_u64(i));
             });
 
         Ok([witness, structural_witness])

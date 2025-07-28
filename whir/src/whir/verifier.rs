@@ -6,7 +6,7 @@ use ff_ext::{ExtensionField, PoseidonField};
 use multilinear_extensions::{mle::MultilinearExtension, virtual_poly::eq_eval};
 use p3::{
     commit::Mmcs,
-    field::{Field, PrimeCharacteristicRing},
+    field::{Field, FieldAlgebra},
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -74,7 +74,7 @@ where
     pub fn new(params: WhirConfig<E>) -> Self {
         Verifier {
             params,
-            two_inv: E::BaseField::from_u64(2).inverse(), // The only inverse in the entire code :)
+            two_inv: E::BaseField::from_canonical_u64(2).inverse(), /* The only inverse in the entire code :) */
         }
     }
 
@@ -441,7 +441,7 @@ where
                         &round.folding_randomness,
                         coset_offset_inv,
                         coset_generator_inv,
-                        E::from_base(&self.two_inv),
+                        E::from_ref_base(&self.two_inv),
                         self.params.folding_factor.at_round(round_index),
                     )
                 })
@@ -469,7 +469,7 @@ where
                     &parsed.final_folding_randomness,
                     coset_offset_inv,
                     coset_generator_inv,
-                    E::from_base(&self.two_inv),
+                    E::from_ref_base(&self.two_inv),
                     self.params.folding_factor.at_round(parsed.rounds.len()),
                 )
             })

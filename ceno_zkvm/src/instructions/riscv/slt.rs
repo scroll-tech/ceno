@@ -13,6 +13,7 @@ use crate::{
     error::ZKVMError,
     gadgets::{IsLtConfig, SignedLtConfig},
     instructions::Instruction,
+    structs::ProgramParams,
     uint::Value,
     witness::LkMultiplicity,
 };
@@ -55,7 +56,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         // If rs1_read < rs2_read, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
@@ -136,7 +140,7 @@ mod test {
     use ceno_emul::{Change, StepRecord, Word, encode_rv32};
     use ff_ext::GoldilocksExt2;
 
-    use rand::Rng;
+    use rand::RngCore;
 
     use super::*;
     use crate::{
@@ -152,7 +156,10 @@ mod test {
             .namespace(
                 || format!("{}/{name}", I::INST_KIND),
                 |cb| {
-                    let config = SetLessThanInstruction::<_, I>::construct_circuit(cb);
+                    let config = SetLessThanInstruction::<_, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    );
                     Ok(config)
                 },
             )
@@ -163,6 +170,7 @@ mod test {
         let (raw_witin, lkm) = SetLessThanInstruction::<_, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
+            cb.cs.num_structural_witin as usize,
             vec![StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
@@ -222,8 +230,8 @@ mod test {
     #[test]
     fn test_slt_random() {
         let mut rng = rand::thread_rng();
-        let a: i32 = rng.gen();
-        let b: i32 = rng.gen();
+        let a: i32 = rng.next_u32() as i32;
+        let b: i32 = rng.next_u32() as i32;
         println!("random: {} <? {}", a, b); // For debugging, do not delete.
         verify::<SltOp>("random 1", a as Word, b as Word, (a < b) as u32);
         verify::<SltOp>("random 2", b as Word, a as Word, (a >= b) as u32);
@@ -244,8 +252,8 @@ mod test {
     #[test]
     fn test_sltu_random() {
         let mut rng = rand::thread_rng();
-        let a: u32 = rng.gen();
-        let b: u32 = rng.gen();
+        let a: u32 = rng.next_u32();
+        let b: u32 = rng.next_u32();
         verify::<SltuOp>("random 1", a, b, (a < b) as u32);
         verify::<SltuOp>("random 2", b, a, (a >= b) as u32);
     }

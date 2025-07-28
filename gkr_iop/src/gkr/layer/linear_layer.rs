@@ -1,77 +1,72 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{mle::Point, utils::eval_by_expr_with_instance};
-use sumcheck::structs::{IOPProof, VerifierError};
+use sumcheck::structs::VerifierError;
 use transcript::Transcript;
 
-use crate::error::BackendError;
+use crate::{
+    error::BackendError,
+    gkr::layer::{hal::LinearLayerProver, sumcheck_layer::SumcheckLayerProof},
+    hal::{ProverBackend, ProverDevice},
+};
 
-use super::{Layer, LayerWitness, sumcheck_layer::SumcheckLayerProof};
+use super::{Layer, LayerWitness, sumcheck_layer::LayerProof};
 
 pub struct LayerClaims<E: ExtensionField> {
     pub in_point: Point<E>,
     pub evals: Vec<E>,
 }
 pub trait LinearLayer<E: ExtensionField> {
-    fn prove(
+    fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
-        wit: LayerWitness<E>,
-        out_point: &Point<E>,
-        transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E>;
+        wit: LayerWitness<PB>,
+        out_point: &Point<PB::E>,
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> LayerProof<PB::E>;
 
     fn verify(
         &self,
-        proof: SumcheckLayerProof<E>,
+        proof: LayerProof<E>,
         sigmas: &[E],
         out_point: &Point<E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>>;
+    ) -> Result<LayerClaims<E>, BackendError>;
 }
 
 impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
-    fn prove(
+    fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
-        wit: LayerWitness<E>,
-        out_point: &Point<E>,
-        transcript: &mut impl Transcript<E>,
-    ) -> SumcheckLayerProof<E> {
-        let evals = wit
-            .bases
-            .iter()
-            .map(|base| base.evaluate(out_point))
-            .collect_vec();
-
-        transcript.append_field_element_exts(&evals);
-
-        SumcheckLayerProof {
-            evals,
-            rotation_proof: None,
-            proof: IOPProof { proofs: vec![] },
-        }
+        wit: LayerWitness<PB>,
+        out_point: &Point<PB::E>,
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> LayerProof<PB::E> {
+        <PD as LinearLayerProver<PB>>::prove(self, wit, out_point, transcript)
     }
 
     fn verify(
         &self,
-        proof: SumcheckLayerProof<E>,
+        proof: LayerProof<E>,
         sigmas: &[E],
         out_point: &Point<E>,
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-    ) -> Result<LayerClaims<E>, BackendError<E>> {
-        let SumcheckLayerProof { evals, .. } = proof;
+    ) -> Result<LayerClaims<E>, BackendError> {
+        let LayerProof {
+            main: SumcheckLayerProof { evals, .. },
+            ..
+        } = proof;
+
         transcript.append_field_element_exts(&evals);
 
-        for ((sigma, expr), expr_name) in sigmas.iter().zip_eq(&self.exprs).zip_eq(&self.expr_names)
-        {
+        for (sigma, expr) in sigmas.iter().zip_eq(&self.exprs) {
             let got = eval_by_expr_with_instance(&[], &evals, &[], &[], challenges, expr)
                 .right()
                 .unwrap();
             if *sigma != got {
                 return Err(BackendError::LayerVerificationFailed(
                     self.name.clone(),
-                    VerifierError::<E>::ClaimNotMatch(expr.clone(), *sigma, got, expr_name.clone()),
+                    VerifierError::ClaimNotMatch(format!("{}", *sigma), format!("{}", got)),
                 ));
             }
         }

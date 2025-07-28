@@ -64,7 +64,7 @@ mod tests {
         mle::{FieldType, MultilinearExtension},
         virtual_poly::eq_eval,
     };
-    use p3::{field::PrimeCharacteristicRing, util::log2_strict_usize};
+    use p3::{field::FieldAlgebra, util::log2_strict_usize};
     use transcript::{BasicTranscript, Transcript};
 
     use crate::{
@@ -96,18 +96,20 @@ mod tests {
         let num_variables = 2;
         let folding_factor = 2;
         let polynomials = vec![
-            (0..1 << num_variables).map(F::from_u64).collect(),
-            (1..(1 << num_variables) + 1).map(F::from_u64).collect(),
+            (0..1 << num_variables).map(F::from_canonical_u64).collect(),
+            (1..(1 << num_variables) + 1)
+                .map(F::from_canonical_u64)
+                .collect(),
         ];
 
         // Initial stuff
         let statement_points = vec![
-            expand_from_univariate(F::from_u64(97), num_variables),
-            expand_from_univariate(F::from_u64(75), num_variables),
+            expand_from_univariate(F::from_canonical_u64(97), num_variables),
+            expand_from_univariate(F::from_canonical_u64(75), num_variables),
         ];
 
         // Poly randomness
-        let [alpha_1, alpha_2] = [F::from_u64(15), F::from_u64(32)];
+        let [alpha_1, alpha_2] = [F::from_canonical_u64(15), F::from_canonical_u64(32)];
 
         // Prover part
         let mut transcript = T::new(b"test");
