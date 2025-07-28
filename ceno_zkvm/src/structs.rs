@@ -199,7 +199,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let config = TC::construct_circuit(&mut circuit_builder, &self.params).unwrap();
-        circuit_builder.finalize();
         assert!(
             self.circuit_css
                 .insert(
@@ -221,7 +220,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             SC::initial_global_state(&mut circuit_builder).expect("global_state_in failed");
         self.finalize_global_state_expr =
             SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
-        circuit_builder.finalize();
     }
 
     pub fn get_css(&self) -> &BTreeMap<String, ComposedConstrainSystem<E>> {

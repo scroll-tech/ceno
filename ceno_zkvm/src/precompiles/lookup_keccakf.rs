@@ -1,4 +1,4 @@
-use ceno_emul::{ByteAddr, Change, Cycle, MemOp, StepRecord};
+use ceno_emul::{ByteAddr, Cycle, MemOp, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
     OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
@@ -947,7 +947,6 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
         Layer::from_circuit_builder(&cb, "Rounds".to_string(), layout.n_challenges(), out_evals);
     chip.add_layer(layer);
 
-    cb.finalize();
     Ok((
         TestKeccakLayout {
             layout,
@@ -1053,10 +1052,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                                         &MemOp {
                                             previous_cycle: 0,
                                             addr: ByteAddr::from(0).waddr(),
-                                            value: Change {
-                                                before: 0,
-                                                after: 0,
-                                            },
+                                            value: Default::default(),
                                         },
                                     )
                                     .expect("assign error");
