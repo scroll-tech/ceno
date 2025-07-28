@@ -25,12 +25,10 @@ use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression, Instance,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
-    monomial::Term,
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
@@ -293,14 +291,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
     fn build_tower_witness<'a, 'b>(
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
-        input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
+        input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &[ArcMultilinearExtension<'b, E>],
+        _is_padded: bool,
         challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
         Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
         Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
-    ) {
+    )
+    where
+        'a: 'b,
+    {
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = composed_cs;
@@ -334,7 +336,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             .iter()
             .chain(w_set_wit.iter())
             .map(|wit| {
+                // if is_padded {
+                //     wit.as_view_chunks(NUM_FANIN)
+                // } else {
                 masked_mle_split_to_chunks(wit, num_instances_with_rotation, NUM_FANIN, E::ONE)
+                // }
             })
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
@@ -344,6 +350,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             .chain(lk_d_wit.iter())
             .enumerate()
             .map(|(i, wit)| {
+                // if is_padded {
+                //     wit.as_view_chunks(NUM_FANIN)
+                // } else {
                 let default = if i < lk_n_wit.len() {
                     // For table circuit, the last layer's length is always two's power
                     // so the padding will not happen, therefore we can use any value here.
@@ -357,6 +366,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
                     NUM_FANIN_LOGUP,
                     default,
                 )
+                // }
             })
             .collect::<Vec<_>>();
         let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
@@ -517,9 +527,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
     fn build_main_witness<'a, 'b>(
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
-        input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
+        input: &ProofInput<'a, CpuBackend<E, PCS>>,
         challenges: &[E; 2],
-    ) -> Vec<ArcMultilinearExtension<'b, E>> {
+    ) -> (Vec<ArcMultilinearExtension<'b, E>>, bool)
+    where
+        'a: 'b,
+    {
         let ComposedConstrainSystem {
             zkvm_v1_css: cs,
             gkr_circuit,
@@ -528,6 +541,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
         let num_instances_with_rotation = num_instances << composed_cs.rotation_vars().unwrap_or(0);
+
+        // sanity check
+        assert_eq!(input.witness.len(), cs.num_witin as usize);
+
+        // structural witness can be empty. In this case they are `eq`, and will be filled later
+        assert!(
+            input.structural_witness.len() == cs.num_structural_witin as usize
+                || input.structural_witness.is_empty(),
+        );
+        assert_eq!(input.fixed.len(), cs.num_fixed);
+
+        // check all witness size are power of 2
+        assert!(
+            input
+                .witness
+                .iter()
+                .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
+        );
 
         if let Some(gkr_circuit) = gkr_circuit {
             // opcode must have at least one read/write/lookup
@@ -538,31 +569,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 "assert opcode circuit"
             );
 
-            // sanity check
-            assert_eq!(input.witness.len(), cs.num_witin as usize);
-
-            // structural witness can be empty. In this case they are `eq`, and will be filled later
-            assert!(
-                input.structural_witness.len() == cs.num_structural_witin as usize
-                    || input.structural_witness.is_empty(),
-            );
-            assert_eq!(input.fixed.len(), cs.num_fixed);
-
-            // check all witness size are power of 2
-            assert!(
-                input
-                    .witness
-                    .iter()
-                    .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
-            );
-
-            assert!(
-                cs.r_table_expressions
-                    .iter()
-                    .zip_eq(cs.w_table_expressions.iter())
-                    .all(|(r, w)| r.table_spec.len == w.table_spec.len)
-            );
-
             let (_, gkr_circuit_out) = Self::gkr_witness(
                 gkr_circuit,
                 num_instances_with_rotation,
@@ -571,34 +577,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 &input.public_input,
                 challenges,
             );
-            gkr_circuit_out.0.0
+            (gkr_circuit_out.0.0, true)
         } else {
-            // opcode must have at least one read/write/lookup
-            let is_opcode_circuit = !cs.lk_expressions.is_empty()
-                || !cs.r_expressions.is_empty()
-                || !cs.w_expressions.is_empty();
-            // table must have at least one read/write/lookup
-            let is_table_circuit = !cs.lk_table_expressions.is_empty()
-                || !cs.r_table_expressions.is_empty()
-                || !cs.w_table_expressions.is_empty();
-
-            // sanity check
-            assert_eq!(input.witness.len(), cs.num_witin as usize);
-
-            // structural witness can be empty. In this case they are `eq`, and will be filled later
             assert!(
-                input.structural_witness.len() == cs.num_structural_witin as usize
-                    || input.structural_witness.is_empty(),
+                !cs.lk_table_expressions.is_empty()
+                    || !cs.r_table_expressions.is_empty()
+                    || !cs.w_table_expressions.is_empty(),
+                "assert table circuit"
             );
-            assert_eq!(input.fixed.len(), cs.num_fixed);
 
-            // check all witness size are power of 2
-            assert!(
-                input
-                    .witness
-                    .iter()
-                    .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
-            );
             if !input.structural_witness.is_empty() {
                 assert!(
                     input
@@ -608,7 +595,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 );
             }
 
-            assert!(is_table_circuit || is_opcode_circuit);
             assert!(
                 cs.r_table_expressions
                     .iter()
@@ -645,7 +631,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 })
                 .collect();
             exit_span!(record_span);
-            records
+            (records, false)
         }
     }
 
@@ -744,161 +730,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 Some(gkr_proof),
             ))
         } else {
-            let is_opcode_circuit = !cs.lk_expressions.is_empty()
-                || !cs.r_expressions.is_empty()
-                || !cs.w_expressions.is_empty();
+            let span = entered_span!("fixed::evals + witin::evals");
+            // In table proof, we always skip same point sumcheck for now
+            // as tower sumcheck batch product argument/logup in same length
+            let mut evals = input
+                .witness
+                .par_iter()
+                .chain(input.fixed.par_iter())
+                .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
+                .collect::<Vec<_>>();
+            let fixed_in_evals = evals.split_off(input.witness.len());
+            let wits_in_evals = evals;
+            exit_span!(span);
 
-            // main selector sumcheck / same point sumcheck
-            let sumcheck_span = entered_span!("main sumcheck");
-            let (input_opening_point, evals, main_sumcheck_proofs) = if is_opcode_circuit {
-                let main_sel_span = entered_span!("main_sel");
-
-                let alpha_pow = get_challenge_pows(cs.num_layer_challenges as usize, transcript);
-                // create selector: all ONE, but padding ZERO to ceil_log2
-                let mut sel: MultilinearExtension<E> = {
-                    // TODO sel can be shared if expression count match
-                    let mut sel = build_eq_x_r_vec(&rt_tower);
-                    if num_instances < sel.len() {
-                        sel.splice(
-                            num_instances..sel.len(),
-                            std::iter::repeat_n(E::ZERO, sel.len() - num_instances),
-                        );
-                    }
-                    sel.into_mle()
-                };
-
-                // get backend expr monimial form and evaluate scalar with challenges
-                let (public_io_evals, challenges) = {
-                    (
-                        // get public io evaluations
-                        cs.instance_name_map
-                            .keys()
-                            .sorted()
-                            .map(|Instance(inst_id)| {
-                                let mle = &input.public_input[*inst_id];
-                                assert_eq!(
-                                    mle.evaluations.len(),
-                                    1,
-                                    "doesnt support instance with evaluation length > 1"
-                                );
-                                match mle.evaluations() {
-                                    FieldType::Base(smart_slice) => E::from(smart_slice[0]),
-                                    FieldType::Ext(smart_slice) => smart_slice[0],
-                                    _ => unreachable!(),
-                                }
-                            })
-                            .collect_vec(),
-                        // concat challenge with layer challenge
-                        challenges.iter().chain(&alpha_pow).copied().collect_vec(),
-                    )
-                };
-                // sanity check degree > 1 zero expression sumcheck
-                if cfg!(debug_assertions) && !cs.assert_zero_sumcheck_expressions.is_empty() {
-                    // \sum_t sel(rt, t) * \sum_j alpha_{j} * all_monomial_terms(t)
-                    for (expr, name) in cs
-                        .assert_zero_sumcheck_expressions
-                        .iter()
-                        .zip_eq(cs.assert_zero_sumcheck_expressions_namespace_map.iter())
-                    {
-                        // sanity check in debug build and output != instance index for zero check sumcheck poly
-                        if cfg!(debug_assertions) {
-                            let expected_zero_poly = wit_infer_by_expr(
-                                &[],
-                                &input.witness,
-                                &[],
-                                &input.public_input,
-                                &challenges,
-                                expr,
-                            );
-                            let top_100_errors = expected_zero_poly
-                                .get_base_field_vec()
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, v)| **v != E::BaseField::ZERO)
-                                .take(100)
-                                .collect_vec();
-                            if !top_100_errors.is_empty() {
-                                return Err(ZKVMError::InvalidWitness(format!(
-                                    "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
-                                    top_100_errors.into_iter().map(|(i, _)| i).join(",")
-                                )));
-                            }
-                        }
-                    }
-                }
-
-                // we append selector at the last of mle, thus its id also in the end
-                let select_expr = Expression::<E>::WitIn(cs.num_backend_witin);
-                let monomial_terms = cs
-                    .backend_expr_monomial_form
-                    .iter()
-                    .map(|Term { scalar, product }| Term {
-                        scalar: scalar.clone(),
-                        product: product
-                            .iter()
-                            .cloned()
-                            .chain(std::iter::once(select_expr.clone()))
-                            .collect_vec(),
-                    })
-                    .collect_vec();
-
-                let expr_builder = VirtualPolynomialsBuilder::new_with_mles(
-                    num_threads,
-                    log2_num_instances,
-                    chain!(&input.witness, &input.structural_witness, &input.fixed)
-                        .map(|mle| Either::Left(mle.as_ref()))
-                        .chain(std::iter::once(&mut sel).map(Either::Right))
-                        .collect_vec(),
-                );
-
-                tracing::trace!("main sel sumcheck start");
-                let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(
-                    expr_builder.to_virtual_polys_with_monomial_terms(
-                        &monomial_terms,
-                        &public_io_evals,
-                        &challenges,
-                    ),
-                    transcript,
-                );
-                tracing::trace!("main sel sumcheck end");
-                exit_span!(main_sel_span);
-
-                let mut evals = state.get_mle_flatten_final_evaluations();
-                let wits_in_evals: Vec<_> = evals.drain(..cs.num_witin as usize).collect();
-                let fixed_in_evals: Vec<_> = evals.drain(..cs.num_fixed).collect();
-                (
-                    state.collect_raw_challenges(),
-                    MainSumcheckEvals {
-                        wits_in_evals,
-                        fixed_in_evals,
-                    },
-                    Some(main_sel_sumcheck_proofs.proofs),
-                )
-            } else {
-                let span = entered_span!("fixed::evals + witin::evals");
-                // In table proof, we always skip same point sumcheck for now
-                // as tower sumcheck batch product argument/logup in same length
-                let mut evals = input
-                    .witness
-                    .par_iter()
-                    .chain(input.fixed.par_iter())
-                    .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
-                    .collect::<Vec<_>>();
-                let fixed_in_evals = evals.split_off(input.witness.len());
-                let wits_in_evals = evals;
-                exit_span!(span);
-                (
-                    rt_tower,
-                    MainSumcheckEvals {
-                        wits_in_evals,
-                        fixed_in_evals,
-                    },
-                    None,
-                )
-            };
-            exit_span!(sumcheck_span);
-
-            Ok((input_opening_point, evals, main_sumcheck_proofs, None))
+            Ok((
+                rt_tower,
+                MainSumcheckEvals {
+                    wits_in_evals,
+                    fixed_in_evals,
+                },
+                None,
+                None,
+            ))
         }
     }
 }

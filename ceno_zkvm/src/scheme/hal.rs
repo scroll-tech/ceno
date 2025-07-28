@@ -66,14 +66,17 @@ pub trait TowerProver<PB: ProverBackend> {
     fn build_tower_witness<'a, 'b>(
         &self,
         cs: &ComposedConstrainSystem<PB::E>,
-        input: &'b ProofInput<'a, PB>,
+        input: &ProofInput<'a, PB>,
         records: &[Arc<PB::MultilinearPoly<'b>>],
+        is_padded: bool,
         challenge: &[PB::E; 2],
     ) -> (
         Vec<Vec<Vec<PB::E>>>,
         Vec<TowerProverSpec<'b, PB>>,
         Vec<TowerProverSpec<'b, PB>>,
-    );
+    )
+    where
+        'a: 'b;
 
     // the validity of value of first layer in the tower tree is reduced to
     // the validity of value of last layer in the tower tree through sumchecks
@@ -96,9 +99,11 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
     fn build_main_witness<'a, 'b>(
         &self,
         cs: &ComposedConstrainSystem<PB::E>,
-        input: &'b ProofInput<'a, PB>,
+        input: &ProofInput<'a, PB>,
         challenge: &[PB::E; 2],
-    ) -> Vec<Arc<PB::MultilinearPoly<'b>>>;
+    ) -> (Vec<Arc<PB::MultilinearPoly<'b>>>, bool)
+    where
+        'a: 'b;
     // this prover aims to achieve two goals:
     // 1. the validity of last layer in the tower tree is reduced to
     //    the validity of read/write/logup records through sumchecks;

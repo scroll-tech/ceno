@@ -165,7 +165,6 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + FieldAlgebra> RowMajorMat
     }
 
     pub fn padding_by_strategy(&mut self) {
-        let num_instances = self.num_instances();
         let start_index = self.num_instances() * self.n_col();
 
         match &self.padding_strategy {

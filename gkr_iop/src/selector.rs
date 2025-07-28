@@ -128,7 +128,7 @@ impl<E: ExtensionField> SelectorType<E> {
     }
 }
 
-pub(crate) fn select_from_expression_result<'a, E: ExtensionField>(
+pub fn select_from_expression_result<'a, E: ExtensionField>(
     sel_type: &SelectorType<E>,
     out_mle: ArcMultilinearExtension<'a, E>,
     num_instances: usize,

@@ -872,7 +872,10 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     }
 
     /// immutable counterpart to [`as_view_chunks_mut`]
-    pub fn as_view_chunks(&'a self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
+    pub fn as_view_chunks<'b>(&'a self, num_chunks: usize) -> Vec<MultilinearExtension<'b, E>>
+    where
+        'a: 'b,
+    {
         let total_len = self.evaluations.len();
         let chunk_size = total_len / num_chunks;
         assert!(

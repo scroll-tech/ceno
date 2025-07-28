@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::mle::{ Point};
+use multilinear_extensions::mle::Point;
 use std::{fmt::Debug, sync::Arc};
 
 use crate::gkr::{

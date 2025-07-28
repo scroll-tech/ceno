@@ -328,11 +328,12 @@ impl<
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
         // build main witness
-        let records = self.device.build_main_witness(cs, &input, challenges);
+        let (records, is_padded) = self.device.build_main_witness(cs, &input, challenges);
+
         // build tower witness
         let (mut out_evals, prod_specs, lookup_specs) = self
             .device
-            .build_tower_witness(cs, &input, &records, challenges);
+            .build_tower_witness(cs, &input, &records, is_padded, challenges);
 
         let lk_out_evals = out_evals.pop().unwrap();
         let w_out_evals = out_evals.pop().unwrap();
