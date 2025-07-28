@@ -92,11 +92,11 @@ impl<E: ExtensionField> SelectorType<E> {
         let (expr, eval) = match self {
             SelectorType::None => return,
             SelectorType::Whole(expr) => {
-                assert_eq!(out_point.len(), in_point.len());
+                debug_assert_eq!(out_point.len(), in_point.len());
                 (expr, eq_eval(out_point, in_point))
             }
             SelectorType::Prefix(_, expr) => {
-                assert!(num_instances <= out_point.len());
+                debug_assert!(num_instances <= (1 << out_point.len()));
                 (
                     expr,
                     eq_eval_less_or_equal_than(num_instances - 1, out_point, in_point),

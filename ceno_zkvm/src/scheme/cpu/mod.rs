@@ -27,7 +27,6 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     monomial::Term,
     util::ceil_log2,
-    utils::eval_by_expr_with_instance,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
@@ -536,6 +535,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 num_instances_with_rotation,
                 &input.witness,
                 &input.fixed,
+                &input.public_input,
                 challenges,
             );
             gkr_circuit_out.0.0
@@ -652,6 +652,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         if let Some(gkr_circuit) = gkr_circuit {
+            let pub_io_evals = // get public io evaluations
+                cs.instance_name_map
+                    .keys()
+                    .sorted()
+                    .map(|Instance(inst_id)| {
+                        let mle = &input.public_input[*inst_id];
+                        assert_eq!(
+                            mle.evaluations.len(),
+                            1,
+                            "doesnt support instance with evaluation length > 1"
+                        );
+                        match mle.evaluations() {
+                            FieldType::Base(smart_slice) => E::from(smart_slice[0]),
+                            FieldType::Ext(smart_slice) => smart_slice[0],
+                            _ => unreachable!(),
+                        }
+                    })
+                    .collect_vec();
             let GKRProverOutput {
                 gkr_proof,
                 opening_evaluations,
@@ -667,6 +685,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 },
                 // eval value doesnt matter as it wont be used by prover
                 &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
+                &pub_io_evals,
                 challenges,
                 transcript,
                 num_instances,
@@ -774,29 +793,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         }
                     }
                 }
-                let mut monomial_terms = cs
+
+                // we append selector at the last of mle, thus its id also in the end
+                let select_expr = Expression::<E>::WitIn(cs.num_backend_witin);
+                let monomial_terms = cs
                     .backend_expr_monomial_form
                     .iter()
-                    .map(
-                        |Term {
-                             scalar: scalar_expr,
-                             product,
-                         }| {
-                            // evaluate scalar with instances (public io) + challenges
-                            let scalar = eval_by_expr_with_instance(
-                                &[],
-                                &[],
-                                &[],
-                                &public_io_evals,
-                                &challenges,
-                                scalar_expr,
-                            );
-                            Term {
-                                scalar,
-                                product: product.clone(),
-                            }
-                        },
-                    )
+                    .map(|Term { scalar, product }| Term {
+                        scalar: scalar.clone(),
+                        product: product
+                            .iter()
+                            .cloned()
+                            .chain(std::iter::once(select_expr.clone()))
+                            .collect_vec(),
+                    })
                     .collect_vec();
 
                 let expr_builder = VirtualPolynomialsBuilder::new_with_mles(
@@ -807,16 +817,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         .chain(std::iter::once(&mut sel).map(Either::Right))
                         .collect_vec(),
                 );
-                // we append selector at the last of mle, thus its id also in the end
-                let select_expr = Expression::<E>::WitIn(cs.num_backend_witin);
-                // every terms times selector
-                monomial_terms
-                    .iter_mut()
-                    .for_each(|Term { product, .. }| product.push(select_expr.clone()));
 
                 tracing::trace!("main sel sumcheck start");
                 let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(
-                    expr_builder.to_virtual_polys_with_monimial_terms(monomial_terms),
+                    expr_builder.to_virtual_polys_with_monomial_terms(
+                        &monomial_terms,
+                        &public_io_evals,
+                        &challenges,
+                    ),
                     transcript,
                 );
                 tracing::trace!("main sel sumcheck end");

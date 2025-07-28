@@ -4,7 +4,7 @@ use multilinear_extensions::{
     ChallengeId, Expression, WitnessId,
     macros::{entered_span, exit_span},
     mle::Point,
-    utils::eval_by_expr,
+    utils::{eval_by_expr, eval_by_expr_with_instance},
     virtual_poly::VPAuxInfo,
 };
 use p3_field::dot_product;
@@ -53,16 +53,19 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         max_num_variables: usize,
         wit: LayerWitness<PB>,
         out_points: &[Point<PB::E>],
+        pub_io_evals: &[PB::E],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
         num_instances: usize,
     ) -> (LayerProof<PB::E>, Point<PB::E>);
 
+    #[allow(clippy::too_many_arguments)]
     fn verify(
         &self,
         max_num_variables: usize,
         proof: LayerProof<E>,
         eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
+        pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         num_instances: usize,
@@ -98,13 +101,23 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .take(self.exprs.len() + num_rotations * ROTATION_OPENING_COUNT)
             .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
             .collect_vec();
-        let zero_expr: Expression<E> =
+        let zero_expr =
             extend_exprs_with_rotation(self, &alpha_pows_expr, self.n_witin as WitnessId)
                 .into_iter()
-                .sum();
-        exit_span!(span);
-        self.rotation_sumcheck_expression = rotation_expr;
+                .sum::<Expression<E>>();
+
+        self.rotation_sumcheck_expression = rotation_expr.clone();
+        self.rotation_sumcheck_expression_monomial_terms = self
+            .rotation_sumcheck_expression
+            .as_ref()
+            .map(|expr| expr.get_monomial_terms());
+
         self.main_sumcheck_expression = Some(zero_expr);
+        self.main_sumcheck_expression_monomial_terms = self
+            .main_sumcheck_expression
+            .as_ref()
+            .map(|expr| expr.get_monomial_terms());
+        exit_span!(span);
     }
 
     fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
@@ -113,6 +126,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         max_num_variables: usize,
         wit: LayerWitness<PB>,
         out_points: &[Point<PB::E>],
+        pub_io_evals: &[PB::E],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
         num_instances: usize,
@@ -123,6 +137,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             max_num_variables,
             wit,
             out_points,
+            pub_io_evals,
             challenges,
             transcript,
             num_instances,
@@ -134,6 +149,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         max_num_variables: usize,
         proof: LayerProof<E>,
         mut eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
+        pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         num_instances: usize,
@@ -232,12 +248,16 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             },
         );
 
-        let got_claim = eval_by_expr(
+        let got_claim = eval_by_expr_with_instance(
+            &[],
             &main_evals,
             &[],
+            pub_io_evals,
             &main_sumcheck_challenges,
             self.main_sumcheck_expression.as_ref().unwrap(),
-        );
+        )
+        .map_either(E::from, |v| v)
+        .into_inner();
 
         if got_claim != expected_evaluation {
             return Err(BackendError::LayerVerificationFailed(

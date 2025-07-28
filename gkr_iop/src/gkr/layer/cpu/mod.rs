@@ -17,6 +17,7 @@ use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     Expression,
     mle::{MultilinearExtension, Point},
+    monomial::Term,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
@@ -109,6 +110,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         max_num_variables: usize,
         wit: LayerWitness<CpuBackend<E, PCS>>,
         out_points: &[Point<<CpuBackend<E, PCS> as ProverBackend>::E>],
+        pub_io_evals: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
         num_instances: usize,
@@ -127,7 +129,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 
         let (_, raw_rotation_exprs) = &layer.rotation_exprs;
         let (rotation_proof, rotation_left, rotation_right, rotation_point) =
-            if let Some(rotation_sumcheck_expression) = layer.rotation_sumcheck_expression.as_ref()
+            if let Some(rotation_sumcheck_expression) =
+                layer.rotation_sumcheck_expression_monomial_terms.as_ref()
             {
                 // 1st sumcheck: process rotation_exprs
                 let rt = out_points.first().unwrap();
@@ -223,8 +226,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
         let (proof, prover_state) = IOPProverState::prove(
-            builder.to_virtual_polys(
-                &[layer.main_sumcheck_expression.clone().unwrap()],
+            builder.to_virtual_polys_with_monomial_terms(
+                &layer
+                    .main_sumcheck_expression_monomial_terms
+                    .clone()
+                    .unwrap(),
+                pub_io_evals,
                 &main_sumcheck_challenges,
             ),
             transcript,
@@ -257,7 +264,7 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
     rotation_cyclic_group_log2: usize,
     wit: &LayerWitness<CpuBackend<E, PCS>>,
     raw_rotation_exprs: &[(Expression<E>, Expression<E>)],
-    rotation_sumcheck_expression: Expression<E>,
+    rotation_sumcheck_expression: Vec<Term<Expression<E>, Expression<E>>>,
     rt: &Point<E>,
     global_challenges: &[E],
     transcript: &mut impl Transcript<E>,
@@ -315,9 +322,14 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
             .chain(std::iter::once(Either::Right(&mut selector)))
             .collect_vec(),
     );
+
     let span = entered_span!("rotation IOPProverState::prove", profiling_4 = true);
     let (rotation_proof, prover_state) = IOPProverState::prove(
-        builder.to_virtual_polys(&[rotation_sumcheck_expression], &rotation_challenges),
+        builder.to_virtual_polys_with_monomial_terms(
+            &rotation_sumcheck_expression,
+            &[],
+            &rotation_challenges,
+        ),
         transcript,
     );
     exit_span!(span);

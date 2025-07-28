@@ -34,6 +34,7 @@ pub trait ZerocheckLayerProver<PB: ProverBackend> {
         max_num_variables: usize,
         wit: LayerWitness<PB>,
         out_points: &[Point<PB::E>],
+        pub_io_evals: &[PB::E],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
         num_instances: usize,

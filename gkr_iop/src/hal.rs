@@ -1,6 +1,6 @@
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::mle::Point;
+use multilinear_extensions::mle::{ Point};
 use std::{fmt::Debug, sync::Arc};
 
 use crate::gkr::{
@@ -43,6 +43,7 @@ pub trait ProtocolWitnessGeneratorProver<PB: ProverBackend> {
         num_instance_with_rotation: usize,
         phase1_witness_group: &[Arc<PB::MultilinearPoly<'b>>],
         fixed: &[Arc<PB::MultilinearPoly<'b>>],
+        pub_io: &[Arc<PB::MultilinearPoly<'b>>],
         challenges: &[PB::E],
     ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>)
     where

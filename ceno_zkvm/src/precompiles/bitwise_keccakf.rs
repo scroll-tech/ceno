@@ -919,6 +919,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         &phase1_witness_group,
         &[],
         &[],
+        &[],
     );
     exit_span!(span);
 
@@ -971,6 +972,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
             gkr_witness,
             &out_evals,
             &[],
+            &[],
             &mut prover_transcript,
             num_instances,
         )
@@ -990,6 +992,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
                     log2_num_instances,
                     gkr_proof,
                     &out_evals,
+                    &[],
                     &[],
                     &mut verifier_transcript,
                     num_instances,

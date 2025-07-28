@@ -1101,6 +1101,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             phase1_witness.num_instances(),
             &phase1_witness_group,
             &fixed,
+            &[],
             &challenges,
         );
     exit_span!(span);
@@ -1190,6 +1191,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             log2_num_instance_rounds,
             gkr_witness,
             &out_evals,
+            &[],
             &challenges,
             &mut prover_transcript,
             num_instances,
@@ -1218,6 +1220,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     log2_num_instance_rounds,
                     gkr_proof.clone(),
                     &out_evals,
+                    &[],
                     &challenges,
                     &mut verifier_transcript,
                     num_instances,

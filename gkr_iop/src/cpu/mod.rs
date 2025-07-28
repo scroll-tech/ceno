@@ -93,6 +93,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         num_instances_with_rotation: usize,
         phase1_witness_group: &[ArcMultilinearExtension<'b, E>],
         _fixed: &[ArcMultilinearExtension<'b, E>],
+        pub_io: &[ArcMultilinearExtension<'b, E>],
         challenges: &[E],
     ) -> (
         GKRCircuitWitness<'a, CpuBackend<E, PCS>>,
@@ -172,7 +173,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // infer current layer output
             let current_layer_output: Vec<
                 Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
-            > = layer_witness(layer, &current_layer_wits, challenges, num_instances);
+            > = layer_witness(
+                layer,
+                &current_layer_wits,
+                pub_io,
+                challenges,
+                num_instances,
+            );
             layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
             // process out to prepare output witness
@@ -222,6 +229,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 pub fn layer_witness<'a, E>(
     layer: &Layer<E>,
     layer_wits: &[ArcMultilinearExtension<'a, E>],
+    pub_io_evals: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E],
     num_instances: usize,
 ) -> Vec<ArcMultilinearExtension<'a, E>>
@@ -241,7 +249,7 @@ where
         .map(|((expr, expr_name), (sel_type, out_eval))| {
             let out_mle = select_from_expression_result(
                 sel_type,
-                wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr),
+                wit_infer_by_expr(&[], layer_wits, &[], pub_io_evals, challenges, expr),
                 num_instances,
             );
             if let EvalExpression::Zero = out_eval {

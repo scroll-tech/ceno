@@ -74,6 +74,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         max_num_variables: usize,
         circuit_wit: GKRCircuitWitness<PB>,
         out_evals: &[PointAndEval<E>],
+        pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         num_instances: usize,
@@ -93,6 +94,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                     max_num_variables,
                     layer_wit,
                     &mut running_evals,
+                    pub_io_evals,
                     &mut challenges,
                     transcript,
                     num_instances,
@@ -111,11 +113,13 @@ impl<E: ExtensionField> GKRCircuit<E> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn verify(
         &self,
         max_num_variables: usize,
         gkr_proof: GKRProof<E>,
         out_evals: &[PointAndEval<E>],
+        pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         num_instances: usize,
@@ -134,6 +138,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                 max_num_variables,
                 layer_proof,
                 &mut evaluations,
+                pub_io_evals,
                 &mut challenges,
                 transcript,
                 num_instances,

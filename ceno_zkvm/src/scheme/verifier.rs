@@ -389,6 +389,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 num_var_with_rotation,
                 proof.gkr_iop_proof.clone().unwrap(),
                 &chain!(record_evals, logup_q_evals).collect_vec(),
+                pi,
                 challenges,
                 transcript,
                 num_instances,

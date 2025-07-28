@@ -1,17 +1,21 @@
-use ceno_emul::StepRecord;
-use ff_ext::ExtensionField;
-use gkr_iop::gkr::GKRCircuit;
-use multilinear_extensions::util::max_usable_threads;
-use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
-    slice::ParallelSlice,
-};
-
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams,
     tables::RMMCollections, witness::LkMultiplicity,
 };
-
+use ceno_emul::StepRecord;
+use ff_ext::ExtensionField;
+use gkr_iop::{
+    chip::Chip,
+    gkr::{GKRCircuit, layer::Layer},
+    selector::SelectorType,
+};
+use itertools::Itertools;
+use multilinear_extensions::{ToExpr, util::max_usable_threads};
+use p3::field::FieldAlgebra;
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSlice,
+};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 pub mod riscv;
@@ -31,11 +35,42 @@ pub trait Instruction<E: ExtensionField> {
         param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError>;
 
-    /// giving config, extract optional gkr circuit
-    fn extract_gkr_iop_circuit(
-        _config: &mut Self::InstructionConfig,
-    ) -> Result<Option<GKRCircuit<E>>, ZKVMError> {
-        Ok(None)
+    fn build_gkr_iop_circuit(
+        cb: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
+    ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
+        let config = Self::construct_circuit(cb, param)?;
+        let w_len = cb.cs.w_expressions.len();
+        let r_len = cb.cs.r_expressions.len();
+        let lk_len = cb.cs.lk_expressions.len();
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
+        let selector = cb.create_structural_witin(|| "selector", 0, 0, 0, false);
+        let selector_type = SelectorType::Prefix(E::BaseField::ZERO, selector.expr());
+
+        // all shared the same selector
+        let (out_evals, mut chip) = (
+            [
+                // r_record
+                (selector_type.clone(), (0..r_len).collect_vec()),
+                // w_record
+                (selector_type.clone(), (r_len..r_len + w_len).collect_vec()),
+                // lk_record
+                (
+                    selector_type.clone(),
+                    (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
+                ),
+                // zero_record
+                (selector_type, (0..zero_len).collect_vec()),
+            ],
+            Chip::new_from_cb(cb, 0),
+        );
+
+        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        chip.add_layer(layer);
+
+        Ok((config, chip.gkr_circuit()))
     }
 
     fn generate_fixed_traces(

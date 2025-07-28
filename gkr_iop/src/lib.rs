@@ -78,6 +78,7 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
         num_instance_with_rotation: usize,
         phase1_witness_group: &[Arc<PB::MultilinearPoly<'a>>],
         fixed: &[Arc<PB::MultilinearPoly<'a>>],
+        pub_io: &[Arc<PB::MultilinearPoly<'a>>],
         challenges: &[PB::E],
     ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>) {
         <PD as ProtocolWitnessGeneratorProver<PB>>::gkr_witness(
@@ -85,6 +86,7 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
             num_instance_with_rotation,
             phase1_witness_group,
             fixed,
+            pub_io,
             challenges,
         )
     }
