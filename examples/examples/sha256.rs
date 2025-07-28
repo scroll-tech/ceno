@@ -1,4 +1,3 @@
-// WARNING: VIBE-CODED!
 extern crate ceno_rt;
 use ceno_rt::syscalls::syscall_sha256_extend;
 use rkyv::vec::ArchivedVec;
@@ -20,13 +19,11 @@ const H0: [u32; 8] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 ];
 
-// To test with hardcoded 10-byte input, run with:
-// RUST_LOG=info cargo run --release --package ceno_zkvm --bin e2e -- --profiling=3 --platform=ceno --public-io=30689455,3643278932,1489987339,1626711444,3610619649,1925764735,581441152,321290698 examples/target/riscv32im-ceno-zkvm-elf/release/examples/sha256
+// Example run (private input: 10 zero bytes)
+// RUST_LOG=info cargo run --release --package ceno_zkvm --bin e2e -- --profiling=3 --platform=ceno --public-io=30689455,3643278932,1489987339,1626711444,3610619649,1925764735,581441152,321290698 examples/target/riscv32im-ceno-zkvm-elf/release/examples/sha256 --hints=0,0,0,0,0,0,0,0,0,0
 fn main() {
-    // Hardcoded 10 zero byte input
-    let input: Vec<u8> = vec![0; 10];
     // Read input data from the host
-    // ceno_rt::read();
+    let input: &ArchivedVec<u8> = ceno_rt::read();
     let input: &[u8] = input.as_ref();
 
     // Initialize hash state
