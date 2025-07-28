@@ -1,14 +1,14 @@
 use crate::{
     circuit_builder::CircuitBuilder,
-    error::ZKVMError,
     instructions::riscv::constants::{LIMB_BITS, UInt},
-    set_val,
     witness::LkMultiplicity,
 };
 use ff_ext::{ExtensionField, FieldInto};
+use gkr_iop::error::CircuitBuilderError;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
+use witness::set_val;
 
 /// Extract the most significant bit from an expression previously constrained
 /// to an 8 or 16-bit length.
@@ -29,14 +29,14 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
     pub fn construct_limb(
         cb: &mut CircuitBuilder<E>,
         val: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         Self::construct_circuit(cb, LIMB_BITS, val)
     }
 
     pub fn construct_byte(
         cb: &mut CircuitBuilder<E>,
         val: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         Self::construct_circuit(cb, 8, val)
     }
 
@@ -48,7 +48,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         cb: &mut CircuitBuilder<E>,
         n_bits: usize,
         val: Expression<E>, // it's assumed that val is within [0, 2^N_BITS)
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         assert!(n_bits == 8 || n_bits == 16);
 
         let msb = cb.create_witin(|| "msb");
@@ -93,7 +93,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         val: u64,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), CircuitBuilderError> {
         let msb = val >> (self.n_bits - 1);
 
         let assert_ux = match self.n_bits {
@@ -103,7 +103,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         };
 
         assert_ux(lk_multiplicity, 2 * val - (msb << self.n_bits));
-        set_val!(instance, self.msb, E::BaseField::from_u64(msb));
+        set_val!(instance, self.msb, E::BaseField::from_canonical_u64(msb));
 
         Ok(())
     }

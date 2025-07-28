@@ -1,6 +1,6 @@
 use crate::{
     structs::{IOPProverState, IOPVerifierState},
-    util::{ceil_log2, extrapolate_uni_poly},
+    util::extrapolate_uni_poly,
 };
 use either::Either;
 use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2};
@@ -8,11 +8,11 @@ use itertools::Itertools;
 use multilinear_extensions::{
     mle::Point,
     monomial::Term,
-    util::max_usable_threads,
+    util::{ceil_log2, max_usable_threads},
     virtual_poly::{VPAuxInfo, VirtualPolynomial},
     virtual_polys::VirtualPolynomials,
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::{Rng, thread_rng};
 use transcript::{BasicTranscript, Transcript};
 
@@ -233,7 +233,7 @@ fn test_extrapolation() {
         let mut prng = rand::thread_rng();
         let poly = DensePolynomial::rand_coeffs(degree, &mut prng);
         let evals = (0..=degree)
-            .map(|i| poly.evaluate(&GoldilocksExt2::from_u64(i as u64)))
+            .map(|i| poly.evaluate(&GoldilocksExt2::from_canonical_u64(i as u64)))
             .collect::<Vec<_>>();
         let query = GoldilocksExt2::random(&mut prng);
         assert_eq!(poly.evaluate(&query), extrapolate_uni_poly(&evals, query));

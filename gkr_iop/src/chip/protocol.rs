@@ -11,7 +11,7 @@ impl<E: ExtensionField> Chip<E> {
             layers: self.layers.clone(),
             n_challenges: self.n_challenges,
             n_evaluations: self.n_evaluations,
-            openings: self.openings.clone(),
+            final_out_evals: self.final_out_evals.clone(),
         }
     }
 }

@@ -5,7 +5,7 @@ use crate::{
 };
 use core::fmt::Debug;
 use ff_ext::{ExtensionField, PoseidonField};
-use itertools::{Itertools, izip};
+use itertools::izip;
 use p3::{
     commit::{ExtensionMmcs, Mmcs},
     fri::{BatchOpening, CommitPhaseProofStep},
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 use sumcheck::structs::IOPProverMessage;
 
 use multilinear_extensions::mle::ArcMultilinearExtension;
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::marker::PhantomData;
 
 pub type Digest<E> = <Poseidon2ExtMerkleMmcs<E> as Mmcs<E>>::Commitment;
 pub type MerkleTree<F> = <<F as PoseidonField>::MMCS as Mmcs<F>>::ProverData<DenseMatrix<F>>;
@@ -94,13 +94,7 @@ where
     pub(crate) codeword: MerkleTree<E::BaseField>,
 
     pub(crate) log2_max_codeword_size: usize,
-    // for small polynomials, the prover commits the entire polynomial as merkle leaves without encoding to codeword
-    // the verifier performs direct checks on these leaves without requiring a proximity test.
-    pub(crate) trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
-    // poly groups w.r.t circuit index
-    pub(crate) polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
-    // keep codeword index w.r.t circuit index
-    pub circuit_codeword_index: BTreeMap<usize, usize>,
+    pub(crate) polys: Vec<Vec<ArcMultilinearExtension<'static, E>>>,
 }
 
 impl<E: ExtensionField> BasefoldCommitmentWithWitness<E>
@@ -110,9 +104,7 @@ where
     pub fn new(
         commit: Digest<E>,
         codeword: MerkleTree<E::BaseField>,
-        polys: BTreeMap<usize, Vec<ArcMultilinearExtension<'static, E>>>,
-        trivial_proofdata: BTreeMap<usize, (Digest<E>, MerkleTree<E::BaseField>)>,
-        circuit_codeword_index: BTreeMap<usize, usize>,
+        polys: Vec<Vec<ArcMultilinearExtension<'static, E>>>,
     ) -> Self {
         let mmcs = poseidon2_merkle_tree::<E>();
         // size = height * 2 because we split codeword leafs into left/right, concat and commit under same row index
@@ -127,21 +119,12 @@ where
             commit,
             codeword,
             polys,
-            trivial_proofdata,
-            circuit_codeword_index,
             log2_max_codeword_size,
         }
     }
 
     pub fn to_commitment(&self) -> BasefoldCommitment<E> {
-        BasefoldCommitment::new(
-            self.commit.clone(),
-            self.trivial_proofdata
-                .iter()
-                .map(|(_, (digest, _))| digest.clone())
-                .collect_vec(),
-            self.log2_max_codeword_size,
-        )
+        BasefoldCommitment::new(self.commit.clone(), self.log2_max_codeword_size)
     }
 
     // pub fn poly_size(&self) -> usize {
@@ -168,23 +151,17 @@ pub struct BasefoldCommitment<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(super) commit: Digest<E>,
-    pub(crate) log2_max_codeword_size: usize,
-    pub(crate) trivial_commits: Vec<Digest<E>>,
+    pub commit: Digest<E>,
+    pub log2_max_codeword_size: usize,
 }
 
 impl<E: ExtensionField> BasefoldCommitment<E>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub fn new(
-        commit: Digest<E>,
-        trivial_commits: Vec<Digest<E>>,
-        log2_max_codeword_size: usize,
-    ) -> Self {
+    pub fn new(commit: Digest<E>, log2_max_codeword_size: usize) -> Self {
         Self {
             commit,
-            trivial_commits,
             log2_max_codeword_size,
         }
     }
@@ -201,10 +178,6 @@ where
     fn eq(&self, other: &Self) -> bool {
         izip!(self.get_codewords(), other.get_codewords())
             .all(|(codeword_a, codeword_b)| codeword_a.eq(codeword_b))
-            && izip!(self.polys.values(), other.polys.values()).all(|(evals_a, evals_b)| {
-                izip!(evals_a, evals_b)
-                    .all(|(evals_a, evals_b)| evals_a.evaluations() == evals_b.evaluations())
-            })
     }
 }
 
@@ -271,23 +244,16 @@ pub type ExtMmcs<E> = ExtensionMmcs<
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct QueryOpeningProof<E: ExtensionField> {
-    pub witin_base_proof: BatchOpening<
-        <E as ExtensionField>::BaseField,
-        <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
-    >,
-    pub fixed_base_proof: Option<
+    pub input_proofs: Vec<
         BatchOpening<
             <E as ExtensionField>::BaseField,
             <<E as ExtensionField>::BaseField as PoseidonField>::MMCS,
         >,
     >,
-    #[allow(clippy::type_complexity)]
     pub commit_phase_openings: Vec<CommitPhaseProofStep<E, ExtMmcs<E>>>,
 }
 
 pub type QueryOpeningProofs<E> = Vec<QueryOpeningProof<E>>;
-
-pub type TrivialProof<E> = Vec<Vec<DenseMatrix<<E as ExtensionField>::BaseField>>>;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -302,8 +268,6 @@ where
     pub(crate) final_message: Vec<Vec<E>>,
     pub(crate) query_opening_proof: QueryOpeningProofs<E>,
     pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
-    // vec![witness, fixed], where fixed is optional
-    pub(crate) trivial_proof: Option<TrivialProof<E>>,
     pub(crate) pow_witness: E::BaseField,
 }
 
@@ -319,12 +283,4 @@ where
     pub(crate) sumcheck_messages: Vec<IOPProverMessage<E>>,
     pub(crate) commits: Vec<Digest<E>>,
     pub(crate) final_message: Vec<Vec<E>>,
-}
-
-#[derive(Clone, Default)]
-pub(crate) struct CircuitIndexMeta {
-    pub witin_num_vars: usize,
-    pub witin_num_polys: usize,
-    pub fixed_num_vars: usize,
-    pub fixed_num_polys: usize,
 }

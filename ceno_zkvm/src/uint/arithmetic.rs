@@ -1,13 +1,14 @@
 use ff_ext::{ExtensionField, SmallField};
+use gkr_iop::error::CircuitBuilderError;
 use itertools::{Itertools, izip};
 
 use super::{UIntLimbs, UintLimb};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, gadgets::AssertLtConfig,
+    circuit_builder::CircuitBuilder, gadgets::AssertLtConfig,
     instructions::riscv::config::IsEqualConfig,
 };
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 
 impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     const POW_OF_C: usize = 2_usize.pow(C as u32);
@@ -18,7 +19,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         addend: &Vec<Expression<E>>,
         with_overflow: bool,
-    ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
+    ) -> Result<UIntLimbs<M, C, E>, CircuitBuilderError> {
         let mut c = UIntLimbs::<M, C, E>::new_as_empty();
 
         // allocate witness cells and do range checks for carries
@@ -29,7 +30,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             Self::NUM_LIMBS,
         )?;
         let Some(carries) = &c.carries else {
-            return Err(ZKVMError::CircuitError);
+            return Err(CircuitBuilderError::CircuitError("empty carry".to_string()));
         };
         carries.iter().enumerate().try_for_each(|(i, carry)| {
             circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr())
@@ -59,7 +60,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                         .assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb_expr.clone())?;
                     Ok(limb_expr)
                 })
-                .collect::<Result<Vec<Expression<E>>, ZKVMError>>()?,
+                .collect::<Result<Vec<Expression<E>>, CircuitBuilderError>>()?,
         );
 
         Ok(c)
@@ -71,7 +72,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         constant: Expression<E>,
         with_overflow: bool,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         circuit_builder.namespace(name_fn, |cb| {
             let Expression::Constant(c) = constant else {
                 panic!("addend is not a constant type");
@@ -83,7 +84,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
             // convert Expression::Constant to limbs
             let b_limbs = (0..Self::NUM_LIMBS)
-                .map(|i| E::BaseField::from_u64((b >> (C * i)) & Self::LIMB_BIT_MASK).expr())
+                .map(|i| {
+                    E::BaseField::from_canonical_u64((b >> (C * i)) & Self::LIMB_BIT_MASK).expr()
+                })
                 .collect_vec();
 
             self.internal_add(cb, &b_limbs, with_overflow)
@@ -97,7 +100,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         addend: &UIntLimbs<M, C, E>,
         with_overflow: bool,
-    ) -> Result<UIntLimbs<M, C, E>, ZKVMError> {
+    ) -> Result<UIntLimbs<M, C, E>, CircuitBuilderError> {
         circuit_builder.namespace(name_fn, |cb| {
             self.internal_add(cb, &addend.expr(), with_overflow)
         })
@@ -108,7 +111,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         multiplier: &mut UIntLimbs<M, C, E>,
         with_overflow: bool,
-    ) -> Result<UIntLimbs<M2, C, E>, ZKVMError> {
+    ) -> Result<UIntLimbs<M2, C, E>, CircuitBuilderError> {
         debug_assert!(M2 == M || M2 == 2 * M, "illegal M2 {M2} and M {M}");
         let is_hi_limb = M2 == 2 * M;
         let num_limbs = if is_hi_limb {
@@ -121,7 +124,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             let limb = circuit_builder.create_witin(|| format!("limb_{i}"));
             circuit_builder.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), limb.expr())?;
             c_limbs.push(limb);
-            Result::<Vec<WitIn>, ZKVMError>::Ok(c_limbs)
+            Result::<Vec<WitIn>, CircuitBuilderError>::Ok(c_limbs)
         })?;
         let c_carries: Vec<WitIn> = (0..num_limbs).try_fold(vec![], |mut c_carries, i| {
             // skip last carry if with_overflow == false
@@ -129,7 +132,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 let carry = circuit_builder.create_witin(|| format!("carry_{i}"));
                 c_carries.push(carry);
             }
-            Result::<Vec<WitIn>, ZKVMError>::Ok(c_carries)
+            Result::<Vec<WitIn>, CircuitBuilderError>::Ok(c_carries)
         })?;
         // assert carry range less than max carry value constant
         let carries_auxiliary_lt_config = c_carries
@@ -144,12 +147,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
                 )
             })
-            .collect::<Result<Vec<AssertLtConfig>, ZKVMError>>()?;
+            .collect::<Result<Vec<AssertLtConfig>, CircuitBuilderError>>()?;
 
         // creating a witness constrained as expression to reduce overall degree
         let mut swap_witin = |name: &str,
                               u: &mut UIntLimbs<M, C, E>|
-         -> Result<Vec<Expression<E>>, ZKVMError> {
+         -> Result<Vec<Expression<E>>, CircuitBuilderError> {
             if u.is_expr() {
                 circuit_builder.namespace(
                     || name.to_owned(),
@@ -199,7 +202,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 result_c[i] = result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
             }
             circuit_builder.require_zero(|| format!("mul_zero_{i}"), result_c[i].clone())?;
-            Ok::<(), ZKVMError>(())
+            Ok::<(), CircuitBuilderError>(())
         })?;
 
         Ok(UIntLimbs::from_witins_unchecked(
@@ -215,7 +218,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         multiplier: &mut UIntLimbs<M, C, E>,
         with_overflow: bool,
-    ) -> Result<UIntLimbs<M2, C, E>, ZKVMError> {
+    ) -> Result<UIntLimbs<M2, C, E>, CircuitBuilderError> {
         circuit_builder.namespace(name_fn, |cb| {
             self.internal_mul(cb, multiplier, with_overflow)
         })
@@ -228,7 +231,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         multiplier: &mut UIntLimbs<M, C, E>,
         addend: &UIntLimbs<M, C, E>,
         with_overflow: bool,
-    ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M2, C, E>), ZKVMError> {
+    ) -> Result<(UIntLimbs<M, C, E>, UIntLimbs<M2, C, E>), CircuitBuilderError> {
         circuit_builder.namespace(name_fn, |cb| {
             let mul = cb.namespace(
                 || "mul",
@@ -256,7 +259,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         name_fn: N,
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UIntLimbs<M, C, E>,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), CircuitBuilderError> {
         circuit_builder.require_equal(name_fn, self.value(), rhs.value())
     }
 
@@ -264,12 +267,12 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         &self,
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UIntLimbs<M, C, E>,
-    ) -> Result<IsEqualConfig, ZKVMError> {
+    ) -> Result<IsEqualConfig, CircuitBuilderError> {
         let n_limbs = Self::NUM_LIMBS;
         let (is_equal_per_limb, diff_inv_per_limb): (Vec<WitIn>, Vec<WitIn>) =
             izip!(&self.limbs, &rhs.limbs)
                 .map(|(a, b)| circuit_builder.is_equal(a.expr(), b.expr()))
-                .collect::<Result<Vec<(WitIn, WitIn)>, ZKVMError>>()?
+                .collect::<Result<Vec<(WitIn, WitIn)>, CircuitBuilderError>>()?
                 .into_iter()
                 .unzip();
 
@@ -298,7 +301,7 @@ mod tests {
         use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
         use multilinear_extensions::{ToExpr, utils::eval_by_expr};
-        use p3::field::PrimeCharacteristicRing;
+        use p3::field::FieldAlgebra;
 
         type E = GoldilocksExt2;
         #[test]
@@ -430,7 +433,7 @@ mod tests {
                 let uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
                 uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
             } else {
-                let const_b = E::BaseField::from_u64(const_b.unwrap()).expr();
+                let const_b = E::BaseField::from_canonical_u64(const_b.unwrap()).expr();
                 uint_a
                     .add_const(|| "uint_c", &mut cb, const_b, overflow)
                     .unwrap()
@@ -483,10 +486,13 @@ mod tests {
             let wit: Vec<E> = witness_values
                 .iter()
                 .cloned()
-                .map(E::from_u64)
+                .map(E::from_canonical_u64)
                 .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
+                assert_eq!(
+                    eval_by_expr(&wit, &[], &challenges, c),
+                    E::from_canonical_u64(ret)
+                );
             });
 
             // overflow
@@ -659,10 +665,13 @@ mod tests {
             let wit: Vec<E> = witness_values
                 .iter()
                 .cloned()
-                .map(E::from_u64)
+                .map(E::from_canonical_u64)
                 .collect_vec();
             uint_c.expr().iter().zip(result).for_each(|(c, ret)| {
-                assert_eq!(eval_by_expr(&wit, &[], &challenges, c), E::from_u64(ret));
+                assert_eq!(
+                    eval_by_expr(&wit, &[], &challenges, c),
+                    E::from_canonical_u64(ret)
+                );
             });
 
             // overflow
@@ -688,7 +697,7 @@ mod tests {
         use ff_ext::{ExtensionField, GoldilocksExt2};
         use itertools::Itertools;
         use multilinear_extensions::mle::{ArcMultilinearExtension, MultilinearExtension};
-        use p3::field::PrimeCharacteristicRing;
+        use p3::field::FieldAlgebra;
 
         type E = GoldilocksExt2; // 18446744069414584321
 
@@ -704,7 +713,7 @@ mod tests {
                         let mle: ArcMultilinearExtension<E> =
                             MultilinearExtension::from_evaluation_vec_smart(
                                 0,
-                                vec![E::BaseField::from_u64(*a)],
+                                vec![E::BaseField::from_canonical_u64(*a)],
                             )
                             .into();
                         mle

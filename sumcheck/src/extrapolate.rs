@@ -43,7 +43,7 @@ impl<E: ExtensionField> ExtrapolationTable<E> {
         for d in min_degree..=max_degree {
             let mut degree_weights = Vec::new();
 
-            let xs: Vec<E> = (0..=d as u64).map(E::from_u64).collect_vec();
+            let xs: Vec<E> = (0..=d as u64).map(E::from_canonical_u64).collect_vec();
             let mut bary_weights = Vec::new();
 
             // Compute barycentric weights w_j = 1 / prod_{i != j} (x_j - x_i)
@@ -58,7 +58,7 @@ impl<E: ExtensionField> ExtrapolationTable<E> {
             }
 
             for z_idx in d + 1..=max_degree {
-                let z = E::from_u64(z_idx as u64);
+                let z = E::from_canonical_u64(z_idx as u64);
                 let mut den = E::ZERO;
                 let mut tmp: Vec<E> = Vec::with_capacity(d + 1);
 

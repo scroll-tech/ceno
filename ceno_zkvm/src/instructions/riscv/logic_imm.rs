@@ -1,7 +1,7 @@
 mod logic_imm_circuit;
+use gkr_iop::tables::ops::{AndTable, OrTable, XorTable};
 use logic_imm_circuit::{LogicInstruction, LogicOp};
 
-use crate::tables::{AndTable, OrTable, XorTable};
 use ceno_emul::InsnKind;
 
 pub struct AndiOp;

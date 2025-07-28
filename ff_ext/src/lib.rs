@@ -1,8 +1,7 @@
 #![deny(clippy::cargo)]
 
 use p3::field::{
-    BasedVectorSpace, ExtensionField as P3ExtensionField, Field as P3Field,
-    PrimeCharacteristicRing, PrimeField, TwoAdicField,
+    ExtensionField as P3ExtensionField, Field as P3Field, FieldAlgebra, PrimeField, TwoAdicField,
 };
 use rand_core::RngCore;
 use serde::{Serialize, de::DeserializeOwned};
@@ -64,7 +63,7 @@ macro_rules! impl_from_uniform_bytes_for_binomial_extension {
             type Bytes = [u8; <$base as FromUniformBytes>::Bytes::WIDTH * $degree];
 
             fn try_from_uniform_bytes(bytes: Self::Bytes) -> Option<Self> {
-                Some(p3::field::BasedVectorSpace::from_basis_coefficients_slice(
+                Some(p3::field::FieldExtensionAlgebra::from_base_slice(
                     &array_try_from_uniform_bytes::<
                         $base,
                         { <$base as FromUniformBytes>::Bytes::WIDTH },
@@ -115,8 +114,6 @@ pub trait ExtensionField:
     const DEGREE: usize;
     const MULTIPLICATIVE_GENERATOR: Self;
     const TWO_ADICITY: usize;
-    const BASE_TWO_ADIC_ROOT_OF_UNITY: Self::BaseField;
-    const TWO_ADIC_ROOT_OF_UNITY: Self;
     const NONRESIDUE: Self::BaseField;
 
     type BaseField: SmallField
@@ -127,27 +124,24 @@ pub trait ExtensionField:
         + PoseidonField
         + DeserializeOwned;
 
-    fn from_base(base: &Self::BaseField) -> Self {
-        Self::from_basis_coefficients_iter(
+    fn from_ref_base(base: &Self::BaseField) -> Self {
+        Self::from_base_iter(
             iter::once(*base).chain(iter::repeat_n(Self::BaseField::ZERO, Self::DEGREE - 1)),
         )
     }
 
     fn from_bases(bases: &[Self::BaseField]) -> Self {
-        debug_assert_eq!(
-            bases.len(),
-            <Self as BasedVectorSpace<Self::BaseField>>::DIMENSION
-        );
-        Self::from_basis_coefficients_slice(bases)
+        debug_assert_eq!(bases.len(), Self::D,);
+        Self::from_base_slice(bases)
     }
 
     fn as_bases(&self) -> &[Self::BaseField] {
-        self.as_basis_coefficients_slice()
+        self.as_base_slice()
     }
 
     /// Convert limbs into self
     fn from_limbs(limbs: &[Self::BaseField]) -> Self {
-        Self::from_bases(&limbs[0..<Self as BasedVectorSpace<Self::BaseField>>::DIMENSION])
+        Self::from_bases(&limbs[0..Self::D])
     }
 
     /// Convert a field elements to a u64 vector

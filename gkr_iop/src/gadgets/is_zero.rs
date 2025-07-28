@@ -1,7 +1,9 @@
 use ff_ext::{ExtensionField, SmallField};
 
-use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, set_val};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
+use witness::set_val;
+
+use crate::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
 
 pub struct IsZeroConfig {
     is_zero: Option<WitIn>,
@@ -17,7 +19,7 @@ impl IsZeroConfig {
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
         x: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         Self::construct(cb, name_fn, x, false)
     }
 
@@ -25,7 +27,7 @@ impl IsZeroConfig {
         cb: &mut CircuitBuilder<E>,
         name_fn: N,
         x: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         Self::construct(cb, name_fn, x, true)
     }
 
@@ -34,7 +36,7 @@ impl IsZeroConfig {
         name_fn: N,
         x: Expression<E>,
         assert_non_zero: bool,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         cb.namespace(name_fn, |cb| {
             let (is_zero, is_zero_expr) = if assert_non_zero {
                 (None, 0.into())
@@ -59,7 +61,7 @@ impl IsZeroConfig {
         &self,
         instance: &mut [F],
         x: F,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), CircuitBuilderError> {
         let (is_zero, inverse) = if x.is_zero() {
             (F::ONE, F::ZERO)
         } else {
@@ -87,7 +89,7 @@ impl IsEqualConfig {
         name_fn: N,
         a: Expression<E>,
         b: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         Ok(IsEqualConfig(IsZeroConfig::construct_circuit(
             cb,
             name_fn,
@@ -100,7 +102,7 @@ impl IsEqualConfig {
         name_fn: N,
         a: Expression<E>,
         b: Expression<E>,
-    ) -> Result<Self, ZKVMError> {
+    ) -> Result<Self, CircuitBuilderError> {
         Ok(IsEqualConfig(IsZeroConfig::construct_non_zero(
             cb,
             name_fn,
@@ -113,7 +115,7 @@ impl IsEqualConfig {
         instance: &mut [F],
         a: F,
         b: F,
-    ) -> Result<(), ZKVMError> {
+    ) -> Result<(), CircuitBuilderError> {
         self.0.assign_instance(instance, a - b)
     }
 }

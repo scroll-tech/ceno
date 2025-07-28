@@ -8,6 +8,7 @@ use crate::{
                 BeqInstruction, BgeInstruction, BgeuInstruction, BltInstruction, BneInstruction,
             },
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
+            ecall::KeccakInstruction,
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
             mul::MulhuInstruction,
@@ -107,6 +108,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
 
     // Ecall Opcodes
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
     // Tables.
     pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
@@ -177,6 +179,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // ecall opcodes
         let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
+        let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
+
         // tables
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
         let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
@@ -239,6 +243,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             lb_config,
             // ecall opcodes
             halt_config,
+            keccak_config,
             // tables
             u16_range_config,
             u14_range_config,
@@ -258,56 +263,61 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
         // alu
-        fixed.register_opcode_circuit::<AddInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SubInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<AndInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<OrInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<XorInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SllInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SrlInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SraInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SltInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SltuInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<MulInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<MulhInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<DivuInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<RemuInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<DivInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<RemInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<AddInstruction<E>>(cs, &self.add_config);
+        fixed.register_opcode_circuit::<SubInstruction<E>>(cs, &self.sub_config);
+        fixed.register_opcode_circuit::<AndInstruction<E>>(cs, &self.and_config);
+        fixed.register_opcode_circuit::<OrInstruction<E>>(cs, &self.or_config);
+        fixed.register_opcode_circuit::<XorInstruction<E>>(cs, &self.xor_config);
+        fixed.register_opcode_circuit::<SllInstruction<E>>(cs, &self.sll_config);
+        fixed.register_opcode_circuit::<SrlInstruction<E>>(cs, &self.srl_config);
+        fixed.register_opcode_circuit::<SraInstruction<E>>(cs, &self.sra_config);
+        fixed.register_opcode_circuit::<SltInstruction<E>>(cs, &self.slt_config);
+        fixed.register_opcode_circuit::<SltuInstruction<E>>(cs, &self.sltu_config);
+        fixed.register_opcode_circuit::<MulInstruction<E>>(cs, &self.mul_config);
+        fixed.register_opcode_circuit::<MulhInstruction<E>>(cs, &self.mulh_config);
+        fixed.register_opcode_circuit::<MulhsuInstruction<E>>(cs, &self.mulhsu_config);
+        fixed.register_opcode_circuit::<MulhuInstruction<E>>(cs, &self.mulhu_config);
+        fixed.register_opcode_circuit::<DivuInstruction<E>>(cs, &self.divu_config);
+        fixed.register_opcode_circuit::<RemuInstruction<E>>(cs, &self.remu_config);
+        fixed.register_opcode_circuit::<DivInstruction<E>>(cs, &self.div_config);
+        fixed.register_opcode_circuit::<RemInstruction<E>>(cs, &self.rem_config);
         // alu with imm
-        fixed.register_opcode_circuit::<AddiInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<AndiInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<OriInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<XoriInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SlliInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SrliInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SraiInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SltiInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SltiuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<AddiInstruction<E>>(cs, &self.addi_config);
+        fixed.register_opcode_circuit::<AndiInstruction<E>>(cs, &self.andi_config);
+        fixed.register_opcode_circuit::<OriInstruction<E>>(cs, &self.ori_config);
+        fixed.register_opcode_circuit::<XoriInstruction<E>>(cs, &self.xori_config);
+        fixed.register_opcode_circuit::<SlliInstruction<E>>(cs, &self.slli_config);
+        fixed.register_opcode_circuit::<SrliInstruction<E>>(cs, &self.srli_config);
+        fixed.register_opcode_circuit::<SraiInstruction<E>>(cs, &self.srai_config);
+        fixed.register_opcode_circuit::<SltiInstruction<E>>(cs, &self.slti_config);
+        fixed.register_opcode_circuit::<SltiuInstruction<E>>(cs, &self.sltiu_config);
         // branching
-        fixed.register_opcode_circuit::<BeqInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<BneInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<BltInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<BltuInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<BgeInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<BgeuInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<BeqInstruction<E>>(cs, &self.beq_config);
+        fixed.register_opcode_circuit::<BneInstruction<E>>(cs, &self.bne_config);
+        fixed.register_opcode_circuit::<BltInstruction<E>>(cs, &self.blt_config);
+        fixed.register_opcode_circuit::<BltuInstruction<E>>(cs, &self.bltu_config);
+        fixed.register_opcode_circuit::<BgeInstruction<E>>(cs, &self.bge_config);
+        fixed.register_opcode_circuit::<BgeuInstruction<E>>(cs, &self.bgeu_config);
+
         // jump
-        fixed.register_opcode_circuit::<JalInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<JalrInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<JalInstruction<E>>(cs, &self.jal_config);
+        fixed.register_opcode_circuit::<JalrInstruction<E>>(cs, &self.jalr_config);
+
         // memory
-        fixed.register_opcode_circuit::<SwInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<ShInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<SbInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<LwInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<LhuInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<LhInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<LbuInstruction<E>>(cs);
-        fixed.register_opcode_circuit::<LbInstruction<E>>(cs);
+        fixed.register_opcode_circuit::<SwInstruction<E>>(cs, &self.sw_config);
+        fixed.register_opcode_circuit::<ShInstruction<E>>(cs, &self.sh_config);
+        fixed.register_opcode_circuit::<SbInstruction<E>>(cs, &self.sb_config);
+        fixed.register_opcode_circuit::<LwInstruction<E>>(cs, &self.lw_config);
+        fixed.register_opcode_circuit::<LhuInstruction<E>>(cs, &self.lhu_config);
+        fixed.register_opcode_circuit::<LhInstruction<E>>(cs, &self.lh_config);
+        fixed.register_opcode_circuit::<LbuInstruction<E>>(cs, &self.lbu_config);
+        fixed.register_opcode_circuit::<LbInstruction<E>>(cs, &self.lb_config);
 
-        fixed.register_opcode_circuit::<HaltInstruction<E>>(cs);
+        // system
+        fixed.register_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config);
+        fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs, &self.keccak_config);
 
+        // table
         fixed.register_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
         fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
         fixed.register_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &());
@@ -329,12 +339,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             .map(|insn_kind| (insn_kind, Vec::new()))
             .collect();
         let mut halt_records = Vec::new();
+        let mut keccak_records = Vec::new();
         steps.into_iter().for_each(|record| {
             let insn_kind = record.insn.kind;
             match insn_kind {
                 // ecall / halt
                 InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
                     halt_records.push(record);
+                }
+                InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => {
+                    keccak_records.push(record);
                 }
                 // other type of ecalls are handled by dummy ecall instruction
                 _ => {
@@ -410,6 +424,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // ecall / halt
         witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
+        witness.assign_opcode_circuit::<KeccakInstruction<E>>(
+            cs,
+            &self.keccak_config,
+            keccak_records,
+        )?;
 
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
@@ -444,7 +463,6 @@ pub struct GroupedSteps(BTreeMap<InsnKind, Vec<StepRecord>>);
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {
     ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
-    keccak_config: <LargeEcallDummy<E, KeccakSpec> as Instruction<E>>::InstructionConfig,
     secp256k1_add_config:
         <LargeEcallDummy<E, Secp256k1AddSpec> as Instruction<E>>::InstructionConfig,
     secp256k1_double_config:
@@ -466,7 +484,6 @@ pub struct DummyExtraConfig<E: ExtensionField> {
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
-        let keccak_config = cs.register_keccakf_circuit();
         let secp256k1_add_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>();
         let secp256k1_double_config =
@@ -489,7 +506,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
 
         Self {
             ecall_config,
-            keccak_config,
             secp256k1_add_config,
             secp256k1_double_config,
             secp256k1_decompress_config,
@@ -508,18 +524,47 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
-        fixed.register_opcode_circuit::<EcallDummy<E>>(cs);
-        fixed.register_keccakf_circuit(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpMulSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>(cs);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>(cs);
+        fixed.register_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config);
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(
+            cs,
+            &self.secp256k1_add_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(
+            cs,
+            &self.secp256k1_decompress_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(
+            cs,
+            &self.secp256k1_double_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
+            cs,
+            &self.sha256_extend_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(
+            cs,
+            &self.bn254_add_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(
+            cs,
+            &self.bn254_double_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(
+            cs,
+            &self.bn254_fp_add_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpMulSpec>>(
+            cs,
+            &self.bn254_fp_add_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>(
+            cs,
+            &self.bn254_fp2_add_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>(
+            cs,
+            &self.bn254_fp2_mul_config,
+        );
     }
 
     pub fn assign_opcode_circuit(
@@ -530,7 +575,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
     ) -> Result<(), ZKVMError> {
         let mut steps = steps.0;
 
-        let mut keccak_steps = Vec::new();
         let mut secp256k1_add_steps = Vec::new();
         let mut secp256k1_double_steps = Vec::new();
         let mut secp256k1_decompress_steps = Vec::new();
@@ -546,7 +590,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         if let Some(ecall_steps) = steps.remove(&ECALL) {
             for step in ecall_steps {
                 match step.rs1().unwrap().value {
-                    KeccakSpec::CODE => keccak_steps.push(step),
                     Secp256k1AddSpec::CODE => secp256k1_add_steps.push(step),
                     Secp256k1DoubleSpec::CODE => secp256k1_double_steps.push(step),
                     Secp256k1DecompressSpec::CODE => secp256k1_decompress_steps.push(step),
@@ -562,7 +605,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             }
         }
 
-        witness.assign_keccakf_circuit(cs, &self.keccak_config, keccak_steps)?;
+        // witness.assign_keccakf_circuit(cs, &self.keccak_config, keccak_steps)?;
 
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1AddSpec>>(
             cs,

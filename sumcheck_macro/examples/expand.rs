@@ -4,12 +4,14 @@
 /// ```
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use multilinear_extensions::{
-    mle::FieldType, util::largest_even_below, virtual_poly::VirtualPolynomial,
+    mle::FieldType,
+    util::{ceil_log2, largest_even_below},
+    virtual_poly::VirtualPolynomial,
     virtual_polys::PolyMeta,
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::rngs::OsRng;
-use sumcheck::util::{AdditiveArray, ceil_log2};
+use sumcheck::util::AdditiveArray;
 
 #[derive(Default)]
 struct Container<'a, E: ExtensionField> {

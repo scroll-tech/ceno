@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::RegisterChipOperations,
+    chip_handler::{RegisterChipOperations, general::PublicIOQuery},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     gadgets::AssertLtConfig,
@@ -10,14 +10,15 @@ use crate::{
             ecall_insn::EcallInstructionConfig,
         },
     },
-    set_val,
+    structs::ProgramParams,
     witness::LkMultiplicity,
 };
 use ceno_emul::{StepRecord, Tracer};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
+use witness::set_val;
 
 pub struct HaltConfig {
     ecall_cfg: EcallInstructionConfig,
@@ -34,7 +35,10 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         "ECALL_HALT".into()
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         let prev_x10_ts = cb.create_witin(|| "prev_x10_ts");
         let exit_code = {
             let exit_code = cb.query_exit_code()?;
@@ -51,7 +55,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
         // read exit_code from arg0 (X10 register)
         let (_, lt_x10_cfg) = cb.register_read(
             || "read x10",
-            E::BaseField::from_u64(ceno_emul::Platform::reg_arg0() as u64),
+            E::BaseField::from_canonical_u64(ceno_emul::Platform::reg_arg0() as u64),
             prev_x10_ts.expr(),
             ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,

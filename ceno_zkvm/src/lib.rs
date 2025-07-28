@@ -1,7 +1,6 @@
 #![deny(clippy::cargo)]
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
-#![feature(variant_count)]
 #![feature(strict_overflow_ops)]
 #![feature(let_chains)]
 
@@ -15,6 +14,7 @@ pub mod circuit_builder;
 pub mod e2e;
 pub mod gadgets;
 mod keygen;
+pub mod precompiles;
 pub mod state;
 pub mod stats;
 pub mod structs;

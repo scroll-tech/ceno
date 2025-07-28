@@ -15,6 +15,7 @@ use crate::{
         },
     },
     scheme::mock_prover::{MOCK_PC_START, MockProver},
+    structs::ProgramParams,
 };
 use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, Word, WriteOp, encode_rv32};
 use ff_ext::{ExtensionField, GoldilocksExt2};
@@ -80,7 +81,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
         .namespace(
             || Inst::name(),
             |cb| {
-                let config = Inst::construct_circuit(cb);
+                let config = Inst::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -101,6 +102,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
     let (raw_witin, lkm) = Inst::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_s_instruction(
             12,
             MOCK_PC_START,
@@ -130,7 +132,7 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
         .namespace(
             || Inst::name(),
             |cb| {
-                let config = Inst::construct_circuit(cb);
+                let config = Inst::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -150,6 +152,7 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
     let (raw_witin, lkm) = Inst::assign_instances(
         &config,
         cb.cs.num_witin as usize,
+        cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_im_instruction(
             12,
             MOCK_PC_START,

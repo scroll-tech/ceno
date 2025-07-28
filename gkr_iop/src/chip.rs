@@ -1,19 +1,20 @@
+use crate::{circuit_builder::CircuitBuilder, gkr::layer::Layer};
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-
-use crate::{evaluation::EvalExpression, gkr::layer::Layer};
 
 pub mod builder;
 pub mod protocol;
 
-/// Chip stores all information required in the GKR protocol, including the
-/// commit phases, the GKR phase and the opening phase.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// Chip stores all information required in the GKR protocol.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct Chip<E: ExtensionField> {
+    /// The number of fixed inputs committed in the whole protocol.
+    pub n_fixed: usize,
     /// The number of base inputs committed in the whole protocol.
     pub n_committed: usize,
 
@@ -26,7 +27,26 @@ pub struct Chip<E: ExtensionField> {
 
     /// The layers of the GKR circuit, in the order outputs-to-inputs.
     pub layers: Vec<Layer<E>>,
+    /// The output of the circuit.
+    pub final_out_evals: Vec<usize>,
+}
 
-    /// The polynomial index and evaluation expressions of the base inputs.
-    pub openings: Vec<(usize, EvalExpression<E>)>,
+impl<E: ExtensionField> Chip<E> {
+    pub fn new_from_cb(cb: &CircuitBuilder<E>, n_challenges: usize) -> Chip<E> {
+        Self {
+            n_fixed: cb.cs.num_fixed,
+            n_committed: cb.cs.num_witin as usize,
+            n_challenges,
+            n_evaluations: cb.cs.w_expressions.len()
+                + cb.cs.r_expressions.len()
+                + cb.cs.lk_expressions.len()
+                + cb.cs.num_fixed
+                + cb.cs.num_witin as usize,
+            final_out_evals: (0..cb.cs.w_expressions.len()
+                + cb.cs.r_expressions.len()
+                + cb.cs.lk_expressions.len())
+                .collect_vec(),
+            layers: vec![],
+        }
+    }
 }

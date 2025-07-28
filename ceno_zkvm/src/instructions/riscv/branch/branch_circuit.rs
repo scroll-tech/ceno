@@ -16,10 +16,11 @@ use crate::{
             constants::{UINT_LIMBS, UInt},
         },
     },
+    structs::ProgramParams,
     witness::LkMultiplicity,
 };
 use multilinear_extensions::Expression;
-pub use p3::field::PrimeCharacteristicRing;
+pub use p3::field::FieldAlgebra;
 
 pub struct BranchCircuit<E, I>(PhantomData<(E, I)>);
 
@@ -41,6 +42,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<BranchConfig<E>, ZKVMError> {
         let read_rs1 = UInt::new_unchecked(|| "rs1_limbs", circuit_builder)?;
         let read_rs2 = UInt::new_unchecked(|| "rs2_limbs", circuit_builder)?;
@@ -151,8 +153,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
         if let Some(equal) = &config.is_equal {
             equal.assign_instance(
                 instance,
-                E::BaseField::from_u64(rs2.as_u64()),
-                E::BaseField::from_u64(rs1.as_u64()),
+                E::BaseField::from_canonical_u64(rs2.as_u64()),
+                E::BaseField::from_canonical_u64(rs1.as_u64()),
             )?;
         }
 

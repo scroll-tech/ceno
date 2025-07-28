@@ -76,9 +76,9 @@ use crate::{
     error::ZKVMError,
     gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::Instruction,
-    set_val,
+    structs::ProgramParams,
     uint::Value,
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::marker::PhantomData;
@@ -144,7 +144,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         format!("{:?}", I::INST_KIND)
     }
 
-    fn construct_circuit(cb: &mut CircuitBuilder<E>) -> Result<Self::InstructionConfig, ZKVMError> {
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
         // The soundness analysis for these constraints is only valid for
         // 32-bit registers represented over the Goldilocks field, so verify
         // these parameters
@@ -459,11 +462,12 @@ mod test {
             },
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
+        structs::ProgramParams,
     };
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use ff_ext::{ExtensionField, GoldilocksExt2 as GE};
     use itertools::Itertools;
-    use rand::Rng;
+    use rand::RngCore;
 
     // unifies DIV/REM/DIVU/REMU interface for testing purposes
     trait TestInstance<E: ExtensionField>
@@ -565,16 +569,17 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{}_({})", Insn::name(), name),
-                |cb| Ok(Insn::construct_circuit(cb)),
+                |cb| Ok(Insn::construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();
         let outcome = Insn::correct(dividend, divisor);
         let insn_code = encode_rv32(Insn::INSN_KIND, 2, 3, 4, 0);
         // values assignment
-        let (raw_witin, lkm) = Insn::assign_instances(
+        let ([raw_witin, _], lkm) = Insn::assign_instances(
             &config,
             cb.cs.num_witin as usize,
+            cb.cs.num_structural_witin as usize,
             vec![StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
@@ -668,8 +673,8 @@ mod test {
     fn test_divrem_unsigned_random() {
         for _ in 0..10 {
             let mut rng = rand::thread_rng();
-            let dividend: u32 = rng.gen();
-            let divisor: u32 = rng.gen();
+            let dividend: u32 = rng.next_u32();
+            let divisor: u32 = rng.next_u32();
             let name = format!("random: dividend = {}, divisor = {}", dividend, divisor);
             verify_positive::<Divu>(&name, dividend, divisor);
             verify_positive::<Remu>(&name, dividend, divisor);
@@ -715,8 +720,8 @@ mod test {
     fn test_divrem_signed_random() {
         for _ in 0..10 {
             let mut rng = rand::thread_rng();
-            let dividend: i32 = rng.gen();
-            let divisor: i32 = rng.gen();
+            let dividend: i32 = rng.next_u32() as i32;
+            let divisor: i32 = rng.next_u32() as i32;
             let name = format!("random: dividend = {}, divisor = {}", dividend, divisor);
             verify_positive::<Div>(&name, dividend, divisor);
             verify_positive::<Rem>(&name, dividend, divisor);

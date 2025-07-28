@@ -17,6 +17,10 @@ impl StructuralWitIn {
     }
 }
 
+pub fn eval_by_expr_constant<E: ExtensionField>(challenges: &[E], expr: &Expression<E>) -> E {
+    eval_by_expr_with_fixed(&[], &[], &[], challenges, expr)
+}
+
 pub fn eval_by_expr<E: ExtensionField>(
     witnesses: &[E],
     structural_witnesses: &[E],
@@ -26,6 +30,9 @@ pub fn eval_by_expr<E: ExtensionField>(
     eval_by_expr_with_fixed(&[], witnesses, structural_witnesses, challenges, expr)
 }
 
+/// Evaluates the expression using fixed values, witnesses, structural witnesses, and challenges.
+/// We allow shorter fixed vectors, which are of the length 2^k and repeated cyclically. `fixed_len_minus_one` is the
+/// length of the fixed vector minus one, which is used to wrap around the indices.
 pub fn eval_by_expr_with_fixed<E: ExtensionField>(
     fixed: &[E],
     witnesses: &[E],

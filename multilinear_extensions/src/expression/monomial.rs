@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Expression;
 use Expression::*;
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use std::{fmt::Display, iter::Sum};
 
 impl<E: ExtensionField> Expression<E> {
@@ -27,14 +27,15 @@ impl<E: ExtensionField> Expression<E> {
 
     fn distribute(&self) -> Vec<Term<Expression<E>, Expression<E>>> {
         match self {
-            Constant(_) => {
+            // only contribute to scalar terms
+            Constant(_) | Challenge(..) | Instance(_) => {
                 vec![Term {
                     scalar: self.clone(),
                     product: vec![],
                 }]
             }
 
-            Fixed(_) | WitIn(_) | StructuralWitIn(..) | Instance(_) | Challenge(..) => {
+            Fixed(_) | WitIn(_) | StructuralWitIn(..) => {
                 vec![Term {
                     scalar: Expression::ONE,
                     product: vec![self.clone()],
@@ -114,7 +115,7 @@ mod tests {
     use super::*;
     use either::Either;
     use ff_ext::{FieldInto, FromUniformBytes, GoldilocksExt2 as E};
-    use p3::{field::PrimeCharacteristicRing, goldilocks::Goldilocks as F};
+    use p3::{field::FieldAlgebra, goldilocks::Goldilocks as F};
     use rand::thread_rng;
 
     #[test]
@@ -136,7 +137,7 @@ mod tests {
 
         let n1 = || Constant(Either::Left(103u64.into_f()));
         let n2 = || Constant(Either::Left(101u64.into_f()));
-        let m = || Constant(Either::Left(-F::from_u64(599)));
+        let m = || Constant(Either::Left(-F::from_canonical_u64(599)));
         let r = || Challenge(0, 1, E::ONE, E::ZERO);
 
         let test_exprs: &[Expression<E>] = &[

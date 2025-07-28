@@ -1,8 +1,9 @@
+use ceno_zkvm::precompiles::{run_bitwise_keccakf, setup_bitwise_keccak_gkr_circuit};
 use clap::{Parser, command};
 use ff_ext::GoldilocksExt2;
-use gkr_iop::precompiles::{run_keccakf, setup_keccak_bitwise_circuit};
 use itertools::Itertools;
-use rand::{Rng, SeedableRng};
+use mpcs::BasefoldDefault;
+use rand::{RngCore, SeedableRng};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
@@ -26,6 +27,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
     type E = GoldilocksExt2;
+    type Pcs = BasefoldDefault<E>;
 
     // default filter
     let default_filter = EnvFilter::builder()
@@ -64,10 +66,14 @@ fn main() {
     let random_u64: u64 = rand::random();
     // Use seeded rng for debugging convenience
     let mut rng = rand::rngs::StdRng::seed_from_u64(random_u64);
-    let num_instance = 1024;
-    let states: Vec<[u64; 25]> = (0..num_instance)
-        .map(|_| std::array::from_fn(|_| rng.gen()))
+    let num_instances = 1024;
+    let states: Vec<[u64; 25]> = (0..num_instances)
+        .map(|_| std::array::from_fn(|_| rng.next_u64()))
         .collect_vec();
-    let circuit_setup = setup_keccak_bitwise_circuit();
-    run_keccakf::<E>(circuit_setup, states, false, false);
+    run_bitwise_keccakf::<E, Pcs>(
+        setup_bitwise_keccak_gkr_circuit().expect("setup circuit error"),
+        states,
+        false,
+        false,
+    );
 }

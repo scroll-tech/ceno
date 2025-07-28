@@ -131,8 +131,8 @@ impl<F: TwoAdicField> NttEngine<F> {
             let omega_3_1 = res.root(3);
             let omega_3_2 = omega_3_1 * omega_3_1;
             // Note: char F cannot be 2 and so division by 2 works, because primitive roots of unity with even order exist.
-            res.half_omega_3_1_min_2 = (omega_3_1 - omega_3_2) / F::from_u64(2u64);
-            res.half_omega_3_1_plus_2 = (omega_3_1 + omega_3_2) / F::from_u64(2u64);
+            res.half_omega_3_1_min_2 = (omega_3_1 - omega_3_2) / F::from_canonical_u64(2u64);
+            res.half_omega_3_1_plus_2 = (omega_3_1 + omega_3_2) / F::from_canonical_u64(2u64);
         }
         if order % 4 == 0 {
             res.omega_4_1 = res.root(4);

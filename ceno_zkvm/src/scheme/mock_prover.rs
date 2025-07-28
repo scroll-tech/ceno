@@ -3,24 +3,34 @@ use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     state::{GlobalState, StateCircuit},
-    structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
-    tables::{
-        AndTable, LtuTable, OpsTable, OrTable, PowTable, ProgramTableCircuit, RangeTable,
-        TableCircuit, U5Table, U8Table, U14Table, U16Table, XorTable,
+    structs::{
+        ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
+        ZKVMWitnesses,
     },
-    witness::{LkMultiplicity, LkMultiplicityRaw},
+    tables::{
+        ProgramTableCircuit, RMMCollections, RangeTable, TableCircuit, U5Table, U8Table, U14Table,
+        U16Table,
+    },
+    witness::LkMultiplicity,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
+use gkr_iop::{
+    tables::{
+        OpsTable,
+        ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
+    },
+    utils::lk_multiplicity::LkMultiplicityRaw,
+};
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, fmt,
     mle::{ArcMultilinearExtension, IntoMLEs},
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -34,7 +44,6 @@ use std::{
 };
 use strum::IntoEnumIterator;
 use tiny_keccak::{Hasher, Keccak};
-use witness::RowMajorMatrix;
 
 const MAX_CONSTRAINT_DEGREE: usize = 2;
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -677,15 +686,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     fn load_program_table(program: &Program, challenge: [E; 2]) -> Vec<Vec<u64>> {
         let mut t_vec = vec![];
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
-        let mut cb = CircuitBuilder::new_with_params(
-            &mut cs,
-            ProgramParams {
-                platform: CENO_PLATFORM,
-                program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
-                ..ProgramParams::default()
-            },
-        );
-        let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb).unwrap();
+        let params = ProgramParams {
+            platform: CENO_PLATFORM,
+            program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
+            ..ProgramParams::default()
+        };
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb, &params).unwrap();
         let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);
         for table_expr in &cs.lk_table_expressions {
             for row in fixed.iter_rows() {
@@ -749,7 +756,7 @@ Hints:
 
     pub fn assert_satisfied_raw(
         cb: &CircuitBuilder<E>,
-        raw_witin: RowMajorMatrix<E::BaseField>,
+        [raw_witin, _raw_structural_witin]: RMMCollections<E::BaseField>,
         program: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
         lkm: Option<LkMultiplicity>,
@@ -812,26 +819,19 @@ Hints:
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
         // Process all circuits.
-        for (circuit_name, cs) in &cs.circuit_css {
-            let empty_rmm = RowMajorMatrix::empty();
+        for (
+            circuit_name,
+            ComposedConstrainSystem {
+                zkvm_v1_css: cs, ..
+            },
+        ) in &cs.circuit_css
+        {
             let is_opcode = cs.lk_table_expressions.is_empty()
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
-            let [witness, structural_witness] = if is_opcode {
-                &[
-                    witnesses
-                        .get_opcode_witness(circuit_name)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            panic!("witness for {} should not be None", circuit_name)
-                        }),
-                    empty_rmm,
-                ]
-            } else {
-                witnesses
-                    .get_table_witness(circuit_name)
-                    .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name))
-            };
+            let [witness, structural_witness] = witnesses
+                .get_table_witness(circuit_name)
+                .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
             let num_rows = witness.num_instances();
 
             if witness.num_instances() == 0 {
@@ -949,7 +949,13 @@ Hints:
                 let mut writes_grp_by_annotations = HashMap::new();
                 // store (pc, timestamp) for $ram_type == RAMType::GlobalState
                 let mut gs = HashMap::new();
-                for (circuit_name, cs) in &cs.circuit_css {
+                for (
+                    circuit_name,
+                    ComposedConstrainSystem {
+                        zkvm_v1_css: cs, ..
+                    },
+                ) in &cs.circuit_css
+                {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
@@ -1018,7 +1024,13 @@ Hints:
 
                 let mut reads = HashSet::new();
                 let mut reads_grp_by_annotations = HashMap::new();
-                for (circuit_name, cs) in &cs.circuit_css {
+                for (
+                    circuit_name,
+                    ComposedConstrainSystem {
+                        zkvm_v1_css: cs, ..
+                    },
+                ) in &cs.circuit_css
+                {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
@@ -1251,16 +1263,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        ROMType::U5,
+        ROMType,
         error::ZKVMError,
         gadgets::{AssertLtConfig, IsLtConfig},
-        set_val,
         witness::LkMultiplicity,
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::{ToExpr, WitIn, mle::IntoMLE};
     use p3::goldilocks::Goldilocks;
-    use witness::InstancePaddingStrategy;
+    use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
     #[derive(Debug)]
     struct AssertZeroCircuit {
@@ -1339,9 +1350,12 @@ mod tests {
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
         let wits_in = vec![
-            vec![Goldilocks::from_u64(3u64), Goldilocks::from_u64(5u64)]
-                .into_mle()
-                .into(),
+            vec![
+                Goldilocks::from_canonical_u64(3u64),
+                Goldilocks::from_canonical_u64(5u64),
+            ]
+            .into_mle()
+            .into(),
         ];
 
         let challenge = [1.into_f(), 1000.into_f()];
@@ -1375,7 +1389,7 @@ mod tests {
                             GoldilocksExt2::ONE,
                             GoldilocksExt2::ZERO,
                         )),
-                        Box::new(Goldilocks::from_u64(U5 as u64).expr()),
+                        Box::new(Goldilocks::from_canonical_u64(ROMType::U5 as u64).expr()),
                     )),
                     Box::new(Expression::Challenge(
                         0,
@@ -1471,7 +1485,7 @@ mod tests {
 
         MockProver::assert_satisfied_raw(
             &builder,
-            raw_witin,
+            [raw_witin, RowMajorMatrix::empty()],
             &[],
             Some([1.into_f(), 1000.into_f()]),
             None,
@@ -1504,7 +1518,7 @@ mod tests {
 
         MockProver::assert_satisfied_raw(
             &builder,
-            raw_witin,
+            [raw_witin, RowMajorMatrix::empty()],
             &[],
             Some([1.into_f(), 1000.into_f()]),
             None,
@@ -1589,7 +1603,7 @@ mod tests {
 
         MockProver::assert_satisfied_raw(
             &builder,
-            raw_witin,
+            [raw_witin, RowMajorMatrix::empty()],
             &[],
             Some([1.into_f(), 1000.into_f()]),
             None,
@@ -1623,7 +1637,7 @@ mod tests {
 
         MockProver::assert_satisfied_raw(
             &builder,
-            raw_witin,
+            [raw_witin, RowMajorMatrix::empty()],
             &[],
             Some([1.into_f(), 1000.into_f()]),
             None,

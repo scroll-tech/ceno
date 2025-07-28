@@ -9,7 +9,7 @@ pub struct BooleanHypercube {
 }
 
 // 2^5-1 cyclic group
-const CYCLIC_POW2_5: [u64; 32] = [
+pub const CYCLIC_POW2_5: [u64; 32] = [
     0b00001, // 0 = decimal 1
     0b00010, // 1 = decimal 2
     0b00100, // 2 = decimal 4
@@ -83,9 +83,9 @@ impl BooleanHypercube {
         point: &Point<E>,
     ) -> E {
         match self.num_vars {
-            // rotated_eval = (1-r4) * left_eval - r4 * right_eval
-            // right_eval = ((1-r4) * left_eval - rotated_eval) / r4
-            5 => ((E::ONE - point[4]) * left_eval - rotated_eval) / point[4],
+            // rotated_eval = (1-r4) * left_eval + r4 * right_eval
+            // right_eval = (rotated_eval - (1-r4) * left_eval) / r4
+            5 => (rotated_eval - (E::ONE - point[4]) * left_eval) / point[4],
             num_vars => unimplemented!("not support {num_vars}"),
         }
     }

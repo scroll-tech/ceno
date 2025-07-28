@@ -8,10 +8,11 @@ use crate::{
     error::ZKVMError,
     gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::Instruction,
-    set_val,
+    structs::ProgramParams,
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
+use witness::set_val;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 
@@ -62,6 +63,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
     fn construct_circuit(
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
         // treat bit shifting as a bit "inflow" and "outflow" process, flowing from left to right or vice versa
         // this approach simplifies constraint and witness allocation compared to using multiplication/division gadget,
@@ -243,6 +245,7 @@ mod tests {
             riscv::{RIVInstruction, constants::UInt},
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
+        structs::ProgramParams,
     };
 
     use super::{ShiftLogicalInstruction, SllOp, SraOp, SrlOp};
@@ -320,8 +323,16 @@ mod tests {
         let config = cb
             .namespace(
                 || format!("{prefix}_({name})"),
-                ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit,
+                |cb| {
+                    Ok(
+                        ShiftLogicalInstruction::<GoldilocksExt2, I>::construct_circuit(
+                            cb,
+                            &ProgramParams::default(),
+                        ),
+                    )
+                },
             )
+            .unwrap()
             .unwrap();
 
         config
@@ -340,6 +351,7 @@ mod tests {
         let (raw_witin, lkm) = ShiftLogicalInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
+            cb.cs.num_structural_witin as usize,
             vec![StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,

@@ -14,6 +14,7 @@ pub mod constants;
 pub mod div;
 pub mod dummy;
 pub mod ecall;
+pub mod ecall_base;
 pub mod jump;
 pub mod logic;
 pub mod logic_imm;
@@ -25,7 +26,7 @@ pub mod slti;
 
 mod b_insn;
 mod i_insn;
-mod insn_base;
+pub mod insn_base;
 mod j_insn;
 mod r_insn;
 

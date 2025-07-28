@@ -1,20 +1,19 @@
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr};
-use p3_field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 
 pub fn not8_expr<E: ExtensionField>(expr: Expression<E>) -> Expression<E> {
-    E::BaseField::from_u8(0xFF).expr() - expr
+    E::BaseField::from_canonical_u8(0xFF).expr() - expr
 }
 
-pub fn set_slice_felts_from_u64<E, I>(dst: &mut [E::BaseField], start_index: &mut usize, iter: I)
+pub fn set_slice_felts_from_u64<E, I>(dst: &mut [E::BaseField], start_index: usize, iter: I)
 where
     E: ExtensionField,
     I: IntoIterator<Item = u64>,
 {
-    for word in iter {
-        dst[*start_index] = E::BaseField::from_u64(word);
-        *start_index += 1;
+    for (i, word) in iter.into_iter().enumerate() {
+        dst[start_index + i] = E::BaseField::from_canonical_u64(word);
     }
 }
 
@@ -101,26 +100,6 @@ impl MaskRepresentation {
 
     pub fn masks(&self) -> Vec<Mask> {
         self.rep.clone()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum CenoLookup<E: ExtensionField> {
-    And(Expression<E>, Expression<E>, Expression<E>),
-    Xor(Expression<E>, Expression<E>, Expression<E>),
-    U16(Expression<E>),
-}
-
-impl<E: ExtensionField> IntoIterator for CenoLookup<E> {
-    type Item = Expression<E>;
-    type IntoIter = std::vec::IntoIter<Expression<E>>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        match self {
-            CenoLookup::And(a, b, c) => vec![a, b, c].into_iter(),
-            CenoLookup::Xor(a, b, c) => vec![a, b, c].into_iter(),
-            CenoLookup::U16(a) => vec![a].into_iter(),
-        }
     }
 }
 

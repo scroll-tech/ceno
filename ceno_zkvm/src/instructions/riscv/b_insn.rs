@@ -3,14 +3,13 @@ use ff_ext::ExtensionField;
 
 use super::constants::PC_STEP_SIZE;
 use crate::{
-    chip_handler::RegisterExpr,
+    chip_handler::{RegisterExpr, general::InstFetch},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
-    set_val,
     tables::InsnRecord,
     utils::i64_to_base,
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};

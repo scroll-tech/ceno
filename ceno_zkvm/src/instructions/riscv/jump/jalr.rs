@@ -10,15 +10,15 @@ use crate::{
         Instruction,
         riscv::{constants::UInt, i_insn::IInstructionConfig, insn_base::MemAddr},
     },
-    set_val,
+    structs::ProgramParams,
     tables::InsnRecord,
     utils::i64_to_base,
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 
 pub struct JalrConfig<E: ExtensionField> {
     pub i_insn: IInstructionConfig<E>,
@@ -44,6 +44,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<JalrConfig<E>, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value

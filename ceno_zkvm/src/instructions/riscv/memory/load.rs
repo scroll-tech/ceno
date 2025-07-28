@@ -9,16 +9,16 @@ use crate::{
             RIVInstruction, constants::UInt, im_insn::IMInstructionConfig, insn_base::MemAddr,
         },
     },
-    set_val,
+    structs::ProgramParams,
     tables::InsnRecord,
     utils::i64_to_base,
-    witness::LkMultiplicity,
+    witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {
@@ -77,6 +77,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
@@ -221,7 +222,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             .memory_addr
             .assign_instance(instance, lk_multiplicity, unaligned_addr.into())?;
         if let Some(&limb) = config.target_limb.as_ref() {
-            set_val!(instance, limb, E::BaseField::from_u16(target_limb));
+            set_val!(
+                instance,
+                limb,
+                E::BaseField::from_canonical_u16(target_limb)
+            );
         }
         if let Some(limb_bytes) = config.target_limb_bytes.as_ref() {
             if addr_low_bits[0] == 1 {
@@ -231,7 +236,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             }
             for (&col, byte) in izip!(limb_bytes.iter(), target_limb_bytes.into_iter()) {
                 lk_multiplicity.assert_ux::<8>(byte as u64);
-                set_val!(instance, col, E::BaseField::from_u8(byte));
+                set_val!(instance, col, E::BaseField::from_canonical_u8(byte));
             }
         }
         let val = match I::INST_KIND {
