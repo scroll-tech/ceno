@@ -18,20 +18,20 @@ use witness::RowMajorMatrix;
 use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
 
-mod structure;
+pub mod structure;
 pub use structure::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
     BasefoldProverParams, BasefoldRSParams, BasefoldVerifierParams,
 };
-mod commit_phase;
+pub mod commit_phase;
 use commit_phase::batch_commit_phase;
-mod encoding;
+pub mod encoding;
 use multilinear_extensions::mle::ArcMultilinearExtension;
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-mod query_phase;
+pub mod query_phase;
 
 /// Implement the Polynomial Commitment Scheme present in the BaseFold paper
 /// https://eprint.iacr.org/2023/1705
