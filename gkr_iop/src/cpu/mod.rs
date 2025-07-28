@@ -155,7 +155,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
-            tracing::info!("generating input {i} layer with layer name {}", layer.name);
+            tracing::debug!("generating input {i} layer with layer name {}", layer.name);
             let num_instances = num_instances_with_rotation >> layer.rotation_cyclic_group_log2;
             let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
             // process in_evals to prepare layer witness

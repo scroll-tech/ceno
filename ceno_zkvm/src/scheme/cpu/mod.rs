@@ -530,6 +530,39 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let num_instances_with_rotation = num_instances << composed_cs.rotation_vars().unwrap_or(0);
 
         if let Some(gkr_circuit) = gkr_circuit {
+            // opcode must have at least one read/write/lookup
+            assert!(
+                cs.lk_expressions.is_empty()
+                    || !cs.r_expressions.is_empty()
+                    || !cs.w_expressions.is_empty(),
+                "assert opcode circuit"
+            );
+
+            // sanity check
+            assert_eq!(input.witness.len(), cs.num_witin as usize);
+
+            // structural witness can be empty. In this case they are `eq`, and will be filled later
+            assert!(
+                input.structural_witness.len() == cs.num_structural_witin as usize
+                    || input.structural_witness.is_empty(),
+            );
+            assert_eq!(input.fixed.len(), cs.num_fixed);
+
+            // check all witness size are power of 2
+            assert!(
+                input
+                    .witness
+                    .iter()
+                    .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
+            );
+
+            assert!(
+                cs.r_table_expressions
+                    .iter()
+                    .zip_eq(cs.w_table_expressions.iter())
+                    .all(|(r, w)| r.table_spec.len == w.table_spec.len)
+            );
+
             let (_, gkr_circuit_out) = Self::gkr_witness(
                 gkr_circuit,
                 num_instances_with_rotation,

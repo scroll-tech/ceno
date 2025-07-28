@@ -87,7 +87,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let sumcheck_proofs = izip!(&self.layers, circuit_wit.layers)
             .enumerate()
             .map(|(i, (layer, layer_wit))| {
-                tracing::info!("prove layer {i} layer with layer name {}", layer.name);
+                tracing::debug!("prove layer {i} layer with layer name {}", layer.name);
                 let span = entered_span!("per_layer_proof", profiling_3 = true);
                 let res = layer.prove::<_, PB, PD>(
                     num_threads,
@@ -133,7 +133,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         for (i, (layer, layer_proof)) in izip!(&self.layers, sumcheck_proofs).enumerate() {
-            tracing::info!("verifier layer {i} layer with layer name {}", layer.name);
+            tracing::debug!("verifier layer {i} layer with layer name {}", layer.name);
             layer.verify(
                 max_num_variables,
                 layer_proof,
