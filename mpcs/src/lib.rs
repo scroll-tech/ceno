@@ -261,7 +261,7 @@ pub enum Error {
     WhirError(whir_external::error::Error),
 }
 
-mod basefold;
+pub mod basefold;
 pub use basefold::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
     BasefoldRSParams, BasefoldSpec, EncodingScheme, RSCode, RSCodeDefaultSpec,

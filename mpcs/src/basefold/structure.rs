@@ -90,11 +90,11 @@ pub struct BasefoldCommitmentWithWitness<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) commit: Digest<E>,
-    pub(crate) codeword: MerkleTree<E::BaseField>,
+    pub commit: Digest<E>,
+    pub codeword: MerkleTree<E::BaseField>,
 
-    pub(crate) log2_max_codeword_size: usize,
-    pub(crate) polys: Vec<Vec<ArcMultilinearExtension<'static, E>>>,
+    pub log2_max_codeword_size: usize,
+    pub polys: Vec<Vec<ArcMultilinearExtension<'static, E>>>,
 }
 
 impl<E: ExtensionField> BasefoldCommitmentWithWitness<E>
@@ -264,11 +264,11 @@ pub struct BasefoldProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) commits: Vec<Digest<E>>,
-    pub(crate) final_message: Vec<Vec<E>>,
-    pub(crate) query_opening_proof: QueryOpeningProofs<E>,
-    pub(crate) sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
-    pub(crate) pow_witness: E::BaseField,
+    pub commits: Vec<Digest<E>>,
+    pub final_message: Vec<Vec<E>>,
+    pub query_opening_proof: QueryOpeningProofs<E>,
+    pub sumcheck_proof: Option<Vec<IOPProverMessage<E>>>,
+    pub pow_witness: E::BaseField,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -280,7 +280,7 @@ pub struct BasefoldCommitPhaseProof<E: ExtensionField>
 where
     E::BaseField: Serialize + DeserializeOwned,
 {
-    pub(crate) sumcheck_messages: Vec<IOPProverMessage<E>>,
-    pub(crate) commits: Vec<Digest<E>>,
-    pub(crate) final_message: Vec<Vec<E>>,
+    pub sumcheck_messages: Vec<IOPProverMessage<E>>,
+    pub commits: Vec<Digest<E>>,
+    pub final_message: Vec<Vec<E>>,
 }
