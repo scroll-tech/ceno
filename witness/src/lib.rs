@@ -186,7 +186,7 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + FieldAlgebra> RowMajorMat
                     .enumerate()
                     .for_each(|(i, instance)| {
                         instance.iter_mut().enumerate().for_each(|(j, v)| {
-                            *v = T::from_canonical_u64(fun((start_index + i) as u64, j as u64));
+                            *v = T::from_wrapped_u64(fun((start_index + i) as u64, j as u64));
                         })
                     });
             }
