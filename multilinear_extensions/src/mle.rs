@@ -184,7 +184,9 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
 
     pub fn select_prefix(self, prefix_len: usize) -> Self {
         field_type_mut_map!(self, |slice| {
-            slice.to_mut()[prefix_len..].fill(Default::default());
+            slice[prefix_len..]
+                .par_iter_mut()
+                .for_each(|elem| *elem = Default::default());
             slice
         })
     }

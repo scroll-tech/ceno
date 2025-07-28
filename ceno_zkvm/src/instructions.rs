@@ -24,7 +24,7 @@ pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
 
     fn padding_strategy() -> InstancePaddingStrategy {
-        InstancePaddingStrategy::RepeatLast
+        InstancePaddingStrategy::Default
     }
 
     fn name() -> String;

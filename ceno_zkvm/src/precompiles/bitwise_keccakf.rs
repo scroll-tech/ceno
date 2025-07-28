@@ -94,7 +94,7 @@ fn keccak_phase1_witness<E: ExtensionField>(states: &[[u64; 25]]) -> RowMajorMat
     }
 
     let mut rmm =
-        RowMajorMatrix::new_by_values(values, STATE_SIZE, InstancePaddingStrategy::RepeatLast);
+        RowMajorMatrix::new_by_values(values, STATE_SIZE, InstancePaddingStrategy::Default);
     rmm.padding_by_strategy();
     rmm
 }
