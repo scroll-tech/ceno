@@ -8,13 +8,17 @@ use ceno_zkvm::{
         setup_platform_debug, verify,
     },
     scheme::{
-        ZKVMProof, constants::MAX_NUM_VARIABLES, mock_prover::LkMultiplicityKey,
+        ZKVMProof, constants::MAX_NUM_VARIABLES, hal::ProverDevice, mock_prover::LkMultiplicityKey,
         verifier::ZKVMVerifier,
     },
     with_panic_hook,
 };
 use clap::Parser;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
+use gkr_iop::{
+    cpu::{CpuBackend, CpuProver},
+    hal::ProverBackend,
+};
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
@@ -235,60 +239,70 @@ fn main() {
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
+    // TODO support GPU backend
+
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
-            run_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>>(
+            let backend = CpuBackend::<_, _>::new(args.max_num_variables, args.security_level)
+                .box_leak_static();
+            let prover = CpuProver::new(backend);
+            run_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, _, _>(
+                prover,
                 program,
                 platform,
                 &hints,
                 &public_io,
                 max_steps,
-                args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
-                args.security_level,
                 Checkpoint::Complete,
             )
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
-            run_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>>(
+            let backend = CpuBackend::<_, _>::new(args.max_num_variables, args.security_level)
+                .box_leak_static();
+            let prover = CpuProver::new(backend);
+            run_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, _, _>(
+                prover,
                 program,
                 platform,
                 &hints,
                 &public_io,
                 max_steps,
-                args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
-                args.security_level,
                 Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
-            run_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>>(
+            let backend = CpuBackend::<_, _>::new(args.max_num_variables, args.security_level)
+                .box_leak_static();
+            let prover = CpuProver::new(backend);
+            run_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, _, _>(
+                prover,
                 program,
                 platform,
                 &hints,
                 &public_io,
                 max_steps,
-                args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
-                args.security_level,
                 Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
-            run_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>>(
+            let backend = CpuBackend::<_, _>::new(args.max_num_variables, args.security_level)
+                .box_leak_static();
+            let prover = CpuProver::new(backend);
+            run_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, _, _>(
+                prover,
                 program,
                 platform,
                 &hints,
                 &public_io,
                 max_steps,
-                args.max_num_variables,
                 args.proof_file,
                 args.vk_file,
-                args.security_level,
                 Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
             )
         }
@@ -304,27 +318,21 @@ fn main() {
 fn run_inner<
     E: ExtensionField + LkMultiplicityKey + DeserializeOwned,
     PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB> + 'static,
 >(
+    pd: PD,
     program: Program,
     platform: Platform,
     hints: &[u32],
     public_io: &[u32],
     max_steps: usize,
-    max_num_variables: usize,
     proof_file: PathBuf,
     vk_file: PathBuf,
-    security_level: SecurityLevel,
     checkpoint: Checkpoint,
 ) {
-    let result = run_e2e_with_checkpoint::<E, PCS>(
-        program,
-        platform,
-        hints,
-        public_io,
-        max_steps,
-        max_num_variables,
-        security_level,
-        checkpoint,
+    let result = run_e2e_with_checkpoint::<E, PCS, _, _>(
+        pd, program, platform, hints, public_io, max_steps, checkpoint,
     );
 
     let zkvm_proof = result

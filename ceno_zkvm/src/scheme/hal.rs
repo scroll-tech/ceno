@@ -22,6 +22,7 @@ pub trait ProverDevice<PB>:
 where
     PB: ProverBackend,
 {
+    fn get_pb(&self) -> &'static PB;
 }
 
 // TODO: remove the lifetime bound

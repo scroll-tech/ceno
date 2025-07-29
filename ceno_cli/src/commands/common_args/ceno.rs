@@ -1,3 +1,4 @@
+use super::CompilationOptions;
 use crate::utils::*;
 use anyhow::{Context, bail};
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
@@ -10,6 +11,7 @@ use ceno_zkvm::{
 };
 use clap::Args;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
+use gkr_iop::cpu::{CpuBackend, CpuProver};
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
@@ -18,8 +20,6 @@ use std::{
     fs::File,
     path::{Path, PathBuf},
 };
-
-use super::CompilationOptions;
 
 /// Ceno options
 #[derive(Clone, Args)]
@@ -372,14 +372,17 @@ fn run_elf_inner<
         platform.hints.len()
     );
 
-    Ok(run_e2e_with_checkpoint::<E, PCS>(
+    // TODO support GPU backend + prover
+    let backend = CpuBackend::<E, PCS>::new(options.max_num_variables, options.security_level)
+        .box_leak_static();
+
+    Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
+        CpuProver::new(backend),
         program,
         platform,
         &hints,
         &public_io,
         options.max_steps,
-        options.max_num_variables,
-        options.security_level,
         checkpoint,
     ))
 }

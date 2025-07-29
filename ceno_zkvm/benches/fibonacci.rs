@@ -5,13 +5,14 @@ use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::{constants::MAX_NUM_VARIABLES, verifier::ZKVMVerifier},
+    scheme::verifier::ZKVMVerifier,
 };
 mod alloc;
 use criterion::*;
 
 use ff_ext::GoldilocksExt2;
-use mpcs::{BasefoldDefault, SecurityLevel};
+use gkr_iop::cpu::{CpuBackend, CpuProver};
+use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 
 criterion_group! {
@@ -39,19 +40,19 @@ fn setup() -> (Program, Platform) {
 
 fn fibonacci_prove(c: &mut Criterion) {
     let (program, platform) = setup();
+    let backend = CpuBackend::<E, Pcs>::default().box_leak_static();
     for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
         // retrive 1 << 20th fibonacci element >> max_steps
         let mut hints = CenoStdin::default();
         let _ = hints.write(&20);
         // estimate proof size data first
-        let result = run_e2e_with_checkpoint::<E, Pcs>(
+        let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
+            CpuProver::new(backend),
             program.clone(),
             platform.clone(),
             &Vec::from(&hints),
             &[],
             max_steps,
-            MAX_NUM_VARIABLES,
-            SecurityLevel::default(),
             Checkpoint::Complete,
         );
         let proof = result.proof.expect("PrepSanityCheck do not provide proof");
@@ -82,14 +83,13 @@ fn fibonacci_prove(c: &mut Criterion) {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
-                        let result = run_e2e_with_checkpoint::<E, Pcs>(
+                        let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
+                            CpuProver::new(backend),
                             program.clone(),
                             platform.clone(),
                             &Vec::from(&hints),
                             &[],
                             max_steps,
-                            MAX_NUM_VARIABLES,
-                            SecurityLevel::default(),
                             Checkpoint::PrepE2EProving,
                         );
                         let instant = std::time::Instant::now();

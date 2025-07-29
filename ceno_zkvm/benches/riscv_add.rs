@@ -53,7 +53,7 @@ fn bench_add(c: &mut Criterion) {
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
 
-    let backend = CpuBackend::<E, Pcs>::new();
+    let backend = CpuBackend::<E, Pcs>::default().box_leak_static();
     let device = CpuProver::new(backend);
     let prover = ZKVMProver::new(pk, device);
     let circuit_pk = prover

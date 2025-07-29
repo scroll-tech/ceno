@@ -9,7 +9,7 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
-use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
     mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
     op_mle,
@@ -22,24 +22,34 @@ use sumcheck::macros::{entered_span, exit_span};
 use witness::RowMajorMatrix;
 
 pub struct CpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub param: PCS::Param,
+    pub pp: <PCS as PolynomialCommitmentScheme<E>>::ProverParam,
+    pub vp: <PCS as PolynomialCommitmentScheme<E>>::VerifierParam,
+    pub max_poly_size_log2: usize,
     _marker: std::marker::PhantomData<E>,
 }
 
+pub const DEFAULT_MAX_NUM_VARIABLES: usize = 24;
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for CpuBackend<E, PCS> {
     fn default() -> Self {
-        Self::new()
+        Self::new(DEFAULT_MAX_NUM_VARIABLES, Conjecture100bits)
     }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> CpuBackend<E, PCS> {
-    pub fn new() -> Self {
-        let param =
-            PCS::setup(E::BaseField::TWO_ADICITY, SecurityLevel::Conjecture100bits).unwrap();
+    pub fn new(max_poly_size_log2: usize, security_level: SecurityLevel) -> Self {
+        let param = PCS::setup(E::BaseField::TWO_ADICITY, security_level).unwrap();
+        let (pp, vp) = PCS::trim(param, 1 << max_poly_size_log2).unwrap();
         Self {
-            param,
+            pp,
+            vp,
+            max_poly_size_log2,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    pub fn box_leak_static(self) -> &'static mut CpuBackend<E, PCS> {
+        Box::leak(Box::new(self))
     }
 }
 
@@ -59,22 +69,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Cp
     type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     type PcsData = PCS::CommitmentWithWitness;
+
+    fn get_pp(&self) -> &<Self::Pcs as PolynomialCommitmentScheme<Self::E>>::ProverParam {
+        &self.pp
+    }
+
+    fn get_vp(&self) -> &<Self::Pcs as PolynomialCommitmentScheme<Self::E>>::VerifierParam {
+        &self.vp
+    }
 }
 
 /// CPU prover for CPU backend
-pub struct CpuProver<PB: ProverBackend> {
-    pub backend: PB,
-    pub pp: Option<<<PB as ProverBackend>::Pcs as PolynomialCommitmentScheme<PB::E>>::ProverParam>,
-    pub largest_poly_size: Option<usize>,
+pub struct CpuProver<PB: ProverBackend + 'static> {
+    pub backend: &'static PB,
 }
 
 impl<PB: ProverBackend> CpuProver<PB> {
-    pub fn new(backend: PB) -> Self {
-        Self {
-            backend,
-            pp: None,
-            largest_poly_size: None,
-        }
+    pub fn new(backend: &'static PB) -> Self {
+        Self { backend }
     }
 }
 
