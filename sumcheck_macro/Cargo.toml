@@ -24,6 +24,6 @@ syn = { version = "2.0", features = ["full"] }
 nightly-features = ["p3/nightly-features"]
 
 [dev-dependencies]
-ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "5af7c08" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "5af7c08" }
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7adb306" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "7adb306" }
 sumcheck.workspace = true
