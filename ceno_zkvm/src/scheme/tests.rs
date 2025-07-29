@@ -145,10 +145,10 @@ fn test_rw_lk_expression_combination() {
         let wits_in = rmm.to_mles();
         // commit to main traces
         let commit_with_witness =
-            Pcs::batch_commit_and_write(&prover.pk.pp, vec![rmm], &mut transcript).unwrap();
+            Pcs::batch_commit_and_write(&prover.pk.pp, vec![rmm.clone()], &mut transcript).unwrap();
 
         let rmm_gl64 :witness::RowMajorMatrix<p3::goldilocks::Goldilocks> = unsafe { std::mem::transmute(rmm.clone()) };
-        let traces_gl64 = vec![(0, rmm_gl64)].into_iter().collect::<BTreeMap<_, _>>();
+        let traces_gl64 = vec![rmm_gl64];
         let cuda_hal = CudaHalGL64::new().unwrap();
         let gpu_res = cuda_hal.basefold.batch_commit(traces_gl64).unwrap();
 

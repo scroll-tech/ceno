@@ -5,7 +5,6 @@ use crate::{
     evaluation::EvalExpression,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
-    infer_layer_witness,
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -89,18 +88,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 {
     fn gkr_witness<'a>(
         circuit: &GKRCircuit<E>,
-        phase1_witness_group: &RowMajorMatrix<E::BaseField>,
-        fixed: &[Vec<E::BaseField>],
+        phase1_witness_group_rmm: &RowMajorMatrix<E::BaseField>,
+        fixed: &RowMajorMatrix<E::BaseField>,
         challenges: &[E],
     ) -> (
         GKRCircuitWitness<'a, GpuBackend<E, PCS>>,
         GKRCircuitOutput<'a, GpuBackend<E, PCS>>,
     ) {
         // layer order from output to input
-        let num_instances = phase1_witness_group.num_instances();
+        let num_instances_with_rotation = phase1_witness_group_rmm.num_instances();
         let mut layer_wits =
             Vec::<LayerWitness<GpuBackend<E, PCS>>>::with_capacity(circuit.layers.len() + 1);
-        let phase1_witness_group = phase1_witness_group
+        let phase1_witness_group = phase1_witness_group_rmm
             .to_mles()
             .into_iter()
             .map(Arc::new)
@@ -135,7 +134,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                                 .iter()
                                 .cycle()
                                 .cloned()
-                                .take(num_instances)
+                                .take(num_instances_with_rotation)
                                 .collect_vec()
                                 .into_mle()
                                 .into(),
@@ -150,6 +149,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
             tracing::info!("generating input {i} layer with layer name {}", layer.name);
+            let num_instances = num_instances_with_rotation >> layer.rotation_cyclic_group_log2;
             let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
             // process in_evals to prepare layer witness
             // This should assume the input of the first layer is the phase1 witness of the circuit.
@@ -166,12 +166,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // infer current layer output
             let current_layer_output: Vec<
                 Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
-            > = infer_layer_witness(layer, &current_layer_wits, challenges);
+            > = crate::cpu::layer_witness(layer, &current_layer_wits, challenges, num_instances);
             layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
             // process out to prepare output witness
             layer
-                .out_eq_and_eval_exprs
+                .out_sel_and_eval_exprs
                 .iter()
                 .flat_map(|(_, out_eval)| out_eval)
                 .zip_eq(&current_layer_output)
@@ -200,7 +200,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         layer_wits.reverse();
 
         // initialize a vector to store the final outputs of the GKR circuit.
-        let mut gkr_out_well_order = vec![Arc::default(); circuit.n_nonzero_out_evals];
+        let mut gkr_out_well_order = vec![Arc::default(); circuit.final_out_evals.len()];
         circuit
             .final_out_evals
             .iter()

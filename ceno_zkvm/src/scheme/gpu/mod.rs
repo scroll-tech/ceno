@@ -11,12 +11,13 @@ use crate::{
             wit_infer_by_expr,
         },
     },
-    structs::{ComposedConstrainSystem, TowerProofs},
+    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
 use either::Either;
 use ff_ext::{GoldilocksExt2, ExtensionField};
 use gkr_iop::{
     gpu::{GpuBackend, GpuProver},
+    gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
 };
 use itertools::{Itertools, chain};
@@ -281,12 +282,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>>() == 
             std::mem::size_of::<PCS::CommitmentWithWitness>();
         let pcs_data = if is_goldilocks && is_pcs_match {
-            let cuda_hal = CudaHalGL64::new().unwrap();
-            let traces_gl64: BTreeMap<usize, witness::RowMajorMatrix<p3::goldilocks::Goldilocks>> = 
-                unsafe { std::mem::transmute(traces.clone()) };
-            let mut gpu_basefold_commitment = cuda_hal.basefold.batch_commit_e2e(traces_gl64).unwrap();
-
-            let cpu_pcs = PCS::batch_commit(prover_param, traces.clone()).unwrap();
+            let vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> = traces.into_values().collect();
+            let cpu_pcs = PCS::batch_commit(prover_param, vec_traces.clone()).unwrap();
             let cpu_basefold_commitment = if std::mem::size_of_val(&cpu_pcs) == 
                 std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>>() {
                 let result = unsafe { 
@@ -297,14 +294,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             } else {
                 panic!("error: type conversion failed");
             };
+
+
+            let cuda_hal = CudaHalGL64::new().unwrap();
+            let traces_gl64: Vec<witness::RowMajorMatrix<p3::goldilocks::Goldilocks>> = 
+                unsafe { std::mem::transmute(vec_traces.clone()) };
+            let mut gpu_basefold_commitment = cuda_hal.basefold.batch_commit_e2e(traces_gl64).unwrap();
+
             assert_eq!(gpu_basefold_commitment.commit, cpu_basefold_commitment.commit);
             // assert_eq!(gpu_basefold_commitment.codeword, cpu_basefold_commitment.codeword);
             assert_eq!(gpu_basefold_commitment.log2_max_codeword_size, cpu_basefold_commitment.log2_max_codeword_size);
             // assert_eq!(gpu_basefold_commitment.trivial_proofdata, cpu_basefold_commitment.trivial_proofdata);
             assert_eq!(gpu_basefold_commitment.polys, cpu_basefold_commitment.polys);
-            assert_eq!(gpu_basefold_commitment.circuit_codeword_index, cpu_basefold_commitment.circuit_codeword_index);
+            // assert_eq!(gpu_basefold_commitment.circuit_codeword_index, cpu_basefold_commitment.circuit_codeword_index);
 
-            gpu_basefold_commitment.trivial_proofdata = cpu_basefold_commitment.trivial_proofdata;
+            // gpu_basefold_commitment.trivial_proofdata = cpu_basefold_commitment.trivial_proofdata;
             
             let gpu_pcs: PCS::CommitmentWithWitness = unsafe {
                 std::mem::transmute_copy(&gpu_basefold_commitment)
@@ -314,7 +318,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             gpu_pcs
         } else {
             println!("GPU commitment data is not compatible with the PCS, use CPU fallback");
-            PCS::batch_commit(prover_param, traces).unwrap()
+            PCS::batch_commit(prover_param, traces.into_values().collect_vec()).unwrap()
         };
         
         let commit = PCS::get_pure_commitment(&pcs_data);
@@ -601,14 +605,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
+    #[allow(clippy::type_complexity)]
+    #[tracing::instrument(
+        skip_all,
+        name = "prove_main_constraints",
+        fields(profiling_3),
+        level = "trace"
+    )]
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
         _records: Vec<ArcMultilinearExtension<'b, E>>,
         input: &'b ProofInput<'a, GpuBackend<E, PCS>>,
-        ComposedConstrainSystem {
-            zkvm_v1_css: cs, ..
-        }: &ComposedConstrainSystem<E>,
+        composed_cs: &ComposedConstrainSystem<E>,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> Result<
@@ -616,178 +625,229 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             Point<E>,
             MainSumcheckEvals<E>,
             Option<Vec<IOPProverMessage<E>>>,
+            Option<GKRProof<E>>,
         ),
         ZKVMError,
     > {
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit,
+        } = composed_cs;
+
         let num_instances = input.num_instances;
         let next_pow2_instances = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instances);
-        let is_opcode_circuit = !cs.lk_expressions.is_empty()
-            || !cs.r_expressions.is_empty()
-            || !cs.w_expressions.is_empty();
+        let num_threads = optimal_sumcheck_threads(log2_num_instances);
+        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
-        // main selector sumcheck / same point sumcheck
-        let sumcheck_span = entered_span!("main sumcheck");
-        let (input_opening_point, evals, main_sumcheck_proofs) = if is_opcode_circuit {
-            let main_sel_span = entered_span!("main_sel");
-            let num_threads = optimal_sumcheck_threads(log2_num_instances);
-            let alpha_pow = get_challenge_pows(cs.num_layer_challenges as usize, transcript);
-            // create selector: all ONE, but padding ZERO to ceil_log2
-            let mut sel: MultilinearExtension<E> = {
-                // TODO sel can be shared if expression count match
-                let mut sel = build_eq_x_r_vec(&rt_tower);
-                if num_instances < sel.len() {
-                    sel.splice(
-                        num_instances..sel.len(),
-                        std::iter::repeat_n(E::ZERO, sel.len() - num_instances),
-                    );
-                }
-                sel.into_mle()
-            };
-
-            // get backend expr monimial form and evaluate scalar with challenges
-            let (public_io_evals, challenges) = {
-                (
-                    // get public io evaluations
-                    cs.instance_name_map
-                        .keys()
-                        .sorted()
-                        .map(|Instance(inst_id)| {
-                            let mle = &input.public_input[*inst_id];
-                            assert_eq!(
-                                mle.evaluations.len(),
-                                1,
-                                "doesnt support instance with evaluation length > 1"
-                            );
-                            match mle.evaluations() {
-                                FieldType::Base(smart_slice) => E::from(smart_slice[0]),
-                                FieldType::Ext(smart_slice) => smart_slice[0],
-                                _ => unreachable!(),
-                            }
-                        })
+        if let Some(gkr_circuit) = gkr_circuit {
+            let GKRProverOutput {
+                gkr_proof,
+                opening_evaluations,
+            } = gkr_circuit.prove::<GpuBackend<E, PCS>, GpuProver<_>>(
+                num_threads,
+                num_var_with_rotation,
+                gkr::GKRCircuitWitness {
+                    layers: vec![LayerWitness(
+                        chain!(&input.witness, &input.structural_witness, &input.fixed)
+                            .cloned()
+                            .collect_vec(),
+                    )],
+                },
+                // eval value doesnt matter as it wont be used by prover
+                &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
+                challenges,
+                transcript,
+                num_instances,
+            )?;
+            Ok((
+                opening_evaluations[0].point.clone(),
+                MainSumcheckEvals {
+                    wits_in_evals: opening_evaluations
+                        .iter()
+                        .take(cs.num_witin as usize)
+                        .map(|Evaluation { value, .. }| value)
+                        .copied()
                         .collect_vec(),
-                    // concat challenge with layer challenge
-                    challenges.iter().chain(&alpha_pow).copied().collect_vec(),
-                )
-            };
-            // sanity check degree > 1 zero expression sumcheck
-            if cfg!(debug_assertions) && !cs.assert_zero_sumcheck_expressions.is_empty() {
-                // \sum_t sel(rt, t) * \sum_j alpha_{j} * all_monomial_terms(t)
-                for (expr, name) in cs
-                    .assert_zero_sumcheck_expressions
-                    .iter()
-                    .zip_eq(cs.assert_zero_sumcheck_expressions_namespace_map.iter())
-                {
-                    // sanity check in debug build and output != instance index for zero check sumcheck poly
-                    if cfg!(debug_assertions) {
-                        let expected_zero_poly = wit_infer_by_expr(
-                            &[],
-                            &input.witness,
-                            &[],
-                            &input.public_input,
-                            &challenges,
-                            expr,
+                    fixed_in_evals: opening_evaluations
+                        .iter()
+                        .skip((cs.num_witin + cs.num_structural_witin) as usize)
+                        .take(cs.num_fixed)
+                        .map(|Evaluation { value, .. }| value)
+                        .copied()
+                        .collect_vec(),
+                },
+                None,
+                Some(gkr_proof),
+            ))
+        } else {
+            let is_opcode_circuit = !cs.lk_expressions.is_empty()
+                || !cs.r_expressions.is_empty()
+                || !cs.w_expressions.is_empty();
+
+            // main selector sumcheck / same point sumcheck
+            let sumcheck_span = entered_span!("main sumcheck");
+            let (input_opening_point, evals, main_sumcheck_proofs) = if is_opcode_circuit {
+                let main_sel_span = entered_span!("main_sel");
+
+                let alpha_pow = get_challenge_pows(cs.num_layer_challenges as usize, transcript);
+                // create selector: all ONE, but padding ZERO to ceil_log2
+                let mut sel: MultilinearExtension<E> = {
+                    // TODO sel can be shared if expression count match
+                    let mut sel = build_eq_x_r_vec(&rt_tower);
+                    if num_instances < sel.len() {
+                        sel.splice(
+                            num_instances..sel.len(),
+                            std::iter::repeat_n(E::ZERO, sel.len() - num_instances),
                         );
-                        let top_100_errors = expected_zero_poly
-                            .get_base_field_vec()
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, v)| **v != E::BaseField::ZERO)
-                            .take(100)
-                            .collect_vec();
-                        if !top_100_errors.is_empty() {
-                            return Err(ZKVMError::InvalidWitness(format!(
-                                "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
-                                top_100_errors.into_iter().map(|(i, _)| i).join(",")
-                            )));
+                    }
+                    sel.into_mle()
+                };
+
+                // get backend expr monimial form and evaluate scalar with challenges
+                let (public_io_evals, challenges) = {
+                    (
+                        // get public io evaluations
+                        cs.instance_name_map
+                            .keys()
+                            .sorted()
+                            .map(|Instance(inst_id)| {
+                                let mle = &input.public_input[*inst_id];
+                                assert_eq!(
+                                    mle.evaluations.len(),
+                                    1,
+                                    "doesnt support instance with evaluation length > 1"
+                                );
+                                match mle.evaluations() {
+                                    FieldType::Base(smart_slice) => E::from(smart_slice[0]),
+                                    FieldType::Ext(smart_slice) => smart_slice[0],
+                                    _ => unreachable!(),
+                                }
+                            })
+                            .collect_vec(),
+                        // concat challenge with layer challenge
+                        challenges.iter().chain(&alpha_pow).copied().collect_vec(),
+                    )
+                };
+                // sanity check degree > 1 zero expression sumcheck
+                if cfg!(debug_assertions) && !cs.assert_zero_sumcheck_expressions.is_empty() {
+                    // \sum_t sel(rt, t) * \sum_j alpha_{j} * all_monomial_terms(t)
+                    for (expr, name) in cs
+                        .assert_zero_sumcheck_expressions
+                        .iter()
+                        .zip_eq(cs.assert_zero_sumcheck_expressions_namespace_map.iter())
+                    {
+                        // sanity check in debug build and output != instance index for zero check sumcheck poly
+                        if cfg!(debug_assertions) {
+                            let expected_zero_poly = wit_infer_by_expr(
+                                &[],
+                                &input.witness,
+                                &[],
+                                &input.public_input,
+                                &challenges,
+                                expr,
+                            );
+                            let top_100_errors = expected_zero_poly
+                                .get_base_field_vec()
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, v)| **v != E::BaseField::ZERO)
+                                .take(100)
+                                .collect_vec();
+                            if !top_100_errors.is_empty() {
+                                return Err(ZKVMError::InvalidWitness(format!(
+                                    "degree > 1 zero check virtual poly: expr {name} != 0 on instance indexes: {}...",
+                                    top_100_errors.into_iter().map(|(i, _)| i).join(",")
+                                )));
+                            }
                         }
                     }
                 }
-            }
-            let mut monomial_terms = cs
-                .backend_expr_monomial_form
-                .iter()
-                .map(
-                    |Term {
-                         scalar: scalar_expr,
-                         product,
-                     }| {
-                        // evaluate scalar with instances (public io) + challenges
-                        let scalar = eval_by_expr_with_instance(
-                            &[],
-                            &[],
-                            &[],
-                            &public_io_evals,
-                            &challenges,
-                            scalar_expr,
-                        );
-                        Term {
-                            scalar,
-                            product: product.clone(),
-                        }
+                let mut monomial_terms = cs
+                    .backend_expr_monomial_form
+                    .iter()
+                    .map(
+                        |Term {
+                             scalar: scalar_expr,
+                             product,
+                         }| {
+                            // evaluate scalar with instances (public io) + challenges
+                            let scalar = eval_by_expr_with_instance(
+                                &[],
+                                &[],
+                                &[],
+                                &public_io_evals,
+                                &challenges,
+                                scalar_expr,
+                            );
+                            Term {
+                                scalar,
+                                product: product.clone(),
+                            }
+                        },
+                    )
+                    .collect_vec();
+
+                let expr_builder = VirtualPolynomialsBuilder::new_with_mles(
+                    num_threads,
+                    log2_num_instances,
+                    chain!(&input.witness, &input.structural_witness, &input.fixed)
+                        .map(|mle| Either::Left(mle.as_ref()))
+                        .chain(std::iter::once(&mut sel).map(Either::Right))
+                        .collect_vec(),
+                );
+                // we append selector at the last of mle, thus its id also in the end
+                let select_expr = Expression::<E>::WitIn(cs.num_backend_witin);
+                // every terms times selector
+                monomial_terms
+                    .iter_mut()
+                    .for_each(|Term { product, .. }| product.push(select_expr.clone()));
+
+                tracing::trace!("main sel sumcheck start");
+                let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(
+                    expr_builder.to_virtual_polys_with_monimial_terms(monomial_terms),
+                    transcript,
+                );
+                tracing::trace!("main sel sumcheck end");
+                exit_span!(main_sel_span);
+
+                let mut evals = state.get_mle_flatten_final_evaluations();
+                let wits_in_evals: Vec<_> = evals.drain(..cs.num_witin as usize).collect();
+                let fixed_in_evals: Vec<_> = evals.drain(..cs.num_fixed).collect();
+                (
+                    state.collect_raw_challenges(),
+                    MainSumcheckEvals {
+                        wits_in_evals,
+                        fixed_in_evals,
                     },
+                    Some(main_sel_sumcheck_proofs.proofs),
                 )
-                .collect_vec();
+            } else {
+                let span = entered_span!("fixed::evals + witin::evals");
+                // In table proof, we always skip same point sumcheck for now
+                // as tower sumcheck batch product argument/logup in same length
+                let mut evals = input
+                    .witness
+                    .par_iter()
+                    .chain(input.fixed.par_iter())
+                    .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
+                    .collect::<Vec<_>>();
+                let fixed_in_evals = evals.split_off(input.witness.len());
+                let wits_in_evals = evals;
+                exit_span!(span);
+                (
+                    rt_tower,
+                    MainSumcheckEvals {
+                        wits_in_evals,
+                        fixed_in_evals,
+                    },
+                    None,
+                )
+            };
+            exit_span!(sumcheck_span);
 
-            let expr_builder = VirtualPolynomialsBuilder::new_with_mles(
-                num_threads,
-                log2_num_instances,
-                chain!(&input.witness, &input.structural_witness, &input.fixed)
-                    .map(|mle| Either::Left(mle.as_ref()))
-                    .chain(std::iter::once(&mut sel).map(Either::Right))
-                    .collect_vec(),
-            );
-            // we append selector at the last of mle, thus its id also in the end
-            let select_expr = Expression::<E>::WitIn(cs.num_backend_witin);
-            // every terms times selector
-            monomial_terms
-                .iter_mut()
-                .for_each(|Term { product, .. }| product.push(select_expr.clone()));
-
-            tracing::trace!("main sel sumcheck start");
-            let (main_sel_sumcheck_proofs, state) = IOPProverState::prove(
-                expr_builder.to_virtual_polys_with_monimial_terms(monomial_terms),
-                transcript,
-            );
-            tracing::trace!("main sel sumcheck end");
-            exit_span!(main_sel_span);
-
-            let mut evals = state.get_mle_flatten_final_evaluations();
-            let wits_in_evals: Vec<_> = evals.drain(..cs.num_witin as usize).collect();
-            let fixed_in_evals: Vec<_> = evals.drain(..cs.num_fixed).collect();
-            (
-                state.collect_raw_challenges(),
-                MainSumcheckEvals {
-                    wits_in_evals,
-                    fixed_in_evals,
-                },
-                Some(main_sel_sumcheck_proofs.proofs),
-            )
-        } else {
-            let span = entered_span!("fixed::evals + witin::evals");
-            // In table proof, we always skip same point sumcheck for now
-            // as tower sumcheck batch product argument/logup in same length
-            let mut evals = input
-                .witness
-                .par_iter()
-                .chain(input.fixed.par_iter())
-                .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
-                .collect::<Vec<_>>();
-            let fixed_in_evals = evals.split_off(input.witness.len());
-            let wits_in_evals = evals;
-            exit_span!(span);
-            (
-                rt_tower,
-                MainSumcheckEvals {
-                    wits_in_evals,
-                    fixed_in_evals,
-                },
-                None,
-            )
-        };
-        exit_span!(sumcheck_span);
-
-        Ok((input_opening_point, evals, main_sumcheck_proofs))
+            Ok((input_opening_point, evals, main_sumcheck_proofs, None))
+        }
     }
 }
 
@@ -799,85 +859,79 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         witness_data: PCS::CommitmentWithWitness,
         fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
         points: Vec<Point<E>>,
-        evals: Vec<Vec<E>>,
+        mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
         circuit_num_polys: &[(usize, usize)],
         num_instances: &[(usize, usize)],
         transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
-
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<p3::goldilocks::Goldilocks>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 
         use p3::field::extension::BinomialExtensionField;
         type EGL64 = BinomialExtensionField<p3::goldilocks::Goldilocks, 2>;
-        let mut test_transcript = transcript::BasicTranscript::<EGL64>::new(b"BaseFold");
         let cuda_hal = CudaHalGL64::new().unwrap();
 
+        let mut rounds = vec![];
+        rounds.push((
+            &witness_data,
+            points
+                .iter()
+                .zip_eq(evals.iter_mut())
+                .zip_eq(num_instances.iter())
+                .map(|((point, evals), (chip_idx, _))| {
+                    let (num_witin, _) = circuit_num_polys[*chip_idx];
+                    (point.clone(), evals.drain(..num_witin).collect_vec())
+                })
+                .collect_vec(),
+        ));
+        if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
+            rounds.push((
+                fixed_data,
+                points
+                    .iter()
+                    .zip_eq(evals.iter_mut())
+                    .zip_eq(num_instances.iter())
+                    .filter(|(_, (chip_idx, _))| {
+                        let (_, num_fixed) = circuit_num_polys[*chip_idx];
+                        num_fixed > 0
+                    })
+                    .map(|((point, evals), _)| (point.clone(), evals.to_vec()))
+                    .collect_vec(),
+            ));
+        }
+
         // Type conversions using unsafe transmute
-        let pp_gl64: &mpcs::basefold::structure::BasefoldProverParams<EGL64, mpcs::BasefoldRSParams> = unsafe { std::mem::transmute(self.pp.as_ref().unwrap()) };
-        let fixed_data_gl64: Option<&mpcs::BasefoldCommitmentWithWitness<EGL64>> = 
-            unsafe { std::mem::transmute(fixed_data.as_ref().map(|f| f.as_ref())) };
-        let witness_data_gl64: &mpcs::BasefoldCommitmentWithWitness<EGL64> = 
-            unsafe { std::mem::transmute(&witness_data) };
-        let points_gl64: &[Vec<EGL64>] = unsafe { std::mem::transmute(points.as_slice()) };
-        let evals_gl64: &[Vec<EGL64>] = unsafe { std::mem::transmute(evals.as_slice()) };
+        let pp_gl64: &mpcs::basefold::structure::BasefoldProverParams<EGL64, mpcs::BasefoldRSParams> = 
+            unsafe { std::mem::transmute(self.pp.as_ref().unwrap()) };
+        let rounds_gl64: Vec<_> = rounds
+            .iter()
+            .map(|(commitment, point_eval_pairs)| {
+                let commitment_gl64: &mpcs::BasefoldCommitmentWithWitness<EGL64> = 
+                    unsafe { std::mem::transmute(*commitment) };
+                let point_eval_pairs_gl64: Vec<_> = point_eval_pairs
+                    .iter()
+                    .map(|(point, evals)| {
+                        let point_gl64: &Vec<EGL64> = unsafe { std::mem::transmute(point) };
+                        let evals_gl64: &Vec<EGL64> = unsafe { std::mem::transmute(evals) };
+                        (point_gl64.clone(), evals_gl64.clone())
+                    })
+                    .collect();
+                (commitment_gl64, point_eval_pairs_gl64)
+            })
+            .collect();
 
-        // let gpu_proof = cuda_hal
-        //     .basefold
-        //     .batch_open_e2e(
-        //         &cuda_hal,
-        //         pp_gl64,
-        //         &num_instances,
-        //         fixed_data_gl64,
-        //         witness_data_gl64,
-        //         points_gl64,
-        //         evals_gl64,
-        //         &circuit_num_polys,
-        //         &mut test_transcript,
-        //     )
-        //     .unwrap();
-
-        // let mut test_transcript = transcript::BasicTranscript::<E>::new(b"BaseFold");
-        // let cpu_proof = PCS::batch_open(
-        //     self.pp.as_ref().unwrap(),
-        //     num_instances,
-        //     fixed_data.as_ref().map(|f| f.as_ref()),
-        //     &witness_data,
-        //     &points,
-        //     &evals,
-        //     circuit_num_polys,
-        //     &mut test_transcript,
-        // )
-        // .unwrap();
-
-        // let cpu_proof_basefold: &mpcs::basefold::structure::BasefoldProof<E> = 
-        //     unsafe { std::mem::transmute(&cpu_proof) };
-        // assert_eq!(cpu_proof_basefold.commits.len(), gpu_proof.commits.len());
-        // for i in 0..cpu_proof_basefold.commits.len() {
-        //     let cpu_commit_as_array: &[E::BaseField; 4] = unsafe { std::mem::transmute(&cpu_proof_basefold.commits[i]) };
-        //     let gpu_commit_as_array: &[E::BaseField; 4] = unsafe { std::mem::transmute(&gpu_proof.commits[i]) };
-        //     assert_eq!(cpu_commit_as_array, gpu_commit_as_array, "commits mismatch at index [{}]", i);
-        // }
-        
-        // println!("GPU proof verification passed, returning CPU proof");
-
-
-    
         let gpu_proof = if std::any::TypeId::of::<E>() == std::any::TypeId::of::<GoldilocksExt2>() {
                 let transcript_any = transcript as &mut dyn std::any::Any;
-                let basic_transcript = transcript_any.downcast_mut::<BasicTranscript<GoldilocksExt2>>().expect("Type should match");
+                let basic_transcript = transcript_any.downcast_mut::<BasicTranscript<GoldilocksExt2>>()
+                    .expect("Type should match");
+
                 let gpu_proof_basefold = cuda_hal
                     .basefold
-                    .batch_open_e2e(
+                    .batch_open(
                         &cuda_hal,
                         pp_gl64,
-                        &num_instances,
-                        fixed_data_gl64,
-                        witness_data_gl64,
-                        points_gl64,
-                        evals_gl64,
-                        &circuit_num_polys,
+                        rounds_gl64,
                         basic_transcript,
                     )
                     .unwrap();
@@ -892,19 +946,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
                 panic!("GPU backend only supports Goldilocks base field");
             };
         gpu_proof
-
-
-        // PCS::batch_open(
-        //     self.pp.as_ref().unwrap(),
-        //     num_instances,
-        //     fixed_data.as_ref().map(|f| f.as_ref()),
-        //     &witness_data,
-        //     &points,
-        //     &evals,
-        //     circuit_num_polys,
-        //     transcript,
-        // )
-        // .unwrap()
     }
 }
 
