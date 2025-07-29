@@ -337,13 +337,8 @@ fn run_inner<
     let vk_bytes = bincode::serialize(&vk).unwrap();
     std::fs::write(&vk_file, vk_bytes).unwrap();
 
-    return; // early terminate
-
-    if checkpoint > Checkpoint::PrepVerify {
-        let verifier = ZKVMVerifier::new(vk);
-        verify(&zkvm_proof, &verifier).expect("Verification failed");
-        soundness_test(zkvm_proof, &verifier);
-    }
+    let verifier = ZKVMVerifier::new(vk);
+    verify(&zkvm_proof, &verifier).expect("Verification failed");
 }
 
 fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
