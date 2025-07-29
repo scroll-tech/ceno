@@ -284,20 +284,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         fields(profiling_3),
         level = "trace"
     )]
-    fn build_tower_witness<'a, 'b>(
+    fn build_tower_witness<'a, 'b, 'c>(
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, CpuBackend<E, PCS>>,
-        records: &[ArcMultilinearExtension<'b, E>],
-        _is_padded: bool,
+        records: &'c [ArcMultilinearExtension<'b, E>],
+        is_padded: bool,
         challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
-        Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
-        Vec<TowerProverSpec<'b, CpuBackend<E, PCS>>>,
+        Vec<TowerProverSpec<'c, CpuBackend<E, PCS>>>,
+        Vec<TowerProverSpec<'c, CpuBackend<E, PCS>>>,
     )
     where
         'a: 'b,
+        'b: 'c,
     {
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
@@ -332,11 +333,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             .iter()
             .chain(w_set_wit.iter())
             .map(|wit| {
-                // if is_padded {
-                //     wit.as_view_chunks(NUM_FANIN)
-                // } else {
-                masked_mle_split_to_chunks(wit, num_instances_with_rotation, NUM_FANIN, E::ONE)
-                // }
+                if is_padded {
+                    wit.as_view_chunks(NUM_FANIN)
+                } else {
+                    masked_mle_split_to_chunks(wit, num_instances_with_rotation, NUM_FANIN, E::ONE)
+                }
             })
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
@@ -346,23 +347,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             .chain(lk_d_wit.iter())
             .enumerate()
             .map(|(i, wit)| {
-                // if is_padded {
-                //     wit.as_view_chunks(NUM_FANIN)
-                // } else {
-                let default = if i < lk_n_wit.len() {
-                    // For table circuit, the last layer's length is always two's power
-                    // so the padding will not happen, therefore we can use any value here.
-                    E::ONE
+                if is_padded {
+                    wit.as_view_chunks(NUM_FANIN)
                 } else {
-                    chip_record_alpha
-                };
-                masked_mle_split_to_chunks(
-                    wit,
-                    num_instances_with_rotation,
-                    NUM_FANIN_LOGUP,
-                    default,
-                )
-                // }
+                    let default = if i < lk_n_wit.len() {
+                        // For table circuit, the last layer's length is always two's power
+                        // so the padding will not happen, therefore we can use any value here.
+                        E::ONE
+                    } else {
+                        chip_record_alpha
+                    };
+                    masked_mle_split_to_chunks(
+                        wit,
+                        num_instances_with_rotation,
+                        NUM_FANIN_LOGUP,
+                        default,
+                    )
+                }
             })
             .collect::<Vec<_>>();
         let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());

@@ -64,20 +64,21 @@ pub trait TowerProver<PB: ProverBackend> {
     // build multiple complete binary trees (tower tree) to accumulate these records
     // either in product or fractional sum form.
     #[allow(clippy::type_complexity)]
-    fn build_tower_witness<'a, 'b>(
+    fn build_tower_witness<'a, 'b, 'c>(
         &self,
         cs: &ComposedConstrainSystem<PB::E>,
         input: &ProofInput<'a, PB>,
-        records: &[Arc<PB::MultilinearPoly<'b>>],
+        records: &'c [Arc<PB::MultilinearPoly<'b>>],
         is_padded: bool,
         challenge: &[PB::E; 2],
     ) -> (
         Vec<Vec<Vec<PB::E>>>,
-        Vec<TowerProverSpec<'b, PB>>,
-        Vec<TowerProverSpec<'b, PB>>,
+        Vec<TowerProverSpec<'c, PB>>,
+        Vec<TowerProverSpec<'c, PB>>,
     )
     where
-        'a: 'b;
+        'a: 'b,
+        'b: 'c;
 
     // the validity of value of first layer in the tower tree is reduced to
     // the validity of value of last layer in the tower tree through sumchecks
