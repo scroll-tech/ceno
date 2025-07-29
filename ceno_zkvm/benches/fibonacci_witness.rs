@@ -1,16 +1,15 @@
-use std::{fs, path::PathBuf, time::Duration};
-
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::constants::MAX_NUM_VARIABLES,
 };
+use std::{fs, path::PathBuf, rc::Rc, time::Duration};
 mod alloc;
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-use mpcs::{BasefoldDefault, SecurityLevel};
+use gkr_iop::cpu::{CpuBackend, CpuProver};
+use mpcs::BasefoldDefault;
 
 criterion_group! {
   name = fibonacci;
@@ -39,6 +38,7 @@ fn setup() -> (Program, Platform) {
 
 fn fibonacci_witness(c: &mut Criterion) {
     let (program, platform) = setup();
+    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
 
     let max_steps = usize::MAX;
     let mut group = c.benchmark_group(format!("fib_wit_max_steps_{}", max_steps));
@@ -58,14 +58,13 @@ fn fibonacci_witness(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
-                    let result = run_e2e_with_checkpoint::<E, Pcs>(
+                    let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
+                        CpuProver::new(backend.clone()),
                         program.clone(),
                         platform.clone(),
                         &Vec::from(&hints),
                         &[],
                         max_steps,
-                        MAX_NUM_VARIABLES,
-                        SecurityLevel::default(),
                         Checkpoint::PrepWitnessGen,
                     );
                     let instant = std::time::Instant::now();
