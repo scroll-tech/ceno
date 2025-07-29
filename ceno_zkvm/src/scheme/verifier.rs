@@ -5,12 +5,14 @@ use ff_ext::ExtensionField;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use gkr_iop::gkr::GKRClaims;
+use gkr_iop::{gkr::GKRClaims, utils::eq_eval_less_or_equal_than};
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
+    Instance, StructuralWitIn,
     mle::IntoMLE,
     util::ceil_log2,
+    utils::eval_by_expr_with_instance,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use p3::field::FieldAlgebra;
@@ -25,9 +27,8 @@ use crate::{
     error::ZKVMError,
     scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{eq_eval_less_or_equal_than, eval_wellform_address_vec},
+    utils::eval_wellform_address_vec,
 };
-use multilinear_extensions::{Instance, StructuralWitIn, utils::eval_by_expr_with_instance};
 
 use super::{ZKVMChipProof, ZKVMProof};
 
@@ -393,6 +394,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &chain!(record_evals, logup_p_evals, logup_q_evals).collect_vec(),
                 challenges,
                 transcript,
+                num_instances,
             )?;
             Ok(opening_evaluations[0].point.clone())
         } else {

@@ -637,6 +637,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
                 challenges,
                 transcript,
+                num_instances,
             )?;
             Ok((
                 opening_evaluations[0].point.clone(),

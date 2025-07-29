@@ -27,6 +27,7 @@ pub trait SumcheckLayerProver<PB: ProverBackend> {
 }
 
 pub trait ZerocheckLayerProver<PB: ProverBackend> {
+    #[allow(clippy::too_many_arguments)]
     fn prove(
         layer: &Layer<PB::E>,
         num_threads: usize,
@@ -35,5 +36,6 @@ pub trait ZerocheckLayerProver<PB: ProverBackend> {
         out_points: &[Point<PB::E>],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
+        num_instances: usize,
     ) -> (LayerProof<PB::E>, Point<PB::E>);
 }

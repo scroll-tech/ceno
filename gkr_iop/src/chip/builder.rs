@@ -9,7 +9,7 @@ impl<E: ExtensionField> Chip<E> {
     pub fn add_layer(&mut self, layer: Layer<E>) {
         assert_eq!(
             layer
-                .out_eq_and_eval_exprs
+                .out_sel_and_eval_exprs
                 .iter()
                 .map(|(_, outs)| outs.len())
                 .sum::<usize>(),
