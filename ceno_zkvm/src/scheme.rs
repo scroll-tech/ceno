@@ -18,6 +18,7 @@ use crate::{
 
 pub mod constants;
 pub mod cpu;
+pub mod gpu;
 pub mod hal;
 pub mod prover;
 pub mod utils;
