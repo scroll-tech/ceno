@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 use ceno_zkvm::{
     self,
@@ -53,7 +53,7 @@ fn bench_add(c: &mut Criterion) {
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
 
-    let backend = CpuBackend::<E, Pcs>::default().box_leak_static();
+    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
     let device = CpuProver::new(backend);
     let prover = ZKVMProver::new(pk, device);
     let circuit_pk = prover

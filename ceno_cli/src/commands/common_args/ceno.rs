@@ -19,6 +19,7 @@ use serde::Serialize;
 use std::{
     fs::File,
     path::{Path, PathBuf},
+    rc::Rc,
 };
 
 /// Ceno options
@@ -373,11 +374,11 @@ fn run_elf_inner<
     );
 
     // TODO support GPU backend + prover
-    let backend = CpuBackend::<E, PCS>::new(options.max_num_variables, options.security_level)
-        .box_leak_static();
+    let backend: Rc<_> =
+        CpuBackend::<E, PCS>::new(options.max_num_variables, options.security_level).into();
 
     Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
-        CpuProver::new(backend),
+        CpuProver::new(backend.clone()),
         program,
         platform,
         &hints,

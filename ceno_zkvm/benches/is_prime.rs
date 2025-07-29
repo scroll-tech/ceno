@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
@@ -36,7 +36,7 @@ fn setup() -> (Program, Platform) {
 
 fn is_prime_1(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend = CpuBackend::<E, Pcs>::default().box_leak_static();
+    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
 
     for n in [100u32, 10000u32, 50000u32] {
         let max_steps = usize::MAX;
@@ -56,7 +56,7 @@ fn is_prime_1(c: &mut Criterion) {
 
                     for _ in 0..iters {
                         let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-                            CpuProver::new(backend),
+                            CpuProver::new(backend.clone()),
                             program.clone(),
                             platform.clone(),
                             &hints,

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
@@ -38,7 +38,7 @@ fn setup() -> (Program, Platform) {
 
 fn quadratic_sorting_1(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend = CpuBackend::<E, Pcs>::default().box_leak_static();
+    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
     for n in [100, 500] {
@@ -58,7 +58,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
                         let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-                            CpuProver::new(backend),
+                            CpuProver::new(backend.clone()),
                             program.clone(),
                             platform.clone(),
                             &hints,

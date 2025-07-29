@@ -1,5 +1,3 @@
-use std::{collections::HashMap, iter, sync::Arc};
-
 use crate::{
     LayerWitness,
     evaluation::EvalExpression,
@@ -18,6 +16,7 @@ use multilinear_extensions::{
 };
 use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::{collections::HashMap, iter, rc::Rc, sync::Arc};
 use sumcheck::macros::{entered_span, exit_span};
 use witness::RowMajorMatrix;
 
@@ -46,10 +45,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> CpuBackend<E, PCS> {
             max_poly_size_log2,
             _marker: std::marker::PhantomData,
         }
-    }
-
-    pub fn box_leak_static(self) -> &'static mut CpuBackend<E, PCS> {
-        Box::leak(Box::new(self))
     }
 }
 
@@ -81,11 +76,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Cp
 
 /// CPU prover for CPU backend
 pub struct CpuProver<PB: ProverBackend + 'static> {
-    pub backend: &'static PB,
+    pub backend: Rc<PB>,
 }
 
 impl<PB: ProverBackend> CpuProver<PB> {
-    pub fn new(backend: &'static PB) -> Self {
+    pub fn new(backend: Rc<PB>) -> Self {
         Self { backend }
     }
 }

@@ -256,7 +256,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
     ) {
         let max_poly_size_log2 = traces
             .values()
-            .map(|trace| ceil_log2(trace.num_instances()) + 1)
+            .map(|trace| ceil_log2(next_pow2_instance_padding(trace.num_instances())))
             .max()
             .unwrap();
         if max_poly_size_log2 > self.backend.max_poly_size_log2 {
@@ -946,7 +946,7 @@ where
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
 {
-    fn get_pb(&self) -> &'static CpuBackend<E, PCS> {
-        self.backend
+    fn get_pb(&self) -> &CpuBackend<E, PCS> {
+        self.backend.as_ref()
     }
 }

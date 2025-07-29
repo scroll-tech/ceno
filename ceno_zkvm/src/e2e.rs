@@ -600,20 +600,20 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
         (pk, vk)
     }
 
-    pub fn keygen_with_pd<
+    pub fn keygen_with_pb<
         PCS: PolynomialCommitmentScheme<E> + 'static,
         PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     >(
         &self,
-        pd: &PB,
+        pb: &PB,
     ) -> (ZKVMProvingKey<E, PCS>, ZKVMVerifyingKey<E, PCS>) {
         let pk = self
             .system_config
             .zkvm_cs
             .clone()
             .key_gen::<PCS>(
-                pd.get_pp().clone(),
-                pd.get_vp().clone(),
+                pb.get_pp().clone(),
+                pb.get_vp().clone(),
                 self.zkvm_fixed_traces.clone(),
             )
             .expect("keygen failed");
@@ -675,7 +675,7 @@ pub fn run_e2e_with_checkpoint<
 
     // Keygen
     let start = std::time::Instant::now();
-    let (pk, vk) = ctx.keygen_with_pd(device.get_pb());
+    let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
     tracing::debug!("keygen done in {:?}", start.elapsed());
 
     let start = std::time::Instant::now();

@@ -243,8 +243,8 @@ fn main() {
 
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
-            let backend = CpuBackend::<_, _>::new(args.max_num_variables, args.security_level)
-                .box_leak_static();
+            let backend =
+                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
             let prover = CpuProver::new(backend);
             run_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, _, _>(
                 prover,
@@ -259,8 +259,8 @@ fn main() {
             )
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
-            let backend = CpuBackend::<_, _>::new(args.max_num_variables, args.security_level)
-                .box_leak_static();
+            let backend =
+                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
             let prover = CpuProver::new(backend);
             run_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, _, _>(
                 prover,
@@ -275,8 +275,8 @@ fn main() {
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
-            let backend = CpuBackend::<_, _>::new(args.max_num_variables, args.security_level)
-                .box_leak_static();
+            let backend =
+                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
             let prover = CpuProver::new(backend);
             run_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, _, _>(
                 prover,
@@ -291,8 +291,8 @@ fn main() {
             )
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
-            let backend = CpuBackend::<_, _>::new(args.max_num_variables, args.security_level)
-                .box_leak_static();
+            let backend =
+                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
             let prover = CpuProver::new(backend);
             run_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, _, _>(
                 prover,

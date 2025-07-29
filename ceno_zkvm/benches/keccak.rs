@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
@@ -38,7 +38,7 @@ fn setup() -> (Program, Platform) {
 
 fn keccak_prove(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend = CpuBackend::<E, Pcs>::default().box_leak_static();
+    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
     // retrive 1 << 20th keccak element >> max_steps
     let mut hints = CenoStdin::default();
     let _ = hints.write(&vec![1, 2, 3]);
@@ -80,7 +80,7 @@ fn keccak_prove(c: &mut Criterion) {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
                     let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-                        CpuProver::new(backend),
+                        CpuProver::new(backend.clone()),
                         program.clone(),
                         platform.clone(),
                         &Vec::from(&hints),
