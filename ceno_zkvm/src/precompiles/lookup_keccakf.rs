@@ -966,7 +966,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     level = "trace",
     fields(profiling_1)
 )]
-pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
     (layout, gkr_circuit, num_witin, num_structual_witin): (
         TestKeccakLayout<E>,
         GKRCircuit<E>,

@@ -887,7 +887,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     Ok((layout, chip.gkr_circuit()))
 }
 
-pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
     (layout, gkr_circuit): (KeccakLayout<E>, GKRCircuit<E>),
     states: Vec<[u64; 25]>,
     verify: bool,

@@ -251,22 +251,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
         PCS::CommitmentWithWitness,
         PCS::Commitment,
     ) {
-        let largest_poly_size = traces
+        let max_poly_size_log2 = traces
             .values()
-            .map(|trace| next_pow2_instance_padding(trace.num_instances()) << 1)
+            .map(|trace| ceil_log2(next_pow2_instance_padding(trace.num_instances())))
             .max()
             .unwrap();
-        let prover_param = if let Some(s) = self.largest_poly_size
-            && s >= largest_poly_size
-        {
-            self.pp.as_ref().unwrap()
-        } else {
-            let (prover_param, _) =
-                PCS::trim(self.backend.param.clone(), largest_poly_size).unwrap();
-            self.largest_poly_size = Some(largest_poly_size);
-            self.pp = Some(prover_param);
-            self.pp.as_ref().unwrap()
-        };
+        if max_poly_size_log2 > self.backend.max_poly_size_log2 {
+            panic!(
+                "max_poly_size_log2 {max_poly_size_log2} > max_poly_size_log2 backend {}",
+                self.backend.max_poly_size_log2
+            )
+        }
+        let prover_param = &self.backend.pp;
         let pcs_data = PCS::batch_commit(prover_param, traces.into_values().collect_vec()).unwrap();
         let commit = PCS::get_pure_commitment(&pcs_data);
         let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data)
@@ -797,7 +793,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
                     .collect_vec(),
             ));
         }
-        PCS::batch_open(self.pp.as_ref().unwrap(), rounds, transcript).unwrap()
+        PCS::batch_open(&self.backend.pp, rounds, transcript).unwrap()
     }
 }
 
@@ -877,4 +873,7 @@ where
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
 {
+    fn get_pb(&self) -> &CpuBackend<E, PCS> {
+        self.backend.as_ref()
+    }
 }

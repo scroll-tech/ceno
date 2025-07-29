@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -26,12 +24,15 @@ use ceno_emul::{
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use gkr_iop::cpu::{CpuBackend, CpuProver};
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
+use std::{marker::PhantomData, rc::Rc};
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
 use itertools::Itertools;
-use mpcs::{PolynomialCommitmentScheme, SecurityLevel, WhirDefault};
+use mpcs::{
+    PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits, WhirDefault,
+};
 use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
 use p3::field::FieldAlgebra;
 use rand::thread_rng;
@@ -95,14 +96,19 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 
 #[test]
 fn test_rw_lk_expression_combination() {
-    fn test_rw_lk_expression_combination_inner<const L: usize, const RW: usize>() {
-        type E = GoldilocksExt2;
-        type Pcs = WhirDefault<E>;
+    type E = GoldilocksExt2;
+    type Pcs = WhirDefault<E>;
 
-        // pcs setup
-        Pcs::setup(1 << 8, SecurityLevel::default()).unwrap();
-        let (pp, vp) = Pcs::trim((), 1 << 8).unwrap();
+    let backend: Rc<_> = CpuBackend::<E, Pcs>::new(8, Conjecture100bits).into();
 
+    fn test_rw_lk_expression_combination_inner<
+        const L: usize,
+        const RW: usize,
+        E: ExtensionField,
+        Pcs: PolynomialCommitmentScheme<E> + 'static,
+    >(
+        device: CpuProver<CpuBackend<E, Pcs>>,
+    ) {
         // configure
         let name = TestCircuit::<E, RW, L>::name();
         let mut zkvm_cs = ZKVMConstraintSystem::default();
@@ -115,7 +121,11 @@ fn test_rw_lk_expression_combination() {
         // keygen
         let pk = zkvm_cs
             .clone()
-            .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
+            .key_gen::<Pcs>(
+                device.backend.pp.clone(),
+                device.backend.vp.clone(),
+                zkvm_fixed_traces,
+            )
             .unwrap();
         let vk = pk.get_vk_slow();
 
@@ -131,8 +141,6 @@ fn test_rw_lk_expression_combination() {
             .unwrap();
 
         // get proof
-        let backend = CpuBackend::<E, Pcs>::new();
-        let device = CpuProver::new(backend);
         let prover = ZkVMCpuProver::new(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
         let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
@@ -203,9 +211,9 @@ fn test_rw_lk_expression_combination() {
     }
 
     // <lookup count, rw count>
-    test_rw_lk_expression_combination_inner::<19, 17>();
-    test_rw_lk_expression_combination_inner::<61, 17>();
-    test_rw_lk_expression_combination_inner::<17, 61>();
+    test_rw_lk_expression_combination_inner::<19, 17, _, _>(CpuProver::new(backend.clone()));
+    test_rw_lk_expression_combination_inner::<61, 17, _, _>(CpuProver::new(backend.clone()));
+    test_rw_lk_expression_combination_inner::<17, 61, _, _>(CpuProver::new(backend.clone()));
 }
 
 const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [
@@ -288,7 +296,7 @@ fn test_single_add_instance_e2e() {
     assert_eq!(halt_records.len(), 1);
 
     // proving
-    let backend = CpuBackend::<E, Pcs>::new();
+    let backend: Rc<_> = CpuBackend::<E, Pcs>::new(24, Conjecture100bits).into();
     let device = CpuProver::new(backend);
     let mut prover = ZKVMProver::new(pk, device);
     let verifier = ZKVMVerifier::new(vk);

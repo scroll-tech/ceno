@@ -25,6 +25,9 @@ pub trait ProverBackend {
     type MultilinearPoly<'a>: Send + Sync + Clone + Debug + MultilinearPolynomial<Self::E>;
     type Matrix: Send + Sync + Clone;
     type PcsData;
+
+    fn get_pp(&self) -> &<Self::Pcs as PolynomialCommitmentScheme<Self::E>>::ProverParam;
+    fn get_vp(&self) -> &<Self::Pcs as PolynomialCommitmentScheme<Self::E>>::VerifierParam;
 }
 
 pub trait ProverDevice<PB>:
