@@ -37,7 +37,7 @@ use sumcheck::{
     util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
-use witness::next_pow2_instance_padding;
+use witness::{InstancePaddingStrategy::Default, next_pow2_instance_padding};
 
 pub struct CpuTowerProver;
 

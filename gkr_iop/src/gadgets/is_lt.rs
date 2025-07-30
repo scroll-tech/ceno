@@ -1,7 +1,9 @@
 use crate::utils::i64_to_base;
+use either::Either;
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, WitIn, power_sequence};
+use p3_field::FieldAlgebra;
 use std::fmt::Display;
 use witness::set_val;
 
@@ -216,7 +218,14 @@ impl InnerLtConfig {
 
         let range = Self::range(max_num_u16_limbs);
 
-        cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
+        // TODO FIXME workaround of from_wrapped_u64 for prime field size smaller than 32 to bypass p3 sanity check
+        // figure out how to encode u64 into extension field proper
+        // cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
+        cb.require_equal(
+            || name.clone(),
+            lhs - rhs,
+            diff_expr - E::BaseField::from_wrapped_u64(range).expr() * is_lt_expr,
+        )?;
 
         Ok(Self {
             diff,
@@ -236,8 +245,8 @@ impl InnerLtConfig {
         self.assign_instance_field(
             instance,
             lkm,
-            F::from_canonical_u64(lhs),
-            F::from_canonical_u64(rhs),
+            F::from_wrapped_u64(lhs),
+            F::from_wrapped_u64(rhs),
             lhs < rhs,
         )
     }

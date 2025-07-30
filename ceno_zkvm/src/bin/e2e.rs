@@ -343,13 +343,10 @@ fn run_inner<
     let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
     fs::write(&proof_file, proof_bytes).unwrap();
     let vk_bytes = bincode::serialize(&vk).unwrap();
-    fs::write(&vk_file, vk_bytes).unwrap();
+    std::fs::write(&vk_file, vk_bytes).unwrap();
 
-    if checkpoint > Checkpoint::PrepVerify {
-        let verifier = ZKVMVerifier::new(vk);
-        verify(&zkvm_proof, &verifier).expect("Verification failed");
-        soundness_test(zkvm_proof, &verifier);
-    }
+    let verifier = ZKVMVerifier::new(vk);
+    verify(&zkvm_proof, &verifier).expect("Verification failed");
 }
 
 fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(

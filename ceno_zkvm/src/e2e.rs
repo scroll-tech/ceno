@@ -20,17 +20,19 @@ use ceno_emul::{
     StepRecord, Tracer, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
-use ff_ext::ExtensionField;
+use ff_ext::{BabyBearExt4, ExtensionField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 use gkr_iop::hal::ProverBackend;
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
+use p3::{babybear::BabyBear, goldilocks::Goldilocks};
 use serde::Serialize;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
+use tracing::info;
 use transcript::BasicTranscript as Transcript;
 
 /// The polynomial commitment scheme kind
@@ -74,6 +76,14 @@ pub enum FieldType {
     Goldilocks,
     BabyBear,
 }
+
+// pub type E = GoldilocksExt2;
+// pub type B = Goldilocks;
+// pub type Pcs = Basefold<GoldilocksExt2, BasefoldRSParams>;
+
+pub type E = BabyBearExt4;
+pub type B = BabyBear;
+pub type Pcs = Basefold<E, BasefoldRSParams>;
 
 pub struct FullMemState<Record> {
     pub mem: Vec<Record>,
@@ -507,6 +517,7 @@ pub fn generate_witness<E: ExtensionField>(
 pub enum Checkpoint {
     PrepE2EProving,
     PrepWitnessGen,
+    PrepProof,
     PrepVerify,
     #[default]
     Complete,

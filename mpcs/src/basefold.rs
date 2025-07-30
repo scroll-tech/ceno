@@ -9,7 +9,6 @@ pub use encoding::{EncodingScheme, RSCode, RSCodeDefaultSpec};
 use ff_ext::ExtensionField;
 use p3::{commit::Mmcs, field::FieldAlgebra, matrix::dense::DenseMatrix, util::log2_strict_usize};
 use query_phase::{batch_query_phase, batch_verifier_query_phase};
-use structure::BasefoldProof;
 pub use structure::{BasefoldSpec, Digest};
 use sumcheck::macros::{entered_span, exit_span};
 use transcript::Transcript;
@@ -18,10 +17,11 @@ use witness::RowMajorMatrix;
 use itertools::Itertools;
 use serde::{Serialize, de::DeserializeOwned};
 
-mod structure;
+pub mod structure;
 pub use structure::{
     Basefold, BasefoldCommitment, BasefoldCommitmentWithWitness, BasefoldDefault, BasefoldParams,
-    BasefoldProverParams, BasefoldRSParams, BasefoldVerifierParams,
+    BasefoldProof, BasefoldProverParams, BasefoldRSParams, BasefoldVerifierParams,
+    QueryOpeningProof, QueryOpeningProofs,
 };
 mod commit_phase;
 use commit_phase::batch_commit_phase;

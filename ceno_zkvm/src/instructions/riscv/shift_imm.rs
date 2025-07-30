@@ -13,8 +13,10 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
+use either::Either;
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
+use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 use witness::set_val;
 
@@ -93,7 +95,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             2,
         )?;
 
-        let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();
+        // let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();
+        let two_pow_total_bits: Expression<_> =
+            E::BaseField::from_wrapped_u64((1u64 << UInt::<E>::TOTAL_BITS)).expr();
 
         let is_lt_config = match I::INST_KIND {
             InsnKind::SLLI => {
