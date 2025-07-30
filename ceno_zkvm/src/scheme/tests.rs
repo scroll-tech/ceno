@@ -16,6 +16,7 @@ use crate::{
     structs::{
         PointAndEval, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
     },
+    state::GlobalState,
     tables::{ProgramTableCircuit, U16TableCircuit},
     witness::{LkMultiplicity, set_val},
 };
@@ -251,6 +252,7 @@ fn test_single_add_instance_e2e() {
     let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
 
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
+    zkvm_cs.register_global_state::<GlobalState>();
 
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config);

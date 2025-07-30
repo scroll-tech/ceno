@@ -946,6 +946,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
                 panic!("GPU backend only supports Goldilocks base field");
             };
         gpu_proof
+
+        // PCS::batch_open(
+        //     self.pp.as_ref().unwrap(),
+        //     rounds,
+        //     transcript
+        // )
+        // .unwrap()
     }
 }
 
