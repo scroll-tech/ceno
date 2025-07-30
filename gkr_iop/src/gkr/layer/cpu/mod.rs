@@ -3,20 +3,21 @@ use crate::{
     gkr::{
         booleanhypercube::BooleanHypercube,
         layer::{
-            Layer, LayerWitness, ROTATION_OPENING_COUNT,
+            Layer, LayerWitness,
             hal::{SumcheckLayerProver, ZerocheckLayerProver},
             zerocheck_layer::RotationPoints,
         },
     },
-    utils::{extend_exprs_with_rotation, rotation_next_base_mle, rotation_selector},
+    utils::{rotation_next_base_mle, rotation_selector},
 };
 use either::Either;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, WitnessId,
+    Expression,
     mle::{MultilinearExtension, Point},
+    monomial::Term,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
@@ -35,6 +36,7 @@ use transcript::Transcript;
 
 use crate::{
     gkr::layer::{
+        ROTATION_OPENING_COUNT,
         hal::LinearLayerProver,
         sumcheck_layer::{LayerProof, SumcheckLayerProof},
     },
@@ -108,6 +110,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         max_num_variables: usize,
         wit: LayerWitness<CpuBackend<E, PCS>>,
         out_points: &[Point<<CpuBackend<E, PCS> as ProverBackend>::E>],
+        pub_io_evals: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
         num_instances: usize,
@@ -115,6 +118,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         LayerProof<<CpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) {
+        assert_eq!(challenges.len(), 2);
         assert_eq!(
             layer.out_sel_and_eval_exprs.len(),
             out_points.len(),
@@ -123,9 +127,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             out_points.len(),
         );
 
-        let (_, rotation_exprs) = &layer.rotation_exprs;
+        let (_, raw_rotation_exprs) = &layer.rotation_exprs;
         let (rotation_proof, rotation_left, rotation_right, rotation_point) =
-            if !rotation_exprs.is_empty() {
+            if let Some(rotation_sumcheck_expression) =
+                layer.rotation_sumcheck_expression_monomial_terms.as_ref()
+            {
                 // 1st sumcheck: process rotation_exprs
                 let rt = out_points.first().unwrap();
                 let (
@@ -141,8 +147,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     layer.rotation_cyclic_subgroup_size,
                     layer.rotation_cyclic_group_log2,
                     &wit,
-                    rotation_exprs,
+                    raw_rotation_exprs,
+                    rotation_sumcheck_expression.clone(),
                     rt,
+                    challenges,
                     transcript,
                 );
                 (Some(proof), Some(left), Some(right), Some(origin))
@@ -151,20 +159,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             };
 
         // 2th sumcheck: batch rotation with other constrains
-        let alpha_pows = get_challenge_pows(
-            layer.exprs.len() + rotation_exprs.len() * ROTATION_OPENING_COUNT,
-            transcript,
-        )
-        .into_iter()
-        .map(|r| Expression::Constant(Either::Right(r)))
-        .collect_vec();
-
-        let span = entered_span!("gen_expr", profiling_4 = true);
-        let zero_check_exprs =
-            extend_exprs_with_rotation(layer, &alpha_pows, layer.n_witin as WitnessId);
-        exit_span!(span);
-
         let span = entered_span!("build_out_points_eq", profiling_4 = true);
+        let main_sumcheck_challenges = chain!(
+            challenges.iter().copied(),
+            get_challenge_pows(
+                layer.exprs.len() + raw_rotation_exprs.len() * ROTATION_OPENING_COUNT,
+                transcript,
+            )
+        )
+        .collect_vec();
         // zero check eq || rotation eq
         let mut eqs = layer
             .out_sel_and_eval_exprs
@@ -222,9 +225,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins);
 
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
-        let zero_check_expr: Expression<E> = zero_check_exprs.into_iter().sum();
         let (proof, prover_state) = IOPProverState::prove(
-            builder.to_virtual_polys(&[zero_check_expr], challenges),
+            builder.to_virtual_polys_with_monomial_terms(
+                &layer
+                    .main_sumcheck_expression_monomial_terms
+                    .clone()
+                    .unwrap(),
+                pub_io_evals,
+                &main_sumcheck_challenges,
+            ),
             transcript,
         );
 
@@ -254,17 +263,19 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
     rotation_cyclic_subgroup_size: usize,
     rotation_cyclic_group_log2: usize,
     wit: &LayerWitness<CpuBackend<E, PCS>>,
-    rotation_exprs: &[(Expression<E>, Expression<E>)],
+    raw_rotation_exprs: &[(Expression<E>, Expression<E>)],
+    rotation_sumcheck_expression: Vec<Term<Expression<E>, Expression<E>>>,
     rt: &Point<E>,
+    global_challenges: &[E],
     transcript: &mut impl Transcript<E>,
 ) -> (SumcheckLayerProof<E>, RotationPoints<E>) {
     let span = entered_span!("rotate_witin_selector", profiling_4 = true);
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
     // rotated_mles is non-deterministic input, rotated from existing witness polynomial
-    // we will reduce it to zero check, and finally reduce to commmitted polynomial opening
+    // we will reduce it to zero check, and finally reduce to committed polynomial opening
     let (mut selector, mut rotated_mles) = {
         let eq = build_eq_x_r_vec(rt);
-        let mut mles = rotation_exprs
+        let mut mles = raw_rotation_exprs
             .par_iter()
             .map(|rotation_expr| match rotation_expr {
                 (Expression::WitIn(source_wit_id), _) => rotation_next_base_mle(
@@ -285,10 +296,11 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
         let selector = mles.pop().unwrap();
         (selector, mles)
     };
-    let rotation_alpha_pows = get_challenge_pows(rotation_exprs.len(), transcript)
-        .into_iter()
-        .map(|r| Expression::Constant(Either::Right(r)))
-        .collect_vec();
+    let rotation_challenges = chain!(
+        global_challenges.iter().copied(),
+        get_challenge_pows(raw_rotation_exprs.len(), transcript)
+    )
+    .collect_vec();
     exit_span!(span);
     // TODO FIXME: we pick a random point from output point, does it sound?
     let builder = VirtualPolynomialsBuilder::new_with_mles(
@@ -297,7 +309,7 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
         // mles format [rotation_mle1, target_mle1, rotation_mle2, target_mle2, ....., selector, eq]
         rotated_mles
             .iter_mut()
-            .zip_eq(rotation_exprs)
+            .zip_eq(raw_rotation_exprs)
             .flat_map(|(mle, (_, expr))| match expr {
                 Expression::WitIn(wit_id) => {
                     vec![
@@ -310,27 +322,21 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
             .chain(std::iter::once(Either::Right(&mut selector)))
             .collect_vec(),
     );
-    // generate rotation expression
-    let rotation_expr = (0..)
-        .tuples()
-        .take(rotation_exprs.len())
-        .zip_eq(&rotation_alpha_pows)
-        .map(|((rotate_wit_id, target_wit_id), alpha)| {
-            alpha * (Expression::WitIn(rotate_wit_id) - Expression::WitIn(target_wit_id))
-        })
-        .sum::<Expression<E>>();
-    // last 2 is [selector, eq]
-    let selector_expr = Expression::<E>::WitIn((rotation_exprs.len() * 2) as WitnessId);
+
     let span = entered_span!("rotation IOPProverState::prove", profiling_4 = true);
     let (rotation_proof, prover_state) = IOPProverState::prove(
-        builder.to_virtual_polys(&[selector_expr * rotation_expr], &[]),
+        builder.to_virtual_polys_with_monomial_terms(
+            &rotation_sumcheck_expression,
+            &[],
+            &rotation_challenges,
+        ),
         transcript,
     );
     exit_span!(span);
     let mut evals = prover_state.get_mle_flatten_final_evaluations();
     let origin_point = prover_state.collect_raw_challenges();
-    // skip selector/eq as verifier can derived itself
-    evals.truncate(rotation_exprs.len() * 2);
+    // skip selector/eq as verifier can derive itself
+    evals.truncate(raw_rotation_exprs.len() * 2);
 
     let span = entered_span!("rotation derived left/right eval", profiling_4 = true);
     // post process: giving opening of rotated polys (point, evals), derive original opening before rotate
@@ -347,7 +353,7 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
     let (left_point, right_point) = bh.get_rotation_points(&origin_point);
     let evals = evals
         .par_chunks_exact(2)
-        .zip_eq(rotation_exprs.par_iter())
+        .zip_eq(raw_rotation_exprs.par_iter())
         .flat_map(|(evals, (rotated_expr, _))| {
             let [rotated_eval, target_eval] = evals else {
                 unreachable!()

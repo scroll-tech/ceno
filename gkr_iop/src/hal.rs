@@ -1,9 +1,7 @@
-use std::fmt::Debug;
-
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::mle::Point;
-use witness::RowMajorMatrix;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::gkr::{
     GKRCircuit, GKRCircuitOutput, GKRCircuitWitness,
@@ -43,12 +41,14 @@ where
 }
 
 pub trait ProtocolWitnessGeneratorProver<PB: ProverBackend> {
-    fn gkr_witness<'a>(
+    fn gkr_witness<'a, 'b>(
         circuit: &GKRCircuit<PB::E>,
-        phase1_witness_group: &RowMajorMatrix<
-            <<PB as ProverBackend>::E as ExtensionField>::BaseField,
-        >,
-        fixed: &RowMajorMatrix<<<PB as ProverBackend>::E as ExtensionField>::BaseField>,
+        num_instance_with_rotation: usize,
+        phase1_witness_group: &[Arc<PB::MultilinearPoly<'b>>],
+        fixed: &[Arc<PB::MultilinearPoly<'b>>],
+        pub_io: &[Arc<PB::MultilinearPoly<'b>>],
         challenges: &[PB::E],
-    ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>);
+    ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>)
+    where
+        'b: 'a;
 }
