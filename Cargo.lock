@@ -340,6 +340,7 @@ dependencies = [
  "console",
  "ff_ext",
  "get_dir",
+ "gkr_iop",
  "mpcs",
  "parse-size",
  "serde",

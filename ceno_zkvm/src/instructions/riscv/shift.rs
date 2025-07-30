@@ -1,6 +1,7 @@
 use ceno_emul::InsnKind;
 use either::Either;
 use ff_ext::ExtensionField;
+use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 
 use crate::{
@@ -103,9 +104,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
         // TODO FIXME workaround of from_wrapped_u64 for prime field size smaller than 32 to bypass p3 sanity check
         // let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();
-        let two_pow_total_bits: Expression<_> = Expression::Constant(Either::Right(
-            E::from_wrapped_u64((1u64 << UInt::<E>::TOTAL_BITS)),
-        ));
+        let two_pow_total_bits: Expression<_> =
+            E::BaseField::from_wrapped_u64((1u64 << UInt::<E>::TOTAL_BITS)).expr();
 
         let signed_extend_config = match I::INST_KIND {
             InsnKind::SLL => {

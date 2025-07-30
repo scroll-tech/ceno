@@ -540,10 +540,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let right = -right.as_ref();
 
                 let left_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, left);
-                let left_evaluated = left_evaluated.get_base_field_vec();
+                let left_evaluated = &left_evaluated.get_base_field_vec()[..num_instances];
 
                 let right_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, &right);
-                let right_evaluated = right_evaluated.get_base_field_vec();
+                let right_evaluated = &right_evaluated.get_base_field_vec()[..num_instances];
 
                 // left_evaluated.len() ?= right_evaluated.len() due to padding instance
                 for (inst_id, (left_element, right_element)) in
@@ -563,7 +563,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             } else {
                 // contains require_zero
                 let expr_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr);
-                let expr_evaluated = expr_evaluated.get_base_field_vec();
+                let expr_evaluated = &expr_evaluated.get_base_field_vec()[..num_instances];
 
                 for (inst_id, element) in enumerate(expr_evaluated) {
                     if *element != E::BaseField::ZERO {
@@ -830,7 +830,8 @@ Hints:
                 && cs.r_table_expressions.is_empty()
                 && cs.w_table_expressions.is_empty();
             let [witness, structural_witness] = witnesses
-                .get_table_witness(circuit_name)
+                .get_opcode_witness(circuit_name)
+                .or_else(|| witnesses.get_table_witness(circuit_name))
                 .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
             let num_rows = witness.num_instances();
 

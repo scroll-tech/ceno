@@ -3,6 +3,7 @@ use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
+        hal::ProverDevice,
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
         verifier::ZKVMVerifier,
@@ -22,7 +23,7 @@ use clap::ValueEnum;
 use ff_ext::{BabyBearExt4, ExtensionField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::hal::ProverBackend;
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
 use p3::{babybear::BabyBear, goldilocks::Goldilocks};
@@ -610,6 +611,27 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
         (pk, vk)
     }
 
+    pub fn keygen_with_pb<
+        PCS: PolynomialCommitmentScheme<E> + 'static,
+        PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    >(
+        &self,
+        pb: &PB,
+    ) -> (ZKVMProvingKey<E, PCS>, ZKVMVerifyingKey<E, PCS>) {
+        let pk = self
+            .system_config
+            .zkvm_cs
+            .clone()
+            .key_gen::<PCS>(
+                pb.get_pp().clone(),
+                pb.get_vp().clone(),
+                self.zkvm_fixed_traces.clone(),
+            )
+            .expect("keygen failed");
+        let vk = pk.get_vk_slow();
+        (pk, vk)
+    }
+
     /// Setup init mem state
     pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> InitMemState {
         let mut io_init = self.io_init.clone();
@@ -647,14 +669,15 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
 pub fn run_e2e_with_checkpoint<
     E: ExtensionField + LkMultiplicityKey + serde::de::DeserializeOwned,
     PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB> + 'static,
 >(
+    device: PD,
     program: Program,
     platform: Platform,
     hints: &[u32],
     public_io: &[u32],
     max_steps: usize,
-    max_num_variables: usize,
-    security_level: SecurityLevel,
     checkpoint: Checkpoint,
 ) -> E2ECheckpointResult<E, PCS> {
     let start = std::time::Instant::now();
@@ -663,7 +686,7 @@ pub fn run_e2e_with_checkpoint<
 
     // Keygen
     let start = std::time::Instant::now();
-    let (pk, vk) = ctx.keygen(max_num_variables, security_level);
+    let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
     tracing::debug!("keygen done in {:?}", start.elapsed());
 
     let start = std::time::Instant::now();
@@ -677,7 +700,14 @@ pub fn run_e2e_with_checkpoint<
             proof: None,
             vk: Some(vk),
             next_step: Some(Box::new(move || {
-                _ = run_e2e_proof::<E, _>(&ctx, &init_full_mem, pk, max_steps, is_mock_proving)
+                _ = run_e2e_proof::<E, _, _, _>(
+                    &ctx,
+                    device,
+                    &init_full_mem,
+                    pk,
+                    max_steps,
+                    is_mock_proving,
+                )
             })),
         };
     }
@@ -716,9 +746,6 @@ pub fn run_e2e_with_checkpoint<
         is_mock_proving,
     );
 
-    // proving
-    let backend: CpuBackend<E, PCS> = CpuBackend::new();
-    let device = CpuProver::new(backend);
     let mut prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {
@@ -770,8 +797,11 @@ pub fn run_e2e_with_checkpoint<
 pub fn run_e2e_proof<
     E: ExtensionField + LkMultiplicityKey,
     PCS: PolynomialCommitmentScheme<E> + 'static,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB>,
 >(
     ctx: &E2EProgramCtx<E>,
+    device: PD,
     init_full_mem: &InitMemState,
     pk: ZKVMProvingKey<E, PCS>,
     max_steps: usize,
@@ -792,8 +822,6 @@ pub fn run_e2e_proof<
     );
 
     // proving
-    let backend: CpuBackend<E, PCS> = CpuBackend::new();
-    let device = CpuProver::new(backend);
     let mut prover = ZKVMProver::new(pk, device);
 
     if is_mock_proving {

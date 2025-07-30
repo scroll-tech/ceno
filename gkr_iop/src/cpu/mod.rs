@@ -1,5 +1,3 @@
-use std::{collections::HashMap, iter, sync::Arc};
-
 use crate::{
     LayerWitness,
     evaluation::EvalExpression,
@@ -9,7 +7,7 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
-use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
     mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
     op_mle,
@@ -18,29 +16,33 @@ use multilinear_extensions::{
 };
 use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::{iter, rc::Rc, sync::Arc};
 use sumcheck::macros::{entered_span, exit_span};
 use witness::RowMajorMatrix;
 
 pub struct CpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub param: PCS::Param,
+    pub pp: <PCS as PolynomialCommitmentScheme<E>>::ProverParam,
+    pub vp: <PCS as PolynomialCommitmentScheme<E>>::VerifierParam,
+    pub max_poly_size_log2: usize,
     _marker: std::marker::PhantomData<E>,
 }
 
+pub const DEFAULT_MAX_NUM_VARIABLES: usize = 24;
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for CpuBackend<E, PCS> {
     fn default() -> Self {
-        Self::new()
+        Self::new(DEFAULT_MAX_NUM_VARIABLES, Conjecture100bits)
     }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> CpuBackend<E, PCS> {
-    pub fn new() -> Self {
-        let param = PCS::setup(
-            1 << E::BaseField::TWO_ADICITY,
-            SecurityLevel::Conjecture100bits,
-        )
-        .unwrap();
+    pub fn new(max_poly_size_log2: usize, security_level: SecurityLevel) -> Self {
+        let param = PCS::setup(1 << E::BaseField::TWO_ADICITY, security_level).unwrap();
+        let (pp, vp) = PCS::trim(param, 1 << max_poly_size_log2).unwrap();
         Self {
-            param,
+            pp,
+            vp,
+            max_poly_size_log2,
             _marker: std::marker::PhantomData,
         }
     }
@@ -62,22 +64,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Cp
     type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     type PcsData = PCS::CommitmentWithWitness;
+
+    fn get_pp(&self) -> &<Self::Pcs as PolynomialCommitmentScheme<Self::E>>::ProverParam {
+        &self.pp
+    }
+
+    fn get_vp(&self) -> &<Self::Pcs as PolynomialCommitmentScheme<Self::E>>::VerifierParam {
+        &self.vp
+    }
 }
 
 /// CPU prover for CPU backend
-pub struct CpuProver<PB: ProverBackend> {
-    pub backend: PB,
-    pub pp: Option<<<PB as ProverBackend>::Pcs as PolynomialCommitmentScheme<PB::E>>::ProverParam>,
-    pub largest_poly_size: Option<usize>,
+pub struct CpuProver<PB: ProverBackend + 'static> {
+    pub backend: Rc<PB>,
 }
 
 impl<PB: ProverBackend> CpuProver<PB> {
-    pub fn new(backend: PB) -> Self {
-        Self {
-            backend,
-            pp: None,
-            largest_poly_size: None,
-        }
+    pub fn new(backend: Rc<PB>) -> Self {
+        Self { backend }
     }
 }
 
@@ -91,24 +95,23 @@ where
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     ProtocolWitnessGeneratorProver<CpuBackend<E, PCS>> for CpuProver<CpuBackend<E, PCS>>
 {
-    fn gkr_witness<'a>(
+    fn gkr_witness<'a, 'b>(
         circuit: &GKRCircuit<E>,
-        phase1_witness_group_rmm: &RowMajorMatrix<E::BaseField>,
-        fixed: &RowMajorMatrix<E::BaseField>,
+        num_instances_with_rotation: usize,
+        phase1_witness_group: &[ArcMultilinearExtension<'b, E>],
+        _fixed: &[ArcMultilinearExtension<'b, E>],
+        pub_io: &[ArcMultilinearExtension<'b, E>],
         challenges: &[E],
     ) -> (
         GKRCircuitWitness<'a, CpuBackend<E, PCS>>,
         GKRCircuitOutput<'a, CpuBackend<E, PCS>>,
-    ) {
+    )
+    where
+        'b: 'a,
+    {
         // layer order from output to input
-        let num_instances_with_rotation = phase1_witness_group_rmm.num_instances();
         let mut layer_wits =
             Vec::<LayerWitness<CpuBackend<E, PCS>>>::with_capacity(circuit.layers.len() + 1);
-        let phase1_witness_group = phase1_witness_group_rmm
-            .to_mles()
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
 
         let mut witness_mle_flatten = vec![None; circuit.n_evaluations];
 
@@ -124,36 +127,42 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
                 });
 
-            // process fixed (and probably short) mle
+            // TODO process fixed (and probably short) mle
+            assert_eq!(
+                first_layer.in_eval_expr.len(),
+                phase1_witness_group.len(),
+                "TODO process fixed (and probably short) mle"
+            );
             // XXX currently fixed poly not support in layers > 1
-            first_layer
-                .in_eval_expr
-                .par_iter()
-                .enumerate()
-                .skip(phase1_witness_group.len())
-                .map(|(index, witin)| {
-                    (
-                        *witin,
-                        Some(
-                            fixed[index - phase1_witness_group.len()]
-                                .iter()
-                                .cycle()
-                                .cloned()
-                                .take(num_instances_with_rotation)
-                                .collect_vec()
-                                .into_mle()
-                                .into(),
-                        ),
-                    )
-                })
-                .collect::<HashMap<_, _>>()
-                .into_iter()
-                .for_each(|(witin, optional_mle)| witness_mle_flatten[witin] = optional_mle);
+
+            // first_layer
+            //     .in_eval_expr
+            //     .par_iter()
+            //     .enumerate()
+            //     .skip(phase1_witness_group.len())
+            //     .map(|(index, witin)| {
+            //         (
+            //             *witin,
+            //             Some(
+            //                 fixed[index - phase1_witness_group.len()]
+            //                     .iter()
+            //                     .cycle()
+            //                     .cloned()
+            //                     .take(num_instances_with_rotation)
+            //                     .collect_vec()
+            //                     .into_mle()
+            //                     .into(),
+            //             ),
+            //         )
+            //     })
+            //     .collect::<HashMap<_, _>>()
+            //     .into_iter()
+            //     .for_each(|(witin, optional_mle)| witness_mle_flatten[witin] = optional_mle);
         }
 
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
-            tracing::info!("generating input {i} layer with layer name {}", layer.name);
+            tracing::debug!("generating input {i} layer with layer name {}", layer.name);
             let num_instances = num_instances_with_rotation >> layer.rotation_cyclic_group_log2;
             let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
             // process in_evals to prepare layer witness
@@ -171,7 +180,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // infer current layer output
             let current_layer_output: Vec<
                 Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
-            > = layer_witness(layer, &current_layer_wits, challenges, num_instances);
+            > = layer_witness(
+                layer,
+                &current_layer_wits,
+                pub_io,
+                challenges,
+                num_instances,
+            );
             layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
             // process out to prepare output witness
@@ -188,9 +203,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                         let a_inv = eval_by_expr_constant(challenges, a).inverse();
                         let b = eval_by_expr_constant(challenges, b);
                         let new_wit = op_mle!(|out_mle| out_mle
-                            .iter()
+                            .par_iter()
                             .map(|x| a_inv * (-b + *x))
-                            .collect_vec()
+                            .collect::<Vec<_>>()
                             .into_mle()
                             .into());
                         witness_mle_flatten[*out] = Some(new_wit);
@@ -221,6 +236,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 pub fn layer_witness<'a, E>(
     layer: &Layer<E>,
     layer_wits: &[ArcMultilinearExtension<'a, E>],
+    pub_io_evals: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E],
     num_instances: usize,
 ) -> Vec<ArcMultilinearExtension<'a, E>>
@@ -240,7 +256,7 @@ where
         .map(|((expr, expr_name), (sel_type, out_eval))| {
             let out_mle = select_from_expression_result(
                 sel_type,
-                wit_infer_by_expr(&[], layer_wits, &[], &[], challenges, expr),
+                wit_infer_by_expr(&[], layer_wits, &[], pub_io_evals, challenges, expr),
                 num_instances,
             );
             if let EvalExpression::Zero = out_eval {

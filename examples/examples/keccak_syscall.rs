@@ -10,9 +10,11 @@ const ITERATIONS: usize = 100;
 fn main() {
     let mut state = [0_u64; 25];
 
-    for _ in 0..ITERATIONS {
+    for i in 0..ITERATIONS {
         syscall_keccak_permute(&mut state);
-        // log_state(&state);
+        if i == 0 {
+            log_state(&state);
+        }
     }
 }
 

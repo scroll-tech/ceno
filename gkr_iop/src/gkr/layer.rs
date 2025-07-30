@@ -1,15 +1,15 @@
-use std::{ops::Neg, sync::Arc, vec::IntoIter};
-
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
     Expression, Fixed, ToExpr, WitnessId,
     mle::{Point, PointAndEval},
+    monomial::Term,
 };
 use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::{ops::Neg, sync::Arc, vec::IntoIter};
 use sumcheck_layer::LayerProof;
 use transcript::Transcript;
 use zerocheck_layer::ZerocheckLayer;
@@ -87,6 +87,17 @@ pub struct Layer<E: ExtensionField> {
 
     // For debugging purposes
     pub expr_names: Vec<String>,
+
+    // static expression, only valid for zerocheck & sumcheck layer
+    // store in 2 forms: expression & monomial
+    pub main_sumcheck_expression_monomial_terms: Option<Vec<Term<Expression<E>, Expression<E>>>>,
+    pub main_sumcheck_expression: Option<Expression<E>>,
+
+    // rotation sumcheck expression, only optionally valid for zerocheck
+    // store in 2 forms: expression & monomial
+    pub rotation_sumcheck_expression_monomial_terms:
+        Option<Vec<Term<Expression<E>, Expression<E>>>>,
+    pub rotation_sumcheck_expression: Option<Expression<E>>,
 }
 
 #[derive(Clone, Debug)]
@@ -121,31 +132,39 @@ impl<E: ExtensionField> Layer<E> {
         ),
         expr_names: Vec<String>,
     ) -> Self {
-        assert!(
-            expr_names.len() == exprs.len(),
-            "there are expr without name"
-        );
+        assert_eq!(expr_names.len(), exprs.len(), "there are expr without name");
         let max_expr_degree = exprs
             .iter()
             .map(|expr| expr.degree())
             .max()
             .expect("empty exprs");
 
-        Self {
-            name,
-            ty,
-            n_witin,
-            n_structural_witin,
-            n_fixed,
-            max_expr_degree,
-            n_challenges,
-            exprs,
-            in_eval_expr,
-            out_sel_and_eval_exprs,
-            rotation_exprs: (rotation_eq, rotation_exprs),
-            rotation_cyclic_group_log2,
-            rotation_cyclic_subgroup_size,
-            expr_names,
+        match ty {
+            LayerType::Zerocheck => {
+                let mut layer = Self {
+                    name,
+                    ty,
+                    n_witin,
+                    n_structural_witin,
+                    n_fixed,
+                    max_expr_degree,
+                    n_challenges,
+                    exprs,
+                    in_eval_expr,
+                    out_sel_and_eval_exprs,
+                    rotation_exprs: (rotation_eq, rotation_exprs),
+                    rotation_cyclic_group_log2,
+                    rotation_cyclic_subgroup_size,
+                    expr_names,
+                    main_sumcheck_expression_monomial_terms: None,
+                    main_sumcheck_expression: None,
+                    rotation_sumcheck_expression_monomial_terms: None,
+                    rotation_sumcheck_expression: None,
+                };
+                <Self as ZerocheckLayer<E>>::build_static_expression(&mut layer);
+                layer
+            }
+            LayerType::Linear => unimplemented!(""),
         }
     }
 
@@ -156,6 +175,7 @@ impl<E: ExtensionField> Layer<E> {
         max_num_variables: usize,
         wit: LayerWitness<PB>,
         claims: &mut [PointAndEval<E>],
+        pub_io_evals: &[E],
         challenges: &mut Vec<E>,
         transcript: &mut T,
         num_instances: usize,
@@ -175,6 +195,7 @@ impl<E: ExtensionField> Layer<E> {
                     max_num_variables,
                     wit,
                     &out_points,
+                    pub_io_evals,
                     challenges,
                     transcript,
                     num_instances,
@@ -196,11 +217,13 @@ impl<E: ExtensionField> Layer<E> {
         sumcheck_layer_proof
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn verify<Trans: Transcript<E>>(
         &self,
         max_num_variables: usize,
         proof: LayerProof<E>,
         claims: &mut [PointAndEval<E>],
+        pub_io_evals: &[E],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
         num_instances: usize,
@@ -214,6 +237,7 @@ impl<E: ExtensionField> Layer<E> {
                 max_num_variables,
                 proof,
                 eval_and_dedup_points,
+                pub_io_evals,
                 challenges,
                 transcript,
                 num_instances,
@@ -313,7 +337,7 @@ impl<E: ExtensionField> Layer<E> {
         let mut expressions = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
 
         // process r_record
-        let mut evals = vec![];
+        let evals = Self::dedup_last_selector_evals(&r_record_evals.0, &mut expr_evals);
         for (idx, ((ram_expr, name), ram_eval)) in cb
             .cs
             .r_expressions
@@ -331,10 +355,9 @@ impl<E: ExtensionField> Layer<E> {
             ));
             expr_names.push(format!("{}/{idx}", name));
         }
-        expr_evals.push((r_record_evals.0.clone(), evals));
 
         // process w_record
-        let mut evals = vec![];
+        let evals = Self::dedup_last_selector_evals(&w_record_evals.0, &mut expr_evals);
         for (idx, ((ram_expr, name), ram_eval)) in cb
             .cs
             .w_expressions
@@ -352,10 +375,9 @@ impl<E: ExtensionField> Layer<E> {
             ));
             expr_names.push(format!("{}/{idx}", name));
         }
-        expr_evals.push((w_record_evals.0.clone(), evals));
 
         // process lookup records
-        let mut evals = vec![];
+        let evals = Self::dedup_last_selector_evals(&lookup_evals.0, &mut expr_evals);
         for (idx, ((lookup, name), lookup_eval)) in cb
             .cs
             .lk_expressions
@@ -373,15 +395,9 @@ impl<E: ExtensionField> Layer<E> {
             ));
             expr_names.push(format!("{}/{idx}", name));
         }
-        expr_evals.push((lookup_evals.0.clone(), evals));
 
-        // sanity check
-        assert_eq!(
-            lookup_evals.0, zero_evals.0,
-            "require lookup selector be the same as zero selector"
-        );
         // process zero_record
-        let (_, ref mut evals) = expr_evals.last_mut().unwrap();
+        let evals = Self::dedup_last_selector_evals(&zero_evals.0, &mut expr_evals);
         for (idx, (zero_expr, name)) in izip!(
             0..,
             chain!(
@@ -411,33 +427,19 @@ impl<E: ExtensionField> Layer<E> {
             ..
         } = &cb.cs;
 
-        let mut is_layer_linear =
-            expressions
-                .iter_mut()
-                .fold(rotations.is_empty(), |is_linear_so_far, t| {
-                    // replace `Fixed` and `StructuralWitIn` with `WitIn`, keep other unchanged
-                    *t = t.transform_all(
-                        &|Fixed(fixed_id)| {
-                            Expression::WitIn(fixed_offset + (*fixed_id as WitnessId))
-                        },
-                        &|id| Expression::WitIn(id),
-                        &|structural_wit_id, _, _, _| {
-                            Expression::WitIn(structural_witin_offset + structural_wit_id)
-                        },
-                        &|i| Expression::Instance(i),
-                        &|c| Expression::Constant(c),
-                        &|cid, pow, s, o| Expression::Challenge(cid, pow, s, o),
-                    );
-                    is_linear_so_far && t.is_linear()
-                });
-
-        is_layer_linear = is_layer_linear && expr_evals.len() == 1;
-
-        let layer_type = if is_layer_linear {
-            LayerType::Linear
-        } else {
-            LayerType::Zerocheck
-        };
+        expressions.iter_mut().for_each(|t| {
+            // replace `Fixed` and `StructuralWitIn` with `WitIn`, keep other unchanged
+            *t = t.transform_all(
+                &|Fixed(fixed_id)| Expression::WitIn(fixed_offset + (*fixed_id as WitnessId)),
+                &|id| Expression::WitIn(id),
+                &|structural_wit_id, _, _, _| {
+                    Expression::WitIn(structural_witin_offset + structural_wit_id)
+                },
+                &|i| Expression::Instance(i),
+                &|c| Expression::Constant(c),
+                &|cid, pow, s, o| Expression::Challenge(cid, pow, s, o),
+            );
+        });
 
         let in_eval_expr = (non_zero_expr_len..)
             .take(cb.cs.num_witin as usize + cb.cs.num_fixed)
@@ -445,7 +447,7 @@ impl<E: ExtensionField> Layer<E> {
         if rotations.is_empty() {
             Layer::new(
                 layer_name,
-                layer_type,
+                LayerType::Zerocheck,
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
@@ -467,7 +469,7 @@ impl<E: ExtensionField> Layer<E> {
             };
             Layer::new(
                 layer_name,
-                layer_type,
+                LayerType::Zerocheck,
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
@@ -483,6 +485,27 @@ impl<E: ExtensionField> Layer<E> {
                 expr_names,
             )
         }
+    }
+
+    // return previous evals for extend, if new selector match with last selector
+    // otherwise push new evals and return it for mutability
+    fn dedup_last_selector_evals<'a>(
+        new_selector: &SelectorType<E>,
+        expr_evals: &'a mut Vec<(SelectorType<E>, Vec<EvalExpression<E>>)>,
+    ) -> &'a mut Vec<EvalExpression<E>>
+    where
+        SelectorType<E>: Clone + PartialEq,
+    {
+        let need_push = match expr_evals.last() {
+            Some((last_sel, _)) => last_sel != new_selector,
+            None => true,
+        };
+
+        if need_push {
+            expr_evals.push((new_selector.clone(), vec![]));
+        }
+
+        &mut expr_evals.last_mut().unwrap().1
     }
 }
 

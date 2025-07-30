@@ -3,6 +3,7 @@ use either::Either;
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, WitIn, power_sequence};
+use p3_field::FieldAlgebra;
 use std::fmt::Display;
 use witness::set_val;
 
@@ -223,8 +224,7 @@ impl InnerLtConfig {
         cb.require_equal(
             || name.clone(),
             lhs - rhs,
-            diff_expr
-                - Expression::Constant(Either::Right(E::from_wrapped_u64(range))) * is_lt_expr,
+            diff_expr - E::BaseField::from_wrapped_u64(range).expr() * is_lt_expr,
         )?;
 
         Ok(Self {

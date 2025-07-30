@@ -177,12 +177,11 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let mut config = OC::construct_circuit(&mut circuit_builder, &self.params).unwrap();
-        circuit_builder.finalize();
-        let gkr_iop_circuit = OC::extract_gkr_iop_circuit(&mut config).unwrap();
+        let (config, gkr_iop_circuit) =
+            OC::build_gkr_iop_circuit(&mut circuit_builder, &self.params).unwrap();
         let cs = ComposedConstrainSystem {
             zkvm_v1_css: cs,
-            gkr_circuit: gkr_iop_circuit,
+            gkr_circuit: Some(gkr_iop_circuit),
         };
         tracing::trace!(
             "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
@@ -200,7 +199,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let config = TC::construct_circuit(&mut circuit_builder, &self.params).unwrap();
-        circuit_builder.finalize();
         assert!(
             self.circuit_css
                 .insert(
@@ -222,7 +220,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             SC::initial_global_state(&mut circuit_builder).expect("global_state_in failed");
         self.finalize_global_state_expr =
             SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
-        circuit_builder.finalize();
     }
 
     pub fn get_css(&self) -> &BTreeMap<String, ComposedConstrainSystem<E>> {

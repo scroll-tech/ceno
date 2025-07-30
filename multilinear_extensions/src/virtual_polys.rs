@@ -96,9 +96,11 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         .into_inner()
     }
 
-    pub fn to_virtual_polys_with_monimial_terms(
+    pub fn to_virtual_polys_with_monomial_terms(
         self,
-        monimial_terms: MonomialTermsExpr<'a, E>,
+        monimial_terms: &[Term<Expression<E>, Expression<E>>],
+        public_io_evals: &[E],
+        challenges: &[E],
     ) -> VirtualPolynomials<'a, E> {
         let mles = self
             .mle_ptr_registry
@@ -114,7 +116,31 @@ impl<'a, E: ExtensionField> VirtualPolynomialsBuilder<'a, E> {
         // register mles to assure index matching the arc_poly order
         virtual_polys.register_mles(mles);
 
-        virtual_polys.add_monomial_terms(monimial_terms);
+        // convert expression into monomial_terms and add to virtual_polys
+        let monomial_terms_scalar_evaluated = monimial_terms
+            .iter()
+            .map(
+                |Term {
+                     scalar: scalar_expr,
+                     product,
+                 }| {
+                    let scalar = eval_by_expr_with_instance(
+                        &[],
+                        &[],
+                        &[],
+                        public_io_evals,
+                        challenges,
+                        scalar_expr,
+                    );
+                    Term {
+                        scalar,
+                        product: product.clone(),
+                    }
+                },
+            )
+            .collect_vec();
+
+        virtual_polys.add_monomial_terms(monomial_terms_scalar_evaluated);
         virtual_polys
     }
 

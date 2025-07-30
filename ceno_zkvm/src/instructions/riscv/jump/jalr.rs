@@ -81,7 +81,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             (overflow.expr(), Some((overflow, tmp)))
         };
 
-        let pow2_32 = Expression::Constant(Either::Right(E::from_wrapped_u64((1u64 << 32))));
+        let pow2_32 = E::BaseField::from_wrapped_u64(1u64 << 32).expr();
         circuit_builder.require_equal(
             || "rs1+imm = next_pc_unrounded + overflow*2^32",
             rs1_read.value() + imm.expr(),

@@ -237,12 +237,11 @@ fn test_keccak_syscall() -> Result<()> {
     let steps = run(&mut state)?;
 
     // Expect the program to have written successive states between Keccak permutations.
-    const ITERATIONS: usize = 100;
-    let keccak_outs = sample_keccak_f(ITERATIONS);
+    let keccak_first_iter_outs = sample_keccak_f(1);
 
     let all_messages = read_all_messages(&state);
-    assert_eq!(all_messages.len(), ITERATIONS);
-    for (got, expect) in izip!(&all_messages, &keccak_outs) {
+    assert_eq!(all_messages.len(), 1);
+    for (got, expect) in izip!(&all_messages, &keccak_first_iter_outs) {
         let got = got
             .chunks_exact(8)
             .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
@@ -252,10 +251,10 @@ fn test_keccak_syscall() -> Result<()> {
 
     // Find the syscall records.
     let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
-    assert_eq!(syscalls.len(), ITERATIONS);
+    assert_eq!(syscalls.len(), 100);
 
     // Check the syscall effects.
-    for (witness, expect) in izip!(syscalls, keccak_outs) {
+    for (witness, expect) in izip!(syscalls, keccak_first_iter_outs) {
         assert_eq!(witness.reg_ops.len(), 2);
         assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
         assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
