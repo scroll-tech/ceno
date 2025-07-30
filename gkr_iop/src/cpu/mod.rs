@@ -258,6 +258,7 @@ where
                 sel_type,
                 wit_infer_by_expr(&[], layer_wits, &[], pub_io_evals, challenges, expr),
                 num_instances,
+                out_eval,
             );
             if let EvalExpression::Zero = out_eval {
                 // sanity check: zero mle

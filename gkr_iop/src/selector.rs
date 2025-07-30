@@ -10,7 +10,10 @@ use multilinear_extensions::{
 use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::{gkr::booleanhypercube::CYCLIC_POW2_5, utils::eq_eval_less_or_equal_than};
+use crate::{
+    evaluation::EvalExpression, gkr::booleanhypercube::CYCLIC_POW2_5,
+    utils::eq_eval_less_or_equal_than,
+};
 
 /// Selector selects part of the witnesses in the sumcheck protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -132,6 +135,7 @@ pub fn select_from_expression_result<'a, E: ExtensionField>(
     sel_type: &SelectorType<E>,
     out_mle: ArcMultilinearExtension<'a, E>,
     num_instances: usize,
+    eval_expression: EvalExpression<E>,
 ) -> ArcMultilinearExtension<'a, E> {
     match sel_type {
         SelectorType::None => out_mle.evaluations.sum().into_mle().into(),
@@ -145,7 +149,7 @@ pub fn select_from_expression_result<'a, E: ExtensionField>(
         SelectorType::OrderedSparse32 { indices, .. } => Arc::try_unwrap(out_mle)
             .unwrap()
             .evaluations_to_owned()
-            .pick_indices_within_chunk(CYCLIC_POW2_5.len(), num_instances, indices)
+            .pick_indices_within_chunk(CYCLIC_POW2_5.len(), num_instances, indices, eval_expression)
             .into_mle()
             .into(),
     }

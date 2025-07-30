@@ -1,7 +1,7 @@
 use std::{any::TypeId, borrow::Cow, mem, sync::Arc};
 
 use crate::{
-    field_type_mut_map,
+    Expression, field_type_mut_map,
     macros::{entered_span, exit_span},
     op_mle,
     smart_slice::SmartSlice,
@@ -197,6 +197,7 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
         chunk_size: usize,
         valid_chunk_index: usize,
         indices: &[usize],
+        eval_expression: Expression<E>,
     ) -> Self {
         field_type_mut_map!(self, |slice| {
             slice
