@@ -1,5 +1,5 @@
 use ceno_emul::{ByteAddr, Cycle, MemOp, StepRecord};
-use ff_ext::{ExtensionField, FieldInto};
+use ff_ext::ExtensionField;
 use gkr_iop::{
     OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
@@ -36,7 +36,7 @@ use sumcheck::{
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     error::ZKVMError,
@@ -673,7 +673,7 @@ where
             .zip_eq(
                 structural_wits
                     .values
-                    .par_chunks_mut(self.n_committed * ROUNDS.next_power_of_two())
+                    .par_chunks_mut(self.n_structural_witin * ROUNDS.next_power_of_two())
                     .take(num_instances),
             )
             .zip(&phase1.instances)
@@ -690,42 +690,59 @@ where
                 let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
                 let mut cyclic_group = bh.into_iter();
 
-                let mut sel_mem_read_iter = self.selector_type_layout.sel_mem_read.iter_sparse32();
-                let mut sel_mem_write_iter =
-                    self.selector_type_layout.sel_mem_write.iter_sparse32();
-                let mut sel_lookup_iter = self.selector_type_layout.sel_lookup.iter_sparse32();
-                let mut sel_zero_iter = self.selector_type_layout.sel_zero.iter_sparse32();
+                let (mut sel_mem_read_iter, sel_mem_read_structural_witin) = (
+                    self.selector_type_layout
+                        .sel_mem_read
+                        .sparse32_indices()
+                        .iter(),
+                    self.selector_type_layout.sel_mem_read.selector_expr().id(),
+                );
+                let (mut sel_mem_write_iter, sel_mem_write_structural_witin) = (
+                    self.selector_type_layout
+                        .sel_mem_write
+                        .sparse32_indices()
+                        .iter(),
+                    self.selector_type_layout.sel_mem_write.selector_expr().id(),
+                );
+                let (mut sel_lookup_iter, sel_lookup_structural_witin) = (
+                    self.selector_type_layout
+                        .sel_lookup
+                        .sparse32_indices()
+                        .iter(),
+                    self.selector_type_layout.sel_lookup.selector_expr().id(),
+                );
+                let (mut sel_zero_iter, sel_zero_structural_witin) = (
+                    self.selector_type_layout.sel_zero.sparse32_indices().iter(),
+                    self.selector_type_layout.sel_zero.selector_expr().id(),
+                );
 
                 #[allow(clippy::needless_range_loop)]
                 for round in 0..ROUNDS {
                     let round_index = cyclic_group.next().unwrap();
                     let wits =
                         &mut wits[round_index as usize * self.n_committed..][..self.n_committed];
-                    let structural_wits = &mut structural_wits
-                        [round_index as usize * self.n_committed..][..self.n_committed];
 
                     // set selector
-                    // TODO get WitIn id from expression
-                    set_val!(
-                        structural_wits,
-                        WitIn { id: 0 },
-                        E::BaseField::from_canonical_u8(sel_mem_read_iter.next().unwrap())
-                    );
-                    set_val!(
-                        structural_wits,
-                        WitIn { id: 1 },
-                        E::BaseField::from_canonical_u8(sel_mem_write_iter.next().unwrap())
-                    );
-                    set_val!(
-                        structural_wits,
-                        WitIn { id: 2 },
-                        E::BaseField::from_canonical_u8(sel_lookup_iter.next().unwrap())
-                    );
-                    set_val!(
-                        structural_wits,
-                        WitIn { id: 3 },
-                        E::BaseField::from_canonical_u8(sel_zero_iter.next().unwrap())
-                    );
+                    if let Some(index) = sel_mem_read_iter.next() {
+                        structural_wits
+                            [index * self.n_structural_witin + sel_mem_read_structural_witin] =
+                            E::BaseField::ONE;
+                    }
+                    if let Some(index) = sel_mem_write_iter.next() {
+                        structural_wits
+                            [index * self.n_structural_witin + sel_mem_write_structural_witin] =
+                            E::BaseField::ONE;
+                    }
+                    if let Some(index) = sel_lookup_iter.next() {
+                        structural_wits
+                            [index * self.n_structural_witin + sel_lookup_structural_witin] =
+                            E::BaseField::ONE;
+                    }
+                    if let Some(index) = sel_zero_iter.next() {
+                        structural_wits
+                            [index * self.n_structural_witin + sel_zero_structural_witin] =
+                            E::BaseField::ONE;
+                    }
 
                     let mut state8 = [[[0u64; 8]; 5]; 5];
                     for x in 0..5 {
@@ -1120,6 +1137,11 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         .into_iter()
         .map(Arc::new)
         .collect_vec();
+    let structural_witness = structural_witness
+        .to_mles()
+        .into_iter()
+        .map(Arc::new)
+        .collect_vec();
     let fixed = layout
         .layout
         .fixed_witness_group()
@@ -1132,8 +1154,8 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         .layout
         .gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
             &gkr_circuit,
-            phase1_witness.num_instances(),
             &phase1_witness_group,
+            &structural_witness,
             &fixed,
             &[],
             &challenges,
@@ -1208,14 +1230,8 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     if cfg!(debug_assertions) {
         // mock prover
         let out_wits = gkr_output.0.0.clone();
-        MockProver::check(
-            &gkr_circuit,
-            &gkr_witness,
-            out_wits,
-            challenges.to_vec(),
-            num_instances,
-        )
-        .expect("mock prover failed");
+        MockProver::check(&gkr_circuit, &gkr_witness, out_wits, challenges.to_vec())
+            .expect("mock prover failed");
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);

@@ -43,8 +43,8 @@ where
 pub trait ProtocolWitnessGeneratorProver<PB: ProverBackend> {
     fn gkr_witness<'a, 'b>(
         circuit: &GKRCircuit<PB::E>,
-        num_instance_with_rotation: usize,
         phase1_witness_group: &[Arc<PB::MultilinearPoly<'b>>],
+        structural_witness: &[Arc<PB::MultilinearPoly<'b>>],
         fixed: &[Arc<PB::MultilinearPoly<'b>>],
         pub_io: &[Arc<PB::MultilinearPoly<'b>>],
         challenges: &[PB::E],

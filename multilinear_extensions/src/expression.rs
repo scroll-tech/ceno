@@ -99,6 +99,20 @@ impl<E: ExtensionField> Expression<E> {
     pub const ZERO: Expression<E> = Expression::Constant(Either::Left(E::BaseField::ZERO));
     pub const ONE: Expression<E> = Expression::Constant(Either::Left(E::BaseField::ONE));
 
+    pub fn id(&self) -> usize {
+        match self {
+            Expression::Fixed(Fixed(id)) => *id,
+            Expression::WitIn(id) => *id as usize,
+            Expression::StructuralWitIn(id, ..) => *id as usize,
+            Expression::Instance(Instance(id)) => *id,
+            Expression::Constant(_) => unimplemented!(),
+            Expression::Sum(..) => unimplemented!(),
+            Expression::Product(..) => unimplemented!(),
+            Expression::ScaledSum(..) => unimplemented!(),
+            Expression::Challenge(id, _, _, _) => *id as usize,
+        }
+    }
+
     pub fn degree(&self) -> usize {
         match self {
             Expression::Fixed(_) => 1,
@@ -1080,12 +1094,10 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
         &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
         &|i| instance[i.0].clone(),
         &|scalar| {
-            let scalar: ArcMultilinearExtension<E> = MultilinearExtension::from_evaluations_vec(
+            either::for_both!(scalar, scalar => MultilinearExtension::from_evaluation_vec_smart(
                 0,
-                vec![scalar.left().expect("do not support extension field")],
-            )
-            .into();
-            scalar
+                vec![scalar],
+            ).into())
         },
         &|challenge_id, pow, scalar, offset| {
             // TODO cache challenge power to be acquired once for each power

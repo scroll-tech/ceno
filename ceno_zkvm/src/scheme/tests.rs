@@ -143,14 +143,20 @@ fn test_rw_lk_expression_combination() {
         // get proof
         let prover = ZkVMCpuProver::new(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
-        let rmm = zkvm_witness.into_iter_sorted().next().unwrap().1.remove(0);
+        let mut rmm = zkvm_witness.into_iter_sorted().next().unwrap().1;
+        let (rmm, structural_rmm) = (rmm.remove(0), rmm.remove(0));
         let wits_in = rmm.to_mles();
+        let structural_wits_in = structural_rmm.to_mles();
         // commit to main traces
         let commit_with_witness =
             Pcs::batch_commit_and_write(&prover.pk.pp, vec![rmm], &mut transcript).unwrap();
         let witin_commit = Pcs::get_pure_commitment(&commit_with_witness);
 
         let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
+        let structural_in = structural_wits_in
+            .into_iter()
+            .map(|v| v.into())
+            .collect_vec();
         let prover_challenges = [
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
@@ -159,7 +165,7 @@ fn test_rw_lk_expression_combination() {
         let input = ProofInput {
             fixed: vec![],
             witness: wits_in,
-            structural_witness: vec![],
+            structural_witness: structural_in,
             public_input: vec![],
             num_instances,
         };

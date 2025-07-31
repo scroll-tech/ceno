@@ -94,6 +94,10 @@ pub trait Instruction<E: ExtensionField> {
         num_structural_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, LkMultiplicity), ZKVMError> {
+        // selector is the only structural witness
+        assert!(num_structural_witin == 0 || num_structural_witin == 1);
+        let num_structural_witin = num_structural_witin.max(1);
+        
         let nthreads = max_usable_threads();
         let num_instance_per_batch = if steps.len() > 256 {
             steps.len().div_ceil(nthreads)
@@ -120,7 +124,7 @@ pub trait Instruction<E: ExtensionField> {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 instances
                     .chunks_mut(num_witin)
-                    .zip(structural_instance.chunks_mut(num_witin))
+                    .zip_eq(structural_instance.chunks_mut(num_structural_witin))
                     .zip(steps)
                     .map(|((instance, structural_instance), step)| {
                         set_val!(structural_instance, WitIn { id: 0 }, E::BaseField::ONE);

@@ -1,15 +1,15 @@
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{
-    ChallengeId, Expression, WitnessId,
+    ChallengeId, Expression, ToExpr, WitnessId,
     macros::{entered_span, exit_span},
     mle::Point,
     monomialize_expr_to_wit_terms,
     utils::{eval_by_expr, eval_by_expr_with_instance},
     virtual_poly::VPAuxInfo,
 };
-use p3_field::dot_product;
-use std::marker::PhantomData;
+use p3_field::{FieldAlgebra, dot_product};
+use std::{marker::PhantomData, ops::Neg};
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState, SumCheckSubClaim, VerifierError},
     util::get_challenge_pows,
@@ -19,6 +19,7 @@ use transcript::Transcript;
 use super::{Layer, LayerWitness, linear_layer::LayerClaims, sumcheck_layer::LayerProof};
 use crate::{
     error::BackendError,
+    evaluation::EvalExpression,
     gkr::{
         booleanhypercube::BooleanHypercube,
         layer::{
@@ -96,6 +97,47 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         } else {
             None
         };
+
+        // generate static expression
+        let out_evals: Vec<_> = self
+            .out_sel_and_eval_exprs
+            .iter()
+            .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
+            .collect();
+        self.exprs_with_selector_out_eval = self
+            .exprs
+            .iter()
+            .zip_eq(out_evals.iter())
+            .map(|(expr, (sel_type, out_eval))| {
+                let sel_expr = sel_type.selector_expr();
+                match out_eval {
+                    EvalExpression::Linear(_, a, b) => {
+                        assert_eq!(
+                            a.as_ref().clone(),
+                            E::BaseField::ONE.expr(),
+                            "need to extend expression to support a.inverse()"
+                        );
+                        // sel * exp - b
+                        sel_expr.clone() * expr + b.as_ref().neg().clone()
+                    }
+                    EvalExpression::Single(_) => sel_expr.clone() * expr,
+                    EvalExpression::Zero => Expression::ZERO,
+                    EvalExpression::Partition(_, _) => unimplemented!(),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        self.exprs_with_selector_out_eval_monomial_form = self
+            .exprs_with_selector_out_eval
+            .iter()
+            .map(|expr| {
+                monomialize_expr_to_wit_terms(
+                    expr,
+                    self.n_witin as WitnessId,
+                    self.n_structural_witin as WitnessId,
+                )
+            })
+            .collect_vec();
 
         // build main sumcheck expression
         let alpha_pows_expr = (2..)

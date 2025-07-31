@@ -3,15 +3,13 @@ use crate::{
     evaluation::EvalExpression,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::Layer},
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
-    selector::select_from_expression_result,
 };
+use either::Either;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
-    mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
-    op_mle,
-    utils::eval_by_expr_constant,
+    mle::{ArcMultilinearExtension, MultilinearExtension, Point},
     wit_infer_by_expr,
 };
 use p3::field::TwoAdicField;
@@ -97,8 +95,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 {
     fn gkr_witness<'a, 'b>(
         circuit: &GKRCircuit<E>,
-        num_instances_with_rotation: usize,
         phase1_witness_group: &[ArcMultilinearExtension<'b, E>],
+        structural_witness: &[ArcMultilinearExtension<'b, E>],
         _fixed: &[ArcMultilinearExtension<'b, E>],
         pub_io: &[ArcMultilinearExtension<'b, E>],
         challenges: &[E],
@@ -163,7 +161,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
             tracing::debug!("generating input {i} layer with layer name {}", layer.name);
-            let num_instances = num_instances_with_rotation >> layer.rotation_cyclic_group_log2;
             let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
             // process in_evals to prepare layer witness
             // This should assume the input of the first layer is the phase1 witness of the circuit.
@@ -175,6 +172,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                         .clone()
                         .expect("witness must exist")
                 })
+                .chain(if i == 0 {
+                    // only supply structural witness for first layer
+                    // TODO figure out how to support > 1 GKR layers
+                    Either::Left(structural_witness.iter().cloned())
+                } else {
+                    Either::Right(iter::empty())
+                })
                 .collect_vec();
 
             // infer current layer output
@@ -182,10 +186,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
             > = layer_witness(
                 layer,
-                &current_layer_wits,
+                &current_layer_wits[..layer.n_witin],
+                if i == 0 {
+                    &current_layer_wits[layer.n_witin..][..layer.n_structural_witin]
+                } else {
+                    &[]
+                },
                 pub_io,
                 challenges,
-                num_instances,
             );
             layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
@@ -196,19 +204,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 .flat_map(|(_, out_eval)| out_eval)
                 .zip_eq(&current_layer_output)
                 .for_each(|(out_eval, out_mle)| match out_eval {
-                    EvalExpression::Single(out) => {
+                    EvalExpression::Single(out) | EvalExpression::Linear(out, _, _) => {
                         witness_mle_flatten[*out] = Some(out_mle.clone());
-                    }
-                    EvalExpression::Linear(out, a, b) => {
-                        let a_inv = eval_by_expr_constant(challenges, a).inverse();
-                        let b = eval_by_expr_constant(challenges, b);
-                        let new_wit = op_mle!(|out_mle| out_mle
-                            .par_iter()
-                            .map(|x| a_inv * (-b + *x))
-                            .collect::<Vec<_>>()
-                            .into_mle()
-                            .into());
-                        witness_mle_flatten[*out] = Some(new_wit);
                     }
                     EvalExpression::Zero => { // zero expression
                         // do nothing on zero expression
@@ -236,9 +233,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 pub fn layer_witness<'a, E>(
     layer: &Layer<E>,
     layer_wits: &[ArcMultilinearExtension<'a, E>],
+    structural_wits: &[ArcMultilinearExtension<'a, E>],
     pub_io_evals: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E],
-    num_instances: usize,
 ) -> Vec<ArcMultilinearExtension<'a, E>>
 where
     E: ExtensionField,
@@ -249,21 +246,37 @@ where
         .flat_map(|(sel_type, out_eval)| izip!(iter::repeat(sel_type), out_eval.iter()))
         .collect();
     layer
-        .exprs
+        .exprs_with_selector_out_eval
         .par_iter()
         .zip_eq(layer.expr_names.par_iter())
         .zip_eq(out_evals.par_iter())
-        .map(|((expr, expr_name), (sel_type, out_eval))| {
-            let out_mle = select_from_expression_result(
-                sel_type,
-                wit_infer_by_expr(&[], layer_wits, &[], pub_io_evals, challenges, expr),
-                num_instances,
-            );
+        .map(|((expr, expr_name), (_, out_eval))| {
+            let out_mle = match out_eval {
+                EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => wit_infer_by_expr(
+                    &[],
+                    layer_wits,
+                    structural_wits,
+                    pub_io_evals,
+                    challenges,
+                    expr,
+                ),
+                EvalExpression::Zero => MultilinearExtension::default().into(),
+                EvalExpression::Partition(_, _) => unimplemented!(),
+            };
             if let EvalExpression::Zero = out_eval {
                 // sanity check: zero mle
                 if cfg!(debug_assertions) {
                     assert!(
-                        out_mle.evaluations().is_zero(),
+                        wit_infer_by_expr(
+                            &[],
+                            layer_wits,
+                            structural_wits,
+                            pub_io_evals,
+                            challenges,
+                            expr,
+                        )
+                        .evaluations()
+                        .is_zero(),
                         "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
                         layer.name
                     );

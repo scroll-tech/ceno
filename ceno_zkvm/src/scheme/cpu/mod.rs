@@ -534,10 +534,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             zkvm_v1_css: cs,
             gkr_circuit,
         } = composed_cs;
-        let num_instances = input.num_instances;
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
-        let num_instances_with_rotation = num_instances << composed_cs.rotation_vars().unwrap_or(0);
 
         // sanity check
         assert_eq!(input.witness.len(), cs.num_witin as usize);
@@ -568,8 +566,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
 
             let (_, gkr_circuit_out) = Self::gkr_witness(
                 gkr_circuit,
-                num_instances_with_rotation,
                 &input.witness,
+                &input.structural_witness,
                 &input.fixed,
                 &input.public_input,
                 challenges,

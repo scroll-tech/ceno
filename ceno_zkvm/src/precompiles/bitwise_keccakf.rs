@@ -915,8 +915,8 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
     #[allow(clippy::type_complexity)]
     let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
         &gkr_circuit,
-        phase1_witness.num_instances(),
         &phase1_witness_group,
+        &[],
         &[],
         &[],
         &[],

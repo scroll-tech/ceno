@@ -1,10 +1,9 @@
 use rayon::iter::IndexedParallelIterator;
-use std::sync::Arc;
 
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
     Expression,
-    mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
+    mle::{IntoMLE, MultilinearExtension, Point},
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
 use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
@@ -25,7 +24,6 @@ pub enum SelectorType<E: ExtensionField> {
     Prefix(E::BaseField, Expression<E>),
     /// selector activates on the specified `indices`, which are assumed to be in ascending order.
     /// each index corresponds to a position within a fixed-size chunk (e.g., size 32),
-    /// and the same `expression` is applied at those positions across all chunks.
     OrderedSparse32 {
         indices: Vec<usize>,
         expression: Expression<E>,
@@ -127,65 +125,20 @@ impl<E: ExtensionField> SelectorType<E> {
         evals[wit_id] = eval;
     }
 
-    pub fn iter_sparse32(&self) -> OrderedSparse32Iter {
+    /// return ordered indices of OrderedSparse32
+    pub fn sparse32_indices(&self) -> &[usize] {
         match self {
-            Self::OrderedSparse32 { indices, .. } => OrderedSparse32Iter {
-                indices,
-                current: 0,
-                index_ptr: 0,
-            },
-            _ => panic!("calling iter_sparse32 on non sparse type"),
+            Self::OrderedSparse32 { indices, .. } => indices,
+            _ => panic!("invalid calling on non sparse type"),
         }
     }
-}
 
-pub struct OrderedSparse32Iter<'a> {
-    indices: &'a [usize],
-    current: usize,
-    index_ptr: usize,
-}
-
-impl<'a> Iterator for OrderedSparse32Iter<'a> {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current >= 32 {
-            return None;
+    pub fn selector_expr(&self) -> &Expression<E> {
+        match self {
+            Self::OrderedSparse32 { expression, .. }
+            | Self::Whole(expression)
+            | Self::Prefix(_, expression) => expression,
+            _ => panic!("calling sparse32_structural_witin_id on non sparse type"),
         }
-
-        let output = if self.index_ptr < self.indices.len()
-            && self.indices[self.index_ptr] == self.current
-        {
-            self.index_ptr += 1;
-            1
-        } else {
-            0
-        };
-
-        self.current += 1;
-        Some(output)
-    }
-}
-
-pub fn select_from_expression_result<'a, E: ExtensionField>(
-    sel_type: &SelectorType<E>,
-    out_mle: ArcMultilinearExtension<'a, E>,
-    num_instances: usize,
-) -> ArcMultilinearExtension<'a, E> {
-    match sel_type {
-        SelectorType::None => out_mle.evaluations.sum().into_mle().into(),
-        SelectorType::Whole(_) => out_mle,
-        SelectorType::Prefix(_pad, _) => Arc::try_unwrap(out_mle)
-            .unwrap()
-            .evaluations_to_owned()
-            .select_prefix(num_instances)
-            .into_mle()
-            .into(),
-        SelectorType::OrderedSparse32 { indices, .. } => Arc::try_unwrap(out_mle)
-            .unwrap()
-            .evaluations_to_owned()
-            .pick_indices_within_chunk(CYCLIC_POW2_5.len(), num_instances, indices)
-            .into_mle()
-            .into(),
     }
 }
