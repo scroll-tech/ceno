@@ -101,7 +101,6 @@ impl<E: ExtensionField> MockProver<E> {
                             .iter()
                             .flat_map(|(sel_type, out)| izip!(iter::repeat(sel_type), out))
                     ) {
-                        // let got = select_from_expression_result(sel_type, got, num_instances);
                         if expect != got {
                             return Err(MockProverError::ZerocheckExpressionNotMatch(
                                 Box::new(out_eval.clone()),

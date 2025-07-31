@@ -104,13 +104,13 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
             .collect();
-        self.exprs_with_selector_out_eval = self
+        self.exprs_with_selector_out_eval_monomial_form = self
             .exprs
             .iter()
             .zip_eq(out_evals.iter())
             .map(|(expr, (sel_type, out_eval))| {
                 let sel_expr = sel_type.selector_expr();
-                match out_eval {
+                let expr = match out_eval {
                     EvalExpression::Linear(_, a, b) => {
                         assert_eq!(
                             a.as_ref().clone(),
@@ -123,21 +123,14 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     EvalExpression::Single(_) => sel_expr.clone() * expr,
                     EvalExpression::Zero => Expression::ZERO,
                     EvalExpression::Partition(_, _) => unimplemented!(),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        self.exprs_with_selector_out_eval_monomial_form = self
-            .exprs_with_selector_out_eval
-            .iter()
-            .map(|expr| {
+                };
                 monomialize_expr_to_wit_terms(
-                    expr,
+                    &expr,
                     self.n_witin as WitnessId,
                     self.n_structural_witin as WitnessId,
                 )
             })
-            .collect_vec();
+            .collect::<Vec<_>>();
 
         // build main sumcheck expression
         let alpha_pows_expr = (2..)

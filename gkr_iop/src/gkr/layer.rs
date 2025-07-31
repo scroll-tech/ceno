@@ -69,9 +69,7 @@ pub struct Layer<E: ExtensionField> {
     /// TODO we should convert into monimial format Vec<Vec<Term<Expression<E>, Expression<E>>>
     /// TODO once we make eq, zero_check rlc challenge alpha all encoded into static expression
     pub exprs: Vec<Expression<E>>,
-    /// same as `exprs` but times with selector + out eval expression
-    pub exprs_with_selector_out_eval: Vec<Expression<E>>,
-    /// same as `exprs_with_selector_out_eval`, just in monomial form
+    /// `exprs` in monomial form
     pub exprs_with_selector_out_eval_monomial_form: Vec<Vec<Term<Expression<E>, Expression<E>>>>,
 
     /// Positions to place the evaluations of the base inputs of this layer.
@@ -154,7 +152,6 @@ impl<E: ExtensionField> Layer<E> {
                     max_expr_degree,
                     n_challenges,
                     exprs,
-                    exprs_with_selector_out_eval: vec![],
                     exprs_with_selector_out_eval_monomial_form: vec![],
                     in_eval_expr,
                     out_sel_and_eval_exprs,

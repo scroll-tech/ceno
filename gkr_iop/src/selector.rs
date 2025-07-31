@@ -138,7 +138,7 @@ impl<E: ExtensionField> SelectorType<E> {
             Self::OrderedSparse32 { expression, .. }
             | Self::Whole(expression)
             | Self::Prefix(_, expression) => expression,
-            _ => panic!("calling sparse32_structural_witin_id on non sparse type"),
+            e => unimplemented!("no selector expression in {:?}", e),
         }
     }
 }

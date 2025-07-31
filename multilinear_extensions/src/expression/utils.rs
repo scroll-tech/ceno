@@ -16,8 +16,30 @@ impl StructuralWitIn {
     }
 }
 
-pub fn eval_by_expr_constant<E: ExtensionField>(challenges: &[E], expr: &Expression<E>) -> E {
-    eval_by_expr_with_fixed(&[], &[], &[], challenges, expr)
+pub fn eval_by_expr_constant<E: ExtensionField>(
+    instance: &[Either<E::BaseField, E>],
+    challenges: &[E],
+    expr: &Expression<E>,
+) -> Either<E::BaseField, E> {
+    expr.evaluate_with_instance(
+        &|_| unimplemented!(),
+        &|_| unimplemented!(),
+        &|_, _, _, _| unimplemented!(),
+        &|i| instance[i.0],
+        &|scalar| scalar,
+        &|challenge_id, pow, scalar, offset| {
+            // TODO cache challenge power to be acquired once for each power
+            let challenge = challenges[challenge_id as usize];
+            Either::Right(challenge.exp_u64(pow as u64) * scalar + offset)
+        },
+        &|a, b| combine_cumulative_either!(a, b, |a, b| a + b),
+        &|a, b| combine_cumulative_either!(a, b, |a, b| a * b),
+        &|x, a, b| {
+            let ax = combine_cumulative_either!(a, x, |c1, c2| c1 * c2);
+            // ax + b
+            combine_cumulative_either!(ax, b, |c1, c2| c1 + c2)
+        },
+    )
 }
 
 pub fn eval_by_expr<E: ExtensionField>(
@@ -89,6 +111,7 @@ pub fn eval_by_expr_with_instance<E: ExtensionField>(
 }
 
 /// convert complex expression into monomial form to WitIn
+/// orders WitIn ++ StructuralWitIn ++ Fixed
 pub fn monomialize_expr_to_wit_terms<E: ExtensionField>(
     expr: &Expression<E>,
     num_witin: WitnessId,

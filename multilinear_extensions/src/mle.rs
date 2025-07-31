@@ -224,6 +224,15 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
             slice
         })
     }
+
+    #[inline(always)]
+    pub fn index(&self, index: usize) -> Either<E::BaseField, E> {
+        match self {
+            FieldType::Base(slice) => Either::Left(slice[index]),
+            FieldType::Ext(slice) => Either::Right(slice[index]),
+            FieldType::Unreachable => unreachable!(),
+        }
+    }
 }
 
 impl<'a, E: ExtensionField> PartialEq for FieldType<'a, E> {
@@ -943,6 +952,11 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
             evaluations: owned_eval,
             num_vars: self.num_vars,
         }
+    }
+
+    #[inline(always)]
+    pub fn index(&self, index: usize) -> Either<E::BaseField, E> {
+        self.evaluations.index(index)
     }
 }
 

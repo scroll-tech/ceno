@@ -94,10 +94,13 @@ pub trait Instruction<E: ExtensionField> {
         num_structural_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, LkMultiplicity), ZKVMError> {
-        // selector is the only structural witness
+        // FIXME selector is the only structural witness
+        // this is workaround, as call `construct_circuit` will not initialized selector
+        // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
-        
+        let selector_witin = WitIn { id: 0 };
+
         let nthreads = max_usable_threads();
         let num_instance_per_batch = if steps.len() > 256 {
             steps.len().div_ceil(nthreads)
@@ -127,7 +130,7 @@ pub trait Instruction<E: ExtensionField> {
                     .zip_eq(structural_instance.chunks_mut(num_structural_witin))
                     .zip(steps)
                     .map(|((instance, structural_instance), step)| {
-                        set_val!(structural_instance, WitIn { id: 0 }, E::BaseField::ONE);
+                        set_val!(structural_instance, selector_witin, E::BaseField::ONE);
                         Self::assign_instance(config, instance, &mut lk_multiplicity, step)
                     })
                     .collect::<Vec<_>>()

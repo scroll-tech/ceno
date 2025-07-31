@@ -4,13 +4,17 @@ pub mod utils;
 use crate::{
     commutative_op_mle_pair,
     mle::{ArcMultilinearExtension, MultilinearExtension},
+    monomial::Term,
     op_mle_xa_b, op_mle3_range,
     util::ceil_log2,
+    utils::eval_by_expr_constant,
 };
 use ff_ext::{ExtensionField, SmallField};
-use itertools::{Either, izip};
+use itertools::{Either, Itertools, izip};
 use p3::field::FieldAlgebra;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use serde::de::DeserializeOwned;
 use std::{
     cmp::max,
@@ -1209,6 +1213,71 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
     )
 }
 
+#[inline(always)]
+fn eval_expr_at_index<E: ExtensionField>(
+    expr: &Expression<E>,
+    i: usize,
+    instance: &[ArcMultilinearExtension<E>],
+    witness: &[ArcMultilinearExtension<E>],
+    challenges: &[E],
+) -> Either<E::BaseField, E> {
+    match expr {
+        Expression::Instance(Instance(id)) => instance[*id].index(0),
+        Expression::Challenge(c_id, pow, scalar, offset) => {
+            Either::Right(challenges[*c_id as usize].exp_u64(*pow as u64) * *scalar + *offset)
+        }
+        Expression::Constant(c) => *c,
+        Expression::WitIn(id) => witness[*id as usize].index(i),
+        e => panic!("Unsupported expr in flat eval {:?}", e),
+    }
+}
+
+pub fn eval_by_monomial_expr<'a, E: ExtensionField>(
+    flat_expr: &[Term<Expression<E>, Expression<E>>],
+    witness: &[ArcMultilinearExtension<'a, E>],
+    instance: &[ArcMultilinearExtension<'a, E>],
+    challenges: &[E],
+) -> ArcMultilinearExtension<'a, E> {
+    let eval_leng = witness[0].evaluations().len();
+
+    // evaluate all scalar terms first
+    let instance_first_element = instance
+        .iter()
+        .map(|instance| instance.evaluations.index(0))
+        .collect_vec();
+    let scalar_evals = flat_expr
+        .par_iter()
+        .map(|Term { scalar, .. }| {
+            eval_by_expr_constant(&instance_first_element, challenges, scalar)
+        })
+        .collect::<Vec<_>>();
+
+    let evaluations = (0..eval_leng)
+        .into_par_iter()
+        .map(|i| {
+            flat_expr
+                .iter()
+                .enumerate()
+                .fold(E::ZERO, |acc, (term_index, Term { product, .. })| {
+                    let scalar_val = scalar_evals[term_index];
+                    let prod_val = product.iter().fold(E::BaseField::ONE, |acc, e| {
+                        let v = eval_expr_at_index(e, i, instance, witness, challenges);
+                        acc * v.expect_left("not in base field")
+                    });
+
+                    acc + scalar_val
+                        .map_either(
+                            |scalar_val| E::from(scalar_val * prod_val),
+                            |scalar_val| scalar_val * prod_val,
+                        )
+                        .into_inner()
+                })
+        })
+        .collect();
+
+    MultilinearExtension::from_evaluation_vec_smart(witness[0].num_vars(), evaluations).into()
+}
+
 pub fn rlc_chip_record<E: ExtensionField>(
     records: Vec<Expression<E>>,
     chip_record_alpha: Expression<E>,
@@ -1433,7 +1502,6 @@ pub mod fmt {
 
 #[cfg(test)]
 mod tests {
-
     use super::{Expression, ToExpr, fmt};
     use crate::{expression::WitIn, mle::IntoMLE, wit_infer_by_expr};
     use either::Either;

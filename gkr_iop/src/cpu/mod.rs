@@ -9,8 +9,8 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
+    eval_by_monomial_expr,
     mle::{ArcMultilinearExtension, MultilinearExtension, Point},
-    wit_infer_by_expr,
 };
 use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -184,17 +184,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // infer current layer output
             let current_layer_output: Vec<
                 Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
-            > = layer_witness(
-                layer,
-                &current_layer_wits[..layer.n_witin],
-                if i == 0 {
-                    &current_layer_wits[layer.n_witin..][..layer.n_structural_witin]
-                } else {
-                    &[]
-                },
-                pub_io,
-                challenges,
-            );
+            > = layer_witness(layer, &current_layer_wits, pub_io, challenges);
             layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
             // process out to prepare output witness
@@ -204,6 +194,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 .flat_map(|(_, out_eval)| out_eval)
                 .zip_eq(&current_layer_output)
                 .for_each(|(out_eval, out_mle)| match out_eval {
+                    // note: Linear (x - b)/a has been done and encode in expression
                     EvalExpression::Single(out) | EvalExpression::Linear(out, _, _) => {
                         witness_mle_flatten[*out] = Some(out_mle.clone());
                     }
@@ -233,7 +224,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 pub fn layer_witness<'a, E>(
     layer: &Layer<E>,
     layer_wits: &[ArcMultilinearExtension<'a, E>],
-    structural_wits: &[ArcMultilinearExtension<'a, E>],
     pub_io_evals: &[ArcMultilinearExtension<'a, E>],
     challenges: &[E],
 ) -> Vec<ArcMultilinearExtension<'a, E>>
@@ -246,20 +236,15 @@ where
         .flat_map(|(sel_type, out_eval)| izip!(iter::repeat(sel_type), out_eval.iter()))
         .collect();
     layer
-        .exprs_with_selector_out_eval
+        .exprs_with_selector_out_eval_monomial_form
         .par_iter()
         .zip_eq(layer.expr_names.par_iter())
         .zip_eq(out_evals.par_iter())
         .map(|((expr, expr_name), (_, out_eval))| {
             let out_mle = match out_eval {
-                EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => wit_infer_by_expr(
-                    &[],
-                    layer_wits,
-                    structural_wits,
-                    pub_io_evals,
-                    challenges,
-                    expr,
-                ),
+                EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
+                    eval_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
+                }
                 EvalExpression::Zero => MultilinearExtension::default().into(),
                 EvalExpression::Partition(_, _) => unimplemented!(),
             };
@@ -267,16 +252,9 @@ where
                 // sanity check: zero mle
                 if cfg!(debug_assertions) {
                     assert!(
-                        wit_infer_by_expr(
-                            &[],
-                            layer_wits,
-                            structural_wits,
-                            pub_io_evals,
-                            challenges,
-                            expr,
-                        )
-                        .evaluations()
-                        .is_zero(),
+                        eval_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
+                            .evaluations()
+                            .is_zero(),
                         "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
                         layer.name
                     );
