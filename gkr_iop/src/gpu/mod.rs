@@ -4,7 +4,7 @@ use crate::{
     LayerWitness,
     evaluation::EvalExpression,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
-    hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
+    hal::{MultilinearPolynomialGpu, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -41,23 +41,39 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
     }
 }
 
-// impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtension<'a, E> {
-//     fn num_vars(&self) -> usize {
-//         self.num_vars()
-//     }
+pub struct CommitmentWithWitnessGpu {
+    
+}
 
-//     fn eval(&self, point: Point<E>) -> E {
-//         self.evaluate(&point)
-//     }
-// }
+pub struct MultilinearExtensionGpu {
+    
+}
+
+impl<'a, E: ExtensionField> MultilinearPolynomialGpu<E> for MultilinearExtensionGpu<'a, E> {
+    fn num_vars(&self) -> usize {
+        self.num_vars()
+    }
+
+    fn eval(&self, point: Point<E>) -> E {
+        self.evaluate(&point)
+    }
+}
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
     type E = E;
     type Pcs = PCS;
-    type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
+    type MultilinearPoly<'a> = MultilinearExtensionGpu<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
-    type PcsData = PCS::CommitmentWithWitness;
+    type PcsData = CommitmentWithWitnessGpu;
 }
+
+// impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
+//     type E = E;
+//     type Pcs = PCS;
+//     type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
+//     type Matrix = RowMajorMatrix<E::BaseField>;
+//     type PcsData = PCS::CommitmentWithWitness;
+// }
 
 /// GPU prover for GPU backend
 pub struct GpuProver<PB: ProverBackend> {
