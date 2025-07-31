@@ -126,6 +126,45 @@ impl<E: ExtensionField> SelectorType<E> {
         }
         evals[wit_id] = eval;
     }
+
+    pub fn iter_sparse32(&self) -> OrderedSparse32Iter {
+        match self {
+            Self::OrderedSparse32 { indices, .. } => OrderedSparse32Iter {
+                indices,
+                current: 0,
+                index_ptr: 0,
+            },
+            _ => panic!("calling iter_sparse32 on non sparse type"),
+        }
+    }
+}
+
+pub struct OrderedSparse32Iter<'a> {
+    indices: &'a [usize],
+    current: usize,
+    index_ptr: usize,
+}
+
+impl<'a> Iterator for OrderedSparse32Iter<'a> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= 32 {
+            return None;
+        }
+
+        let output = if self.index_ptr < self.indices.len()
+            && self.indices[self.index_ptr] == self.current
+        {
+            self.index_ptr += 1;
+            1
+        } else {
+            0
+        };
+
+        self.current += 1;
+        Some(output)
+    }
 }
 
 pub fn select_from_expression_result<'a, E: ExtensionField>(

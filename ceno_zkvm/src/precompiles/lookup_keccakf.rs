@@ -1,5 +1,5 @@
 use ceno_emul::{ByteAddr, Cycle, MemOp, StepRecord};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{
     OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
@@ -36,7 +36,7 @@ use sumcheck::{
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
 use crate::{
     error::ZKVMError,
@@ -635,7 +635,7 @@ where
         lk_multiplicity: &mut LkMultiplicity,
     ) {
         // TODO assign eq (selectors) to _structural_wits
-        let [wits, _structural_wits] = wits;
+        let [wits, structural_wits] = wits;
         let KeccakLayer {
             wits:
                 KeccakWitCols {
@@ -670,8 +670,14 @@ where
         wits.values
             .par_chunks_mut(self.n_committed * ROUNDS.next_power_of_two())
             .take(num_instances)
+            .zip_eq(
+                structural_wits
+                    .values
+                    .par_chunks_mut(self.n_committed * ROUNDS.next_power_of_two())
+                    .take(num_instances),
+            )
             .zip(&phase1.instances)
-            .for_each(|(wits, KeccakInstance { witin, .. })| {
+            .for_each(|((wits, structural_wits), KeccakInstance { witin, .. })| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 let state_32_iter = witin.instance.iter().map(|e| *e as u64);
                 let mut state64 = [[0u64; 5]; 5];
@@ -684,11 +690,43 @@ where
                 let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
                 let mut cyclic_group = bh.into_iter();
 
+                let mut sel_mem_read_iter = self.selector_type_layout.sel_mem_read.iter_sparse32();
+                let mut sel_mem_write_iter =
+                    self.selector_type_layout.sel_mem_write.iter_sparse32();
+                let mut sel_lookup_iter = self.selector_type_layout.sel_lookup.iter_sparse32();
+                let mut sel_zero_iter = self.selector_type_layout.sel_zero.iter_sparse32();
+
                 #[allow(clippy::needless_range_loop)]
                 for round in 0..ROUNDS {
                     let round_index = cyclic_group.next().unwrap();
                     let wits =
                         &mut wits[round_index as usize * self.n_committed..][..self.n_committed];
+                    let structural_wits = &mut structural_wits
+                        [round_index as usize * self.n_committed..][..self.n_committed];
+
+                    // set selector
+                    // TODO get WitIn id from expression
+                    set_val!(
+                        structural_wits,
+                        WitIn { id: 0 },
+                        E::BaseField::from_canonical_u8(sel_mem_read_iter.next().unwrap())
+                    );
+                    set_val!(
+                        structural_wits,
+                        WitIn { id: 1 },
+                        E::BaseField::from_canonical_u8(sel_mem_write_iter.next().unwrap())
+                    );
+                    set_val!(
+                        structural_wits,
+                        WitIn { id: 2 },
+                        E::BaseField::from_canonical_u8(sel_lookup_iter.next().unwrap())
+                    );
+                    set_val!(
+                        structural_wits,
+                        WitIn { id: 3 },
+                        E::BaseField::from_canonical_u8(sel_zero_iter.next().unwrap())
+                    );
+
                     let mut state8 = [[[0u64; 8]; 5]; 5];
                     for x in 0..5 {
                         for y in 0..5 {
