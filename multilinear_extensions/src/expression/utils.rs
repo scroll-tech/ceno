@@ -1,9 +1,8 @@
+use super::{Expression, StructuralWitIn, WitIn};
+use crate::{Fixed, WitnessId, combine_cumulative_either, monomial::Term};
 use either::Either;
 use ff_ext::ExtensionField;
-
-use crate::combine_cumulative_either;
-
-use super::{Expression, StructuralWitIn, WitIn};
+use itertools::Itertools;
 
 impl WitIn {
     pub fn assign<E: ExtensionField>(&self, instance: &mut [E::BaseField], value: E::BaseField) {
@@ -87,4 +86,38 @@ pub fn eval_by_expr_with_instance<E: ExtensionField>(
             combine_cumulative_either!(ax, b, |c1, c2| c1 + c2)
         },
     )
+}
+
+/// convert complex expression into monomial form to WitIn
+pub fn monomialize_expr_to_wit_terms<E: ExtensionField>(
+    expr: &Expression<E>,
+    num_witin: WitnessId,
+    num_structural_witin: WitnessId,
+) -> Vec<Term<Expression<E>, Expression<E>>> {
+    let witid_offset = 0 as WitnessId;
+    let structural_witin_offset = witid_offset + num_witin;
+    let fixed_offset = structural_witin_offset + num_structural_witin;
+
+    let monomial_terms_expr = expr.get_monomial_terms();
+    monomial_terms_expr
+        .into_iter()
+        .map(
+            |Term {
+                 scalar,
+                 mut product,
+             }| {
+                product.iter_mut().for_each(|t| match t {
+                    Expression::WitIn(_) => (),
+                    Expression::StructuralWitIn(structural_wit_id, _, _, _) => {
+                        *t = Expression::WitIn(structural_witin_offset + *structural_wit_id);
+                    }
+                    Expression::Fixed(Fixed(fixed_id)) => {
+                        *t = Expression::WitIn(fixed_offset + (*fixed_id as u16));
+                    }
+                    e => panic!("unknown monomial terms {:?}", e),
+                });
+                Term { scalar, product }
+            },
+        )
+        .collect_vec()
 }

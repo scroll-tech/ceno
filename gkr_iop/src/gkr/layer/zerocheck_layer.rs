@@ -4,6 +4,7 @@ use multilinear_extensions::{
     ChallengeId, Expression, WitnessId,
     macros::{entered_span, exit_span},
     mle::Point,
+    monomialize_expr_to_wit_terms,
     utils::{eval_by_expr, eval_by_expr_with_instance},
     virtual_poly::VPAuxInfo,
 };
@@ -107,16 +108,24 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .sum::<Expression<E>>();
 
         self.rotation_sumcheck_expression = rotation_expr.clone();
-        self.rotation_sumcheck_expression_monomial_terms = self
-            .rotation_sumcheck_expression
-            .as_ref()
-            .map(|expr| expr.get_monomial_terms());
+        self.rotation_sumcheck_expression_monomial_terms =
+            self.rotation_sumcheck_expression.as_ref().map(|expr| {
+                monomialize_expr_to_wit_terms(
+                    expr,
+                    self.n_witin as WitnessId,
+                    self.n_structural_witin as WitnessId,
+                )
+            });
 
         self.main_sumcheck_expression = Some(zero_expr);
-        self.main_sumcheck_expression_monomial_terms = self
-            .main_sumcheck_expression
-            .as_ref()
-            .map(|expr| expr.get_monomial_terms());
+        self.main_sumcheck_expression_monomial_terms =
+            self.main_sumcheck_expression.as_ref().map(|expr| {
+                monomialize_expr_to_wit_terms(
+                    expr,
+                    self.n_witin as WitnessId,
+                    self.n_structural_witin as WitnessId,
+                )
+            });
         exit_span!(span);
     }
 
