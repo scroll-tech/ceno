@@ -307,13 +307,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             };
             std::mem::forget(basefold_commit);
 
-            let basefold_mles_raw = basefold_mles.into_par_iter()
+            let basefold_mles_without_arc = basefold_mles.into_par_iter()
                 .map(|mle| mle.as_ref().clone())
                 .collect::<Vec<_>>();
             let mles: Vec<MultilinearExtension<'a, E>> = unsafe {
-                std::mem::transmute_copy(&basefold_mles_raw)
+                std::mem::transmute_copy(&basefold_mles_without_arc)
             };
-            std::mem::forget(basefold_mles_raw);
+            std::mem::forget(basefold_mles_without_arc);
 
             // let mut gpu_basefold_commitment = cuda_hal.basefold.batch_commit_e2e(traces_gl64).unwrap();
             // assert_eq!(gpu_basefold_commitment.commit, cpu_basefold_commitment.commit);
@@ -325,7 +325,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             // std::mem::forget(gpu_basefold_commitment);
             // println!("construct cpu commitment from gpu data");
             // gpu_pcs
-            (mles, pcs_data, commit)
+            // transmute pcs_data from GPU specific type to generic PcsData type
+            let pcs_data_generic: <GpuBackend<E, PCS> as ProverBackend>::PcsData = unsafe {
+                std::mem::transmute_copy(&pcs_data)
+            };
+            std::mem::forget(pcs_data);
+
+            (mles, pcs_data_generic, commit)
         } else {
             panic!("GPU commitment data is not compatible with the PCS");
         };
@@ -977,7 +983,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
             >,
         >,
     ) -> DeviceProvingKey<GpuBackend<E, PCS>> {
-        let pcs_data = pk.fixed_commit_wd.clone().unwrap();
+        let pcs_data_original = pk.fixed_commit_wd.clone().unwrap();
+        
+        // transmute from PCS::CommitmentWithWitness to GpuBackend::PcsData
+        let pcs_data: Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData> = unsafe {
+            std::mem::transmute_copy(&pcs_data_original)
+        };
+        std::mem::forget(pcs_data_original);
+        
         let fixed_mles =
             PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());
 
