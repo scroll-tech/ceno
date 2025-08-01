@@ -124,10 +124,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     EvalExpression::Zero => Expression::ZERO,
                     EvalExpression::Partition(_, _) => unimplemented!(),
                 };
+
                 monomialize_expr_to_wit_terms(
                     &expr,
                     self.n_witin as WitnessId,
                     self.n_structural_witin as WitnessId,
+                    self.n_fixed as WitnessId,
                 )
             })
             .collect::<Vec<_>>();
@@ -149,6 +151,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     expr,
                     self.n_witin as WitnessId,
                     self.n_structural_witin as WitnessId,
+                    self.n_fixed as WitnessId,
                 )
             });
 
@@ -159,6 +162,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     expr,
                     self.n_witin as WitnessId,
                     self.n_structural_witin as WitnessId,
+                    self.n_fixed as WitnessId,
                 )
             });
         exit_span!(span);

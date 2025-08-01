@@ -367,6 +367,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                         &|structural_wit_id, _, _, _| {
                             Expression::WitIn(structural_witin_offset + structural_wit_id)
                         },
+                        &|i| Expression::InstanceScalar(i),
                         &|i| Expression::Instance(i),
                         &|c| Expression::Constant(c),
                         &|cid, pow, s, o| Expression::Challenge(cid, pow, s, o),
