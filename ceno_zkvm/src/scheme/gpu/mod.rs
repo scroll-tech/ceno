@@ -299,9 +299,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             let traces_gl64: Vec<witness::RowMajorMatrix<p3::goldilocks::Goldilocks>> = 
                 unsafe { std::mem::transmute(vec_traces.clone()) };
             let pcs_data = cuda_hal.basefold.batch_commit(traces_gl64).unwrap();
-            let commit = cuda_hal.basefold.get_pure_commitment(&pcs_data);
-            let mles = cuda_hal.basefold.get_arc_mle_witness_from_commitment(&pcs_data);
-            
+            let basefold_commit = cuda_hal.basefold.get_pure_commitment(&pcs_data);
+            let basefold_mles = cuda_hal.basefold.get_arc_mle_witness_from_commitment(&pcs_data);
+
+            let commit: PCS::Commitment = unsafe {
+                    std::mem::transmute_copy(&basefold_commit)
+            };
+            std::mem::forget(basefold_commit);
+
+            let basefold_mles_raw = basefold_mles.into_par_iter()
+                .map(|mle| mle.as_ref().clone())
+                .collect::<Vec<_>>();
+            let mles: Vec<MultilinearExtension<'a, E>> = unsafe {
+                std::mem::transmute_copy(&basefold_mles_raw)
+            };
+            std::mem::forget(basefold_mles_raw);
 
             // let mut gpu_basefold_commitment = cuda_hal.basefold.batch_commit_e2e(traces_gl64).unwrap();
             // assert_eq!(gpu_basefold_commitment.commit, cpu_basefold_commitment.commit);
@@ -853,8 +865,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
 {
     fn open(
         &self,
-        witness_data: PCS::CommitmentWithWitness,
-        fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
+        witness_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+        fixed_data: Option<Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData>>,
         points: Vec<Point<E>>,
         mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
         circuit_num_polys: &[(usize, usize)],
