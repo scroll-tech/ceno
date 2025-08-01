@@ -1163,6 +1163,7 @@ dependencies = [
  "ceno_emul",
  "clap",
  "criterion",
+ "cuda_hal",
  "either",
  "ff_ext",
  "itertools 0.13.0",

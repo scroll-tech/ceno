@@ -4,7 +4,7 @@ use crate::{
     LayerWitness,
     evaluation::EvalExpression,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
-    hal::{MultilinearPolynomialGpu, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
+    hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -18,6 +18,9 @@ use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use sumcheck::macros::{entered_span, exit_span};
 use witness::RowMajorMatrix;
+
+use ceno_gpu::BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu;
+use ceno_gpu::gl64::buffer::BufferImpl;
 
 pub struct GpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub param: PCS::Param,
@@ -41,30 +44,31 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
     }
 }
 
-pub struct CommitmentWithWitnessGpu {
+// pub struct CommitmentWithWitnessGpu {
     
-}
+// }
 
-pub struct MultilinearExtensionGpu {
+
+// impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu<'a, E> {
+//     fn num_vars(&self) -> usize {
+//         self.num_vars()
+//     }
+
+//     fn eval(&self, point: Point<E>) -> E {
+//         self.evaluate(&point)
+//     }
+// }
+
+// pub struct MultilinearExtensionGpu {
     
-}
-
-impl<'a, E: ExtensionField> MultilinearPolynomialGpu<E> for MultilinearExtensionGpu<'a, E> {
-    fn num_vars(&self) -> usize {
-        self.num_vars()
-    }
-
-    fn eval(&self, point: Point<E>) -> E {
-        self.evaluate(&point)
-    }
-}
+// }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
     type E = E;
     type Pcs = PCS;
-    type MultilinearPoly<'a> = MultilinearExtensionGpu<'a, E>;
+    type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
-    type PcsData = CommitmentWithWitnessGpu;
+    type PcsData = BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<E::BaseField>>;
 }
 
 // impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
