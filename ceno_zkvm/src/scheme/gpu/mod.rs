@@ -254,7 +254,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
         Vec<MultilinearExtension<'a, E>>,
-        PCS::CommitmentWithWitness,
+        <GpuBackend<E, PCS> as ProverBackend>::PcsData, // PCS::CommitmentWithWitness = BasefoldCommitmentWithWitnessGpu
         PCS::Commitment,
     ) {
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<p3::goldilocks::Goldilocks>() {
@@ -278,54 +278,51 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             self.pp.as_ref().unwrap()
         };
 
-        let is_goldilocks = std::any::TypeId::of::<E>() == std::any::TypeId::of::<GoldilocksExt2>();
         let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>>() == 
             std::mem::size_of::<PCS::CommitmentWithWitness>();
-        let pcs_data = if is_goldilocks && is_pcs_match {
+        let (mles, pcs_data, commit) = if is_pcs_match {
             let vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> = traces.into_values().collect();
-            let cpu_pcs = PCS::batch_commit(prover_param, vec_traces.clone()).unwrap();
-            let cpu_basefold_commitment = if std::mem::size_of_val(&cpu_pcs) == 
-                std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>>() {
-                let result = unsafe { 
-                    std::ptr::read(&cpu_pcs as *const _ as *const mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>) 
-                };
-                std::mem::forget(cpu_pcs);
-                result
-            } else {
-                panic!("error: type conversion failed");
-            };
 
+            // let cpu_pcs = PCS::batch_commit(prover_param, vec_traces.clone()).unwrap();
+            // let cpu_basefold_commitment = if std::mem::size_of_val(&cpu_pcs) == 
+            //     std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>>() {
+            //     let result = unsafe { 
+            //         std::ptr::read(&cpu_pcs as *const _ as *const mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>) 
+            //     };
+            //     std::mem::forget(cpu_pcs);
+            //     result
+            // } else {
+            //     panic!("error: type conversion failed");
+            // };
 
             let cuda_hal = CudaHalGL64::new().unwrap();
             let traces_gl64: Vec<witness::RowMajorMatrix<p3::goldilocks::Goldilocks>> = 
                 unsafe { std::mem::transmute(vec_traces.clone()) };
-            let mut gpu_basefold_commitment = cuda_hal.basefold.batch_commit_e2e(traces_gl64).unwrap();
-
-            assert_eq!(gpu_basefold_commitment.commit, cpu_basefold_commitment.commit);
-            // assert_eq!(gpu_basefold_commitment.codeword, cpu_basefold_commitment.codeword);
-            assert_eq!(gpu_basefold_commitment.log2_max_codeword_size, cpu_basefold_commitment.log2_max_codeword_size);
-            // assert_eq!(gpu_basefold_commitment.trivial_proofdata, cpu_basefold_commitment.trivial_proofdata);
-            assert_eq!(gpu_basefold_commitment.polys, cpu_basefold_commitment.polys);
-            // assert_eq!(gpu_basefold_commitment.circuit_codeword_index, cpu_basefold_commitment.circuit_codeword_index);
-
-            // gpu_basefold_commitment.trivial_proofdata = cpu_basefold_commitment.trivial_proofdata;
+            let pcs_data = cuda_hal.basefold.batch_commit(traces_gl64).unwrap();
+            let commit = cuda_hal.basefold.get_pure_commitment(&pcs_data);
+            let mles = cuda_hal.basefold.get_arc_mle_witness_from_commitment(&pcs_data);
             
-            let gpu_pcs: PCS::CommitmentWithWitness = unsafe {
-                std::mem::transmute_copy(&gpu_basefold_commitment)
-            };
-            std::mem::forget(gpu_basefold_commitment);
-            println!("construct cpu commitment from gpu data");
-            gpu_pcs
+
+            // let mut gpu_basefold_commitment = cuda_hal.basefold.batch_commit_e2e(traces_gl64).unwrap();
+            // assert_eq!(gpu_basefold_commitment.commit, cpu_basefold_commitment.commit);
+            // assert_eq!(gpu_basefold_commitment.log2_max_codeword_size, cpu_basefold_commitment.log2_max_codeword_size);
+            // assert_eq!(gpu_basefold_commitment.polys, cpu_basefold_commitment.polys);
+            // let gpu_pcs: PCS::CommitmentWithWitness = unsafe {
+            //     std::mem::transmute_copy(&gpu_basefold_commitment)
+            // };
+            // std::mem::forget(gpu_basefold_commitment);
+            // println!("construct cpu commitment from gpu data");
+            // gpu_pcs
+            (mles, pcs_data, commit)
         } else {
-            println!("GPU commitment data is not compatible with the PCS, use CPU fallback");
-            PCS::batch_commit(prover_param, traces.into_values().collect_vec()).unwrap()
+            panic!("GPU commitment data is not compatible with the PCS");
         };
-        
-        let commit = PCS::get_pure_commitment(&pcs_data);
-        let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data)
-            .into_par_iter()
-            .map(|mle| mle.as_ref().clone())
-            .collect::<Vec<_>>();
+
+        // let commit = PCS::get_pure_commitment(&pcs_data);
+        // let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data)
+        //     .into_par_iter()
+        //     .map(|mle| mle.as_ref().clone())
+        //     .collect::<Vec<_>>();
 
         (mles, pcs_data, commit)
     }
