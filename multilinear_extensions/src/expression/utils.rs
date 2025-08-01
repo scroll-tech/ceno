@@ -1,5 +1,5 @@
 use super::{Expression, StructuralWitIn, WitIn};
-use crate::{Fixed, WitnessId, combine_cumulative_either, monomial::Term};
+use crate::{Fixed, Instance, WitnessId, combine_cumulative_either, monomial::Term};
 use either::Either;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -116,10 +116,12 @@ pub fn monomialize_expr_to_wit_terms<E: ExtensionField>(
     expr: &Expression<E>,
     num_witin: WitnessId,
     num_structural_witin: WitnessId,
+    num_fixed: WitnessId,
 ) -> Vec<Term<Expression<E>, Expression<E>>> {
     let witid_offset = 0 as WitnessId;
     let structural_witin_offset = witid_offset + num_witin;
     let fixed_offset = structural_witin_offset + num_structural_witin;
+    let instance_offset = fixed_offset + num_fixed;
 
     let monomial_terms_expr = expr.get_monomial_terms();
     monomial_terms_expr
@@ -136,6 +138,9 @@ pub fn monomialize_expr_to_wit_terms<E: ExtensionField>(
                     }
                     Expression::Fixed(Fixed(fixed_id)) => {
                         *t = Expression::WitIn(fixed_offset + (*fixed_id as u16));
+                    }
+                    Expression::Instance(Instance(instance_id)) => {
+                        *t = Expression::WitIn(instance_offset + (*instance_id as u16));
                     }
                     e => panic!("unknown monomial terms {:?}", e),
                 });

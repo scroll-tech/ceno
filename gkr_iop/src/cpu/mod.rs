@@ -97,7 +97,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         circuit: &GKRCircuit<E>,
         phase1_witness_group: &[ArcMultilinearExtension<'b, E>],
         structural_witness: &[ArcMultilinearExtension<'b, E>],
-        _fixed: &[ArcMultilinearExtension<'b, E>],
+        fixed: &[ArcMultilinearExtension<'b, E>],
         pub_io: &[ArcMultilinearExtension<'b, E>],
         challenges: &[E],
     ) -> (
@@ -179,6 +179,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 } else {
                     Either::Right(iter::empty())
                 })
+                .chain(fixed.iter().cloned())
                 .collect_vec();
 
             // infer current layer output

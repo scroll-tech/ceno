@@ -23,7 +23,7 @@ use gkr_iop::{
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Expression, Instance,
+    Expression, Instance, WitnessId,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
@@ -619,6 +619,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         expr,
                         cs.num_witin,
                         cs.num_structural_witin,
+                        cs.num_fixed as WitnessId,
                         &input.fixed,
                         &input.witness,
                         &input.structural_witness,

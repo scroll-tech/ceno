@@ -74,6 +74,7 @@ impl<E: ExtensionField> MockProver<E> {
                         &(sel.selector_expr() * expr),
                         layer.n_witin as WitnessId,
                         layer.n_structural_witin as WitnessId,
+                        layer.n_fixed as WitnessId,
                         &[],
                         &wits,
                         &structural_wits,
@@ -91,6 +92,7 @@ impl<E: ExtensionField> MockProver<E> {
                         out.mock_evaluate(
                             layer.n_witin as WitnessId,
                             layer.n_structural_witin as WitnessId,
+                            layer.n_fixed as WitnessId,
                             &evaluations,
                             &challenges,
                             num_vars,
@@ -145,6 +147,7 @@ impl<E: ExtensionField> EvalExpression<E> {
         &self,
         n_witin: WitnessId,
         n_structural_witin: WitnessId,
+        n_fixed: WitnessId,
         evals: &[ArcMultilinearExtension<'a, E>],
         challenges: &[E],
         num_vars: usize,
@@ -158,6 +161,7 @@ impl<E: ExtensionField> EvalExpression<E> {
                 &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
                 n_witin,
                 n_structural_witin,
+                n_fixed,
                 &[],
                 evals,
                 &[],
@@ -169,7 +173,14 @@ impl<E: ExtensionField> EvalExpression<E> {
                 let parts = parts
                     .iter()
                     .map(|part| {
-                        part.mock_evaluate(n_witin, n_structural_witin, evals, challenges, num_vars)
+                        part.mock_evaluate(
+                            n_witin,
+                            n_structural_witin,
+                            n_fixed,
+                            evals,
+                            challenges,
+                            num_vars,
+                        )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 indices

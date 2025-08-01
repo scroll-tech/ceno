@@ -2,7 +2,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
-    Expression, Fixed, ToExpr, WitnessId,
+    Expression, ToExpr,
     mle::{Point, PointAndEval},
     monomial::Term,
 };
@@ -419,30 +419,12 @@ impl<E: ExtensionField> Layer<E> {
             expr_names.push(format!("{}/{idx}", name));
         }
 
-        let witin_offset = 0 as WitnessId;
-        let structural_witin_offset = witin_offset + (cb.cs.num_witin as WitnessId);
-        let fixed_offset = structural_witin_offset + (cb.cs.num_structural_witin as WitnessId);
-
         // Sort expressions, expr_names, and evals according to eval.0 and classify evals.
         let ConstraintSystem {
             rotation_params,
             rotations,
             ..
         } = &cb.cs;
-
-        expressions.iter_mut().for_each(|t| {
-            // replace `Fixed` and `StructuralWitIn` with `WitIn`, keep other unchanged
-            *t = t.transform_all(
-                &|Fixed(fixed_id)| Expression::WitIn(fixed_offset + (*fixed_id as WitnessId)),
-                &|id| Expression::WitIn(id),
-                &|structural_wit_id, _, _, _| {
-                    Expression::WitIn(structural_witin_offset + structural_wit_id)
-                },
-                &|i| Expression::Instance(i),
-                &|c| Expression::Constant(c),
-                &|cid, pow, s, o| Expression::Challenge(cid, pow, s, o),
-            );
-        });
 
         let in_eval_expr = (non_zero_expr_len..)
             .take(cb.cs.num_witin as usize + cb.cs.num_fixed)

@@ -36,6 +36,8 @@ pub enum Expression<E: ExtensionField> {
     Fixed(Fixed),
     /// Public Values
     Instance(Instance),
+    /// Public Values, with global id counter shared with `Instance`
+    InstanceScalar(Instance),
     /// Constant poly
     Constant(Either<E::BaseField, E>),
     /// This is the sum of two expressions
@@ -58,7 +60,8 @@ impl<E: ExtensionField> Debug for Expression<E> {
             }
             Expression::Fixed(fixed) => write!(f, "F[{}]", fixed.0),
             Expression::Instance(instance) => write!(f, "I[{}]", instance.0),
-            Expression::Constant(c) => write!(f, "C[{}]", c),
+            Expression::InstanceScalar(instance) => write!(f, "Is[{}]", instance.0),
+            Expression::Constant(c) => write!(f, "Const[{}]", c),
             Expression::Sum(a, b) => write!(f, "({} + {})", a, b),
             Expression::Product(a, b) => write!(f, "({} * {})", a, b),
             Expression::ScaledSum(x, a, b) => write!(f, "{} * {} + {}", x, a, b),
@@ -105,6 +108,7 @@ impl<E: ExtensionField> Expression<E> {
             Expression::WitIn(id) => *id as usize,
             Expression::StructuralWitIn(id, ..) => *id as usize,
             Expression::Instance(Instance(id)) => *id,
+            Expression::InstanceScalar(Instance(id)) => *id,
             Expression::Constant(_) => unimplemented!(),
             Expression::Sum(..) => unimplemented!(),
             Expression::Product(..) => unimplemented!(),
@@ -118,7 +122,8 @@ impl<E: ExtensionField> Expression<E> {
             Expression::Fixed(_) => 1,
             Expression::WitIn(_) => 1,
             Expression::StructuralWitIn(..) => 1,
-            Expression::Instance(_) => 0,
+            Expression::Instance(_) => 1,
+            Expression::InstanceScalar(_) => 0,
             Expression::Constant(_) => 0,
             Expression::Sum(a_expr, b_expr) => max(a_expr.degree(), b_expr.degree()),
             Expression::Product(a_expr, b_expr) => a_expr.degree() + b_expr.degree(),
@@ -186,6 +191,7 @@ impl<E: ExtensionField> Expression<E> {
                 structural_wit_in(*witness_id, *max_len, *offset, *multi_factor)
             }
             Expression::Instance(i) => instance(*i),
+            Expression::InstanceScalar(i) => instance(*i),
             Expression::Constant(scalar) => constant(*scalar),
             Expression::Sum(a, b) => {
                 let a = a.evaluate_with_instance(
@@ -301,6 +307,7 @@ impl<E: ExtensionField> Expression<E> {
             Expression::WitIn(_) => false,
             Expression::StructuralWitIn(..) => false,
             Expression::Instance(_) => false,
+            Expression::InstanceScalar(_) => false,
             Expression::Constant(c) => c
                 .map_either(|c| c == E::BaseField::ZERO, |c| c == E::ZERO)
                 .into_inner(),
@@ -321,7 +328,8 @@ impl<E: ExtensionField> Expression<E> {
                 | Expression::StructuralWitIn(..)
                 | Expression::Challenge(..)
                 | Expression::Constant(_)
-                | Expression::Instance(_),
+                | Expression::Instance(_)
+                | Expression::InstanceScalar(_),
                 _,
             ) => true,
             (Expression::Sum(a, b), MonomialState::SumTerm) => {
@@ -347,12 +355,14 @@ impl<E: ExtensionField> Expression<E> {
     /// recursively transforms an expression tree by allowing custom handlers for each leaf variant.
     /// this allows rewriting any part of the tree (e.g., replacing `Fixed` with `WitIn`, etc.).
     /// each closure corresponds to the rewrite a specific leaf node.
-    pub fn transform_all<TF, TW, TS, TI, TC, CH>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn transform_all<TF, TW, TS, TI, TIS, TC, CH>(
         &self,
         fixed_fn: &TF,
         wit_fn: &TW,
         struct_wit_fn: &TS,
         instance_fn: &TI,
+        instance_scalar_fn: &TIS,
         constant_fn: &TC,
         challenge_fn: &CH,
     ) -> Expression<E>
@@ -361,6 +371,7 @@ impl<E: ExtensionField> Expression<E> {
         TW: Fn(WitnessId) -> Expression<E>,
         TS: Fn(WitnessId, usize, u32, usize) -> Expression<E>,
         TI: Fn(Instance) -> Expression<E>,
+        TIS: Fn(Instance) -> Expression<E>,
         TC: Fn(Either<E::BaseField, E>) -> Expression<E>,
         CH: Fn(ChallengeId, usize, E, E) -> Expression<E>,
     {
@@ -371,6 +382,7 @@ impl<E: ExtensionField> Expression<E> {
             }
             Expression::Fixed(f) => fixed_fn(f),
             Expression::Instance(i) => instance_fn(*i),
+            Expression::InstanceScalar(i) => instance_scalar_fn(*i),
             Expression::Constant(c) => constant_fn(*c),
             Expression::Challenge(id, pow, scalar, offset) => {
                 challenge_fn(*id, *pow, *scalar, *offset)
@@ -381,6 +393,7 @@ impl<E: ExtensionField> Expression<E> {
                     wit_fn,
                     struct_wit_fn,
                     instance_fn,
+                    instance_scalar_fn,
                     constant_fn,
                     challenge_fn,
                 )),
@@ -389,6 +402,7 @@ impl<E: ExtensionField> Expression<E> {
                     wit_fn,
                     struct_wit_fn,
                     instance_fn,
+                    instance_scalar_fn,
                     constant_fn,
                     challenge_fn,
                 )),
@@ -399,6 +413,7 @@ impl<E: ExtensionField> Expression<E> {
                     wit_fn,
                     struct_wit_fn,
                     instance_fn,
+                    instance_scalar_fn,
                     constant_fn,
                     challenge_fn,
                 )),
@@ -407,6 +422,7 @@ impl<E: ExtensionField> Expression<E> {
                     wit_fn,
                     struct_wit_fn,
                     instance_fn,
+                    instance_scalar_fn,
                     constant_fn,
                     challenge_fn,
                 )),
@@ -417,6 +433,7 @@ impl<E: ExtensionField> Expression<E> {
                     wit_fn,
                     struct_wit_fn,
                     instance_fn,
+                    instance_scalar_fn,
                     constant_fn,
                     challenge_fn,
                 )),
@@ -425,6 +442,7 @@ impl<E: ExtensionField> Expression<E> {
                     wit_fn,
                     struct_wit_fn,
                     instance_fn,
+                    instance_scalar_fn,
                     constant_fn,
                     challenge_fn,
                 )),
@@ -433,6 +451,7 @@ impl<E: ExtensionField> Expression<E> {
                     wit_fn,
                     struct_wit_fn,
                     instance_fn,
+                    instance_scalar_fn,
                     constant_fn,
                     challenge_fn,
                 )),
@@ -453,12 +472,16 @@ impl<E: ExtensionField> Neg for Expression<E> {
                 Box::new(Expression::Constant(Either::Left(-E::BaseField::ONE))),
                 Box::new(Expression::Constant(Either::Left(E::BaseField::ZERO))),
             ),
+
             Expression::Constant(c1) => Expression::Constant(c1.map_either(|c| -c, |c| -c)),
             Expression::Sum(a, b) => Expression::Sum(-a, -b),
             Expression::Product(a, b) => Expression::Product(-a, b.clone()),
             Expression::ScaledSum(x, a, b) => Expression::ScaledSum(x, -a, -b),
             Expression::Challenge(challenge_id, pow, scalar, offset) => {
                 Expression::Challenge(challenge_id, pow, scalar.neg(), offset.neg())
+            }
+            Expression::InstanceScalar(_) => {
+                unimplemented!("figure out how to support InstanceScalar")
             }
         }
     }
@@ -886,14 +909,16 @@ impl<E: ExtensionField> Mul for Expression<E> {
             ),
             // instance * witin
             // instance * fixed
-            (c @ Expression::Instance(..), w @ Expression::WitIn(..))
-            | (w @ Expression::WitIn(..), c @ Expression::Instance(..))
-            | (c @ Expression::Instance(..), w @ Expression::Fixed(..))
-            | (w @ Expression::Fixed(..), c @ Expression::Instance(..)) => Expression::ScaledSum(
-                Box::new(w.clone()),
-                Box::new(c.clone()),
-                Box::new(Expression::Constant(Either::Left(E::BaseField::ZERO))),
-            ),
+            (c @ Expression::InstanceScalar(..), w @ Expression::WitIn(..))
+            | (w @ Expression::WitIn(..), c @ Expression::InstanceScalar(..))
+            | (c @ Expression::InstanceScalar(..), w @ Expression::Fixed(..))
+            | (w @ Expression::Fixed(..), c @ Expression::InstanceScalar(..)) => {
+                Expression::ScaledSum(
+                    Box::new(w.clone()),
+                    Box::new(c.clone()),
+                    Box::new(Expression::Constant(Either::Left(E::BaseField::ZERO))),
+                )
+            }
             // constant * challenge
             (
                 Expression::Constant(c1),
@@ -1062,6 +1087,12 @@ impl<E: ExtensionField> ToExpr<E> for &Fixed {
 impl<E: ExtensionField> ToExpr<E> for Instance {
     type Output = Expression<E>;
     fn expr(&self) -> Expression<E> {
+        Expression::InstanceScalar(*self)
+    }
+}
+
+impl Instance {
+    pub fn expr_as_instance<E: ExtensionField>(&self) -> Expression<E> {
         Expression::Instance(*self)
     }
 }
@@ -1084,12 +1115,10 @@ impl<E: ExtensionField> ToExpr<E> for Expression<E> {
 fn eval_expr_at_index<E: ExtensionField>(
     expr: &Expression<E>,
     i: usize,
-    instance: &[ArcMultilinearExtension<E>],
     witness: &[ArcMultilinearExtension<E>],
     challenges: &[E],
 ) -> Either<E::BaseField, E> {
     match expr {
-        Expression::Instance(Instance(id)) => instance[*id].index(0),
         Expression::Challenge(c_id, pow, scalar, offset) => {
             Either::Right(challenges[*c_id as usize].exp_u64(*pow as u64) * *scalar + *offset)
         }
@@ -1105,7 +1134,7 @@ fn eval_expr_at_index<E: ExtensionField>(
 /// where scalar is constant and product varies by index.
 /// returns a multilinear extension of the combined result.
 ///
-/// input witness is assumed to be wit ++ structural_wit ++ fixed.
+/// `witness` is assumed to be wit ++ structural_wit ++ fixed.
 pub fn wit_infer_by_monomial_expr<'a, E: ExtensionField>(
     flat_expr: &[Term<Expression<E>, Expression<E>>],
     witness: &[ArcMultilinearExtension<'a, E>],
@@ -1114,7 +1143,11 @@ pub fn wit_infer_by_monomial_expr<'a, E: ExtensionField>(
 ) -> ArcMultilinearExtension<'a, E> {
     let eval_leng = witness[0].evaluations().len();
 
+    let witness = chain!(witness, instance).cloned().collect_vec();
+
     // evaluate all scalar terms first
+    // when instance was access in scalar, we only take its first item
+    // this operation is sound
     let instance_first_element = instance
         .iter()
         .map(|instance| instance.evaluations.index(0))
@@ -1138,7 +1171,7 @@ pub fn wit_infer_by_monomial_expr<'a, E: ExtensionField>(
                         product
                             .iter()
                             .fold(Either::Left(E::BaseField::ONE), |acc, e| {
-                                let v = eval_expr_at_index(e, i, instance, witness, challenges);
+                                let v = eval_expr_at_index(e, i, &witness, challenges);
                                 combine_cumulative_either!(v, acc, |v, acc| v * acc)
                             });
 
@@ -1164,6 +1197,7 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
     expr: &Expression<E>,
     n_witin: WitnessId,
     n_structural_witin: WitnessId,
+    n_fixed: WitnessId,
     fixed: &[ArcMultilinearExtension<'a, E>],
     witnesses: &[ArcMultilinearExtension<'a, E>],
     structual_witnesses: &[ArcMultilinearExtension<'a, E>],
@@ -1174,7 +1208,7 @@ pub fn wit_infer_by_expr<'a, E: ExtensionField>(
         .cloned()
         .collect_vec();
     wit_infer_by_monomial_expr(
-        &monomialize_expr_to_wit_terms(expr, n_witin, n_structural_witin),
+        &monomialize_expr_to_wit_terms(expr, n_witin, n_structural_witin, n_fixed),
         &witin,
         instance,
         challenges,
@@ -1237,7 +1271,7 @@ macro_rules! impl_expr_from_unsigned {
                 }
             }
         )*
-    };
+    }
 }
 impl_expr_from_unsigned!(u8, u16, u32, u64, usize);
 
@@ -1310,8 +1344,9 @@ pub mod fmt {
                     |constant| field(*constant).to_string(),
                 )
                 .into_inner(),
-            Expression::Fixed(fixed) => format!("{:?}", fixed),
-            Expression::Instance(i) => format!("{:?}", i),
+            Expression::Fixed(fixed) => format!("F{:?}", fixed),
+            Expression::Instance(i) => format!("I{:?}", i),
+            Expression::InstanceScalar(i) => format!("Is{:?}", i),
             Expression::Sum(left, right) => {
                 let s = format!("{} + {}", expr(left, wtns, false), expr(right, wtns, false));
                 if add_parens_sum {
@@ -1579,6 +1614,7 @@ mod tests {
         let res = wit_infer_by_expr(
             &expr,
             3,
+            0,
             0,
             &[],
             &[
