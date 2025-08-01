@@ -2,19 +2,15 @@ pub mod monomial;
 pub mod utils;
 
 use crate::{
-    commutative_op_mle_pair,
     mle::{ArcMultilinearExtension, MultilinearExtension},
     monomial::Term,
-    op_mle_xa_b, op_mle3_range,
-    util::ceil_log2,
+    monomialize_expr_to_wit_terms,
     utils::eval_by_expr_constant,
 };
 use ff_ext::{ExtensionField, SmallField};
-use itertools::{Either, Itertools, izip};
+use itertools::{Either, Itertools, chain, izip};
 use p3::field::FieldAlgebra;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
-};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::de::DeserializeOwned;
 use std::{
     cmp::max,
@@ -1084,135 +1080,6 @@ impl<E: ExtensionField> ToExpr<E> for Expression<E> {
     }
 }
 
-pub fn wit_infer_by_expr<'a, E: ExtensionField>(
-    fixed: &[ArcMultilinearExtension<'a, E>],
-    witnesses: &[ArcMultilinearExtension<'a, E>],
-    structual_witnesses: &[ArcMultilinearExtension<'a, E>],
-    instance: &[ArcMultilinearExtension<'a, E>],
-    challenges: &[E],
-    expr: &Expression<E>,
-) -> ArcMultilinearExtension<'a, E> {
-    expr.evaluate_with_instance::<ArcMultilinearExtension<'a, E>>(
-        &|f| fixed[f.0].clone(),
-        &|witness_id| witnesses[witness_id as usize].clone(),
-        &|witness_id, _, _, _| structual_witnesses[witness_id as usize].clone(),
-        &|i| instance[i.0].clone(),
-        &|scalar| {
-            either::for_both!(scalar, scalar => MultilinearExtension::from_evaluation_vec_smart(
-                0,
-                vec![scalar],
-            ).into())
-        },
-        &|challenge_id, pow, scalar, offset| {
-            // TODO cache challenge power to be acquired once for each power
-            let challenge = challenges[challenge_id as usize];
-            let challenge: ArcMultilinearExtension<E> =
-                MultilinearExtension::from_evaluations_ext_vec(
-                    0,
-                    vec![challenge.exp_u64(pow as u64) * scalar + offset],
-                )
-                .into();
-            challenge
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => {
-                        MultilinearExtension::from_evaluation_vec_smart(0, vec![a[0] + b[0]]).into()
-                    }
-                    (1, _) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] + *b)
-                            .collect(),
-                    )
-                    .into(),
-                    (_, 1) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a + b[0])
-                            .collect(),
-                    )
-                    .into(),
-                    (_, _) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .zip(b.par_iter())
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|(a, b)| *a + *b)
-                            .collect(),
-                    )
-                    .into(),
-                }
-            })
-        },
-        &|a, b| {
-            commutative_op_mle_pair!(|a, b| {
-                match (a.len(), b.len()) {
-                    (1, 1) => {
-                        MultilinearExtension::from_evaluation_vec_smart(0, vec![a[0] * b[0]]).into()
-                    }
-                    (1, _) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(b.len()),
-                        b.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|b| a[0] * *b)
-                            .collect(),
-                    )
-                    .into(),
-                    (_, 1) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a * b[0])
-                            .collect(),
-                    )
-                    .into(),
-                    (_, _) => {
-                        assert_eq!(a.len(), b.len());
-                        // we do the pointwise evaluation multiplication here without involving FFT
-                        // the evaluations outside of range will be checked via sumcheck + identity polynomial
-                        MultilinearExtension::from_evaluation_vec_smart(
-                            ceil_log2(a.len()),
-                            a.par_iter()
-                                .zip(b.par_iter())
-                                .with_min_len(MIN_PAR_SIZE)
-                                .map(|(a, b)| *a * *b)
-                                .collect(),
-                        )
-                        .into()
-                    }
-                }
-            })
-        },
-        &|x, a, b| {
-            op_mle_xa_b!(|x, a, b| {
-                match (x.len(), a.len(), b.len()) {
-                    (_, 1, 1) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(x.len()),
-                        x.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|x| a[0] * *x + b[0])
-                            .collect(),
-                    )
-                    .into(),
-                    (1, _, 1) => MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(a.len()),
-                        a.par_iter()
-                            .with_min_len(MIN_PAR_SIZE)
-                            .map(|a| *a * x[0] + b[0])
-                            .collect(),
-                    )
-                    .into(),
-                    lefted => panic!("unknown combination {:?}", lefted),
-                }
-            })
-        },
-    )
-}
-
 #[inline(always)]
 fn eval_expr_at_index<E: ExtensionField>(
     expr: &Expression<E>,
@@ -1232,7 +1099,14 @@ fn eval_expr_at_index<E: ExtensionField>(
     }
 }
 
-pub fn eval_by_monomial_expr<'a, E: ExtensionField>(
+/// infer full witness from flat expression over monomial terms
+///
+/// evaluates each term as scalar * product at every point,
+/// where scalar is constant and product varies by index.
+/// returns a multilinear extension of the combined result.
+///
+/// input witness is assumed to be wit ++ structural_wit ++ fixed.
+pub fn wit_infer_by_monomial_expr<'a, E: ExtensionField>(
     flat_expr: &[Term<Expression<E>, Expression<E>>],
     witness: &[ArcMultilinearExtension<'a, E>],
     instance: &[ArcMultilinearExtension<'a, E>],
@@ -1260,22 +1134,51 @@ pub fn eval_by_monomial_expr<'a, E: ExtensionField>(
                 .enumerate()
                 .fold(E::ZERO, |acc, (term_index, Term { product, .. })| {
                     let scalar_val = scalar_evals[term_index];
-                    let prod_val = product.iter().fold(E::BaseField::ONE, |acc, e| {
-                        let v = eval_expr_at_index(e, i, instance, witness, challenges);
-                        acc * v.expect_left("not in base field")
-                    });
+                    let prod_val =
+                        product
+                            .iter()
+                            .fold(Either::Left(E::BaseField::ONE), |acc, e| {
+                                let v = eval_expr_at_index(e, i, instance, witness, challenges);
+                                combine_cumulative_either!(v, acc, |v, acc| v * acc)
+                            });
 
-                    acc + scalar_val
-                        .map_either(
-                            |scalar_val| E::from(scalar_val * prod_val),
-                            |scalar_val| scalar_val * prod_val,
-                        )
-                        .into_inner()
+                    // term := scalar_val * prod_val
+                    let term =
+                        combine_cumulative_either!(scalar_val, prod_val, |scalar, prod_val| scalar
+                            * prod_val);
+
+                    either::for_both!(term, term => acc + term)
                 })
         })
         .collect();
 
     MultilinearExtension::from_evaluation_vec_smart(witness[0].num_vars(), evaluations).into()
+}
+
+/// infer witness value from expression by flattening into monomial terms
+///
+/// combines witnesses, structural witnesses, and fixed columns,
+/// then delegates to monomial-based inference.
+#[allow(clippy::too_many_arguments)]
+pub fn wit_infer_by_expr<'a, E: ExtensionField>(
+    expr: &Expression<E>,
+    n_witin: WitnessId,
+    n_structural_witin: WitnessId,
+    fixed: &[ArcMultilinearExtension<'a, E>],
+    witnesses: &[ArcMultilinearExtension<'a, E>],
+    structual_witnesses: &[ArcMultilinearExtension<'a, E>],
+    instance: &[ArcMultilinearExtension<'a, E>],
+    challenges: &[E],
+) -> ArcMultilinearExtension<'a, E> {
+    let witin = chain!(witnesses, structual_witnesses, fixed)
+        .cloned()
+        .collect_vec();
+    wit_infer_by_monomial_expr(
+        &monomialize_expr_to_wit_terms(expr, n_witin, n_structural_witin),
+        &witin,
+        instance,
+        challenges,
+    )
 }
 
 pub fn rlc_chip_record<E: ExtensionField>(
@@ -1388,14 +1291,14 @@ pub mod fmt {
                 } else {
                     let mut s = String::new();
                     if *scaler != E::ONE {
-                        write!(s, "{}*", field(scaler)).unwrap();
+                        write!(s, "{}*", field(*scaler)).unwrap();
                     }
                     write!(s, "Challenge({})", id,).unwrap();
                     if *pow > 1 {
                         write!(s, "^{}", pow).unwrap();
                     }
                     if *offset != E::ZERO {
-                        write!(s, "+{}", field(offset)).unwrap();
+                        write!(s, "+{}", field(*offset)).unwrap();
                     }
                     s
                 }
@@ -1403,8 +1306,8 @@ pub mod fmt {
             Expression::Constant(constant) => constant
                 .as_ref()
                 .map_either(
-                    |constant| base_field::<E::BaseField>(constant, true).to_string(),
-                    |constant| field(constant).to_string(),
+                    |constant| base_field::<E::BaseField>(*constant, true).to_string(),
+                    |constant| field(*constant).to_string(),
                 )
                 .into_inner(),
             Expression::Fixed(fixed) => format!("{:?}", fixed),
@@ -1436,11 +1339,16 @@ pub mod fmt {
         }
     }
 
-    pub fn field<E: ExtensionField>(field: &E) -> String {
+    pub fn either_field<E: ExtensionField>(f: Either<E::BaseField, E>, add_parens: bool) -> String {
+        f.map_either(|v| base_field(v, add_parens), |v| field(v))
+            .into_inner()
+    }
+
+    pub fn field<E: ExtensionField>(field: E) -> String {
         let data = field
             .as_bases()
             .iter()
-            .map(|b| base_field::<E::BaseField>(b, false))
+            .map(|b| base_field::<E::BaseField>(*b, false))
             .collect::<Vec<String>>();
         let only_one_limb = field.as_bases()[1..]
             .iter()
@@ -1453,7 +1361,7 @@ pub mod fmt {
         }
     }
 
-    pub fn base_field<F: SmallField>(base_field: &F, add_parens: bool) -> String {
+    pub fn base_field<F: SmallField>(base_field: F, add_parens: bool) -> String {
         let value = base_field.to_canonical_u64();
 
         if value > F::MODULUS_U64 - u16::MAX as u64 {
@@ -1490,8 +1398,8 @@ pub mod fmt {
                 let wit = &wits_in[*wt_id as usize];
                 let name = &wits_in_name[*wt_id as usize];
                 let value_fmt = match wit.evaluations() {
-                    FieldType::Base(vec) => base_field::<E::BaseField>(&vec[inst_id], true),
-                    FieldType::Ext(vec) => field(&vec[inst_id]),
+                    FieldType::Base(vec) => base_field::<E::BaseField>(vec[inst_id], true),
+                    FieldType::Ext(vec) => field(vec[inst_id]),
                     FieldType::Unreachable => unreachable!(),
                 };
                 format!("  WitIn({wt_id})={value_fmt} {name:?}")
@@ -1655,32 +1563,7 @@ mod tests {
     }
 
     #[test]
-    fn test_wit_infer_by_expr_base_field() {
-        type E = ff_ext::GoldilocksExt2;
-        type B = p3::goldilocks::Goldilocks;
-        let a = WitIn { id: 0 };
-        let b = WitIn { id: 1 };
-        let c = WitIn { id: 2 };
-
-        let expr: Expression<E> = a.expr() + b.expr() + a.expr() * b.expr() + (c.expr() * 3 + 2);
-
-        let res = wit_infer_by_expr(
-            &[],
-            &[
-                vec![B::from_canonical_u64(1)].into_mle().into(),
-                vec![B::from_canonical_u64(2)].into_mle().into(),
-                vec![B::from_canonical_u64(3)].into_mle().into(),
-            ],
-            &[],
-            &[],
-            &[],
-            &expr,
-        );
-        res.get_base_field_vec();
-    }
-
-    #[test]
-    fn test_wit_infer_by_expr_ext_field() {
+    fn test_raw_wit_infer_by_monomial_expr() {
         type E = ff_ext::GoldilocksExt2;
         type B = p3::goldilocks::Goldilocks;
         let a = WitIn { id: 0 };
@@ -1694,6 +1577,9 @@ mod tests {
             + Expression::Challenge(0, 1, E::ONE, E::ONE);
 
         let res = wit_infer_by_expr(
+            &expr,
+            3,
+            0,
             &[],
             &[
                 vec![B::from_canonical_u64(1)].into_mle().into(),
@@ -1703,7 +1589,6 @@ mod tests {
             &[],
             &[],
             &[E::ONE],
-            &expr,
         );
         res.get_ext_field_vec();
     }

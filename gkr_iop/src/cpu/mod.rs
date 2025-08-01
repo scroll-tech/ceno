@@ -9,8 +9,8 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
-    eval_by_monomial_expr,
     mle::{ArcMultilinearExtension, MultilinearExtension, Point},
+    wit_infer_by_monomial_expr,
 };
 use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -241,18 +241,10 @@ where
         .zip_eq(layer.expr_names.par_iter())
         .zip_eq(out_evals.par_iter())
         .map(|((expr, expr_name), (_, out_eval))| {
-            let out_mle = match out_eval {
-                EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
-                    eval_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
-                }
-                EvalExpression::Zero => MultilinearExtension::default().into(),
-                EvalExpression::Partition(_, _) => unimplemented!(),
-            };
-            if let EvalExpression::Zero = out_eval {
-                // sanity check: zero mle
-                if cfg!(debug_assertions) {
+            if cfg!(debug_assertions) {
+                if let EvalExpression::Zero = out_eval {
                     assert!(
-                        eval_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
+                        wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
                             .evaluations()
                             .is_zero(),
                         "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
@@ -260,7 +252,13 @@ where
                     );
                 }
             };
-            out_mle
+            match out_eval {
+                EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
+                    wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
+                }
+                EvalExpression::Zero => MultilinearExtension::default().into(),
+                EvalExpression::Partition(_, _) => unimplemented!(),
+            }
         })
         .collect::<Vec<_>>()
 }

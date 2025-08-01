@@ -71,12 +71,14 @@ impl<E: ExtensionField> MockProver<E> {
                 )
                 .map(|(expr, (sel, _))| {
                     wit_infer_by_expr(
+                        &(sel.selector_expr() * expr),
+                        layer.n_witin as WitnessId,
+                        layer.n_structural_witin as WitnessId,
                         &[],
                         &wits,
                         &structural_wits,
                         &[],
                         &challenges,
-                        &(sel.selector_expr() * expr),
                     )
                 })
                 .collect_vec();
@@ -85,8 +87,15 @@ impl<E: ExtensionField> MockProver<E> {
                 .out_sel_and_eval_exprs
                 .iter()
                 .flat_map(|(_, out)| {
-                    out.iter()
-                        .map(|out| out.mock_evaluate(&evaluations, &challenges, num_vars))
+                    out.iter().map(|out| {
+                        out.mock_evaluate(
+                            layer.n_witin as WitnessId,
+                            layer.n_structural_witin as WitnessId,
+                            &evaluations,
+                            &challenges,
+                            num_vars,
+                        )
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             match layer.ty {
@@ -134,6 +143,8 @@ impl<E: ExtensionField> MockProver<E> {
 impl<E: ExtensionField> EvalExpression<E> {
     pub fn mock_evaluate<'a>(
         &self,
+        n_witin: WitnessId,
+        n_structural_witin: WitnessId,
         evals: &[ArcMultilinearExtension<'a, E>],
         challenges: &[E],
         num_vars: usize,
@@ -144,18 +155,22 @@ impl<E: ExtensionField> EvalExpression<E> {
             }
             EvalExpression::Single(i) => evals[*i].clone(),
             EvalExpression::Linear(i, c0, c1) => wit_infer_by_expr(
+                &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
+                n_witin,
+                n_structural_witin,
                 &[],
                 evals,
                 &[],
                 &[],
                 challenges,
-                &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
             ),
             EvalExpression::Partition(parts, indices) => {
                 assert_eq!(parts.len(), 1 << indices.len());
                 let parts = parts
                     .iter()
-                    .map(|part| part.mock_evaluate(evals, challenges, num_vars))
+                    .map(|part| {
+                        part.mock_evaluate(n_witin, n_structural_witin, evals, challenges, num_vars)
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 indices
                     .iter()

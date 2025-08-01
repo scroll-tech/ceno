@@ -616,12 +616,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 .map(|expr| {
                     assert_eq!(expr.degree(), 1);
                     wit_infer_by_expr(
+                        expr,
+                        cs.num_witin,
+                        cs.num_structural_witin,
                         &input.fixed,
                         &input.witness,
                         &input.structural_witness,
                         &input.public_input,
                         challenges,
-                        expr,
                     )
                 })
                 .collect();
