@@ -150,7 +150,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     /// take vector of primative type and instantiate witnesses
     pub fn from_const_unchecked<T: Into<u64>>(limbs: Vec<T>) -> Self {
-        assert!(limbs.len() == Self::NUM_LIMBS);
+        assert_eq!(limbs.len(), Self::NUM_LIMBS);
         UIntLimbs {
             limbs: UintLimb::Expression(
                 limbs
@@ -558,7 +558,8 @@ impl<E: ExtensionField> UIntLimbs<32, 16, E> {
 
     /// Return a value suitable for memory read/write. From [u16; 2] limbs
     pub fn memory_expr(&self) -> MemoryExpr<E> {
-        self.value()
+        let u16_limbs = self.expr();
+        u16_limbs.try_into().expect("two limbs with M=32 and C=16")
     }
 }
 

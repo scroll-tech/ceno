@@ -12,15 +12,16 @@ use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
 use witness::set_val;
 
-pub struct MemWordChange<const N_ZEROS: usize> {
+pub struct MemWordChange<E: ExtensionField, const N_ZEROS: usize> {
     prev_limb_bytes: Vec<WitIn>,
     rs2_limb_bytes: Vec<WitIn>,
 
-    expected_changes: Vec<WitIn>,
+    expected_limb_change: WitIn,
+    expect_change_limbs_expr: [Expression<E>; 2],
 }
 
-impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
-    pub(crate) fn construct_circuit<E: ExtensionField>(
+impl<E: ExtensionField, const N_ZEROS: usize> MemWordChange<E, N_ZEROS> {
+    pub(crate) fn construct_circuit(
         cb: &mut CircuitBuilder<E>,
         addr: &MemAddr<E>,
         prev_word: &UInt<E>,
@@ -60,16 +61,19 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
             Ok(bytes)
         };
 
+        assert!(prev_word.wits_in().is_some() && rs2_word.wits_in().is_some());
+
+        let low_bits = addr.low_bit_exprs();
+        let prev_limbs = prev_word.expr();
+        let rs2_limbs = rs2_word.expr();
+
+        // alloc a new witIn to cache degree 2 expression
+        let expected_limb_change = cb.create_witin(|| "expected_change");
+
         assert_eq!(UInt::<E>::NUM_LIMBS, 2);
         // for sb (n_zeros = 0)
-        match N_ZEROS {
+        let (prev_limb_bytes, rs2_limb_bytes) = match N_ZEROS {
             0 => {
-                assert!(prev_word.wits_in().is_some() && rs2_word.wits_in().is_some());
-
-                let low_bits = addr.low_bit_exprs();
-                let prev_limbs = prev_word.expr();
-                let rs2_limbs = rs2_word.expr();
-
                 // degree 2 expression
                 let prev_target_limb = cb.select(&low_bits[1], &prev_limbs[1], &prev_limbs[0]);
                 let prev_limb_bytes = decompose_limb(cb, "prev_limb", &prev_target_limb, 2)?;
@@ -82,8 +86,6 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     u8_base_inv.expr() * (&rs2_limbs[0] - rs2_limb_bytes[0].expr()),
                 )?;
 
-                // alloc a new witIn to cache degree 2 expression
-                let expected_limb_change = cb.create_witin(|| "expected_limb_change");
                 cb.condition_require_equal(
                     || "expected_limb_change = select(low_bits[0], rs2 - prev)",
                     low_bits[0].clone(),
@@ -92,59 +94,50 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     rs2_limb_bytes[0].expr() - prev_limb_bytes[0].expr(),
                 )?;
 
-                // alloc a new witIn to cache degree 2 expression
-                let expected_change = cb.create_witin(|| "expected_change");
-                cb.condition_require_equal(
-                    || "expected_change = select(low_bits[1], limb_change*2^16, limb_change)",
-                    low_bits[1].clone(),
-                    expected_change.expr(),
-                    expected_limb_change.expr() << 16,
-                    expected_limb_change.expr(),
-                )?;
-
-                Ok(MemWordChange {
-                    prev_limb_bytes,
-                    rs2_limb_bytes,
-                    expected_changes: vec![expected_limb_change, expected_change],
-                })
+                (prev_limb_bytes, rs2_limb_bytes)
             }
             // for sh (n_zeros = 1)
             1 => {
-                assert!(prev_word.wits_in().is_some() && rs2_word.wits_in().is_some());
-
-                let low_bits = addr.low_bit_exprs();
-                let prev_limbs = prev_word.expr();
-                let rs2_limbs = rs2_word.expr();
-
-                let expected_change = cb.create_witin(|| "expected_change");
-
                 // alloc a new witIn to cache degree 2 expression
                 cb.condition_require_equal(
-                    || "expected_change = select(low_bits[1], 2^16*(limb_change))",
+                    || "expected_limb_change = select(low_bits[1], limb_change)",
                     // degree 2 expression
                     low_bits[1].clone(),
-                    expected_change.expr(),
-                    (&rs2_limbs[0] - &prev_limbs[1]) << 16,
+                    expected_limb_change.expr(),
+                    &rs2_limbs[0] - &prev_limbs[1],
                     &rs2_limbs[0] - &prev_limbs[0],
                 )?;
 
-                Ok(MemWordChange {
-                    prev_limb_bytes: vec![],
-                    rs2_limb_bytes: vec![],
-                    expected_changes: vec![expected_change],
-                })
+                (vec![], vec![])
             }
             _ => unreachable!("N_ZEROS cannot be larger than 1"),
-        }
+        };
+
+        let hi_limb_change = cb.select(
+            &low_bits[1],
+            &(expected_limb_change.expr() - prev_limbs[1].expr()),
+            &E::BaseField::ZERO.expr(),
+        );
+
+        let lo_limb_change = cb.select(
+            &low_bits[1],
+            &E::BaseField::ZERO.expr(),
+            &(expected_limb_change.expr() - prev_limbs[0].expr()),
+        );
+
+        Ok(MemWordChange {
+            prev_limb_bytes,
+            rs2_limb_bytes,
+            expected_limb_change,
+            expect_change_limbs_expr: [lo_limb_change, hi_limb_change],
+        })
     }
 
-    pub(crate) fn value<E: ExtensionField>(&self) -> Expression<E> {
-        assert!(N_ZEROS <= 1);
-
-        self.expected_changes[1 - N_ZEROS].expr()
+    pub(crate) fn as_lo_hi(&self) -> &[Expression<E>; 2] {
+        &self.expect_change_limbs_expr
     }
 
-    pub fn assign_instance<E: ExtensionField>(
+    pub fn assign_instance(
         &self,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
@@ -182,23 +175,12 @@ impl<const N_ZEROS: usize> MemWordChange<N_ZEROS> {
                     E::BaseField::from_canonical_u64((rs2_limb.to_le_bytes()[0] as u64) << 8)
                         - E::BaseField::from_canonical_u64((prev_limb.to_le_bytes()[1] as u64) << 8)
                 };
-                let final_change = if low_bits[1] == 0 {
-                    change
-                } else {
-                    E::BaseField::from_canonical_u64(1u64 << 16) * change
-                };
-                set_val!(instance, self.expected_changes[0], change);
-                set_val!(instance, self.expected_changes[1], final_change);
+                set_val!(instance, self.expected_limb_change, change);
             }
             1 => {
-                let final_change = if low_bits[1] == 0 {
-                    E::BaseField::from_canonical_u16(rs2_limb)
-                        - E::BaseField::from_canonical_u16(prev_limb)
-                } else {
-                    E::BaseField::from_canonical_u64((rs2_limb as u64) << 16)
-                        - E::BaseField::from_canonical_u64((prev_limb as u64) << 16)
-                };
-                set_val!(instance, self.expected_changes[0], final_change);
+                let change = E::BaseField::from_canonical_u16(rs2_limb)
+                    - E::BaseField::from_canonical_u16(prev_limb);
+                set_val!(instance, self.expected_limb_change, change);
             }
             _ => unreachable!("N_ZEROS cannot be larger than 1"),
         }

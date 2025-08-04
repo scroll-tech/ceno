@@ -60,14 +60,14 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
 
         let mem_writes = (0..S::MEM_OPS_COUNT)
             .map(|i| {
-                let val_before = cb.create_witin(|| format!("mem_before_{}_READ_ARG", i));
-                let val_after = cb.create_witin(|| format!("mem_after_{}_WRITE_ARG", i));
+                let val_before = UInt::new_unchecked(|| format!("mem_before_{}_WRITE_ARG", i), cb)?;
+                let val_after = UInt::new(|| format!("mem_after_{}_WRITE_ARG", i), cb)?;
                 let addr = cb.create_witin(|| format!("addr_{}", i));
                 WriteMEM::construct_circuit(
                     cb,
                     addr.expr(),
-                    val_before.expr(),
-                    val_after.expr(),
+                    val_before.memory_expr(),
+                    val_after.memory_expr(),
                     dummy_insn.ts(),
                 )
                 .map(|writer| (addr, Change::new(val_before, val_after), writer))
@@ -105,8 +105,12 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
 
         // Assign memory.
         for ((addr, value, writer), op) in config.mem_writes.iter().zip_eq(&ops.mem_ops) {
-            set_val!(instance, value.before, op.value.before as u64);
-            set_val!(instance, value.after, op.value.after as u64);
+            value
+                .before
+                .assign_value(instance, Value::new_unchecked(op.value.before));
+            value
+                .after
+                .assign_value(instance, Value::new(op.value.after, lk_multiplicity));
             set_val!(instance, addr, u64::from(op.addr));
             writer.assign_op(instance, lk_multiplicity, step.cycle(), op)?;
         }
@@ -122,5 +126,5 @@ pub struct LargeEcallConfig<E: ExtensionField> {
     reg_writes: Vec<(UInt<E>, WriteRD<E>)>,
 
     start_addr: WitIn,
-    mem_writes: Vec<(WitIn, Change<WitIn>, WriteMEM)>,
+    mem_writes: Vec<(WitIn, Change<UInt<E>>, WriteMEM)>,
 }

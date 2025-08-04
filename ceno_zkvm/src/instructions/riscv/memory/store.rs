@@ -17,7 +17,7 @@ use crate::{
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
-use std::marker::PhantomData;
+use std::{array, marker::PhantomData};
 
 pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     s_insn: SInstructionConfig<E>,
@@ -28,7 +28,7 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     prev_memory_value: UInt<E>,
 
     memory_addr: MemAddr<E>,
-    word_change: Option<MemWordChange<N_ZEROS>>,
+    word_change: Option<MemWordChange<E, N_ZEROS>>,
 }
 
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
@@ -66,7 +66,6 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        // Memory initialization is not guaranteed to contain u32. Range-check it here.
         let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
 
@@ -94,13 +93,18 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let (new_memory_value, word_change) = match I::INST_KIND {
             InsnKind::SW => (rs2_read.memory_expr(), None),
             InsnKind::SH | InsnKind::SB => {
-                let change = MemWordChange::<N_ZEROS>::construct_circuit(
+                let change = MemWordChange::<E, N_ZEROS>::construct_circuit(
                     circuit_builder,
                     &memory_addr,
                     &prev_memory_value,
                     &rs2_read,
                 )?;
-                (prev_memory_value.value() + change.value(), Some(change))
+                (
+                    array::from_fn(|i| {
+                        prev_memory_value.memory_expr()[i].clone() + change.as_lo_hi()[i].clone()
+                    }),
+                    Some(change),
+                )
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
@@ -154,7 +158,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             .memory_addr
             .assign_instance(instance, lk_multiplicity, addr.into())?;
         if let Some(change) = config.word_change.as_ref() {
-            change.assign_instance::<E>(instance, lk_multiplicity, step, addr.shift())?;
+            change.assign_instance(instance, lk_multiplicity, step, addr.shift())?;
         }
 
         Ok(())

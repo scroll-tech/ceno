@@ -383,12 +383,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc read_record degree ({})",
-            name_fn().into()
-        );
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.r_expressions_namespace_map.push(path);
@@ -405,12 +399,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc write_record degree ({})",
-            name_fn().into()
-        );
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);
