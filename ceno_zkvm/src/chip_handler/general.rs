@@ -21,7 +21,7 @@ pub trait PublicIOQuery {
     fn query_init_cycle(&mut self) -> Result<Instance, CircuitBuilderError>;
     fn query_end_pc(&mut self) -> Result<Instance, CircuitBuilderError>;
     fn query_end_cycle(&mut self) -> Result<Instance, CircuitBuilderError>;
-    fn query_public_io(&mut self) -> Result<Instance, CircuitBuilderError>;
+    fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError>;
 }
 
 impl<'a, E: ExtensionField> InstFetch<E> for CircuitBuilder<'a, E> {
@@ -60,7 +60,11 @@ impl<'a, E: ExtensionField> PublicIOQuery for CircuitBuilder<'a, E> {
         self.cs.query_instance(|| "end_cycle", END_CYCLE_IDX)
     }
 
-    fn query_public_io(&mut self) -> Result<Instance, CircuitBuilderError> {
-        self.cs.query_instance(|| "public_io", PUBLIC_IO_IDX)
+    fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError> {
+        Ok([
+            self.cs.query_instance(|| "public_io_low", PUBLIC_IO_IDX)?,
+            self.cs
+                .query_instance(|| "public_io_high", PUBLIC_IO_IDX + 1)?,
+        ])
     }
 }

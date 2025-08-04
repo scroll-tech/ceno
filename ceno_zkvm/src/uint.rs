@@ -470,7 +470,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn as_lo_hi<const M2: usize>(
         &self,
     ) -> Result<(UIntLimbs<M2, C, E>, UIntLimbs<M2, C, E>), CircuitBuilderError> {
-        assert!(M == 2 * M2);
+        assert_eq!(M, 2 * M2);
         let mut self_lo = self.expr();
         let self_hi = self_lo.split_off(self_lo.len() / 2);
         Ok((

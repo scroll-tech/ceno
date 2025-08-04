@@ -115,14 +115,14 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordChange<E, N_ZEROS> {
 
         let hi_limb_change = cb.select(
             &low_bits[1],
-            &(expected_limb_change.expr() - prev_limbs[1].expr()),
+            &expected_limb_change.expr(),
             &E::BaseField::ZERO.expr(),
         );
 
         let lo_limb_change = cb.select(
             &low_bits[1],
             &E::BaseField::ZERO.expr(),
-            &(expected_limb_change.expr() - prev_limbs[0].expr()),
+            &expected_limb_change.expr(),
         );
 
         Ok(MemWordChange {
