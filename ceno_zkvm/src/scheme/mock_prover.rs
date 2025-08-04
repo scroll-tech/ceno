@@ -15,7 +15,8 @@ use crate::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
-use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
+use either::Either;
+use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
 use generic_static::StaticTypeMap;
 use gkr_iop::{
     tables::{
@@ -26,11 +27,10 @@ use gkr_iop::{
 };
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
-    Expression, fmt,
+    Expression, WitnessId, fmt,
     mle::{ArcMultilinearExtension, IntoMLEs},
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
-use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -90,15 +90,15 @@ impl LkMultiplicityKey for BabyBearExt4 {
 pub enum MockProverError<E: ExtensionField, K: LkMultiplicityKey> {
     AssertZeroError {
         expression: Expression<E>,
-        evaluated: E::BaseField,
+        evaluated: Either<E::BaseField, E>,
         name: String,
         inst_id: usize,
     },
     AssertEqualError {
         left_expression: Expression<E>,
         right_expression: Expression<E>,
-        left: E::BaseField,
-        right: E::BaseField,
+        left: Either<E::BaseField, E>,
+        right: Either<E::BaseField, E>,
         name: String,
         inst_id: usize,
     },
@@ -218,7 +218,7 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
             } => {
                 let expression_fmt = fmt::expr(expression, &mut wtns, false);
                 let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
-                let eval_fmt = fmt::base_field(evaluated, false);
+                let eval_fmt = fmt::either_field(*evaluated, false);
                 println!(
                     "\nAssertZeroError {name:?}: Evaluated expression is not zero\n\
                     Expression: {expression_fmt}\n\
@@ -237,8 +237,8 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                 let left_expression_fmt = fmt::expr(left_expression, &mut wtns, false);
                 let right_expression_fmt = fmt::expr(right_expression, &mut wtns, false);
                 let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
-                let left_eval_fmt = fmt::base_field(left, false);
-                let right_eval_fmt = fmt::base_field(right, false);
+                let left_eval_fmt = fmt::either_field(*left, false);
+                let right_eval_fmt = fmt::either_field(*right, false);
                 println!(
                     "\nAssertEqualError {name:?}\n\
                     Left: {left_eval_fmt} != Right: {right_eval_fmt}\n\
@@ -268,7 +268,7 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
             } => {
                 let expression_fmt = fmt::expr(expression, &mut wtns, false);
                 let wtns_fmt = fmt::wtns(&wtns, wits_in, *inst_id, wits_in_name);
-                let eval_fmt = fmt::field(evaluated);
+                let eval_fmt = fmt::field(*evaluated);
                 println!(
                     "\nLookupError {name:#?}: Evaluated expression does not exist in T vector\n\
                     ROM Type: {rom_type:?}\n\
@@ -539,11 +539,31 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             {
                 let right = -right.as_ref();
 
-                let left_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, left);
-                let left_evaluated = &left_evaluated.get_base_field_vec()[..num_instances];
+                let left_evaluated = wit_infer_by_expr(
+                    left,
+                    cs.num_witin,
+                    cs.num_structural_witin,
+                    cs.num_fixed as WitnessId,
+                    &[],
+                    wits_in,
+                    &[],
+                    pi,
+                    &challenge,
+                );
+                let left_evaluated = &left_evaluated.get_ext_field_vec()[..num_instances];
 
-                let right_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, &right);
-                let right_evaluated = &right_evaluated.get_base_field_vec()[..num_instances];
+                let right_evaluated = wit_infer_by_expr(
+                    &right,
+                    cs.num_witin,
+                    cs.num_structural_witin,
+                    cs.num_fixed as WitnessId,
+                    &[],
+                    wits_in,
+                    &[],
+                    pi,
+                    &challenge,
+                );
+                let right_evaluated = &right_evaluated.get_ext_field_vec()[..num_instances];
 
                 // left_evaluated.len() ?= right_evaluated.len() due to padding instance
                 for (inst_id, (left_element, right_element)) in
@@ -553,8 +573,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         errors.push(MockProverError::AssertEqualError {
                             left_expression: *left.clone(),
                             right_expression: right.clone(),
-                            left: *left_element,
-                            right: *right_element,
+                            left: Either::Right(*left_element),
+                            right: Either::Right(*right_element),
                             name: name.clone(),
                             inst_id,
                         });
@@ -562,14 +582,24 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             } else {
                 // contains require_zero
-                let expr_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr);
-                let expr_evaluated = &expr_evaluated.get_base_field_vec()[..num_instances];
+                let expr_evaluated = wit_infer_by_expr(
+                    expr,
+                    cs.num_witin,
+                    cs.num_structural_witin,
+                    cs.num_fixed as WitnessId,
+                    &[],
+                    wits_in,
+                    &[],
+                    pi,
+                    &challenge,
+                );
+                let expr_evaluated = &expr_evaluated.get_ext_field_vec()[..num_instances];
 
                 for (inst_id, element) in enumerate(expr_evaluated) {
-                    if *element != E::BaseField::ZERO {
+                    if *element != E::ZERO {
                         errors.push(MockProverError::AssertZeroError {
                             expression: expr.clone(),
-                            evaluated: *element,
+                            evaluated: Either::Right(*element),
                             name: name.clone(),
                             inst_id,
                         });
@@ -585,7 +615,17 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             .zip_eq(cs.lk_expressions_namespace_map.iter())
             .zip_eq(cs.lk_expressions_items_map.iter())
         {
-            let expr_evaluated = wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, expr);
+            let expr_evaluated = wit_infer_by_expr(
+                expr,
+                cs.num_witin,
+                cs.num_structural_witin,
+                cs.num_fixed as WitnessId,
+                &[],
+                wits_in,
+                &[],
+                pi,
+                &challenge,
+            );
             let expr_evaluated = &expr_evaluated.get_ext_field_vec()[..num_instances];
 
             // Check each lookup expr exists in t vec
@@ -615,12 +655,21 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let args_eval: Vec<_> = args
                     .iter()
                     .map(|arg_expr| {
-                        let arg_eval =
-                            wit_infer_by_expr(&[], wits_in, &[], pi, &challenge, arg_expr);
+                        let arg_eval = wit_infer_by_expr(
+                            arg_expr,
+                            cs.num_witin,
+                            cs.num_structural_witin,
+                            cs.num_fixed as WitnessId,
+                            &[],
+                            wits_in,
+                            &[],
+                            pi,
+                            &challenge,
+                        );
                         let mut arg_eval = arg_eval
-                            .get_base_field_vec()
+                            .get_ext_field_vec()
                             .iter()
-                            .map(SmallField::to_canonical_u64)
+                            .map(|v| v.to_canonical_u64_vec()[0])
                             .take(num_instances)
                             .collect_vec();
 
@@ -895,32 +944,38 @@ Hints:
                     izip!(&cs.lk_table_expressions, &cs.lk_expressions_items_map)
                 {
                     let lk_table = wit_infer_by_expr(
+                        &expr.values,
+                        cs.num_witin,
+                        cs.num_structural_witin,
+                        cs.num_fixed as WitnessId,
                         &fixed,
                         &witness,
                         &structural_witness,
                         &pi_mles,
                         &challenges,
-                        &expr.values,
                     )
                     .get_ext_field_vec()
                     .to_vec();
 
                     let multiplicity = wit_infer_by_expr(
+                        &expr.multiplicity,
+                        cs.num_witin,
+                        cs.num_structural_witin,
+                        cs.num_fixed as WitnessId,
                         &fixed,
                         &witness,
                         &structural_witness,
                         &pi_mles,
                         &challenges,
-                        &expr.multiplicity,
                     )
-                    .get_base_field_vec()
+                    .get_ext_field_vec()
                     .to_vec();
 
                     for (key, multiplicity) in izip!(lk_table, multiplicity) {
                         lkm_tables.set_count(
                             *rom_type,
                             key,
-                            multiplicity.to_canonical_u64() as usize,
+                            multiplicity.to_canonical_u64_vec()[0] as usize,
                         );
                     }
                 }
@@ -976,12 +1031,15 @@ Hints:
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
                         let write_rlc_records = (wit_infer_by_expr(
+                            w_rlc_expr,
+                            cs.num_witin,
+                            cs.num_structural_witin,
+                            cs.num_fixed as WitnessId,
                             fixed,
                             witness,
                             &[],
                             &pi_mles,
                             &challenges,
-                            w_rlc_expr,
                         )
                         .get_ext_field_vec())[..*num_rows]
                             .to_vec();
@@ -994,14 +1052,17 @@ Hints:
                                 .skip(1)
                                 .map(|expr| {
                                     let v = wit_infer_by_expr(
+                                        expr,
+                                        cs.num_witin,
+                                        cs.num_structural_witin,
+                                        cs.num_fixed as WitnessId,
                                         fixed,
                                         witness,
                                         &[],
                                         &pi_mles,
                                         &challenges,
-                                        expr,
                                     );
-                                    v.get_base_field_vec()[..*num_rows].to_vec()
+                                    v.get_ext_field_vec()[..*num_rows].to_vec()
                                 })
                                 .collect_vec();
                             // convert [[pc], [timestamp]] into [[pc, timestamp]]
@@ -1050,10 +1111,20 @@ Hints:
                     .zip_eq(cs.r_ram_types.iter())
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
-                        let read_records =
-                            wit_infer_by_expr(fixed, witness, &[], &pi_mles, &challenges, r_expr)
-                                .get_ext_field_vec()[..*num_rows]
-                                .to_vec();
+                        let read_records = wit_infer_by_expr(
+                            r_expr,
+                            cs.num_witin,
+                            cs.num_structural_witin,
+                            cs.num_fixed as WitnessId,
+                            fixed,
+                            witness,
+                            &[],
+                            &pi_mles,
+                            &challenges,
+                        )
+                        .get_ext_field_vec()[..*num_rows]
+                            .to_vec();
+
                         let mut records = vec![];
                         for (row, record) in enumerate(read_records) {
                             // TODO: return error
@@ -1089,8 +1160,10 @@ Hints:
                         .filter(|(read, _)| !$writes.contains(read))
                         .take(10)
                         .for_each(|(_, row)| {
-                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
-                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
+                            let pc =
+                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64_vec()[0]);
+                            let ts =
+                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64_vec()[0]);
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} writes",
                                 annotation,
@@ -1125,8 +1198,10 @@ Hints:
                         .filter(|(write, _)| !$reads.contains(write))
                         .take(10)
                         .for_each(|(_, row)| {
-                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
-                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
+                            let pc =
+                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64_vec()[0]);
+                            let ts =
+                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64_vec()[0]);
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} reads",
                                 annotation,
@@ -1271,7 +1346,7 @@ mod tests {
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::{ToExpr, WitIn, mle::IntoMLE};
-    use p3::goldilocks::Goldilocks;
+    use p3::{field::FieldAlgebra, goldilocks::Goldilocks};
     use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
     #[derive(Debug)]
