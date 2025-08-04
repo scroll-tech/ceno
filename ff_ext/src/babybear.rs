@@ -228,22 +228,16 @@ pub mod impl_babybear {
                 (vec![1, 2, 3, 4], vec![5, 6, 7, 8], vec![676, 588, 386, 60]),
             ] {
                 let a = BabyBearExt4::from_base_iter(
-                    a_limbs
-                        .into_iter()
-                        .map(|limb| BabyBear::from_canonical_u32(limb)),
+                    a_limbs.into_iter().map(BabyBear::from_canonical_u32),
                 );
                 let b = BabyBearExt4::from_base_iter(
-                    b_limbs
-                        .into_iter()
-                        .map(|limb| BabyBear::from_canonical_u32(limb)),
+                    b_limbs.into_iter().map(BabyBear::from_canonical_u32),
                 );
                 let c = a * b;
                 assert_eq!(
                     c,
                     BabyBearExt4::from_base_iter(
-                        c_limbs
-                            .into_iter()
-                            .map(|limb| { BabyBear::from_canonical_u32(limb) })
+                        c_limbs.into_iter().map(BabyBear::from_canonical_u32)
                     )
                 );
             }
