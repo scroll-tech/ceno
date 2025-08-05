@@ -1,10 +1,9 @@
 use rayon::iter::IndexedParallelIterator;
-use std::sync::Arc;
 
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
     Expression,
-    mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension, Point},
+    mle::{IntoMLE, MultilinearExtension, Point},
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
 use rayon::{iter::ParallelIterator, slice::ParallelSliceMut};
@@ -25,7 +24,6 @@ pub enum SelectorType<E: ExtensionField> {
     Prefix(E::BaseField, Expression<E>),
     /// selector activates on the specified `indices`, which are assumed to be in ascending order.
     /// each index corresponds to a position within a fixed-size chunk (e.g., size 32),
-    /// and the same `expression` is applied at those positions across all chunks.
     OrderedSparse32 {
         indices: Vec<usize>,
         expression: Expression<E>,
@@ -92,11 +90,11 @@ impl<E: ExtensionField> SelectorType<E> {
         let (expr, eval) = match self {
             SelectorType::None => return,
             SelectorType::Whole(expr) => {
-                assert_eq!(out_point.len(), in_point.len());
+                debug_assert_eq!(out_point.len(), in_point.len());
                 (expr, eq_eval(out_point, in_point))
             }
             SelectorType::Prefix(_, expr) => {
-                assert!(num_instances <= out_point.len());
+                debug_assert!(num_instances <= (1 << out_point.len()));
                 (
                     expr,
                     eq_eval_less_or_equal_than(num_instances - 1, out_point, in_point),
@@ -126,27 +124,21 @@ impl<E: ExtensionField> SelectorType<E> {
         }
         evals[wit_id] = eval;
     }
-}
 
-pub(crate) fn select_from_expression_result<'a, E: ExtensionField>(
-    sel_type: &SelectorType<E>,
-    out_mle: ArcMultilinearExtension<'a, E>,
-    num_instances: usize,
-) -> ArcMultilinearExtension<'a, E> {
-    match sel_type {
-        SelectorType::None => out_mle.evaluations.sum().into_mle().into(),
-        SelectorType::Whole(_) => out_mle,
-        SelectorType::Prefix(_pad, _) => Arc::try_unwrap(out_mle)
-            .unwrap()
-            .evaluations_to_owned()
-            .select_prefix(num_instances)
-            .into_mle()
-            .into(),
-        SelectorType::OrderedSparse32 { indices, .. } => Arc::try_unwrap(out_mle)
-            .unwrap()
-            .evaluations_to_owned()
-            .pick_indices_within_chunk(CYCLIC_POW2_5.len(), num_instances, indices)
-            .into_mle()
-            .into(),
+    /// return ordered indices of OrderedSparse32
+    pub fn sparse32_indices(&self) -> &[usize] {
+        match self {
+            Self::OrderedSparse32 { indices, .. } => indices,
+            _ => panic!("invalid calling on non sparse type"),
+        }
+    }
+
+    pub fn selector_expr(&self) -> &Expression<E> {
+        match self {
+            Self::OrderedSparse32 { expression, .. }
+            | Self::Whole(expression)
+            | Self::Prefix(_, expression) => expression,
+            e => unimplemented!("no selector expression in {:?}", e),
+        }
     }
 }

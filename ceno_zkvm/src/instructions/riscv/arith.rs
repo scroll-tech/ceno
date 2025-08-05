@@ -1,13 +1,12 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{InsnKind, StepRecord};
-use ff_ext::ExtensionField;
-
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
     structs::ProgramParams, uint::Value, witness::LkMultiplicity,
 };
+use ceno_emul::{InsnKind, StepRecord};
+use ff_ext::ExtensionField;
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]

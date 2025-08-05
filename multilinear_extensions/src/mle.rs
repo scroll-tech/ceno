@@ -184,7 +184,9 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
 
     pub fn select_prefix(self, prefix_len: usize) -> Self {
         field_type_mut_map!(self, |slice| {
-            slice.to_mut()[prefix_len..].fill(Default::default());
+            slice[prefix_len..]
+                .par_iter_mut()
+                .for_each(|elem| *elem = Default::default());
             slice
         })
     }
@@ -221,6 +223,15 @@ impl<'a, E: ExtensionField> FieldType<'a, E> {
                 });
             slice
         })
+    }
+
+    #[inline(always)]
+    pub fn index(&self, index: usize) -> Either<E::BaseField, E> {
+        match self {
+            FieldType::Base(slice) => Either::Left(slice[index]),
+            FieldType::Ext(slice) => Either::Right(slice[index]),
+            FieldType::Unreachable => unreachable!(),
+        }
     }
 }
 
@@ -870,7 +881,10 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
     }
 
     /// immutable counterpart to [`as_view_chunks_mut`]
-    pub fn as_view_chunks(&'a self, num_chunks: usize) -> Vec<MultilinearExtension<'a, E>> {
+    pub fn as_view_chunks<'b>(&'a self, num_chunks: usize) -> Vec<MultilinearExtension<'b, E>>
+    where
+        'a: 'b,
+    {
         let total_len = self.evaluations.len();
         let chunk_size = total_len / num_chunks;
         assert!(
@@ -938,6 +952,11 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
             evaluations: owned_eval,
             num_vars: self.num_vars,
         }
+    }
+
+    #[inline(always)]
+    pub fn index(&self, index: usize) -> Either<E::BaseField, E> {
+        self.evaluations.index(index)
     }
 }
 

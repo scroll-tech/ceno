@@ -13,11 +13,7 @@ use multilinear_extensions::{
 use rand::thread_rng;
 use thiserror::Error;
 
-use crate::{
-    cpu::CpuBackend,
-    evaluation::EvalExpression,
-    selector::{SelectorType, select_from_expression_result},
-};
+use crate::{cpu::CpuBackend, evaluation::EvalExpression, selector::SelectorType};
 
 use super::{GKRCircuit, GKRCircuitWitness, layer::LayerType};
 
@@ -48,7 +44,6 @@ impl<E: ExtensionField> MockProver<E> {
         circuit_wit: &'a GKRCircuitWitness<'b, CpuBackend<E, PCS>>,
         mut evaluations: Vec<ArcMultilinearExtension<'b, E>>,
         mut challenges: Vec<E>,
-        num_instances: usize,
     ) -> Result<(), MockProverError<'a, E>>
     where
         'b: 'a,
@@ -60,27 +55,54 @@ impl<E: ExtensionField> MockProver<E> {
         // check the input layer
         for (layer, layer_wit) in izip!(&circuit.layers, &circuit_wit.layers) {
             let num_vars = layer_wit.num_vars();
-            let wits = layer_wit
+            let mut wits = layer_wit
                 .iter()
                 .map(|mle| mle.as_view().into())
                 .collect::<Vec<_>>();
+            let structural_wits = wits.split_off(layer.n_witin);
             let gots = layer
                 .exprs
                 .iter()
-                .map(|expr| wit_infer_by_expr(&[], &wits, &[], &[], &challenges, expr))
+                .zip_eq(
+                    layer
+                        .out_sel_and_eval_exprs
+                        .iter()
+                        .flat_map(|(sel_type, out)| izip!(iter::repeat(sel_type), out)),
+                )
+                .map(|(expr, (sel, _))| {
+                    wit_infer_by_expr(
+                        &(sel.selector_expr() * expr),
+                        layer.n_witin as WitnessId,
+                        layer.n_structural_witin as WitnessId,
+                        layer.n_fixed as WitnessId,
+                        &[],
+                        &wits,
+                        &structural_wits,
+                        &[],
+                        &challenges,
+                    )
+                })
                 .collect_vec();
 
             let expects = layer
                 .out_sel_and_eval_exprs
                 .iter()
                 .flat_map(|(_, out)| {
-                    out.iter()
-                        .map(|out| out.mock_evaluate(&evaluations, &challenges, num_vars))
+                    out.iter().map(|out| {
+                        out.mock_evaluate(
+                            layer.n_witin as WitnessId,
+                            layer.n_structural_witin as WitnessId,
+                            layer.n_fixed as WitnessId,
+                            &evaluations,
+                            &challenges,
+                            num_vars,
+                        )
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             match layer.ty {
                 LayerType::Zerocheck => {
-                    for (got, expect, expr, expr_name, (sel_type, out_eval)) in izip!(
+                    for (got, expect, expr, expr_name, (_, out_eval)) in izip!(
                         gots,
                         expects,
                         &layer.exprs,
@@ -90,7 +112,6 @@ impl<E: ExtensionField> MockProver<E> {
                             .iter()
                             .flat_map(|(sel_type, out)| izip!(iter::repeat(sel_type), out))
                     ) {
-                        let got = select_from_expression_result(sel_type, got, num_instances);
                         if expect != got {
                             return Err(MockProverError::ZerocheckExpressionNotMatch(
                                 Box::new(out_eval.clone()),
@@ -124,6 +145,9 @@ impl<E: ExtensionField> MockProver<E> {
 impl<E: ExtensionField> EvalExpression<E> {
     pub fn mock_evaluate<'a>(
         &self,
+        n_witin: WitnessId,
+        n_structural_witin: WitnessId,
+        n_fixed: WitnessId,
         evals: &[ArcMultilinearExtension<'a, E>],
         challenges: &[E],
         num_vars: usize,
@@ -134,18 +158,30 @@ impl<E: ExtensionField> EvalExpression<E> {
             }
             EvalExpression::Single(i) => evals[*i].clone(),
             EvalExpression::Linear(i, c0, c1) => wit_infer_by_expr(
+                &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
+                n_witin,
+                n_structural_witin,
+                n_fixed,
                 &[],
                 evals,
                 &[],
                 &[],
                 challenges,
-                &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
             ),
             EvalExpression::Partition(parts, indices) => {
                 assert_eq!(parts.len(), 1 << indices.len());
                 let parts = parts
                     .iter()
-                    .map(|part| part.mock_evaluate(evals, challenges, num_vars))
+                    .map(|part| {
+                        part.mock_evaluate(
+                            n_witin,
+                            n_structural_witin,
+                            n_fixed,
+                            evals,
+                            challenges,
+                            num_vars,
+                        )
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 indices
                     .iter()
