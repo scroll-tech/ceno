@@ -695,11 +695,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         let mut arg_eval = arg_eval
                             .get_ext_field_vec()
                             .iter()
-                            .map(|v| {
-                                let v = v.to_canonical_u64_vec();
-                                assert!(v[1..].iter().all(|x| *x == 0));
-                                v[0]
-                            })
+                            .map(E::to_canonical_u64)
                             .take(num_instances)
                             .collect_vec();
 
@@ -1027,7 +1023,7 @@ Hints:
                         lkm_tables.set_count(
                             *rom_type,
                             key,
-                            multiplicity.to_canonical_u64_vec()[0] as usize,
+                            multiplicity.to_canonical_u64() as usize,
                         );
                     }
                 }
@@ -1218,9 +1214,9 @@ Hints:
                         .take(10)
                         .for_each(|(_, row)| {
                             let pc =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64_vec()[0]);
+                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
                             let ts =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64_vec()[0]);
+                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} writes",
                                 annotation,
@@ -1256,9 +1252,9 @@ Hints:
                         .take(10)
                         .for_each(|(_, row)| {
                             let pc =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64_vec()[0]);
+                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
                             let ts =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64_vec()[0]);
+                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} reads",
                                 annotation,
