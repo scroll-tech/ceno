@@ -43,6 +43,27 @@ use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
 use ceno_gpu::gl64::CudaHalGL64;
+use cudarc::driver::{CudaDevice, DriverError};
+use ceno_gpu::gl64::convert_ceno_to_gpu_basefold_commitment;
+
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+// static CUDA_HAL: Lazy<Mutex<CudaHalGL64>> = Lazy::new(|| {
+//     Mutex::new(CudaHalGL64::new().unwrap())
+// });
+
+static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> = Lazy::new(|| {
+    CudaDevice::new(0)
+});
+static CUDA_HAL: Lazy<Result<Arc<Mutex<CudaHalGL64>>, Box<dyn std::error::Error + Send + Sync>>> = Lazy::new(|| {
+    let device = CUDA_DEVICE.as_ref().map_err(|e| format!("Device init failed: {:?}", e))?;
+    device.bind_to_thread()?;
+    
+    CudaHalGL64::new()
+        .map(|hal| Arc::new(Mutex::new(hal)))
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+});
+
 
 pub struct GpuTowerProver;
 
@@ -295,25 +316,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             //     panic!("error: type conversion failed");
             // };
 
-            let cuda_hal = CudaHalGL64::new().unwrap();
+            // let cuda_hal = CUDA_HAL.lock().unwrap(); // CudaHalGL64::new().unwrap();
+            let device = CUDA_DEVICE.as_ref().map_err(|e| format!("Device not available: {:?}", e)).unwrap();
+            device.bind_to_thread().unwrap();
+            let hal_arc = CUDA_HAL.as_ref().map_err(|e| format!("HAL not available: {:?}", e)).unwrap();
+            let cuda_hal = hal_arc.lock().unwrap();
+
             let traces_gl64: Vec<witness::RowMajorMatrix<p3::goldilocks::Goldilocks>> = 
                 unsafe { std::mem::transmute(vec_traces.clone()) };
             let pcs_data = cuda_hal.basefold.batch_commit(traces_gl64).unwrap();
             let basefold_commit = cuda_hal.basefold.get_pure_commitment(&pcs_data);
-            let basefold_mles = cuda_hal.basefold.get_arc_mle_witness_from_commitment(&pcs_data);
+            let basefold_mles = cuda_hal.basefold.get_mle_witness_from_commitment(&pcs_data);
 
             let commit: PCS::Commitment = unsafe {
                     std::mem::transmute_copy(&basefold_commit)
             };
             std::mem::forget(basefold_commit);
 
-            let basefold_mles_without_arc = basefold_mles.into_par_iter()
-                .map(|mle| mle.as_ref().clone())
-                .collect::<Vec<_>>();
             let mles: Vec<MultilinearExtension<'a, E>> = unsafe {
-                std::mem::transmute_copy(&basefold_mles_without_arc)
+                std::mem::transmute_copy(&basefold_mles)
             };
-            std::mem::forget(basefold_mles_without_arc);
+            std::mem::forget(basefold_mles);
 
             // let mut gpu_basefold_commitment = cuda_hal.basefold.batch_commit_e2e(traces_gl64).unwrap();
             // assert_eq!(gpu_basefold_commitment.commit, cpu_basefold_commitment.commit);
@@ -866,6 +889,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
     }
 }
 
+use p3::field::extension::BinomialExtensionField;
+type GL64 = p3::goldilocks::Goldilocks;
+type EGL64 = BinomialExtensionField<GL64, 2>;
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
@@ -883,9 +910,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
             panic!("GPU backend only supports Goldilocks base field");
         }
 
-        use p3::field::extension::BinomialExtensionField;
-        type EGL64 = BinomialExtensionField<p3::goldilocks::Goldilocks, 2>;
-        let cuda_hal = CudaHalGL64::new().unwrap();
+        // use p3::field::extension::BinomialExtensionField;
+        // type GL64 = p3::goldilocks::Goldilocks;
+        // type EGL64 = BinomialExtensionField<GL64, 2>;
+        // let cuda_hal = CUDA_HAL.lock().unwrap(); //CudaHalGL64::new().unwrap();
+        let device = CUDA_DEVICE.as_ref().map_err(|e| format!("Device not available: {:?}", e)).unwrap();
+        device.bind_to_thread().unwrap();
+        let hal_arc = CUDA_HAL.as_ref().map_err(|e| format!("HAL not available: {:?}", e)).unwrap();
+        let cuda_hal = hal_arc.lock().unwrap();
 
         let mut rounds = vec![];
         rounds.push((
@@ -916,13 +948,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
             ));
         }
 
+
+        use ceno_gpu::gl64::buffer::BufferImpl;
+        use ceno_gpu::BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu;
+
         // Type conversions using unsafe transmute
         let pp_gl64: &mpcs::basefold::structure::BasefoldProverParams<EGL64, mpcs::BasefoldRSParams> = 
             unsafe { std::mem::transmute(self.pp.as_ref().unwrap()) };
         let rounds_gl64: Vec<_> = rounds
             .iter()
             .map(|(commitment, point_eval_pairs)| {
-                let commitment_gl64: &mpcs::BasefoldCommitmentWithWitness<EGL64> = 
+                let commitment_gl64: &BasefoldCommitmentWithWitnessGpu<GL64, BufferImpl<GL64>> = 
                     unsafe { std::mem::transmute(*commitment) };
                 let point_eval_pairs_gl64: Vec<_> = point_eval_pairs
                     .iter()
@@ -984,12 +1020,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         >,
     ) -> DeviceProvingKey<GpuBackend<E, PCS>> {
         let pcs_data_original = pk.fixed_commit_wd.clone().unwrap();
-        
-        // transmute from PCS::CommitmentWithWitness to GpuBackend::PcsData
-        let pcs_data: Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData> = unsafe {
-            std::mem::transmute_copy(&pcs_data_original)
+
+        // assert pcs match 
+        let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>>() == 
+            std::mem::size_of::<PCS::CommitmentWithWitness>();
+        assert!(is_pcs_match, "pcs mismatch");
+
+        // 1. transmute from PCS::CommitmentWithWitness to BasefoldCommitmentWithWitness<E>
+        let basefold_commitment: &mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2> = unsafe {
+            std::mem::transmute_copy(&pcs_data_original.as_ref())
         };
-        std::mem::forget(pcs_data_original);
+        // 2. convert from BasefoldCommitmentWithWitness<E> to BasefoldCommitmentWithWitness<GL64>
+        let hal_arc = CUDA_HAL.as_ref().map_err(|e| format!("HAL not available: {:?}", e)).unwrap();
+        let cuda_hal = hal_arc.lock().unwrap();
+        let pcs_data_basefold = convert_ceno_to_gpu_basefold_commitment(&cuda_hal, basefold_commitment);
+        let pcs_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData = unsafe {
+            std::mem::transmute_copy(&pcs_data_basefold)
+        };
+        std::mem::forget(pcs_data_basefold);
+        let pcs_data = Arc::new(pcs_data);
         
         let fixed_mles =
             PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());

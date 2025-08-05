@@ -29,6 +29,8 @@ serde_json.workspace = true
 sumcheck.workspace = true
 transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "7adb306" }
 witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "7adb306" }
+once_cell = "1.21.3"
+cudarc = { version = "0.13.0", features = ["driver", "cuda-version-from-build-system"] }
 
 itertools.workspace = true
 ndarray.workspace = true

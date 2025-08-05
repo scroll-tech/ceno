@@ -455,6 +455,7 @@ dependencies = [
  "clap",
  "criterion",
  "cuda_hal",
+ "cudarc",
  "either",
  "ff_ext",
  "generic_static",
@@ -466,6 +467,7 @@ dependencies = [
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
  "ndarray",
  "num-traits",
+ "once_cell",
  "p3 0.1.0",
  "parse-size",
  "paste",
@@ -739,6 +741,7 @@ dependencies = [
 [[package]]
 name = "cuda_hal"
 version = "0.1.0"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#a70f0bbc79af929fa25b39582938552dff1d6894"
 dependencies = [
  "anyhow",
  "cudarc",
@@ -2969,6 +2972,7 @@ checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 [[package]]
 name = "sppark"
 version = "0.1.11"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#a70f0bbc79af929fa25b39582938552dff1d6894"
 dependencies = [
  "cc",
  "which",
@@ -2977,6 +2981,7 @@ dependencies = [
 [[package]]
 name = "sppark_plug"
 version = "0.1.0"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#a70f0bbc79af929fa25b39582938552dff1d6894"
 dependencies = [
  "cc",
  "ff_ext",
