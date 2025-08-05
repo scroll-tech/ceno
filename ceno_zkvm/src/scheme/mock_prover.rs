@@ -23,7 +23,7 @@ use gkr_iop::{
         OpsTable,
         ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
     },
-    utils::lk_multiplicity::LkMultiplicityRaw,
+    utils::lk_multiplicity::{LkMultiplicityRaw, Multiplicity},
 };
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
@@ -469,46 +469,72 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
 impl<'a, E: ExtensionField + Hash> MockProver<E> {
     pub fn run_with_challenge(
         cb: &CircuitBuilder<E>,
+        fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         challenge: [E; 2],
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], &[], Some(challenge), lkm)
+        Self::run_maybe_challenge(
+            cb,
+            fixed,
+            wits_in,
+            structural_witin,
+            &[],
+            &[],
+            Some(challenge),
+            lkm,
+        )
     }
 
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        Self::run_maybe_challenge(cb, wits_in, program, &[], None, lkm)
+        Self::run_maybe_challenge(cb, &[], wits_in, &[], program, &[], None, lkm)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
+        fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         pi: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
         let program = Program::from(program);
         let (table, challenge) = Self::load_tables_with_program(cb.cs, &program, challenge);
 
-        Self::run_maybe_challenge_with_table(cb.cs, &table, wits_in, pi, 1, challenge, lkm)
-            .map(|_| ())
+        Self::run_maybe_challenge_with_table(
+            cb.cs,
+            &table,
+            fixed,
+            wits_in,
+            structural_witin,
+            pi,
+            1,
+            challenge,
+            lkm,
+        )
+        .map(|_| ())
     }
 
     #[allow(clippy::too_many_arguments)]
     fn run_maybe_challenge_with_table(
         cs: &ConstraintSystem<E>,
         table: &HashSet<Vec<u64>>,
+        fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         pi: &[ArcMultilinearExtension<'a, E>],
         num_instances: usize,
         challenge: [E; 2],
-        expected_lkm: Option<LkMultiplicity>,
+        expected_lkm: Option<Multiplicity<u64>>,
     ) -> Result<LkMultiplicityRaw<E>, Vec<MockProverError<E, u64>>> {
         let mut shared_lkm = LkMultiplicityRaw::<E>::default();
         let mut errors = vec![];
@@ -544,9 +570,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     cs.num_witin,
                     cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
-                    &[],
+                    fixed,
                     wits_in,
-                    &[],
+                    structural_witin,
                     pi,
                     &challenge,
                 );
@@ -557,9 +583,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     cs.num_witin,
                     cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
-                    &[],
+                    fixed,
                     wits_in,
-                    &[],
+                    structural_witin,
                     pi,
                     &challenge,
                 );
@@ -587,9 +613,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     cs.num_witin,
                     cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
-                    &[],
+                    fixed,
                     wits_in,
-                    &[],
+                    structural_witin,
                     pi,
                     &challenge,
                 );
@@ -620,9 +646,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 cs.num_witin,
                 cs.num_structural_witin,
                 cs.num_fixed as WitnessId,
-                &[],
+                fixed,
                 wits_in,
-                &[],
+                structural_witin,
                 pi,
                 &challenge,
             );
@@ -660,22 +686,25 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             cs.num_witin,
                             cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
-                            &[],
+                            fixed,
                             wits_in,
-                            &[],
+                            structural_witin,
                             pi,
                             &challenge,
                         );
                         let mut arg_eval = arg_eval
                             .get_ext_field_vec()
                             .iter()
-                            .map(|v| v.to_canonical_u64_vec()[0])
+                            .map(|v| {
+                                let v = v.to_canonical_u64_vec();
+                                assert!(v[1..].iter().all(|x| *x == 0));
+                                v[0]
+                            })
                             .take(num_instances)
                             .collect_vec();
 
                         // Constant terms will have single element in `args_expr_evaluated`, so let's fix that.
-                        if arg_expr.is_constant() {
-                            assert_eq!(arg_eval.len(), 1);
+                        if arg_expr.is_constant() && arg_eval.len() == 1 {
                             arg_eval.resize(num_instances, arg_eval[0])
                         }
                         arg_eval
@@ -707,7 +736,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             }
 
-            errors.extend(compare_lkm(lkm_from_cs, lkm_from_assignment));
+            errors.extend(compare_lkm(
+                lkm_from_cs.into_finalize_result(),
+                lkm_from_assignment,
+            ));
         }
 
         if errors.is_empty() {
@@ -755,20 +787,23 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         t_vec
     }
 
+    #[allow(clippy::too_many_arguments)]
     /// Run and check errors
     ///
     /// Panic, unless we see exactly the expected errors.
     /// (Expecting no errors is a valid expectation.)
     pub fn assert_with_expected_errors(
         cb: &CircuitBuilder<E>,
+        fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         constraint_names: &[&str],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) {
         let error_groups = if let Some(challenge) = challenge {
-            Self::run_with_challenge(cb, wits_in, challenge, lkm)
+            Self::run_with_challenge(cb, fixed, wits_in, structural_witin, challenge, lkm)
         } else {
             Self::run(cb, wits_in, program, lkm)
         }
@@ -805,27 +840,43 @@ Hints:
 
     pub fn assert_satisfied_raw(
         cb: &CircuitBuilder<E>,
-        [raw_witin, _raw_structural_witin]: RMMCollections<E::BaseField>,
+        [raw_witin, raw_structural_witin]: RMMCollections<E::BaseField>,
         program: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) {
         let wits_in = raw_witin
             .to_mles()
             .into_iter()
             .map(|v| v.into())
             .collect_vec();
-        Self::assert_satisfied(cb, &wits_in, program, challenge, lkm);
+        let structural_witin = raw_structural_witin
+            .to_mles()
+            .into_iter()
+            .map(|v| v.into())
+            .collect_vec();
+        Self::assert_satisfied(cb, &wits_in, &structural_witin, program, challenge, lkm);
     }
 
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) {
-        Self::assert_with_expected_errors(cb, wits_in, program, &[], challenge, lkm);
+        assert_eq!(cb.cs.num_fixed, 0);
+        Self::assert_with_expected_errors(
+            cb,
+            &[],
+            wits_in,
+            structural_witin,
+            program,
+            &[],
+            challenge,
+            lkm,
+        );
     }
 
     pub fn assert_satisfied_full(
@@ -913,14 +964,15 @@ Hints:
                 );
                 // Assert opcode and check single opcode lk multiplicity
                 // Also combine multiplicity in lkm_opcodes
-                let lkm_from_assignments = witnesses
-                    .get_lk_mlt(circuit_name)
-                    .map(LkMultiplicityRaw::deep_clone);
+                let lkm_from_assignments = witnesses.get_lk_mlt(circuit_name).cloned();
+
                 match Self::run_maybe_challenge_with_table(
                     cs,
                     &lookup_table,
+                    &fixed,
                     &witness,
-                    &[],
+                    &structural_witness,
+                    &pi_mles,
                     num_rows,
                     challenges,
                     lkm_from_assignments,
@@ -987,7 +1039,10 @@ Hints:
         }
 
         // Assert lkm between all tables and combined opcode circuits
-        let errors: Vec<MockProverError<E, E>> = compare_lkm(lkm_tables, lkm_opcodes);
+        let errors: Vec<MockProverError<E, E>> = compare_lkm(
+            lkm_tables.into_finalize_result(),
+            lkm_opcodes.into_finalize_result(),
+        );
 
         if errors.is_empty() {
             tracing::info!("Mock proving successful for tables");
@@ -1014,6 +1069,7 @@ Hints:
                 {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
+                    let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
                         continue;
@@ -1037,7 +1093,7 @@ Hints:
                             cs.num_fixed as WitnessId,
                             fixed,
                             witness,
-                            &[],
+                            structural_witness,
                             &pi_mles,
                             &challenges,
                         )
@@ -1058,7 +1114,7 @@ Hints:
                                         cs.num_fixed as WitnessId,
                                         fixed,
                                         witness,
-                                        &[],
+                                        structural_witness,
                                         &pi_mles,
                                         &challenges,
                                     );
@@ -1095,6 +1151,7 @@ Hints:
                 {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
+                    let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
                         continue;
@@ -1118,7 +1175,7 @@ Hints:
                             cs.num_fixed as WitnessId,
                             fixed,
                             witness,
-                            &[],
+                            structural_witness,
                             &pi_mles,
                             &challenges,
                         )
@@ -1284,19 +1341,13 @@ Hints:
     }
 }
 
-fn compare_lkm<E, K>(
-    lkm_a: LkMultiplicityRaw<K>,
-    lkm_b: LkMultiplicityRaw<K>,
-) -> Vec<MockProverError<E, K>>
+fn compare_lkm<E, K>(lkm_a: Multiplicity<K>, lkm_b: Multiplicity<K>) -> Vec<MockProverError<E, K>>
 where
     E: ExtensionField,
     K: LkMultiplicityKey + Default + Ord,
 {
-    let lkm_a = lkm_a.into_finalize_result();
-    let lkm_b = lkm_b.into_finalize_result();
-
     // Compare each LK Multiplicity.
-    izip!(ROMType::iter(), &lkm_a, &lkm_b)
+    izip!(ROMType::iter(), &lkm_a.0, &lkm_b.0)
         .flat_map(|(rom_type, a_map, b_map)| {
             // We use a BTreeSet, instead of a HashSet, to ensure deterministic order.
             let keys: BTreeSet<_> = chain!(a_map.keys(), b_map.keys()).collect();
@@ -1399,7 +1450,7 @@ mod tests {
         .map(|f| f.into_mle().into())
         .collect_vec();
 
-        MockProver::assert_satisfied(&builder, &wits_in, &[], None, None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], &[], None, None);
     }
 
     #[derive(Debug)]
@@ -1435,7 +1486,7 @@ mod tests {
         ];
 
         let challenge = [1.into_f(), 1000.into_f()];
-        MockProver::assert_satisfied(&builder, &wits_in, &[], Some(challenge), None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], &[], Some(challenge), None);
     }
 
     #[test]
@@ -1449,7 +1500,7 @@ mod tests {
         let wits_in = vec![(vec![123u64.into_f()] as Vec<Goldilocks>).into_mle().into()];
 
         let challenge = [2.into_f(), 1000.into_f()];
-        let result = MockProver::run_with_challenge(&builder, &wits_in, challenge, None);
+        let result = MockProver::run_with_challenge(&builder, &[], &wits_in, &[], challenge, None);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
         assert_eq!(

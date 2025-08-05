@@ -560,11 +560,13 @@ mod test {
         }
         MockProver::assert_with_expected_errors(
             &cb,
+            &[],
             &raw_witin
                 .to_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[],
             &[],
             if is_ok { &[] } else { &["mid_u14"] },
             None,

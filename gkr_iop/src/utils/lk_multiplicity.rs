@@ -5,7 +5,7 @@ use std::{
     fmt::Debug,
     hash::Hash,
     mem::{self},
-    ops::AddAssign,
+    ops::{AddAssign, Deref, DerefMut},
     sync::Arc,
 };
 use thread_local::ThreadLocal;
@@ -19,6 +19,20 @@ pub type MultiplicityRaw<K> = [HashMap<K, usize>; mem::variant_count::<LookupTab
 
 #[derive(Clone, Default, Debug)]
 pub struct Multiplicity<K>(pub MultiplicityRaw<K>);
+
+impl<K> Deref for Multiplicity<K> {
+    type Target = MultiplicityRaw<K>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<K> DerefMut for Multiplicity<K> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 /// A lock-free thread safe struct to count logup multiplicity for each ROM type
 /// Lock-free by thread-local such that each thread will only have its local copy
@@ -34,7 +48,7 @@ where
     K: Copy + Clone + Debug + Default + Eq + Hash + Send,
 {
     fn add_assign(&mut self, rhs: Self) {
-        *self += Multiplicity(rhs.into_finalize_result());
+        *self += Multiplicity(rhs.into_finalize_result().0);
     }
 }
 
@@ -91,12 +105,12 @@ where
 
 impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> {
     /// Merge result from multiple thread local to single result.
-    pub fn into_finalize_result(self) -> MultiplicityRaw<K> {
+    pub fn into_finalize_result(self) -> Multiplicity<K> {
         let mut results = Multiplicity::default();
         for y in Arc::try_unwrap(self.multiplicity).unwrap() {
             results += y.into_inner();
         }
-        results.0
+        results
     }
 
     pub fn increment(&mut self, rom_type: LookupTable, key: K) {
@@ -113,17 +127,6 @@ impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> 
             table.remove(&key);
         } else {
             table.insert(key, count);
-        }
-    }
-
-    /// Clone inner, expensive operation.
-    pub fn deep_clone(&self) -> Self {
-        let multiplicity = self.multiplicity.get_or_default();
-        let deep_cloned = multiplicity.borrow().clone();
-        let thread_local = ThreadLocal::new();
-        thread_local.get_or(|| RefCell::new(deep_cloned));
-        LkMultiplicityRaw {
-            multiplicity: Arc::new(thread_local),
         }
     }
 }
@@ -212,6 +215,6 @@ mod tests {
         }
         let res = lkm.into_finalize_result();
         // check multiplicity counts of assert_byte
-        assert_eq!(res[LookupTable::U8 as usize][&8], thread_count);
+        assert_eq!(res.0[LookupTable::U8 as usize][&8], thread_count);
     }
 }
