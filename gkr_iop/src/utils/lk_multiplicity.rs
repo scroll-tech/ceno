@@ -34,6 +34,47 @@ impl<K> DerefMut for Multiplicity<K> {
     }
 }
 
+/// for consuming the wrapper
+impl<K> IntoIterator for Multiplicity<K>
+where
+    MultiplicityRaw<K>: IntoIterator,
+{
+    type Item = <MultiplicityRaw<K> as IntoIterator>::Item;
+    type IntoIter = <MultiplicityRaw<K> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+/// for immutable references
+impl<'a, K> IntoIterator for &'a Multiplicity<K>
+where
+    &'a MultiplicityRaw<K>: IntoIterator,
+{
+    type Item = <&'a MultiplicityRaw<K> as IntoIterator>::Item;
+    type IntoIter = <&'a MultiplicityRaw<K> as IntoIterator>::IntoIter;
+
+    #[allow(clippy::into_iter_on_ref)]
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.0).into_iter()
+    }
+}
+
+/// for mutable references
+impl<'a, K> IntoIterator for &'a mut Multiplicity<K>
+where
+    &'a mut MultiplicityRaw<K>: IntoIterator,
+{
+    type Item = <&'a mut MultiplicityRaw<K> as IntoIterator>::Item;
+    type IntoIter = <&'a mut MultiplicityRaw<K> as IntoIterator>::IntoIter;
+
+    #[allow(clippy::into_iter_on_ref)]
+    fn into_iter(self) -> Self::IntoIter {
+        (&mut self.0).into_iter()
+    }
+}
+
 /// A lock-free thread safe struct to count logup multiplicity for each ROM type
 /// Lock-free by thread-local such that each thread will only have its local copy
 /// struct is cloneable, for internallly it use Arc so the clone will be low cost
@@ -215,6 +256,6 @@ mod tests {
         }
         let res = lkm.into_finalize_result();
         // check multiplicity counts of assert_byte
-        assert_eq!(res.0[LookupTable::U8 as usize][&8], thread_count);
+        assert_eq!(res[LookupTable::U8 as usize][&8], thread_count);
     }
 }

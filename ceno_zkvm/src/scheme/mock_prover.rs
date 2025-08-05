@@ -1213,10 +1213,8 @@ Hints:
                         .filter(|(read, _)| !$writes.contains(read))
                         .take(10)
                         .for_each(|(_, row)| {
-                            let pc =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
-                            let ts =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
+                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
+                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} writes",
                                 annotation,
@@ -1251,10 +1249,8 @@ Hints:
                         .filter(|(write, _)| !$reads.contains(write))
                         .take(10)
                         .for_each(|(_, row)| {
-                            let pc =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
-                            let ts =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
+                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
+                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} reads",
                                 annotation,
@@ -1343,7 +1339,7 @@ where
     K: LkMultiplicityKey + Default + Ord,
 {
     // Compare each LK Multiplicity.
-    izip!(ROMType::iter(), &lkm_a.0, &lkm_b.0)
+    izip!(ROMType::iter(), &lkm_a, &lkm_b)
         .flat_map(|(rom_type, a_map, b_map)| {
             // We use a BTreeSet, instead of a HashSet, to ensure deterministic order.
             let keys: BTreeSet<_> = chain!(a_map.keys(), b_map.keys()).collect();
