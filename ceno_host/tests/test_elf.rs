@@ -478,6 +478,23 @@ fn test_sha256_extend() -> Result<()> {
 }
 
 #[test]
+fn test_sha256_full() -> Result<()> {
+    let public_io: &Vec<u32> = &vec![
+        30689455, 3643278932, 1489987339, 1626711444, 3610619649, 1925764735, 581441152, 321290698,
+    ];
+    let hints: &Vec<u32> = &vec![0u32; 10];
+    let all_messages = messages_to_strings(&ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::sha256,
+        CenoStdin::default().write(hints)?,
+        Some(CenoStdin::default().write(public_io)?),
+    ));
+    assert_eq!(all_messages.len(), 0);
+
+    Ok(())
+}
+
+#[test]
 fn test_bn254_fptower_syscalls() -> Result<()> {
     let program_elf = ceno_examples::bn254_fptower_syscalls;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
