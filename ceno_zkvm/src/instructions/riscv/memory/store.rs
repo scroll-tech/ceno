@@ -5,7 +5,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{
-            RIVInstruction, constants::UInt, insn_base::MemAddr, memory::gadget::MemWordChange,
+            RIVInstruction, constants::UInt, insn_base::MemAddr, memory::gadget::MemWordUtil,
             s_insn::SInstructionConfig,
         },
     },
@@ -17,7 +17,7 @@ use crate::{
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
-use std::{array, marker::PhantomData};
+use std::marker::PhantomData;
 
 pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     s_insn: SInstructionConfig<E>,
@@ -28,7 +28,7 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     prev_memory_value: UInt<E>,
 
     memory_addr: MemAddr<E>,
-    word_change: Option<MemWordChange<E, N_ZEROS>>,
+    word_change: Option<MemWordUtil<E, N_ZEROS>>,
 }
 
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
@@ -93,18 +93,13 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let (new_memory_value, word_change) = match I::INST_KIND {
             InsnKind::SW => (rs2_read.memory_expr(), None),
             InsnKind::SH | InsnKind::SB => {
-                let change = MemWordChange::<E, N_ZEROS>::construct_circuit(
+                let change = MemWordUtil::<E, N_ZEROS>::construct_circuit(
                     circuit_builder,
                     &memory_addr,
                     &prev_memory_value,
                     &rs2_read,
                 )?;
-                (
-                    array::from_fn(|i| {
-                        prev_memory_value.memory_expr()[i].clone() + change.as_lo_hi()[i].clone()
-                    }),
-                    Some(change),
-                )
+                (change.as_lo_hi().clone(), Some(change))
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
