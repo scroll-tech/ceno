@@ -17,7 +17,7 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
-use std::{array, marker::PhantomData, ops::Neg};
+use std::{array, marker::PhantomData};
 use witness::set_val;
 
 pub struct BranchCircuit<E, I>(PhantomData<(E, I)>);
@@ -66,9 +66,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
 
         let read_rs1_msb_f = circuit_builder.create_witin(|| "read_rs1_msb_f");
         let read_rs2_msb_f = circuit_builder.create_witin(|| "read_rs2_msb_f");
-        let diff_marker: [WitIn; UINT_LIMBS] = array::from_fn(|_| {
+        let diff_marker: [WitIn; UINT_LIMBS] = array::from_fn(|i| {
             circuit_builder
-                .create_bit(|| "diff_maker")
+                .create_bit(|| format!("diff_maker_{i}"))
                 .expect("create_bit_error")
         });
         let diff_val = circuit_builder.create_witin(|| "diff_val");
@@ -100,7 +100,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
             prefix_sum += diff_marker[i].expr();
             circuit_builder.require_zero(
                 || format!("prefix_diff_zero_{i}"),
-                prefix_sum.expr().neg() * diff.clone(),
+                (E::BaseField::ONE.expr() - prefix_sum.expr()) * diff.clone(),
             )?;
             circuit_builder.condition_require_zero(
                 || format!("diff_maker_conditional_equal_{i}"),
@@ -117,26 +117,26 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
         circuit_builder.assert_bit(|| "prefix_sum_bit", prefix_sum.expr())?;
         circuit_builder.condition_require_zero(
             || "cmp_lt_conditional_zero",
-            prefix_sum.expr().neg(),
+            E::BaseField::ONE.expr() - prefix_sum.expr(),
             cmp_lt.expr(),
         )?;
 
         // Range check to ensure diff_val is non-zero.
-        circuit_builder.assert_ux::<_, _, 8>(
+        circuit_builder.assert_ux::<_, _, LIMB_BITS>(
             || "diff_val is non-zero",
             prefix_sum.expr() * (diff_val.expr() - E::BaseField::ONE.expr()),
         )?;
 
         let branch_taken_bit = match I::INST_KIND {
             InsnKind::BLT => {
-                // Check if read_rs1_msb_f and read_rs2_msb_f are in [-128, 127) if signed, [0, 256) if unsigned.
-                circuit_builder.assert_ux::<_, _, 8>(
+                // Check if read_rs1_msb_f and read_rs2_msb_f are in [-32768, 32767) if signed, [0, 65536) if unsigned.
+                circuit_builder.assert_ux::<_, _, LIMB_BITS>(
                     || "read_rs1_msb_f_signed_range_check",
                     read_rs1_msb_f.expr()
                         + E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr(),
                 )?;
 
-                circuit_builder.assert_ux::<_, _, 8>(
+                circuit_builder.assert_ux::<_, _, LIMB_BITS>(
                     || "read_rs2_msb_f_signed_range_check",
                     read_rs2_msb_f.expr()
                         + E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr(),
@@ -145,13 +145,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
             }
             InsnKind::BGE => {
                 // Check if read_rs1_msb_f and read_rs2_msb_f are in [-128, 127) if signed, [0, 256) if unsigned.
-                circuit_builder.assert_ux::<_, _, 8>(
+                circuit_builder.assert_ux::<_, _, LIMB_BITS>(
                     || "read_rs1_msb_f_signed_range_check",
                     read_rs1_msb_f.expr()
                         + E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr(),
                 )?;
 
-                circuit_builder.assert_ux::<_, _, 8>(
+                circuit_builder.assert_ux::<_, _, LIMB_BITS>(
                     || "read_rs2_msb_f_signed_range_check",
                     read_rs2_msb_f.expr()
                         + E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr(),
@@ -160,12 +160,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
             }
             InsnKind::BLTU => {
                 // Check if read_rs1_msb_f and read_rs2_msb_f are in [-128, 127) if signed, [0, 256) if unsigned.
-                circuit_builder.assert_ux::<_, _, 8>(
+                circuit_builder.assert_ux::<_, _, LIMB_BITS>(
                     || "read_rs1_msb_f_signed_range_check",
                     read_rs1_msb_f.expr(),
                 )?;
 
-                circuit_builder.assert_ux::<_, _, 8>(
+                circuit_builder.assert_ux::<_, _, LIMB_BITS>(
                     || "read_rs2_msb_f_signed_range_check",
                     read_rs2_msb_f.expr(),
                 )?;
@@ -173,12 +173,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
             }
             InsnKind::BGEU => {
                 // Check if read_rs1_msb_f and read_rs2_msb_f are in [-128, 127) if signed, [0, 256) if unsigned.
-                circuit_builder.assert_ux::<_, _, 8>(
+                circuit_builder.assert_ux::<_, _, LIMB_BITS>(
                     || "read_rs1_msb_f_signed_range_check",
                     read_rs1_msb_f.expr(),
                 )?;
 
-                circuit_builder.assert_ux::<_, _, 8>(
+                circuit_builder.assert_ux::<_, _, LIMB_BITS>(
                     || "read_rs2_msb_f_signed_range_check",
                     read_rs2_msb_f.expr(),
                 )?;
@@ -291,11 +291,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
         set_val!(instance, config.diff_val, diff_val as u64);
 
         if diff_idx != UINT_LIMBS {
-            lk_multiplicity.assert_ux::<8>((diff_val - 1) as u64);
+            lk_multiplicity.assert_ux::<LIMB_BITS>((diff_val - 1) as u64);
+        } else {
+            lk_multiplicity.assert_ux::<LIMB_BITS>(0);
         }
 
-        lk_multiplicity.assert_ux::<8>(a_msb_range as u64);
-        lk_multiplicity.assert_ux::<8>(b_msb_range as u64);
+        lk_multiplicity.assert_ux::<LIMB_BITS>(a_msb_range as u64);
+        lk_multiplicity.assert_ux::<LIMB_BITS>(b_msb_range as u64);
 
         Ok(())
     }
