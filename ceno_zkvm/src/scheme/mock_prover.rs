@@ -45,7 +45,7 @@ use std::{
 use strum::IntoEnumIterator;
 use tiny_keccak::{Hasher, Keccak};
 
-const MAX_CONSTRAINT_DEGREE: usize = 2;
+const MAX_CONSTRAINT_DEGREE: usize = 3;
 const MOCK_PROGRAM_SIZE: usize = 32;
 pub const MOCK_PC_START: ByteAddr = ByteAddr({
     // This needs to be a static, because otherwise the compiler complains

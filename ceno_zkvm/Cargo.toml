@@ -83,6 +83,7 @@ nightly-features = [
   "witness/nightly-features",
 ]
 sanity-check = ["mpcs/sanity-check"]
+u16limb_circuit = []
 
 [[bench]]
 harness = false

@@ -118,7 +118,6 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     };
 
     let insn_code = encode_rv32(InsnKind::BLTU, 2, 3, 0, -8);
-    println!("{:?}", insn_code);
     let (raw_witin, lkm) = BltuInstruction::assign_instances(
         &config,
         circuit_builder.cs.num_witin as usize,
