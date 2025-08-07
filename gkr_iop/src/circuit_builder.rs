@@ -265,12 +265,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
                 .chain(record.clone())
                 .collect(),
         );
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc lk_record degree ({})",
-            name_fn().into()
-        );
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);

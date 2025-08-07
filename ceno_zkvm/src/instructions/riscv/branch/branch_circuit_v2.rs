@@ -1,7 +1,7 @@
 use crate::{
+    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    gadgets::SignedLtConfig,
     instructions::{
         Instruction,
         riscv::{
@@ -14,11 +14,11 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
-use ff_ext::ExtensionField;
-use gkr_iop::gadgets::{IsEqualConfig, IsLtConfig};
+use ff_ext::{ExtensionField, FieldInto, SmallField};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
 use std::{array, marker::PhantomData, ops::Neg};
+use witness::set_val;
 
 pub struct BranchCircuit<E, I>(PhantomData<(E, I)>);
 
@@ -47,9 +47,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
     type InstructionConfig = BranchConfig<E>;
 
     fn name() -> String {
-        todo!()
+        format!("{:?}", I::INST_KIND)
     }
 
+    /// circuit implementation refer from https://github.com/openvm-org/openvm/blob/ca36de3803213da664b03d111801ab903d55e360/extensions/rv32im/circuit/src/branch_lt/core.rs
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
@@ -99,7 +100,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
             prefix_sum += diff_marker[i].expr();
             circuit_builder.require_zero(
                 || format!("prefix_diff_zero_{i}"),
-                (prefix_sum.clone() * diff.clone()).neg(),
+                prefix_sum.expr().neg() * diff.clone(),
             )?;
             circuit_builder.condition_require_zero(
                 || format!("diff_maker_conditional_equal_{i}"),
@@ -209,11 +210,111 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
     }
 
     fn assign_instance(
-        _config: &Self::InstructionConfig,
-        _instance: &mut [E::BaseField],
-        _lk_multiplicity: &mut LkMultiplicity,
-        _step: &StepRecord,
+        config: &Self::InstructionConfig,
+        instance: &mut [E::BaseField],
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        todo!()
+        config
+            .b_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
+
+        let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
+        let rs1_limbs = rs1.as_u16_limbs();
+        let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
+        let rs2_limbs = rs2.as_u16_limbs();
+        config.read_rs1.assign_limbs(instance, rs1_limbs);
+        config.read_rs2.assign_limbs(instance, rs2_limbs);
+
+        let (cmp_result, diff_idx, rs1_sign, rs2_sign) =
+            run_cmp::<E>(step.insn.kind, rs1_limbs, rs2_limbs);
+        config
+            .diff_marker
+            .iter()
+            .enumerate()
+            .for_each(|(i, witin)| {
+                set_val!(instance, witin, (i == diff_idx) as u64);
+            });
+
+        let is_signed = matches!(step.insn().kind, InsnKind::BLT | InsnKind::BGE);
+        let is_ge = matches!(step.insn().kind, InsnKind::BGE | InsnKind::BGEU);
+
+        let cmp_lt = cmp_result ^ is_ge;
+        set_val!(instance, config.cmp_lt, cmp_lt as u64);
+
+        // We range check (read_rs1_msb_f + 128) and (read_rs2_msb_f + 128) if signed,
+        // read_rs1_msb_f and read_rs2_msb_f if not
+        let (read_rs1_msb_f, a_msb_range) = if rs1_sign {
+            (
+                -E::BaseField::from_canonical_u32(
+                    (1 << LIMB_BITS) - rs1_limbs[UINT_LIMBS - 1] as u32,
+                ),
+                rs1_limbs[UINT_LIMBS - 1] - (1 << (LIMB_BITS - 1)),
+            )
+        } else {
+            (
+                E::BaseField::from_canonical_u16(rs1_limbs[UINT_LIMBS - 1]),
+                rs1_limbs[UINT_LIMBS - 1] + ((is_signed as u16) << (LIMB_BITS - 1)),
+            )
+        };
+        let (read_rs2_msb_f, b_msb_range) = if rs2_sign {
+            (
+                -E::BaseField::from_canonical_u32(
+                    (1 << LIMB_BITS) - rs2_limbs[UINT_LIMBS - 1] as u32,
+                ),
+                rs2_limbs[UINT_LIMBS - 1] - (1 << (LIMB_BITS - 1)),
+            )
+        } else {
+            (
+                E::BaseField::from_canonical_u16(rs2_limbs[UINT_LIMBS - 1]),
+                rs2_limbs[UINT_LIMBS - 1] + ((is_signed as u16) << (LIMB_BITS - 1)),
+            )
+        };
+
+        set_val!(instance, config.read_rs1_msb_f, read_rs1_msb_f);
+        set_val!(instance, config.read_rs2_msb_f, read_rs2_msb_f);
+
+        let diff_val = if diff_idx == UINT_LIMBS {
+            0
+        } else if diff_idx == (UINT_LIMBS - 1) {
+            if cmp_lt {
+                read_rs2_msb_f - read_rs1_msb_f
+            } else {
+                read_rs1_msb_f - read_rs2_msb_f
+            }
+            .to_canonical_u64() as u16
+        } else if cmp_lt {
+            rs2_limbs[diff_idx] - rs1_limbs[diff_idx]
+        } else {
+            rs1_limbs[diff_idx] - rs2_limbs[diff_idx]
+        };
+        set_val!(instance, config.diff_val, diff_val as u64);
+
+        if diff_idx != UINT_LIMBS {
+            lk_multiplicity.assert_ux::<8>((diff_val - 1) as u64);
+        }
+
+        lk_multiplicity.assert_ux::<8>(a_msb_range as u64);
+        lk_multiplicity.assert_ux::<8>(b_msb_range as u64);
+
+        Ok(())
     }
+}
+
+// returns (cmp_result, diff_idx, x_sign, y_sign)
+pub(super) fn run_cmp<E: ExtensionField>(
+    local_opcode: InsnKind,
+    x: &[u16],
+    y: &[u16],
+) -> (bool, usize, bool, bool) {
+    let signed = matches!(local_opcode, InsnKind::BLT | InsnKind::BGE);
+    let ge_op = matches!(local_opcode, InsnKind::BGE | InsnKind::BGEU);
+    let x_sign = (x[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1) && signed;
+    let y_sign = (y[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1) && signed;
+    for i in (0..UINT_LIMBS).rev() {
+        if x[i] != y[i] {
+            return ((x[i] < y[i]) ^ x_sign ^ y_sign ^ ge_op, i, x_sign, y_sign);
+        }
+    }
+    (ge_op, UINT_LIMBS, x_sign, y_sign)
 }

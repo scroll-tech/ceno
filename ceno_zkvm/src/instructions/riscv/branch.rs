@@ -32,7 +32,7 @@ impl RIVInstruction for BltuOp {
 }
 #[cfg(feature = "u16limb_circuit")]
 // TODO use branch_circuit_v2
-pub type BltuInstruction<E> = branch_circuit::BranchCircuit<E, BltuOp>;
+pub type BltuInstruction<E> = branch_circuit_v2::BranchCircuit<E, BltuOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type BltuInstruction<E> = branch_circuit::BranchCircuit<E, BltuOp>;
 
@@ -42,7 +42,7 @@ impl RIVInstruction for BgeuOp {
 }
 #[cfg(feature = "u16limb_circuit")]
 // TODO use branch_circuit_v2
-pub type BgeuInstruction<E> = branch_circuit::BranchCircuit<E, BgeuOp>;
+pub type BgeuInstruction<E> = branch_circuit_v2::BranchCircuit<E, BgeuOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type BgeuInstruction<E> = branch_circuit::BranchCircuit<E, BgeuOp>;
 
@@ -52,9 +52,9 @@ impl RIVInstruction for BltOp {
 }
 #[cfg(feature = "u16limb_circuit")]
 // TODO use branch_circuit_v2
-pub type BltInstruction<E> = branch_circuit::BranchCircuit<E, BltOp>;
-#[cfg(not(feature = "u16limb_circuit"))]
 pub type BltInstruction<E> = branch_circuit_v2::BranchCircuit<E, BltOp>;
+#[cfg(not(feature = "u16limb_circuit"))]
+pub type BltInstruction<E> = branch_circuit::BranchCircuit<E, BltOp>;
 
 pub struct BgeOp;
 impl RIVInstruction for BgeOp {
@@ -62,6 +62,6 @@ impl RIVInstruction for BgeOp {
 }
 #[cfg(feature = "u16limb_circuit")]
 // TODO use branch_circuit_v2
-pub type BgeInstruction<E> = branch_circuit::BranchCircuit<E, BgeOp>;
-#[cfg(not(feature = "u16limb_circuit"))]
 pub type BgeInstruction<E> = branch_circuit_v2::BranchCircuit<E, BgeOp>;
+#[cfg(not(feature = "u16limb_circuit"))]
+pub type BgeInstruction<E> = branch_circuit::BranchCircuit<E, BgeOp>;
