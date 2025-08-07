@@ -1,3 +1,4 @@
+/// circuit implementation refer from https://github.com/openvm-org/openvm/blob/ca36de3803213da664b03d111801ab903d55e360/extensions/rv32im/circuit/src/branch_lt/core.rs
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,

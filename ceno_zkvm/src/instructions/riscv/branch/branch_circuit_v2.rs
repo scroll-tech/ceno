@@ -33,7 +33,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
         format!("{:?}", I::INST_KIND)
     }
 
-    /// circuit implementation refer from https://github.com/openvm-org/openvm/blob/ca36de3803213da664b03d111801ab903d55e360/extensions/rv32im/circuit/src/branch_lt/core.rs
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         _param: &ProgramParams,

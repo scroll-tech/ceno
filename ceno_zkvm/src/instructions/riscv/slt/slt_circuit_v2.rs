@@ -22,7 +22,7 @@ pub struct SetLessThanConfig<E: ExtensionField> {
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub(crate) rd_written: UInt<E>,
 
     uint_lt_config: UIntLimbsLTConfig<E>,
