@@ -362,12 +362,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         )?;
 
         // verify LogUp witness nominator p(x) ?= constant vector 1
-        // index 0 is LogUp witness for Fixed Lookup table
-        if logup_p_evals[0].eval != E::ONE {
-            return Err(ZKVMError::VerifyError(
-                "Lookup table witness p(x) != constant 1".into(),
-            ));
-        }
+        logup_p_evals
+            .iter()
+            .try_for_each(|PointAndEval { eval, .. }| {
+                if *eval != E::ONE {
+                    Err(ZKVMError::VerifyError(
+                        "Lookup table witness p(x) != constant 1".into(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            })?;
 
         debug_assert!(
             chain!(&record_evals, &logup_p_evals, &logup_q_evals)
