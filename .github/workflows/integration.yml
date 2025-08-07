@@ -3,7 +3,7 @@ name: Integrations
 on:
   merge_group:
   pull_request:
-    types: [synchronize, opened, reopened, ready_for_review]
+    types: [ synchronize, opened, reopened, ready_for_review ]
   push:
     branches:
       - master
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   skip_check:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [ self-hosted, Linux, X64 ]
     outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
     steps:
@@ -27,14 +27,14 @@ jobs:
           do_not_skip: '["pull_request", "workflow_dispatch", "schedule", "merge_group"]'
 
   integration:
-    needs: [skip_check]
+    needs: [ skip_check ]
     if: |
       github.event.pull_request.draft == false &&
       (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
 
     name: Integration testing
     timeout-minutes: 30
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [ self-hosted, Linux, X64 ]
 
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +53,13 @@ jobs:
           RUST_LOG: debug
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --package ceno_zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/fibonacci
+
+      - name: Run fibonacci (debug) + feature u16limb_circuit
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --package ceno_zkvm --features u16limb_circuit --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/fibonacci
+
 
       - name: Run fibonacci (release)
         env:
