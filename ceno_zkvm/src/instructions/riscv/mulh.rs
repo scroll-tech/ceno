@@ -9,7 +9,6 @@ impl RIVInstruction for MulOp {
     const INST_KIND: InsnKind = InsnKind::MUL;
 }
 #[cfg(feature = "u16limb_circuit")]
-// TODO use mulh_circuit_v2
 pub type MulInstruction<E> = mulh_circuit_v2::MulhInstructionBase<E, MulOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type MulInstruction<E> = mulh_circuit::MulhInstructionBase<E, MulOp>;
@@ -19,7 +18,6 @@ impl RIVInstruction for MulhOp {
     const INST_KIND: InsnKind = InsnKind::MULH;
 }
 #[cfg(feature = "u16limb_circuit")]
-// TODO use mulh_circuit_v2
 pub type MulhInstruction<E> = mulh_circuit_v2::MulhInstructionBase<E, MulhOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type MulhInstruction<E> = mulh_circuit::MulhInstructionBase<E, MulhOp>;
@@ -30,7 +28,6 @@ impl RIVInstruction for MulhuOp {
 }
 
 #[cfg(feature = "u16limb_circuit")]
-// TODO use mulh_circuit_v2
 pub type MulhuInstruction<E> = mulh_circuit_v2::MulhInstructionBase<E, MulhuOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type MulhuInstruction<E> = mulh_circuit::MulhInstructionBase<E, MulhuOp>;
@@ -40,7 +37,6 @@ impl RIVInstruction for MulhsuOp {
     const INST_KIND: InsnKind = InsnKind::MULHSU;
 }
 #[cfg(feature = "u16limb_circuit")]
-// TODO use mulh_circuit_v2
 pub type MulhsuInstruction<E> = mulh_circuit_v2::MulhInstructionBase<E, MulhsuOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type MulhsuInstruction<E> = mulh_circuit::MulhInstructionBase<E, MulhsuOp>;
@@ -106,11 +102,10 @@ mod test {
     }
 
     fn verify_mulu<I: RIVInstruction, E: ExtensionField>(name: &'static str, rs1: u32, rs2: u32) {
-        #[cfg(feature = "u16limb_circuit")]
-        // TODO use mulh_circuit_v2
-        use super::mulh_circuit::MulhInstructionBase;
         #[cfg(not(feature = "u16limb_circuit"))]
         use super::mulh_circuit::MulhInstructionBase;
+        #[cfg(feature = "u16limb_circuit")]
+        use super::mulh_circuit_v2::MulhInstructionBase;
 
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
