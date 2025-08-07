@@ -707,6 +707,8 @@ pub fn run_e2e_with_checkpoint<
     );
 
     // proving
+    // let backend: CpuBackend<E, PCS> = CpuBackend::new();
+    // let device = CpuProver::new(backend);
     let backend: GpuBackend<E, PCS> = GpuBackend::new();
     let device = GpuProver::new(backend);
     let mut prover = ZKVMProver::new(pk, device);

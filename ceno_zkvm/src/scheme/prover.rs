@@ -144,7 +144,7 @@ impl<
             transcript.append_message(&num_instance.to_le_bytes());
         }
 
-        let commit_to_traces_span = entered_span!("batch commit to traces", profiling_2 = true);
+        let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
         let mut wits_instances = BTreeMap::new();
         let mut wits_rmms = BTreeMap::new();
         let mut structural_wits = BTreeMap::new();
@@ -189,8 +189,10 @@ impl<
         exit_span!(commit_to_traces_span);
 
         // transfer pk to device
+        let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
         let device_pk = self.device.transport_proving_key(self.pk.clone());
         let mut fixed_mles = device_pk.fixed_mles;
+        exit_span!(transfer_pk_span);
 
         // squeeze two challenges from transcript
         let challenges = [
@@ -275,6 +277,7 @@ impl<
                 Ok((points, evaluations))
             },
         )?;
+        exit_span!(main_proofs_span);
 
         // batch opening pcs
         // generate static info from prover key for expected num variable
@@ -284,7 +287,7 @@ impl<
             .values()
             .map(|pk| (pk.get_cs().num_witin(), pk.get_cs().num_fixed()))
             .collect_vec();
-        let pcs_opening = entered_span!("pcs_opening");
+        let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
         let mpcs_opening_proof = self.device.open(
             witness_data,
             Some(device_pk.pcs_data),
@@ -294,7 +297,6 @@ impl<
             &num_instances_with_rotation,
             &mut transcript,
         );
-
         exit_span!(pcs_opening);
 
         let vm_proof = ZKVMProof::new(
@@ -304,7 +306,6 @@ impl<
             witin_commit,
             mpcs_opening_proof,
         );
-        exit_span!(main_proofs_span);
 
         Ok(vm_proof)
     }
