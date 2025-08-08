@@ -8,6 +8,7 @@ use gkr_iop::{
     chip::Chip,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
+    utils::lk_multiplicity::Multiplicity,
 };
 use itertools::Itertools;
 use multilinear_extensions::{ToExpr, WitIn, util::max_usable_threads};
@@ -93,7 +94,7 @@ pub trait Instruction<E: ExtensionField> {
         num_witin: usize,
         num_structural_witin: usize,
         steps: Vec<StepRecord>,
-    ) -> Result<(RMMCollections<E::BaseField>, LkMultiplicity), ZKVMError> {
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
@@ -121,14 +122,14 @@ pub trait Instruction<E: ExtensionField> {
             raw_structual_witin.par_batch_iter_mut(num_instance_per_batch);
 
         raw_witin_iter
-            .zip(raw_structual_witin_iter)
-            .zip(steps.par_chunks(num_instance_per_batch))
+            .zip_eq(raw_structual_witin_iter)
+            .zip_eq(steps.par_chunks(num_instance_per_batch))
             .flat_map(|((instances, structural_instance), steps)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 instances
                     .chunks_mut(num_witin)
                     .zip_eq(structural_instance.chunks_mut(num_structural_witin))
-                    .zip(steps)
+                    .zip_eq(steps)
                     .map(|((instance, structural_instance), step)| {
                         set_val!(structural_instance, selector_witin, E::BaseField::ONE);
                         Self::assign_instance(config, instance, &mut lk_multiplicity, step)
@@ -139,6 +140,9 @@ pub trait Instruction<E: ExtensionField> {
 
         raw_witin.padding_by_strategy();
         raw_structual_witin.padding_by_strategy();
-        Ok(([raw_witin, raw_structual_witin], lk_multiplicity))
+        Ok((
+            [raw_witin, raw_structual_witin],
+            lk_multiplicity.into_finalize_result(),
+        ))
     }
 }

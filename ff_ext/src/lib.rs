@@ -146,4 +146,11 @@ pub trait ExtensionField:
 
     /// Convert a field elements to a u64 vector
     fn to_canonical_u64_vec(&self) -> Vec<u64>;
+
+    /// retrive first field elements to u64
+    fn to_canonical_u64(&self) -> u64 {
+        let res = self.to_canonical_u64_vec();
+        assert!(res[1..].iter().all(|v| *v == 0));
+        res[0]
+    }
 }
