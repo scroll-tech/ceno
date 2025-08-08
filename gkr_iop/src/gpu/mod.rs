@@ -1,67 +1,57 @@
-use std::{collections::HashMap, sync::Arc};
-
 use crate::{
     LayerWitness,
     evaluation::EvalExpression,
-    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
+    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::Layer},
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
+use either::Either;
 use ff_ext::ExtensionField;
-use itertools::Itertools;
-use mpcs::{Point, PolynomialCommitmentScheme, SecurityLevel};
+use itertools::{Itertools, izip};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
-    mle::{IntoMLE, MultilinearExtension},
-    op_mle,
-    utils::eval_by_expr_constant,
+    mle::{ArcMultilinearExtension, MultilinearExtension, Point},
+    wit_infer_by_monomial_expr,
 };
 use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::{iter, rc::Rc, sync::Arc};
 use sumcheck::macros::{entered_span, exit_span};
 use witness::RowMajorMatrix;
+
+use crate::cpu::layer_witness;
 
 use ceno_gpu::BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu;
 use ceno_gpu::gl64::buffer::BufferImpl;
 
 pub struct GpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub param: PCS::Param,
+    pub pp: <PCS as PolynomialCommitmentScheme<E>>::ProverParam,
+    pub vp: <PCS as PolynomialCommitmentScheme<E>>::VerifierParam,
+    pub max_poly_size_log2: usize,
     _marker: std::marker::PhantomData<E>,
 }
 
+pub const DEFAULT_MAX_NUM_VARIABLES: usize = 24;
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for GpuBackend<E, PCS> {
     fn default() -> Self {
-        Self::new()
+        Self::new(DEFAULT_MAX_NUM_VARIABLES, Conjecture100bits)
     }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
-    pub fn new() -> Self {
-        let param =
-            PCS::setup(E::BaseField::TWO_ADICITY, SecurityLevel::Conjecture100bits).unwrap();
+    pub fn new(max_poly_size_log2: usize, security_level: SecurityLevel) -> Self {
+        let param = PCS::setup(E::BaseField::TWO_ADICITY, security_level).unwrap();
+        let (pp, vp) = PCS::trim(param, 1 << max_poly_size_log2).unwrap();
         Self {
-            param,
+            pp,
+            vp,
+            max_poly_size_log2,
             _marker: std::marker::PhantomData,
         }
     }
 }
 
-// pub struct CommitmentWithWitnessGpu {
-    
-// }
 
-
-// impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu<'a, E> {
-//     fn num_vars(&self) -> usize {
-//         self.num_vars()
-//     }
-
-//     fn eval(&self, point: Point<E>) -> E {
-//         self.evaluate(&point)
-//     }
-// }
-
-// pub struct MultilinearExtensionGpu {
-    
-// }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
     type E = E;
@@ -69,30 +59,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
     type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     type PcsData = BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<E::BaseField>>;
+
+    fn get_pp(&self) -> &<Self::Pcs as PolynomialCommitmentScheme<Self::E>>::ProverParam {
+        &self.pp
+    }
+
+    fn get_vp(&self) -> &<Self::Pcs as PolynomialCommitmentScheme<Self::E>>::VerifierParam {
+        &self.vp
+    }
 }
 
-// impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
-//     type E = E;
-//     type Pcs = PCS;
-//     type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
-//     type Matrix = RowMajorMatrix<E::BaseField>;
-//     type PcsData = PCS::CommitmentWithWitness;
-// }
-
 /// GPU prover for GPU backend
-pub struct GpuProver<PB: ProverBackend> {
-    pub backend: PB,
-    pub pp: Option<<<PB as ProverBackend>::Pcs as PolynomialCommitmentScheme<PB::E>>::ProverParam>,
-    pub largest_poly_size: Option<usize>,
+pub struct GpuProver<PB: ProverBackend + 'static> {
+    pub backend: Rc<PB>,
 }
 
 impl<PB: ProverBackend> GpuProver<PB> {
-    pub fn new(backend: PB) -> Self {
-        Self {
-            backend,
-            pp: None,
-            largest_poly_size: None,
-        }
+    pub fn new(backend: Rc<PB>) -> Self {
+        Self { backend }
     }
 }
 
@@ -106,24 +90,23 @@ where
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     ProtocolWitnessGeneratorProver<GpuBackend<E, PCS>> for GpuProver<GpuBackend<E, PCS>>
 {
-    fn gkr_witness<'a>(
+    fn gkr_witness<'a, 'b>(
         circuit: &GKRCircuit<E>,
-        phase1_witness_group_rmm: &RowMajorMatrix<E::BaseField>,
-        fixed: &RowMajorMatrix<E::BaseField>,
+        phase1_witness_group: &[ArcMultilinearExtension<'b, E>],
+        structural_witness: &[ArcMultilinearExtension<'b, E>],
+        fixed: &[ArcMultilinearExtension<'b, E>],
+        pub_io: &[ArcMultilinearExtension<'b, E>],
         challenges: &[E],
     ) -> (
         GKRCircuitWitness<'a, GpuBackend<E, PCS>>,
         GKRCircuitOutput<'a, GpuBackend<E, PCS>>,
-    ) {
+    )
+    where
+        'b: 'a,
+    {
         // layer order from output to input
-        let num_instances_with_rotation = phase1_witness_group_rmm.num_instances();
         let mut layer_wits =
             Vec::<LayerWitness<GpuBackend<E, PCS>>>::with_capacity(circuit.layers.len() + 1);
-        let phase1_witness_group = phase1_witness_group_rmm
-            .to_mles()
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
 
         let mut witness_mle_flatten = vec![None; circuit.n_evaluations];
 
@@ -139,37 +122,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
                 });
 
-            // process fixed (and probably short) mle
+            // TODO process fixed (and probably short) mle
+            assert_eq!(
+                first_layer.in_eval_expr.len(),
+                phase1_witness_group.len(),
+                "TODO process fixed (and probably short) mle"
+            );
             // XXX currently fixed poly not support in layers > 1
-            first_layer
-                .in_eval_expr
-                .par_iter()
-                .enumerate()
-                .skip(phase1_witness_group.len())
-                .map(|(index, witin)| {
-                    (
-                        *witin,
-                        Some(
-                            fixed[index - phase1_witness_group.len()]
-                                .iter()
-                                .cycle()
-                                .cloned()
-                                .take(num_instances_with_rotation)
-                                .collect_vec()
-                                .into_mle()
-                                .into(),
-                        ),
-                    )
-                })
-                .collect::<HashMap<_, _>>()
-                .into_iter()
-                .for_each(|(witin, optional_mle)| witness_mle_flatten[witin] = optional_mle);
         }
 
         // generate all layer witness from input to output
         for (i, layer) in circuit.layers.iter().rev().enumerate() {
-            tracing::info!("generating input {i} layer with layer name {}", layer.name);
-            let num_instances = num_instances_with_rotation >> layer.rotation_cyclic_group_log2;
+            tracing::debug!("generating input {i} layer with layer name {}", layer.name);
             let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
             // process in_evals to prepare layer witness
             // This should assume the input of the first layer is the phase1 witness of the circuit.
@@ -181,12 +145,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                         .clone()
                         .expect("witness must exist")
                 })
+                .chain(if i == 0 {
+                    // only supply structural witness for first layer
+                    // TODO figure out how to support > 1 GKR layers
+                    Either::Left(structural_witness.iter().cloned())
+                } else {
+                    Either::Right(iter::empty())
+                })
+                .chain(fixed.iter().cloned())
                 .collect_vec();
 
             // infer current layer output
             let current_layer_output: Vec<
                 Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
-            > = crate::cpu::layer_witness(layer, &current_layer_wits, challenges, num_instances);
+            > = layer_witness(layer, &current_layer_wits, pub_io, challenges);
             layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
             // process out to prepare output witness
@@ -196,19 +168,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 .flat_map(|(_, out_eval)| out_eval)
                 .zip_eq(&current_layer_output)
                 .for_each(|(out_eval, out_mle)| match out_eval {
-                    EvalExpression::Single(out) => {
+                    // note: Linear (x - b)/a has been done and encode in expression
+                    EvalExpression::Single(out) | EvalExpression::Linear(out, _, _) => {
                         witness_mle_flatten[*out] = Some(out_mle.clone());
-                    }
-                    EvalExpression::Linear(out, a, b) => {
-                        let a_inv = eval_by_expr_constant(challenges, a).inverse();
-                        let b = eval_by_expr_constant(challenges, b);
-                        let new_wit = op_mle!(|out_mle| out_mle
-                            .iter()
-                            .map(|x| a_inv * (-b + *x))
-                            .collect_vec()
-                            .into_mle()
-                            .into());
-                        witness_mle_flatten[*out] = Some(new_wit);
                     }
                     EvalExpression::Zero => { // zero expression
                         // do nothing on zero expression

@@ -338,7 +338,7 @@ dependencies = [
  "ceno_zkvm",
  "clap",
  "console",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "get_dir",
  "gkr_iop",
  "mpcs 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -406,7 +406,7 @@ dependencies = [
  "anyhow",
  "ceno_rt",
  "elf",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "num-bigint",
@@ -458,7 +458,7 @@ dependencies = [
  "cuda_hal",
  "cudarc",
  "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "generic_static",
  "gkr_iop",
  "glob",
@@ -742,15 +742,15 @@ dependencies = [
 [[package]]
 name = "cuda_hal"
 version = "0.1.0"
-source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#b28311390fa8621e6bf69e2d3bbd516fab60d2cf"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#16b72bdaec002a8304facceaf51fbac66ced6c08"
 dependencies = [
  "anyhow",
  "cudarc",
  "downcast-rs 0.1.2",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
+ "ff_ext",
  "itertools 0.13.0",
- "mpcs 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
+ "mpcs 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "p3-commit",
  "p3-dft",
  "p3-field",
@@ -765,11 +765,11 @@ dependencies = [
  "rayon",
  "sppark",
  "sppark_plug",
- "sumcheck 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
+ "sumcheck 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "thiserror 2.0.12",
  "tracing",
- "transcript 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "witness 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
+ "transcript 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "witness 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
 ]
 
 [[package]]
@@ -1043,17 +1043,6 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
-dependencies = [
- "once_cell",
- "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "rand_core",
- "serde",
-]
-
-[[package]]
-name = "ff_ext"
-version = "0.1.0"
 source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "once_cell",
@@ -1180,7 +1169,7 @@ dependencies = [
  "criterion",
  "cuda_hal",
  "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "itertools 0.13.0",
  "mpcs 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -1750,7 +1739,7 @@ dependencies = [
  "clap",
  "criterion",
  "ctr",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "generic-array",
  "itertools 0.13.0",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -1774,37 +1763,6 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
-dependencies = [
- "aes",
- "bincode",
- "bitvec",
- "clap",
- "ctr",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "generic-array",
- "itertools 0.13.0",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "num-bigint",
- "num-integer",
- "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "poseidon 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "rand",
- "rand_chacha",
- "rayon",
- "serde",
- "sumcheck 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "tracing",
- "tracing-subscriber",
- "transcript 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "whir 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "witness 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "zeroize",
-]
-
-[[package]]
-name = "mpcs"
-version = "0.1.0"
 source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "aes",
@@ -1812,7 +1770,7 @@ dependencies = [
  "bitvec",
  "clap",
  "ctr",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "generic-array",
  "itertools 0.13.0",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -1840,7 +1798,7 @@ dependencies = [
  "criterion",
  "either",
  "env_logger",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "itertools 0.13.0",
  "log",
  "p3 0.1.0",
@@ -1853,25 +1811,10 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
-dependencies = [
- "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "itertools 0.13.0",
- "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "rand",
- "rayon",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "multilinear_extensions"
-version = "0.1.0"
 source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "itertools 0.13.0",
  "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "rand",
@@ -2073,28 +2016,6 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 [[package]]
 name = "p3"
 version = "0.1.0"
-dependencies = [
- "p3-baby-bear",
- "p3-challenger",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-fri",
- "p3-goldilocks",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-mds",
- "p3-merkle-tree",
- "p3-poseidon",
- "p3-poseidon2",
- "p3-symmetric",
- "p3-util",
-]
-
-[[package]]
-name = "p3"
-version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
 dependencies = [
  "p3-baby-bear",
  "p3-challenger",
@@ -2484,21 +2405,9 @@ name = "poseidon"
 version = "0.1.0"
 dependencies = [
  "criterion",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "p3 0.1.0",
  "rand",
- "serde",
- "unroll",
-]
-
-[[package]]
-name = "poseidon"
-version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
-dependencies = [
- "criterion",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
  "serde",
  "unroll",
 ]
@@ -2509,7 +2418,7 @@ version = "0.1.0"
 source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "criterion",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "serde",
  "unroll",
@@ -3064,7 +2973,7 @@ checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 [[package]]
 name = "sppark"
 version = "0.1.11"
-source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#b28311390fa8621e6bf69e2d3bbd516fab60d2cf"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#16b72bdaec002a8304facceaf51fbac66ced6c08"
 dependencies = [
  "cc",
  "which",
@@ -3073,10 +2982,10 @@ dependencies = [
 [[package]]
 name = "sppark_plug"
 version = "0.1.0"
-source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#b28311390fa8621e6bf69e2d3bbd516fab60d2cf"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#16b72bdaec002a8304facceaf51fbac66ced6c08"
 dependencies = [
  "cc",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
+ "ff_ext",
  "itertools 0.13.0",
  "p3-field",
  "sppark",
@@ -3157,7 +3066,7 @@ dependencies = [
  "criterion",
  "crossbeam-channel",
  "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "p3 0.1.0",
@@ -3175,30 +3084,11 @@ dependencies = [
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
-dependencies = [
- "crossbeam-channel",
- "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "itertools 0.13.0",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "rayon",
- "serde",
- "sumcheck_macro 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "thiserror 1.0.69",
- "tracing",
- "transcript 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
-]
-
-[[package]]
-name = "sumcheck"
-version = "0.1.0"
 source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "crossbeam-channel",
  "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -3214,7 +3104,7 @@ dependencies = [
 name = "sumcheck_macro"
 version = "0.1.0"
 dependencies = [
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "p3 0.1.0",
@@ -3222,19 +3112,6 @@ dependencies = [
  "quote",
  "rand",
  "sumcheck 0.1.0",
- "syn 2.0.101",
-]
-
-[[package]]
-name = "sumcheck_macro"
-version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
-dependencies = [
- "itertools 0.13.0",
- "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "proc-macro2",
- "quote",
- "rand",
  "syn 2.0.101",
 ]
 
@@ -3591,7 +3468,7 @@ name = "transcript"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "itertools 0.13.0",
  "p3 0.1.0",
  "poseidon 0.1.0",
@@ -3601,23 +3478,10 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
-dependencies = [
- "crossbeam-channel",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "itertools 0.13.0",
- "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "poseidon 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "serde",
-]
-
-[[package]]
-name = "transcript"
-version = "0.1.0"
 source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "crossbeam-channel",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "itertools 0.13.0",
  "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "poseidon 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -3899,7 +3763,7 @@ dependencies = [
  "clap",
  "derivative",
  "derive_more",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "goldilocks",
  "itertools 0.14.0",
  "lazy_static",
@@ -3923,38 +3787,6 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
-dependencies = [
- "bincode",
- "blake2",
- "blake3",
- "clap",
- "derivative",
- "derive_more",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "goldilocks",
- "itertools 0.14.0",
- "lazy_static",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "poseidon 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "rand",
- "rand_chacha",
- "rayon",
- "serde",
- "serde_json",
- "sha3",
- "sumcheck 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "thiserror 1.0.69",
- "tracing",
- "transcript 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "transpose",
- "witness 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
-]
-
-[[package]]
-name = "whir"
-version = "0.1.0"
 source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "bincode",
@@ -3963,7 +3795,7 @@ dependencies = [
  "clap",
  "derivative",
  "derive_more",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "goldilocks",
  "itertools 0.14.0",
  "lazy_static",
@@ -4110,7 +3942,7 @@ dependencies = [
 name = "witness"
 version = "0.1.0"
 dependencies = [
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "p3 0.1.0",
  "rand",
@@ -4122,23 +3954,9 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?rev=7adb306#7adb306fe5564c6451ebeea88a4d655d1586906e"
-dependencies = [
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7adb306)",
- "rand",
- "rayon",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "witness"
-version = "0.1.0"
 source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
+ "ff_ext",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "rand",
