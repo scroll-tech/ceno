@@ -11,7 +11,7 @@ use crate::{
             ecall::KeccakInstruction,
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
-            mul::MulhuInstruction,
+            mulh::MulhuInstruction,
             shift::{SllInstruction, SrlInstruction},
             shift_imm::{SlliInstruction, SraiInstruction, SrliInstruction},
             slti::SltiInstruction,
@@ -35,7 +35,7 @@ use dummy::LargeEcallDummy;
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
-use mul::{MulInstruction, MulhInstruction, MulhsuInstruction};
+use mulh::{MulInstruction, MulhInstruction, MulhsuInstruction};
 use shift::SraInstruction;
 use slt::{SltInstruction, SltuInstruction};
 use slti::SltiuInstruction;
