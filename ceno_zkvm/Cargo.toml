@@ -16,19 +16,19 @@ ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
 ceno_gpu.workspace = true
 either.workspace = true
-ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7adb306" }
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
 gkr_iop = { path = "../gkr_iop" }
 keccakf = "0.1.2"
-mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "7adb306" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "7adb306" }
+mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "7c277a1" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "7c277a1" }
 p3.workspace = true
 rand_chacha.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sumcheck.workspace = true
-transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "7adb306" }
-witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "7adb306" }
+transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "7c277a1" }
+witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "7c277a1" }
 once_cell = "1.21.3"
 cudarc = { version = "0.13.0", features = ["driver", "cuda-version-from-build-system"] }
 

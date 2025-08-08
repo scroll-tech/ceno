@@ -11,7 +11,7 @@ version.workspace = true
 
 [dependencies]
 crossbeam-channel.workspace = true
-ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7adb306" }
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
 itertools.workspace = true
 p3.workspace = true
 poseidon.workspace = true

@@ -15,10 +15,10 @@ bincode = "1.3.3"
 bitvec = "1.0"
 clap.workspace = true
 ctr = "0.9"
-ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7adb306" }
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
 generic-array = { version = "0.14", features = ["serde"] }
 itertools.workspace = true
-multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "7adb306" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "7c277a1" }
 num-bigint = "0.4"
 num-integer = "0.1"
 p3.workspace = true
@@ -30,9 +30,9 @@ serde.workspace = true
 sumcheck.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "7adb306" }
+transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "7c277a1" }
 whir = { path = "../whir" }
-witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "7adb306" }
+witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "7c277a1" }
 zeroize = "1.8"
 
 [dev-dependencies]
