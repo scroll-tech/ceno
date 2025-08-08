@@ -2,7 +2,7 @@ use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    gadgets::{SignedExtendConfig, UIntLimbsLT, UIntLimbsLTConfig},
+    gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
     instructions::{
         Instruction,
         riscv::{
@@ -12,13 +12,13 @@ use crate::{
         },
     },
     structs::ProgramParams,
-    tables::InsnRecord,
+    utils::{imm_sign_extend, imm_sign_extend_circuit},
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind, SWord, StepRecord, Word};
-use ff_ext::ExtensionField;
-use gkr_iop::{gadgets::IsLtConfig, utils::i64_to_base};
+use ceno_emul::{InsnKind, StepRecord, Word};
+use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
+use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 use witness::set_val;
 
@@ -28,8 +28,10 @@ pub struct SetLessThanImmConfig<E: ExtensionField> {
 
     rs1_read: UInt<E>,
     imm: WitIn,
+    // 0 positive, 1 negative
+    imm_sign: Option<WitIn>,
     #[allow(dead_code)]
-    rd_written: UInt<E>,
+    pub(crate) rd_written: UInt<E>,
 
     uint_lt_config: UIntLimbsLTConfig<E>,
 }
@@ -47,14 +49,34 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
+        assert_eq!(UINT_LIMBS, 2);
         // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
         let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
         let imm = cb.create_witin(|| "imm");
-        let imm_uint = UInt::from_exprs_unchecked(vec![imm.expr()]);
 
-        let uint_lt_config = match I::INST_KIND {
-            InsnKind::SLTIU => UIntLimbsLT::construct_circuit(cb, &rs1_read, &imm_uint, false)?,
-            InsnKind::SLTI => UIntLimbsLT::construct_circuit(cb, &rs1_read, &imm_uint, true)?,
+        let (uint_lt_config, imm_sign_extend, imm_sign) = match I::INST_KIND {
+            InsnKind::SLTIU => {
+                let imm_sign_extend = UInt::from_exprs_unchecked(
+                    imm_sign_extend_circuit::<E>(false, E::BaseField::ZERO.expr(), imm.expr())
+                        .to_vec(),
+                );
+                (
+                    UIntLimbsLT::construct_circuit(cb, &rs1_read, &imm_sign_extend, false)?,
+                    imm_sign_extend,
+                    None,
+                )
+            }
+            InsnKind::SLTI => {
+                let imm_sign = cb.create_bit(|| "imm_sign")?;
+                let imm_sign_extend = UInt::from_exprs_unchecked(
+                    imm_sign_extend_circuit::<E>(true, imm_sign.expr(), imm.expr()).to_vec(),
+                );
+                (
+                    UIntLimbsLT::construct_circuit(cb, &rs1_read, &imm_sign_extend, true)?,
+                    imm_sign_extend,
+                    Some(imm_sign),
+                )
+            }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
 
@@ -63,7 +85,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         let i_insn = IInstructionConfig::<E>::construct_circuit(
             cb,
             I::INST_KIND,
-            imm.expr(),
+            imm_sign_extend.expr().remove(0),
+            imm_sign
+                .map(|imm_sign| imm_sign.expr())
+                .unwrap_or(E::BaseField::ZERO.expr()),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
@@ -73,6 +98,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             i_insn,
             rs1_read,
             imm,
+            imm_sign,
             rd_written,
             uint_lt_config,
         })
@@ -92,38 +118,26 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             .rs1_read
             .assign_value(instance, Value::new_unchecked(rs1));
 
-        let imm = InsnRecord::imm_internal(&step.insn());
-        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
-
+        let imm = step.insn().imm as i16 as u16;
         let is_signed = matches!(step.insn().kind, InsnKind::SLT);
+        set_val!(instance, config.imm, E::BaseField::from_canonical_u16(imm));
+        let imm_sign_extend = imm_sign_extend(is_signed, step.insn().imm as i16);
+        if is_signed {
+            set_val!(
+                instance,
+                config.imm_sign.as_ref().unwrap(),
+                E::BaseField::from_bool(imm_sign_extend[1] > 0)
+            );
+        }
+
         UIntLimbsLT::<E>::assign(
             &config.uint_lt_config,
             instance,
             lkm,
-            rs1_read.as_u16_limbs(),
-            rs2_read.as_u16_limbs(),
+            rs1_value.as_u16_limbs(),
+            &imm_sign_extend,
             is_signed,
         )?;
-        match I::INST_KIND {
-            InsnKind::SLTIU => {
-                config
-                    .lt
-                    .assign_instance(instance, lkm, rs1 as u64, imm as u64)?;
-            }
-            InsnKind::SLTI => {
-                config.is_rs1_neg.as_ref().unwrap().assign_instance(
-                    instance,
-                    lkm,
-                    *rs1_value.as_u16_limbs().last().unwrap() as u64,
-                )?;
-                let (rs1, imm) = (rs1 as SWord, imm as SWord);
-                config
-                    .lt
-                    .assign_instance_signed(instance, lkm, rs1 as i64, imm as i64)?;
-            }
-            _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
-        }
-
         Ok(())
     }
 }

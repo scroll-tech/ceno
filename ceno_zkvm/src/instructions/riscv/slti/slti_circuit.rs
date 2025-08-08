@@ -16,9 +16,10 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, SWord, StepRecord, Word};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{gadgets::IsLtConfig, utils::i64_to_base};
 use multilinear_extensions::{ToExpr, WitIn};
+use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 use witness::set_val;
 
@@ -29,7 +30,7 @@ pub struct SetLessThanImmConfig<E: ExtensionField> {
     rs1_read: UInt<E>,
     imm: WitIn,
     #[allow(dead_code)]
-    rd_written: UInt<E>,
+    pub(crate) rd_written: UInt<E>,
     lt: IsLtConfig,
 
     // SLTI
@@ -70,6 +71,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             cb,
             I::INST_KIND,
             imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            E::BaseField::ZERO.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,

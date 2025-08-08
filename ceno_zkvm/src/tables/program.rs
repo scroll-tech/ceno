@@ -1,5 +1,3 @@
-use std::{collections::HashMap, marker::PhantomData};
-
 use super::RMMCollections;
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
@@ -16,18 +14,35 @@ use itertools::Itertools;
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use std::{collections::HashMap, marker::PhantomData};
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
+
+#[cfg(not(feature = "u16limb_circuit"))]
 #[derive(Clone, Debug)]
 pub struct InsnRecord<T>([T; 6]);
 
+#[cfg(feature = "u16limb_circuit")]
+#[derive(Clone, Debug)]
+pub struct InsnRecord<T>([T; 7]);
+
 impl<T> InsnRecord<T> {
+    #[cfg(not(feature = "u16limb_circuit"))]
     pub fn new(pc: T, kind: T, rd: Option<T>, rs1: T, rs2: T, imm_internal: T) -> Self
     where
         T: From<u32>,
     {
         let rd = rd.unwrap_or_else(|| T::from(Instruction::RD_NULL));
         InsnRecord([pc, kind, rd, rs1, rs2, imm_internal])
+    }
+
+    #[cfg(feature = "u16limb_circuit")]
+    pub fn new(pc: T, kind: T, rd: Option<T>, rs1: T, rs2: T, imm_internal: T, imm_sign: T) -> Self
+    where
+        T: From<u32>,
+    {
+        let rd = rd.unwrap_or_else(|| T::from(Instruction::RD_NULL));
+        InsnRecord([pc, kind, rd, rs1, rs2, imm_internal, imm_sign])
     }
 
     pub fn as_slice(&self) -> &[T] {
@@ -37,14 +52,30 @@ impl<T> InsnRecord<T> {
 
 impl<F: SmallField> InsnRecord<F> {
     fn from_decoded(pc: u32, insn: &Instruction) -> Self {
-        InsnRecord([
-            (pc as u64).into_f(),
-            (insn.kind as u64).into_f(),
-            (insn.rd_internal() as u64).into_f(),
-            (insn.rs1_or_zero() as u64).into_f(),
-            (insn.rs2_or_zero() as u64).into_f(),
-            i64_to_base(InsnRecord::imm_internal(insn)),
-        ])
+        #[cfg(not(feature = "u16limb_circuit"))]
+        {
+            InsnRecord([
+                (pc as u64).into_f(),
+                (insn.kind as u64).into_f(),
+                (insn.rd_internal() as u64).into_f(),
+                (insn.rs1_or_zero() as u64).into_f(),
+                (insn.rs2_or_zero() as u64).into_f(),
+                i64_to_base(InsnRecord::imm_internal(insn)),
+            ])
+        }
+
+        #[cfg(feature = "u16limb_circuit")]
+        {
+            InsnRecord([
+                (pc as u64).into_f(),
+                (insn.kind as u64).into_f(),
+                (insn.rd_internal() as u64).into_f(),
+                (insn.rs1_or_zero() as u64).into_f(),
+                (insn.rs2_or_zero() as u64).into_f(),
+                F::from_canonical_u16(insn.imm as i16 as u16),
+                F::from_bool(InsnRecord::imm_signed_internal(insn)),
+            ])
+        }
     }
 }
 
@@ -67,6 +98,16 @@ impl InsnRecord<()> {
             // Signed view.
             // For example, u32::MAX is `-1 mod p` in the finite field.
             _ => insn.imm as i64,
+        }
+    }
+
+    pub fn imm_signed_internal(insn: &Instruction) -> bool {
+        match (insn.kind, InsnFormat::from(insn.kind)) {
+            (SLLI | SRLI | SRAI, _) => false,
+            // Unsigned view.
+            (_, R | U) | (ADDI | SLTIU | ANDI | XORI | ORI, _) => false,
+            // Signed view.
+            _ => true,
         }
     }
 }
@@ -96,6 +137,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<ProgramTableConfig, ZKVMError> {
+        #[cfg(not(feature = "u16limb_circuit"))]
         let record = InsnRecord([
             cb.create_fixed(|| "pc"),
             cb.create_fixed(|| "kind"),
@@ -103,6 +145,17 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             cb.create_fixed(|| "rs1"),
             cb.create_fixed(|| "rs2"),
             cb.create_fixed(|| "imm_internal"),
+        ]);
+
+        #[cfg(feature = "u16limb_circuit")]
+        let record = InsnRecord([
+            cb.create_fixed(|| "pc"),
+            cb.create_fixed(|| "kind"),
+            cb.create_fixed(|| "rd"),
+            cb.create_fixed(|| "rs1"),
+            cb.create_fixed(|| "rs2"),
+            cb.create_fixed(|| "imm_internal"),
+            cb.create_fixed(|| "imm_sign"),
         ]);
 
         let mlt = cb.create_witin(|| "mlt");

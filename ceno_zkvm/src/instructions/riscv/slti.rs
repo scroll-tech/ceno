@@ -1,5 +1,14 @@
-mod slti_circuit;
+#[cfg(feature = "u16limb_circuit")]
 mod slti_circuit_v2;
+
+#[cfg(not(feature = "u16limb_circuit"))]
+mod slti_circuit;
+
+#[cfg(feature = "u16limb_circuit")]
+use crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmInstruction;
+
+#[cfg(not(feature = "u16limb_circuit"))]
+use crate::instructions::riscv::slti::slti_circuit::SetLessThanImmInstruction;
 
 use std::marker::PhantomData;
 
@@ -24,7 +33,6 @@ use crate::{
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
-use crate::instructions::riscv::slti::slti_circuit::SetLessThanImmInstruction;
 
 pub struct SltiOp;
 impl RIVInstruction for SltiOp {
@@ -37,7 +45,6 @@ impl RIVInstruction for SltiuOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLTIU;
 }
 pub type SltiuInstruction<E> = SetLessThanImmInstruction<E, SltiuOp>;
-
 
 #[cfg(test)]
 mod test {

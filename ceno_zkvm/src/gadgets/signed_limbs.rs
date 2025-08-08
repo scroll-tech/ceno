@@ -11,6 +11,7 @@ use p3::field::FieldAlgebra;
 use std::{array, marker::PhantomData};
 use witness::set_val;
 
+#[derive(Debug)]
 pub struct UIntLimbsLTConfig<E: ExtensionField> {
     // Most significant limb of a and b respectively as a field element, will be range
     // checked to be within [-32768, 32767) if signed and [0, 65536) if unsigned.
