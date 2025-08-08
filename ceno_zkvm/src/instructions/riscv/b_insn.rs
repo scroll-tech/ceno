@@ -65,6 +65,8 @@ impl<E: ExtensionField> BInstructionConfig<E> {
             rs1.id.expr(),
             rs2.id.expr(),
             imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
         ))?;
 
         // Branch program counter
