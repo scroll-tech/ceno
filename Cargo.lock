@@ -995,6 +995,7 @@ version = "0.1.0"
 dependencies = [
  "once_cell",
  "p3",
+ "rand",
  "rand_core",
  "serde",
 ]
