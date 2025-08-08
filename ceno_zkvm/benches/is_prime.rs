@@ -1,15 +1,16 @@
-use std::{rc::Rc, time::Duration};
+use std::time::Duration;
 
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    scheme::{create_backend, create_prover},
 };
 mod alloc;
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+
 use mpcs::BasefoldDefault;
 
 criterion_group! {
@@ -36,7 +37,7 @@ fn setup() -> (Program, Platform) {
 
 fn is_prime_1(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
+    let backend = create_backend::<E, Pcs>(24, mpcs::SecurityLevel::Conjecture100bits);
 
     for n in [100u32, 10000u32, 50000u32] {
         let max_steps = usize::MAX;
@@ -56,7 +57,7 @@ fn is_prime_1(c: &mut Criterion) {
 
                     for _ in 0..iters {
                         let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-                            CpuProver::new(backend.clone()),
+                            create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),
                             &hints,

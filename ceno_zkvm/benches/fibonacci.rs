@@ -1,17 +1,17 @@
-use std::{rc::Rc, time::Duration};
+use std::time::Duration;
 
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::verifier::ZKVMVerifier,
+    scheme::{verifier::ZKVMVerifier, create_backend, create_prover},
 };
 mod alloc;
 use criterion::*;
 
 use ff_ext::GoldilocksExt2;
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 
@@ -40,14 +40,14 @@ fn setup() -> (Program, Platform) {
 
 fn fibonacci_prove(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
+    let backend = create_backend::<E, Pcs>(24, mpcs::SecurityLevel::Conjecture100bits);
     for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
         // retrive 1 << 20th fibonacci element >> max_steps
         let mut hints = CenoStdin::default();
         let _ = hints.write(&20);
         // estimate proof size data first
         let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-            CpuProver::new(backend.clone()),
+            create_prover(backend.clone()),
             program.clone(),
             platform.clone(),
             &Vec::from(&hints),
@@ -84,7 +84,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
                         let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-                            CpuProver::new(backend.clone()),
+                            create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),
                             &Vec::from(&hints),

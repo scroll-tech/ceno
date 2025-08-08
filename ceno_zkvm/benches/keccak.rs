@@ -1,16 +1,17 @@
-use std::{rc::Rc, time::Duration};
+use std::time::Duration;
 
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    scheme::{create_backend, create_prover},
 };
 mod alloc;
 use criterion::*;
 
 use ff_ext::GoldilocksExt2;
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+
 use mpcs::BasefoldDefault;
 
 criterion_group! {
@@ -38,7 +39,7 @@ fn setup() -> (Program, Platform) {
 
 fn keccak_prove(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
+    let backend = create_backend::<E, Pcs>(24, mpcs::SecurityLevel::Conjecture100bits);
     // retrive 1 << 20th keccak element >> max_steps
     let mut hints = CenoStdin::default();
     let _ = hints.write(&vec![1, 2, 3]);
@@ -80,7 +81,7 @@ fn keccak_prove(c: &mut Criterion) {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
                     let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-                        CpuProver::new(backend.clone()),
+                        create_prover(backend.clone()),
                         program.clone(),
                         platform.clone(),
                         &Vec::from(&hints),
