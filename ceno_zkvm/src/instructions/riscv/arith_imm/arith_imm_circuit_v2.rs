@@ -42,7 +42,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let imm = circuit_builder.create_witin(|| "imm");
-        let imm_sign = circuit_builder.create_bit(|| "imm_sign")?;
+        let imm_sign = circuit_builder.create_witin(|| "imm_sign");
         let imm_sign_extend = UInt::from_exprs_unchecked(
             imm_sign_extend_circuit::<E>(true, imm_sign.expr(), imm.expr()).to_vec(),
         );

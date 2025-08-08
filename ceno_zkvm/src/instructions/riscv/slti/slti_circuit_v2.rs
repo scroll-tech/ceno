@@ -67,7 +67,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
                 )
             }
             InsnKind::SLTI => {
-                let imm_sign = cb.create_bit(|| "imm_sign")?;
+                let imm_sign = cb.create_witin(|| "imm_sign");
                 let imm_sign_extend = UInt::from_exprs_unchecked(
                     imm_sign_extend_circuit::<E>(true, imm_sign.expr(), imm.expr()).to_vec(),
                 );
@@ -88,7 +88,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             imm_sign_extend.expr().remove(0),
             imm_sign
                 .map(|imm_sign| imm_sign.expr())
-                .unwrap_or(E::BaseField::ZERO.expr()),
+                .unwrap_or(0.into()),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
