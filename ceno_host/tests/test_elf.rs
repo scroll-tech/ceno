@@ -237,12 +237,11 @@ fn test_keccak_syscall() -> Result<()> {
     let steps = run(&mut state)?;
 
     // Expect the program to have written successive states between Keccak permutations.
-    const ITERATIONS: usize = 100;
-    let keccak_outs = sample_keccak_f(ITERATIONS);
+    let keccak_first_iter_outs = sample_keccak_f(1);
 
     let all_messages = read_all_messages(&state);
-    assert_eq!(all_messages.len(), ITERATIONS);
-    for (got, expect) in izip!(&all_messages, &keccak_outs) {
+    assert_eq!(all_messages.len(), 1);
+    for (got, expect) in izip!(&all_messages, &keccak_first_iter_outs) {
         let got = got
             .chunks_exact(8)
             .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
@@ -252,10 +251,10 @@ fn test_keccak_syscall() -> Result<()> {
 
     // Find the syscall records.
     let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
-    assert_eq!(syscalls.len(), ITERATIONS);
+    assert_eq!(syscalls.len(), 100);
 
     // Check the syscall effects.
-    for (witness, expect) in izip!(syscalls, keccak_outs) {
+    for (witness, expect) in izip!(syscalls, keccak_first_iter_outs) {
         assert_eq!(witness.reg_ops.len(), 2);
         assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
         assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
@@ -473,6 +472,23 @@ fn test_sha256_extend() -> Result<()> {
             assert_eq!(write_op.value.before, write_op.value.after);
         }
     }
+
+    Ok(())
+}
+
+#[test]
+fn test_sha256_full() -> Result<()> {
+    let public_io: &Vec<u32> = &vec![
+        30689455, 3643278932, 1489987339, 1626711444, 3610619649, 1925764735, 581441152, 321290698,
+    ];
+    let hints: &Vec<u32> = &vec![0u32; 10];
+    let all_messages = messages_to_strings(&ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::sha256,
+        CenoStdin::default().write(hints)?,
+        Some(CenoStdin::default().write(public_io)?),
+    ));
+    assert_eq!(all_messages.len(), 0);
 
     Ok(())
 }

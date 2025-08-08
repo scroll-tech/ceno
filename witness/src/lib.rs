@@ -27,8 +27,6 @@ pub enum InstancePaddingStrategy {
     // Pads with default values of underlying type
     // Usually zero, but check carefully
     Default,
-    // Pads by repeating last row
-    RepeatLast,
     // Custom strategy consists of a closure
     // `pad(i, j) = padding value for cell at row i, column j`
     // pad should be able to cross thread boundaries
@@ -167,19 +165,10 @@ impl<T: Sized + Sync + Clone + Send + Copy + Default + FieldAlgebra> RowMajorMat
     }
 
     pub fn padding_by_strategy(&mut self) {
-        let num_instances = self.num_instances();
         let start_index = self.num_instances() * self.n_col();
 
         match &self.padding_strategy {
             InstancePaddingStrategy::Default => (),
-            InstancePaddingStrategy::RepeatLast => {
-                if num_instances > 0 {
-                    let padding_vec = self[num_instances - 1].to_vec();
-                    self.inner.values[start_index..]
-                        .par_chunks_mut(self.inner.width)
-                        .for_each(|instance| instance.copy_from_slice(&padding_vec));
-                }
-            }
             InstancePaddingStrategy::Custom(fun) => {
                 self.inner.values[start_index..]
                     .par_chunks_mut(self.inner.width)

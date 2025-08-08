@@ -1,9 +1,9 @@
 pub mod lk_multiplicity;
 
 use ff_ext::{ExtensionField, SmallField};
-use itertools::{Itertools, izip};
+use itertools::Itertools;
 use multilinear_extensions::{
-    Expression, Fixed, WitIn, WitnessId,
+    Fixed, WitIn, WitnessId,
     mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
@@ -14,115 +14,7 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 
-use crate::{
-    gkr::{booleanhypercube::BooleanHypercube, layer::Layer},
-    selector::SelectorType,
-};
-
-pub fn extend_exprs_with_rotation<E: ExtensionField>(
-    layer: &Layer<E>,
-    alpha_pows: &[Expression<E>],
-    offset_eq_id: WitnessId,
-) -> Vec<Expression<E>> {
-    let mut alpha_pows_iter = alpha_pows.iter();
-    let mut expr_iter = layer.exprs.iter();
-    let mut zero_check_exprs = Vec::with_capacity(layer.out_sel_and_eval_exprs.len());
-
-    let match_expr = |sel_expr: &Expression<E>| match sel_expr {
-        Expression::StructuralWitIn(id, ..) => Expression::WitIn(offset_eq_id + *id),
-        invalid => panic!("invalid eq format {:?}", invalid),
-    };
-
-    for (sel_type, out_evals) in layer.out_sel_and_eval_exprs.iter() {
-        let group_length = out_evals.len();
-        let zero_check_expr = expr_iter
-            .by_ref()
-            .take(group_length)
-            .cloned()
-            .zip_eq(alpha_pows_iter.by_ref().take(group_length))
-            .map(|(expr, alpha)| alpha * expr)
-            .sum::<Expression<E>>();
-        let expr = match sel_type {
-            SelectorType::None => zero_check_expr,
-            SelectorType::Whole(sel)
-            | SelectorType::Prefix(_, sel)
-            | SelectorType::OrderedSparse32 {
-                expression: sel, ..
-            } => match_expr(sel) * zero_check_expr,
-        };
-        zero_check_exprs.push(expr);
-    }
-
-    // prepare rotation expr
-    let (rotation_eq, rotation_exprs) = &layer.rotation_exprs;
-    if rotation_eq.is_none() {
-        return zero_check_exprs;
-    }
-
-    let left_rotation_expr: Expression<E> = izip!(
-        rotation_exprs.iter(),
-        alpha_pows_iter.by_ref().take(rotation_exprs.len())
-    )
-    .map(|((rotate_expr, _), alpha)| {
-        assert!(matches!(rotate_expr, Expression::WitIn(_)));
-        alpha * rotate_expr
-    })
-    .sum();
-    let right_rotation_expr: Expression<E> = izip!(
-        rotation_exprs.iter(),
-        alpha_pows_iter.by_ref().take(rotation_exprs.len())
-    )
-    .map(|((rotate_expr, _), alpha)| {
-        assert!(matches!(rotate_expr, Expression::WitIn(_)));
-        alpha * rotate_expr
-    })
-    .sum();
-    let rotation_expr: Expression<E> = izip!(
-        rotation_exprs.iter(),
-        alpha_pows_iter.by_ref().take(rotation_exprs.len())
-    )
-    .map(|((_, expr), alpha)| {
-        assert!(matches!(expr, Expression::WitIn(_)));
-        alpha * expr
-    })
-    .sum();
-
-    // push rotation expr to zerocheck expr
-    if let Some(
-        [
-            rotation_left_eq_expr,
-            rotation_right_eq_expr,
-            rotation_eq_expr,
-        ],
-    ) = rotation_eq.as_ref()
-    {
-        let (rotation_left_eq_expr, rotation_right_eq_expr, rotation_eq_expr) = match (
-            rotation_left_eq_expr,
-            rotation_right_eq_expr,
-            rotation_eq_expr,
-        ) {
-            (
-                Expression::StructuralWitIn(left_eq_id, ..),
-                Expression::StructuralWitIn(right_eq_id, ..),
-                Expression::StructuralWitIn(eq_id, ..),
-            ) => (
-                Expression::WitIn(offset_eq_id + *left_eq_id),
-                Expression::WitIn(offset_eq_id + *right_eq_id),
-                Expression::WitIn(offset_eq_id + *eq_id),
-            ),
-            invalid => panic!("invalid eq format {:?}", invalid),
-        };
-        // add rotation left expr
-        zero_check_exprs.push(rotation_left_eq_expr * left_rotation_expr);
-        // add rotation right expr
-        zero_check_exprs.push(rotation_right_eq_expr * right_rotation_expr);
-        // add target expr
-        zero_check_exprs.push(rotation_eq_expr * rotation_expr);
-    }
-    assert!(expr_iter.next().is_none() && alpha_pows_iter.next().is_none());
-
-    zero_check_exprs
-}
+use crate::gkr::booleanhypercube::BooleanHypercube;
 
 pub fn rotation_next_base_mle<'a, E: ExtensionField>(
     bh: &BooleanHypercube,

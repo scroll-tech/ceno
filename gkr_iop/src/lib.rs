@@ -1,7 +1,5 @@
 #![feature(variant_count)]
 #![feature(strict_overflow_ops)]
-use std::marker::PhantomData;
-
 use crate::{
     chip::Chip,
     circuit_builder::CircuitBuilder,
@@ -14,6 +12,7 @@ use either::Either;
 use ff_ext::ExtensionField;
 use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
 use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
+use std::{marker::PhantomData, sync::Arc};
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -77,16 +76,18 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     fn gkr_witness<'a, PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
         &self,
         circuit: &GKRCircuit<PB::E>,
-        phase1_witness_group: &RowMajorMatrix<
-            <<PB as ProverBackend>::E as ExtensionField>::BaseField,
-        >,
-        fixed: &RowMajorMatrix<<<PB as ProverBackend>::E as ExtensionField>::BaseField>,
+        phase1_witness_group: &[Arc<PB::MultilinearPoly<'a>>],
+        structural_witness: &[Arc<PB::MultilinearPoly<'a>>],
+        fixed: &[Arc<PB::MultilinearPoly<'a>>],
+        pub_io: &[Arc<PB::MultilinearPoly<'a>>],
         challenges: &[PB::E],
     ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>) {
         <PD as ProtocolWitnessGeneratorProver<PB>>::gkr_witness(
             circuit,
             phase1_witness_group,
+            structural_witness,
             fixed,
+            pub_io,
             challenges,
         )
     }

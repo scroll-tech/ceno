@@ -74,6 +74,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         max_num_variables: usize,
         circuit_wit: GKRCircuitWitness<PB>,
         out_evals: &[PointAndEval<E>],
+        pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         num_instances: usize,
@@ -86,13 +87,14 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let sumcheck_proofs = izip!(&self.layers, circuit_wit.layers)
             .enumerate()
             .map(|(i, (layer, layer_wit))| {
-                tracing::info!("prove layer {i} layer with layer name {}", layer.name);
+                tracing::debug!("prove layer {i} layer with layer name {}", layer.name);
                 let span = entered_span!("per_layer_proof", profiling_3 = true);
                 let res = layer.prove::<_, PB, PD>(
                     num_threads,
                     max_num_variables,
                     layer_wit,
                     &mut running_evals,
+                    pub_io_evals,
                     &mut challenges,
                     transcript,
                     num_instances,
@@ -111,11 +113,13 @@ impl<E: ExtensionField> GKRCircuit<E> {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn verify(
         &self,
         max_num_variables: usize,
         gkr_proof: GKRProof<E>,
         out_evals: &[PointAndEval<E>],
+        pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         num_instances: usize,
@@ -129,11 +133,12 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         for (i, (layer, layer_proof)) in izip!(&self.layers, sumcheck_proofs).enumerate() {
-            tracing::info!("verifier layer {i} layer with layer name {}", layer.name);
+            tracing::debug!("verifier layer {i} layer with layer name {}", layer.name);
             layer.verify(
                 max_num_variables,
                 layer_proof,
                 &mut evaluations,
+                pub_io_evals,
                 &mut challenges,
                 transcript,
                 num_instances,

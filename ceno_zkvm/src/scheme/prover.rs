@@ -314,7 +314,8 @@ impl<
     ///
     /// for each read/write/logup expression, we pack all records of that type
     /// into a single tower tree, and then feed these trees into tower prover.
-    #[tracing::instrument(skip_all, name = "create_chip_proof", fields(table_name=name, profiling_2), level="trace")]
+    #[tracing::instrument(skip_all, name = "create_chip_proof", fields(table_name=name, profiling_2
+    ), level = "trace")]
     pub fn create_chip_proof<'a>(
         &self,
         name: &str,
@@ -327,11 +328,13 @@ impl<
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
+        // build main witness
+        let (records, is_padded) = self.device.build_main_witness(cs, &input, challenges);
+
         // build tower witness
-        // assume we already extract gkr-circuit information into zkvm_v1_css
-        // thus we can skip calling gkr-circuit.gkr_witness() as tower witness generate the witness correctly
-        let (mut out_evals, records, prod_specs, lookup_specs) =
-            self.device.build_tower_witness(cs, &input, challenges);
+        let (mut out_evals, prod_specs, lookup_specs) = self
+            .device
+            .build_tower_witness(cs, &input, &records, is_padded, challenges);
 
         let lk_out_evals = out_evals.pop().unwrap();
         let w_out_evals = out_evals.pop().unwrap();

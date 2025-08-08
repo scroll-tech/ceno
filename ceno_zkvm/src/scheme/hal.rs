@@ -22,6 +22,7 @@ pub trait ProverDevice<PB>:
 where
     PB: ProverBackend,
 {
+    fn get_pb(&self) -> &PB;
 }
 
 // TODO: remove the lifetime bound
@@ -63,17 +64,21 @@ pub trait TowerProver<PB: ProverBackend> {
     // build multiple complete binary trees (tower tree) to accumulate these records
     // either in product or fractional sum form.
     #[allow(clippy::type_complexity)]
-    fn build_tower_witness<'a, 'b>(
+    fn build_tower_witness<'a, 'b, 'c>(
         &self,
         cs: &ComposedConstrainSystem<PB::E>,
-        input: &'b ProofInput<'a, PB>,
+        input: &ProofInput<'a, PB>,
+        records: &'c [Arc<PB::MultilinearPoly<'b>>],
+        is_padded: bool,
         challenge: &[PB::E; 2],
     ) -> (
         Vec<Vec<Vec<PB::E>>>,
-        Vec<Arc<PB::MultilinearPoly<'b>>>,
-        Vec<TowerProverSpec<'b, PB>>,
-        Vec<TowerProverSpec<'b, PB>>,
-    );
+        Vec<TowerProverSpec<'c, PB>>,
+        Vec<TowerProverSpec<'c, PB>>,
+    )
+    where
+        'a: 'b,
+        'b: 'c;
 
     // the validity of value of first layer in the tower tree is reduced to
     // the validity of value of last layer in the tower tree through sumchecks
@@ -92,6 +97,15 @@ pub struct MainSumcheckEvals<E: ExtensionField> {
 }
 
 pub trait MainSumcheckProver<PB: ProverBackend> {
+    #[allow(clippy::type_complexity)]
+    fn build_main_witness<'a, 'b>(
+        &self,
+        cs: &ComposedConstrainSystem<PB::E>,
+        input: &ProofInput<'a, PB>,
+        challenge: &[PB::E; 2],
+    ) -> (Vec<Arc<PB::MultilinearPoly<'b>>>, bool)
+    where
+        'a: 'b;
     // this prover aims to achieve two goals:
     // 1. the validity of last layer in the tower tree is reduced to
     //    the validity of read/write/logup records through sumchecks;

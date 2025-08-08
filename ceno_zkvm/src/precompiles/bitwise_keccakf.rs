@@ -1,5 +1,3 @@
-use std::{array::from_fn, mem::transmute};
-
 use ff_ext::ExtensionField;
 use itertools::{Itertools, iproduct, izip};
 use mpcs::PolynomialCommitmentScheme;
@@ -9,6 +7,7 @@ use multilinear_extensions::{
     util::ceil_log2,
 };
 use p3::{field::FieldAlgebra, util::indices_arr};
+use std::{array::from_fn, mem::transmute, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
@@ -95,7 +94,7 @@ fn keccak_phase1_witness<E: ExtensionField>(states: &[[u64; 25]]) -> RowMajorMat
     }
 
     let mut rmm =
-        RowMajorMatrix::new_by_values(values, STATE_SIZE, InstancePaddingStrategy::RepeatLast);
+        RowMajorMatrix::new_by_values(values, STATE_SIZE, InstancePaddingStrategy::Default);
     rmm.padding_by_strategy();
     rmm
 }
@@ -888,7 +887,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     Ok((layout, chip.gkr_circuit()))
 }
 
-pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
     (layout, gkr_circuit): (KeccakLayout<E>, GKRCircuit<E>),
     states: Vec<[u64; 25]>,
     verify: bool,
@@ -908,11 +907,18 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 
     // Omit the commit phase1 and phase2.
     let span = entered_span!("gkr_witness", profiling_1 = true);
+    let phase1_witness_group = phase1_witness
+        .to_mles()
+        .into_iter()
+        .map(Arc::new)
+        .collect_vec();
     #[allow(clippy::type_complexity)]
     let (gkr_witness, gkr_output) = layout.gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
         &gkr_circuit,
-        &phase1_witness,
-        &layout.fixed_witness_group(),
+        &phase1_witness_group,
+        &[],
+        &[],
+        &[],
         &[],
     );
     exit_span!(span);
@@ -966,6 +972,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
             gkr_witness,
             &out_evals,
             &[],
+            &[],
             &mut prover_transcript,
             num_instances,
         )
@@ -985,6 +992,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
                     log2_num_instances,
                     gkr_proof,
                     &out_evals,
+                    &[],
                     &[],
                     &mut verifier_transcript,
                     num_instances,

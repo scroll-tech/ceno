@@ -30,6 +30,7 @@ ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
 ceno_zkvm = { path = "../ceno_zkvm" }
 ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7adb306" }
+gkr_iop = { path = "../gkr_iop" }
 mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "7adb306" }
 
 [build-dependencies]

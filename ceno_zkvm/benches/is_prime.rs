@@ -1,16 +1,16 @@
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::constants::MAX_NUM_VARIABLES,
 };
 mod alloc;
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-use mpcs::{BasefoldDefault, SecurityLevel};
+use gkr_iop::cpu::{CpuBackend, CpuProver};
+use mpcs::BasefoldDefault;
 
 criterion_group! {
   name = is_prime;
@@ -36,6 +36,7 @@ fn setup() -> (Program, Platform) {
 
 fn is_prime_1(c: &mut Criterion) {
     let (program, platform) = setup();
+    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
 
     for n in [100u32, 10000u32, 50000u32] {
         let max_steps = usize::MAX;
@@ -54,14 +55,13 @@ fn is_prime_1(c: &mut Criterion) {
                     let mut time = Duration::new(0, 0);
 
                     for _ in 0..iters {
-                        let result = run_e2e_with_checkpoint::<E, Pcs>(
+                        let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
+                            CpuProver::new(backend.clone()),
                             program.clone(),
                             platform.clone(),
                             &hints,
                             &[],
                             max_steps,
-                            MAX_NUM_VARIABLES,
-                            SecurityLevel::default(),
                             Checkpoint::PrepE2EProving,
                         );
                         let instant = std::time::Instant::now();

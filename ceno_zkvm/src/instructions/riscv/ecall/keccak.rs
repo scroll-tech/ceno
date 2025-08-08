@@ -39,7 +39,6 @@ use crate::{
 
 #[derive(Debug)]
 pub struct EcallKeccakConfig<E: ExtensionField> {
-    pub circuit: GKRCircuit<E>,
     pub layout: KeccakLayout<E>,
     vm_state: StateInOut<E>,
     ecall_id: (WriteFixedRS<E, { Platform::reg_ecall() }>, UInt<E>),
@@ -57,17 +56,17 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         "Ecall_Keccak".to_string()
     }
 
-    /// giving config, extract optional gkr circuit
-    fn extract_gkr_iop_circuit(
-        config: &mut Self::InstructionConfig,
-    ) -> Result<Option<GKRCircuit<E>>, ZKVMError> {
-        Ok(Some(config.circuit.clone()))
+    fn construct_circuit(
+        _circuit_builder: &mut CircuitBuilder<E>,
+        _param: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
+        unimplemented!()
     }
 
-    fn construct_circuit(
+    fn build_gkr_iop_circuit(
         cb: &mut CircuitBuilder<E>,
-        _params: &ProgramParams,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
+        _param: &ProgramParams,
+    ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
         // constrain vmstate
         let vm_state = StateInOut::construct_circuit(cb, false)?;
 
@@ -130,14 +129,16 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
         let circuit = chip.gkr_circuit();
 
-        Ok(EcallKeccakConfig {
+        Ok((
+            EcallKeccakConfig {
+                layout,
+                vm_state,
+                ecall_id,
+                state_ptr,
+                mem_rw,
+            },
             circuit,
-            layout,
-            vm_state,
-            ecall_id,
-            state_ptr,
-            mem_rw,
-        })
+        ))
     }
 
     fn generate_fixed_traces(
@@ -147,6 +148,15 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         let fixed = config.layout.fixed_witness_group();
         assert_eq!(fixed.width(), num_fixed);
         Some(fixed)
+    }
+
+    fn assign_instance(
+        _config: &Self::InstructionConfig,
+        _instance: &mut [<E as ExtensionField>::BaseField],
+        _lk_multiplicity: &mut LkMultiplicity,
+        _step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        unreachable!("we override logic in assign_instances")
     }
 
     fn assign_instances(
@@ -270,14 +280,5 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         raw_witin.padding_by_strategy();
         raw_structural_witin.padding_by_strategy();
         Ok(([raw_witin, raw_structural_witin], lk_multiplicity))
-    }
-
-    fn assign_instance(
-        _config: &Self::InstructionConfig,
-        _instance: &mut [<E as ExtensionField>::BaseField],
-        _lk_multiplicity: &mut LkMultiplicity,
-        _step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        unreachable!("we override logic in assign_instances")
     }
 }
