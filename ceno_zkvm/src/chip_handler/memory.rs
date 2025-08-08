@@ -24,14 +24,14 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperation
             // READ (a, v, t)
             let read_record = [
                 vec![RAMType::Memory.into(), memory_addr.clone()],
-                vec![value.clone()],
+                value.to_vec(),
                 vec![prev_ts.clone()],
             ]
             .concat();
             // Write (a, v, t)
             let write_record = [
                 vec![RAMType::Memory.into(), memory_addr.clone()],
-                vec![value],
+                value.to_vec(),
                 vec![ts.clone()],
             ]
             .concat();
@@ -66,14 +66,14 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperation
             // READ (a, v, t)
             let read_record = [
                 vec![RAMType::Memory.into(), memory_addr.clone()],
-                vec![prev_values],
+                prev_values.to_vec(),
                 vec![prev_ts.clone()],
             ]
             .concat();
             // Write (a, v, t)
             let write_record = [
                 vec![RAMType::Memory.into(), memory_addr.clone()],
-                vec![value],
+                value.to_vec(),
                 vec![ts.clone()],
             ]
             .concat();

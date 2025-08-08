@@ -114,8 +114,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                     // mem address := state_ptr + i
                     state_ptr.0.prev_value.value()
                         + E::BaseField::from_canonical_u32(i as u32).expr(),
-                    val_before.expr(),
-                    val_after.expr(),
+                    val_before.clone(),
+                    val_after.clone(),
                     vm_state.ts,
                 )
             })

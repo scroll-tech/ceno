@@ -78,6 +78,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E
 }
 
 #[derive(Debug)]
+pub struct MemAddrVal<E: ExtensionField> {
+    mem_addr: WitIn,
+    mem_before: UInt<E>,
+    mem_after: UInt<E>,
+}
+
+#[derive(Debug)]
 pub struct DummyConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
 
@@ -85,7 +92,7 @@ pub struct DummyConfig<E: ExtensionField> {
     rs2: Option<(ReadRS2<E>, UInt<E>)>,
     rd: Option<(WriteRD<E>, UInt<E>)>,
 
-    mem_addr_val: Option<[WitIn; 3]>,
+    mem_addr_val: Option<MemAddrVal<E>>,
     mem_read: Option<ReadMEM<E>>,
     mem_write: Option<WriteMEM>,
 
@@ -140,20 +147,29 @@ impl<E: ExtensionField> DummyConfig<E> {
 
         // Memory
         let mem_addr_val = if with_mem_read || with_mem_write {
-            Some([
-                circuit_builder.create_witin(|| "mem_addr"),
-                circuit_builder.create_witin(|| "mem_before"),
-                circuit_builder.create_witin(|| "mem_after"),
-            ])
+            Some(MemAddrVal {
+                mem_addr: circuit_builder.create_witin(|| "mem_addr"),
+                mem_before: UInt::new_unchecked(|| "mem_before", circuit_builder)?,
+                mem_after: UInt::new(|| "mem_after", circuit_builder)?,
+            })
         } else {
             None
         };
 
         let mem_read = if with_mem_read {
+            let Some(MemAddrVal {
+                mem_addr,
+                mem_before,
+                ..
+            }) = mem_addr_val.as_ref()
+            else {
+                unreachable!()
+            };
+
             Some(ReadMEM::construct_circuit(
                 circuit_builder,
-                mem_addr_val.as_ref().unwrap()[0].expr(),
-                mem_addr_val.as_ref().unwrap()[1].expr(),
+                mem_addr.expr(),
+                mem_before.expr().try_into().unwrap(),
                 vm_state.ts,
             )?)
         } else {
@@ -161,11 +177,19 @@ impl<E: ExtensionField> DummyConfig<E> {
         };
 
         let mem_write = if with_mem_write {
+            let Some(MemAddrVal {
+                mem_addr,
+                mem_before,
+                mem_after,
+            }) = mem_addr_val.as_ref()
+            else {
+                unreachable!()
+            };
             Some(WriteMEM::construct_circuit(
                 circuit_builder,
-                mem_addr_val.as_ref().unwrap()[0].expr(),
-                mem_addr_val.as_ref().unwrap()[1].expr(),
-                mem_addr_val.as_ref().unwrap()[2].expr(),
+                mem_addr.expr(),
+                mem_before.expr().try_into().unwrap(),
+                mem_after.expr().try_into().unwrap(),
                 vm_state.ts,
             )?)
         } else {
@@ -245,11 +269,16 @@ impl<E: ExtensionField> DummyConfig<E> {
         }
 
         // Memory
-        if let Some([mem_addr, mem_before, mem_after]) = &self.mem_addr_val {
+        if let Some(MemAddrVal {
+            mem_addr,
+            mem_before,
+            mem_after,
+        }) = &self.mem_addr_val
+        {
             let mem_op = step.memory_op().expect("memory operation");
             set_val!(instance, mem_addr, u64::from(mem_op.addr));
-            set_val!(instance, mem_before, mem_op.value.before as u64);
-            set_val!(instance, mem_after, mem_op.value.after as u64);
+            mem_before.assign_value(instance, Value::new_unchecked(mem_op.value.before));
+            mem_after.assign_value(instance, Value::new(mem_op.value.after, lk_multiplicity));
         }
         if let Some(mem_read) = &self.mem_read {
             mem_read.assign_instance(instance, lk_multiplicity, step)?;

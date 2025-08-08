@@ -49,8 +49,9 @@ pub trait RegisterChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce(
 /// The common representation of a memory address.
 pub type AddressExpr<E> = Expression<E>;
 
-/// The common representation of a memory value.
-pub type MemoryExpr<E> = Expression<E>;
+/// The common representation of a register value.
+/// Format: `[u16; UINT_LIMBS]`, least-significant-first.
+pub type MemoryExpr<E> = [Expression<E>; UINT_LIMBS];
 
 pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
     fn memory_read(

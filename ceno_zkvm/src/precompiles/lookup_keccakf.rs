@@ -39,6 +39,7 @@ use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
+    chip_handler::MemoryExpr,
     error::ZKVMError,
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::utils::{
@@ -165,8 +166,8 @@ pub struct KeccakLayout<E: ExtensionField> {
     pub params: KeccakParams,
     pub layer_exprs: KeccakLayer<WitIn, StructuralWitIn>,
     pub selector_type_layout: SelectorTypeLayout<E>,
-    pub input32_exprs: [Expression<E>; KECCAK_INPUT32_SIZE],
-    pub output32_exprs: [Expression<E>; KECCAK_OUTPUT32_SIZE],
+    pub input32_exprs: [MemoryExpr<E>; KECCAK_INPUT32_SIZE],
+    pub output32_exprs: [MemoryExpr<E>; KECCAK_OUTPUT32_SIZE],
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
@@ -236,8 +237,8 @@ impl<E: ExtensionField> KeccakLayout<E> {
                     expression: eq_zero.expr(),
                 },
             },
-            input32_exprs: array::from_fn(|_| Expression::WitIn(0)),
-            output32_exprs: array::from_fn(|_| Expression::WitIn(0)),
+            input32_exprs: array::from_fn(|_| array::from_fn(|_| Expression::WitIn(0))),
+            output32_exprs: array::from_fn(|_| array::from_fn(|_| Expression::WitIn(0))),
             n_fixed: 0,
             n_committed: 0,
             n_structural_witin: STRUCTURAL_WITIN,
@@ -453,14 +454,16 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         for x in 0..5 {
             for y in 0..5 {
                 for k in 0..2 {
-                    // create an expression combining 4 elements of state8 into a single 32-bit felt
-                    keccak_output32.push(expansion_expr::<E, 32>(
-                        &keccak_output8
-                            .slice(s![x, y, 4 * k..4 * (k + 1)])
-                            .iter()
-                            .map(|e| (8, e.expr()))
-                            .collect_vec(),
-                    ))
+                    // create an expression combining 4 elements of state8 into a 2x16-bit felt
+                    let output8_slice = keccak_output8
+                        .slice(s![x, y, 4 * k..4 * (k + 1)])
+                        .iter()
+                        .map(|e| (8, e.expr()))
+                        .collect_vec();
+                    keccak_output32.push([
+                        expansion_expr::<E, 16>(&output8_slice[0..2]),
+                        expansion_expr::<E, 16>(&output8_slice[2..4]),
+                    ])
                 }
             }
         }
@@ -470,15 +473,16 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         for x in 0..5 {
             for y in 0..5 {
                 for k in 0..2 {
-                    // create an expression combining 4 elements of state8 into a single 32-bit felt
-                    keccak_input32.push(expansion_expr::<E, 32>(
-                        keccak_input8
-                            .slice(s![x, y, 4 * k..4 * (k + 1)])
-                            .iter()
-                            .map(|e| (8, e.expr()))
-                            .collect_vec()
-                            .as_slice(),
-                    ))
+                    // create an expression combining 4 elements of state8 into a single 2x16-bit felt
+                    let input8_slice = keccak_input8
+                        .slice(s![x, y, 4 * k..4 * (k + 1)])
+                        .iter()
+                        .map(|e| (8, e.expr()))
+                        .collect_vec();
+                    keccak_input32.push([
+                        expansion_expr::<E, 16>(&input8_slice[0..2]),
+                        expansion_expr::<E, 16>(&input8_slice[2..4]),
+                    ])
                 }
             }
         }
@@ -551,12 +555,12 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         0
     }
 
-    fn n_layers(&self) -> usize {
-        1
-    }
-
     fn n_evaluations(&self) -> usize {
         unimplemented!()
+    }
+
+    fn n_layers(&self) -> usize {
+        1
     }
 }
 
@@ -989,8 +993,8 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
                 &mut cb,
                 // mem address := state_ptr + i
                 state_ptr.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
-                val_before.expr(),
-                val_after.expr(),
+                val_before.clone(),
+                val_after.clone(),
                 vm_state.ts,
             )
         })
