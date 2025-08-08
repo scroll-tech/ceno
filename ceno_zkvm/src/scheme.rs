@@ -268,3 +268,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
 fn byte_to_mb(byte_size: u64) -> f64 {
     byte_size as f64 / (1024.0 * 1024.0)
 }
+
+#[cfg(feature = "gpu")]
+pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    backend: std::rc::Rc<gkr_iop::gpu::GpuBackend<E, PCS>>,
+) -> gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>> {
+    gkr_iop::gpu::GpuProver::new(backend)
+}
+
+#[cfg(not(feature = "gpu"))]
+pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    backend: std::rc::Rc<gkr_iop::cpu::CpuBackend<E, PCS>>,
+) -> gkr_iop::cpu::CpuProver<gkr_iop::cpu::CpuBackend<E, PCS>> {
+    gkr_iop::cpu::CpuProver::new(backend)
+}
+
+#[cfg(feature = "gpu")]
+pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    max_num_variables: usize,
+    security_level: mpcs::SecurityLevel,
+) -> std::rc::Rc<gkr_iop::gpu::GpuBackend<E, PCS>> {
+    gkr_iop::gpu::GpuBackend::<E, PCS>::new(max_num_variables, security_level).into()
+}
+
+#[cfg(not(feature = "gpu"))]
+pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    max_num_variables: usize,
+    security_level: mpcs::SecurityLevel,
+) -> std::rc::Rc<gkr_iop::cpu::CpuBackend<E, PCS>> {
+    gkr_iop::cpu::CpuBackend::<E, PCS>::new(max_num_variables, security_level).into()
+}

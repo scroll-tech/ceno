@@ -47,4 +47,5 @@ tikv-jemallocator = { version = "0.6", optional = true }
 criterion.workspace = true
 
 [features]
+gpu = []
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
