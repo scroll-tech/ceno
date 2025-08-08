@@ -16,6 +16,7 @@ use crate::{
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
+use p3::field::FieldAlgebra;
 use witness::set_val;
 
 /// DummyInstruction can handle any instruction and produce its side-effects.
@@ -198,6 +199,8 @@ impl<E: ExtensionField> DummyConfig<E> {
             rs1_id,
             rs2_id,
             imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            E::BaseField::ZERO.expr(),
         ))?;
 
         Ok(DummyConfig {

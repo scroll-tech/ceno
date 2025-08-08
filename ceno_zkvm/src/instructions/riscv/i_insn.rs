@@ -28,6 +28,7 @@ impl<E: ExtensionField> IInstructionConfig<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
         imm: Expression<E>,
+        #[cfg(feature = "u16limb_circuit")] imm_sign: Expression<E>,
         rs1_read: RegisterExpr<E>,
         rd_written: RegisterExpr<E>,
         branching: bool,
@@ -49,6 +50,8 @@ impl<E: ExtensionField> IInstructionConfig<E> {
             rs1.id.expr(),
             0.into(),
             imm.clone(),
+            #[cfg(feature = "u16limb_circuit")]
+            imm_sign,
         ))?;
 
         Ok(IInstructionConfig { vm_state, rs1, rd })

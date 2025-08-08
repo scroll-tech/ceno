@@ -1,139 +1,27 @@
-use std::marker::PhantomData;
+mod slt_circuit;
+mod slt_circuit_v2;
 
-use ceno_emul::{InsnKind, SWord, StepRecord};
-use ff_ext::ExtensionField;
+use ceno_emul::InsnKind;
 
-use super::{
-    RIVInstruction,
-    constants::{UINT_LIMBS, UInt},
-    r_insn::RInstructionConfig,
-};
-use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    gadgets::{IsLtConfig, SignedLtConfig},
-    instructions::Instruction,
-    structs::ProgramParams,
-    uint::Value,
-    witness::LkMultiplicity,
-};
-
-pub struct SetLessThanInstruction<E, I>(PhantomData<(E, I)>);
+use super::RIVInstruction;
 
 pub struct SltOp;
 impl RIVInstruction for SltOp {
     const INST_KIND: InsnKind = InsnKind::SLT;
 }
-pub type SltInstruction<E> = SetLessThanInstruction<E, SltOp>;
+#[cfg(feature = "u16limb_circuit")]
+pub type SltInstruction<E> = slt_circuit_v2::SetLessThanInstruction<E, SltOp>;
+#[cfg(not(feature = "u16limb_circuit"))]
+pub type SltInstruction<E> = slt_circuit::SetLessThanInstruction<E, SltOp>;
 
 pub struct SltuOp;
 impl RIVInstruction for SltuOp {
     const INST_KIND: InsnKind = InsnKind::SLTU;
 }
-pub type SltuInstruction<E> = SetLessThanInstruction<E, SltuOp>;
-
-/// This config handles R-Instructions that represent registers values as 2 * u16.
-pub struct SetLessThanConfig<E: ExtensionField> {
-    r_insn: RInstructionConfig<E>,
-
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    #[cfg_attr(not(test), allow(dead_code))]
-    rd_written: UInt<E>,
-
-    deps: SetLessThanDependencies<E>,
-}
-
-enum SetLessThanDependencies<E: ExtensionField> {
-    Slt { signed_lt: SignedLtConfig<E> },
-    Sltu { is_lt: IsLtConfig },
-}
-
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruction<E, I> {
-    type InstructionConfig = SetLessThanConfig<E>;
-
-    fn name() -> String {
-        format!("{:?}", I::INST_KIND)
-    }
-
-    fn construct_circuit(
-        cb: &mut CircuitBuilder<E>,
-        _params: &ProgramParams,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        // If rs1_read < rs2_read, rd_written = 1. Otherwise rd_written = 0
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", cb)?;
-
-        let (deps, rd_written) = match I::INST_KIND {
-            InsnKind::SLT => {
-                let signed_lt =
-                    SignedLtConfig::construct_circuit(cb, || "rs1 < rs2", &rs1_read, &rs2_read)?;
-                let rd_written = UInt::from_exprs_unchecked(vec![signed_lt.expr()]);
-                (SetLessThanDependencies::Slt { signed_lt }, rd_written)
-            }
-            InsnKind::SLTU => {
-                let is_lt = IsLtConfig::construct_circuit(
-                    cb,
-                    || "rs1 < rs2",
-                    rs1_read.value(),
-                    rs2_read.value(),
-                    UINT_LIMBS,
-                )?;
-                let rd_written = UInt::from_exprs_unchecked(vec![is_lt.expr()]);
-                (SetLessThanDependencies::Sltu { is_lt }, rd_written)
-            }
-            _ => unreachable!(),
-        };
-
-        let r_insn = RInstructionConfig::<E>::construct_circuit(
-            cb,
-            I::INST_KIND,
-            rs1_read.register_expr(),
-            rs2_read.register_expr(),
-            rd_written.register_expr(),
-        )?;
-
-        Ok(SetLessThanConfig {
-            r_insn,
-            rs1_read,
-            rs2_read,
-            rd_written,
-            deps,
-        })
-    }
-
-    fn assign_instance(
-        config: &Self::InstructionConfig,
-        instance: &mut [<E as ExtensionField>::BaseField],
-        lkm: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config.r_insn.assign_instance(instance, lkm, step)?;
-
-        let rs1 = step.rs1().unwrap().value;
-        let rs2 = step.rs2().unwrap().value;
-
-        let rs1_read = Value::new_unchecked(rs1);
-        let rs2_read = Value::new_unchecked(rs2);
-        config
-            .rs1_read
-            .assign_limbs(instance, rs1_read.as_u16_limbs());
-        config
-            .rs2_read
-            .assign_limbs(instance, rs2_read.as_u16_limbs());
-
-        match &config.deps {
-            SetLessThanDependencies::Slt { signed_lt } => {
-                signed_lt.assign_instance(instance, lkm, rs1 as SWord, rs2 as SWord)?
-            }
-            SetLessThanDependencies::Sltu { is_lt } => {
-                is_lt.assign_instance(instance, lkm, rs1.into(), rs2.into())?
-            }
-        }
-
-        Ok(())
-    }
-}
+#[cfg(feature = "u16limb_circuit")]
+pub type SltuInstruction<E> = slt_circuit_v2::SetLessThanInstruction<E, SltuOp>;
+#[cfg(not(feature = "u16limb_circuit"))]
+pub type SltuInstruction<E> = slt_circuit::SetLessThanInstruction<E, SltuOp>;
 
 #[cfg(test)]
 mod test {
@@ -144,10 +32,16 @@ mod test {
 
     use super::*;
     use crate::{
+        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
+        instructions::{Instruction, riscv::constants::UInt},
         scheme::mock_prover::{MOCK_PC_START, MockProver},
+        structs::ProgramParams,
     };
+    #[cfg(not(feature = "u16limb_circuit"))]
+    use slt_circuit::SetLessThanInstruction;
+    #[cfg(feature = "u16limb_circuit")]
+    use slt_circuit_v2::SetLessThanInstruction;
 
     fn verify<I: RIVInstruction>(name: &'static str, rs1: Word, rs2: Word, rd: Word) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
@@ -232,7 +126,6 @@ mod test {
         let mut rng = rand::thread_rng();
         let a: i32 = rng.next_u32() as i32;
         let b: i32 = rng.next_u32() as i32;
-        println!("random: {} <? {}", a, b); // For debugging, do not delete.
         verify::<SltOp>("random 1", a as Word, b as Word, (a < b) as u32);
         verify::<SltOp>("random 2", b as Word, a as Word, (a >= b) as u32);
     }

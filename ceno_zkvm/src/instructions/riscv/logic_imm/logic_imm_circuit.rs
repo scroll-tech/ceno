@@ -92,6 +92,8 @@ impl<E: ExtensionField> LogicConfig<E> {
             cb,
             insn_kind,
             imm.value(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
