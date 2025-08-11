@@ -21,7 +21,7 @@ use multilinear_extensions::{
     util::ceil_log2,
 };
 use rayon::iter::ParallelIterator;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc, rc::Rc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverMessage,
@@ -31,35 +31,32 @@ use witness::next_pow2_instance_padding;
 
 use gkr_iop::cpu::{CpuBackend, CpuProver};
 use crate::scheme::cpu::CpuTowerProver;
-use mpcs::SecurityLevel::Conjecture100bits;
 
 #[cfg(feature = "gpu")]
-use ceno_gpu::gl64::CudaHalGL64;
-#[cfg(feature = "gpu")]
-use cudarc::driver::{CudaDevice, DriverError};
-#[cfg(feature = "gpu")]
-use ceno_gpu::gl64::convert_ceno_to_gpu_basefold_commitment;
+mod gpu_prover {
+    use once_cell::sync::Lazy;
+    use std::sync::{Arc, Mutex};
 
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
-// static CUDA_HAL: Lazy<Mutex<CudaHalGL64>> = Lazy::new(|| {
-//     Mutex::new(CudaHalGL64::new().unwrap())
-// });
+    use ceno_gpu::gl64::CudaHalGL64;
+    use cudarc::driver::{CudaDevice, DriverError};
+    pub use ceno_gpu::gl64::convert_ceno_to_gpu_basefold_commitment;
+
+    pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> = Lazy::new(|| {
+        CudaDevice::new(0)
+    });
+
+    pub static CUDA_HAL: Lazy<Result<Arc<Mutex<CudaHalGL64>>, Box<dyn std::error::Error + Send + Sync>>> = Lazy::new(|| {
+        let device = CUDA_DEVICE.as_ref().map_err(|e| format!("Device init failed: {:?}", e))?;
+        device.bind_to_thread()?;
+        
+        CudaHalGL64::new()
+            .map(|hal| Arc::new(Mutex::new(hal)))
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    });
+}
 
 #[cfg(feature = "gpu")]
-static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> = Lazy::new(|| {
-    CudaDevice::new(0)
-});
-#[cfg(feature = "gpu")]
-static CUDA_HAL: Lazy<Result<Arc<Mutex<CudaHalGL64>>, Box<dyn std::error::Error + Send + Sync>>> = Lazy::new(|| {
-    let device = CUDA_DEVICE.as_ref().map_err(|e| format!("Device init failed: {:?}", e))?;
-    device.bind_to_thread()?;
-    
-    CudaHalGL64::new()
-        .map(|hal| Arc::new(Mutex::new(hal)))
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-});
-
+pub use gpu_prover::*;
 
 pub struct GpuTowerProver;
 
@@ -76,9 +73,9 @@ pub struct TemporaryGpuProver<E: ExtensionField, PCS: PolynomialCommitmentScheme
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static> TemporaryGpuProver<E, PCS> {
-    pub fn new(backend: std::rc::Rc<GpuBackend<E, PCS>>, security_level: mpcs::SecurityLevel) -> Self {
+    pub fn new(backend: Rc<GpuBackend<E, PCS>>, security_level: mpcs::SecurityLevel) -> Self {
         let gpu = GpuProver::new(backend.clone());
-        let cpu_backend = std::rc::Rc::new(CpuBackend::<E, PCS>::new(
+        let cpu_backend = Rc::new(CpuBackend::<E, PCS>::new(
             backend.max_poly_size_log2,
             security_level,
         ));

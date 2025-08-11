@@ -14,7 +14,9 @@ use witness::RowMajorMatrix;
 
 use crate::cpu::{CpuBackend, CpuProver};
 
+#[cfg(feature = "gpu")]
 use ceno_gpu::BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu;
+#[cfg(feature = "gpu")]
 use ceno_gpu::gl64::buffer::BufferImpl;
 
 pub struct GpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
@@ -50,7 +52,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
     type Pcs = PCS;
     type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
+    #[cfg(feature = "gpu")]
     type PcsData = BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<E::BaseField>>;
+    #[cfg(not(feature = "gpu"))]
+    type PcsData = <PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
     fn get_pp(&self) -> &<Self::Pcs as PolynomialCommitmentScheme<Self::E>>::ProverParam {
         &self.pp

@@ -13,7 +13,7 @@ version.workspace = true
 ark-std = { version = "0.5" }
 bincode.workspace = true
 ceno_emul = { path = "../ceno_emul" }
-ceno_gpu.workspace = true
+ceno_gpu = { workspace = true, optional = true }
 clap.workspace = true
 either.workspace = true
 ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
@@ -47,5 +47,5 @@ tikv-jemallocator = { version = "0.6", optional = true }
 criterion.workspace = true
 
 [features]
-gpu = []
+gpu = ["dep:ceno_gpu"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
