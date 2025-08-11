@@ -1,24 +1,18 @@
 use crate::{
     LayerWitness,
-    evaluation::EvalExpression,
-    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::Layer},
-    hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
+    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
+    hal::{ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
-use either::Either;
 use ff_ext::ExtensionField;
-use itertools::{Itertools, izip};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
-    mle::{ArcMultilinearExtension, MultilinearExtension, Point},
-    wit_infer_by_monomial_expr,
+    mle::{ArcMultilinearExtension, MultilinearExtension},
 };
 use p3::field::TwoAdicField;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{iter, rc::Rc, sync::Arc};
-use sumcheck::macros::{entered_span, exit_span};
+use std::rc::Rc;
 use witness::RowMajorMatrix;
 
-use crate::cpu::layer_witness;
+use crate::cpu::{CpuBackend, CpuProver};
 
 use ceno_gpu::BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu;
 use ceno_gpu::gl64::buffer::BufferImpl;
@@ -51,8 +45,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
     }
 }
 
-
-
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
     type E = E;
     type Pcs = PCS;
@@ -69,7 +61,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
     }
 }
 
-/// GPU prover for GPU backend
 pub struct GpuProver<PB: ProverBackend + 'static> {
     pub backend: Rc<PB>,
 }
@@ -104,93 +95,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     where
         'b: 'a,
     {
-        // layer order from output to input
-        let mut layer_wits =
-            Vec::<LayerWitness<GpuBackend<E, PCS>>>::with_capacity(circuit.layers.len() + 1);
+        // Use CPU version to generate witness
+        let (cpu_witness, cpu_output) = <CpuProver<CpuBackend<E, PCS>> as ProtocolWitnessGeneratorProver<
+            CpuBackend<E, PCS>,
+        >>::gkr_witness(
+            circuit,
+            phase1_witness_group,
+            structural_witness,
+            fixed,
+            pub_io,
+            challenges,
+        );
 
-        let mut witness_mle_flatten = vec![None; circuit.n_evaluations];
+        // Convert CPU return type to GPU backend type (the specific type of multilinear polynomial is the same)
+        let gpu_layers = cpu_witness
+            .layers
+            .into_iter()
+            .map(|lw| LayerWitness::<GpuBackend<E, PCS>>::new(lw.0, vec![]))
+            .collect();
+        let GKRCircuitOutput(cpu_out_lw) = cpu_output;
+        let gpu_output = GKRCircuitOutput::<GpuBackend<E, PCS>>(LayerWitness::new(cpu_out_lw.0, vec![]));
 
-        // set input to witness_mle_flatten via first layer in_eval_expr
-        if let Some(first_layer) = circuit.layers.last() {
-            // process witin
-            first_layer
-                .in_eval_expr
-                .iter()
-                .take(phase1_witness_group.len())
-                .enumerate()
-                .for_each(|(index, witin)| {
-                    witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
-                });
-
-            // TODO process fixed (and probably short) mle
-            assert_eq!(
-                first_layer.in_eval_expr.len(),
-                phase1_witness_group.len(),
-                "TODO process fixed (and probably short) mle"
-            );
-            // XXX currently fixed poly not support in layers > 1
-        }
-
-        // generate all layer witness from input to output
-        for (i, layer) in circuit.layers.iter().rev().enumerate() {
-            tracing::debug!("generating input {i} layer with layer name {}", layer.name);
-            let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
-            // process in_evals to prepare layer witness
-            // This should assume the input of the first layer is the phase1 witness of the circuit.
-            let current_layer_wits = layer
-                .in_eval_expr
-                .iter()
-                .map(|witin| {
-                    witness_mle_flatten[*witin]
-                        .clone()
-                        .expect("witness must exist")
-                })
-                .chain(if i == 0 {
-                    // only supply structural witness for first layer
-                    // TODO figure out how to support > 1 GKR layers
-                    Either::Left(structural_witness.iter().cloned())
-                } else {
-                    Either::Right(iter::empty())
-                })
-                .chain(fixed.iter().cloned())
-                .collect_vec();
-
-            // infer current layer output
-            let current_layer_output: Vec<
-                Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
-            > = layer_witness(layer, &current_layer_wits, pub_io, challenges);
-            layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
-
-            // process out to prepare output witness
-            layer
-                .out_sel_and_eval_exprs
-                .iter()
-                .flat_map(|(_, out_eval)| out_eval)
-                .zip_eq(&current_layer_output)
-                .for_each(|(out_eval, out_mle)| match out_eval {
-                    // note: Linear (x - b)/a has been done and encode in expression
-                    EvalExpression::Single(out) | EvalExpression::Linear(out, _, _) => {
-                        witness_mle_flatten[*out] = Some(out_mle.clone());
-                    }
-                    EvalExpression::Zero => { // zero expression
-                        // do nothing on zero expression
-                    }
-                    other => unimplemented!("{:?}", other),
-                });
-            exit_span!(span);
-        }
-        layer_wits.reverse();
-
-        // initialize a vector to store the final outputs of the GKR circuit.
-        let mut gkr_out_well_order = vec![Arc::default(); circuit.final_out_evals.len()];
-        circuit
-            .final_out_evals
-            .iter()
-            .for_each(|out| gkr_out_well_order[*out] = witness_mle_flatten[*out].clone().unwrap());
-
-        (
-            GKRCircuitWitness { layers: layer_wits },
-            GKRCircuitOutput(LayerWitness(gkr_out_well_order)),
-        )
+        (GKRCircuitWitness { layers: gpu_layers }, gpu_output)
     }
 }
