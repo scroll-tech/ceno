@@ -20,7 +20,6 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
 };
-use rayon::iter::ParallelIterator;
 use std::{collections::BTreeMap, sync::Arc, rc::Rc};
 use sumcheck::{
     macros::{entered_span, exit_span},
