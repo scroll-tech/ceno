@@ -10,6 +10,7 @@ use ceno_zkvm::{
 mod alloc;
 use criterion::*;
 
+use gkr_iop::cpu::default_backend_config;
 use ff_ext::GoldilocksExt2;
 
 use mpcs::BasefoldDefault;
@@ -40,7 +41,9 @@ fn setup() -> (Program, Platform) {
 
 fn fibonacci_prove(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend = create_backend::<E, Pcs>(24, mpcs::SecurityLevel::Conjecture100bits);
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+
     for max_steps in [1usize << 20, 1usize << 21, 1usize << 22] {
         // retrive 1 << 20th fibonacci element >> max_steps
         let mut hints = CenoStdin::default();

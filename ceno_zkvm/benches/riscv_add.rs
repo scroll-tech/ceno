@@ -9,6 +9,7 @@ use ceno_zkvm::{
 mod alloc;
 use criterion::*;
 
+use gkr_iop::cpu::default_backend_config;
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
 
@@ -53,8 +54,9 @@ fn bench_add(c: &mut Criterion) {
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
 
-    let backend = create_backend::<E, Pcs>(24, SecurityLevel::Conjecture100bits);
-    let device = create_prover(backend, SecurityLevel::Conjecture100bits);
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let device = create_prover(backend);
     let prover = ZKVMProver::new(pk, device);
     let circuit_pk = prover
         .pk

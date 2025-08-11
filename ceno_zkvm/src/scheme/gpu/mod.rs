@@ -73,11 +73,11 @@ pub struct TemporaryGpuProver<E: ExtensionField, PCS: PolynomialCommitmentScheme
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static> TemporaryGpuProver<E, PCS> {
-    pub fn new(backend: Rc<GpuBackend<E, PCS>>, security_level: mpcs::SecurityLevel) -> Self {
+    pub fn new(backend: Rc<GpuBackend<E, PCS>>) -> Self {
         let gpu = GpuProver::new(backend.clone());
         let cpu_backend = Rc::new(CpuBackend::<E, PCS>::new(
             backend.max_poly_size_log2,
-            security_level,
+            backend.security_level,
         ));
         let inner_cpu = CpuProver::new(cpu_backend);
         Self { gpu, inner_cpu }
@@ -281,7 +281,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
     where
         'a: 'b,
     {
-        // 零拷贝：将 &ProofInput<GpuBackend> 转为 &ProofInput<CpuBackend>
         let cpu_input: &ProofInput<'a, CpuBackend<E, PCS>> = unsafe {
             &*(input as *const ProofInput<'a, GpuBackend<E, PCS>>
                 as *const ProofInput<'a, CpuBackend<E, PCS>>)

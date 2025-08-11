@@ -10,7 +10,7 @@ use ceno_zkvm::{
 mod alloc;
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-
+use gkr_iop::cpu::default_backend_config;
 use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
 
@@ -39,7 +39,8 @@ fn setup() -> (Program, Platform) {
 
 fn quadratic_sorting_1(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend = create_backend::<E, Pcs>(24, mpcs::SecurityLevel::Conjecture100bits);
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
     for n in [100, 500] {

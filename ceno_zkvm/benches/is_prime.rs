@@ -10,7 +10,7 @@ use ceno_zkvm::{
 mod alloc;
 use criterion::*;
 use ff_ext::GoldilocksExt2;
-
+use gkr_iop::cpu::default_backend_config;
 use mpcs::BasefoldDefault;
 
 criterion_group! {
@@ -37,7 +37,9 @@ fn setup() -> (Program, Platform) {
 
 fn is_prime_1(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend = create_backend::<E, Pcs>(24, mpcs::SecurityLevel::Conjecture100bits);
+
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
 
     for n in [100u32, 10000u32, 50000u32] {
         let max_steps = usize::MAX;

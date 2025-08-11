@@ -373,9 +373,7 @@ fn run_elf_inner<
         platform.hints.len()
     );
 
-    // TODO support GPU backend + prover
     let backend = create_backend(options.max_num_variables, options.security_level);
-
     Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
         create_prover(backend.clone()),
         program,

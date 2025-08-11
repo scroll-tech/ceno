@@ -4,7 +4,7 @@ use crate::{
     hal::{ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
 use ff_ext::ExtensionField;
-use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::{
     mle::{ArcMultilinearExtension, MultilinearExtension},
 };
@@ -12,7 +12,7 @@ use p3::field::TwoAdicField;
 use std::rc::Rc;
 use witness::RowMajorMatrix;
 
-use crate::cpu::{CpuBackend, CpuProver};
+use crate::cpu::{CpuBackend, CpuProver, default_backend_config};
 
 #[cfg(feature = "gpu")]
 use ceno_gpu::BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu;
@@ -23,14 +23,14 @@ pub struct GpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: <PCS as PolynomialCommitmentScheme<E>>::ProverParam,
     pub vp: <PCS as PolynomialCommitmentScheme<E>>::VerifierParam,
     pub max_poly_size_log2: usize,
+    pub security_level: SecurityLevel,
     _marker: std::marker::PhantomData<E>,
 }
 
-pub const DEFAULT_MAX_NUM_VARIABLES: usize = 24;
-
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for GpuBackend<E, PCS> {
     fn default() -> Self {
-        Self::new(DEFAULT_MAX_NUM_VARIABLES, Conjecture100bits)
+        let (max_poly_size_log2, security_level) = default_backend_config();
+        Self::new(max_poly_size_log2, security_level)
     }
 }
 
@@ -42,6 +42,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
             pp,
             vp,
             max_poly_size_log2,
+            security_level,
             _marker: std::marker::PhantomData,
         }
     }

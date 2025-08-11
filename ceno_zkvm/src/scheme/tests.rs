@@ -22,7 +22,7 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::cpu::{CpuBackend, CpuProver, default_backend_config};
 use crate::scheme::{create_backend, create_prover};
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
 use std::marker::PhantomData;
@@ -100,7 +100,8 @@ fn test_rw_lk_expression_combination() {
     type E = GoldilocksExt2;
     type Pcs = WhirDefault<E>;
 
-    let backend = create_backend::<E, Pcs>(8, Conjecture100bits);
+    let (max_num_variables, security_level) = (8, Conjecture100bits);
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
 
     fn test_rw_lk_expression_combination_inner<
         const L: usize,
@@ -303,8 +304,9 @@ fn test_single_add_instance_e2e() {
     assert_eq!(halt_records.len(), 1);
 
     // proving
-    let backend = create_backend::<E, Pcs>(24, Conjecture100bits);
-    let device = create_prover(backend, Conjecture100bits);
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let device = create_prover(backend);
     let mut prover = ZKVMProver::new(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();

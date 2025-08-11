@@ -282,7 +282,6 @@ pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 #[cfg(not(feature = "gpu"))]
 pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     backend: Rc<gkr_iop::cpu::CpuBackend<E, PCS>>,
-    _security_level: mpcs::SecurityLevel, // used by TemporaryGpuProver
 ) -> gkr_iop::cpu::CpuProver<gkr_iop::cpu::CpuBackend<E, PCS>> {
     gkr_iop::cpu::CpuProver::new(backend)
 }
@@ -298,7 +297,6 @@ pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 #[cfg(feature = "gpu")]
 pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     backend: Rc<gkr_iop::gpu::GpuBackend<E, PCS>>,
-    security_level: mpcs::SecurityLevel,
 ) -> crate::scheme::gpu::TemporaryGpuProver<E, PCS> {
-    crate::scheme::gpu::TemporaryGpuProver::new(backend, security_level)
+    crate::scheme::gpu::TemporaryGpuProver::new(backend)
 }
