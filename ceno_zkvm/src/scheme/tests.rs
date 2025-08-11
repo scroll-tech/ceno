@@ -304,7 +304,7 @@ fn test_single_add_instance_e2e() {
 
     // proving
     let backend = create_backend::<E, Pcs>(24, Conjecture100bits);
-    let device = create_prover(backend);
+    let device = create_prover(backend, Conjecture100bits);
     let mut prover = ZKVMProver::new(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();

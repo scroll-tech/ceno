@@ -54,7 +54,7 @@ fn bench_add(c: &mut Criterion) {
         .expect("keygen failed");
 
     let backend = create_backend::<E, Pcs>(24, SecurityLevel::Conjecture100bits);
-    let device = create_prover(backend);
+    let device = create_prover(backend, SecurityLevel::Conjecture100bits);
     let prover = ZKVMProver::new(pk, device);
     let circuit_pk = prover
         .pk

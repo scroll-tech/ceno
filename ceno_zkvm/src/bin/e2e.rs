@@ -236,12 +236,10 @@ fn main() {
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
-    // TODO support GPU backend
-
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
             let backend = create_backend(args.max_num_variables, args.security_level);
-            let prover = create_prover(backend);
+            let prover = create_prover(backend, args.security_level);
             run_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, _, _>(
                 prover,
                 program,
@@ -256,7 +254,7 @@ fn main() {
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
             let backend = create_backend(args.max_num_variables, args.security_level);
-            let prover = create_prover(backend);
+            let prover = create_prover(backend, args.security_level);
             run_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, _, _>(
                 prover,
                 program,
@@ -271,7 +269,7 @@ fn main() {
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
             let backend = create_backend(args.max_num_variables, args.security_level);
-            let prover = create_prover(backend);
+            let prover = create_prover(backend, args.security_level);
             run_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, _, _>(
                 prover,
                 program,
@@ -286,7 +284,7 @@ fn main() {
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
             let backend = create_backend(args.max_num_variables, args.security_level);
-            let prover = create_prover(backend);
+            let prover = create_prover(backend, args.security_level);
             run_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, _, _>(
                 prover,
                 program,
