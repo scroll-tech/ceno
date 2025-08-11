@@ -455,8 +455,6 @@ dependencies = [
  "cfg-if",
  "clap",
  "criterion",
- "cuda_hal",
- "cudarc",
  "either",
  "ff_ext",
  "generic_static",
@@ -737,48 +735,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
 dependencies = [
  "cipher",
-]
-
-[[package]]
-name = "cuda_hal"
-version = "0.1.0"
-source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#5e9a5ad5fe5c820c4b8d249de6cf018f54f22856"
-dependencies = [
- "anyhow",
- "cudarc",
- "downcast-rs 0.1.2",
- "ff_ext",
- "itertools 0.13.0",
- "mpcs 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-fri",
- "p3-goldilocks",
- "p3-matrix",
- "p3-merkle-tree",
- "p3-poseidon2",
- "p3-symmetric",
- "p3-util",
- "rand",
- "rayon",
- "sppark",
- "sppark_plug",
- "sumcheck 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
- "thiserror 2.0.12",
- "tracing",
- "transcript 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
- "witness 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
-]
-
-[[package]]
-name = "cudarc"
-version = "0.13.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "486c221362668c63a1636cfa51463b09574433b39029326cff40864b3ba12b6e"
-dependencies = [
- "libloading",
 ]
 
 [[package]]
@@ -1167,7 +1123,6 @@ dependencies = [
  "ceno_emul",
  "clap",
  "criterion",
- "cuda_hal",
  "either",
  "ff_ext",
  "itertools 0.13.0",
@@ -2969,27 +2924,6 @@ name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-
-[[package]]
-name = "sppark"
-version = "0.1.11"
-source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#5e9a5ad5fe5c820c4b8d249de6cf018f54f22856"
-dependencies = [
- "cc",
- "which",
-]
-
-[[package]]
-name = "sppark_plug"
-version = "0.1.0"
-source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#5e9a5ad5fe5c820c4b8d249de6cf018f54f22856"
-dependencies = [
- "cc",
- "ff_ext",
- "itertools 0.13.0",
- "p3-field",
- "sppark",
-]
 
 [[package]]
 name = "stable_deref_trait"

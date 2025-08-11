@@ -14,7 +14,7 @@ base64 = "0.22"
 ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
-ceno_gpu = { workspace = true, optional = true }
+ceno_gpu = { git = "ssh://git@github.com/scroll-tech/ceno-gpu.git", package = "cuda_hal", branch = "dev/integrate-into-ceno-as-dep", optional = true }
 either.workspace = true
 ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
 gkr_iop = { path = "../gkr_iop" }

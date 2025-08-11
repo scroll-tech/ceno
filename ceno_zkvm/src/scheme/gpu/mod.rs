@@ -213,7 +213,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         'a: 'b,
         'b: 'c,
     {
-        // 零拷贝：将 &ProofInput<GpuBackend> 转为 &ProofInput<CpuBackend>
         let cpu_input: &ProofInput<'a, CpuBackend<E, PCS>> = unsafe {
             &*(input as *const ProofInput<'a, GpuBackend<E, PCS>>
                 as *const ProofInput<'a, CpuBackend<E, PCS>>)
