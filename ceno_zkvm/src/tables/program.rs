@@ -105,9 +105,9 @@ impl InsnRecord<()> {
         match (insn.kind, InsnFormat::from(insn.kind)) {
             (SLLI | SRLI | SRAI, _) => false,
             // Unsigned view.
-            (_, R | U) | (ADDI | SLTIU | ANDI | XORI | ORI, _) => false,
+            (_, R | U) | (SLTIU | ANDI | XORI | ORI, _) => false,
             // Signed view.
-            _ => true,
+            _ => insn.imm < 0,
         }
     }
 }

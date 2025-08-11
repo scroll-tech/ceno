@@ -50,6 +50,7 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
             rs1.id.expr(),
             0.into(),
             imm.clone(),
+            #[cfg(feature = "u16limb_circuit")] 0.into(),
         ))?;
 
         Ok(IMInstructionConfig {

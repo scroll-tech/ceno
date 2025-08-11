@@ -128,6 +128,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             circuit_builder,
             I::INST_KIND,
             imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
