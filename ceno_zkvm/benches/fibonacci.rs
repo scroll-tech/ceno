@@ -5,13 +5,13 @@ use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::{verifier::ZKVMVerifier, create_backend, create_prover},
+    scheme::{create_backend, create_prover, verifier::ZKVMVerifier},
 };
 mod alloc;
 use criterion::*;
 
-use gkr_iop::cpu::default_backend_config;
 use ff_ext::GoldilocksExt2;
+use gkr_iop::cpu::default_backend_config;
 
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;

@@ -6,8 +6,8 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::*,
     scheme::{
-        constants::MAX_NUM_VARIABLES, mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
-        create_backend, create_prover,
+        constants::MAX_NUM_VARIABLES, create_backend, create_prover,
+        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
     },
 };
 use clap::Args;

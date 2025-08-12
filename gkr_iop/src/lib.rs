@@ -19,12 +19,12 @@ use witness::RowMajorMatrix;
 pub mod chip;
 pub mod circuit_builder;
 pub mod cpu;
-#[cfg(feature = "gpu")]
-pub mod gpu;
 pub mod error;
 pub mod evaluation;
 pub mod gadgets;
 pub mod gkr;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod hal;
 pub mod selector;
 pub mod tables;

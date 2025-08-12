@@ -1,10 +1,10 @@
 use crate::{
     cpu::{CpuBackend, CpuProver},
-    gpu::{GpuBackend, GpuProver},
     gkr::layer::{
-        hal::{LinearLayerProver, SumcheckLayerProver, ZerocheckLayerProver},
         Layer, LayerWitness,
+        hal::{LinearLayerProver, SumcheckLayerProver, ZerocheckLayerProver},
     },
+    gpu::{GpuBackend, GpuProver},
 };
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
@@ -24,10 +24,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Gp
     ) -> crate::gkr::layer::sumcheck_layer::LayerProof<E> {
         let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>::new(wit.0, vec![]);
         <CpuProver<CpuBackend<E, PCS>> as LinearLayerProver<CpuBackend<E, PCS>>>::prove(
-            layer,
-            cpu_wit,
-            out_point,
-            transcript,
+            layer, cpu_wit, out_point, transcript,
         )
     }
 }
@@ -86,4 +83,3 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         )
     }
 }
-

@@ -5,9 +5,7 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
-use multilinear_extensions::{
-    mle::{ArcMultilinearExtension, MultilinearExtension},
-};
+use multilinear_extensions::mle::{ArcMultilinearExtension, MultilinearExtension};
 use p3::field::TwoAdicField;
 use std::rc::Rc;
 use witness::RowMajorMatrix;
@@ -120,7 +118,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .map(|lw| LayerWitness::<GpuBackend<E, PCS>>::new(lw.0, vec![]))
             .collect();
         let GKRCircuitOutput(cpu_out_lw) = cpu_output;
-        let gpu_output = GKRCircuitOutput::<GpuBackend<E, PCS>>(LayerWitness::new(cpu_out_lw.0, vec![]));
+        let gpu_output =
+            GKRCircuitOutput::<GpuBackend<E, PCS>>(LayerWitness::new(cpu_out_lw.0, vec![]));
 
         (GKRCircuitWitness { layers: gpu_layers }, gpu_output)
     }

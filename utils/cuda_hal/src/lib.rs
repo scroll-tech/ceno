@@ -1,7 +1,7 @@
 // Placeholder crate: This crate acts as a stub to avoid fetching the private repository
 // during dependency resolution when the `gpu` feature is not enabled.
 
-// When the `gpu` feature is enabled, the workspace patch should be replaced with 
+// When the `gpu` feature is enabled, the workspace patch should be replaced with
 // the real implementation from the private repository.
 
 #[cfg(feature = "gpu")]
@@ -14,21 +14,20 @@ compile_error!(
 // Minimal stub exports to satisfy basic compilation when gpu feature is disabled
 pub mod gl64 {
     pub struct CudaHalGL64;
-    
+
     impl CudaHalGL64 {
         pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
             Err("GPU placeholder: real implementation required".into())
         }
     }
-    
+
     pub fn convert_ceno_to_gpu_basefold_commitment<T>(_hal: &CudaHalGL64, _commitment: &T) -> T {
         panic!("GPU placeholder: real implementation required")
     }
-    
+
     pub mod buffer {
         pub struct BufferImpl<T>(std::marker::PhantomData<T>);
     }
 }
 
 pub struct BasefoldCommitmentWithWitness<T, B>(std::marker::PhantomData<(T, B)>);
-

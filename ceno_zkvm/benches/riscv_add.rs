@@ -3,15 +3,15 @@ use std::time::Duration;
 use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
-    scheme::{hal::ProofInput, prover::ZKVMProver, create_backend, create_prover},
+    scheme::{create_backend, create_prover, hal::ProofInput, prover::ZKVMProver},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
 mod alloc;
 use criterion::*;
 
-use gkr_iop::cpu::default_backend_config;
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
+use gkr_iop::cpu::default_backend_config;
 
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
 

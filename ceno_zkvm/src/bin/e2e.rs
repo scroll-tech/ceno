@@ -8,8 +8,8 @@ use ceno_zkvm::{
         setup_platform_debug, verify,
     },
     scheme::{
-        ZKVMProof, constants::MAX_NUM_VARIABLES, hal::ProverDevice, mock_prover::LkMultiplicityKey,
-        verifier::ZKVMVerifier, create_backend, create_prover,
+        ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
+        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
     },
     with_panic_hook,
 };

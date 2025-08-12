@@ -7,6 +7,7 @@ use crate::{
     },
     scheme::{
         cpu::CpuTowerProver,
+        create_backend, create_prover,
         hal::{ProofInput, TowerProverSpec},
         prover::ZkVMCpuProver,
     },
@@ -23,7 +24,6 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use gkr_iop::cpu::{CpuBackend, CpuProver, default_backend_config};
-use crate::scheme::{create_backend, create_prover};
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
 use std::marker::PhantomData;
 
