@@ -2,6 +2,7 @@ use super::RMMCollections;
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
+    instructions::riscv::constants::LIMB_BITS,
     structs::{ProgramParams, ROMType},
     tables::TableCircuit,
 };
@@ -16,6 +17,7 @@ use p3::field::FieldAlgebra;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::{collections::HashMap, marker::PhantomData};
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
+
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 
 #[cfg(not(feature = "u16limb_circuit"))]
@@ -73,7 +75,7 @@ impl<F: SmallField> InsnRecord<F> {
                 (insn.rs1_or_zero() as u64).into_f(),
                 (insn.rs2_or_zero() as u64).into_f(),
                 InsnRecord::imm_internal(insn).1,
-                F::from_bool(InsnRecord::<F>::imm_signed_internal(insn)),
+                InsnRecord::<F>::imm_signed_internal(insn).1,
             ])
         }
     }
@@ -110,6 +112,11 @@ impl<F: SmallField> InsnRecord<F> {
             // Prepare the immediate for ShiftImmInstruction.
             // The shift is implemented as a multiplication/division by 1 << immediate.
             (SLLI | SRLI | SRAI, _) => (1 << insn.imm, i64_to_base(1 << insn.imm)),
+            // logic imm
+            (XORI | ORI | ANDI, _) => (
+                insn.imm as i16 as i64,
+                F::from_canonical_u16(insn.imm as u16),
+            ),
             // for imm operate with program counter => convert to field value
             (_, B) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
             // for default imm to operate with register value
@@ -120,16 +127,21 @@ impl<F: SmallField> InsnRecord<F> {
         }
     }
 
-    pub fn imm_signed_internal(insn: &Instruction) -> bool {
+    pub fn imm_signed_internal(insn: &Instruction) -> (i64, F) {
         match (insn.kind, InsnFormat::from(insn.kind)) {
-            (SLLI | SRLI | SRAI, _) => false,
+            (SLLI | SRLI | SRAI, _) => (false as i64, F::from_bool(false)),
+            // logic imm
+            (XORI | ORI | ANDI, _) => (
+                (insn.imm >> LIMB_BITS) as i16 as i64,
+                F::from_canonical_u16((insn.imm >> LIMB_BITS) as u16),
+            ),
             // Unsigned view.
-            (_, R | U) | (ANDI | XORI | ORI, _) => false,
+            (_, R | U) => (false as i64, F::from_bool(false)),
             // in particular imm operated with program counter
             // encode as field element, which do not need extra sign extension of imm
-            (_, B) => false,
+            (_, B) => (false as i64, F::from_bool(false)),
             // Signed views
-            _ => insn.imm < 0,
+            _ => ((insn.imm < 0) as i64, F::from_bool(insn.imm < 0)),
         }
     }
 }

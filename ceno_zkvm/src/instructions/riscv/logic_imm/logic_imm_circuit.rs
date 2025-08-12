@@ -9,7 +9,7 @@ use crate::{
     error::ZKVMError,
     instructions::{
         Instruction,
-        riscv::{constants::UInt8, i_insn::IInstructionConfig},
+        riscv::{constants::UInt8, i_insn::IInstructionConfig, logic_imm::LogicOp},
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -17,12 +17,6 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
-
-/// This trait defines a logic instruction, connecting an instruction type to a lookup table.
-pub trait LogicOp {
-    const INST_KIND: InsnKind;
-    type OpsTable: OpsTable;
-}
 
 /// The Instruction circuit for a given LogicOp.
 pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
@@ -92,8 +86,6 @@ impl<E: ExtensionField> LogicConfig<E> {
             cb,
             insn_kind,
             imm.value(),
-            #[cfg(feature = "u16limb_circuit")]
-            0.into(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
