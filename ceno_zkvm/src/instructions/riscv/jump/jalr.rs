@@ -12,7 +12,7 @@ use crate::{
     },
     structs::ProgramParams,
     tables::InsnRecord,
-    utils::{i64_to_base, imm_sign_extend_circuit},
+    utils::imm_sign_extend_circuit,
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};

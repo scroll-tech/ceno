@@ -72,8 +72,8 @@ impl<F: SmallField> InsnRecord<F> {
                 (insn.rd_internal() as u64).into_f(),
                 (insn.rs1_or_zero() as u64).into_f(),
                 (insn.rs2_or_zero() as u64).into_f(),
-                F::from_canonical_u16(insn.imm as i16 as u16),
-                F::from_bool(InsnRecord::imm_signed_internal(insn)),
+                InsnRecord::imm_internal(insn).1,
+                F::from_bool(InsnRecord::<F>::imm_signed_internal(insn)),
             ])
         }
     }
@@ -105,15 +105,18 @@ impl<F: SmallField> InsnRecord<F> {
     }
 
     #[cfg(feature = "u16limb_circuit")]
-    pub fn imm_internal(insn: &Instruction) -> i64 {
+    pub fn imm_internal(insn: &Instruction) -> (i64, F) {
         match (insn.kind, InsnFormat::from(insn.kind)) {
             // Prepare the immediate for ShiftImmInstruction.
             // The shift is implemented as a multiplication/division by 1 << immediate.
-            (SLLI | SRLI | SRAI, _) => 1 << insn.imm,
+            (SLLI | SRLI | SRAI, _) => (1 << insn.imm, i64_to_base(1 << insn.imm)),
             // for imm operate with program counter => convert to field value
-            (BLT, _) => i64_to_base(insn.imm as u32 as i64),
+            (BLT, _) => (insn.imm as u32 as i64, i64_to_base(insn.imm as u32 as i64)),
             // for default imm to operate with register value
-            _ => F::from_canonical_u16(insn.imm as i16 as u16),
+            _ => (
+                insn.imm as u32 as i64,
+                F::from_canonical_u16(insn.imm as i16 as u16),
+            ),
         }
     }
 

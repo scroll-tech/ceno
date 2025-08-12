@@ -2,7 +2,6 @@ use std::marker::PhantomData;
 
 use ceno_emul::{InsnCategory, InsnFormat, InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-use gkr_iop::utils::i64_to_base;
 
 use super::super::{
     RIVInstruction,

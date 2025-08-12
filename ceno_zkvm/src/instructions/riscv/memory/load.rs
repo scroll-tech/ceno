@@ -11,7 +11,6 @@ use crate::{
     },
     structs::ProgramParams,
     tables::InsnRecord,
-    utils::i64_to_base,
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
