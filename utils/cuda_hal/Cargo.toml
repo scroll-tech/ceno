@@ -24,3 +24,6 @@ rand = "0.8"
 rayon = "1.10"
 thiserror = "1"
 tracing = "0.1"
+
+[features]
+gpu = []
