@@ -71,7 +71,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             cb,
             I::INST_KIND,
             imm.expr(),
-            #[cfg(feature = "u16limb_circuit")] E::BaseField::ZERO.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            E::BaseField::ZERO.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
