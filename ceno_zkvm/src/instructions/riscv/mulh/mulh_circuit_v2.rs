@@ -72,9 +72,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             carry_low[i] = carry_divide.expr() * (expected_limb - rd_low[i].expr());
         }
 
-        for (rd_low, carry_mul) in rd_low.iter().zip(carry_low.iter()) {
+        for (rd_low, carry_low) in rd_low.iter().zip(carry_low.iter()) {
             circuit_builder.assert_ux::<_, _, 16>(|| "range_check_low", rd_low.expr())?;
-            circuit_builder.assert_ux::<_, _, 16>(|| "range_check_carry", carry_mul.clone())?;
+            circuit_builder.assert_ux::<_, _, 16>(|| "range_check_carry_low", carry_low.clone())?;
         }
 
         let mut carry_high: [Expression<E>; UINT_LIMBS] = array::from_fn(|i| {
@@ -83,6 +83,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 .expr()
         });
 
+        let rs1_ext = circuit_builder.create_witin(|| format!("rs1_ext"));
+        let rs2_ext = circuit_builder.create_witin(|| format!("rs2_ext"));
+
         for j in 0..UINT_LIMBS {
             let expected_limb =
                 if j == 0 {
@@ -90,12 +93,25 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 } else {
                     carry_high[j - 1].clone()
                 } + ((j + 1)..UINT_LIMBS).fold(E::BaseField::ZERO.expr(), |acc, k| {
-                    acc + (rs1_expr[k] * rs2_expr[UINT_LIMBS + j - k])
+                    acc + (rs1_expr[k].clone() * rs2_expr[UINT_LIMBS + j - k].clone())
                 }) + (0..(j + 1)).fold(E::BaseField::ZERO.expr(), |acc, k| {
-                    acc + (rs1_expr[k] * cols.c_ext) + (rs2_expr[k] * cols.b_ext)
+                    acc + (rs1_expr[k].clone() * rs2_ext.expr())
+                        + (rs2_expr[k].clone() * rs1_ext.expr())
                 });
-            carry_high[j] = E::BaseField::from(carry_divide).expr() * (expected_limb - rd_expr[j]);
+            carry_high[j] =
+                E::BaseField::from(carry_divide).expr() * (expected_limb - rd_expr[j].clone());
         }
+
+        for (rd_high, carry_high) in rd_expr.iter().zip(carry_high.iter()) {
+            circuit_builder.assert_ux::<_, _, 16>(|| "range_check_high", rd_high.clone())?;
+            circuit_builder
+                .assert_ux::<_, _, 16>(|| "range_check_carry_high", carry_high.clone())?;
+        }
+
+        let sign_mask = E::BaseField::from_canonical_u32(1 << (UINT_LIMBS - 1));
+        let ext_inv = E::BaseField::from_canonical_u32((1 << UINT_LIMBS) - 1).inverse();
+        let rs1_sign: Expression<E> = rs1_ext.expr() * ext_inv.expr();
+        let rs2_sign: Expression<E> = rs2_ext.expr() * ext_inv.expr();
 
         match I::INST_KIND {
             InsnKind::MULH => {
