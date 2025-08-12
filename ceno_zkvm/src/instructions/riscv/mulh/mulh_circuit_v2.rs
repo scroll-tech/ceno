@@ -14,7 +14,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{Expression, ToExpr as _, WitIn};
 use p3::field::{Field, FieldAlgebra};
 use witness::set_val;
@@ -227,9 +227,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 .as_slice(),
         );
 
-        set_val!(instance, config.rd_low, rd_low);
-        set_val!(instance, config.rs1_ext, rs1_ext);
-        set_val!(instance, config.rs2_ext, rs2_ext);
+        for i in 0..UINT_LIMBS {
+            set_val!(instance, config.rd_low[i], rd_low[i] as u64);
+        }
+        set_val!(instance, config.rs1_ext, rs1_ext as u64);
+        set_val!(instance, config.rs2_ext, rs2_ext as u64);
 
         Ok(())
     }
