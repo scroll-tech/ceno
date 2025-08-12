@@ -111,7 +111,7 @@ impl<F: SmallField> InsnRecord<F> {
             // The shift is implemented as a multiplication/division by 1 << immediate.
             (SLLI | SRLI | SRAI, _) => (1 << insn.imm, i64_to_base(1 << insn.imm)),
             // for imm operate with program counter => convert to field value
-            (BLT, _) => (insn.imm as u32 as i64, i64_to_base(insn.imm as u32 as i64)),
+            (_, B) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
             // for default imm to operate with register value
             _ => (
                 insn.imm as u32 as i64,
@@ -127,7 +127,7 @@ impl<F: SmallField> InsnRecord<F> {
             (_, R | U) | (ANDI | XORI | ORI, _) => false,
             // in particular imm operated with program counter
             // encode as field element, which do not need extra sign extension of imm
-            (BLT, _) => false,
+            (_, B) => false,
             // Signed views
             _ => insn.imm < 0,
         }

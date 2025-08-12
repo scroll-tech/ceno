@@ -96,7 +96,6 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         self.rs1.assign_instance(instance, lk_multiplicity, step)?;
         self.rs2.assign_instance(instance, lk_multiplicity, step)?;
 
-        println!("&step.insn() {:?}", &step.insn());
         // Immediate
         set_val!(
             instance,
