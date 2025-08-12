@@ -19,6 +19,7 @@ use witness::RowMajorMatrix;
 pub mod chip;
 pub mod circuit_builder;
 pub mod cpu;
+#[cfg(feature = "gpu")]
 pub mod gpu;
 pub mod error;
 pub mod evaluation;

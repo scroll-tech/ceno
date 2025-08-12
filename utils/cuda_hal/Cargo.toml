@@ -1,0 +1,26 @@
+[package]
+name = "cuda_hal"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "cuda_hal"
+path = "src/lib.rs"
+
+[dependencies]
+# Add dependencies that match what the real ceno_gpu needs
+anyhow = "1.0"
+ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
+mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "7c277a1" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "7c277a1" }
+sumcheck = { git = "https://github.com/scroll-tech/ceno", package = "sumcheck", rev = "7c277a1" }
+transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "7c277a1" }
+witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "7c277a1" }
+p3-field = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+p3-goldilocks = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
+itertools = "0.13"
+rand = "0.8"
+rayon = "1.10"
+thiserror = "1"
+tracing = "0.1"

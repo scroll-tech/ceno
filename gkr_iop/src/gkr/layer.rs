@@ -24,6 +24,7 @@ use crate::{
 };
 
 pub mod cpu;
+#[cfg(feature = "gpu")]
 pub mod gpu;
 pub mod hal;
 pub mod linear_layer;

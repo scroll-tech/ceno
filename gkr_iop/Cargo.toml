@@ -13,7 +13,7 @@ version.workspace = true
 ark-std = { version = "0.5" }
 bincode.workspace = true
 ceno_emul = { path = "../ceno_emul" }
-ceno_gpu = { git = "ssh://git@github.com/scroll-tech/ceno-gpu.git", package = "cuda_hal", branch = "dev/integrate-into-ceno-as-dep", optional = true }
+ceno_gpu = { workspace = true, optional = true }
 clap.workspace = true
 either.workspace = true
 ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
