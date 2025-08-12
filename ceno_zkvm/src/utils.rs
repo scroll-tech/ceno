@@ -147,14 +147,13 @@ pub fn imm_sign_extend_circuit<E: ExtensionField>(
 }
 #[inline(always)]
 pub fn imm_sign_extend(is_signed_extension: bool, imm: i16) -> [u16; UINT_LIMBS] {
+    #[allow(clippy::if_same_then_else)]
     if !is_signed_extension {
         [imm as u16, 0]
+    } else if imm >= 0 {
+        [imm as u16, 0u16]
     } else {
-        if imm >= 0 {
-            [imm as u16, 0u16]
-        } else {
-            [imm as u16, 0xffff]
-        }
+        [imm as u16, 0xffff]
     }
 }
 

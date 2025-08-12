@@ -10,8 +10,7 @@ use crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmInstruction
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::instructions::riscv::slti::slti_circuit::SetLessThanImmInstruction;
 
-use super::{RIVInstruction, constants::UInt};
-use crate::{structs::ProgramParams, uint::Value};
+use super::RIVInstruction;
 
 pub struct SltiOp;
 impl RIVInstruction for SltiOp {
@@ -34,12 +33,17 @@ mod test {
 
     use super::*;
     use crate::{
+        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{
             Instruction,
-            riscv::test_utils::{i32_extra, imm_extra, immu_extra, u32_extra},
+            riscv::{
+                constants::UInt,
+                test_utils::{i32_extra, imm_extra, immu_extra, u32_extra},
+            },
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
+        structs::ProgramParams,
     };
 
     #[test]
