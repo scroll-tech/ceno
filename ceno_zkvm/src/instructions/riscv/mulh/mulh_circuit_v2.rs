@@ -1,28 +1,33 @@
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    gadgets::Signed,
     instructions::{
         Instruction,
         riscv::{
             RIVInstruction,
-            constants::{UINT_LIMBS, UInt},
+            constants::{LIMB_BITS, UINT_LIMBS, UInt},
             r_insn::RInstructionConfig,
         },
     },
     structs::ProgramParams,
+    uint::Value,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use multilinear_extensions::{Expression, ToExpr as _, WitIn};
 use p3::field::{Field, FieldAlgebra};
+use witness::set_val;
 
 use std::{array, marker::PhantomData};
 
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
 pub struct MulhConfig<E: ExtensionField> {
+    rs1_read: UInt<E>,
+    rs2_read: UInt<E>,
+    rd_written: UInt<E>,
+    r_insn: RInstructionConfig<E>,
     rd_low: [WitIn; UINT_LIMBS],
     rs1_ext: WitIn,
     rs2_ext: WitIn,
@@ -48,6 +53,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+
+        let r_insn = RInstructionConfig::<E>::construct_circuit(
+            circuit_builder,
+            I::INST_KIND,
+            rs1_read.register_expr(),
+            rs2_read.register_expr(),
+            rd_written.register_expr(),
+        )?;
 
         let rs1_expr = rs1_read.expr();
         let rs2_expr = rs2_read.expr();
@@ -157,6 +170,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         }
 
         Ok(MulhConfig {
+            rs1_read,
+            rs2_read,
+            rd_written,
+            r_insn,
             rd_low,
             rs1_ext,
             rs2_ext,
@@ -165,11 +182,104 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
     }
 
     fn assign_instance(
-        _config: &Self::InstructionConfig,
-        _instance: &mut [<E as ExtensionField>::BaseField],
-        _lk_multiplicity: &mut LkMultiplicity,
-        _step: &StepRecord,
+        config: &Self::InstructionConfig,
+        instance: &mut [<E as ExtensionField>::BaseField],
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        unimplemented!()
+        // Read registers from step
+        let rs1 = step.rs1().unwrap().value;
+        let rs1_val = Value::new_unchecked(rs1);
+        config
+            .rs1_read
+            .assign_limbs(instance, rs1_val.as_u16_limbs());
+
+        let rs2 = step.rs2().unwrap().value;
+        let rs2_val = Value::new_unchecked(rs2);
+        config
+            .rs2_read
+            .assign_limbs(instance, rs2_val.as_u16_limbs());
+
+        let rd = step.rd().unwrap().value.after;
+        let rd_val = Value::new(rd, lk_multiplicity);
+        config
+            .rd_written
+            .assign_limbs(instance, rd_val.as_u16_limbs());
+
+        // R-type instruction
+        config
+            .r_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
+
+        let (_, rd_low, carry, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
+            I::INST_KIND,
+            rs1_val
+                .as_u16_limbs()
+                .iter()
+                .map(|x| *x as u32)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            rs2_val
+                .as_u16_limbs()
+                .iter()
+                .map(|x| *x as u32)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+
+        set_val!(instance, config.rd_low, rd_low);
+        set_val!(instance, config.rs1_ext, rs1_ext);
+        set_val!(instance, config.rs2_ext, rs2_ext);
+
+        Ok(())
     }
+}
+
+fn run_mulh<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
+    kind: InsnKind,
+    x: &[u32],
+    y: &[u32],
+) -> ([u32; NUM_LIMBS], [u32; NUM_LIMBS], Vec<u32>, u32, u32) {
+    let mut mul = [0; NUM_LIMBS];
+    let mut carry = vec![0; 2 * NUM_LIMBS];
+    for i in 0..NUM_LIMBS {
+        if i > 0 {
+            mul[i] = carry[i - 1];
+        }
+        for j in 0..=i {
+            mul[i] += x[j] * y[i - j];
+        }
+        carry[i] = mul[i] >> LIMB_BITS;
+        mul[i] %= 1 << LIMB_BITS;
+    }
+
+    let x_ext = (x[NUM_LIMBS - 1] >> (LIMB_BITS - 1))
+        * if kind == InsnKind::MULHU {
+            0
+        } else {
+            (1 << LIMB_BITS) - 1
+        };
+    let y_ext = (y[NUM_LIMBS - 1] >> (LIMB_BITS - 1))
+        * if kind == InsnKind::MULH {
+            (1 << LIMB_BITS) - 1
+        } else {
+            0
+        };
+
+    let mut mulh = [0; NUM_LIMBS];
+    let mut x_prefix = 0;
+    let mut y_prefix = 0;
+
+    for i in 0..NUM_LIMBS {
+        x_prefix += x[i];
+        y_prefix += y[i];
+        mulh[i] = carry[NUM_LIMBS + i - 1] + x_prefix * y_ext + y_prefix * x_ext;
+        for j in (i + 1)..NUM_LIMBS {
+            mulh[i] += x[j] * y[NUM_LIMBS + i - j];
+        }
+        carry[NUM_LIMBS + i] = mulh[i] >> LIMB_BITS;
+        mulh[i] %= 1 << LIMB_BITS;
+    }
+
+    (mulh, mul, carry, x_ext, y_ext)
 }
