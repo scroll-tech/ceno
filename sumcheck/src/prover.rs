@@ -1,6 +1,5 @@
 use std::{mem, sync::Arc};
 
-use crossbeam_channel::bounded;
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{
@@ -12,12 +11,11 @@ use multilinear_extensions::{
     virtual_polys::{PolyMeta, VirtualPolynomials},
 };
 use rayon::{
-    Scope,
     iter::{IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     prelude::{IntoParallelIterator, ParallelIterator},
 };
 use sumcheck_macro::sumcheck_code_gen;
-use transcript::{Challenge, Transcript, TranscriptSyncronized};
+use transcript::{Challenge, Transcript};
 
 use crate::{
     extrapolate::ExtrapolationCache,
@@ -29,6 +27,96 @@ use crate::{
     },
 };
 use p3::field::FieldAlgebra;
+
+struct Phase1Workers<'a, E: ExtensionField> {
+    workers_states: Vec<Phase1WorkerState<'a, E>>,
+}
+
+impl<'a, E: ExtensionField> Phase1Workers<'a, E> {
+    fn run(
+        mut self,
+        num_variables: usize,
+        max_degree: usize,
+        transcript: &mut impl Transcript<E>,
+    ) -> (Vec<IOPProverState<'a, E>>, Vec<IOPProverMessage<E>>) {
+        let mut prover_msgs = Vec::with_capacity(num_variables);
+        for _ in 0..num_variables {
+            let mut evaluations = AdditiveVec::new(max_degree + 1);
+            self.workers_states.par_iter_mut().for_each(|state| {
+                state.run_round();
+            });
+
+            for worker_state in self.workers_states.iter_mut() {
+                evaluations += AdditiveVec(
+                    worker_state
+                        .last_round_evaluations
+                        .take()
+                        .expect("at least round of evaluations has happened by this time"),
+                );
+            }
+
+            transcript.append_field_element_exts(&evaluations.0);
+
+            let challenge = transcript.sample_and_append_challenge(b"Internal round");
+            for worker_state in self.workers_states.iter_mut() {
+                worker_state.challenge = Some(challenge);
+            }
+
+            prover_msgs.push(IOPProverMessage {
+                evaluations: evaluations.0,
+            });
+        }
+
+        let Self { workers_states, .. } = self;
+
+        (
+            workers_states
+                .into_iter()
+                .map(|mut s| {
+                    if let Some(challenge) = s.challenge.take() {
+                        s.prover_state.push_challenges(vec![challenge]);
+                        // fix last challenge to collect final evaluation
+                        s.prover_state.fix_var(challenge.elements);
+                    }
+                    s.prover_state
+                })
+                .collect(),
+            prover_msgs,
+        )
+    }
+}
+
+struct Phase1WorkerState<'a, E: ExtensionField> {
+    prover_state: IOPProverState<'a, E>,
+    challenge: Option<Challenge<E>>,
+    last_round_evaluations: Option<Vec<E>>,
+}
+
+impl<'a, E: ExtensionField> Phase1WorkerState<'a, E> {
+    fn new(
+        is_main_worker: bool,
+        poly: VirtualPolynomial<'a, E>,
+        phase2_numvar: usize,
+        poly_meta: Option<Vec<PolyMeta>>,
+    ) -> Self {
+        Self {
+            prover_state: IOPProverState::prover_init_with_extrapolation_aux(
+                is_main_worker,
+                poly,
+                Some(phase2_numvar),
+                poly_meta,
+            ),
+            challenge: None,
+            last_round_evaluations: None,
+        }
+    }
+
+    fn run_round(&mut self) {
+        let prover_msg =
+            IOPProverState::prove_round_and_update_state(&mut self.prover_state, &self.challenge);
+        self.last_round_evaluations = Some(prover_msg.evaluations)
+    }
+}
 
 impl<'a, E: ExtensionField> IOPProverState<'a, E> {
     /// Given a virtual polynomial, generate an IOP proof.
@@ -161,143 +249,27 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
         transcript: &mut impl Transcript<E>,
     ) -> (Vec<IOPProverState<'a, E>>, Vec<IOPProverMessage<E>>) {
         let log2_max_thread_id = ceil_log2(max_thread_id); // do not support SIZE not power of 2
-        let thread_based_transcript = TranscriptSyncronized::new(max_thread_id);
-        let (tx_prover_state, rx_prover_state) = bounded(max_thread_id);
 
-        // spawn extra #(max_thread_id - 1) work threads
-        let num_worker_threads = max_thread_id - 1;
-        // whereas the main-thread be the last work thread
-        let main_thread_id = num_worker_threads;
         let span = entered_span!("spawn loop", profiling_4 = true);
-        let scoped_fn = |s: &Scope<'a>| {
-            for (thread_id, poly) in polys.iter_mut().enumerate().take(num_worker_threads) {
-                let mut prover_state = Self::prover_init_with_extrapolation_aux(
-                    false,
+        let workers_states: Vec<_> = polys
+            .iter_mut()
+            .enumerate()
+            .map(|(thread_id, poly)| {
+                // Only the first one of the workers is the "main" worker
+                Phase1WorkerState::new(
+                    thread_id == 0,
                     mem::take(poly),
-                    Some(log2_max_thread_id),
+                    log2_max_thread_id,
                     Some(poly_meta.clone()),
-                );
-                let tx_prover_state = tx_prover_state.clone();
-                let mut thread_based_transcript = thread_based_transcript.clone();
-                s.spawn(move |_| {
-                    let mut challenge = None;
-                    // Note: This span is not nested into the "spawn loop" span, although lexically it looks so.
-                    // Nesting is possible, but then `tracing-forest` does the wrong thing when measuring duration.
-                    // TODO: investigate possibility of nesting with correct duration of parent span
-                    let span = entered_span!("prove_rounds");
-                    for _ in 0..num_variables {
-                        let prover_msg = IOPProverState::prove_round_and_update_state(
-                            &mut prover_state,
-                            &challenge,
-                        );
-                        thread_based_transcript.append_field_element_exts(&prover_msg.evaluations);
+                )
+            })
+            .collect();
 
-                        challenge = Some(
-                            thread_based_transcript.sample_and_append_challenge(b"Internal round"),
-                        );
-                        thread_based_transcript.commit_rolling();
-                    }
-                    exit_span!(span);
-                    // pushing the last challenge point to the state
-                    if let Some(p) = challenge {
-                        prover_state.push_challenges(vec![p]);
-                        // fix last challenge to collect final evaluation
-                        prover_state.fix_var(p.elements);
+        exit_span!(span);
 
-                        tx_prover_state
-                            .send(Some((thread_id, prover_state)))
-                            .unwrap();
-                    } else {
-                        tx_prover_state.send(None).unwrap();
-                    }
-                })
-            }
-            exit_span!(span);
+        let workers = Phase1Workers { workers_states };
 
-            let mut prover_msgs = Vec::with_capacity(num_variables);
-            let mut prover_state = Self::prover_init_with_extrapolation_aux(
-                true,
-                mem::take(&mut polys[main_thread_id]),
-                Some(log2_max_thread_id),
-                Some(poly_meta.clone()),
-            );
-            let tx_prover_state = tx_prover_state.clone();
-            let mut thread_based_transcript = thread_based_transcript.clone();
-
-            let main_thread_span = entered_span!("main_thread_prove_rounds");
-            // main thread also be one worker thread
-            // NOTE inline main thread flow with worker thread to improve efficiency
-            // refactor to shared closure cause to 5% throuput drop
-            let mut challenge = None;
-            for _ in 0..num_variables {
-                let prover_msg =
-                    IOPProverState::prove_round_and_update_state(&mut prover_state, &challenge);
-
-                // for each round, we must collect #SIZE prover message
-                let mut evaluations = AdditiveVec::new(max_degree + 1);
-
-                // sum for all round poly evaluations vector
-                evaluations += AdditiveVec(prover_msg.evaluations);
-                for _ in 0..num_worker_threads {
-                    let round_poly_coeffs = thread_based_transcript.read_field_element_exts();
-                    evaluations += AdditiveVec(round_poly_coeffs);
-                }
-
-                let get_challenge_span = entered_span!("main_thread_get_challenge");
-                transcript.append_field_element_exts(&evaluations.0);
-
-                let next_challenge = transcript.sample_and_append_challenge(b"Internal round");
-                (0..num_worker_threads).for_each(|_| {
-                    thread_based_transcript.send_challenge(next_challenge.elements);
-                });
-
-                exit_span!(get_challenge_span);
-
-                prover_msgs.push(IOPProverMessage {
-                    evaluations: evaluations.0,
-                });
-
-                challenge = Some(next_challenge);
-                thread_based_transcript.commit_rolling();
-            }
-            exit_span!(main_thread_span);
-            // pushing the last challenge point to the state
-            if let Some(p) = challenge {
-                prover_state.push_challenges(vec![p]);
-                // fix last challenge to collect final evaluation
-                prover_state.fix_var(p.elements);
-                tx_prover_state
-                    .send(Some((main_thread_id, prover_state)))
-                    .unwrap();
-            } else {
-                tx_prover_state.send(None).unwrap();
-            }
-
-            let mut prover_states = (0..max_thread_id)
-                .map(|_| IOPProverState::default())
-                .collect::<Vec<_>>();
-            for _ in 0..max_thread_id {
-                if let Some((index, prover_msg)) = rx_prover_state.recv().unwrap() {
-                    prover_states[index] = prover_msg
-                } else {
-                    println!("got empty msg, which is normal if virtual poly is constant function")
-                }
-            }
-
-            (prover_states, prover_msgs)
-        };
-
-        // create local thread pool if global rayon pool size < max_thread_id
-        // this usually cause by global pool size not power of 2.
-        if rayon::current_num_threads() >= max_thread_id {
-            rayon::in_place_scope(scoped_fn)
-        } else {
-            panic!(
-                "rayon global thread pool size {} mismatch with desired poly size {}.",
-                rayon::current_num_threads(),
-                polys.len()
-            );
-        }
+        workers.run(num_variables, max_degree, transcript)
     }
 
     /// Initialize the prover state to argue for the sum of the input polynomial
