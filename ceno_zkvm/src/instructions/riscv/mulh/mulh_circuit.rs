@@ -105,42 +105,6 @@ use multilinear_extensions::Expression;
 
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
-pub struct MulOp;
-impl RIVInstruction for MulOp {
-    const INST_KIND: InsnKind = InsnKind::MUL;
-}
-pub type MulInstruction<E> = MulhInstructionBase<E, MulOp>;
-
-pub struct MulhOp;
-impl RIVInstruction for MulhOp {
-    const INST_KIND: InsnKind = InsnKind::MULH;
-}
-pub type MulhInstruction<E> = MulhInstructionBase<E, MulhOp>;
-
-pub struct MulhuOp;
-impl RIVInstruction for MulhuOp {
-    const INST_KIND: InsnKind = InsnKind::MULHU;
-}
-pub type MulhuInstruction<E> = MulhInstructionBase<E, MulhuOp>;
-
-pub struct MulhsuOp;
-impl RIVInstruction for MulhsuOp {
-    const INST_KIND: InsnKind = InsnKind::MULHSU;
-}
-pub type MulhsuInstruction<E> = MulhInstructionBase<E, MulhsuOp>;
-
-pub struct MulhConfig<E: ExtensionField> {
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    rd_written: UInt<E>,
-    sign_deps: MulhSignDependencies<E>,
-    r_insn: RInstructionConfig<E>,
-    /// The low/high part of the result of multiplying two Uint32.
-    ///
-    /// Whether it's low or high depends on the operation.
-    prod_lo_hi: UInt<E>,
-}
-
 enum MulhSignDependencies<E: ExtensionField> {
     LL {
         constrain_rd: IsEqualConfig,
@@ -158,6 +122,18 @@ enum MulhSignDependencies<E: ExtensionField> {
         rs2_signed: Signed<E>,
         rd_signed: Signed<E>,
     },
+}
+
+pub struct MulhConfig<E: ExtensionField> {
+    rs1_read: UInt<E>,
+    rs2_read: UInt<E>,
+    rd_written: UInt<E>,
+    sign_deps: MulhSignDependencies<E>,
+    r_insn: RInstructionConfig<E>,
+    /// The low/high part of the result of multiplying two Uint32.
+    ///
+    /// Whether it's low or high depends on the operation.
+    prod_lo_hi: UInt<E>,
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBase<E, I> {
@@ -401,242 +377,5 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             .assign_limbs(instance, prod_lo_hi_val.as_u16_limbs());
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use ceno_emul::{Change, StepRecord, encode_rv32};
-    use ff_ext::GoldilocksExt2;
-    use gkr_iop::circuit_builder::DebugIndex;
-
-    use super::*;
-    use crate::{
-        circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
-        scheme::mock_prover::{MOCK_PC_START, MockProver},
-    };
-
-    #[test]
-    fn test_opcode_mul() {
-        verify_mulu::<MulOp>("basic", 2, 11);
-        verify_mulu::<MulOp>("2 * 0", 2, 0);
-        verify_mulu::<MulOp>("0 * 0", 0, 0);
-        verify_mulu::<MulOp>("0 * 2", 0, 2);
-        verify_mulu::<MulOp>("0 * u32::MAX", 0, u32::MAX);
-        verify_mulu::<MulOp>("u32::MAX", u32::MAX, u32::MAX);
-        verify_mulu::<MulOp>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
-    }
-
-    #[test]
-    fn test_opcode_mulhu() {
-        verify_mulu::<MulhuOp>("basic", 2, 11);
-        verify_mulu::<MulhuOp>("2 * 0", 2, 0);
-        verify_mulu::<MulhuOp>("0 * 0", 0, 0);
-        verify_mulu::<MulhuOp>("0 * 2", 0, 2);
-        verify_mulu::<MulhuOp>("0 * u32::MAX", 0, u32::MAX);
-        verify_mulu::<MulhuOp>("u32::MAX", u32::MAX, u32::MAX);
-        verify_mulu::<MulhuOp>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
-    }
-
-    fn verify_mulu<I: RIVInstruction>(name: &'static str, rs1: u32, rs2: u32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || format!("{:?}_({name})", I::INST_KIND),
-                |cb| {
-                    Ok(MulhInstructionBase::<GoldilocksExt2, I>::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    ))
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let outcome = match I::INST_KIND {
-            InsnKind::MUL => rs1.wrapping_mul(rs2),
-            InsnKind::MULHU => {
-                let a = Value::<'_, u32>::new_unchecked(rs1);
-                let b = Value::<'_, u32>::new_unchecked(rs2);
-                let value_mul = a.mul_hi(&b, &mut LkMultiplicity::default(), true);
-                value_mul.as_hi_value::<u32>().as_u32()
-            }
-            _ => unreachable!("Unsupported instruction kind"),
-        };
-
-        // values assignment
-        let insn_code = encode_rv32(I::INST_KIND, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulhInstructionBase::<GoldilocksExt2, I>::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            cb.cs.num_structural_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                rs1,
-                rs2,
-                Change::new(0, outcome),
-                0,
-            )],
-        )
-        .unwrap();
-
-        // verify value write to register, which is only hi
-        let expected_rd_written =
-            UInt::from_const_unchecked(Value::new_unchecked(outcome).as_u16_limbs().to_vec());
-        let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
-        cb.require_equal(
-            || "assert_rd_written",
-            rd_written_expr,
-            expected_rd_written.value(),
-        )
-        .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
-    }
-
-    #[test]
-    fn test_opcode_mulh() {
-        let test_cases = vec![
-            (2, 11),
-            (7, 0),
-            (0, 5),
-            (0, -3),
-            (-19, 0),
-            (0, 0),
-            (-12, -31),
-            (2, -1),
-            (1, i32::MIN),
-            (i32::MAX, -1),
-            (i32::MAX, i32::MIN),
-            (i32::MAX, i32::MAX),
-            (i32::MIN, i32::MIN),
-        ];
-        test_cases
-            .into_iter()
-            .for_each(|(rs1, rs2)| verify_mulh(rs1, rs2));
-    }
-
-    fn verify_mulh(rs1: i32, rs2: i32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "mulh",
-                |cb| {
-                    Ok(MulhInstruction::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    ))
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let signed_prod_high = ((rs1 as i64).wrapping_mul(rs2 as i64) >> 32) as u32;
-
-        // values assignment
-        let insn_code = encode_rv32(InsnKind::MULH, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulhInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            cb.cs.num_structural_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                rs1 as u32,
-                rs2 as u32,
-                Change::new(0, signed_prod_high),
-                0,
-            )],
-        )
-        .unwrap();
-
-        // verify value written to register
-        let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
-        cb.require_equal(
-            || "assert_rd_written",
-            rd_written_expr,
-            Expression::from(signed_prod_high),
-        )
-        .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
-    }
-
-    #[test]
-    fn test_opcode_mulhsu() {
-        let test_cases = vec![
-            (0, 0),
-            (0, 5),
-            (0, u32::MAX),
-            (7, 0),
-            (2, 11),
-            (91, u32::MAX),
-            (i32::MAX, 0),
-            (i32::MAX, 2),
-            (i32::MAX, u32::MAX),
-            (-4, 0),
-            (-1, 3),
-            (-1000, u32::MAX),
-            (i32::MIN, 0),
-            (i32::MIN, 21),
-            (i32::MIN, u32::MAX),
-        ];
-        test_cases
-            .into_iter()
-            .for_each(|(rs1, rs2)| verify_mulhsu(rs1, rs2));
-    }
-
-    fn verify_mulhsu(rs1: i32, rs2: u32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "mulhsu",
-                |cb| {
-                    Ok(MulhsuInstruction::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    ))
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let signed_unsigned_prod_high = ((rs1 as i64).wrapping_mul(rs2 as i64) >> 32) as u32;
-
-        // values assignment
-        let insn_code = encode_rv32(InsnKind::MULHSU, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulhsuInstruction::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            cb.cs.num_structural_witin as usize,
-            vec![StepRecord::new_r_instruction(
-                3,
-                MOCK_PC_START,
-                insn_code,
-                rs1 as u32,
-                rs2,
-                Change::new(0, signed_unsigned_prod_high),
-                0,
-            )],
-        )
-        .unwrap();
-
-        // verify value written to register
-        let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
-        cb.require_equal(
-            || "assert_rd_written",
-            rd_written_expr,
-            Expression::from(signed_unsigned_prod_high),
-        )
-        .unwrap();
-
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
 }
