@@ -9,7 +9,6 @@ use ceno_emul::{
     InsnFormat, InsnFormat::*, InsnKind::*, Instruction, PC_STEP_SIZE, Program, WORD_SIZE,
 };
 use ff_ext::{ExtensionField, FieldInto, SmallField};
-use gkr_iop::utils::i64_to_base;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
@@ -105,7 +104,7 @@ impl InsnRecord<()> {
         match (insn.kind, InsnFormat::from(insn.kind)) {
             (SLLI | SRLI | SRAI, _) => false,
             // Unsigned view.
-            (_, R | U) | (SLTIU | ANDI | XORI | ORI, _) => false,
+            (_, R | U) | (ANDI | XORI | ORI, _) => false,
             // Signed view.
             _ => insn.imm < 0,
         }

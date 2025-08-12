@@ -9,17 +9,7 @@ pub use crate::instructions::riscv::arith_imm::arith_imm_circuit_v2::AddiInstruc
 #[cfg(not(feature = "u16limb_circuit"))]
 pub use crate::instructions::riscv::arith_imm::arith_imm_circuit::AddiInstruction;
 
-use std::marker::PhantomData;
-
-use ceno_emul::StepRecord;
-use ff_ext::ExtensionField;
-
-use crate::{
-    Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    structs::ProgramParams, tables::InsnRecord, witness::LkMultiplicity,
-};
-
-use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};
+use super::RIVInstruction;
 
 impl<E> RIVInstruction for AddiInstruction<E> {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::ADDI;

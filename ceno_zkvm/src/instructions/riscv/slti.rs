@@ -10,29 +10,8 @@ use crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmInstruction
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::instructions::riscv::slti::slti_circuit::SetLessThanImmInstruction;
 
-use std::marker::PhantomData;
-
-use ceno_emul::{InsnKind, SWord, StepRecord, Word};
-use ff_ext::ExtensionField;
-
-use super::{
-    RIVInstruction,
-    constants::{UINT_LIMBS, UInt},
-    i_insn::IInstructionConfig,
-};
-use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    gadgets::{IsLtConfig, SignedExtendConfig},
-    instructions::Instruction,
-    structs::ProgramParams,
-    tables::InsnRecord,
-    uint::Value,
-    utils::i64_to_base,
-    witness::{LkMultiplicity, set_val},
-};
-use ff_ext::FieldInto;
-use multilinear_extensions::{ToExpr, WitIn};
+use super::{RIVInstruction, constants::UInt};
+use crate::{structs::ProgramParams, uint::Value};
 
 pub struct SltiOp;
 impl RIVInstruction for SltiOp {
@@ -74,6 +53,7 @@ mod test {
         verify("lt = true, 0 < u32::MAX-1", 0, -1);
         verify("lt = true, 1 < u32::MAX-1", 1, -1);
         verify("lt = true, 0 < imm lower bondary", 0, -2048);
+        verify("lt = true, 65535 < imm lower bondary", 65535, -1);
     }
 
     #[test]

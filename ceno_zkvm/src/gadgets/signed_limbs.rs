@@ -162,7 +162,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
             });
         set_val!(instance, config.cmp_lt, cmp_lt as u64);
 
-        // We range check (read_rs1_msb_f + 128) and (read_rs2_msb_f + 128) if signed,
+        // We range check (read_rs1_msb_f + 32768) and (read_rs2_msb_f + 32768) if signed,
         // read_rs1_msb_f and read_rs2_msb_f if not
         let (a_msb_f, a_msb_range) = if a_sign {
             (

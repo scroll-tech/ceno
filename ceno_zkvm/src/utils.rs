@@ -150,7 +150,7 @@ pub fn imm_sign_extend(is_signed: bool, imm: i16) -> [u16; UINT_LIMBS] {
     if !is_signed {
         [imm as u16, 0]
     } else {
-        if imm > 0 {
+        if imm >= 0 {
             [imm as u16, 0u16]
         } else {
             [imm as u16, 0xffff]
