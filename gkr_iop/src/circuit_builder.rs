@@ -1138,6 +1138,7 @@ pub fn expansion_expr<E: ExtensionField, const SIZE: usize>(
 
 pub enum DebugIndex {
     RdWrite = 0,
+    MemWrite = 1,
 }
 
 impl<E: ExtensionField> CircuitBuilder<'_, E> {

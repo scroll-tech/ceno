@@ -28,7 +28,7 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     prev_memory_value: UInt<E>,
 
     memory_addr: MemAddr<E>,
-    word_change: Option<MemWordUtil<E, N_ZEROS>>,
+    next_memory_value: Option<MemWordUtil<E, N_ZEROS>>,
 }
 
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
@@ -90,16 +90,16 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             rs1_read.value() + imm.expr(),
         )?;
 
-        let (new_memory_value, word_change) = match I::INST_KIND {
+        let (next_memory_value, next_memory) = match I::INST_KIND {
             InsnKind::SW => (rs2_read.memory_expr(), None),
             InsnKind::SH | InsnKind::SB => {
-                let change = MemWordUtil::<E, N_ZEROS>::construct_circuit(
+                let next_memory = MemWordUtil::<E, N_ZEROS>::construct_circuit(
                     circuit_builder,
                     &memory_addr,
                     &prev_memory_value,
                     &rs2_read,
                 )?;
-                (change.as_lo_hi().clone(), Some(change))
+                (next_memory.as_lo_hi().clone(), Some(next_memory))
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
@@ -112,7 +112,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             rs2_read.register_expr(),
             memory_addr.expr_align4(),
             prev_memory_value.memory_expr(),
-            new_memory_value,
+            next_memory_value,
         )?;
 
         Ok(StoreConfig {
@@ -122,7 +122,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             imm,
             prev_memory_value,
             memory_addr,
-            word_change,
+            next_memory_value: next_memory,
         })
     }
 
@@ -152,7 +152,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         config
             .memory_addr
             .assign_instance(instance, lk_multiplicity, addr.into())?;
-        if let Some(change) = config.word_change.as_ref() {
+        if let Some(change) = config.next_memory_value.as_ref() {
             change.assign_instance(instance, lk_multiplicity, step, addr.shift())?;
         }
 

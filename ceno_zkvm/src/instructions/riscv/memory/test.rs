@@ -1,9 +1,11 @@
 use crate::{
+    Value,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     instructions::{
         Instruction,
         riscv::{
             RIVInstruction,
+            constants::UInt,
             memory::{
                 LwInstruction, SbInstruction, ShInstruction, SwInstruction,
                 load::{
@@ -19,6 +21,7 @@ use crate::{
 };
 use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, Word, WriteOp, encode_rv32};
 use ff_ext::{ExtensionField, GoldilocksExt2};
+use gkr_iop::circuit_builder::DebugIndex;
 use std::hash::Hash;
 
 fn sb(prev: Word, rs2: Word, shift: u32) -> Word {
@@ -119,6 +122,17 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
             },
             8,
         )],
+    )
+    .unwrap();
+
+    // verify mem_write
+    let expected_mem_written =
+        UInt::from_const_unchecked(Value::new_unchecked(new_mem_value).as_u16_limbs().to_vec());
+    let mem_written_expr = cb.get_debug_expr(DebugIndex::MemWrite as usize)[0].clone();
+    cb.require_equal(
+        || "assert_mem_written",
+        mem_written_expr,
+        expected_mem_written.value(),
     )
     .unwrap();
 

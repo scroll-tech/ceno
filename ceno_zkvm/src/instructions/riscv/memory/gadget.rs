@@ -87,7 +87,7 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordUtil<E, N_ZEROS> {
                 )?;
 
                 cb.condition_require_equal(
-                    || "expected_limb = select(low_bits[0], rs2_limb_bytes[1] ++ prev_limb_bytes[0], prev_limb_bytes[1] ++ rs2_limb_bytes[0])",
+                    || "expected_limb = select(low_bits[0], rs2_limb_bytes[0] ++ prev_limb_bytes[0], prev_limb_bytes[1] ++ rs2_limb_bytes[0])",
                     low_bits[0].clone(),
                     expected_limb.expr(),
                     (rs2_limb_bytes[0].expr() << 8) + prev_limb_bytes[0].expr(),
@@ -107,12 +107,12 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordUtil<E, N_ZEROS> {
                 .as_ref()
                 .map_either(|witin| witin.expr(), |expr| expr.expr())
                 .into_inner(),
-            &E::BaseField::ZERO.expr(),
+            &prev_limbs[1],
         );
 
         let lo_limb = cb.select(
             &low_bits[1],
-            &E::BaseField::ZERO.expr(),
+            &prev_limbs[0],
             &expected_limb
                 .as_ref()
                 .map_either(|witin| witin.expr(), |expr| expr.expr())

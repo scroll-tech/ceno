@@ -81,7 +81,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
-        // Memory initialization is not guaranteed to contain u32. Range-check it here.
+        // skip read range check, assuming constraint in write.
         let memory_read = UInt::new_unchecked(|| "memory_read", circuit_builder)?;
 
         let memory_addr = match I::INST_KIND {
