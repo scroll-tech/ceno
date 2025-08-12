@@ -9,6 +9,7 @@ use ceno_emul::{
     InsnFormat, InsnFormat::*, InsnKind::*, Instruction, PC_STEP_SIZE, Program, WORD_SIZE,
 };
 use ff_ext::{ExtensionField, FieldInto, SmallField};
+use gkr_iop::utils::i64_to_base;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
@@ -59,7 +60,7 @@ impl<F: SmallField> InsnRecord<F> {
                 (insn.rd_internal() as u64).into_f(),
                 (insn.rs1_or_zero() as u64).into_f(),
                 (insn.rs2_or_zero() as u64).into_f(),
-                i64_to_base(InsnRecord::imm_internal(insn)),
+                InsnRecord::imm_internal(insn).1,
             ])
         }
 
@@ -78,7 +79,7 @@ impl<F: SmallField> InsnRecord<F> {
     }
 }
 
-impl InsnRecord<()> {
+impl<F: SmallField> InsnRecord<F> {
     /// The internal view of the immediate in the program table.
     /// This is encoded in a way that is efficient for circuits, depending on the instruction.
     ///
@@ -86,17 +87,33 @@ impl InsnRecord<()> {
     /// - `as u32` and `as i32` as usual.
     /// - `i64_to_base(imm)` gives the field element going into the program table.
     /// - `as u64` in unsigned cases.
+    #[cfg(not(feature = "u16limb_circuit"))]
+    pub fn imm_internal(insn: &Instruction) -> (i64, F) {
+        match (insn.kind, InsnFormat::from(insn.kind)) {
+            // Prepare the immediate for ShiftImmInstruction.
+            // The shift is implemented as a multiplication/division by 1 << immediate.
+            (SLLI | SRLI | SRAI, _) => (1 << insn.imm, i64_to_base(1 << insn.imm)),
+            // Unsigned view.
+            // For example, u32::MAX is `u32::MAX mod p` in the finite field
+            (_, R | U) | (ADDI | SLTIU | ANDI | XORI | ORI, _) => {
+                (insn.imm as u32 as i64, i64_to_base(insn.imm as u32 as i64))
+            }
+            // Signed view.
+            // For example, u32::MAX is `-1 mod p` in the finite field.
+            _ => (insn.imm as i64, i64_to_base(insn.imm as i64)),
+        }
+    }
+
+    #[cfg(feature = "u16limb_circuit")]
     pub fn imm_internal(insn: &Instruction) -> i64 {
         match (insn.kind, InsnFormat::from(insn.kind)) {
             // Prepare the immediate for ShiftImmInstruction.
             // The shift is implemented as a multiplication/division by 1 << immediate.
             (SLLI | SRLI | SRAI, _) => 1 << insn.imm,
-            // Unsigned view.
-            // For example, u32::MAX is `u32::MAX mod p` in the finite field.
-            (_, R | U) | (ADDI | SLTIU | ANDI | XORI | ORI, _) => insn.imm as u32 as i64,
-            // Signed view.
-            // For example, u32::MAX is `-1 mod p` in the finite field.
-            _ => insn.imm as i64,
+            // for imm operate with program counter => convert to field value
+            (BLT, _) => i64_to_base(insn.imm as u32 as i64),
+            // for default imm to operate with register value
+            _ => F::from_canonical_u16(insn.imm as i16 as u16),
         }
     }
 
@@ -105,7 +122,10 @@ impl InsnRecord<()> {
             (SLLI | SRLI | SRAI, _) => false,
             // Unsigned view.
             (_, R | U) | (ANDI | XORI | ORI, _) => false,
-            // Signed view.
+            // in particular imm operated with program counter
+            // encode as field element, which do not need extra sign extension of imm
+            (BLT, _) => false,
+            // Signed views
             _ => insn.imm < 0,
         }
     }

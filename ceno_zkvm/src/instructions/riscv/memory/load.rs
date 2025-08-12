@@ -204,15 +204,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let memory_value = step.memory_op().unwrap().value.before;
         let memory_read = Value::new(memory_value, lk_multiplicity);
         // imm is signed 12-bit value
-        let imm = InsnRecord::imm_internal(&step.insn());
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let unaligned_addr =
-            ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm as i32));
+            ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
         let shift = unaligned_addr.shift();
         let addr_low_bits = [shift & 0x01, (shift >> 1) & 0x01];
         let target_limb = memory_read.as_u16_limbs()[addr_low_bits[1] as usize];
         let mut target_limb_bytes = target_limb.to_le_bytes();
 
-        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
+        set_val!(instance, config.imm, imm.1);
         config
             .im_insn
             .assign_instance(instance, lk_multiplicity, step)?;

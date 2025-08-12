@@ -97,12 +97,9 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         self.rs1.assign_instance(instance, lk_multiplicity, step)?;
         self.rs2.assign_instance(instance, lk_multiplicity, step)?;
 
+        println!("&step.insn() {:?}", &step.insn());
         // Immediate
-        set_val!(
-            instance,
-            self.imm,
-            i64_to_base::<E::BaseField>(InsnRecord::imm_internal(&step.insn()))
-        );
+        set_val!(instance, self.imm, InsnRecord::<E::BaseField>::imm_internal(&step.insn()).1);
 
         // Fetch the instruction.
         lk_multiplicity.fetch(step.pc().before.0);

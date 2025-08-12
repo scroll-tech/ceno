@@ -153,7 +153,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         // imm_internal is a precomputed 2**shift.
-        let imm = InsnRecord::imm_internal(&step.insn()) as u64;
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u64;
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
 

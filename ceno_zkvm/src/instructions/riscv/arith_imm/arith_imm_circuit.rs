@@ -4,7 +4,7 @@ use crate::{
     error::ZKVMError,
     instructions::{
         Instruction,
-        riscv::{constants::UInt, i_insn::IInstructionConfig},
+        riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -25,7 +25,7 @@ pub struct InstructionConfig<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
-    type InstructionConfig = crate::instructions::riscv::arith_imm::InstructionConfig<E>;
+    type InstructionConfig = InstructionConfig<E>;
 
     fn name() -> String {
         format!("{:?}", Self::INST_KIND)
@@ -48,7 +48,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
             false,
         )?;
 
-        Ok(crate::instructions::riscv::arith_imm::InstructionConfig {
+        Ok(InstructionConfig {
             i_insn,
             rs1_read,
             imm,
@@ -64,7 +64,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     ) -> Result<(), ZKVMError> {
         let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
         let imm = Value::new(
-            InsnRecord::imm_internal(&step.insn()) as u32,
+            InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32,
             lk_multiplicity,
         );
 

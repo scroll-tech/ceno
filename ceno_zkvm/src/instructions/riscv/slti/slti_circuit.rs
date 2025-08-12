@@ -71,7 +71,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             cb,
             I::INST_KIND,
             imm.expr(),
-            E::BaseField::ZERO.expr(),
+            #[cfg(feature = "u16limb_circuit")] E::BaseField::ZERO.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             false,
@@ -101,14 +101,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             .rs1_read
             .assign_value(instance, Value::new_unchecked(rs1));
 
-        let imm = InsnRecord::imm_internal(&step.insn());
-        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
+        set_val!(instance, config.imm, imm.1);
 
         match I::INST_KIND {
             InsnKind::SLTIU => {
                 config
                     .lt
-                    .assign_instance(instance, lkm, rs1 as u64, imm as u64)?;
+                    .assign_instance(instance, lkm, rs1 as u64, imm.0 as u64)?;
             }
             InsnKind::SLTI => {
                 config.is_rs1_neg.as_ref().unwrap().assign_instance(
@@ -116,7 +116,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
                     lkm,
                     *rs1_value.as_u16_limbs().last().unwrap() as u64,
                 )?;
-                let (rs1, imm) = (rs1 as SWord, imm as SWord);
+                let (rs1, imm) = (rs1 as SWord, imm.0 as SWord);
                 config
                     .lt
                     .assign_instance_signed(instance, lkm, rs1 as i64, imm as i64)?;

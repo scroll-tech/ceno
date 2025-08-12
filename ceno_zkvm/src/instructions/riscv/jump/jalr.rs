@@ -125,10 +125,10 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let insn = step.insn();
 
         let rs1 = step.rs1().unwrap().value;
-        let imm = InsnRecord::imm_internal(&insn);
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&insn);
         let rd = step.rd().unwrap().value.after;
 
-        let (sum, overflowing) = rs1.overflowing_add_signed(imm as i32);
+        let (sum, overflowing) = rs1.overflowing_add_signed(imm.0 as i32);
 
         config
             .rs1_read
@@ -137,14 +137,14 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             .rd_written
             .assign_value(instance, Value::new(rd, lk_multiplicity));
 
-        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
+        set_val!(instance, config.imm, imm.1);
 
         config
             .next_pc_addr
             .assign_instance(instance, lk_multiplicity, sum)?;
 
         if let Some((overflow_cfg, tmp_cfg)) = &config.overflow {
-            let (overflow, tmp) = match (overflowing, imm < 0) {
+            let (overflow, tmp) = match (overflowing, imm.0 < 0) {
                 (false, _) => (E::BaseField::ZERO, E::BaseField::ONE),
                 (true, false) => (E::BaseField::ONE, E::BaseField::ZERO),
                 (true, true) => (-E::BaseField::ONE, E::BaseField::ZERO),

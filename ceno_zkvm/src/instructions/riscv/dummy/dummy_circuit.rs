@@ -261,7 +261,7 @@ impl<E: ExtensionField> DummyConfig<E> {
             mem_write.assign_instance::<E>(instance, lk_multiplicity, step)?;
         }
 
-        let imm = i64_to_base::<E::BaseField>(InsnRecord::imm_internal(&step.insn()));
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).1;
         set_val!(instance, self.imm, imm);
 
         Ok(())
