@@ -1,9 +1,9 @@
-use std::{rc::Rc, time::Duration};
+use std::time::Duration;
 
 use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
-    scheme::{hal::ProofInput, prover::ZKVMProver},
+    scheme::{create_backend, create_prover, hal::ProofInput, prover::ZKVMProver},
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
 mod alloc;
@@ -11,7 +11,8 @@ use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use ff_ext::GoldilocksExt2;
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::cpu::default_backend_config;
+
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
 
 use rand::rngs::OsRng;
@@ -53,8 +54,9 @@ fn bench_add(c: &mut Criterion) {
         .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
         .expect("keygen failed");
 
-    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
-    let device = CpuProver::new(backend);
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let device = create_prover(backend);
     let prover = ZKVMProver::new(pk, device);
     let circuit_pk = prover
         .pk
