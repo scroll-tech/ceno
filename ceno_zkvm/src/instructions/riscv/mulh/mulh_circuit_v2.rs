@@ -211,7 +211,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             .r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
-        let (_, rd_low, carry, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
+        let (_, rd_low, _, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
             I::INST_KIND,
             rs1_val
                 .as_u16_limbs()
