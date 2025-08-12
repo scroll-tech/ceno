@@ -58,7 +58,8 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             circuit_builder,
             InsnKind::JALR,
             imm_sign_extend.expr().remove(0),
-            #[cfg(feature = "u16limb_circuit")] imm_sign.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            imm_sign.expr(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             true,

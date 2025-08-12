@@ -146,8 +146,8 @@ pub fn imm_sign_extend_circuit<E: ExtensionField>(
     }
 }
 #[inline(always)]
-pub fn imm_sign_extend(is_signed: bool, imm: i16) -> [u16; UINT_LIMBS] {
-    if !is_signed {
+pub fn imm_sign_extend(is_signed_extension: bool, imm: i16) -> [u16; UINT_LIMBS] {
+    if !is_signed_extension {
         [imm as u16, 0]
     } else {
         if imm >= 0 {
