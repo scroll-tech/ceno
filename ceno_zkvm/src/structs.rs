@@ -4,11 +4,10 @@ use crate::{
     instructions::Instruction,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
-    witness::LkMultiplicity,
 };
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::ExtensionField;
-use gkr_iop::{gkr::GKRCircuit, tables::LookupTable};
+use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
@@ -279,7 +278,7 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 pub struct ZKVMWitnesses<E: ExtensionField> {
     witnesses_opcodes: BTreeMap<String, RMMCollections<E::BaseField>>,
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
-    lk_mlts: BTreeMap<String, LkMultiplicity>,
+    lk_mlts: BTreeMap<String, Multiplicity<u64>>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
@@ -292,7 +291,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.witnesses_tables.get(name)
     }
 
-    pub fn get_lk_mlt(&self, name: &String) -> Option<&LkMultiplicity> {
+    pub fn get_lk_mlt(&self, name: &String) -> Option<&Multiplicity<u64>> {
         self.lk_mlts.get(name)
     }
 
@@ -332,13 +331,9 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         for name in keys {
             let lk_mlt = if is_keep_raw_lk_mlts {
                 // mock prover needs the lk_mlt for processing, so we do not remove it
-                self.lk_mlts
-                    .get(&name)
-                    .unwrap()
-                    .deep_clone()
-                    .into_finalize_result()
+                self.lk_mlts.get(&name).cloned().unwrap()
             } else {
-                self.lk_mlts.remove(&name).unwrap().into_finalize_result()
+                self.lk_mlts.remove(&name).unwrap()
             };
 
             if combined_lk_mlt.is_empty() {

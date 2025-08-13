@@ -5,6 +5,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     gkr::{GKRCircuit, layer::Layer},
+    utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
@@ -166,7 +167,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         num_witin: usize,
         num_structural_witin: usize,
         steps: Vec<StepRecord>,
-    ) -> Result<(RMMCollections<E::BaseField>, LkMultiplicity), ZKVMError> {
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
         if steps.is_empty() {
             return Ok((
@@ -174,7 +175,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                     RowMajorMatrix::new(0, num_witin, InstancePaddingStrategy::Default),
                     RowMajorMatrix::new(0, num_structural_witin, InstancePaddingStrategy::Default),
                 ],
-                lk_multiplicity,
+                lk_multiplicity.into_finalize_result(),
             ));
         }
         let nthreads = max_usable_threads();
@@ -281,6 +282,9 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
         raw_witin.padding_by_strategy();
         raw_structural_witin.padding_by_strategy();
-        Ok(([raw_witin, raw_structural_witin], lk_multiplicity))
+        Ok((
+            [raw_witin, raw_structural_witin],
+            lk_multiplicity.into_finalize_result(),
+        ))
     }
 }

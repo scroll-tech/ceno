@@ -479,7 +479,7 @@ mod tests {
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            &lkm,
+            &lkm.0,
             &input,
         )
         .unwrap();
