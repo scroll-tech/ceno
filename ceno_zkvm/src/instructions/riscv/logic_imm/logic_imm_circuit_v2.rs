@@ -39,19 +39,29 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
+        let num_limbs = LIMB_BITS / 8;
         let config = LogicConfig::construct_circuit(cb, I::INST_KIND)?;
-
         // Constrain the registers based on the given lookup table.
         // lo
         UIntLimbs::<{ LIMB_BITS }, 8, E>::logic(
             cb,
             I::OpsTable::ROM_TYPE,
             &UIntLimbs::from_exprs_unchecked(
-                config.rs1_read.expr().into_iter().take(2).collect_vec(),
+                config
+                    .rs1_read
+                    .expr()
+                    .into_iter()
+                    .take(num_limbs)
+                    .collect_vec(),
             ),
             &config.imm_lo,
             &UIntLimbs::from_exprs_unchecked(
-                config.rd_written.expr().into_iter().take(2).collect_vec(),
+                config
+                    .rd_written
+                    .expr()
+                    .into_iter()
+                    .take(num_limbs)
+                    .collect_vec(),
             ),
         )?;
         // hi
@@ -63,8 +73,8 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
                     .rs1_read
                     .expr()
                     .into_iter()
-                    .skip(2)
-                    .take(2)
+                    .skip(num_limbs)
+                    .take(num_limbs)
                     .collect_vec(),
             ),
             &config.imm_hi,
@@ -73,8 +83,8 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
                     .rd_written
                     .expr()
                     .into_iter()
-                    .skip(2)
-                    .take(2)
+                    .skip(num_limbs)
+                    .take(num_limbs)
                     .collect_vec(),
             ),
         )?;
@@ -156,6 +166,7 @@ impl<E: ExtensionField> LogicConfig<E> {
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
+        let num_limbs = LIMB_BITS / 8;
         self.i_insn.assign_instance(instance, lkm, step)?;
 
         let rs1_read = split_to_u8(step.rs1().unwrap().value);
@@ -163,7 +174,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
         let imm_lo =
             split_to_u8::<u16>(InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32)
-                [0..2]
+                [..num_limbs]
                 .to_vec();
         let imm_hi = split_to_u8::<u16>(
             InsnRecord::<E::BaseField>::imm_signed_internal(&step.insn()).0 as u32,
