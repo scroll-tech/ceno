@@ -145,6 +145,8 @@ pub fn imm_sign_extend_circuit<E: ExtensionField>(
         ]
     }
 }
+
+#[cfg(feature = "u16limb_circuit")]
 #[inline(always)]
 pub fn imm_sign_extend(is_signed_extension: bool, imm: i16) -> [u16; UINT_LIMBS] {
     #[allow(clippy::if_same_then_else)]

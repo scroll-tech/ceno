@@ -17,9 +17,8 @@ use crate::{
 };
 use ceno_emul::{InsnKind, SWord, StepRecord, Word};
 use ff_ext::{ExtensionField, FieldInto};
-use gkr_iop::{gadgets::IsLtConfig, utils::i64_to_base};
+use gkr_iop::gadgets::IsLtConfig;
 use multilinear_extensions::{ToExpr, WitIn};
-use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 use witness::set_val;
 

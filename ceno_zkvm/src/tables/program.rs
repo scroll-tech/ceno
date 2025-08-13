@@ -19,11 +19,9 @@ use std::{collections::HashMap, marker::PhantomData};
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
-
 #[cfg(not(feature = "u16limb_circuit"))]
 #[derive(Clone, Debug)]
 pub struct InsnRecord<T>([T; 6]);
-
 #[cfg(feature = "u16limb_circuit")]
 #[derive(Clone, Debug)]
 pub struct InsnRecord<T>([T; 7]);

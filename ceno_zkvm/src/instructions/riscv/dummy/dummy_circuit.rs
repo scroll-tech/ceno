@@ -15,6 +15,7 @@ use crate::{
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
+#[cfg(feature = "u16limb_circuit")]
 use p3::field::FieldAlgebra;
 use witness::set_val;
 
