@@ -12,7 +12,6 @@ use crate::{
     },
     structs::ProgramParams,
     tables::InsnRecord,
-    utils::imm_sign_extend_circuit,
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
@@ -48,18 +47,14 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     ) -> Result<JalrConfig<E>, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
-        let imm_sign = circuit_builder.create_witin(|| "imm_sign");
-        let imm_sign_extend = UInt::from_exprs_unchecked(
-            imm_sign_extend_circuit::<E>(true, imm_sign.expr(), imm.expr()).to_vec(),
-        );
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
         let i_insn = IInstructionConfig::construct_circuit(
             circuit_builder,
             InsnKind::JALR,
-            imm_sign_extend.expr().remove(0),
+            imm.expr(),
             #[cfg(feature = "u16limb_circuit")]
-            imm_sign.expr(),
+            0.into(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             true,
