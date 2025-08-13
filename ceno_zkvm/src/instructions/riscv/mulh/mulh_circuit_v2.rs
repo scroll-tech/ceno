@@ -29,6 +29,7 @@ pub struct MulhConfig<E: ExtensionField> {
     rd_written: UInt<E>,
     r_insn: RInstructionConfig<E>,
     rd_low: [WitIn; UINT_LIMBS],
+    carry: [WitIn; UINT_LIMBS * 2],
     rs1_ext: WitIn,
     rs2_ext: WitIn,
     phantom: PhantomData<E>,
@@ -70,6 +71,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         let rd_low: [_; UINT_LIMBS] =
             array::from_fn(|i| circuit_builder.create_witin(|| format!("rd_mul_{i}")));
+        let carry: [_; UINT_LIMBS * 2] =
+            array::from_fn(|i| circuit_builder.create_witin(|| format!("carry_{i}")));
+
         let mut carry_low: [Expression<E>; UINT_LIMBS] = array::from_fn(|i| {
             circuit_builder
                 .create_witin(|| format!("carry_low_{i}"))
@@ -87,9 +91,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             carry_low[i] = carry_divide.expr() * (expected_limb - rd_low[i].expr());
         }
 
-        for (rd_low, carry_low) in rd_low.iter().zip(carry_low.iter()) {
+        for (rd_low, carry_low) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
             circuit_builder.assert_ux::<_, _, 16>(|| "range_check_low", rd_low.expr())?;
-            circuit_builder.assert_ux::<_, _, 16>(|| "range_check_carry_low", carry_low.clone())?;
+            circuit_builder.assert_ux::<_, _, 16>(|| "range_check_carry_low", carry_low.expr())?;
+        }
+
+        for (carry_low_expr, carry_low_witin) in carry_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
+            circuit_builder.require_equal(
+                || "carry_low_check_witin",
+                carry_low_expr.clone(),
+                carry_low_witin.expr(),
+            )?;
         }
 
         let mut carry_high: [Expression<E>; UINT_LIMBS] = array::from_fn(|i| {
@@ -117,10 +129,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 E::BaseField::from(carry_divide).expr() * (expected_limb - rd_expr[j].clone());
         }
 
-        for (rd_high, carry_high) in rd_expr.iter().zip(carry_high.iter()) {
+        for (rd_high, carry_high) in rd_expr.iter().zip(carry[UINT_LIMBS..].iter()) {
             circuit_builder.assert_ux::<_, _, 16>(|| "range_check_high", rd_high.clone())?;
             circuit_builder
-                .assert_ux::<_, _, 16>(|| "range_check_carry_high", carry_high.clone())?;
+                .assert_ux::<_, _, 16>(|| "range_check_carry_high", carry_high.expr())?;
+        }
+
+        for (carry_high_expr, carry_high_witin) in carry_high.iter().zip(carry[UINT_LIMBS..].iter())
+        {
+            circuit_builder.require_equal(
+                || "carry_high_check_witin",
+                carry_high_expr.clone(),
+                carry_high_witin.expr(),
+            )?;
         }
 
         let sign_mask = E::BaseField::from_canonical_u32(1 << (UINT_LIMBS - 1));
@@ -175,6 +196,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             rd_written,
             r_insn,
             rd_low,
+            carry,
             rs1_ext,
             rs2_ext,
             phantom: PhantomData,
@@ -227,6 +249,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         for i in 0..UINT_LIMBS {
             set_val!(instance, config.rd_low[i], rd_low[i] as u64);
+        }
+        for i in 0..UINT_LIMBS * 2 {
+            set_val!(instance, config.carry[i], carry[i] as u64);
         }
         set_val!(instance, config.rs1_ext, rs1_ext as u64);
         set_val!(instance, config.rs2_ext, rs2_ext as u64);
