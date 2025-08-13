@@ -91,14 +91,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             carry_low[i] = carry_divide.expr() * (expected_limb - rd_low[i].expr());
         }
 
-        for (rd_low, carry_low) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
-            circuit_builder.assert_ux::<_, _, 16>(|| "range_check_low", rd_low.expr())?;
-            circuit_builder.assert_ux::<_, _, 16>(|| "range_check_carry_low", carry_low.expr())?;
+        for (i, (rd_low, carry_low)) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()).enumerate() {
+            circuit_builder
+                .assert_ux::<_, _, 16>(|| format!("range_check_low_{i}"), rd_low.expr())?;
+            circuit_builder
+                .assert_ux::<_, _, 16>(|| format!("range_check_carry_low_{i}"), carry_low.expr())?;
         }
 
-        for (carry_low_expr, carry_low_witin) in carry_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
+        for (i, (carry_low_expr, carry_low_witin)) in carry_low
+            .iter()
+            .zip(carry[0..UINT_LIMBS].iter())
+            .enumerate()
+        {
             circuit_builder.require_equal(
-                || "carry_low_check_witin",
+                || format!("carry_low_check_witin_{i}"),
                 carry_low_expr.clone(),
                 carry_low_witin.expr(),
             )?;
@@ -129,23 +135,30 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 E::BaseField::from(carry_divide).expr() * (expected_limb - rd_expr[j].clone());
         }
 
-        for (rd_high, carry_high) in rd_expr.iter().zip(carry[UINT_LIMBS..].iter()) {
-            circuit_builder.assert_ux::<_, _, 16>(|| "range_check_high", rd_high.clone())?;
+        for (i, (rd_high, carry_high)) in rd_expr.iter().zip(carry[UINT_LIMBS..].iter()).enumerate()
+        {
             circuit_builder
-                .assert_ux::<_, _, 16>(|| "range_check_carry_high", carry_high.expr())?;
+                .assert_ux::<_, _, 16>(|| format!("range_check_high_{i}"), rd_high.clone())?;
+            circuit_builder.assert_ux::<_, _, 16>(
+                || format!("range_check_carry_high_{i}"),
+                carry_high.expr(),
+            )?;
         }
 
-        for (carry_high_expr, carry_high_witin) in carry_high.iter().zip(carry[UINT_LIMBS..].iter())
+        for (i, (carry_high_expr, carry_high_witin)) in carry_high
+            .iter()
+            .zip(carry[UINT_LIMBS..].iter())
+            .enumerate()
         {
             circuit_builder.require_equal(
-                || "carry_high_check_witin",
+                || format!("carry_high_check_witin_{i}"),
                 carry_high_expr.clone(),
                 carry_high_witin.expr(),
             )?;
         }
 
-        let sign_mask = E::BaseField::from_canonical_u32(1 << (UINT_LIMBS - 1));
-        let ext_inv = E::BaseField::from_canonical_u32((1 << UINT_LIMBS) - 1).inverse();
+        let sign_mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1));
+        let ext_inv = E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).inverse();
         let rs1_sign: Expression<E> = rs1_ext.expr() * ext_inv.expr();
         let rs2_sign: Expression<E> = rs2_ext.expr() * ext_inv.expr();
 
