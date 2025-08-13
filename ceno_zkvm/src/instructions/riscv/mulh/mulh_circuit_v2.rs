@@ -233,6 +233,23 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         set_val!(instance, config.rs1_ext, rs1_ext as u64);
         set_val!(instance, config.rs2_ext, rs2_ext as u64);
 
+        lk_multiplicity.assert_ux::<16>(UINT_LIMBS as u64);
+        lk_multiplicity.assert_ux::<16>(UINT_LIMBS as u64);
+        lk_multiplicity.assert_ux::<16>(UINT_LIMBS as u64);
+        lk_multiplicity.assert_ux::<16>(UINT_LIMBS as u64);
+
+        match I::INST_KIND {
+            InsnKind::MULH => {}
+            InsnKind::MULHU => {
+                lk_multiplicity.assert_ux::<16>(1);
+            }
+            InsnKind::MULHSU => {
+                lk_multiplicity.assert_ux::<16>(1);
+            }
+            InsnKind::MUL => {}
+            _ => unreachable!("Unsupported instruction kind"),
+        }
+
         Ok(())
     }
 }
