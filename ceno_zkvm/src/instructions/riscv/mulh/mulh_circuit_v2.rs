@@ -315,14 +315,14 @@ fn run_mulh<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
     x: &[u32],
     y: &[u32],
 ) -> ([u32; NUM_LIMBS], [u32; NUM_LIMBS], Vec<u32>, u32, u32) {
-    let mut mul = [0; NUM_LIMBS];
+    let mut mul = [0u64; NUM_LIMBS];
     let mut carry = vec![0; 2 * NUM_LIMBS];
     for i in 0..NUM_LIMBS {
         if i > 0 {
             mul[i] = carry[i - 1];
         }
         for j in 0..=i {
-            mul[i] += x[j] * y[i - j];
+            mul[i] += (x[j] * y[i - j]) as u64;
         }
         carry[i] = mul[i] >> LIMB_BITS;
         mul[i] %= 1 << LIMB_BITS;
@@ -348,13 +348,24 @@ fn run_mulh<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
     for i in 0..NUM_LIMBS {
         x_prefix += x[i];
         y_prefix += y[i];
-        mulh[i] = carry[NUM_LIMBS + i - 1] + x_prefix * y_ext + y_prefix * x_ext;
+        mulh[i] = carry[NUM_LIMBS + i - 1] + (x_prefix * y_ext) as u64 + (y_prefix * x_ext) as u64;
         for j in (i + 1)..NUM_LIMBS {
-            mulh[i] += x[j] * y[NUM_LIMBS + i - j];
+            mulh[i] += (x[j] * y[NUM_LIMBS + i - j]) as u64;
         }
         carry[NUM_LIMBS + i] = mulh[i] >> LIMB_BITS;
         mulh[i] %= 1 << LIMB_BITS;
     }
 
-    (mulh, mul, carry, x_ext, y_ext)
+    let mut mulh_u32 = [0u32; NUM_LIMBS];
+    let mut mul_u32 = [0u32; NUM_LIMBS];
+    let mut carry_u32 = vec![0u32; 2 * NUM_LIMBS];
+
+    for i in 0..NUM_LIMBS {
+        mul_u32[i] = mul[i] as u32;
+        mulh_u32[i] = mulh[i] as u32;
+        carry_u32[i] = carry[i] as u32;
+        carry_u32[i + NUM_LIMBS] = carry[i + NUM_LIMBS] as u32;
+    }
+
+    (mulh_u32, mul_u32, carry_u32, x_ext, y_ext)
 }
