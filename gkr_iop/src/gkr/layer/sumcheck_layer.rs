@@ -114,10 +114,10 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
 
         if got_claim != expected_evaluation {
             return Err(BackendError::LayerVerificationFailed(
-                "sumcheck verify failed".to_string(),
+                "sumcheck verify failed".to_string().into(),
                 VerifierError::ClaimNotMatch(
-                    format!("{}", expected_evaluation),
-                    format!("{}", got_claim),
+                    format!("{}", expected_evaluation).into(),
+                    format!("{}", got_claim).into(),
                 ),
             ));
         }
