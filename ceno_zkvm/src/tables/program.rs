@@ -122,7 +122,9 @@ impl<F: SmallField> InsnRecord<F> {
                 F::from_canonical_u16(insn.imm as u16),
             ),
             // for imm operate with program counter => convert to field value
-            (_, B) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
+            (_, B | J) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
+            // TODO JALR need to connecting register (2 limb) with pc (1 limb)
+            (JALR, _) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
             // for default imm to operate with register value
             _ => (
                 insn.imm as i16 as i64,
@@ -145,7 +147,9 @@ impl<F: SmallField> InsnRecord<F> {
             (_, R | U) => (false as i64, F::from_bool(false)),
             // in particular imm operated with program counter
             // encode as field element, which do not need extra sign extension of imm
-            (_, B) => (false as i64, F::from_bool(false)),
+            (_, B | J) => (false as i64, F::from_bool(false)),
+            // TODO JALR need to connecting register (2 limb) with pc (1 limb)
+            (JALR, _) => (false as i64, F::from_bool(false)),
             // Signed views
             _ => ((insn.imm < 0) as i64, F::from_bool(insn.imm < 0)),
         }
