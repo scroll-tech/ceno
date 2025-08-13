@@ -33,7 +33,7 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
-    for StoreInstruction<E, I, N_ZEROS>
+for StoreInstruction<E, I, N_ZEROS>
 {
     type InstructionConfig = StoreConfig<E, N_ZEROS>;
 

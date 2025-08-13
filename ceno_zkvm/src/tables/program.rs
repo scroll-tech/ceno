@@ -121,7 +121,7 @@ impl<F: SmallField> InsnRecord<F> {
             (_, B) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
             // for default imm to operate with register value
             _ => (
-                insn.imm as u32 as i64,
+                insn.imm as i16 as i64,
                 F::from_canonical_u16(insn.imm as i16 as u16),
             ),
         }
