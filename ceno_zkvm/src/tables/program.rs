@@ -112,6 +112,10 @@ impl<F: SmallField> InsnRecord<F> {
             // Prepare the immediate for ShiftImmInstruction.
             // The shift is implemented as a multiplication/division by 1 << immediate.
             (SLLI | SRLI | SRAI, _) => (1 << insn.imm, i64_to_base(1 << insn.imm)),
+            // TODO convert to 2 limbs to support smaller field
+            (LB | LH | LW | LBU | LHU | SB | SH | SW, _) => {
+                (insn.imm as i64, i64_to_base(insn.imm as i64))
+            }
             // logic imm
             (XORI | ORI | ANDI, _) => (
                 insn.imm as i16 as i64,
@@ -130,6 +134,8 @@ impl<F: SmallField> InsnRecord<F> {
     pub fn imm_signed_internal(insn: &Instruction) -> (i64, F) {
         match (insn.kind, InsnFormat::from(insn.kind)) {
             (SLLI | SRLI | SRAI, _) => (false as i64, F::from_bool(false)),
+            // TODO convert to 2 limbs to support smaller field
+            (LB | LH | LW | LBU | LHU | SB | SH | SW, _) => (false as i64, F::from_bool(false)),
             // logic imm
             (XORI | ORI | ANDI, _) => (
                 (insn.imm >> LIMB_BITS) as i16 as i64,

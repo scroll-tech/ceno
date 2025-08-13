@@ -2,7 +2,7 @@ mod gadget;
 
 #[cfg(not(feature = "u16limb_circuit"))]
 pub mod load;
-#[cfg(feature = "u16limb_circuit")]
+#[cfg(not(feature = "u16limb_circuit"))]
 pub mod store;
 
 #[cfg(feature = "u16limb_circuit")]
