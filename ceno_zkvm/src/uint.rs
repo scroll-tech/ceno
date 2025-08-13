@@ -505,13 +505,16 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for 
 
     fn try_from(limbs: Vec<WitIn>) -> Result<Self, Self::Error> {
         if limbs.len() != Self::NUM_LIMBS {
-            return Err(UtilError::UIntError(format!(
-                "cannot construct UIntLimbs<{}, {}> from {} cells, requires {} cells",
-                M,
-                C,
-                limbs.len(),
-                Self::NUM_LIMBS
-            )));
+            return Err(UtilError::UIntError(
+                format!(
+                    "cannot construct UIntLimbs<{}, {}> from {} cells, requires {} cells",
+                    M,
+                    C,
+                    limbs.len(),
+                    Self::NUM_LIMBS
+                )
+                .into(),
+            ));
         }
 
         Ok(Self {
