@@ -41,19 +41,11 @@ impl<'a, E: ExtensionField> Phase1Workers<'a, E> {
     ) -> (Vec<IOPProverState<'a, E>>, Vec<IOPProverMessage<E>>) {
         let mut prover_msgs = Vec::with_capacity(num_variables);
         for _ in 0..num_variables {
-            let mut evaluations = AdditiveVec::new(max_degree + 1);
-            self.workers_states.par_iter_mut().for_each(|state| {
-                state.run_round();
-            });
-
-            for worker_state in self.workers_states.iter_mut() {
-                evaluations += AdditiveVec(
-                    worker_state
-                        .last_round_evaluations
-                        .take()
-                        .expect("at least round of evaluations has happened by this time"),
-                );
-            }
+            let evaluations = self
+                .workers_states
+                .par_iter_mut()
+                .map(|state| state.run_round())
+                .reduce(|| AdditiveVec::new(max_degree + 1), |a, b| a + b);
 
             transcript.append_field_element_exts(&evaluations.0);
 
@@ -89,7 +81,6 @@ impl<'a, E: ExtensionField> Phase1Workers<'a, E> {
 struct Phase1WorkerState<'a, E: ExtensionField> {
     prover_state: IOPProverState<'a, E>,
     challenge: Option<Challenge<E>>,
-    last_round_evaluations: Option<Vec<E>>,
 }
 
 impl<'a, E: ExtensionField> Phase1WorkerState<'a, E> {
@@ -107,14 +98,13 @@ impl<'a, E: ExtensionField> Phase1WorkerState<'a, E> {
                 poly_meta,
             ),
             challenge: None,
-            last_round_evaluations: None,
         }
     }
 
-    fn run_round(&mut self) {
+    fn run_round(&mut self) -> AdditiveVec<E> {
         let prover_msg =
             IOPProverState::prove_round_and_update_state(&mut self.prover_state, &self.challenge);
-        self.last_round_evaluations = Some(prover_msg.evaluations)
+        AdditiveVec(prover_msg.evaluations)
     }
 }
 
