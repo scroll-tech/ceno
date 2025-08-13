@@ -168,21 +168,21 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         match I::INST_KIND {
             InsnKind::MULH => {
                 // Implement MULH circuit here
+                circuit_builder.assert_ux::<_, _, 16>(
+                    || "mulh_range_check_rs1_last",
+                    E::BaseField::from_canonical_u32(2).expr() * rs1_expr[UINT_LIMBS - 1].clone()
+                        - rs1_sign * sign_mask.expr(),
+                )?;
+                circuit_builder.assert_ux::<_, _, 16>(
+                    || "mulh_range_check_rs2_last",
+                    E::BaseField::from_canonical_u32(2).expr() * rs2_expr[UINT_LIMBS - 1].clone()
+                        - rs2_sign * sign_mask.expr(),
+                )?;
             }
             InsnKind::MULHU => {
                 // Implement MULHU circuit here
                 circuit_builder.require_zero(|| "mulhu_rs1_sign_zero", rs1_sign.clone())?;
                 circuit_builder.require_zero(|| "mulhu_rs2_sign_zero", rs2_sign.clone())?;
-                circuit_builder.assert_ux::<_, _, 16>(
-                    || "mulhu_range_check_rs1_last",
-                    E::BaseField::from_canonical_u32(2).expr() * rs1_expr[UINT_LIMBS - 1].clone()
-                        - rs1_sign * sign_mask.expr(),
-                )?;
-                circuit_builder.assert_ux::<_, _, 16>(
-                    || "mulhu_range_check_rs2_last",
-                    E::BaseField::from_canonical_u32(2).expr() * rs2_expr[UINT_LIMBS - 1].clone()
-                        - rs2_sign * sign_mask.expr(),
-                )?;
             }
             InsnKind::MULHSU => {
                 // Implement MULHSU circuit here
