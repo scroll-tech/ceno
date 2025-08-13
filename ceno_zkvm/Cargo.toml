@@ -17,11 +17,9 @@ ceno_host = { path = "../ceno_host" }
 either.workspace = true
 ff_ext = { path = "../ff_ext" }
 gkr_iop = { path = "../gkr_iop" }
-keccakf = "0.1.2"
 mpcs = { path = "../mpcs" }
 multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
 p3.workspace = true
-rand_chacha.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -31,11 +29,8 @@ witness = { path = "../witness" }
 
 itertools.workspace = true
 ndarray.workspace = true
-num-traits.workspace = true
-paste.workspace = true
 poseidon.workspace = true
 prettytable-rs.workspace = true
-rkyv.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 tracing.workspace = true
@@ -49,7 +44,6 @@ generic_static = "0.2"
 parse-size = "1.1"
 rand.workspace = true
 tempfile = "3.14"
-thread_local.workspace = true
 tiny-keccak.workspace = true
 
 [target.'cfg(unix)'.dependencies]

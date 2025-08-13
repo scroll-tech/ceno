@@ -2,7 +2,6 @@ use crate::{
     chip_handler::{AddressExpr, MemoryChipOperations, MemoryExpr},
     circuit_builder::CircuitBuilder,
     gadgets::AssertLtConfig,
-    instructions::riscv::constants::UINT_LIMBS,
     structs::RAMType,
 };
 use ff_ext::ExtensionField;
@@ -20,37 +19,14 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperation
         ts: Expression<E>,
         value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError> {
-        self.namespace(name_fn, |cb| {
-            // READ (a, v, t)
-            let read_record = [
-                vec![RAMType::Memory.into(), memory_addr.clone()],
-                vec![value.clone()],
-                vec![prev_ts.clone()],
-            ]
-            .concat();
-            // Write (a, v, t)
-            let write_record = [
-                vec![RAMType::Memory.into(), memory_addr.clone()],
-                vec![value],
-                vec![ts.clone()],
-            ]
-            .concat();
-            cb.read_record(|| "read_record", RAMType::Memory, read_record)?;
-            cb.write_record(|| "write_record", RAMType::Memory, write_record)?;
-
-            // assert prev_ts < current_ts
-            let lt_cfg = AssertLtConfig::construct_circuit(
-                cb,
-                || "prev_ts < ts",
-                prev_ts,
-                ts.clone(),
-                UINT_LIMBS,
-            )?;
-
-            let next_ts = ts + 1;
-
-            Ok((next_ts, lt_cfg))
-        })
+        self.ram_type_read(
+            name_fn,
+            RAMType::Memory,
+            memory_addr.clone(),
+            prev_ts,
+            ts,
+            value,
+        )
     }
 
     fn memory_write(
@@ -62,35 +38,14 @@ impl<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> MemoryChipOperation
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
     ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError> {
-        self.namespace(name_fn, |cb| {
-            // READ (a, v, t)
-            let read_record = [
-                vec![RAMType::Memory.into(), memory_addr.clone()],
-                vec![prev_values],
-                vec![prev_ts.clone()],
-            ]
-            .concat();
-            // Write (a, v, t)
-            let write_record = [
-                vec![RAMType::Memory.into(), memory_addr.clone()],
-                vec![value],
-                vec![ts.clone()],
-            ]
-            .concat();
-            cb.read_record(|| "read_record", RAMType::Memory, read_record)?;
-            cb.write_record(|| "write_record", RAMType::Memory, write_record)?;
-
-            let lt_cfg = AssertLtConfig::construct_circuit(
-                cb,
-                || "prev_ts < ts",
-                prev_ts,
-                ts.clone(),
-                UINT_LIMBS,
-            )?;
-
-            let next_ts = ts + 1;
-
-            Ok((next_ts, lt_cfg))
-        })
+        self.ram_type_write(
+            name_fn,
+            RAMType::Memory,
+            memory_addr.clone(),
+            prev_ts,
+            ts,
+            prev_values,
+            value,
+        )
     }
 }

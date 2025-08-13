@@ -80,8 +80,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
-        // Memory initialization is not guaranteed to contain u32. Range-check it here.
-        let memory_read = UInt::new(|| "memory_read", circuit_builder)?;
+        // skip read range check, assuming constraint in write.
+        let memory_read = UInt::new_unchecked(|| "memory_read", circuit_builder)?;
 
         let memory_addr = match I::INST_KIND {
             InsnKind::LW => MemAddr::construct_align4(circuit_builder),
@@ -201,7 +201,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     ) -> Result<(), ZKVMError> {
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let memory_value = step.memory_op().unwrap().value.before;
-        let memory_read = Value::new(memory_value, lk_multiplicity);
+        let memory_read = Value::new_unchecked(memory_value);
         // imm is signed 12-bit value
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let unaligned_addr =
