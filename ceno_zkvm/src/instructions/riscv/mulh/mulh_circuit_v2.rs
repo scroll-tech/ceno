@@ -190,15 +190,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         // Read registers from step
         let rs1 = step.rs1().unwrap().value;
         let rs1_val = Value::new_unchecked(rs1);
-        config
-            .rs1_read
-            .assign_limbs(instance, rs1_val.as_u16_limbs());
+        let rs1_limbs = rs1_val.as_u16_limbs();
+        config.rs1_read.assign_limbs(instance, rs1_limbs);
 
         let rs2 = step.rs2().unwrap().value;
         let rs2_val = Value::new_unchecked(rs2);
-        config
-            .rs2_read
-            .assign_limbs(instance, rs2_val.as_u16_limbs());
+        let rs2_limbs = rs2_val.as_u16_limbs();
+        config.rs2_read.assign_limbs(instance, rs2_limbs);
 
         let rd = step.rd().unwrap().value.after;
         let rd_val = Value::new(rd, lk_multiplicity);
@@ -211,7 +209,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             .r_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
-        let (_, rd_low, _, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
+        let (rd_high, rd_low, carry, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
             I::INST_KIND,
             rs1_val
                 .as_u16_limbs()
@@ -233,18 +231,38 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         set_val!(instance, config.rs1_ext, rs1_ext as u64);
         set_val!(instance, config.rs2_ext, rs2_ext as u64);
 
-        lk_multiplicity.assert_ux::<16>(UINT_LIMBS as u64);
-        lk_multiplicity.assert_ux::<16>(UINT_LIMBS as u64);
-        lk_multiplicity.assert_ux::<16>(UINT_LIMBS as u64);
-        lk_multiplicity.assert_ux::<16>(UINT_LIMBS as u64);
+        for (rd_low, carry_low) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
+            lk_multiplicity.assert_ux::<16>(*rd_low as u64);
+            lk_multiplicity.assert_ux::<16>(*carry_low as u64);
+        }
+
+        for (rd_high, carry_high) in rd_high.iter().zip(carry[UINT_LIMBS..].iter()) {
+            lk_multiplicity.assert_ux::<16>(*rd_high as u64);
+            lk_multiplicity.assert_ux::<16>(*carry_high as u64);
+        }
+
+        let sign_mask = 1 << (UINT_LIMBS - 1);
+        let ext = (1 << UINT_LIMBS) - 1;
+        let rs1_sign = rs1_ext / ext;
+        let rs2_sign = rs2_ext / ext;
 
         match I::INST_KIND {
             InsnKind::MULH => {}
             InsnKind::MULHU => {
-                lk_multiplicity.assert_ux::<16>(1);
+                lk_multiplicity.assert_ux::<16>(
+                    (2 * rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask) as u64,
+                );
+                lk_multiplicity.assert_ux::<16>(
+                    (2 * rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
+                );
             }
             InsnKind::MULHSU => {
-                lk_multiplicity.assert_ux::<16>(1);
+                lk_multiplicity.assert_ux::<16>(
+                    (2 * rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask) as u64,
+                );
+                lk_multiplicity.assert_ux::<16>(
+                    (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
+                );
             }
             InsnKind::MUL => {}
             _ => unreachable!("Unsupported instruction kind"),
