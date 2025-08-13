@@ -461,29 +461,23 @@ dependencies = [
  "gkr_iop",
  "glob",
  "itertools 0.13.0",
- "keccakf",
  "mpcs",
  "multilinear_extensions",
  "ndarray",
- "num-traits",
  "p3",
  "parse-size",
- "paste",
  "poseidon",
  "pprof2",
  "prettytable-rs",
  "proptest",
  "rand",
- "rand_chacha",
  "rayon",
- "rkyv",
  "serde",
  "serde_json",
  "strum",
  "strum_macros",
  "sumcheck",
  "tempfile",
- "thread_local",
  "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "tiny-keccak",
@@ -1511,15 +1505,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ecc2af9a1119c51f12a14607e783cb977bde58bc069ff0c3da1095e635d70654"
 dependencies = [
  "cpufeatures",
-]
-
-[[package]]
-name = "keccakf"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d4ade81a4c9327bf19dcd0bd45784b99f86243edca6be0de19fc2d3aa8a4de2"
-dependencies = [
- "crunchy",
 ]
 
 [[package]]
