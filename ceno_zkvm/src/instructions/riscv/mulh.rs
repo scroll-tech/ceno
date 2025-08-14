@@ -59,7 +59,7 @@ mod test {
         witness::LkMultiplicity,
     };
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
-    use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
+    use ff_ext::{ExtensionField, GoldilocksExt2};
     use gkr_iop::circuit_builder::DebugIndex;
     use multilinear_extensions::Expression;
 
@@ -69,9 +69,9 @@ mod test {
         verify_mulu::<MulOp, GoldilocksExt2>("2 * 0", 2, 0);
         verify_mulu::<MulOp, GoldilocksExt2>("0 * 0", 0, 0);
         verify_mulu::<MulOp, GoldilocksExt2>("0 * 2", 0, 2);
-        // verify_mulu::<MulOp, GoldilocksExt2>("0 * u32::MAX", 0, u32::MAX);
+        verify_mulu::<MulOp, GoldilocksExt2>("0 * u32::MAX", 0, u32::MAX);
         // verify_mulu::<MulOp, GoldilocksExt2>("u32::MAX", u32::MAX, u32::MAX);
-        // verify_mulu::<MulOp, GoldilocksExt2>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
+        verify_mulu::<MulOp, GoldilocksExt2>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
 
         // verify_mulu::<MulOp, BabyBearExt4>("basic", 2, 11);
         // verify_mulu::<MulOp, BabyBearExt4>("2 * 0", 2, 0);
@@ -88,9 +88,9 @@ mod test {
         verify_mulu::<MulhuOp, GoldilocksExt2>("2 * 0", 2, 0);
         verify_mulu::<MulhuOp, GoldilocksExt2>("0 * 0", 0, 0);
         verify_mulu::<MulhuOp, GoldilocksExt2>("0 * 2", 0, 2);
-        // verify_mulu::<MulhuOp, GoldilocksExt2>("0 * u32::MAX", 0, u32::MAX);
+        verify_mulu::<MulhuOp, GoldilocksExt2>("0 * u32::MAX", 0, u32::MAX);
         // verify_mulu::<MulhuOp, GoldilocksExt2>("u32::MAX", u32::MAX, u32::MAX);
-        // verify_mulu::<MulhuOp, GoldilocksExt2>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
+        verify_mulu::<MulhuOp, GoldilocksExt2>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
 
         // verify_mulu::<MulhuOp, BabyBearExt4>("basic", 2, 11);
         // verify_mulu::<MulhuOp, BabyBearExt4>("2 * 0", 2, 0);

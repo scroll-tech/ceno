@@ -28,6 +28,7 @@ pub struct MulhConfig<E: ExtensionField> {
     rs2_read: UInt<E>,
     rd_written: UInt<E>,
     r_insn: RInstructionConfig<E>,
+    rd_high: [WitIn; UINT_LIMBS],
     rd_low: [WitIn; UINT_LIMBS],
     carry: [WitIn; UINT_LIMBS * 2],
     rs1_ext: WitIn,
@@ -70,7 +71,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         let carry_divide = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
 
         let rd_low: [_; UINT_LIMBS] =
-            array::from_fn(|i| circuit_builder.create_witin(|| format!("rd_mul_{i}")));
+            array::from_fn(|i| circuit_builder.create_witin(|| format!("rd_low_{i}")));
+        let rd_high: [_; UINT_LIMBS] =
+            array::from_fn(|i| circuit_builder.create_witin(|| format!("rd_high_{i}")));
         let carry: [_; UINT_LIMBS * 2] =
             array::from_fn(|i| circuit_builder.create_witin(|| format!("carry_{i}")));
 
@@ -93,7 +96,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         for (i, (rd_low, carry_low)) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()).enumerate() {
             circuit_builder
-                .assert_ux::<_, _, 16>(|| format!("range_check_low_{i}"), rd_low.expr())?;
+                .assert_ux::<_, _, 16>(|| format!("range_check_rd_low_{i}"), rd_low.expr())?;
             circuit_builder
                 .assert_ux::<_, _, 16>(|| format!("range_check_carry_low_{i}"), carry_low.expr())?;
         }
@@ -132,13 +135,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                         + (rs2_expr[k].clone() * rs1_ext.expr())
                 });
             carry_high[j] =
-                E::BaseField::from(carry_divide).expr() * (expected_limb - rd_expr[j].clone());
+                E::BaseField::from(carry_divide).expr() * (expected_limb - rd_high[j].expr());
         }
 
-        for (i, (rd_high, carry_high)) in rd_expr.iter().zip(carry[UINT_LIMBS..].iter()).enumerate()
+        for (i, (rd_high, carry_high)) in rd_high.iter().zip(carry[UINT_LIMBS..].iter()).enumerate()
         {
             circuit_builder
-                .assert_ux::<_, _, 16>(|| format!("range_check_high_{i}"), rd_high.clone())?;
+                .assert_ux::<_, _, 16>(|| format!("range_check_high_{i}"), rd_high.expr())?;
             circuit_builder.assert_ux::<_, _, 16>(
                 || format!("range_check_carry_high_{i}"),
                 carry_high.expr(),
@@ -198,9 +201,28 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 )?;
             }
             InsnKind::MUL => {
-                // Implement MUL circuit here
+                for (i, (rd, rd_low)) in rd_expr.iter().zip(rd_low.iter()).enumerate() {
+                    circuit_builder.require_equal(
+                        || format!("mul_check_rd_written_{i}"),
+                        rd.clone(),
+                        rd_low.expr(),
+                    )?;
+                }
             }
             _ => unreachable!("Unsupported instruction kind"),
+        }
+
+        match I::INST_KIND {
+            InsnKind::MULH | InsnKind::MULHU | InsnKind::MULHSU => {
+                for (i, (rd, rd_high)) in rd_expr.iter().zip(rd_high.iter()).enumerate() {
+                    circuit_builder.require_equal(
+                        || format!("mul_check_rd_written_{i}"),
+                        rd.clone(),
+                        rd_high.expr(),
+                    )?;
+                }
+            }
+            _ => {}
         }
 
         Ok(MulhConfig {
@@ -208,6 +230,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             rs2_read,
             rd_written,
             r_insn,
+            rd_high,
             rd_low,
             carry,
             rs1_ext,
@@ -262,6 +285,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         for i in 0..UINT_LIMBS {
             set_val!(instance, config.rd_low[i], rd_low[i] as u64);
+            set_val!(instance, config.rd_high[i], rd_high[i] as u64);
         }
         for i in 0..UINT_LIMBS * 2 {
             set_val!(instance, config.carry[i], carry[i] as u64);
