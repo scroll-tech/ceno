@@ -54,7 +54,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         // 0. Registers and instruction lookup
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+        // No need to check range of rd_written here because both rd_low and
+        // rd_high are checked later, and rd_written is enforced to be equal
+        // to one of them according to the instruction kind
+        let rd_written = UInt::new_unchecked(|| "rd_written", circuit_builder)?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -134,8 +137,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                     acc + (rs1_expr[k].clone() * rs2_ext.expr())
                         + (rs2_expr[k].clone() * rs1_ext.expr())
                 });
-            carry_high[j] =
-                E::BaseField::from(carry_divide).expr() * (expected_limb - rd_high[j].expr());
+            carry_high[j] = carry_divide.expr() * (expected_limb - rd_high[j].expr());
         }
 
         for (i, (rd_high, carry_high)) in rd_high.iter().zip(carry[UINT_LIMBS..].iter()).enumerate()
@@ -257,7 +259,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         config.rs2_read.assign_limbs(instance, rs2_limbs);
 
         let rd = step.rd().unwrap().value.after;
-        let rd_val = Value::new(rd, lk_multiplicity);
+        let rd_val = Value::new_unchecked(rd);
         config
             .rd_written
             .assign_limbs(instance, rd_val.as_u16_limbs());
@@ -303,8 +305,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             lk_multiplicity.assert_ux::<16>(*carry_high as u64);
         }
 
-        let sign_mask = 1 << (UINT_LIMBS - 1);
-        let ext = (1 << UINT_LIMBS) - 1;
+        let sign_mask = 1 << (LIMB_BITS - 1);
+        let ext = (1 << LIMB_BITS) - 1;
         let rs1_sign = rs1_ext / ext;
         let rs2_sign = rs2_ext / ext;
 
