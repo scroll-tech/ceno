@@ -604,11 +604,13 @@ mod test {
         let expected_errors: &[_] = if is_ok { &[] } else { &[name] };
         MockProver::assert_with_expected_errors(
             &cb,
+            &[],
             &raw_witin
                 .to_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[],
             &[insn_code],
             expected_errors,
             None,
