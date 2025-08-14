@@ -3,18 +3,20 @@ use std::marker::PhantomData;
 use ceno_emul::InsnKind;
 use ff_ext::ExtensionField;
 
+use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
     Value,
     error::ZKVMError,
     gadgets::{AssertLtConfig, SignedExtendConfig},
-    instructions::Instruction,
+    instructions::{
+        Instruction,
+        riscv::constants::{LIMB_BITS, UINT_LIMBS},
+    },
     structs::ProgramParams,
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use witness::set_val;
-
-use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 
 pub struct ShiftConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
@@ -98,7 +100,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             || "outflow < pow2_rs2_low5",
             outflow.expr(),
             pow2_rs2_low5.expr(),
-            2,
+            UINT_LIMBS * LIMB_BITS,
         )?;
 
         let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();

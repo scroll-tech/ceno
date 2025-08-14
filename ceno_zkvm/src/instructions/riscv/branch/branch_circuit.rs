@@ -13,7 +13,7 @@ use crate::{
         riscv::{
             RIVInstruction,
             b_insn::BInstructionConfig,
-            constants::{UINT_LIMBS, UInt},
+            constants::{LIMB_BITS, UINT_LIMBS, UInt},
         },
     },
     structs::ProgramParams,
@@ -95,7 +95,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                     || "rs1<rs2",
                     read_rs1.value(),
                     read_rs2.value(),
-                    UINT_LIMBS,
+                    UINT_LIMBS * LIMB_BITS,
                 )?;
                 (unsigned_lt.expr(), None, None, Some(unsigned_lt))
             }
@@ -105,7 +105,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                     || "rs1 >= rs2",
                     read_rs1.value(),
                     read_rs2.value(),
-                    UINT_LIMBS,
+                    UINT_LIMBS * LIMB_BITS,
                 )?;
                 (
                     Expression::ONE - unsigned_lt.expr(),
