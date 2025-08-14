@@ -265,12 +265,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
                 .chain(record.clone())
                 .collect(),
         );
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc lk_record degree ({})",
-            name_fn().into()
-        );
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
@@ -629,6 +623,17 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.rlc_chip_record(records)
     }
 
+    pub fn create_bit<NR, N>(&mut self, name_fn: N) -> Result<WitIn, CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR + Clone,
+    {
+        let bit = self.cs.create_witin(name_fn.clone());
+        self.assert_bit(name_fn, bit.expr())?;
+
+        Ok(bit)
+    }
+
     pub fn create_u8<NR, N>(&mut self, name_fn: N) -> Result<WitIn, CircuitBuilderError>
     where
         NR: Into<String>,
@@ -733,6 +738,23 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                 let cond_target = false_expr.clone() + cond.clone() * true_expr - cond * false_expr;
                 cb.cs.require_zero(name_fn, target - cond_target)
             },
+        )
+    }
+
+    pub fn condition_require_zero<NR, N>(
+        &mut self,
+        name_fn: N,
+        cond: Expression<E>,
+        expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        // cond * expr
+        self.namespace(
+            || "cond_require_zero",
+            |cb| cb.cs.require_zero(name_fn, cond * expr.expr()),
         )
     }
 

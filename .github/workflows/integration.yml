@@ -55,6 +55,13 @@ jobs:
           MOCK_PROVING: 1
         run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/fibonacci
 
+      - name: Run fibonacci (debug) + feature u16limb_circuit
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --package ceno_zkvm --features u16limb_circuit --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/fibonacci
+
+
       - name: Run fibonacci (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
