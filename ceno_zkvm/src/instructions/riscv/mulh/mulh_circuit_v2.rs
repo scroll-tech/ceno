@@ -285,8 +285,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         let rs2_sign = rs2_ext / ext;
 
         match I::INST_KIND {
-            InsnKind::MULH => {}
-            InsnKind::MULHU => {
+            InsnKind::MULH => {
                 lk_multiplicity.assert_ux::<16>(
                     (2 * rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask) as u64,
                 );
@@ -294,6 +293,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                     (2 * rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
                 );
             }
+            InsnKind::MULHU => {}
             InsnKind::MULHSU => {
                 lk_multiplicity.assert_ux::<16>(
                     (2 * rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask) as u64,
