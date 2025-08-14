@@ -16,6 +16,7 @@ use std::{
 /// this is useful when the caller might own, share, or temporarily mutate a slice
 /// and we want to abstract over all three cases while enabling mutation (via `.to_mut()`).
 #[derive(Debug, Serialize)]
+#[serde(untagged)]
 pub enum SmartSlice<'a, T> {
     Borrowed(&'a [T]),        // shared reference
     BorrowedMut(&'a mut [T]), // mutable reference
@@ -163,5 +164,21 @@ where
         D: Deserializer<'de>,
     {
         Vec::<T>::deserialize(deserializer).map(SmartSlice::Owned)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SmartSlice;
+
+    #[test]
+    fn test_smart_slice_de_ser() {
+        let slice = SmartSlice::Owned(vec![1, 2, 3]);
+
+        let slice_encoded = serde_json::to_string(&slice).unwrap();
+
+        let slice_decoded = serde_json::from_str(&slice_encoded).unwrap();
+
+        assert_eq!(slice, slice_decoded);
     }
 }
