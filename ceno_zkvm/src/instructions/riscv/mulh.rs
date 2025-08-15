@@ -50,7 +50,7 @@ mod test {
             Instruction,
             riscv::{
                 RIVInstruction,
-                constants::UInt,
+                constants::{LIMB_BITS, UInt},
                 mulh::{MulOp, MulhInstruction, MulhsuInstruction, MulhuOp},
             },
         },
@@ -59,7 +59,7 @@ mod test {
         witness::LkMultiplicity,
     };
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
-    use ff_ext::{ExtensionField, GoldilocksExt2};
+    use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
     use gkr_iop::circuit_builder::DebugIndex;
     use multilinear_extensions::Expression;
 
@@ -73,13 +73,13 @@ mod test {
         // verify_mulu::<MulOp, GoldilocksExt2>("u32::MAX", u32::MAX, u32::MAX);
         verify_mulu::<MulOp, GoldilocksExt2>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
 
-        // verify_mulu::<MulOp, BabyBearExt4>("basic", 2, 11);
-        // verify_mulu::<MulOp, BabyBearExt4>("2 * 0", 2, 0);
-        // verify_mulu::<MulOp, BabyBearExt4>("0 * 0", 0, 0);
-        // verify_mulu::<MulOp, BabyBearExt4>("0 * 2", 0, 2);
-        // verify_mulu::<MulOp, BabyBearExt4>("0 * u32::MAX", 0, u32::MAX);
+        verify_mulu::<MulOp, BabyBearExt4>("basic", 2, 11);
+        verify_mulu::<MulOp, BabyBearExt4>("2 * 0", 2, 0);
+        verify_mulu::<MulOp, BabyBearExt4>("0 * 0", 0, 0);
+        verify_mulu::<MulOp, BabyBearExt4>("0 * 2", 0, 2);
+        verify_mulu::<MulOp, BabyBearExt4>("0 * u32::MAX", 0, u32::MAX);
         // verify_mulu::<MulOp, BabyBearExt4>("u32::MAX", u32::MAX, u32::MAX);
-        // verify_mulu::<MulOp, BabyBearExt4>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
+        verify_mulu::<MulOp, BabyBearExt4>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
     }
 
     #[test]
@@ -92,13 +92,13 @@ mod test {
         // verify_mulu::<MulhuOp, GoldilocksExt2>("u32::MAX", u32::MAX, u32::MAX);
         verify_mulu::<MulhuOp, GoldilocksExt2>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
 
-        // verify_mulu::<MulhuOp, BabyBearExt4>("basic", 2, 11);
-        // verify_mulu::<MulhuOp, BabyBearExt4>("2 * 0", 2, 0);
-        // verify_mulu::<MulhuOp, BabyBearExt4>("0 * 0", 0, 0);
-        // verify_mulu::<MulhuOp, BabyBearExt4>("0 * 2", 0, 2);
-        // verify_mulu::<MulhuOp, BabyBearExt4>("0 * u32::MAX", 0, u32::MAX);
+        verify_mulu::<MulhuOp, BabyBearExt4>("basic", 2, 11);
+        verify_mulu::<MulhuOp, BabyBearExt4>("2 * 0", 2, 0);
+        verify_mulu::<MulhuOp, BabyBearExt4>("0 * 0", 0, 0);
+        verify_mulu::<MulhuOp, BabyBearExt4>("0 * 2", 0, 2);
+        verify_mulu::<MulhuOp, BabyBearExt4>("0 * u32::MAX", 0, u32::MAX);
         // verify_mulu::<MulhuOp, BabyBearExt4>("u32::MAX", u32::MAX, u32::MAX);
-        // verify_mulu::<MulhuOp, BabyBearExt4>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
+        verify_mulu::<MulhuOp, BabyBearExt4>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
     }
 
     fn verify_mulu<I: RIVInstruction, E: ExtensionField>(name: &'static str, rs1: u32, rs2: u32) {
@@ -185,9 +185,9 @@ mod test {
         test_cases
             .iter()
             .for_each(|(rs1, rs2)| verify_mulh::<GoldilocksExt2>(*rs1, *rs2));
-        // test_cases
-        //     .iter()
-        //     .for_each(|(rs1, rs2)| verify_mulh::<BabyBearExt4>(*rs1, *rs2));
+        test_cases
+            .iter()
+            .for_each(|(rs1, rs2)| verify_mulh::<BabyBearExt4>(*rs1, *rs2));
     }
 
     fn verify_mulh<E: ExtensionField>(rs1: i32, rs2: i32) {
@@ -231,7 +231,9 @@ mod test {
         cb.require_equal(
             || "assert_rd_written",
             rd_written_expr,
-            Expression::from(signed_prod_high),
+            Expression::from(signed_prod_high % (1 << LIMB_BITS))
+                + Expression::from(signed_prod_high >> LIMB_BITS)
+                    * Expression::from(1 << LIMB_BITS),
         )
         .unwrap();
 
@@ -260,9 +262,9 @@ mod test {
         test_cases
             .iter()
             .for_each(|(rs1, rs2)| verify_mulhsu::<GoldilocksExt2>(*rs1, *rs2));
-        // test_cases
-        //     .iter()
-        //     .for_each(|(rs1, rs2)| verify_mulhsu::<BabyBearExt4>(*rs1, *rs2));
+        test_cases
+            .iter()
+            .for_each(|(rs1, rs2)| verify_mulhsu::<BabyBearExt4>(*rs1, *rs2));
     }
 
     fn verify_mulhsu<E: ExtensionField>(rs1: i32, rs2: u32) {
@@ -306,7 +308,9 @@ mod test {
         cb.require_equal(
             || "assert_rd_written",
             rd_written_expr,
-            Expression::from(signed_unsigned_prod_high),
+            Expression::from(signed_unsigned_prod_high % (1 << LIMB_BITS))
+                + Expression::from(signed_unsigned_prod_high >> LIMB_BITS)
+                    * Expression::from(1 << LIMB_BITS),
         )
         .unwrap();
 
