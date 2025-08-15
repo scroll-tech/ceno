@@ -170,17 +170,17 @@ where
             .chain(points.to_vec())
             .collect();
 
-        let ood_answers = parsed_commitment
+        let eval_per_point = evals_per_point
+            .iter()
+            .map(|evals| compute_dot_product(evals, &random_coeff));
+        let initial_answers = parsed_commitment
             .ood_answers
             .clone()
             .chunks_exact(num_polys)
             .map(|answer| compute_dot_product(answer, &random_coeff))
-            .collect::<Vec<_>>();
-        let eval_per_point = evals_per_point
-            .iter()
-            .map(|evals| compute_dot_product(evals, &random_coeff));
+            .chain(eval_per_point)
+            .collect();
 
-        let initial_answers: Vec<_> = ood_answers.into_iter().chain(eval_per_point).collect();
         exit_span!(internal_timer);
 
         let internal_timer = entered_span!("Write proof to transcript batch");
@@ -750,7 +750,7 @@ where
 
             let ood_points = &round_proof.ood_points;
             let stir_challenges_points = &round_proof.stir_challenges_points;
-            let stir_challenges: Vec<_> = ood_points
+            let sum_of_claims: E = ood_points
                 .iter()
                 .chain(stir_challenges_points)
                 .cloned()
@@ -759,10 +759,6 @@ where
                     // TODO:
                     // Maybe refactor outside
                 })
-                .collect();
-
-            let sum_of_claims: E = stir_challenges
-                .into_iter()
                 .map(|point| eq_eval(&point, &folding_randomness))
                 .zip(&round_proof.combination_randomness)
                 .map(|(point, rand)| point * *rand)
