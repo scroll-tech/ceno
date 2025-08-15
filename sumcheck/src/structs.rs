@@ -76,5 +76,5 @@ pub struct SumCheckSubClaim<E: ExtensionField> {
 #[derive(Clone, Debug, Error)]
 pub enum VerifierError {
     #[error("Claim not match: expect: {0:?}, got: {1:?}")]
-    ClaimNotMatch(String, String),
+    ClaimNotMatch(Box<str>, Box<str>),
 }

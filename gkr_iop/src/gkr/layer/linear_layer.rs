@@ -65,8 +65,11 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
                 .unwrap();
             if *sigma != got {
                 return Err(BackendError::LayerVerificationFailed(
-                    self.name.clone(),
-                    VerifierError::ClaimNotMatch(format!("{}", *sigma), format!("{}", got)),
+                    self.name.clone().into(),
+                    VerifierError::ClaimNotMatch(
+                        format!("{}", *sigma).into(),
+                        format!("{}", got).into(),
+                    ),
                 ));
             }
         }

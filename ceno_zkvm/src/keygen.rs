@@ -25,7 +25,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
                     .circuit_fixed_traces
                     .remove(&c_name)
                     .flatten()
-                    .ok_or(ZKVMError::FixedTraceNotFound(c_name.clone()))?;
+                    .ok_or(ZKVMError::FixedTraceNotFound(c_name.clone().into()))?;
                 fixed_traces.insert(circuit_index, fixed_trace_rmm);
             };
 

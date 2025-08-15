@@ -5,12 +5,10 @@
 
 pub mod basic;
 
-pub mod syncronized;
 pub use basic::BasicTranscript;
 use ff_ext::SmallField;
 use itertools::Itertools;
 use p3::{challenger::GrindingChallenger, field::FieldAlgebra};
-pub use syncronized::TranscriptSyncronized;
 #[derive(Default, Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Challenge<F> {
     pub elements: F,

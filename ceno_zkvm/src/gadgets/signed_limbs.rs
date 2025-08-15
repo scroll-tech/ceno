@@ -11,6 +11,10 @@ use p3::field::FieldAlgebra;
 use std::{array, marker::PhantomData};
 use witness::set_val;
 
+/// gadget for comparing two `UInt` values, supporting both signed and unsigned modes.
+///
+/// this configuration structure allows flexible comparison logic depending on whether
+/// the operands should be interpreted as signed or unsigned integers.
 #[derive(Debug)]
 pub struct UIntLimbsLTConfig<E: ExtensionField> {
     // Most significant limb of a and b respectively as a field element, will be range
@@ -152,7 +156,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
         b: &[u16],
         is_sign_comparison: bool,
     ) -> Result<(), CircuitBuilderError> {
-        let (cmp_lt, diff_idx, a_sign, b_sign) = run_cmp(is_sign_comparison, a, b);
+        let (cmp_lt, diff_idx, is_a_neg, is_b_neg) = run_cmp(is_sign_comparison, a, b);
         config
             .diff_marker
             .iter()
@@ -162,9 +166,9 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
             });
         set_val!(instance, config.cmp_lt, cmp_lt as u64);
 
-        // We range check (read_rs1_msb_f + 32768) and (read_rs2_msb_f + 32768) if signed,
-        // read_rs1_msb_f and read_rs2_msb_f if not
-        let (a_msb_f, a_msb_range) = if a_sign {
+        // We range check (read_rs1_msb_f + 2^(LIMB_BITS - 1)) and (read_rs2_msb_f + 2^(LIMB_BITS - 1)) if negative,
+        // otherwise read_rs1_msb_f and read_rs2_msb_f
+        let (a_msb_f, a_msb_range) = if is_a_neg {
             (
                 -E::BaseField::from_canonical_u32((1 << LIMB_BITS) - a[UINT_LIMBS - 1] as u32),
                 a[UINT_LIMBS - 1] - (1 << (LIMB_BITS - 1)),
@@ -175,7 +179,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
                 a[UINT_LIMBS - 1] + ((is_sign_comparison as u16) << (LIMB_BITS - 1)),
             )
         };
-        let (b_msb_f, b_msb_range) = if b_sign {
+        let (b_msb_f, b_msb_range) = if is_b_neg {
             (
                 -E::BaseField::from_canonical_u32((1 << LIMB_BITS) - b[UINT_LIMBS - 1] as u32),
                 b[UINT_LIMBS - 1] - (1 << (LIMB_BITS - 1)),
@@ -219,15 +223,15 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
     }
 }
 
-// returns (cmp_lt, diff_idx, x_sign, y_sign)
+// returns (cmp_lt, diff_idx, is_x_neg, is_y_neg)
 // cmp_lt = true if a < b else false
 pub fn run_cmp(signed: bool, x: &[u16], y: &[u16]) -> (bool, usize, bool, bool) {
-    let x_sign = (x[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1) && signed;
-    let y_sign = (y[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1) && signed;
+    let is_x_neg = (x[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1) && signed;
+    let is_y_neg = (y[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1) && signed;
     for i in (0..UINT_LIMBS).rev() {
         if x[i] != y[i] {
-            return ((x[i] < y[i]) ^ x_sign ^ y_sign, i, x_sign, y_sign);
+            return ((x[i] < y[i]) ^ is_x_neg ^ is_y_neg, i, is_x_neg, is_y_neg);
         }
     }
-    (false, UINT_LIMBS, x_sign, y_sign)
+    (false, UINT_LIMBS, is_x_neg, is_y_neg)
 }

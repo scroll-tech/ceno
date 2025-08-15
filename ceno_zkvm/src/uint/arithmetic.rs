@@ -30,7 +30,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             Self::NUM_LIMBS,
         )?;
         let Some(carries) = &c.carries else {
-            return Err(CircuitBuilderError::CircuitError("empty carry".to_string()));
+            return Err(CircuitBuilderError::CircuitError(
+                "empty carry".to_string().into(),
+            ));
         };
         carries.iter().enumerate().try_for_each(|(i, carry)| {
             circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr())
