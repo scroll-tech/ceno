@@ -16,6 +16,8 @@ pub const LIMB_MASK: u32 = 0xFFFF;
 
 pub const BIT_WIDTH: usize = 32usize;
 
+pub const PC_BITS: usize = 30;
+
 pub type UInt<E> = UIntLimbs<BIT_WIDTH, LIMB_BITS, E>;
 pub type UIntMul<E> = UIntLimbs<{ 2 * BIT_WIDTH }, LIMB_BITS, E>;
 /// use UInt<x> for x bits limb size

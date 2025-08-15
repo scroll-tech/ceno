@@ -33,6 +33,7 @@ mod r_insn;
 mod ecall_insn;
 
 mod im_insn;
+mod lui;
 mod memory;
 mod s_insn;
 #[cfg(test)]

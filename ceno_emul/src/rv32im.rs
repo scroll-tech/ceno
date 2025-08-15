@@ -195,6 +195,7 @@ pub enum InsnKind {
     LW,
     LBU,
     LHU,
+    LUI,
     SB,
     SH,
     SW,
@@ -212,7 +213,7 @@ impl From<InsnKind> for InsnCategory {
             | MULHU | DIV | DIVU | REM | REMU => Compute,
             ADDI | XORI | ORI | ANDI | SLLI | SRLI | SRAI | SLTI | SLTIU => Compute,
             BEQ | BNE | BLT | BGE | BLTU | BGEU => Branch,
-            JAL | JALR => Compute,
+            JAL | JALR | LUI => Compute,
             LB | LH | LW | LBU | LHU => Load,
             SB | SH | SW => Store,
             ECALL => System,
@@ -231,6 +232,7 @@ impl From<InsnKind> for InsnFormat {
             JAL => J,
             JALR => I,
             LB | LH | LW | LBU | LHU => I,
+            LUI => U,
             SB | SH | SW => S,
             ECALL => I,
             INVALID => I,
@@ -306,6 +308,7 @@ fn step_compute<M: EmuContext>(ctx: &mut M, kind: InsnKind, insn: &Instruction) 
 
             match kind {
                 ADDI => rs1.wrapping_add(imm_i),
+                LUI => imm_i << 12,
                 XORI => rs1 ^ imm_i,
                 ORI => rs1 | imm_i,
                 ANDI => rs1 & imm_i,
