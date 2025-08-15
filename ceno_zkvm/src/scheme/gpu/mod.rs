@@ -278,16 +278,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         use ceno_gpu::CudaHal as _; // bring trait methods into scope
         let mut _prod_buffers: Vec<ceno_gpu::gl64::buffer::BufferImpl<EGL64>> = Vec::new();
         let mut _logup_buffers: Vec<ceno_gpu::gl64::buffer::BufferImpl<EGL64>> = Vec::new();
-        
+
         // prod buffers
         for spec in prod_specs.iter() {
-            let last = spec.witness.last().expect("non-empty product tower witness");
+            let last = spec
+                .witness
+                .last()
+                .expect("non-empty product tower witness");
             assert_eq!(last.len(), 2, "prod_spec must have 2 MLEs");
             let nv = last[0].num_vars();
             let buf = cuda_hal.alloc_ext_elems_on_device(1 << (nv + 2)).unwrap();
             _prod_buffers.push(buf);
         }
-        
+
         // logup buffers
         for spec in logup_specs.iter() {
             let last = spec.witness.last().expect("non-empty logup tower witness");
@@ -296,18 +299,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             let buf = cuda_hal.alloc_ext_elems_on_device(1 << (nv + 3)).unwrap();
             _logup_buffers.push(buf);
         }
-        
+
         // prod specs
-        let prod_gpu: Vec<_> = prod_specs.iter()
+        let prod_gpu: Vec<_> = prod_specs
+            .iter()
             .zip(_prod_buffers.iter_mut())
             .map(|(spec, buf)| {
-                let last = spec.witness.last().expect("non-empty product tower witness");
+                let last = spec
+                    .witness
+                    .last()
+                    .expect("non-empty product tower witness");
                 let nv = last[0].num_vars();
                 let a = last[0].get_ext_field_vec();
                 let b = last[1].get_ext_field_vec();
                 let a_gl: &[EGL64] = unsafe { std::mem::transmute(a) };
                 let b_gl: &[EGL64] = unsafe { std::mem::transmute(b) };
-                
+
                 cuda_hal
                     .tower
                     .build_prod_tower(nv, &[a_gl, b_gl], buf)
@@ -316,7 +323,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             .collect();
 
         // logup specs
-        let logup_gpu: Vec<_> = logup_specs.iter()
+        let logup_gpu: Vec<_> = logup_specs
+            .iter()
             .zip(_logup_buffers.iter_mut())
             .map(|(spec, buf)| {
                 let last = spec.witness.last().expect("non-empty logup tower witness");
@@ -338,20 +346,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             .collect();
 
         // transcript >>> BasicTranscript<GL64^2>
-        let basic_tr: &mut BasicTranscript<GoldilocksExt2> = unsafe {
-            &mut *(transcript as *mut _ as *mut BasicTranscript<GoldilocksExt2>)
+        let basic_tr: &mut BasicTranscript<GoldilocksExt2> =
+            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GoldilocksExt2>) };
+
+        let input = ceno_gpu::TowerInput {
+            prod_specs: prod_gpu,
+            logup_specs: logup_gpu,
         };
 
-        let input = ceno_gpu::TowerInput { 
-            prod_specs: prod_gpu,
-            logup_specs: logup_gpu 
-        };
-        
         let (point_gl, proof_gpu) = cuda_hal
             .tower
             .create_proof(&input, basic_tr)
             .expect("gpu tower create_proof failed");
-    
+
         // TowerProofs
         let point: Point<E> = unsafe { std::mem::transmute(point_gl) };
         let proof: TowerProofs<E> = unsafe { std::mem::transmute(proof_gpu) };
