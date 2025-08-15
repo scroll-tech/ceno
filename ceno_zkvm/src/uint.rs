@@ -150,7 +150,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
 
     /// take vector of primative type and instantiate witnesses
     pub fn from_const_unchecked<T: Into<u64>>(limbs: Vec<T>) -> Self {
-        assert!(limbs.len() == Self::NUM_LIMBS);
+        assert_eq!(limbs.len(), Self::NUM_LIMBS);
         UIntLimbs {
             limbs: UintLimb::Expression(
                 limbs
@@ -470,7 +470,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn as_lo_hi<const M2: usize>(
         &self,
     ) -> Result<(UIntLimbs<M2, C, E>, UIntLimbs<M2, C, E>), CircuitBuilderError> {
-        assert!(M == 2 * M2);
+        assert_eq!(M, 2 * M2);
         let mut self_lo = self.expr();
         let self_hi = self_lo.split_off(self_lo.len() / 2);
         Ok((
@@ -505,13 +505,16 @@ impl<const M: usize, const C: usize, E: ExtensionField> TryFrom<Vec<WitIn>> for 
 
     fn try_from(limbs: Vec<WitIn>) -> Result<Self, Self::Error> {
         if limbs.len() != Self::NUM_LIMBS {
-            return Err(UtilError::UIntError(format!(
-                "cannot construct UIntLimbs<{}, {}> from {} cells, requires {} cells",
-                M,
-                C,
-                limbs.len(),
-                Self::NUM_LIMBS
-            )));
+            return Err(UtilError::UIntError(
+                format!(
+                    "cannot construct UIntLimbs<{}, {}> from {} cells, requires {} cells",
+                    M,
+                    C,
+                    limbs.len(),
+                    Self::NUM_LIMBS
+                )
+                .into(),
+            ));
         }
 
         Ok(Self {
@@ -558,7 +561,8 @@ impl<E: ExtensionField> UIntLimbs<32, 16, E> {
 
     /// Return a value suitable for memory read/write. From [u16; 2] limbs
     pub fn memory_expr(&self) -> MemoryExpr<E> {
-        self.value()
+        let u16_limbs = self.expr();
+        u16_limbs.try_into().expect("two limbs with M=32 and C=16")
     }
 }
 

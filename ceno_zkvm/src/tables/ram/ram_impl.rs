@@ -206,7 +206,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         let init_table = [
             vec![(NVRAM::RAM_TYPE as usize).into()],
             vec![Expression::Fixed(addr)],
-            vec![init_v.expr_as_instance()],
+            init_v.iter().map(|v| v.expr_as_instance()).collect_vec(),
             vec![Expression::ZERO], // Initial cycle.
         ]
         .concat();
@@ -215,7 +215,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             // a v t
             vec![(NVRAM::RAM_TYPE as usize).into()],
             vec![Expression::Fixed(addr)],
-            vec![init_v.expr_as_instance()],
+            init_v.iter().map(|v| v.expr_as_instance()).collect_vec(),
             vec![final_cycle.expr()],
         ]
         .concat();
@@ -479,7 +479,7 @@ mod tests {
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            &lkm,
+            &lkm.0,
             &input,
         )
         .unwrap();

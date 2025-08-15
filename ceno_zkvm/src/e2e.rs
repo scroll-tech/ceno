@@ -449,7 +449,6 @@ pub fn generate_witness<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     emul_result: EmulationResult,
     program: &Program,
-    is_mock_proving: bool,
 ) -> ZKVMWitnesses<E> {
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
@@ -465,7 +464,7 @@ pub fn generate_witness<E: ExtensionField>(
         .dummy_config
         .assign_opcode_circuit(&system_config.zkvm_cs, &mut zkvm_witness, dummy_records)
         .unwrap();
-    zkvm_witness.finalize_lk_multiplicities(is_mock_proving);
+    zkvm_witness.finalize_lk_multiplicities();
 
     // assign table circuits
     system_config
@@ -723,17 +722,12 @@ pub fn run_e2e_with_checkpoint<
                 // When we run e2e and halt before generate_witness, this implies we are going to
                 // benchmark generate_witness performance. So we skip mock proving check on
                 // `generate_witness` to avoid it affecting the benchmark result.
-                _ = generate_witness(&ctx.system_config, emul_result, &ctx.program, false)
+                _ = generate_witness(&ctx.system_config, emul_result, &ctx.program)
             })),
         };
     }
 
-    let zkvm_witness = generate_witness(
-        &ctx.system_config,
-        emul_result,
-        &ctx.program,
-        is_mock_proving,
-    );
+    let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
 
     let mut prover = ZKVMProver::new(pk, device);
 
@@ -803,12 +797,7 @@ pub fn run_e2e_proof<
     let pi = emul_result.pi.clone();
 
     // Generate witness
-    let zkvm_witness = generate_witness(
-        &ctx.system_config,
-        emul_result,
-        &ctx.program,
-        is_mock_proving,
-    );
+    let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
 
     // proving
     let mut prover = ZKVMProver::new(pk, device);

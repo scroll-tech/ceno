@@ -262,7 +262,7 @@ impl<E: ExtensionField> ReadMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: AddressExpr<E>,
-        mem_read: Expression<E>,
+        mem_read: MemoryExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
         let prev_ts = circuit_builder.create_witin(|| "prev_ts");
@@ -560,11 +560,13 @@ mod test {
         }
         MockProver::assert_with_expected_errors(
             &cb,
+            &[],
             &raw_witin
                 .to_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[],
             &[],
             if is_ok { &[] } else { &["mid_u14"] },
             None,

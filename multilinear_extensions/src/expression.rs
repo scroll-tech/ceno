@@ -1402,15 +1402,8 @@ pub mod fmt {
         if value > F::MODULUS_U64 - u16::MAX as u64 {
             // beautiful format for negative number > -65536
             parens(format!("-{}", F::MODULUS_U64 - value), add_parens)
-        } else if value < u16::MAX as u64 {
-            format!("{value}")
         } else {
-            // hex
-            if value > F::MODULUS_U64 - (u32::MAX as u64 + u16::MAX as u64) {
-                parens(format!("-{}", F::MODULUS_U64 - value), add_parens)
-            } else {
-                format!("{value}")
-            }
+            format!("{value}")
         }
     }
 

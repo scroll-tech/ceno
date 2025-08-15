@@ -39,7 +39,7 @@ pub struct StackTable;
 
 impl DynVolatileRamTable for StackTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const V_LIMBS: usize = UINT_LIMBS;
     const ZERO_INIT: bool = true;
     const DESCENDING: bool = true;
 
@@ -54,15 +54,15 @@ impl DynVolatileRamTable for StackTable {
         params.platform.stack.start
     }
 
+    fn name() -> &'static str {
+        "StackTable"
+    }
+
     fn max_len(params: &ProgramParams) -> usize {
         let max_size = (Self::offset_addr(params) - Self::end_addr(params))
             .div_ceil(WORD_SIZE as u32) as Addr
             + 1;
         1 << (u32::BITS - 1 - max_size.leading_zeros()) // prev_power_of_2
-    }
-
-    fn name() -> &'static str {
-        "StackTable"
     }
 }
 
@@ -72,7 +72,7 @@ pub type StackCircuit<E> = DynVolatileRamCircuit<E, StackTable>;
 pub struct HintsTable;
 impl DynVolatileRamTable for HintsTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const V_LIMBS: usize = UINT_LIMBS;
     const ZERO_INIT: bool = false;
     const DESCENDING: bool = false;
 
@@ -96,7 +96,7 @@ pub struct RegTable;
 
 impl NonVolatileTable for RegTable {
     const RAM_TYPE: RAMType = RAMType::Register;
-    const V_LIMBS: usize = UINT_LIMBS; // See `RegisterExpr`.
+    const V_LIMBS: usize = UINT_LIMBS;
     const WRITABLE: bool = true;
 
     fn name() -> &'static str {
@@ -115,15 +115,15 @@ pub struct StaticMemTable;
 
 impl NonVolatileTable for StaticMemTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const V_LIMBS: usize = UINT_LIMBS;
     const WRITABLE: bool = true;
-
-    fn len(params: &ProgramParams) -> usize {
-        params.static_memory_len
-    }
 
     fn name() -> &'static str {
         "StaticMemTable"
+    }
+
+    fn len(params: &ProgramParams) -> usize {
+        params.static_memory_len
     }
 }
 
@@ -134,15 +134,15 @@ pub struct PubIOTable;
 
 impl NonVolatileTable for PubIOTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const V_LIMBS: usize = UINT_LIMBS;
     const WRITABLE: bool = false;
-
-    fn len(params: &ProgramParams) -> usize {
-        params.pubio_len
-    }
 
     fn name() -> &'static str {
         "PubIOTable"
+    }
+
+    fn len(params: &ProgramParams) -> usize {
+        params.pubio_len
     }
 }
 

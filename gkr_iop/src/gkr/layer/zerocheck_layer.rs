@@ -309,10 +309,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
 
         if got_claim != expected_evaluation {
             return Err(BackendError::LayerVerificationFailed(
-                self.name.clone(),
+                self.name.clone().into(),
                 VerifierError::ClaimNotMatch(
-                    format!("{}", expected_evaluation),
-                    format!("{}", got_claim),
+                    format!("{}", expected_evaluation).into(),
+                    format!("{}", got_claim).into(),
                 ),
             ));
         }
@@ -401,10 +401,10 @@ fn verify_rotation<E: ExtensionField>(
 
     if got_claim != expected_evaluation {
         return Err(BackendError::LayerVerificationFailed(
-            "rotation verify failed".to_string(),
+            "rotation verify failed".to_string().into(),
             VerifierError::ClaimNotMatch(
-                format!("{}", expected_evaluation),
-                format!("{}", got_claim),
+                format!("{}", expected_evaluation).into(),
+                format!("{}", got_claim).into(),
             ),
         ));
     }

@@ -6,7 +6,10 @@ use crate::{
     gadgets::{AssertLtConfig, SignedExtendConfig},
     instructions::{
         Instruction,
-        riscv::{constants::UInt, i_insn::IInstructionConfig},
+        riscv::{
+            constants::{LIMB_BITS, UINT_LIMBS, UInt},
+            i_insn::IInstructionConfig,
+        },
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -90,7 +93,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             || "outflow < imm",
             outflow.expr(),
             imm.expr(),
-            2,
+            UINT_LIMBS * LIMB_BITS,
         )?;
 
         let two_pow_total_bits: Expression<_> = (1u64 << UInt::<E>::TOTAL_BITS).into();

@@ -3,14 +3,13 @@ use std::fmt::Display;
 use ff_ext::ExtensionField;
 use gkr_iop::error::CircuitBuilderError;
 
+use super::AssertLtConfig;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
-    instructions::riscv::constants::{UINT_LIMBS, UInt},
+    instructions::riscv::constants::{LIMB_BITS, UINT_LIMBS, UInt},
     witness::LkMultiplicity,
 };
-
-use super::AssertLtConfig;
 
 /// divide gadget
 #[derive(Debug, Clone)]
@@ -40,7 +39,7 @@ impl<E: ExtensionField> DivConfig<E> {
                 || "remainder < divisor",
                 remainder.value(),
                 divisor.value(),
-                UINT_LIMBS,
+                UINT_LIMBS * LIMB_BITS,
             )?;
 
             Ok(Self {
