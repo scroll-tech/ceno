@@ -50,7 +50,7 @@ mod test {
             Instruction,
             riscv::{
                 RIVInstruction,
-                constants::{LIMB_BITS, UInt},
+                constants::UInt,
                 mulh::{MulOp, MulhInstruction, MulhsuInstruction, MulhuOp},
             },
         },
@@ -61,7 +61,6 @@ mod test {
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
     use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
     use gkr_iop::circuit_builder::DebugIndex;
-    use multilinear_extensions::Expression;
 
     #[test]
     fn test_opcode_mul() {
@@ -227,13 +226,16 @@ mod test {
         .unwrap();
 
         // verify value written to register
+        let expected_rd_written = UInt::from_const_unchecked(
+            Value::new_unchecked(signed_prod_high)
+                .as_u16_limbs()
+                .to_vec(),
+        );
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
         cb.require_equal(
             || "assert_rd_written",
             rd_written_expr,
-            Expression::from(signed_prod_high % (1 << LIMB_BITS))
-                + Expression::from(signed_prod_high >> LIMB_BITS)
-                    * Expression::from(1 << LIMB_BITS),
+            expected_rd_written.value(),
         )
         .unwrap();
 
@@ -304,13 +306,16 @@ mod test {
         .unwrap();
 
         // verify value written to register
+        let expected_rd_written = UInt::from_const_unchecked(
+            Value::new_unchecked(signed_unsigned_prod_high)
+                .as_u16_limbs()
+                .to_vec(),
+        );
         let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
         cb.require_equal(
             || "assert_rd_written",
             rd_written_expr,
-            Expression::from(signed_unsigned_prod_high % (1 << LIMB_BITS))
-                + Expression::from(signed_unsigned_prod_high >> LIMB_BITS)
-                    * Expression::from(1 << LIMB_BITS),
+            expected_rd_written.value(),
         )
         .unwrap();
 
