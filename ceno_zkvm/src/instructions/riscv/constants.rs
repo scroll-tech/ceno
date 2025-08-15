@@ -23,3 +23,4 @@ pub type UIntMul<E> = UIntLimbs<{ 2 * BIT_WIDTH }, LIMB_BITS, E>;
 /// use UInt<x> for x bits limb size
 pub type UInt8<E> = UIntLimbs<BIT_WIDTH, 8, E>;
 pub const UINT_LIMBS: usize = BIT_WIDTH.div_ceil(LIMB_BITS);
+pub const UINT_BYTE_LIMBS: usize = BIT_WIDTH.div_ceil(8);

@@ -1,4 +1,3 @@
-use multilinear_extensions::ToExpr;
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -6,12 +5,19 @@ use std::{
     panic::{self, PanicHookInfo},
 };
 
-use crate::instructions::riscv::constants::UINT_LIMBS;
 use ff_ext::ExtensionField;
 pub use gkr_iop::utils::i64_to_base;
 use itertools::Itertools;
+use p3::field::Field;
+
+#[cfg(feature = "u16limb_circuit")]
+use crate::instructions::riscv::constants::UINT_LIMBS;
+#[cfg(feature = "u16limb_circuit")]
 use multilinear_extensions::Expression;
-use p3::field::{Field, FieldAlgebra};
+#[cfg(feature = "u16limb_circuit")]
+use multilinear_extensions::ToExpr;
+#[cfg(feature = "u16limb_circuit")]
+use p3::field::FieldAlgebra;
 
 pub fn split_to_u8<T: From<u8>>(value: u32) -> Vec<T> {
     (0..(u32::BITS / 8))
@@ -131,6 +137,7 @@ where
     result
 }
 
+#[cfg(feature = "u16limb_circuit")]
 pub fn imm_sign_extend_circuit<E: ExtensionField>(
     require_signed: bool,
     is_signed: Expression<E>,

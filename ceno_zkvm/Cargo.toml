@@ -67,17 +67,17 @@ forbid_overflow = []
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 nightly-features = [
-  "p3/nightly-features",
-  "ff_ext/nightly-features",
-  "mpcs/nightly-features",
-  "multilinear_extensions/nightly-features",
-  "poseidon/nightly-features",
-  "sumcheck/nightly-features",
-  "transcript/nightly-features",
-  "witness/nightly-features",
+    "p3/nightly-features",
+    "ff_ext/nightly-features",
+    "mpcs/nightly-features",
+    "multilinear_extensions/nightly-features",
+    "poseidon/nightly-features",
+    "sumcheck/nightly-features",
+    "transcript/nightly-features",
+    "witness/nightly-features",
 ]
 sanity-check = ["mpcs/sanity-check"]
-u16limb_circuit = []
+u16limb_circuit = ["ceno_emul/u16limb_circuit"]
 
 [[bench]]
 harness = false

@@ -121,6 +121,11 @@ impl<F: SmallField> InsnRecord<F> {
             ),
             // for imm operate with program counter => convert to field value
             (_, B | J) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
+            // U type
+            (_, U) => (
+                (insn.imm as u32 & 0xfffff) as i64,
+                F::from_wrapped_u32(insn.imm as u32 & 0xfffff),
+            ),
             // TODO JALR need to connecting register (2 limb) with pc (1 limb)
             (JALR, _) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
             // for default imm to operate with register value

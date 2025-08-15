@@ -195,6 +195,7 @@ pub enum InsnKind {
     LW,
     LBU,
     LHU,
+    #[cfg(feature = "u16limb_circuit")]
     LUI,
     SB,
     SH,
@@ -213,10 +214,12 @@ impl From<InsnKind> for InsnCategory {
             | MULHU | DIV | DIVU | REM | REMU => Compute,
             ADDI | XORI | ORI | ANDI | SLLI | SRLI | SRAI | SLTI | SLTIU => Compute,
             BEQ | BNE | BLT | BGE | BLTU | BGEU => Branch,
-            JAL | JALR | LUI => Compute,
+            JAL | JALR => Compute,
             LB | LH | LW | LBU | LHU => Load,
             SB | SH | SW => Store,
             ECALL => System,
+            #[cfg(feature = "u16limb_circuit")]
+            LUI => Compute,
         }
     }
 }
@@ -232,10 +235,11 @@ impl From<InsnKind> for InsnFormat {
             JAL => J,
             JALR => I,
             LB | LH | LW | LBU | LHU => I,
-            LUI => U,
             SB | SH | SW => S,
             ECALL => I,
             INVALID => I,
+            #[cfg(feature = "u16limb_circuit")]
+            LUI => U,
         }
     }
 }
@@ -308,7 +312,8 @@ fn step_compute<M: EmuContext>(ctx: &mut M, kind: InsnKind, insn: &Instruction) 
 
             match kind {
                 ADDI => rs1.wrapping_add(imm_i),
-                LUI => imm_i << 12,
+                #[cfg(feature = "u16limb_circuit")]
+                LUI => imm_i,
                 XORI => rs1 ^ imm_i,
                 ORI => rs1 | imm_i,
                 ANDI => rs1 & imm_i,

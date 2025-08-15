@@ -249,24 +249,38 @@ impl InstructionProcessor for InstructionTranspiler {
         }
     }
 
-    /// Convert LUI to ADDI.
-    ///
-    /// RiscV's load-upper-immediate instruction is necessary to build arbitrary constants,
-    /// because its ADDI can only have a relatively small immediate value: there's just not
-    /// enough space in the 32 bits for more.
-    ///
-    /// Our internal ADDI does not have this limitation, so we can convert LUI to ADDI.
-    /// See [`InstructionTranspiler::process_auipc`] for more background on the conversion.
     fn process_lui(&mut self, dec_insn: UType) -> Self::InstructionResult {
         // Verify assumption that the immediate is already shifted left by 12 bits.
         assert_eq!(dec_insn.imm & 0xfff, 0);
-        Instruction {
-            kind: InsnKind::ADDI,
-            rd: dec_insn.rd,
-            rs1: 0,
-            rs2: 0,
-            imm: dec_insn.imm,
-            raw: self.word,
+        #[cfg(not(feature = "u16limb_circuit"))]
+        {
+            // Convert LUI to ADDI.
+            //
+            // RiscV's load-upper-immediate instruction is necessary to build arbitrary constants,
+            // because its ADDI can only have a relatively small immediate value: there's just not
+            // enough space in the 32 bits for more.
+            //
+            // Our internal ADDI does not have this limitation, so we can convert LUI to ADDI.
+            // See [`InstructionTranspiler::process_auipc`] for more background on the conversion.
+            Instruction {
+                kind: InsnKind::ADDI,
+                rd: dec_insn.rd,
+                rs1: 0,
+                rs2: 0,
+                imm: dec_insn.imm,
+                raw: self.word,
+            }
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        {
+            Instruction {
+                kind: InsnKind::LUI,
+                rd: dec_insn.rd,
+                rs1: 0,
+                rs2: 0,
+                imm: dec_insn.imm,
+                raw: self.word,
+            }
         }
     }
 
@@ -289,8 +303,6 @@ impl InstructionProcessor for InstructionTranspiler {
     /// In any case, AUIPC and LUI together make up ~0.1% of instructions executed in typical
     /// real world scenarios like a `reth` run.
     ///
-    /// TODO(Matthias): run benchmarks to verify the impact on recursion, once we have a working
-    /// recursion.
     fn process_auipc(&mut self, dec_insn: UType) -> Self::InstructionResult {
         let pc = self.pc;
         // Verify our assumption that the immediate is already shifted left by 12 bits.
