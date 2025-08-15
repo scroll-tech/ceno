@@ -48,6 +48,8 @@ impl<E: ExtensionField> RInstructionConfig<E> {
             rs1.id.expr(),
             rs2.id.expr(),
             0.into(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
         ))?;
 
         Ok(RInstructionConfig {

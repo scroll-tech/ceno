@@ -185,7 +185,6 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
 fn test_blt_circuit() -> Result<(), ZKVMError> {
     impl_blt_circuit(false, 0, 0)?;
     impl_blt_circuit(true, 0, 1)?;
-
     impl_blt_circuit(false, 1, -10)?;
     impl_blt_circuit(false, -10, -10)?;
     impl_blt_circuit(false, -9, -10)?;

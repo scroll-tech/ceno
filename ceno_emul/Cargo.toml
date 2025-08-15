@@ -30,3 +30,4 @@ tracing.workspace = true
 [features]
 default = ["forbid_overflow"]
 forbid_overflow = []
+u16limb_circuit = []

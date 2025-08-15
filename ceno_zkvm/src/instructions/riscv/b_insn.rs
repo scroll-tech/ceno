@@ -8,7 +8,6 @@ use crate::{
     error::ZKVMError,
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
     tables::InsnRecord,
-    utils::i64_to_base,
     witness::{LkMultiplicity, set_val},
 };
 use ff_ext::FieldInto;
@@ -65,6 +64,8 @@ impl<E: ExtensionField> BInstructionConfig<E> {
             rs1.id.expr(),
             rs2.id.expr(),
             imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
         ))?;
 
         // Branch program counter
@@ -99,7 +100,7 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         set_val!(
             instance,
             self.imm,
-            i64_to_base::<E::BaseField>(InsnRecord::imm_internal(&step.insn()))
+            InsnRecord::<E::BaseField>::imm_internal(&step.insn()).1
         );
 
         // Fetch the instruction.
