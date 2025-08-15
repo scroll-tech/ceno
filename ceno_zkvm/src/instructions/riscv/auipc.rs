@@ -18,8 +18,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::InsnKind;
-use gkr_iop::tables::LookupTable;
-use gkr_iop::tables::ops::XorTable;
+use gkr_iop::tables::{LookupTable, ops::XorTable};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
 use witness::set_val;
@@ -161,7 +160,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             set_val!(instance, witin, E::BaseField::from_canonical_u8(*val));
         }
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32;
-        let imm = split_to_u8(imm << 4);
+        let imm = split_to_u8(imm);
         for (val, witin) in izip!(imm.iter(), config.imm_limbs) {
             lk_multiplicity.assert_ux::<8>(*val as u64);
             set_val!(instance, witin, E::BaseField::from_canonical_u8(*val));

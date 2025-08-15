@@ -284,36 +284,49 @@ impl InstructionProcessor for InstructionTranspiler {
         }
     }
 
-    /// Convert AUIPC to ADDI.
-    ///
-    /// RiscV's instructions are designed to be (mosty) position-independent.  AUIPC is used
-    /// to get access to the current program counter, even if the code has been moved around
-    /// by the linker.
-    ///
-    /// Our conversion here happens after the linker has done its job, so we can safely hardcode
-    /// the current program counter into the immediate value of our internal ADDI.
-    ///
-    /// Note that our internal ADDI can have arbitrary intermediate values, not just 12 bits.
-    ///
-    /// ADDI is slightly more general than LUI or AUIPC, because you can also specify an
-    /// input register rs1.  That generality might cost us sligthtly in the non-recursive proof,
-    /// but we suspect decreasing the total number of different instruction kinds will speed up
-    /// the recursive proof.
-    ///
-    /// In any case, AUIPC and LUI together make up ~0.1% of instructions executed in typical
-    /// real world scenarios like a `reth` run.
-    ///
     fn process_auipc(&mut self, dec_insn: UType) -> Self::InstructionResult {
         let pc = self.pc;
         // Verify our assumption that the immediate is already shifted left by 12 bits.
         assert_eq!(dec_insn.imm & 0xfff, 0);
-        Instruction {
-            kind: InsnKind::ADDI,
-            rd: dec_insn.rd,
-            rs1: 0,
-            rs2: 0,
-            imm: dec_insn.imm.wrapping_add(pc as i32),
-            raw: self.word,
+        #[cfg(not(feature = "u16limb_circuit"))]
+        {
+            // Convert AUIPC to ADDI.
+            //
+            // RiscV's instructions are designed to be (mosty) position-independent.  AUIPC is used
+            // to get access to the current program counter, even if the code has been moved around
+            // by the linker.
+            //
+            // Our conversion here happens after the linker has done its job, so we can safely hardcode
+            // the current program counter into the immediate value of our internal ADDI.
+            //
+            // Note that our internal ADDI can have arbitrary intermediate values, not just 12 bits.
+            //
+            // ADDI is slightly more general than LUI or AUIPC, because you can also specify an
+            // input register rs1.  That generality might cost us sligthtly in the non-recursive proof,
+            // but we suspect decreasing the total number of different instruction kinds will speed up
+            // the recursive proof.
+            //
+            // In any case, AUIPC and LUI together make up ~0.1% of instructions executed in typical
+            // real world scenarios like a `reth` run.
+            Instruction {
+                kind: InsnKind::ADDI,
+                rd: dec_insn.rd,
+                rs1: 0,
+                rs2: 0,
+                imm: dec_insn.imm.wrapping_add(pc as i32),
+                raw: self.word,
+            }
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        {
+            Instruction {
+                kind: InsnKind::AUIPC,
+                rd: dec_insn.rd,
+                rs1: 0,
+                rs2: 0,
+                imm: dec_insn.imm,
+                raw: self.word,
+            }
         }
     }
 
