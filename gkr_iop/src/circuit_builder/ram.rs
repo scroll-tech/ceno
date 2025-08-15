@@ -4,10 +4,14 @@ use ff_ext::ExtensionField;
 use crate::circuit_builder::DebugIndex;
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, power_sequence};
+use p3_field::Field;
 
 use crate::{circuit_builder::CircuitBuilder, gadgets::AssertLtConfig};
 
 impl<E: ExtensionField> CircuitBuilder<'_, E> {
+    // MAX_TS_BITS need to be smaller than prime field
+    pub const MAX_TS_BITS: usize = 30;
+
     pub fn ram_type_read<const LIMBS: usize, NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
@@ -17,6 +21,7 @@ impl<E: ExtensionField> CircuitBuilder<'_, E> {
         ts: Expression<E>,
         value: [Expression<E>; LIMBS],
     ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError> {
+        assert!(E::BaseField::bits() > Self::MAX_TS_BITS);
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = [
@@ -43,7 +48,7 @@ impl<E: ExtensionField> CircuitBuilder<'_, E> {
                 || "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
-                LIMBS,
+                Self::MAX_TS_BITS,
             )?;
 
             let next_ts = ts + 1;
@@ -64,6 +69,7 @@ impl<E: ExtensionField> CircuitBuilder<'_, E> {
         value: [Expression<E>; LIMBS],
     ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError> {
         assert!(identifier.expr().degree() <= 1);
+        assert!(E::BaseField::bits() > Self::MAX_TS_BITS);
         self.namespace(name_fn, |cb| {
             // READ (a, v, t)
             let read_record = [
@@ -89,7 +95,7 @@ impl<E: ExtensionField> CircuitBuilder<'_, E> {
                 || "prev_ts < ts",
                 prev_ts,
                 ts.clone(),
-                LIMBS,
+                Self::MAX_TS_BITS,
             )?;
 
             let next_ts = ts + 1;

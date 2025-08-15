@@ -146,7 +146,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     || format!("carry_{i}_in_less_than"),
                     carry.expr(),
                     (Self::MAX_DEGREE_2_MUL_CARRY_VALUE as usize).into(),
-                    Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
+                    Self::MAX_DEGREE_2_MUL_CARRY_BITS,
                 )
             })
             .collect::<Result<Vec<AssertLtConfig>, CircuitBuilderError>>()?;
@@ -730,7 +730,8 @@ mod tests {
                 .flat_map(|carry| {
                     let max_carry_value = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_VALUE;
                     let max_carry_u16_limb = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_U16_LIMB;
-                    let diff = cal_lt_diff(true, max_carry_u16_limb, carry, max_carry_value);
+                    let max_carry_bit = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_BITS;
+                    let diff = cal_lt_diff(true, max_carry_bit, carry, max_carry_value);
                     let mut diff_u16_limb = Value::new_unchecked(diff).as_u16_limbs().to_vec();
                     diff_u16_limb.resize(max_carry_u16_limb, 0);
                     diff_u16_limb.iter().map(|v| *v as u64).collect_vec()

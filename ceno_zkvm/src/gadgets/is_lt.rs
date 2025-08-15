@@ -4,17 +4,16 @@ use ceno_emul::{SWord, Word};
 use ff_ext::ExtensionField;
 use gkr_iop::error::CircuitBuilderError;
 
+use super::SignedExtendConfig;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
     gadgets::InnerLtConfig,
-    instructions::riscv::constants::{UINT_LIMBS, UInt},
+    instructions::riscv::constants::{LIMB_BITS, UINT_LIMBS, UInt},
     witness::{LkMultiplicity, set_val},
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-
-use super::SignedExtendConfig;
 
 #[derive(Debug)]
 pub struct AssertSignedLtConfig<E> {
@@ -124,7 +123,7 @@ impl<E: ExtensionField> InnerSignedLtConfig<E> {
             lhs_value,
             rhs_value,
             is_lt_expr,
-            UINT_LIMBS,
+            UINT_LIMBS * LIMB_BITS,
         )?;
 
         Ok(Self {
