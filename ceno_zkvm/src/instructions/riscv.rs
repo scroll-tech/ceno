@@ -32,6 +32,8 @@ mod r_insn;
 
 mod ecall_insn;
 
+#[cfg(feature = "u16limb_circuit")]
+mod auipc;
 mod im_insn;
 #[cfg(feature = "u16limb_circuit")]
 mod lui;
