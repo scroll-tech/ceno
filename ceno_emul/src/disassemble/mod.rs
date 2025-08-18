@@ -8,6 +8,7 @@ use rrs_lib::{
 
 /// A transpiler that converts the 32-bit encoded instructions into instructions.
 pub(crate) struct InstructionTranspiler {
+    #[allow(dead_code)]
     pc: u32,
     word: u32,
 }
@@ -285,11 +286,11 @@ impl InstructionProcessor for InstructionTranspiler {
     }
 
     fn process_auipc(&mut self, dec_insn: UType) -> Self::InstructionResult {
-        let pc = self.pc;
         // Verify our assumption that the immediate is already shifted left by 12 bits.
         assert_eq!(dec_insn.imm & 0xfff, 0);
         #[cfg(not(feature = "u16limb_circuit"))]
         {
+            let pc = self.pc;
             // Convert AUIPC to ADDI.
             //
             // RiscV's instructions are designed to be (mosty) position-independent.  AUIPC is used

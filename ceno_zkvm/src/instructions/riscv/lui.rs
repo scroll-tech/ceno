@@ -56,7 +56,6 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
             circuit_builder,
             InsnKind::LUI,
             imm.expr(),
-            #[cfg(feature = "u16limb_circuit")]
             0.into(),
             [0.into(), 0.into()],
             UInt8::from_exprs_unchecked(rd_exprs.clone()).register_expr(),
@@ -128,9 +127,9 @@ mod tests {
 
     #[test]
     fn test_lui() {
-        let cases = vec![(0, 0), (0x1000, 1), (0xfffff000, 0xfffff)];
-        for &(rd, imm) in &cases {
-            test_opcode_lui::<GoldilocksExt2>(rd, imm);
+        let cases = vec![0, 0x1, 0xfffff];
+        for imm in &cases {
+            test_opcode_lui::<GoldilocksExt2>((*imm as u32) << 12, imm << 12);
             // #[cfg(feature = "u16limb_circuit")]
             // test_opcode_lui::<BabyBearExt4>(rd, imm);
         }

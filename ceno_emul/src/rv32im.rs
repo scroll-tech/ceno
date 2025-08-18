@@ -321,7 +321,7 @@ fn step_compute<M: EmuContext>(ctx: &mut M, kind: InsnKind, insn: &Instruction) 
                 #[cfg(feature = "u16limb_circuit")]
                 LUI => imm_i,
                 #[cfg(feature = "u16limb_circuit")]
-                AUIPC => pc.wrapping_add(insn.imm as u32).0,
+                AUIPC => pc.wrapping_add(imm_i).0,
                 XORI => rs1 ^ imm_i,
                 ORI => rs1 | imm_i,
                 ANDI => rs1 & imm_i,

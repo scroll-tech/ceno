@@ -1,5 +1,5 @@
 use ff_ext::{ExtensionField, FieldInto};
-use itertools::{Itertools, izip};
+use itertools::izip;
 use std::marker::PhantomData;
 
 use crate::{
@@ -69,7 +69,6 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             circuit_builder,
             InsnKind::AUIPC,
             imm.expr(),
-            #[cfg(feature = "u16limb_circuit")]
             0.into(),
             [0.into(), 0.into()],
             UInt8::from_exprs_unchecked(rd_exprs.clone()).register_expr(),
@@ -88,10 +87,10 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
 
         // Compute the most significant limb of PC
         let pc_msl = (i_insn.vm_state.pc.expr() - intermed_val.expr())
-            * E::BaseField::from_canonical_usize(
+            * (E::BaseField::from_canonical_usize(
                 1 << (UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1)),
             )
-            .inverse()
+            .inverse())
             .expr();
 
         // The vector pc_limbs contains the actual limbs of PC in little endian order
@@ -104,7 +103,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         assert_eq!(pc_limbs_expr.len(), UINT_BYTE_LIMBS);
 
         // Range check the most significant limb of pc to be in [0, 2^{PC_BITS-(RV32_REGISTER_NUM_LIMBS-1)*RV32_CELL_BITS})
-        let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UInt8::<E>::NUM_LIMBS - 1);
+        let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1);
         let additional_bits =
             (last_limb_bits..UInt8::<E>::LIMB_BITS).fold(0, |acc, x| acc + (1 << x));
         let additional_bits = E::BaseField::from_canonical_u32(additional_bits);
@@ -128,6 +127,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             carry[i] = carry_divide.expr()
                 * (pc_limbs_expr[i].expr() + imm_limbs[i - 1].expr() - rd_exprs[i].expr()
                     + carry[i - 1].expr());
+            // carry[i] * 2^(UInt8::LIMB_BITS) + rd_exprs[i].expr() = pc_limbs_expr[i] + imm_limbs[i].expr() + carry[i - 1].expr()
             circuit_builder.assert_bit(|| format!("carry_bit_{i}"), carry[i].expr())?;
         }
 
@@ -166,7 +166,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             set_val!(instance, witin, E::BaseField::from_canonical_u8(*val));
         }
         // constrain pc msb limb range via xor
-        let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UInt8::<E>::NUM_LIMBS - 1);
+        let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1);
         let additional_bits =
             (last_limb_bits..UInt8::<E>::LIMB_BITS).fold(0, |acc, x| acc + (1 << x));
         lk_multiplicity.logic_u8::<XorTable>(pc[3] as u64, additional_bits as u64);
@@ -194,15 +194,27 @@ mod tests {
 
     #[test]
     fn test_auipc() {
-        let cases = vec![(MOCK_PC_START.0 + 0, 0), (MOCK_PC_START.0 + 0x1000, 1)];
-        for &(rd, imm) in &cases {
-            test_opcode_auipc::<GoldilocksExt2>(rd, imm);
+        let cases = vec![
+            // imm without lower 12 bits zero
+            0, 0x1,
+            // imm = -1 → all 1’s in 20-bit imm
+            // rd = PC - 0x1000
+            -1i32, 0x12345, // imm = 0x12345
+            // max positive imm
+            0xfffff,
+        ];
+        for imm in &cases {
+            test_opcode_auipc::<GoldilocksExt2>(
+                MOCK_PC_START.0.wrapping_add((*imm as u32) << 12),
+                imm << 12,
+            );
             // #[cfg(feature = "u16limb_circuit")]
-            // test_opcode_Auipc::<BabyBearExt4>(rd, imm);
+            // test_opcode_auipc::<BabyBearExt4>(rd, imm);
         }
     }
 
     fn test_opcode_auipc<E: ExtensionField>(rd: u32, imm: i32) {
+        use ceno_emul::ByteAddr;
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb

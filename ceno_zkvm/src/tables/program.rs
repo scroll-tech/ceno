@@ -123,13 +123,15 @@ impl<F: SmallField> InsnRecord<F> {
             (_, B | J) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
             // AUIPC
             (AUIPC, U) => (
-                ((insn.imm as u32 & 0xfffff) << 4) as i64,
-                F::from_wrapped_u32((insn.imm as u32 & 0xfffff) << 4),
+                // riv32 u type lower 12 bits are 0
+                // take all except for least significant limb (8 bit)
+                (insn.imm as u32 >> 8) as i64,
+                F::from_wrapped_u32(insn.imm as u32 >> 8),
             ),
             // U type
             (_, U) => (
-                (insn.imm as u32 & 0xfffff) as i64,
-                F::from_wrapped_u32(insn.imm as u32 & 0xfffff),
+                (insn.imm as u32 >> 12) as i64,
+                F::from_wrapped_u32(insn.imm as u32 >> 12),
             ),
             // TODO JALR need to connecting register (2 limb) with pc (1 limb)
             (JALR, _) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
