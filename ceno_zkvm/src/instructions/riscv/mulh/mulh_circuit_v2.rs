@@ -80,11 +80,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         let carry: [_; UINT_LIMBS * 2] =
             array::from_fn(|i| circuit_builder.create_witin(|| format!("carry_{i}")));
 
-        let mut carry_low: [Expression<E>; UINT_LIMBS] = array::from_fn(|i| {
-            circuit_builder
-                .create_witin(|| format!("carry_low_{i}"))
-                .expr()
-        });
+        let mut carry_low: [Expression<E>; UINT_LIMBS] =
+            array::from_fn(|_| E::BaseField::ZERO.expr());
 
         for i in 0..UINT_LIMBS {
             let expected_limb = if i == 0 {
@@ -116,11 +113,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             )?;
         }
 
-        let mut carry_high: [Expression<E>; UINT_LIMBS] = array::from_fn(|i| {
-            circuit_builder
-                .create_witin(|| format!("carry_high_{i}"))
-                .expr()
-        });
+        let mut carry_high: [Expression<E>; UINT_LIMBS] =
+            array::from_fn(|_| E::BaseField::ZERO.expr());
 
         let rs1_ext = circuit_builder.create_witin(|| "rs1_ext".to_string());
         let rs2_ext = circuit_builder.create_witin(|| "rs2_ext".to_string());
