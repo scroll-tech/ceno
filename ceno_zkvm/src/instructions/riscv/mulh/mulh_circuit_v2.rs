@@ -122,8 +122,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 .expr()
         });
 
-        let rs1_ext = circuit_builder.create_witin(|| format!("rs1_ext"));
-        let rs2_ext = circuit_builder.create_witin(|| format!("rs2_ext"));
+        let rs1_ext = circuit_builder.create_witin(|| "rs1_ext".to_string());
+        let rs2_ext = circuit_builder.create_witin(|| "rs2_ext".to_string());
 
         for j in 0..UINT_LIMBS {
             let expected_limb =
