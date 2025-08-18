@@ -166,7 +166,7 @@ mod test {
 
     #[test]
     fn test_opcode_mulh() {
-        let test_cases = vec![
+        let test_cases = [
             (2, 11),
             (7, 0),
             (0, 5),
@@ -244,7 +244,7 @@ mod test {
 
     #[test]
     fn test_opcode_mulhsu() {
-        let test_cases = vec![
+        let test_cases = [
             (0, 0),
             (0, 5),
             (0, u32::MAX),
