@@ -199,6 +199,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             carry_ext[j] = carry_divide.expr() * (expected_limb - dividend_ext.clone());
         }
 
+        for (i, (remainder, carry_ext)) in quotient_expr.iter().zip(carry_ext.iter()).enumerate() {
+            cb.assert_ux::<_, _, 16>(|| format!("range_check_remainder_{i}"), remainder.clone())?;
+            cb.assert_ux::<_, _, 16>(|| format!("range_check_carry_ext_{i}"), carry_ext.clone())?;
+        }
+
         Ok(DivRemConfig {
             dividend,
             divisor,
