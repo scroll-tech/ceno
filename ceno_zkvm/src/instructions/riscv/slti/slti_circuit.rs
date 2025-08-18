@@ -7,7 +7,7 @@ use crate::{
         Instruction,
         riscv::{
             RIVInstruction,
-            constants::{UINT_LIMBS, UInt},
+            constants::{LIMB_BITS, UINT_LIMBS, UInt},
             i_insn::IInstructionConfig,
         },
     },
@@ -62,8 +62,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
 
-        let lt =
-            IsLtConfig::construct_circuit(cb, || "rs1 < imm", value_expr, imm.expr(), UINT_LIMBS)?;
+        let lt = IsLtConfig::construct_circuit(
+            cb,
+            || "rs1 < imm",
+            value_expr,
+            imm.expr(),
+            UINT_LIMBS * LIMB_BITS,
+        )?;
         let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(

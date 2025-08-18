@@ -1,5 +1,7 @@
 use ceno_emul::{ByteAddr, Change, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
-use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
+#[cfg(feature = "u16limb_circuit")]
+use ff_ext::BabyBearExt4;
+use ff_ext::{ExtensionField, GoldilocksExt2};
 
 use super::*;
 use crate::{

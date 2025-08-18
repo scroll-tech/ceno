@@ -124,7 +124,9 @@ impl<E: ExtensionField> LogicConfig<E> {
 #[cfg(test)]
 mod test {
     use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
-    use ff_ext::GoldilocksExt2;
+    #[cfg(feature = "u16limb_circuit")]
+    use ff_ext::BabyBearExt4;
+    use ff_ext::{ExtensionField, GoldilocksExt2};
     use gkr_iop::circuit_builder::DebugIndex;
 
     use crate::{
@@ -150,27 +152,56 @@ mod test {
 
     #[test]
     fn test_opcode_andi() {
-        verify::<AndiOp>("basic", 0x0000_0011, 3, 0x0000_0011 & 3);
-        verify::<AndiOp>("zero result", 0x0000_0100, 3, 0x0000_0100 & 3);
-        verify::<AndiOp>("negative imm", TEST, NEG, TEST & NEG);
+        let cases = vec![
+            ("basic", 0x0000_0011, 3, 0x0000_0011 & 3),
+            ("zero result", 0x0000_0100, 3, 0x0000_0100 & 3),
+            ("negative imm", TEST, NEG, TEST & NEG),
+        ];
+
+        for &(name, rs1, imm, expected) in &cases {
+            verify::<AndiOp, GoldilocksExt2>(name, rs1, imm, expected);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<AndiOp, BabyBearExt4>(name, rs1, imm, expected);
+        }
     }
 
     #[test]
     fn test_opcode_ori() {
-        verify::<OriOp>("basic", 0x0000_0011, 3, 0x0000_0011 | 3);
-        verify::<OriOp>("basic2", 0x0000_0100, 3, 0x0000_0100 | 3);
-        verify::<OriOp>("negative imm", TEST, NEG, TEST | NEG);
+        let cases = vec![
+            ("basic", 0x0000_0011, 3, 0x0000_0011 | 3),
+            ("basic2", 0x0000_0100, 3, 0x0000_0100 | 3),
+            ("negative imm", TEST, NEG, TEST | NEG),
+        ];
+
+        for &(name, rs1, imm, expected) in &cases {
+            verify::<OriOp, GoldilocksExt2>(name, rs1, imm, expected);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<OriOp, BabyBearExt4>(name, rs1, imm, expected);
+        }
     }
 
     #[test]
     fn test_opcode_xori() {
-        verify::<XoriOp>("basic", 0x0000_0011, 3, 0x0000_0011 ^ 3);
-        verify::<XoriOp>("non-overlap", 0x0000_0100, 3, 0x0000_0100 ^ 3);
-        verify::<XoriOp>("negative imm", TEST, NEG, TEST ^ NEG);
+        let cases = vec![
+            ("basic", 0x0000_0011, 3, 0x0000_0011 ^ 3),
+            ("non-overlap", 0x0000_0100, 3, 0x0000_0100 ^ 3),
+            ("negative imm", TEST, NEG, TEST ^ NEG),
+        ];
+
+        for &(name, rs1, imm, expected) in &cases {
+            verify::<XoriOp, GoldilocksExt2>(name, rs1, imm, expected);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<XoriOp, BabyBearExt4>(name, rs1, imm, expected);
+        }
     }
 
-    fn verify<I: LogicOp>(name: &'static str, rs1_read: u32, imm: u32, expected_rd_written: u32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    fn verify<I: LogicOp, E: ExtensionField>(
+        name: &'static str,
+        rs1_read: u32,
+        imm: u32,
+        expected_rd_written: u32,
+    ) {
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let (prefix, rd_written) = match I::INST_KIND {
@@ -184,10 +215,8 @@ mod test {
             .namespace(
                 || format!("{prefix}_({name})"),
                 |cb| {
-                    let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    );
+                    let config =
+                        LogicInstruction::<E, I>::construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )
@@ -195,7 +224,7 @@ mod test {
             .unwrap();
 
         let insn_code = encode_rv32u(I::INST_KIND, 2, 0, 4, imm);
-        let (raw_witin, lkm) = LogicInstruction::<GoldilocksExt2, I>::assign_instances(
+        let (raw_witin, lkm) = LogicInstruction::<E, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,

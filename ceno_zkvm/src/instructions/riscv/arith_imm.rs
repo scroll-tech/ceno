@@ -26,26 +26,34 @@ mod test {
         structs::ProgramParams,
     };
     use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
-    use ff_ext::GoldilocksExt2;
+    #[cfg(feature = "u16limb_circuit")]
+    use ff_ext::BabyBearExt4;
+    use ff_ext::{ExtensionField, GoldilocksExt2};
     use gkr_iop::circuit_builder::DebugIndex;
 
     #[test]
-    fn test_opcode_addi_v1() {
-        test_opcode_addi(1000, 1003, 3);
-        test_opcode_addi(1000, 997, -3);
+    fn test_opcode_addi() {
+        let cases = vec![
+            (1000, 1003, 3), // positive immediate
+            (1000, 997, -3), // negative immediate
+        ];
+
+        for &(rs1, expected, imm) in &cases {
+            test_opcode_addi_internal::<GoldilocksExt2>(rs1, expected, imm);
+            #[cfg(feature = "u16limb_circuit")]
+            test_opcode_addi_internal::<BabyBearExt4>(rs1, expected, imm);
+        }
     }
 
-    fn test_opcode_addi(rs1: u32, rd: u32, imm: i32) {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+    fn test_opcode_addi_internal<E: ExtensionField>(rs1: u32, rd: u32, imm: i32) {
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
             .namespace(
                 || "addi",
                 |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    );
+                    let config =
+                        AddiInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )
@@ -53,7 +61,7 @@ mod test {
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm);
-        let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
+        let (raw_witin, lkm) = AddiInstruction::<E>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
