@@ -96,6 +96,7 @@ pub struct DivRemConfig<E: ExtensionField> {
     dividend_sign: WitIn,
     divisor_sign: WitIn,
     quotient_sign: WitIn,
+    remainder_zero: WitIn,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -154,7 +155,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let carry_divide = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
         let carry: [_; UINT_LIMBS] = array::from_fn(|i| cb.create_witin(|| format!("carry_{i}")));
         let mut carry_expr: [Expression<E>; UINT_LIMBS] =
-            array::from_fn(|i| cb.create_witin(|| format!("carry_expr_{i}")).expr());
+            array::from_fn(|_| E::BaseField::ZERO.expr());
 
         for i in 0..UINT_LIMBS {
             let expected_limb = if i == 0 {
@@ -183,7 +184,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let quotient_ext: Expression<E> =
             quotient_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
         let mut carry_ext: [Expression<E>; UINT_LIMBS] =
-            array::from_fn(|i| cb.create_witin(|| format!("carry_ext_{i}")).expr());
+            array::from_fn(|_| E::BaseField::ZERO.expr());
+
+        let remainder_zero = cb.create_witin(|| "remainder_zero".to_string());
+        for j in 0..UINT_LIMBS {
+            let expected_limb =
+                if j == 0 {
+                    carry_expr[UINT_LIMBS - 1].clone()
+                } else {
+                    carry_ext[j - 1].clone()
+                } + ((j + 1)..UINT_LIMBS).fold(E::BaseField::ZERO.expr(), |acc, k| {
+                    acc + (divisor_expr[k].clone() * quotient_expr[UINT_LIMBS + j - k].clone())
+                }) + (E::BaseField::ONE.expr() - remainder_zero.expr()) * dividend_ext.clone();
+            carry_ext[j] = carry_divide.expr() * (expected_limb - dividend_ext.clone());
+        }
 
         Ok(DivRemConfig {
             dividend,
@@ -193,6 +207,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             r_insn,
             dividend_sign,
             divisor_sign,
+            quotient_sign,
+            remainder_zero,
         })
     }
 
