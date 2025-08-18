@@ -383,7 +383,7 @@ where
 
             let ood_points = &round_proof.ood_points;
             let stir_challenges_points = &round_proof.stir_challenges_points;
-            let stir_challenges: Vec<_> = ood_points
+            let sum_of_claims: E = ood_points
                 .iter()
                 .chain(stir_challenges_points)
                 .cloned()
@@ -392,10 +392,6 @@ where
                     // TODO:
                     // Maybe refactor outside
                 })
-                .collect();
-
-            let sum_of_claims: E = stir_challenges
-                .into_iter()
                 .map(|point| eq_eval(&point, &folding_randomness))
                 .zip(&round_proof.combination_randomness)
                 .map(|(point, rand)| point * *rand)
