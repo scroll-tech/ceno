@@ -221,9 +221,7 @@ impl From<InsnKind> for InsnCategory {
             SB | SH | SW => Store,
             ECALL => System,
             #[cfg(feature = "u16limb_circuit")]
-            LUI => Compute,
-            #[cfg(feature = "u16limb_circuit")]
-            AUIPC => Compute,
+            LUI | AUIPC => Compute,
         }
     }
 }
@@ -243,9 +241,7 @@ impl From<InsnKind> for InsnFormat {
             ECALL => I,
             INVALID => I,
             #[cfg(feature = "u16limb_circuit")]
-            LUI => U,
-            #[cfg(feature = "u16limb_circuit")]
-            AUIPC => U,
+            LUI | AUIPC => U,
         }
     }
 }
