@@ -6,7 +6,7 @@ use crate::{
         Instruction,
         riscv::{
             RIVInstruction,
-            constants::{UINT_LIMBS, UInt},
+            constants::{LIMB_BITS, UINT_LIMBS, UInt},
             r_insn::RInstructionConfig,
         },
     },
@@ -65,7 +65,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
                     || "rs1 < rs2",
                     rs1_read.value(),
                     rs2_read.value(),
-                    UINT_LIMBS,
+                    UINT_LIMBS * LIMB_BITS,
                 )?;
                 let rd_written = UInt::from_exprs_unchecked(vec![is_lt.expr()]);
                 (SetLessThanDependencies::Sltu { is_lt }, rd_written)
