@@ -64,7 +64,7 @@
 
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto, SmallField};
-use p3::goldilocks::Goldilocks;
+use p3::{field::Field, goldilocks::Goldilocks};
 
 use super::{
     super::{
@@ -83,7 +83,8 @@ use crate::{
     witness::{LkMultiplicity, set_val},
 };
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use std::marker::PhantomData;
+use p3::field::FieldAlgebra;
+use std::{array, marker::PhantomData};
 
 pub struct DivRemConfig<E: ExtensionField> {
     pub(crate) dividend: UInt<E>, // rs1_read
@@ -91,6 +92,9 @@ pub struct DivRemConfig<E: ExtensionField> {
     pub(crate) quotient: UInt<E>,
     pub(crate) remainder: UInt<E>,
     pub(crate) r_insn: RInstructionConfig<E>,
+
+    dividend_sign: WitIn,
+    divisor_sign: WitIn,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -119,6 +123,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let quotient = UInt::new(|| "quotient", cb)?;
         let remainder = UInt::new(|| "remainder", cb)?;
 
+        let dividend_expr = dividend.expr();
+        let divisor_expr = divisor.expr();
+        let quotient_expr = quotient.expr();
+        let remainder_expr = remainder.expr();
+
         // TODO determine whether any optimizations are possible for getting
         // just one of quotient or remainder
         let rd_written_e = match I::INST_KIND {
@@ -135,12 +144,36 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rd_written_e,
         )?;
 
+        let dividend_sign = cb.create_witin(|| "dividend_sign".to_string());
+        let divisor_sign = cb.create_witin(|| "divisor_sign".to_string());
+        let dividend_ext: Expression<E> =
+            dividend_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
+        let divisor_ext: Expression<E> =
+            divisor_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
+        let carry_divide = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
+        let carry: [_; UINT_LIMBS] = array::from_fn(|i| cb.create_witin(|| format!("carry_{i}")));
+        let mut carry_expr: [Expression<E>; UINT_LIMBS] =
+            array::from_fn(|i| cb.create_witin(|| format!("carry_expr_{i}")).expr());
+
+        for i in 0..UINT_LIMBS {
+            let expected_limb = if i == 0 {
+                E::BaseField::ZERO.expr()
+            } else {
+                carry_expr[i - 1].clone()
+            } + (0..=i).fold(remainder_expr[i].expr(), |ac, k| {
+                ac + (divisor_expr[k].clone() * quotient_expr[i - k].clone())
+            });
+            carry_expr[i] = carry_divide.expr() * (expected_limb - dividend_expr[i].clone());
+        }
+
         Ok(DivRemConfig {
             dividend,
             divisor,
             quotient,
             remainder,
             r_insn,
+            dividend_sign,
+            divisor_sign,
         })
     }
 
