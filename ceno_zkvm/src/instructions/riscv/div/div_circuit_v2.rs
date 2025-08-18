@@ -97,6 +97,7 @@ pub struct DivRemConfig<E: ExtensionField> {
     divisor_sign: WitIn,
     quotient_sign: WitIn,
     remainder_zero: WitIn,
+    divisor_zero: WitIn,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -204,6 +205,30 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             cb.assert_ux::<_, _, 16>(|| format!("range_check_carry_ext_{i}"), carry_ext.clone())?;
         }
 
+        let divisor_zero = cb.create_witin(|| "divisor_zero".to_string());
+        cb.assert_bit(
+            || "divisor_remainder_not_both_zero",
+            divisor_zero.expr() + remainder_zero.expr(),
+        )?;
+        cb.assert_bit(|| "divisor_zero_bool", divisor_zero.expr())?;
+
+        for (i, (divisor_expr, quotient_expr)) in
+            divisor_expr.iter().zip(quotient_expr.iter()).enumerate()
+        {
+            cb.condition_require_zero(
+                || format!("check_divisor_zero_{}", i),
+                divisor_zero.expr(),
+                divisor_expr.clone(),
+            )?;
+            cb.condition_require_equal(
+                || format!("check_quotient_on_divisor_zero"),
+                divisor_zero.expr(),
+                quotient_expr.clone(),
+                E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr(),
+                quotient_expr.clone(),
+            )?;
+        }
+
         Ok(DivRemConfig {
             dividend,
             divisor,
@@ -214,6 +239,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             divisor_sign,
             quotient_sign,
             remainder_zero,
+            divisor_zero,
         })
     }
 
