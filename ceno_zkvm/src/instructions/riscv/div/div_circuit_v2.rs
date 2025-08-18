@@ -95,6 +95,7 @@ pub struct DivRemConfig<E: ExtensionField> {
 
     dividend_sign: WitIn,
     divisor_sign: WitIn,
+    quotient_sign: WitIn,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -177,6 +178,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             cb.assert_ux::<_, _, 16>(|| format!("range_check_quotient_{i}"), quotient.clone())?;
             cb.assert_ux::<_, _, 16>(|| format!("range_check_carry_{i}"), carry.expr())?;
         }
+
+        let quotient_sign = cb.create_witin(|| "quotient_sign".to_string());
+        let quotient_ext: Expression<E> =
+            quotient_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
+        let mut carry_ext: [Expression<E>; UINT_LIMBS] =
+            array::from_fn(|i| cb.create_witin(|| format!("carry_ext_{i}")).expr());
 
         Ok(DivRemConfig {
             dividend,
