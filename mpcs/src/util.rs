@@ -103,19 +103,22 @@ pub(crate) fn codeword_fold_with_challenge<E: ExtensionField>(
 
 #[cfg(any(test, feature = "benchmark"))]
 pub mod test {
-    #[cfg(test)]
-    use crate::util::{base_to_usize, u32_to_field};
     use ff_ext::FromUniformBytes;
-    use p3::field::FieldAlgebra;
-    #[cfg(test)]
-    type E = ff_ext::GoldilocksExt2;
-    #[cfg(test)]
-    type F = p3::goldilocks::Goldilocks;
     use rand::{
         CryptoRng, RngCore, SeedableRng,
         rngs::{OsRng, StdRng},
     };
     use std::{array, iter, ops::Range};
+    #[cfg(test)]
+    use {
+        crate::util::{base_to_usize, u32_to_field},
+        p3::field::FieldAlgebra,
+    };
+
+    #[cfg(test)]
+    type E = ff_ext::GoldilocksExt2;
+    #[cfg(test)]
+    type F = p3::goldilocks::Goldilocks;
 
     pub fn std_rng() -> impl RngCore + CryptoRng {
         StdRng::from_seed(Default::default())
