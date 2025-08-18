@@ -173,6 +173,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             )?;
         }
 
+        for (i, (quotient, carry)) in quotient_expr.iter().zip(carry.iter()).enumerate() {
+            cb.assert_ux::<_, _, 16>(|| format!("range_check_quotient_{i}"), quotient.clone())?;
+            cb.assert_ux::<_, _, 16>(|| format!("range_check_carry_{i}"), carry.expr())?;
+        }
+
         Ok(DivRemConfig {
             dividend,
             divisor,
