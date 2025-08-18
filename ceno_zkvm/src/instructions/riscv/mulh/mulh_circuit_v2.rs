@@ -175,13 +175,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 // Implement MULH circuit here
                 circuit_builder.assert_ux::<_, _, 16>(
                     || "mulh_range_check_rs1_last",
-                    E::BaseField::from_canonical_u32(2).expr() * rs1_expr[UINT_LIMBS - 1].clone()
-                        - rs1_sign * sign_mask.expr(),
+                    E::BaseField::from_canonical_u32(2).expr()
+                        * (rs1_expr[UINT_LIMBS - 1].clone() - rs1_sign * sign_mask.expr()),
                 )?;
                 circuit_builder.assert_ux::<_, _, 16>(
                     || "mulh_range_check_rs2_last",
-                    E::BaseField::from_canonical_u32(2).expr() * rs2_expr[UINT_LIMBS - 1].clone()
-                        - rs2_sign * sign_mask.expr(),
+                    E::BaseField::from_canonical_u32(2).expr()
+                        * (rs2_expr[UINT_LIMBS - 1].clone() - rs2_sign * sign_mask.expr()),
                 )?;
             }
             InsnKind::MULHU => {
@@ -194,8 +194,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 circuit_builder.require_zero(|| "mulhsu_rs2_sign_zero", rs2_sign.clone())?;
                 circuit_builder.assert_ux::<_, _, 16>(
                     || "mulhsu_range_check_rs1_last",
-                    E::BaseField::from_canonical_u32(2).expr() * rs1_expr[UINT_LIMBS - 1].clone()
-                        - rs1_sign * sign_mask.expr(),
+                    E::BaseField::from_canonical_u32(2).expr()
+                        * (rs1_expr[UINT_LIMBS - 1].clone() - rs1_sign * sign_mask.expr()),
                 )?;
                 circuit_builder.assert_ux::<_, _, 16>(
                     || "mulhsu_range_check_rs2_last",
@@ -313,16 +313,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         match I::INST_KIND {
             InsnKind::MULH => {
                 lk_multiplicity.assert_ux::<16>(
-                    (2 * rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask) as u64,
+                    (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
                 );
                 lk_multiplicity.assert_ux::<16>(
-                    (2 * rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
+                    (2 * (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask)) as u64,
                 );
             }
             InsnKind::MULHU => {}
             InsnKind::MULHSU => {
                 lk_multiplicity.assert_ux::<16>(
-                    (2 * rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask) as u64,
+                    (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
                 );
                 lk_multiplicity.assert_ux::<16>(
                     (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
@@ -374,7 +374,9 @@ fn run_mulh<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
     for i in 0..NUM_LIMBS {
         x_prefix += x[i];
         y_prefix += y[i];
-        mulh[i] = carry[NUM_LIMBS + i - 1] + (x_prefix * y_ext) as u64 + (y_prefix * x_ext) as u64;
+        mulh[i] = carry[NUM_LIMBS + i - 1]
+            + (x_prefix as u64 * y_ext as u64)
+            + (y_prefix as u64 * x_ext as u64);
         for j in (i + 1)..NUM_LIMBS {
             mulh[i] += (x[j] * y[NUM_LIMBS + i - j]) as u64;
         }
