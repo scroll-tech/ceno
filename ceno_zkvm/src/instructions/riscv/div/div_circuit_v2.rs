@@ -165,6 +165,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             });
             carry_expr[i] = carry_divide.expr() * (expected_limb - dividend_expr[i].clone());
         }
+        for (i, (carry_expr, carry_witin)) in carry_expr.iter().zip(carry.iter()).enumerate() {
+            cb.require_equal(
+                || format!("carry_check_witin_{i}"),
+                carry_expr.clone(),
+                carry_witin.expr(),
+            )?;
+        }
 
         Ok(DivRemConfig {
             dividend,
