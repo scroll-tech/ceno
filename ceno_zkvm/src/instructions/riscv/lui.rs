@@ -131,7 +131,7 @@ mod tests {
         for imm in &cases {
             test_opcode_lui::<GoldilocksExt2>((*imm as u32) << 12, imm << 12);
             #[cfg(feature = "u16limb_circuit")]
-            test_opcode_lui::<BabyBearExt4>(rd, imm);
+            test_opcode_lui::<BabyBearExt4>((*imm as u32) << 12, imm << 12);
         }
     }
 

@@ -208,13 +208,15 @@ mod tests {
                 MOCK_PC_START.0.wrapping_add((*imm as u32) << 12),
                 imm << 12,
             );
-            // #[cfg(feature = "u16limb_circuit")]
-            // test_opcode_auipc::<BabyBearExt4>(rd, imm);
+            #[cfg(feature = "u16limb_circuit")]
+            test_opcode_auipc::<BabyBearExt4>(
+                MOCK_PC_START.0.wrapping_add((*imm as u32) << 12),
+                imm << 12,
+            );
         }
     }
 
     fn test_opcode_auipc<E: ExtensionField>(rd: u32, imm: i32) {
-        use ceno_emul::ByteAddr;
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
