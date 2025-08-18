@@ -98,6 +98,9 @@ pub struct DivRemConfig<E: ExtensionField> {
     quotient_sign: WitIn,
     remainder_zero: WitIn,
     divisor_zero: WitIn,
+    divisor_sum_inv: WitIn,
+    remainder_sum_inv: WitIn,
+    sign_xor: WitIn,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -220,13 +223,76 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 divisor_zero.expr(),
                 divisor_expr.clone(),
             )?;
-            cb.condition_require_equal(
+            cb.condition_require_zero(
                 || format!("check_quotient_on_divisor_zero"),
                 divisor_zero.expr(),
-                quotient_expr.clone(),
-                E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr(),
-                quotient_expr.clone(),
+                quotient_expr.clone()
+                    - E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr(),
             )?;
+        }
+        // divisor_sum is guaranteed to be non-zero if divisor is non-zero since we assume
+        // each limb of divisor to be within [0, 2^LIMB_BITS) already.
+        // To constrain that if divisor = 0 then divisor_zero = 1, we check that if divisor_zero = 0 then divisor_sum is non-zero using divisor_sum_inv.
+        let divisor_sum_inv = cb.create_witin(|| "divisor_sum_inv".to_string());
+        let divisor_sum: Expression<E> = divisor_expr
+            .iter()
+            .fold(E::BaseField::ZERO.expr(), |acc, d| acc + d.clone());
+        let divisor_not_zero: Expression<E> = E::BaseField::ONE.expr() - divisor_zero.expr();
+        cb.condition_require_zero(
+            || "check_divisor_sum_inv",
+            divisor_not_zero,
+            divisor_sum.clone() * divisor_sum_inv.expr() - E::BaseField::ONE.expr(),
+        )?;
+
+        cb.assert_bit(|| "remainder_zero_bool", remainder_zero.expr())?;
+        for (i, remainder_expr) in remainder_expr.iter().enumerate() {
+            cb.condition_require_zero(
+                || format!("check_divisor_zero_{}", i),
+                remainder_zero.expr(),
+                remainder_expr.clone(),
+            )?;
+        }
+        let remainder_sum_inv = cb.create_witin(|| "remainder_sum_inv".to_string());
+        let remainder_sum: Expression<E> = remainder_expr
+            .iter()
+            .fold(E::BaseField::ZERO.expr(), |acc, r| acc + r.clone());
+        let divisor_remainder_not_zero: Expression<E> =
+            E::BaseField::ONE.expr() - divisor_zero.expr() - remainder_zero.expr();
+        cb.condition_require_zero(
+            || "check_remainder_sum_inv",
+            divisor_remainder_not_zero,
+            remainder_sum.clone() * remainder_sum_inv.expr() - E::BaseField::ONE.expr(),
+        )?;
+
+        cb.assert_bit(|| "check_dividend_sign_bool", dividend_sign.expr())?;
+        cb.assert_bit(|| "check_divisor_sign_bool", divisor_sign.expr())?;
+
+        match I::INST_KIND {
+            InsnKind::DIVU | InsnKind::REMU => {
+                cb.require_zero(
+                    || "divu_remu_sign_equal_zero",
+                    dividend_sign.expr() + divisor_sign.expr(),
+                )?;
+            }
+            _ => {}
+        }
+
+        let sign_xor = cb.create_witin(|| "sign_xor".to_string());
+        cb.require_equal(
+            || "sign_xor_zero",
+            dividend_sign.expr() + divisor_sign.expr()
+                - E::BaseField::from_canonical_u32(2).expr()
+                    * dividend_sign.expr()
+                    * divisor_sign.expr(),
+            sign_xor.expr(),
+        )?;
+
+        match I::INST_KIND {
+            InsnKind::DIV => {}
+            InsnKind::DIVU => {}
+            InsnKind::REM => {}
+            InsnKind::REMU => {}
+            _ => unreachable!("Unsupported instruction kind"),
         }
 
         Ok(DivRemConfig {
@@ -240,6 +306,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             quotient_sign,
             remainder_zero,
             divisor_zero,
+            divisor_sum_inv,
+            remainder_sum_inv,
+            sign_xor,
         })
     }
 
