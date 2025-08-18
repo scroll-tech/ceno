@@ -75,7 +75,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
-    instructions::Instruction,
+    instructions::{Instruction, riscv::constants::LIMB_BITS},
     structs::ProgramParams,
     uint::Value,
     witness::{LkMultiplicity, set_val},
@@ -247,7 +247,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     || "oriented_remainder_nonnegative",
                     (-1i32).into(),
                     remainder_pos_orientation.clone(),
-                    UINT_LIMBS,
+                    UINT_LIMBS * LIMB_BITS,
                 )?;
 
                 (
@@ -290,7 +290,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "is_remainder_lt_divisor",
             rem_e,
             div_e,
-            UINT_LIMBS,
+            UINT_LIMBS * LIMB_BITS,
         )?;
 
         // When divisor is nonzero, (nonnegative) remainder must be less than

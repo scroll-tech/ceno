@@ -130,8 +130,8 @@ mod tests {
         let cases = vec![0, 0x1, 0xfffff];
         for imm in &cases {
             test_opcode_lui::<GoldilocksExt2>((*imm as u32) << 12, imm << 12);
-            // #[cfg(feature = "u16limb_circuit")]
-            // test_opcode_lui::<BabyBearExt4>(rd, imm);
+            #[cfg(feature = "u16limb_circuit")]
+            test_opcode_lui::<BabyBearExt4>(rd, imm);
         }
     }
 

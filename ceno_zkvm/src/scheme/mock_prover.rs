@@ -16,7 +16,7 @@ use crate::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use either::Either;
-use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
+use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use gkr_iop::{
     tables::{
@@ -31,6 +31,7 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, IntoMLEs},
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
+use p3::field::{Field, FieldAlgebra};
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -403,7 +404,10 @@ fn load_tables<E: ExtensionField>(
     load_op_table::<OrTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<XorTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<LtuTable, _>(&mut table_vec, cs, challenge);
-    load_op_table::<PowTable, _>(&mut table_vec, cs, challenge);
+    if E::BaseField::bits() > 32 {
+        // this pow table only work on large prime field
+        load_op_table::<PowTable, _>(&mut table_vec, cs, challenge);
+    }
 
     HashSet::from_iter(table_vec)
 }
@@ -454,13 +458,20 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
             Err(e) => panic!("{:?}", e),
         };
 
-        (challenge.map(|c| c.to_canonical_u64_vec()), table)
+        (
+            challenge.map(|c| {
+                c.as_base_slice()
+                    .iter()
+                    .map(|b| b.to_canonical_u64())
+                    .collect_vec()
+            }),
+            table,
+        )
     });
     // reinitialize per generic type E
     (
-        challenges_repr.clone().map(|repr| unsafe {
-            let ptr = repr.as_slice().as_ptr() as *const E;
-            *ptr
+        challenges_repr.clone().map(|repr| {
+            E::from_base_iter(repr.iter().copied().map(E::BaseField::from_canonical_u64))
         }),
         table.clone(),
     )
