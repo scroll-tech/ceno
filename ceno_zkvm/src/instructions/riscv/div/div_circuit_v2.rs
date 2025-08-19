@@ -76,7 +76,6 @@ use super::{
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::{Instruction, riscv::constants::LIMB_BITS},
     structs::ProgramParams,
     uint::Value,
@@ -84,7 +83,7 @@ use crate::{
 };
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
-use std::{array, marker::PhantomData, ops::Div};
+use std::{array, marker::PhantomData};
 
 pub struct DivRemConfig<E: ExtensionField> {
     pub(crate) dividend: UInt<E>, // rs1_read
@@ -461,7 +460,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             _ => unreachable!("Unsupported instruction kind"),
         };
 
-        let (quotient, remainder, x_sign, y_sign, q_sign, case) =
+        let (quotient, remainder, dividend_sign, divisor_sign, quotient_sign, case) =
             run_divrem(signed, &u32_to_limbs(&dividend), &u32_to_limbs(&divisor));
 
         config.quotient.assign_limbs(
@@ -481,8 +480,100 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 .as_slice(),
         );
 
-        set_val!(instance, config.dividend_sign, x_sign as u64);
-        set_val!(instance, config.divisor_sign, y_sign as u64);
+        set_val!(instance, config.dividend_sign, dividend_sign as u64);
+        set_val!(instance, config.divisor_sign, divisor_sign as u64);
+        set_val!(instance, config.quotient_sign, quotient_sign as u64);
+        set_val!(
+            instance,
+            config.remainder_zero,
+            (limbs_to_u32(&remainder) == 0) as u64
+        );
+        set_val!(instance, config.divisor_zero, (divisor == 0) as u64);
+
+        let carries = run_mul_carries(
+            signed,
+            &u32_to_limbs(&divisor),
+            &quotient,
+            &remainder,
+            quotient_sign,
+        );
+
+        for i in 0..UINT_LIMBS {
+            lkm.assert_ux::<16>(quotient[i] as u64);
+            lkm.assert_ux::<16>(remainder[i] as u64);
+            lkm.assert_ux::<16>(carries[i] as u64);
+            lkm.assert_ux::<16>(carries[i + UINT_LIMBS] as u64);
+        }
+
+        let sign_xor = dividend_sign ^ divisor_sign;
+        let remainder_prime = if sign_xor {
+            negate(&remainder)
+        } else {
+            remainder
+        };
+        let remainder_zero =
+            remainder.iter().all(|&v| v == 0) && case != DivRemCoreSpecialCase::ZeroDivisor;
+
+        if signed {
+            let dividend_sign_mask = if dividend_sign {
+                1 << (LIMB_BITS - 1)
+            } else {
+                0
+            };
+            let divisor_sign_mask = if divisor_sign {
+                1 << (LIMB_BITS - 1)
+            } else {
+                0
+            };
+            lkm.assert_ux::<16>((dividend_limbs[UINT_LIMBS - 1] as u64 - dividend_sign_mask) << 1);
+            lkm.assert_ux::<16>((divisor_limbs[UINT_LIMBS - 1] as u64 - divisor_sign_mask) << 1);
+        }
+
+        let divisor_sum_f = divisor_limbs.iter().fold(E::BaseField::ZERO, |acc, c| {
+            acc + E::BaseField::from_canonical_u16(*c)
+        });
+        let divisor_sum_inv_f = divisor_sum_f.try_inverse().unwrap_or(E::BaseField::ZERO);
+
+        let remainder_sum_f = remainder.iter().fold(E::BaseField::ZERO, |acc, r| {
+            acc + E::BaseField::from_canonical_u32(*r)
+        });
+        let remainder_sum_inv_f = remainder_sum_f.try_inverse().unwrap_or(E::BaseField::ZERO);
+
+        let (lt_diff_idx, lt_diff_val) = if case == DivRemCoreSpecialCase::None && !remainder_zero {
+            let idx = run_sltu_diff_idx(&u32_to_limbs(&divisor), &remainder_prime, divisor_sign);
+            let val = if divisor_sign {
+                remainder_prime[idx] - divisor_limbs[idx] as u32
+            } else {
+                divisor_limbs[idx] as u32 - remainder_prime[idx]
+            };
+            lkm.assert_ux::<16>(val as u64 - 1);
+            (idx, val)
+        } else {
+            (UINT_LIMBS, 0)
+        };
+
+        let remainder_prime_f = remainder_prime.map(E::BaseField::from_canonical_u32);
+
+        set_val!(instance, config.divisor_sum_inv, divisor_sum_inv_f);
+        set_val!(instance, config.remainder_sum_inv, remainder_sum_inv_f);
+        for i in 0..UINT_LIMBS {
+            set_val!(
+                instance,
+                config.remainder_inv[i],
+                (remainder_prime_f[i] - E::BaseField::from_canonical_u32(1 << LIMB_BITS)).inverse()
+            );
+            set_val!(instance, config.lt_marker[i], (i == lt_diff_idx) as u64);
+        }
+        set_val!(instance, config.sign_xor, sign_xor as u64);
+        config.remainder_prime.assign_limbs(
+            instance,
+            remainder_prime
+                .iter()
+                .map(|x| *x as u16)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+        set_val!(instance, config.lt_diff, lt_diff_val as u64);
 
         Ok(())
     }
