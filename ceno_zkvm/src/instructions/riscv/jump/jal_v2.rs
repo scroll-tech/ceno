@@ -3,13 +3,12 @@ use std::marker::PhantomData;
 use ff_ext::ExtensionField;
 
 use crate::{
-    Value,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
         Instruction,
         riscv::{
-            constants::{BIT_WIDTH, PC_BITS, UINT_BYTE_LIMBS, UInt8},
+            constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             j_insn::JInstructionConfig,
         },
     },
