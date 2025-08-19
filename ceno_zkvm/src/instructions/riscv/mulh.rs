@@ -1,45 +1,40 @@
 use crate::instructions::riscv::RIVInstruction;
 use ceno_emul::InsnKind;
 
+#[cfg(not(feature = "u16limb_circuit"))]
 mod mulh_circuit;
+#[cfg(feature = "u16limb_circuit")]
 mod mulh_circuit_v2;
+
+#[cfg(not(feature = "u16limb_circuit"))]
+use mulh_circuit::MulhInstructionBase;
+#[cfg(feature = "u16limb_circuit")]
+use mulh_circuit_v2::MulhInstructionBase;
 
 pub struct MulOp;
 impl RIVInstruction for MulOp {
     const INST_KIND: InsnKind = InsnKind::MUL;
 }
-#[cfg(feature = "u16limb_circuit")]
-pub type MulInstruction<E> = mulh_circuit_v2::MulhInstructionBase<E, MulOp>;
-#[cfg(not(feature = "u16limb_circuit"))]
-pub type MulInstruction<E> = mulh_circuit::MulhInstructionBase<E, MulOp>;
+pub type MulInstruction<E> = MulhInstructionBase<E, MulOp>;
 
 pub struct MulhOp;
 impl RIVInstruction for MulhOp {
     const INST_KIND: InsnKind = InsnKind::MULH;
 }
-#[cfg(feature = "u16limb_circuit")]
-pub type MulhInstruction<E> = mulh_circuit_v2::MulhInstructionBase<E, MulhOp>;
-#[cfg(not(feature = "u16limb_circuit"))]
-pub type MulhInstruction<E> = mulh_circuit::MulhInstructionBase<E, MulhOp>;
+pub type MulhInstruction<E> = MulhInstructionBase<E, MulhOp>;
 
 pub struct MulhuOp;
 impl RIVInstruction for MulhuOp {
     const INST_KIND: InsnKind = InsnKind::MULHU;
 }
 
-#[cfg(feature = "u16limb_circuit")]
-pub type MulhuInstruction<E> = mulh_circuit_v2::MulhInstructionBase<E, MulhuOp>;
-#[cfg(not(feature = "u16limb_circuit"))]
-pub type MulhuInstruction<E> = mulh_circuit::MulhInstructionBase<E, MulhuOp>;
+pub type MulhuInstruction<E> = MulhInstructionBase<E, MulhuOp>;
 
 pub struct MulhsuOp;
 impl RIVInstruction for MulhsuOp {
     const INST_KIND: InsnKind = InsnKind::MULHSU;
 }
-#[cfg(feature = "u16limb_circuit")]
-pub type MulhsuInstruction<E> = mulh_circuit_v2::MulhInstructionBase<E, MulhsuOp>;
-#[cfg(not(feature = "u16limb_circuit"))]
-pub type MulhsuInstruction<E> = mulh_circuit::MulhInstructionBase<E, MulhsuOp>;
+pub type MulhsuInstruction<E> = MulhInstructionBase<E, MulhsuOp>;
 
 #[cfg(test)]
 mod test {
