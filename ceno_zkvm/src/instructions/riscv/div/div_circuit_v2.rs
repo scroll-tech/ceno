@@ -84,7 +84,7 @@ use crate::{
 };
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
-use std::{array, marker::PhantomData};
+use std::{array, marker::PhantomData, ops::Div};
 
 pub struct DivRemConfig<E: ExtensionField> {
     pub(crate) dividend: UInt<E>, // rs1_read
@@ -436,18 +436,216 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     }
 
     fn assign_instance(
-        _config: &Self::InstructionConfig,
-        _instance: &mut [E::BaseField],
-        _lkm: &mut LkMultiplicity,
+        config: &Self::InstructionConfig,
+        instance: &mut [E::BaseField],
+        lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         // dividend = quotient * divisor + remainder
         let dividend = step.rs1().unwrap().value;
-        let divisor = step.rs2().unwrap().value;
+        let dividend_value = Value::new_unchecked(dividend);
+        let dividend_limbs = dividend_value.as_u16_limbs();
+        config.dividend.assign_limbs(instance, dividend_limbs);
 
-        let _dividend_v = Value::new_unchecked(dividend);
-        let _divisor_v = Value::new_unchecked(divisor);
+        let divisor = step.rs2().unwrap().value;
+        let divisor_value = Value::new_unchecked(divisor);
+        let divisor_limbs = divisor_value.as_u16_limbs();
+        config.divisor.assign_limbs(instance, divisor_limbs);
+
+        // R-type instruction
+        config.r_insn.assign_instance(instance, lkm, step)?;
+
+        let signed = match I::INST_KIND {
+            InsnKind::DIV | InsnKind::REM => true,
+            InsnKind::DIVU | InsnKind::REMU => false,
+            _ => unreachable!("Unsupported instruction kind"),
+        };
+
+        let (quotient, remainder, x_sign, y_sign, q_sign, case) =
+            run_divrem(signed, &u32_to_limbs(&dividend), &u32_to_limbs(&divisor));
+
+        config.quotient.assign_limbs(
+            instance,
+            quotient
+                .iter()
+                .map(|x| *x as u16)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+        config.remainder.assign_limbs(
+            instance,
+            remainder
+                .iter()
+                .map(|x| *x as u16)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+
+        set_val!(instance, config.dividend_sign, x_sign as u64);
+        set_val!(instance, config.divisor_sign, y_sign as u64);
 
         Ok(())
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub(super) enum DivRemCoreSpecialCase {
+    None,
+    ZeroDivisor,
+    SignedOverflow,
+}
+
+// Returns (quotient, remainder, x_sign, y_sign, q_sign, case) where case = 0 for normal, 1
+// for zero divisor, and 2 for signed overflow
+pub(super) fn run_divrem(
+    signed: bool,
+    x: &[u32; UINT_LIMBS],
+    y: &[u32; UINT_LIMBS],
+) -> (
+    [u32; UINT_LIMBS],
+    [u32; UINT_LIMBS],
+    bool,
+    bool,
+    bool,
+    DivRemCoreSpecialCase,
+) {
+    let x_sign = signed && (x[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1);
+    let y_sign = signed && (y[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1);
+    let max_limb = (1 << LIMB_BITS) - 1;
+
+    let zero_divisor = y.iter().all(|val| *val == 0);
+    let overflow = x[UINT_LIMBS - 1] == 1 << (LIMB_BITS - 1)
+        && x[..(UINT_LIMBS - 1)].iter().all(|val| *val == 0)
+        && y.iter().all(|val| *val == max_limb)
+        && x_sign
+        && y_sign;
+
+    if zero_divisor {
+        return (
+            [max_limb; UINT_LIMBS],
+            *x,
+            x_sign,
+            y_sign,
+            signed,
+            DivRemCoreSpecialCase::ZeroDivisor,
+        );
+    } else if overflow {
+        return (
+            *x,
+            [0; UINT_LIMBS],
+            x_sign,
+            y_sign,
+            false,
+            DivRemCoreSpecialCase::SignedOverflow,
+        );
+    }
+
+    let x_abs = if x_sign { negate(x) } else { *x };
+    let y_abs = if y_sign { negate(y) } else { *y };
+
+    let x_big = limbs_to_u32(&x_abs);
+    let y_big = limbs_to_u32(&y_abs);
+    let q_big = x_big / y_big;
+    let r_big = x_big % y_big;
+
+    let q = if x_sign ^ y_sign {
+        negate(&u32_to_limbs(&q_big))
+    } else {
+        u32_to_limbs(&q_big)
+    };
+    let q_sign = signed && (q[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1);
+
+    // In C |q * y| <= |x|, which means if x is negative then r <= 0 and vice versa.
+    let r = if x_sign {
+        negate(&u32_to_limbs(&r_big))
+    } else {
+        u32_to_limbs(&r_big)
+    };
+
+    (q, r, x_sign, y_sign, q_sign, DivRemCoreSpecialCase::None)
+}
+
+pub(super) fn run_sltu_diff_idx(x: &[u32; UINT_LIMBS], y: &[u32; UINT_LIMBS], cmp: bool) -> usize {
+    for i in (0..UINT_LIMBS).rev() {
+        if x[i] != y[i] {
+            assert!((x[i] < y[i]) == cmp);
+            return i;
+        }
+    }
+    assert!(!cmp);
+    UINT_LIMBS
+}
+
+// returns carries of d * q + r
+pub(super) fn run_mul_carries(
+    signed: bool,
+    d: &[u32; UINT_LIMBS],
+    q: &[u32; UINT_LIMBS],
+    r: &[u32; UINT_LIMBS],
+    q_sign: bool,
+) -> Vec<u32> {
+    let mut carry = vec![0u32; 2 * UINT_LIMBS];
+    for i in 0..UINT_LIMBS {
+        let mut val = r[i] + if i > 0 { carry[i - 1] } else { 0 };
+        for j in 0..=i {
+            val += d[j] * q[i - j];
+        }
+        carry[i] = val >> LIMB_BITS;
+    }
+
+    let q_ext = if q_sign && signed {
+        (1 << LIMB_BITS) - 1
+    } else {
+        0
+    };
+    let d_ext =
+        (d[UINT_LIMBS - 1] >> (LIMB_BITS - 1)) * if signed { (1 << LIMB_BITS) - 1 } else { 0 };
+    let r_ext =
+        (r[UINT_LIMBS - 1] >> (LIMB_BITS - 1)) * if signed { (1 << LIMB_BITS) - 1 } else { 0 };
+    let mut d_prefix = 0;
+    let mut q_prefix = 0;
+
+    for i in 0..UINT_LIMBS {
+        d_prefix += d[i];
+        q_prefix += q[i];
+        let mut val = carry[UINT_LIMBS + i - 1] + d_prefix * q_ext + q_prefix * d_ext + r_ext;
+        for j in (i + 1)..UINT_LIMBS {
+            val += d[j] * q[UINT_LIMBS + i - j];
+        }
+        carry[UINT_LIMBS + i] = val >> LIMB_BITS;
+    }
+    carry
+}
+
+fn limbs_to_u32(x: &[u32; UINT_LIMBS]) -> u32 {
+    let base = 1 << LIMB_BITS;
+    let mut res = 0;
+    for val in x.iter().rev() {
+        res *= base.clone();
+        res += *val;
+    }
+    res
+}
+
+fn u32_to_limbs(x: &u32) -> [u32; UINT_LIMBS] {
+    let mut res = [0; UINT_LIMBS];
+    let mut x = x.clone();
+    let base = u32::from(1u32 << LIMB_BITS);
+    for limb in res.iter_mut() {
+        let (quot, rem) = (x / base, x % base);
+        *limb = rem;
+        x = quot;
+    }
+    debug_assert_eq!(x, u32::from(0u32));
+    res
+}
+
+fn negate(x: &[u32; UINT_LIMBS]) -> [u32; UINT_LIMBS] {
+    let mut carry = 1;
+    array::from_fn(|i| {
+        let val = (1 << LIMB_BITS) + carry - 1 - x[i];
+        carry = val >> LIMB_BITS;
+        val % (1 << LIMB_BITS)
+    })
 }
