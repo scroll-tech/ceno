@@ -42,3 +42,12 @@ impl RangeTable for U16Table {
     }
 }
 pub type U16TableCircuit<E> = RangeTableCircuit<E, U16Table>;
+
+pub struct U18Table;
+impl RangeTable for U18Table {
+    const ROM_TYPE: ROMType = ROMType::U18;
+    fn len() -> usize {
+        1 << 18
+    }
+}
+pub type U18TableCircuit<E> = RangeTableCircuit<E, U18Table>;

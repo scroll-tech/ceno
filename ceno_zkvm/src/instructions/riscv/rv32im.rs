@@ -1,3 +1,7 @@
+use super::{
+    arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
+    memory::LwInstruction,
+};
 use crate::{
     error::ZKVMError,
     instructions::{
@@ -21,7 +25,8 @@ use crate::{
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, LtuTableCircuit, OrTableCircuit, PowTableCircuit, TableCircuit,
-        U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit, XorTableCircuit,
+        U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit, U18TableCircuit,
+        XorTableCircuit,
     },
 };
 use ceno_emul::{
@@ -44,11 +49,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 use strum::IntoEnumIterator;
-
-use super::{
-    arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
-    memory::LwInstruction,
-};
 
 pub mod mmu;
 
@@ -110,6 +110,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
     // Tables.
+    pub u18_range_config: <U18TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u8_range_config: <U8TableCircuit<E> as TableCircuit<E>>::TableConfig,
@@ -182,6 +183,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
 
         // tables
+        let u18_range_config = cs.register_table_circuit::<U18TableCircuit<E>>();
         let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
         let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
         let u8_range_config = cs.register_table_circuit::<U8TableCircuit<E>>();
@@ -245,6 +247,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             halt_config,
             keccak_config,
             // tables
+            u18_range_config,
             u16_range_config,
             u14_range_config,
             u8_range_config,
@@ -319,6 +322,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // table
         fixed.register_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
+        fixed.register_table_circuit::<U18TableCircuit<E>>(cs, &self.u18_range_config, &());
         fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
         fixed.register_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &());
         fixed.register_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &());
@@ -443,6 +447,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
     ) -> Result<(), ZKVMError> {
+        witness.assign_table_circuit::<U18TableCircuit<E>>(cs, &self.u18_range_config, &())?;
         witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
         witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
         witness.assign_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &())?;

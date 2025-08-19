@@ -80,7 +80,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             circuit_builder
                 .assert_ux::<_, _, 16>(|| format!("range_check_rd_low_{i}"), rd_low.expr())?;
             circuit_builder
-                .assert_ux::<_, _, 16>(|| format!("range_check_carry_low_{i}"), carry_low.expr())?;
+                .assert_ux::<_, _, 18>(|| format!("range_check_carry_low_{i}"), carry_low.expr())?;
         }
 
         let (rd_high, rs1_ext, rs2_ext) = match I::INST_KIND {
@@ -114,7 +114,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                         || format!("range_check_high_{i}"),
                         rd_high.expr(),
                     )?;
-                    circuit_builder.assert_ux::<_, _, 16>(
+                    circuit_builder.assert_ux::<_, _, 18>(
                         || format!("range_check_carry_high_{i}"),
                         carry_high.expr(),
                     )?;
@@ -249,7 +249,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         for (rd_low, carry_low) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
             lk_multiplicity.assert_ux::<16>(*rd_low as u64);
-            lk_multiplicity.assert_ux::<16>(*carry_low as u64);
+            lk_multiplicity.assert_ux::<18>(*carry_low as u64);
         }
 
         for i in 0..UINT_LIMBS {
@@ -269,7 +269,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
                 for (rd_high, carry_high) in rd_high.iter().zip(carry[UINT_LIMBS..].iter()) {
                     lk_multiplicity.assert_ux::<16>(*rd_high as u64);
-                    lk_multiplicity.assert_ux::<16>(*carry_high as u64);
+                    lk_multiplicity.assert_ux::<18>(*carry_high as u64);
                 }
             }
             _ => (),

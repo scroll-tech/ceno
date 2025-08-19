@@ -64,7 +64,7 @@ mod test {
         verify_mulu::<MulOp, GoldilocksExt2>("0 * 0", 0, 0);
         verify_mulu::<MulOp, GoldilocksExt2>("0 * 2", 0, 2);
         verify_mulu::<MulOp, GoldilocksExt2>("0 * u32::MAX", 0, u32::MAX);
-        // verify_mulu::<MulOp, GoldilocksExt2>("u32::MAX", u32::MAX, u32::MAX);
+        verify_mulu::<MulOp, GoldilocksExt2>("u32::MAX", u32::MAX, u32::MAX);
         verify_mulu::<MulOp, GoldilocksExt2>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
 
         verify_mulu::<MulOp, BabyBearExt4>("basic", 2, 11);
@@ -72,7 +72,7 @@ mod test {
         verify_mulu::<MulOp, BabyBearExt4>("0 * 0", 0, 0);
         verify_mulu::<MulOp, BabyBearExt4>("0 * 2", 0, 2);
         verify_mulu::<MulOp, BabyBearExt4>("0 * u32::MAX", 0, u32::MAX);
-        // verify_mulu::<MulOp, BabyBearExt4>("u32::MAX", u32::MAX, u32::MAX);
+        verify_mulu::<MulOp, BabyBearExt4>("u32::MAX", u32::MAX, u32::MAX);
         verify_mulu::<MulOp, BabyBearExt4>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
     }
 
@@ -83,7 +83,7 @@ mod test {
         verify_mulu::<MulhuOp, GoldilocksExt2>("0 * 0", 0, 0);
         verify_mulu::<MulhuOp, GoldilocksExt2>("0 * 2", 0, 2);
         verify_mulu::<MulhuOp, GoldilocksExt2>("0 * u32::MAX", 0, u32::MAX);
-        // verify_mulu::<MulhuOp, GoldilocksExt2>("u32::MAX", u32::MAX, u32::MAX);
+        verify_mulu::<MulhuOp, GoldilocksExt2>("u32::MAX", u32::MAX, u32::MAX);
         verify_mulu::<MulhuOp, GoldilocksExt2>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
 
         verify_mulu::<MulhuOp, BabyBearExt4>("basic", 2, 11);
@@ -91,7 +91,7 @@ mod test {
         verify_mulu::<MulhuOp, BabyBearExt4>("0 * 0", 0, 0);
         verify_mulu::<MulhuOp, BabyBearExt4>("0 * 2", 0, 2);
         verify_mulu::<MulhuOp, BabyBearExt4>("0 * u32::MAX", 0, u32::MAX);
-        // verify_mulu::<MulhuOp, BabyBearExt4>("u32::MAX", u32::MAX, u32::MAX);
+        verify_mulu::<MulhuOp, BabyBearExt4>("u32::MAX", u32::MAX, u32::MAX);
         verify_mulu::<MulhuOp, BabyBearExt4>("u16::MAX", u16::MAX as u32, u16::MAX as u32);
     }
 
@@ -168,13 +168,13 @@ mod test {
             (0, -3),
             (-19, 0),
             (0, 0),
-            // (-12, -31),
+            (-12, -31),
             (2, -1),
             (1, i32::MIN),
-            // (i32::MAX, -1),
-            // (i32::MAX, i32::MIN),
-            // (i32::MAX, i32::MAX),
-            // (i32::MIN, i32::MIN),
+            (i32::MAX, -1),
+            (i32::MAX, i32::MIN),
+            (i32::MAX, i32::MAX),
+            (i32::MIN, i32::MIN),
         ];
         test_cases
             .iter()
@@ -248,13 +248,13 @@ mod test {
             (91, u32::MAX),
             (i32::MAX, 0),
             (i32::MAX, 2),
-            // (i32::MAX, u32::MAX), TODO: this causes carry exceed 16 bits, fix later
+            (i32::MAX, u32::MAX),
             (-4, 0),
             (-1, 3),
-            // (-1000, u32::MAX), TODO: this causes carry exceed 16 bits, fix later
+            (-1000, u32::MAX),
             (i32::MIN, 0),
             (i32::MIN, 21),
-            // (i32::MIN, u32::MAX),
+            (i32::MIN, u32::MAX),
         ];
         test_cases
             .iter()
