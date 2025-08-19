@@ -240,7 +240,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let divisor_not_zero: Expression<E> = E::BaseField::ONE.expr() - divisor_zero.expr();
         cb.condition_require_zero(
             || "check_divisor_sum_inv",
-            divisor_not_zero,
+            divisor_not_zero.clone(),
             divisor_sum.clone() * divisor_sum_inv.expr() - E::BaseField::ONE.expr(),
         )?;
 
@@ -286,6 +286,33 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     * divisor_sign.expr(),
             sign_xor.expr(),
         )?;
+
+        let quotient_sum: Expression<E> = quotient_expr
+            .iter()
+            .fold(E::BaseField::ZERO.expr(), |acc, q| acc + q.clone());
+        cb.assert_bit(|| "quotient_sign_bool", quotient_sign.expr())?;
+        cb.condition_require_zero(
+            || "check_quotient_sign_eq_xor",
+            quotient_sum * divisor_not_zero.clone(),
+            quotient_sign.expr() - sign_xor.expr(),
+        )?;
+        cb.condition_require_zero(
+            || "check_quotient_sign_zero_when_not_eq_xor",
+            (quotient_sign.expr() - sign_xor.expr()) * divisor_not_zero.clone(),
+            quotient_sign.expr(),
+        )?;
+
+        let sign_mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1));
+
+        match I::INST_KIND {
+            InsnKind::DIV | InsnKind::REM => {
+                cb.require_zero(
+                    || "divu_remu_sign_equal_zero",
+                    dividend_sign.expr() + divisor_sign.expr(),
+                )?;
+            }
+            _ => {}
+        }
 
         match I::INST_KIND {
             InsnKind::DIV => {}
