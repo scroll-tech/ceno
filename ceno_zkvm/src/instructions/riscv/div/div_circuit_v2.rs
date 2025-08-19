@@ -63,8 +63,8 @@
 //! booleans is equal to 1.
 
 use ceno_emul::{InsnKind, StepRecord};
-use ff_ext::{ExtensionField, FieldInto, SmallField};
-use p3::{field::Field, goldilocks::Goldilocks};
+use ff_ext::{ExtensionField, FieldInto};
+use p3::field::Field;
 
 use super::{
     super::{
@@ -123,7 +123,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // 32-bit registers represented over the Goldilocks field, so verify
         // these parameters
         assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
-        assert_eq!(E::BaseField::MODULUS_U64, Goldilocks::MODULUS_U64);
+        assert_eq!(UInt::<E>::LIMB_BITS, 16);
+        assert_eq!(UInt::<E>::NUM_LIMBS, 2);
 
         // 32-bit value from rs1
         let dividend = UInt::new_unchecked(|| "dividend", cb)?;
@@ -291,7 +292,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         let sign_mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1));
 
-        let remainder_prime = UInt::<E>::new(|| "remainder_prime", cb)?;
+        let remainder_prime = UInt::<E>::new_unchecked(|| "remainder_prime", cb)?;
         let remainder_prime_expr = remainder_prime.expr();
         let mut carry_lt: [Expression<E>; UINT_LIMBS] =
             array::from_fn(|_| E::BaseField::ZERO.expr());
@@ -448,17 +449,22 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         // R-type instruction
         config.r_insn.assign_instance(instance, lkm, step)?;
 
-        let signed = match I::INST_KIND {
-            InsnKind::DIV | InsnKind::REM => true,
-            InsnKind::DIVU | InsnKind::REMU => false,
+        let (signed, _div) = match I::INST_KIND {
+            InsnKind::DIV => (true, true),
+            InsnKind::REM => (true, false),
+            InsnKind::DIVU => (false, true),
+            InsnKind::REMU => (false, false),
             _ => unreachable!("Unsupported instruction kind"),
         };
 
         let (quotient, remainder, dividend_sign, divisor_sign, quotient_sign, case) =
             run_divrem(signed, &u32_to_limbs(&dividend), &u32_to_limbs(&divisor));
 
+        println!("Quotient: {:?}", quotient);
         let quotient_val = Value::new(limbs_to_u32(&quotient), lkm);
+        println!("Remainder: {:?}", remainder);
         let remainder_val = Value::new(limbs_to_u32(&remainder), lkm);
+
         config
             .quotient
             .assign_limbs(instance, quotient_val.as_u16_limbs());
@@ -663,11 +669,11 @@ pub(super) fn run_mul_carries(
 ) -> Vec<u32> {
     let mut carry = vec![0u32; 2 * UINT_LIMBS];
     for i in 0..UINT_LIMBS {
-        let mut val = r[i] + if i > 0 { carry[i - 1] } else { 0 };
+        let mut val: u64 = r[i] as u64 + if i > 0 { carry[i - 1] } else { 0 } as u64;
         for j in 0..=i {
-            val += d[j] * q[i - j];
+            val += d[j] as u64 * q[i - j] as u64;
         }
-        carry[i] = val >> LIMB_BITS;
+        carry[i] = (val >> LIMB_BITS) as u32;
     }
 
     let q_ext = if q_sign && signed {
@@ -685,11 +691,14 @@ pub(super) fn run_mul_carries(
     for i in 0..UINT_LIMBS {
         d_prefix += d[i];
         q_prefix += q[i];
-        let mut val = carry[UINT_LIMBS + i - 1] + d_prefix * q_ext + q_prefix * d_ext + r_ext;
+        let mut val: u64 = carry[UINT_LIMBS + i - 1] as u64
+            + (d_prefix as u64 * q_ext as u64)
+            + (q_prefix as u64 * d_ext as u64)
+            + r_ext as u64;
         for j in (i + 1)..UINT_LIMBS {
-            val += d[j] * q[UINT_LIMBS + i - j];
+            val += d[j] as u64 * q[UINT_LIMBS + i - j] as u64;
         }
-        carry[UINT_LIMBS + i] = val >> LIMB_BITS;
+        carry[UINT_LIMBS + i] = (val >> LIMB_BITS) as u32;
     }
     carry
 }
