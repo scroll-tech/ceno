@@ -100,7 +100,11 @@ pub struct DivRemConfig<E: ExtensionField> {
     divisor_zero: WitIn,
     divisor_sum_inv: WitIn,
     remainder_sum_inv: WitIn,
+    remainder_inv: [WitIn; UINT_LIMBS],
     sign_xor: WitIn,
+    remainder_prime: UInt<E>, // r'
+    lt_marker: [WitIn; UINT_LIMBS],
+    lt_diff: WitIn,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -157,7 +161,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let divisor_ext: Expression<E> =
             divisor_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
         let carry_divide = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
-        let carry: [_; UINT_LIMBS] = array::from_fn(|i| cb.create_witin(|| format!("carry_{i}")));
         let mut carry_expr: [Expression<E>; UINT_LIMBS] =
             array::from_fn(|_| E::BaseField::ZERO.expr());
 
@@ -171,15 +174,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             });
             carry_expr[i] = carry_divide.expr() * (expected_limb - dividend_expr[i].clone());
         }
-        for (i, (carry_expr, carry_witin)) in carry_expr.iter().zip(carry.iter()).enumerate() {
-            cb.require_equal(
-                || format!("carry_check_witin_{i}"),
-                carry_expr.clone(),
-                carry_witin.expr(),
-            )?;
-        }
 
-        for (i, (quotient, carry)) in quotient_expr.iter().zip(carry.iter()).enumerate() {
+        for (i, (quotient, carry)) in quotient_expr.iter().zip(carry_expr.iter()).enumerate() {
             cb.assert_ux::<_, _, 16>(|| format!("range_check_quotient_{i}"), quotient.clone())?;
             cb.assert_ux::<_, _, 16>(|| format!("range_check_carry_{i}"), carry.expr())?;
         }
@@ -199,6 +195,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     carry_ext[j - 1].clone()
                 } + ((j + 1)..UINT_LIMBS).fold(E::BaseField::ZERO.expr(), |acc, k| {
                     acc + (divisor_expr[k].clone() * quotient_expr[UINT_LIMBS + j - k].clone())
+                }) + (0..(j + 1)).fold(E::BaseField::ZERO.expr(), |acc, k| {
+                    acc + (divisor_expr[k].clone() * quotient_ext.expr())
+                        + (quotient_expr[k].clone() * divisor_ext.expr())
                 }) + (E::BaseField::ONE.expr() - remainder_zero.expr()) * dividend_ext.clone();
             carry_ext[j] = carry_divide.expr() * (expected_limb - dividend_ext.clone());
         }
@@ -267,16 +266,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         cb.assert_bit(|| "check_dividend_sign_bool", dividend_sign.expr())?;
         cb.assert_bit(|| "check_divisor_sign_bool", divisor_sign.expr())?;
 
-        match I::INST_KIND {
-            InsnKind::DIVU | InsnKind::REMU => {
-                cb.require_zero(
-                    || "divu_remu_sign_equal_zero",
-                    dividend_sign.expr() + divisor_sign.expr(),
-                )?;
-            }
-            _ => {}
-        }
-
+        // TODO: can directly define sign_xor as expr?
         let sign_xor = cb.create_witin(|| "sign_xor".to_string());
         cb.require_equal(
             || "sign_xor_zero",
@@ -304,21 +294,123 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         let sign_mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1));
 
+        let remainder_prime = UInt::<E>::new(|| "remainder_prime", cb)?;
+        let remainder_prime_expr = remainder_prime.expr();
+        let mut carry_lt: [Expression<E>; UINT_LIMBS] =
+            array::from_fn(|_| E::BaseField::ZERO.expr());
+        let remainder_inv: [_; UINT_LIMBS] =
+            array::from_fn(|i| cb.create_witin(|| format!("remainder_inv_{i}")));
+
+        for i in 0..UINT_LIMBS {
+            // When the signs of remainer (i.e., dividend) and divisor are the same, r_prime = r.
+            cb.condition_require_zero(
+                || "r_rp_equal_when_xor_zero",
+                E::BaseField::ONE.expr() - sign_xor.expr(),
+                remainder_expr[i].clone() - remainder_prime_expr[i].clone(),
+            )?;
+
+            // When the signs of remainder and divisor are different, r_prime = -r. To constrain this, we
+            // first ensure each r[i] + r_prime[i] + carry[i - 1] is in {0, 2^LIMB_BITS}, and
+            // that when the sum is 0 then r_prime[i] = 0 as well. Passing both constraints
+            // implies that 0 <= r_prime[i] <= 2^LIMB_BITS, and in order to ensure r_prime[i] !=
+            // 2^LIMB_BITS we check that r_prime[i] - 2^LIMB_BITS has an inverse in F.
+            let last_carry = if i > 0 {
+                carry_lt[i - 1].clone()
+            } else {
+                E::BaseField::ZERO.expr()
+            };
+            carry_lt[i] =
+                (last_carry.clone() + remainder_expr[i].clone() + remainder_prime_expr[i].clone())
+                    * carry_divide.expr();
+            cb.condition_require_zero(
+                || "check_carry_lt",
+                sign_xor.expr(),
+                (carry_lt[i].clone() - last_carry.clone())
+                    * (carry_lt[i].clone() - E::BaseField::ONE.expr()),
+            )?;
+            cb.condition_require_zero(
+                || "check_remainder_prime_not_max",
+                sign_xor.expr(),
+                (remainder_prime_expr[i].clone()
+                    - E::BaseField::from_canonical_u32(1 << LIMB_BITS).expr())
+                    * remainder_inv[i].expr()
+                    - E::BaseField::ONE.expr(),
+            )?;
+            cb.condition_require_zero(
+                || "check_remainder_prime_zero",
+                sign_xor.expr() * (E::BaseField::ONE.expr() - carry_lt[i].clone()),
+                remainder_prime_expr[i].clone(),
+            )?;
+        }
+
+        let lt_marker: [_; UINT_LIMBS] =
+            array::from_fn(|i| cb.create_witin(|| format!("lt_marker_{i}")));
+        let mut prefix_sum: Expression<E> = divisor_zero.expr() + remainder_zero.expr();
+        let lt_diff = cb.create_witin(|| "lt_diff");
+
+        for i in (0..UINT_LIMBS).rev() {
+            let diff = remainder_prime_expr[i].clone()
+                * (E::BaseField::from_canonical_u8(2).expr() * divisor_sign.expr()
+                    - E::BaseField::ONE.expr())
+                + divisor_expr[i].clone()
+                    * (E::BaseField::ONE.expr()
+                        - E::BaseField::from_canonical_u8(2).expr() * divisor_sign.expr());
+            prefix_sum += lt_marker[i].expr();
+            cb.assert_bit(|| format!("lt_maker_bool_{}", i), lt_marker[i].expr())?;
+            cb.require_zero(
+                || "prefix_sum_not_zero_or_diff_zero",
+                (E::BaseField::ONE.expr() - prefix_sum.clone()) * diff.clone(),
+            )?;
+            cb.condition_require_zero(
+                || format!("check_lt_diff_equal_diff"),
+                lt_marker[i].expr(),
+                lt_diff.expr() - diff.clone(),
+            )?;
+        }
+
+        // - If r_prime != divisor, then prefix_sum = 1 so marker[i] must be 1 iff i is the first index
+        //   where diff != 0. Constrains that diff == lt_diff where lt_diff is non-zero.
+        // - If r_prime == divisor, then prefix_sum = 0. Here, prefix_sum cannot be 1 because all diff are
+        //   zero, making diff == lt_diff fails.
+        cb.require_equal(
+            || "prefix_sum_one",
+            prefix_sum.clone(),
+            E::BaseField::ONE.expr(),
+        )?;
+
+        // When not special case (divisor = 0 or remainder = 0), ensure lt_diff
+        // is not zero by a range check
+        cb.assert_ux::<_, _, 16>(
+            || "lt_diff_nonzero",
+            (lt_diff.expr() - E::BaseField::ONE.expr())
+                * (E::BaseField::ONE.expr() - divisor_zero.expr() - remainder_zero.expr()),
+        )?;
+
         match I::INST_KIND {
             InsnKind::DIV | InsnKind::REM => {
                 cb.require_zero(
                     || "divu_remu_sign_equal_zero",
                     dividend_sign.expr() + divisor_sign.expr(),
                 )?;
+                cb.assert_ux::<_, _, 16>(
+                    || "div_rem_range_check_dividend_last",
+                    E::BaseField::from_canonical_u32(2).expr()
+                        * (dividend_expr[UINT_LIMBS - 1].clone()
+                            - dividend_sign.expr() * sign_mask.expr()),
+                )?;
+                cb.assert_ux::<_, _, 16>(
+                    || "div_rem_range_check_divisor_last",
+                    E::BaseField::from_canonical_u32(2).expr()
+                        * (divisor_expr[UINT_LIMBS - 1].clone()
+                            - divisor_sign.expr() * sign_mask.expr()),
+                )?;
             }
-            _ => {}
-        }
-
-        match I::INST_KIND {
-            InsnKind::DIV => {}
-            InsnKind::DIVU => {}
-            InsnKind::REM => {}
-            InsnKind::REMU => {}
+            InsnKind::DIVU | InsnKind::REMU => {
+                cb.require_zero(
+                    || "divu_remu_sign_equal_zero",
+                    dividend_sign.expr() + divisor_sign.expr(),
+                )?;
+            }
             _ => unreachable!("Unsupported instruction kind"),
         }
 
@@ -335,7 +427,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             divisor_zero,
             divisor_sum_inv,
             remainder_sum_inv,
+            remainder_inv,
             sign_xor,
+            remainder_prime,
+            lt_marker,
+            lt_diff,
         })
     }
 
