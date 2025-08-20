@@ -221,7 +221,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 divisor_expr.clone(),
             )?;
             cb.condition_require_zero(
-                || format!("check_quotient_on_divisor_zero"),
+                || "check_quotient_on_divisor_zero".to_string(),
                 divisor_zero.expr(),
                 quotient_expr.clone()
                     - E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr(),
@@ -360,7 +360,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 (E::BaseField::ONE.expr() - prefix_sum.clone()) * diff.clone(),
             )?;
             cb.condition_require_zero(
-                || format!("check_lt_diff_equal_diff"),
+                || "check_lt_diff_equal_diff".to_string(),
                 lt_marker[i].expr(),
                 lt_diff.expr() - diff.clone(),
             )?;
@@ -705,7 +705,7 @@ fn limbs_to_u32(x: &[u32; UINT_LIMBS]) -> u32 {
     let base = 1 << LIMB_BITS;
     let mut res = 0;
     for val in x.iter().rev() {
-        res *= base.clone();
+        res *= base;
         res += *val;
     }
     res
@@ -713,14 +713,14 @@ fn limbs_to_u32(x: &[u32; UINT_LIMBS]) -> u32 {
 
 fn u32_to_limbs(x: &u32) -> [u32; UINT_LIMBS] {
     let mut res = [0; UINT_LIMBS];
-    let mut x = x.clone();
-    let base = u32::from(1u32 << LIMB_BITS);
+    let mut x = *x;
+    let base = (1u32 << LIMB_BITS);
     for limb in res.iter_mut() {
         let (quot, rem) = (x / base, x % base);
         *limb = rem;
         x = quot;
     }
-    debug_assert_eq!(x, u32::from(0u32));
+    debug_assert_eq!(x, 0u32);
     res
 }
 
