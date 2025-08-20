@@ -29,9 +29,11 @@ pub fn u32_to_field<E: ExtensionField>(x: u32) -> E::BaseField {
 /// # example
 ///
 /// ```
+/// use mpcs::util::split_by_sizes;
+///
 /// let input = vec![10, 20, 30, 40, 50, 60];
 /// let sizes = vec![2, 3, 1];
-/// let result = split_by_sizes(input, &sizes);
+/// let result = split_by_sizes(&input, &sizes);
 ///
 /// assert_eq!(result.len(), 3);
 /// assert_eq!(result[0], &[10, 20]);
