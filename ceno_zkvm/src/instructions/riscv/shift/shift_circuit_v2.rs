@@ -1,16 +1,14 @@
 use crate::{
-    Value,
-    error::ZKVMError,
     instructions::{
         Instruction,
         riscv::{
             RIVInstruction,
-            constants::{LIMB_BITS, UINT_LIMBS, UInt},
+            constants::{UINT_BYTE_LIMBS, UInt8},
             r_insn::RInstructionConfig,
         },
     },
     structs::ProgramParams,
-    utils::split_to_limb,
+    utils::{split_to_limb, split_to_u8},
 };
 use ceno_emul::InsnKind;
 use ff_ext::{ExtensionField, FieldInto};
@@ -63,19 +61,19 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         let mut bit_marker_sum = Expression::ZERO;
         let mut bit_shift = Expression::ZERO;
 
-        for i in 0..LIMB_BITS {
+        for (i, bit_shift_marker_i) in bit_shift_marker.iter().enumerate().take(LIMB_BITS) {
             circuit_builder.assert_bit(
                 || format!("bit_shift_marker_{i}_assert_bit"),
-                bit_shift_marker[i].expr(),
+                bit_shift_marker_i.expr(),
             )?;
-            bit_marker_sum += bit_shift_marker[i].expr();
-            bit_shift += E::BaseField::from_canonical_usize(i).expr() * bit_shift_marker[i].expr();
+            bit_marker_sum += bit_shift_marker_i.expr();
+            bit_shift += E::BaseField::from_canonical_usize(i).expr() * bit_shift_marker_i.expr();
 
             match kind {
                 InsnKind::SLL => {
                     circuit_builder.condition_require_zero(
                         || "bit_multiplier_left_condition",
-                        bit_shift_marker[i].expr(),
+                        bit_shift_marker_i.expr(),
                         bit_multiplier_left.expr()
                             - E::BaseField::from_canonical_usize(1 << i).expr(),
                     )?;
@@ -83,7 +81,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                 InsnKind::SRL | InsnKind::SRA => {
                     circuit_builder.condition_require_zero(
                         || "bit_multiplier_right_condition",
-                        bit_shift_marker[i].expr(),
+                        bit_shift_marker_i.expr(),
                         bit_multiplier_right.expr()
                             - E::BaseField::from_canonical_usize(1 << i).expr(),
                     )?;
@@ -111,7 +109,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                     InsnKind::SLL => {
                         if j < i {
                             circuit_builder.condition_require_zero(
-                                || format!("limb_shift_marker_a_{j}"),
+                                || format!("limb_shift_marker_a_{i}_{j}"),
                                 limb_shift_marker[i].expr(),
                                 a[j].expr(),
                             )?;
@@ -124,7 +122,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                                 - E::BaseField::from_canonical_usize(1 << LIMB_BITS).expr()
                                     * bit_shift_carry[j - i].expr();
                             circuit_builder.condition_require_zero(
-                                || format!("limb_shift_marker_a_expected_a_left_{j}",),
+                                || format!("limb_shift_marker_a_expected_a_left_{i}_{j}",),
                                 limb_shift_marker[i].expr(),
                                 a[j].expr() - expected_a_left,
                             )?;
@@ -134,11 +132,12 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                         // SRL and SRA constraints. Combining with above would require an additional column.
                         if j + i > NUM_LIMBS - 1 {
                             circuit_builder.condition_require_zero(
-                                || format!("limb_shift_marker_a_{j}"),
+                                || format!("limb_shift_marker_a_{i}_{j}"),
                                 limb_shift_marker[i].expr(),
-                                b_sign.expr()
-                                    * E::BaseField::from_canonical_usize((1 << LIMB_BITS) - 1)
-                                        .expr(),
+                                a[j].expr()
+                                    - b_sign.expr()
+                                        * E::BaseField::from_canonical_usize((1 << LIMB_BITS) - 1)
+                                            .expr(),
                             )?;
                         } else {
                             let expected_a_right =
@@ -150,7 +149,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                                     + (b[j + i].expr() - bit_shift_carry[j + i].expr());
 
                             circuit_builder.condition_require_zero(
-                                || format!("limb_shift_marker_a_expected_a_left_{j}",),
+                                || format!("limb_shift_marker_a_expected_a_right_{i}_{j}",),
                                 limb_shift_marker[i].expr(),
                                 a[j].expr() * bit_multiplier_right.expr() - expected_a_right,
                             )?;
@@ -262,8 +261,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         let num_bits_log = (NUM_LIMBS * LIMB_BITS).ilog2();
         lk_multiplicity.assert_ux_in_u16(
             LIMB_BITS - num_bits_log as usize,
-            (((c[0] as usize) - bit_shift - limb_shift * LIMB_BITS)
-                >> num_bits_log) as u64,
+            (((c[0] as usize) - bit_shift - limb_shift * LIMB_BITS) >> num_bits_log) as u64,
         );
 
         let mut b_sign = 0;
@@ -276,10 +274,10 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
 }
 
 pub struct ShiftConfig<E: ExtensionField> {
-    shift_base_config: ShiftBaseConfig<E, UINT_LIMBS, LIMB_BITS>,
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    pub rd_written: UInt<E>,
+    shift_base_config: ShiftBaseConfig<E, UINT_BYTE_LIMBS, 8>,
+    rs1_read: UInt8<E>,
+    rs2_read: UInt8<E>,
+    pub rd_written: UInt8<E>,
     r_insn: RInstructionConfig<E>,
 }
 
@@ -297,10 +295,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
         let (rd_written, rs1_read, rs2_read) = match I::INST_KIND {
-            InsnKind::SLL => {
-                let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-                let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
+            InsnKind::SLL | InsnKind::SRL | InsnKind::SRA => {
+                let rs1_read = UInt8::new_unchecked(|| "rs1_read", circuit_builder)?;
+                let rs2_read = UInt8::new_unchecked(|| "rs2_read", circuit_builder)?;
+                let rd_written = UInt8::new(|| "rd_written", circuit_builder)?;
                 (rd_written, rs1_read, rs2_read)
             }
             _ => unimplemented!(),
@@ -317,9 +315,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let shift_base_config = ShiftBaseConfig::construct_circuit(
             circuit_builder,
             I::INST_KIND,
-            rd_written.register_expr(),
-            rs1_read.register_expr(),
-            rs2_read.register_expr(),
+            rd_written.expr().try_into().unwrap(),
+            rs1_read.expr().try_into().unwrap(),
+            rs2_read.expr().try_into().unwrap(),
         )?;
 
         Ok(ShiftConfig {
@@ -337,51 +335,19 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         lk_multiplicity: &mut crate::witness::LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), crate::error::ZKVMError> {
-        // rs2 & its derived values
-        let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
-        // let rs2_low5 = rs2_read.as_u64() & 0b11111;
-        // lk_multiplicity.assert_ux::<5>(rs2_low5);
-        // lk_multiplicity.lookup_pow2(rs2_low5);
-        //
-        // let pow2_rs2_low5 = 1u64 << rs2_low5;
-        //
-        // let rs2_high = Value::new(
-        //     ((rs2_read.as_u64() - rs2_low5) >> 5) as u32,
-        //     lk_multiplicity,
-        // );
-        // config.rs2_high.assign_value(instance, rs2_high);
-        // config.rs2_read.assign_value(instance, rs2_read);
-        //
-        // set_val!(instance, config.pow2_rs2_low5, pow2_rs2_low5);
-        // set_val!(instance, config.rs2_low5, rs2_low5);
-        //
+        // rs2
+        let rs2_read = split_to_u8::<u16>(step.rs2().unwrap().value);
         // rs1
-        let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
+        let rs1_read = split_to_u8::<u16>(step.rs1().unwrap().value);
         // rd
-        let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-        // // outflow
-        // let outflow = match I::INST_KIND {
-        //     InsnKind::SLL => (rs1_read.as_u64() * pow2_rs2_low5) >> UInt::<E>::TOTAL_BITS,
-        //     InsnKind::SRL => rs1_read.as_u64() & (pow2_rs2_low5 - 1),
-        //     InsnKind::SRA => {
-        //         let Some(signed_ext_config) = config.signed_extend_config.as_ref() else {
-        //             Err(ZKVMError::CircuitError)?
-        //         };
-        //         signed_ext_config.assign_instance(
-        //             instance,
-        //             lk_multiplicity,
-        //             *rs1_read.as_u16_limbs().last().unwrap() as u64,
-        //         )?;
-        //         rs1_read.as_u64() & (pow2_rs2_low5 - 1)
-        //     }
-        //     _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
-        // };
-        //
-        // set_val!(instance, config.outflow, outflow);
-        //
-        config.rs1_read.assign_value(instance, rs1_read);
-        config.rs2_read.assign_value(instance, rs2_read);
-        config.rd_written.assign_value(instance, rd_written);
+        let rd_written = split_to_u8::<u16>(step.rd().unwrap().value.after);
+        for val in &rd_written {
+            lk_multiplicity.assert_ux::<8>(*val as u64);
+        }
+
+        config.rs1_read.assign_limbs(instance, &rs1_read);
+        config.rs2_read.assign_limbs(instance, &rs2_read);
+        config.rd_written.assign_limbs(instance, &rd_written);
 
         config.shift_base_config.assign_instances(
             instance,

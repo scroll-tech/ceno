@@ -36,14 +36,14 @@ mod tests {
 
     use super::{ShiftLogicalInstruction, SllOp, SraOp, SrlOp};
     use crate::{
-        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{
             Instruction,
-            riscv::{RIVInstruction, constants::UInt},
+            riscv::{RIVInstruction, constants::UInt8},
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
         structs::ProgramParams,
+        utils::split_to_u8,
     };
 
     #[test]
@@ -134,11 +134,7 @@ mod tests {
             .require_equal(
                 || format!("{prefix}_({name})_assert_rd_written"),
                 &mut cb,
-                &UInt::from_const_unchecked(
-                    Value::new_unchecked(expected_rd_written)
-                        .as_u16_limbs()
-                        .to_vec(),
-                ),
+                &UInt8::from_const_unchecked(split_to_u8::<u8>(expected_rd_written)),
             )
             .unwrap();
 
