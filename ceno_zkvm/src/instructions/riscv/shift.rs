@@ -1,7 +1,7 @@
 #[cfg(not(feature = "u16limb_circuit"))]
-mod shift_circuit;
+pub mod shift_circuit;
 #[cfg(feature = "u16limb_circuit")]
-mod shift_circuit_v2;
+pub mod shift_circuit_v2;
 
 use ceno_emul::InsnKind;
 
@@ -45,46 +45,68 @@ mod tests {
         structs::ProgramParams,
         utils::split_to_u8,
     };
+    #[cfg(feature = "u16limb_circuit")]
+    use ff_ext::BabyBearExt4;
 
     #[test]
     fn test_opcode_sll() {
-        verify::<GoldilocksExt2, SllOp>("basic", 0b_0001, 3, 0b_1000);
-        // 33 << 33 === 33 << 1
-        verify::<GoldilocksExt2, SllOp>("rs2 over 5-bits", 0b_0001, 33, 0b_0010);
-        verify::<GoldilocksExt2, SllOp>("bit loss", (1 << 31) | 1, 1, 0b_0010);
-        verify::<GoldilocksExt2, SllOp>("zero shift", 0b_0001, 0, 0b_0001);
-        verify::<GoldilocksExt2, SllOp>("all zeros", 0b_0000, 0, 0b_0000);
-        verify::<GoldilocksExt2, SllOp>("base is zero", 0b_0000, 1, 0b_0000);
+        let cases = [
+            ("basic 1", 32, 3, 32 << 3),
+            ("basic 2", 0b_0001, 3, 0b_1000),
+            // 33 << 33 === 33 << 1
+            ("rs2 over 5-bits", 0b_0001, 33, 0b_0010),
+            ("bit loss", (1 << 31) | 1, 1, 0b_0010),
+            ("zero shift", 0b_0001, 0, 0b_0001),
+            ("all zeros", 0b_0000, 0, 0b_0000),
+            ("base is zero", 0b_0000, 1, 0b_0000),
+        ];
+
+        for (name, lhs, rhs, expected) in cases {
+            verify::<GoldilocksExt2, SllOp>(name, lhs, rhs, expected);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<BabyBearExt4, SllOp>(name, lhs, rhs, expected);
+        }
     }
 
     #[test]
     fn test_opcode_srl() {
-        verify::<GoldilocksExt2, SrlOp>("basic", 0b_1000, 3, 0b_0001);
-        // 33 >> 33 === 33 >> 1
-        verify::<GoldilocksExt2, SrlOp>("rs2 over 5-bits", 0b_1010, 33, 0b_0101);
-        verify::<GoldilocksExt2, SrlOp>("bit loss", 0b_1001, 1, 0b_0100);
-        verify::<GoldilocksExt2, SrlOp>("zero shift", 0b_1000, 0, 0b_1000);
-        verify::<GoldilocksExt2, SrlOp>("all zeros", 0b_0000, 0, 0b_0000);
-        verify::<GoldilocksExt2, SrlOp>("base is zero", 0b_0000, 1, 0b_0000);
+        let cases = [
+            ("basic", 0b_1000, 3, 0b_0001),
+            // 33 >> 33 === 33 >> 1
+            ("rs2 over 5-bits", 0b_1010, 33, 0b_0101),
+            ("bit loss", 0b_1001, 1, 0b_0100),
+            ("zero shift", 0b_1000, 0, 0b_1000),
+            ("all zeros", 0b_0000, 0, 0b_0000),
+            ("base is zero", 0b_0000, 1, 0b_0000),
+        ];
+
+        for (name, lhs, rhs, expected) in cases {
+            verify::<GoldilocksExt2, SrlOp>(name, lhs, rhs, expected);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<BabyBearExt4, SrlOp>(name, lhs, rhs, expected);
+        }
     }
 
     #[test]
     fn test_opcode_sra() {
-        // positive rs1
-        // rs2 = 3
-        verify::<GoldilocksExt2, SraOp>("32 >> 3", 32, 3, 32 >> 3);
-        verify::<GoldilocksExt2, SraOp>("33 >> 3", 33, 3, 33 >> 3);
-        // rs2 = 31
-        verify::<GoldilocksExt2, SraOp>("32 >> 31", 32, 31, 32 >> 31);
-        verify::<GoldilocksExt2, SraOp>("33 >> 31", 33, 31, 33 >> 31);
+        let cases = [
+            // positive rs1
+            ("32 >> 3", 32, 3, 32 >> 3),
+            ("33 >> 3", 33, 3, 33 >> 3),
+            ("32 >> 31", 32, 31, 32 >> 31),
+            ("33 >> 31", 33, 31, 33 >> 31),
+            // negative rs1
+            ("-32 >> 3", (-32_i32) as u32, 3, (-32_i32 >> 3) as u32),
+            ("-33 >> 3", (-33_i32) as u32, 3, (-33_i32 >> 3) as u32),
+            ("-32 >> 31", (-32_i32) as u32, 31, (-32_i32 >> 31) as u32),
+            ("-33 >> 31", (-33_i32) as u32, 31, (-33_i32 >> 31) as u32),
+        ];
 
-        // negative rs1
-        // rs2 = 3
-        verify::<GoldilocksExt2, SraOp>("-32 >> 3", (-32_i32) as u32, 3, (-32_i32 >> 3) as u32);
-        verify::<GoldilocksExt2, SraOp>("-33 >> 3", (-33_i32) as u32, 3, (-33_i32 >> 3) as u32);
-        // rs2 = 31
-        verify::<GoldilocksExt2, SraOp>("-32 >> 31", (-32_i32) as u32, 31, (-32_i32 >> 31) as u32);
-        verify::<GoldilocksExt2, SraOp>("-33 >> 31", (-33_i32) as u32, 31, (-33_i32 >> 31) as u32);
+        for (name, lhs, rhs, expected) in cases {
+            verify::<GoldilocksExt2, SraOp>(name, lhs, rhs, expected);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<BabyBearExt4, SraOp>(name, lhs, rhs, expected);
+        }
     }
 
     fn verify<E: ExtensionField, I: RIVInstruction>(

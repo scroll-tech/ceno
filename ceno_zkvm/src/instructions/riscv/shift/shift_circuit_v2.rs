@@ -1,9 +1,11 @@
+/// constrain implementation follow from https://github.com/openvm-org/openvm/blob/main/extensions/rv32im/circuit/src/shift/core.rs
 use crate::{
     instructions::{
         Instruction,
         riscv::{
             RIVInstruction,
             constants::{UINT_BYTE_LIMBS, UInt8},
+            i_insn::IInstructionConfig,
             r_insn::RInstructionConfig,
         },
     },
@@ -70,7 +72,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
             bit_shift += E::BaseField::from_canonical_usize(i).expr() * bit_shift_marker_i.expr();
 
             match kind {
-                InsnKind::SLL => {
+                InsnKind::SLL | InsnKind::SLLI => {
                     circuit_builder.condition_require_zero(
                         || "bit_multiplier_left_condition",
                         bit_shift_marker_i.expr(),
@@ -78,7 +80,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                             - E::BaseField::from_canonical_usize(1 << i).expr(),
                     )?;
                 }
-                InsnKind::SRL | InsnKind::SRA => {
+                InsnKind::SRL | InsnKind::SRLI | InsnKind::SRA | InsnKind::SRAI => {
                     circuit_builder.condition_require_zero(
                         || "bit_multiplier_right_condition",
                         bit_shift_marker_i.expr(),
@@ -106,7 +108,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
 
             for j in 0..NUM_LIMBS {
                 match kind {
-                    InsnKind::SLL => {
+                    InsnKind::SLL | InsnKind::SLLI => {
                         if j < i {
                             circuit_builder.condition_require_zero(
                                 || format!("limb_shift_marker_a_{i}_{j}"),
@@ -128,7 +130,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                             )?;
                         }
                     }
-                    InsnKind::SRL | InsnKind::SRA => {
+                    InsnKind::SRL | InsnKind::SRLI | InsnKind::SRA | InsnKind::SRAI => {
                         // SRL and SRA constraints. Combining with above would require an additional column.
                         if j + i > NUM_LIMBS - 1 {
                             circuit_builder.condition_require_zero(
@@ -180,7 +182,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                 - bit_shift.expr())
                 * num_bits.inverse().expr(),
         )?;
-        if !matches!(kind, InsnKind::SRA) {
+        if !matches!(kind, InsnKind::SRA | InsnKind::SRAI) {
             circuit_builder.require_zero(|| "b_sign_zero", b_sign.expr())?;
         } else {
             let mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr();
@@ -232,7 +234,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         );
 
         match kind {
-            InsnKind::SLL => set_val!(
+            InsnKind::SLL | InsnKind::SLLI => set_val!(
                 instance,
                 self.bit_multiplier_left,
                 E::BaseField::from_canonical_usize(1 << bit_shift)
@@ -245,7 +247,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         };
 
         let bit_shift_carry: [u32; NUM_LIMBS] = array::from_fn(|i| match kind {
-            InsnKind::SLL => b[i] >> (LIMB_BITS - bit_shift),
+            InsnKind::SLL | InsnKind::SLLI => b[i] >> (LIMB_BITS - bit_shift),
             _ => b[i] % (1 << bit_shift),
         });
         for (val, witin) in bit_shift_carry.iter().zip_eq(&self.bit_shift_carry) {
@@ -265,7 +267,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         );
 
         let mut b_sign = 0;
-        if matches!(kind, InsnKind::SRA) {
+        if matches!(kind, InsnKind::SRA | InsnKind::SRAI) {
             b_sign = b[NUM_LIMBS - 1] >> (LIMB_BITS - 1);
             lk_multiplicity.lookup_xor_byte(b[NUM_LIMBS - 1] as u64, 1 << (LIMB_BITS - 1));
         }
@@ -273,7 +275,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
     }
 }
 
-pub struct ShiftConfig<E: ExtensionField> {
+pub struct ShiftRTypeConfig<E: ExtensionField> {
     shift_base_config: ShiftBaseConfig<E, UINT_BYTE_LIMBS, 8>,
     rs1_read: UInt8<E>,
     rs2_read: UInt8<E>,
@@ -284,7 +286,7 @@ pub struct ShiftConfig<E: ExtensionField> {
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
-    type InstructionConfig = ShiftConfig<E>;
+    type InstructionConfig = ShiftRTypeConfig<E>;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -320,7 +322,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             rs2_read.expr().try_into().unwrap(),
         )?;
 
-        Ok(ShiftConfig {
+        Ok(ShiftRTypeConfig {
             r_insn,
             rs1_read,
             rs2_read,
@@ -330,7 +332,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     }
 
     fn assign_instance(
-        config: &ShiftConfig<E>,
+        config: &ShiftRTypeConfig<E>,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut crate::witness::LkMultiplicity,
         step: &ceno_emul::StepRecord,
@@ -356,15 +358,101 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             step.rs1().unwrap().value,
             step.rs2().unwrap().value,
         );
-        // config.assert_lt_config.assign_instance(
-        //     instance,
-        //     lk_multiplicity,
-        //     outflow,
-        //     pow2_rs2_low5,
-        // )?;
-        //
         config
             .r_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
+
+        Ok(())
+    }
+}
+
+pub struct ShiftImmConfig<E: ExtensionField> {
+    shift_base_config: ShiftBaseConfig<E, UINT_BYTE_LIMBS, 8>,
+    rs1_read: UInt8<E>,
+    pub rd_written: UInt8<E>,
+    i_insn: IInstructionConfig<E>,
+    imm: WitIn,
+}
+
+pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
+
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
+    type InstructionConfig = ShiftImmConfig<E>;
+
+    fn name() -> String {
+        format!("{:?}", I::INST_KIND)
+    }
+
+    fn construct_circuit(
+        circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
+        let (rd_written, rs1_read, imm) = match I::INST_KIND {
+            InsnKind::SLLI | InsnKind::SRLI | InsnKind::SRAI => {
+                let rs1_read = UInt8::new_unchecked(|| "rs1_read", circuit_builder)?;
+                let imm = circuit_builder.create_witin(|| "imm");
+                let rd_written = UInt8::new(|| "rd_written", circuit_builder)?;
+                (rd_written, rs1_read, imm)
+            }
+            _ => unimplemented!(),
+        };
+        let uint8_imm = UInt8::from_exprs_unchecked(vec![imm.expr(), 0.into(), 0.into(), 0.into()]);
+
+        let i_insn = IInstructionConfig::<E>::construct_circuit(
+            circuit_builder,
+            I::INST_KIND,
+            imm.expr(),
+            0.into(),
+            rs1_read.register_expr(),
+            rd_written.register_expr(),
+            false,
+        )?;
+
+        let shift_base_config = ShiftBaseConfig::construct_circuit(
+            circuit_builder,
+            I::INST_KIND,
+            rd_written.expr().try_into().unwrap(),
+            rs1_read.expr().try_into().unwrap(),
+            uint8_imm.expr().try_into().unwrap(),
+        )?;
+
+        Ok(ShiftImmConfig {
+            i_insn,
+            imm,
+            rs1_read,
+            rd_written,
+            shift_base_config,
+        })
+    }
+
+    fn assign_instance(
+        config: &ShiftImmConfig<E>,
+        instance: &mut [<E as ExtensionField>::BaseField],
+        lk_multiplicity: &mut crate::witness::LkMultiplicity,
+        step: &ceno_emul::StepRecord,
+    ) -> Result<(), crate::error::ZKVMError> {
+        let imm = step.insn().imm as i16 as u16;
+        set_val!(instance, config.imm, E::BaseField::from_canonical_u16(imm));
+        // rs1
+        let rs1_read = split_to_u8::<u16>(step.rs1().unwrap().value);
+        // rd
+        let rd_written = split_to_u8::<u16>(step.rd().unwrap().value.after);
+        for val in &rd_written {
+            lk_multiplicity.assert_ux::<8>(*val as u64);
+        }
+
+        config.rs1_read.assign_limbs(instance, &rs1_read);
+        config.rd_written.assign_limbs(instance, &rd_written);
+
+        config.shift_base_config.assign_instances(
+            instance,
+            lk_multiplicity,
+            I::INST_KIND,
+            step.rs1().unwrap().value,
+            imm as u32,
+        );
+        config
+            .i_insn
             .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())
@@ -377,9 +465,9 @@ fn run_shift<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
     y: &[u32; NUM_LIMBS],
 ) -> ([u32; NUM_LIMBS], usize, usize) {
     match kind {
-        InsnKind::SLL => run_shift_left::<NUM_LIMBS, LIMB_BITS>(x, y),
-        InsnKind::SRL => run_shift_right::<NUM_LIMBS, LIMB_BITS>(x, y, true),
-        InsnKind::SRA => run_shift_right::<NUM_LIMBS, LIMB_BITS>(x, y, false),
+        InsnKind::SLL | InsnKind::SLLI => run_shift_left::<NUM_LIMBS, LIMB_BITS>(x, y),
+        InsnKind::SRL | InsnKind::SRLI => run_shift_right::<NUM_LIMBS, LIMB_BITS>(x, y, true),
+        InsnKind::SRA | InsnKind::SRAI => run_shift_right::<NUM_LIMBS, LIMB_BITS>(x, y, false),
         _ => unreachable!(),
     }
 }
