@@ -181,6 +181,7 @@ impl LkMultiplicity {
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
         self.increment(
             match C {
+                18 => LookupTable::U18,
                 16 => LookupTable::U16,
                 14 => LookupTable::U14,
                 8 => LookupTable::U8,
