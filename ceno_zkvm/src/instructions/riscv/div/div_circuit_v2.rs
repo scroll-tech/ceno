@@ -473,7 +473,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         set_val!(instance, config.dividend_sign, dividend_sign as u64);
         set_val!(instance, config.divisor_sign, divisor_sign as u64);
         set_val!(instance, config.quotient_sign, quotient_sign as u64);
-        set_val!(instance, config.divisor_zero, (divisor == 0) as u64);
+        set_val!(
+            instance,
+            config.divisor_zero,
+            (case == DivRemCoreSpecialCase::ZeroDivisor) as u64
+        );
 
         let carries = run_mul_carries(
             signed,
