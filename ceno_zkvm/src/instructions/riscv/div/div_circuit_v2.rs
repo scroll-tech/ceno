@@ -650,7 +650,7 @@ fn limbs_to_u32(x: &[u32; UINT_LIMBS]) -> u32 {
 fn u32_to_limbs(x: &u32) -> [u32; UINT_LIMBS] {
     let mut res = [0; UINT_LIMBS];
     let mut x = *x;
-    let base = (1u32 << LIMB_BITS);
+    let base = 1u32 << LIMB_BITS;
     for limb in res.iter_mut() {
         let (quot, rem) = (x / base, x % base);
         *limb = rem;
