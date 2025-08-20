@@ -62,7 +62,7 @@ mod test {
         structs::ProgramParams,
     };
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
-    use ff_ext::{ExtensionField, GoldilocksExt2 as GE};
+    use ff_ext::{BabyBearExt4 as BE, ExtensionField, GoldilocksExt2 as GE};
     use itertools::Itertools;
     use rand::RngCore;
 
@@ -154,14 +154,14 @@ mod test {
         const INSN_KIND: InsnKind = InsnKind::REMU;
     }
 
-    fn verify<Insn: Instruction<GE> + TestInstance<GE>>(
+    fn verify<E: ExtensionField, Insn: Instruction<E> + TestInstance<E>>(
         name: &str,
-        dividend: <Insn as TestInstance<GE>>::NumType,
-        divisor: <Insn as TestInstance<GE>>::NumType,
-        exp_outcome: <Insn as TestInstance<GE>>::NumType,
+        dividend: <Insn as TestInstance<E>>::NumType,
+        divisor: <Insn as TestInstance<E>>::NumType,
+        exp_outcome: <Insn as TestInstance<E>>::NumType,
         is_ok: bool,
     ) {
-        let mut cs = ConstraintSystem::<GE>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
             .namespace(
@@ -216,12 +216,12 @@ mod test {
     }
 
     // shortcut to verify given pair produces correct output
-    fn verify_positive<Insn: Instruction<GE> + TestInstance<GE>>(
+    fn verify_positive<E: ExtensionField, Insn: Instruction<E> + TestInstance<E>>(
         name: &str,
-        dividend: <Insn as TestInstance<GE>>::NumType,
-        divisor: <Insn as TestInstance<GE>>::NumType,
+        dividend: <Insn as TestInstance<E>>::NumType,
+        divisor: <Insn as TestInstance<E>>::NumType,
     ) {
-        verify::<Insn>(
+        verify::<E, Insn>(
             name,
             dividend,
             divisor,
@@ -231,8 +231,10 @@ mod test {
     }
 
     // Test unsigned opcodes
-    type Divu = DivuInstruction<GE>;
-    type Remu = RemuInstruction<GE>;
+    type DivuG = DivuInstruction<GE>;
+    type RemuG = RemuInstruction<GE>;
+    type DivuB = DivuInstruction<BE>;
+    type RemuB = RemuInstruction<BE>;
 
     #[test]
     fn test_divrem_unsigned_handmade() {
@@ -245,8 +247,13 @@ mod test {
         ];
 
         for (name, dividend, divisor) in test_cases.into_iter() {
-            verify_positive::<Divu>(name, dividend, divisor);
-            verify_positive::<Remu>(name, dividend, divisor);
+            verify_positive::<GE, DivuG>(name, dividend, divisor);
+            verify_positive::<GE, RemuG>(name, dividend, divisor);
+            #[cfg(feature = "u16limb_circuit")]
+            {
+                verify_positive::<BE, DivuB>(name, dividend, divisor);
+                verify_positive::<BE, RemuB>(name, dividend, divisor);
+            }
         }
     }
 
@@ -257,15 +264,20 @@ mod test {
         for dividend in interesting_values {
             for divisor in interesting_values {
                 let name = format!("dividend = {}, divisor = {}", dividend, divisor);
-                verify_positive::<Divu>(&name, dividend, divisor);
-                verify_positive::<Remu>(&name, dividend, divisor);
+                verify_positive::<GE, DivuG>(&name, dividend, divisor);
+                verify_positive::<GE, RemuG>(&name, dividend, divisor);
+                #[cfg(feature = "u16limb_circuit")]
+                {
+                    verify_positive::<BE, DivuB>(&name, dividend, divisor);
+                    verify_positive::<BE, RemuB>(&name, dividend, divisor);
+                }
             }
         }
     }
 
     #[test]
     fn test_divrem_unsigned_unsatisfied() {
-        verify::<Divu>("assert_outcome", 10, 2, 3, false);
+        verify::<GE, DivuG>("assert_outcome", 10, 2, 3, false);
     }
 
     #[test]
@@ -275,14 +287,21 @@ mod test {
             let dividend: u32 = rng.next_u32();
             let divisor: u32 = rng.next_u32();
             let name = format!("random: dividend = {}, divisor = {}", dividend, divisor);
-            verify_positive::<Divu>(&name, dividend, divisor);
-            verify_positive::<Remu>(&name, dividend, divisor);
+            verify_positive::<GE, DivuG>(&name, dividend, divisor);
+            verify_positive::<GE, RemuG>(&name, dividend, divisor);
+            #[cfg(feature = "u16limb_circuit")]
+            {
+                verify_positive::<BE, DivuB>(&name, dividend, divisor);
+                verify_positive::<BE, RemuB>(&name, dividend, divisor);
+            }
         }
     }
 
     // Test signed opcodes
-    type Div = DivInstruction<GE>;
-    type Rem = RemInstruction<GE>;
+    type DivG = DivInstruction<GE>;
+    type RemG = RemInstruction<GE>;
+    type DivB = DivInstruction<BE>;
+    type RemB = RemInstruction<BE>;
 
     #[test]
     fn test_divrem_signed_handmade() {
@@ -298,8 +317,13 @@ mod test {
         ];
 
         for (name, dividend, divisor) in test_cases.into_iter() {
-            verify_positive::<Div>(name, dividend, divisor);
-            verify_positive::<Rem>(name, dividend, divisor);
+            verify_positive::<GE, DivG>(name, dividend, divisor);
+            verify_positive::<GE, RemG>(name, dividend, divisor);
+            #[cfg(feature = "u16limb_circuit")]
+            {
+                verify_positive::<BE, DivB>(name, dividend, divisor);
+                verify_positive::<BE, RemB>(name, dividend, divisor);
+            }
         }
     }
 
@@ -310,8 +334,13 @@ mod test {
         for dividend in interesting_values {
             for divisor in interesting_values {
                 let name = format!("dividend = {}, divisor = {}", dividend, divisor);
-                verify_positive::<Div>(&name, dividend, divisor);
-                verify_positive::<Rem>(&name, dividend, divisor);
+                verify_positive::<GE, DivG>(&name, dividend, divisor);
+                verify_positive::<GE, RemG>(&name, dividend, divisor);
+                #[cfg(feature = "u16limb_circuit")]
+                {
+                    verify_positive::<BE, DivB>(&name, dividend, divisor);
+                    verify_positive::<BE, RemB>(&name, dividend, divisor);
+                }
             }
         }
     }
@@ -323,8 +352,13 @@ mod test {
             let dividend: i32 = rng.next_u32() as i32;
             let divisor: i32 = rng.next_u32() as i32;
             let name = format!("random: dividend = {}, divisor = {}", dividend, divisor);
-            verify_positive::<Div>(&name, dividend, divisor);
-            verify_positive::<Rem>(&name, dividend, divisor);
+            verify_positive::<GE, DivG>(&name, dividend, divisor);
+            verify_positive::<GE, RemG>(&name, dividend, divisor);
+            #[cfg(feature = "u16limb_circuit")]
+            {
+                verify_positive::<BE, DivB>(&name, dividend, divisor);
+                verify_positive::<BE, RemB>(&name, dividend, divisor);
+            }
         }
     }
 }
