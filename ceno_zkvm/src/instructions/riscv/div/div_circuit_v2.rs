@@ -176,7 +176,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         }
 
         for (i, carry) in carry_expr.iter().enumerate() {
-            cb.assert_ux::<_, _, 16>(|| format!("range_check_carry_{i}"), carry.clone())?;
+            cb.assert_ux::<_, _, 18>(|| format!("range_check_carry_{i}"), carry.clone())?;
         }
 
         let quotient_sign = cb.create_witin(|| "quotient_sign".to_string());
@@ -202,7 +202,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         }
 
         for (i, carry_ext) in carry_ext.iter().enumerate() {
-            cb.assert_ux::<_, _, 16>(|| format!("range_check_carry_ext_{i}"), carry_ext.clone())?;
+            cb.assert_ux::<_, _, 18>(|| format!("range_check_carry_ext_{i}"), carry_ext.clone())?;
         }
 
         let divisor_zero = cb.create_witin(|| "divisor_zero".to_string());
@@ -460,9 +460,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let (quotient, remainder, dividend_sign, divisor_sign, quotient_sign, case) =
             run_divrem(signed, &u32_to_limbs(&dividend), &u32_to_limbs(&divisor));
 
-        println!("Quotient: {:?}", quotient);
         let quotient_val = Value::new(limbs_to_u32(&quotient), lkm);
-        println!("Remainder: {:?}", remainder);
         let remainder_val = Value::new(limbs_to_u32(&remainder), lkm);
 
         config
@@ -491,8 +489,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         );
 
         for i in 0..UINT_LIMBS {
-            lkm.assert_ux::<16>(carries[i] as u64);
-            lkm.assert_ux::<16>(carries[i + UINT_LIMBS] as u64);
+            lkm.assert_ux::<18>(carries[i] as u64);
+            lkm.assert_ux::<18>(carries[i + UINT_LIMBS] as u64);
         }
 
         let sign_xor = dividend_sign ^ divisor_sign;
