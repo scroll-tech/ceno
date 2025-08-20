@@ -777,6 +777,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         match C {
+            18 => self.assert_u18(name_fn, expr),
             16 => self.assert_u16(name_fn, expr),
             14 => self.assert_u14(name_fn, expr),
             8 => self.assert_byte(name_fn, expr),
@@ -870,6 +871,19 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.lk_record(name_fn, LookupTable::U16, vec![expr])?;
+        Ok(())
+    }
+
+    fn assert_u18<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.lk_record(name_fn, LookupTable::U18, vec![expr])?;
         Ok(())
     }
 

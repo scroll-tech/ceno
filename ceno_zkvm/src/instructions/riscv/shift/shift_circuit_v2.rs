@@ -14,12 +14,11 @@ use crate::{
 };
 use ceno_emul::InsnKind;
 use ff_ext::{ExtensionField, FieldInto};
-use gkr_iop::gadgets::AssertLtConfig;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
 use std::{array, marker::PhantomData};
-use witness::{InstancePaddingStrategy::Default, set_val};
+use witness::set_val;
 
 pub struct ShiftBaseConfig<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     // bit_multiplier = 2^bit_shift
@@ -92,7 +91,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                 _ => unreachable!(),
             }
         }
-        circuit_builder.require_one(|| "bit_marker_sum_as_1", bit_marker_sum.expr())?;
+        circuit_builder.require_one(|| "bit_marker_sum_one_hot", bit_marker_sum.expr())?;
 
         // Check that a[i] = b[i] <</>> c[i] both on the bit and limb shift level if c <
         // NUM_LIMBS * LIMB_BITS.
@@ -161,17 +160,26 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                 }
             }
         }
-        circuit_builder.require_one(|| "limb_marker_sum_as_1", limb_marker_sum.expr())?;
+        circuit_builder.require_one(|| "limb_marker_sum_one_hot", limb_marker_sum.expr())?;
 
         // Check that bit_shift and limb_shift are correct.
         let num_bits = E::BaseField::from_canonical_usize(NUM_LIMBS * LIMB_BITS);
-        circuit_builder.assert_ux_v2(
+        // TODO switch to assert_ux_v2 once support dynamic table range check
+        // circuit_builder.assert_ux_v2(
+        //     || "bit_shift_vs_limb_shift",
+        //     (c[0].expr()
+        //         - limb_shift * E::BaseField::from_canonical_usize(LIMB_BITS).expr()
+        //         - bit_shift.expr())
+        //         * num_bits.inverse().expr(),
+        //     LIMB_BITS - ((NUM_LIMBS * LIMB_BITS) as u32).ilog2() as usize,
+        // )?;
+        circuit_builder.assert_ux_in_u16(
             || "bit_shift_vs_limb_shift",
+            LIMB_BITS - ((NUM_LIMBS * LIMB_BITS) as u32).ilog2() as usize,
             (c[0].expr()
                 - limb_shift * E::BaseField::from_canonical_usize(LIMB_BITS).expr()
                 - bit_shift.expr())
                 * num_bits.inverse().expr(),
-            LIMB_BITS - ((NUM_LIMBS * LIMB_BITS) as u32).ilog2() as usize,
         )?;
         if !matches!(kind, InsnKind::SRA) {
             circuit_builder.require_zero(|| "b_sign_zero", b_sign.expr())?;
@@ -209,7 +217,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
     }
 
     pub fn assign_instances(
-        config: &Self,
+        &self,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut crate::witness::LkMultiplicity,
         kind: InsnKind,
@@ -227,12 +235,12 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         match kind {
             InsnKind::SLL => set_val!(
                 instance,
-                config.bit_multiplier_left,
+                self.bit_multiplier_left,
                 E::BaseField::from_canonical_usize(1 << bit_shift)
             ),
             _ => set_val!(
                 instance,
-                config.bit_multiplier_right,
+                self.bit_multiplier_right,
                 E::BaseField::from_canonical_usize(1 << bit_shift)
             ),
         };
@@ -241,26 +249,29 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
             InsnKind::SLL => b[i] >> (LIMB_BITS - bit_shift),
             _ => b[i] % (1 << bit_shift),
         });
-        for (val, witin) in bit_shift_carry.iter().zip_eq(&config.bit_shift_carry) {
+        for (val, witin) in bit_shift_carry.iter().zip_eq(&self.bit_shift_carry) {
             set_val!(instance, witin, E::BaseField::from_canonical_u32(*val));
+            lk_multiplicity.assert_ux_v2(*val as u64, LIMB_BITS);
         }
-        for (i, witin) in config.bit_shift_marker.iter().enumerate() {
+        for (i, witin) in self.bit_shift_marker.iter().enumerate() {
             set_val!(instance, witin, E::BaseField::from_bool(i == bit_shift));
         }
-        for (i, witin) in config.limb_shift_marker.iter().enumerate() {
+        for (i, witin) in self.limb_shift_marker.iter().enumerate() {
             set_val!(instance, witin, E::BaseField::from_bool(i == limb_shift));
         }
+        let num_bits_log = (NUM_LIMBS * LIMB_BITS).ilog2();
+        lk_multiplicity.assert_ux_in_u16(
+            LIMB_BITS - num_bits_log as usize,
+            (((c[0] as usize) - bit_shift - limb_shift * LIMB_BITS)
+                >> num_bits_log) as u64,
+        );
 
         let mut b_sign = 0;
         if matches!(kind, InsnKind::SRA) {
             b_sign = b[NUM_LIMBS - 1] >> (LIMB_BITS - 1);
             lk_multiplicity.lookup_xor_byte(b[NUM_LIMBS - 1] as u64, 1 << (LIMB_BITS - 1));
         }
-        set_val!(
-            instance,
-            config.b_sign,
-            E::BaseField::from_bool(b_sign != 0)
-        );
+        set_val!(instance, self.b_sign, E::BaseField::from_bool(b_sign != 0));
     }
 }
 
@@ -321,7 +332,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
+        config: &ShiftConfig<E>,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut crate::witness::LkMultiplicity,
         step: &ceno_emul::StepRecord,
@@ -344,12 +355,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         // set_val!(instance, config.pow2_rs2_low5, pow2_rs2_low5);
         // set_val!(instance, config.rs2_low5, rs2_low5);
         //
-        // // rs1
-        // let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-        //
-        // // rd
-        // let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
-        //
+        // rs1
+        let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
+        // rd
+        let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
         // // outflow
         // let outflow = match I::INST_KIND {
         //     InsnKind::SLL => (rs1_read.as_u64() * pow2_rs2_low5) >> UInt::<E>::TOTAL_BITS,
@@ -370,9 +379,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         //
         // set_val!(instance, config.outflow, outflow);
         //
-        // config.rs1_read.assign_value(instance, rs1_read);
-        // config.rd_written.assign_value(instance, rd_written);
-        //
+        config.rs1_read.assign_value(instance, rs1_read);
+        config.rs2_read.assign_value(instance, rs2_read);
+        config.rd_written.assign_value(instance, rd_written);
+
+        config.shift_base_config.assign_instances(
+            instance,
+            lk_multiplicity,
+            I::INST_KIND,
+            step.rs1().unwrap().value,
+            step.rs2().unwrap().value,
+        );
         // config.assert_lt_config.assign_instance(
         //     instance,
         //     lk_multiplicity,
@@ -380,9 +397,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         //     pow2_rs2_low5,
         // )?;
         //
-        // config
-        //     .r_insn
-        //     .assign_instance(instance, lk_multiplicity, step)?;
+        config
+            .r_insn
+            .assign_instance(instance, lk_multiplicity, step)?;
 
         Ok(())
     }
