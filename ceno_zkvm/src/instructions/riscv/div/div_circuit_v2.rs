@@ -201,7 +201,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         cb.assert_bit(|| "check_divisor_sign_bool", divisor_sign.expr())?;
 
         // TODO: can directly define sign_xor as expr?
-        // Tried once, it will causes degree too high (although increases just one).
+        // Tried once, it will cause degree too high (although increases just one).
         // So the current degree is already at the brink of maximal supported.
         // The high degree mostly comes from the carry expressions.
         let sign_xor = cb.create_witin(|| "sign_xor".to_string());
