@@ -101,8 +101,27 @@ pub fn eval_stacked_wellform_address_vec<E: ExtensionField>(r: &[E]) -> E {
     if r.len() < 2 {
         return E::ZERO;
     }
-    eval_stacked_wellform_address_vec(&r[..r.len() - 1])
+    eval_stacked_wellform_address_vec(&r[..r.len() - 1]) * r[r.len() - 1]
         + eval_wellform_address_vec(0, 1, &r[..r.len() - 1], false) * (E::ONE - r[r.len() - 1])
+}
+
+/// Evaluate MLE with the following evaluation over the hypercube:
+/// [0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, ..., n, n, n, ..., n]
+/// which is the concatenation of
+/// [0]
+/// [1, 1]
+/// [2, 2, 2, 2]
+/// ...
+/// [n, n, n, ..., n]
+/// which is then prefixed by a single zero to make all the subvectors aligned to powers of two.
+/// This function is used to support dynamic range check.
+/// Note that this MLE has n+1 variables, so r should have length n+1.
+pub fn eval_stacked_constant_vec<E: ExtensionField>(r: &[E]) -> E {
+    if r.len() < 2 {
+        return E::ZERO;
+    }
+    eval_stacked_constant_vec(&r[..r.len() - 1]) * r[r.len() - 1]
+        + E::from_canonical_usize(r.len() - 1) * (E::ONE - r[r.len() - 1])
 }
 
 pub fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
