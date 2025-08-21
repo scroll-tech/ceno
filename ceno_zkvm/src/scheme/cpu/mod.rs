@@ -530,9 +530,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         'b: 'c,
     {
         // First build tower witness
-        let (out_evals, prod_specs, logup_specs) = 
+        let (out_evals, prod_specs, logup_specs) =
             self.build_tower_witness(composed_cs, input, records, is_padded, challenges);
-        
+
         // Then prove the tower relation
         CpuTowerProver::create_proof(out_evals, prod_specs, logup_specs, 2, transcript)
     }

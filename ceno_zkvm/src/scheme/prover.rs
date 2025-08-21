@@ -333,15 +333,9 @@ impl<
 
         // prove the product and logup sum relation between layers in tower
         // (internally calls build_tower_witness)
-        let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
-            self.device.prove_tower_relation(
-                cs,
-                &input,
-                &records,
-                is_padded,
-                challenges,
-                transcript,
-            );
+        let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) = self
+            .device
+            .prove_tower_relation(cs, &input, &records, is_padded, challenges, transcript);
 
         assert_eq!(
             rt_tower.len(), // num var length should equal to max_num_instance
