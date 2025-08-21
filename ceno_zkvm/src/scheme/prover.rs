@@ -28,7 +28,7 @@ use witness::RowMajorMatrix;
 
 use crate::{
     error::ZKVMError,
-    scheme::{constants::NUM_FANIN_LOGUP, hal::ProofInput},
+    scheme::hal::ProofInput,
     structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
@@ -331,19 +331,15 @@ impl<
         // build main witness
         let (records, is_padded) = self.device.build_main_witness(cs, &input, challenges);
 
-        // build tower witness
-        let (out_evals, prod_specs, lookup_specs) = self
-            .device
-            .build_tower_witness(cs, &input, &records, is_padded, challenges);
-
         // prove the product and logup sum relation between layers in tower
+        // (internally calls build_tower_witness)
         let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
             self.device.prove_tower_relation(
                 cs,
-                out_evals,
-                prod_specs,
-                lookup_specs,
-                NUM_FANIN_LOGUP,
+                &input,
+                &records,
+                is_padded,
+                challenges,
                 transcript,
             );
 

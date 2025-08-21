@@ -510,13 +510,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         fields(profiling_3),
         level = "trace"
     )]
-    fn prove_tower_relation<'a>(
+    fn prove_tower_relation<'a, 'b, 'c>(
         &self,
-        _composed_cs: &ComposedConstrainSystem<E>,
-        out_evals: Vec<Vec<Vec<E>>>,
-        prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
-        logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
-        num_fanin: usize,
+        composed_cs: &ComposedConstrainSystem<E>,
+        input: &ProofInput<'a, CpuBackend<E, PCS>>,
+        records: &'c [Arc<MultilinearExtension<'b, E>>],
+        is_padded: bool,
+        challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
     ) -> (
         Point<E>,
@@ -524,8 +524,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         Vec<Vec<E>>,
         Vec<Vec<E>>,
         Vec<Vec<E>>,
-    ) {
-        CpuTowerProver::create_proof(out_evals, prod_specs, logup_specs, num_fanin, transcript)
+    )
+    where
+        'a: 'b,
+        'b: 'c,
+    {
+        // First build tower witness
+        let (out_evals, prod_specs, logup_specs) = 
+            self.build_tower_witness(composed_cs, input, records, is_padded, challenges);
+        
+        // Then prove the tower relation
+        CpuTowerProver::create_proof(out_evals, prod_specs, logup_specs, 2, transcript)
     }
 }
 

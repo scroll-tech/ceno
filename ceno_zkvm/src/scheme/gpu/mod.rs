@@ -26,7 +26,7 @@ use sumcheck::{
 use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
-use crate::scheme::cpu::CpuTowerProver;
+
 use gkr_iop::cpu::{CpuBackend, CpuProver};
 
 #[cfg(feature = "gpu")]
@@ -116,7 +116,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static> TemporaryG
 
         // Extract logup out_evals from GPU towers
         let mut lk_out_evals = Vec::new();
-        for (i, gpu_spec) in logup_gpu.iter().enumerate() {
+        for (_i, gpu_spec) in logup_gpu.iter().enumerate() {
             let first_layer_evals: Vec<E> = gpu_spec
                 .get_final_evals(0)
                 .expect("Failed to extract final evals from GPU logup tower");
@@ -275,12 +275,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         };
 
         // GPU optimization: build the same tower structure as CPU but only keep the last layer
-        use crate::scheme::{
-            constants::{NUM_FANIN, NUM_FANIN_LOGUP},
-            utils::{
-                infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
-            },
-        };
+                 use crate::scheme::{
+             constants::{NUM_FANIN, NUM_FANIN_LOGUP},
+             utils::masked_mle_split_to_chunks,
+         };
         use multilinear_extensions::mle::IntoMLE;
 
         // Build last layer chunks exactly like CPU version
@@ -365,13 +363,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         fields(profiling_3),
         level = "trace"
     )]
-    fn prove_tower_relation<'a>(
+    fn prove_tower_relation<'a, 'b, 'c>(
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
-        mut _out_evals: Vec<Vec<Vec<E>>>,
-        prod_specs: Vec<TowerProverSpec<'a, GpuBackend<E, PCS>>>,
-        logup_specs: Vec<TowerProverSpec<'a, GpuBackend<E, PCS>>>,
-        num_fanin: usize,
+        input: &ProofInput<'a, GpuBackend<E, PCS>>,
+        records: &'c [Arc<MultilinearExtension<'b, E>>],
+        is_padded: bool,
+        challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
     ) -> (
         Point<E>,
@@ -379,17 +377,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         Vec<Vec<E>>,
         Vec<Vec<E>>,
         Vec<Vec<E>>,
-    ) {
+    )
+    where
+        'a: 'b,
+        'b: 'c,
+    {
         if std::any::TypeId::of::<E::BaseField>()
             != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
         {
             panic!("GPU backend only supports Goldilocks base field");
         }
-        assert_eq!(num_fanin, 2, "tower prover currently assumes fan-in = 2");
-        // println!("prod_specs: {}", prod_specs.len());
-        // println!("logup_specs: {}", logup_specs.len());
 
-        // Calculate r_set_len directly from constraint system, not from out_evals
+        // First build tower witness (optimized - only last layer)
+        let (_out_evals, prod_specs, logup_specs) = 
+            self.build_tower_witness(composed_cs, input, records, is_padded, challenges);
+
+        // Calculate r_set_len directly from constraint system
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = composed_cs;
