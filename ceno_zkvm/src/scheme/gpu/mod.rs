@@ -237,9 +237,8 @@ fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
     ),
     String,
 > {
-    use ceno_gpu::gl64::GpuPolynomialExt;
     use crate::scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP};
-    use ceno_gpu::CudaHal as _;
+    use ceno_gpu::{CudaHal as _, gl64::GpuPolynomialExt};
     use p3::field::FieldAlgebra;
     type EGL64 = ff_ext::GoldilocksExt2;
 
@@ -510,6 +509,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         let mut _logup_buffers: Vec<ceno_gpu::gl64::buffer::BufferImpl<EGL64>> = Vec::new();
 
         // Call build_tower_witness_gpu which will allocate buffers and build GPU specs
+        let span = entered_span!("build_tower_witness", profiling_2 = true);
         let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
             composed_cs,
             input,
@@ -521,11 +521,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         )
         .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
         .unwrap();
+        exit_span!(span);
 
         // GPU optimization: Extract out_evals from GPU-built towers before consuming them
         // This is the true optimization - using GPU tower results instead of CPU inference
+        let span = entered_span!("extract_out_evals_from_gpu_towers", profiling_2 = true);
         let (r_out_evals, w_out_evals, lk_out_evals) =
             self.extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
+        exit_span!(span);
 
         // transcript >>> BasicTranscript<GL64^2>
         let basic_tr: &mut BasicTranscript<GoldilocksExt2> =
@@ -536,10 +539,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             logup_specs: logup_gpu,
         };
 
+        let span = entered_span!("prove_tower_relation", profiling_2 = true);
         let (point_gl, proof_gpu) = cuda_hal
             .tower
             .create_proof(&input, basic_tr)
             .expect("gpu tower create_proof failed");
+        exit_span!(span);
 
         // TowerProofs
         let point: Point<E> = unsafe { std::mem::transmute(point_gl) };

@@ -331,11 +331,13 @@ impl<
         // build main witness
         let (records, is_padded) = self.device.build_main_witness(cs, &input, challenges);
 
+        let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
         // (internally calls build_tower_witness)
         let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) = self
             .device
             .prove_tower_relation(cs, &input, &records, is_padded, challenges, transcript);
+        exit_span!(span);
 
         assert_eq!(
             rt_tower.len(), // num var length should equal to max_num_instance
