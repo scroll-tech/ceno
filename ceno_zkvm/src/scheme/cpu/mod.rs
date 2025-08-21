@@ -43,11 +43,18 @@ pub struct CpuTowerProver;
 
 impl CpuTowerProver {
     pub fn create_proof<'a, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+        mut out_evals: Vec<Vec<Vec<E>>>,
         prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
-    ) -> (Point<E>, TowerProofs<E>) {
+    ) -> (
+        Point<E>,
+        TowerProofs<E>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+    ) {
         #[derive(Debug, Clone)]
         enum GroupedMLE<'a, E: ExtensionField> {
             Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
@@ -237,7 +244,10 @@ impl CpuTowerProver {
         }
         let next_rt = out_rt;
 
-        (next_rt, proofs)
+        let lk_out_evals = out_evals.pop().unwrap();
+        let w_out_evals = out_evals.pop().unwrap();
+        let r_out_evals = out_evals.pop().unwrap();
+        (next_rt, proofs, lk_out_evals, w_out_evals, r_out_evals)
     }
 }
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBackend<E, PCS>>
@@ -502,12 +512,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
     )]
     fn prove_tower_relation<'a>(
         &self,
+        _composed_cs: &ComposedConstrainSystem<E>,
+        out_evals: Vec<Vec<Vec<E>>>,
         prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
-    ) -> (Point<E>, TowerProofs<E>) {
-        CpuTowerProver::create_proof(prod_specs, logup_specs, num_fanin, transcript)
+    ) -> (
+        Point<E>,
+        TowerProofs<E>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+    ) {
+        CpuTowerProver::create_proof(out_evals, prod_specs, logup_specs, num_fanin, transcript)
     }
 }
 

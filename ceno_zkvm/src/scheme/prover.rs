@@ -332,18 +332,20 @@ impl<
         let (records, is_padded) = self.device.build_main_witness(cs, &input, challenges);
 
         // build tower witness
-        let (mut out_evals, prod_specs, lookup_specs) = self
+        let (out_evals, prod_specs, lookup_specs) = self
             .device
             .build_tower_witness(cs, &input, &records, is_padded, challenges);
 
-        let lk_out_evals = out_evals.pop().unwrap();
-        let w_out_evals = out_evals.pop().unwrap();
-        let r_out_evals = out_evals.pop().unwrap();
-
         // prove the product and logup sum relation between layers in tower
-        let (rt_tower, tower_proof) =
-            self.device
-                .prove_tower_relation(prod_specs, lookup_specs, NUM_FANIN_LOGUP, transcript);
+        let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
+            self.device.prove_tower_relation(
+                cs,
+                out_evals,
+                prod_specs,
+                lookup_specs,
+                NUM_FANIN_LOGUP,
+                transcript,
+            );
 
         assert_eq!(
             rt_tower.len(), // num var length should equal to max_num_instance

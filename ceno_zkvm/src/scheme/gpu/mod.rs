@@ -82,24 +82,56 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static> TemporaryG
         let inner_cpu = CpuProver::new(cpu_backend);
         Self { gpu, inner_cpu }
     }
-}
 
-impl GpuTowerProver {
-    pub fn create_proof<'a, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-        prod_specs: Vec<TowerProverSpec<'a, GpuBackend<E, PCS>>>,
-        logup_specs: Vec<TowerProverSpec<'a, GpuBackend<E, PCS>>>,
-        num_fanin: usize,
-        transcript: &mut impl Transcript<E>,
-    ) -> (Point<E>, TowerProofs<E>) {
-        let prod_specs_cpu: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>> = prod_specs
-            .into_iter()
-            .map(|s| TowerProverSpec { witness: s.witness })
-            .collect();
-        let logup_specs_cpu: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>> = logup_specs
-            .into_iter()
-            .map(|s| TowerProverSpec { witness: s.witness })
-            .collect();
-        CpuTowerProver::create_proof(prod_specs_cpu, logup_specs_cpu, num_fanin, transcript)
+    // Extract out_evals from GPU-built tower witnesses
+    // This is the true GPU optimization - directly using GPU tower results
+    fn extract_out_evals_from_gpu_towers(
+        &self,
+        prod_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built product towers
+        logup_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built logup towers
+        r_set_len: usize,
+    ) -> (Vec<Vec<E>>, Vec<Vec<E>>, Vec<Vec<E>>) {
+        // Extract product out_evals from GPU towers
+        let mut r_out_evals = Vec::new();
+        let mut w_out_evals = Vec::new();
+        for (i, gpu_spec) in prod_gpu.iter().enumerate() {
+            let first_layer_evals: Vec<E> = gpu_spec
+                .get_final_evals(0)
+                .expect("Failed to extract final evals from GPU product tower");
+
+            // Product tower first layer should have 2 MLEs
+            assert_eq!(
+                first_layer_evals.len(),
+                2,
+                "Product tower first layer should have 2 MLEs"
+            );
+
+            // Split into r_out_evals and w_out_evals based on r_set_len
+            if i < r_set_len {
+                r_out_evals.push(first_layer_evals);
+            } else {
+                w_out_evals.push(first_layer_evals);
+            }
+        }
+
+        // Extract logup out_evals from GPU towers
+        let mut lk_out_evals = Vec::new();
+        for (i, gpu_spec) in logup_gpu.iter().enumerate() {
+            let first_layer_evals: Vec<E> = gpu_spec
+                .get_final_evals(0)
+                .expect("Failed to extract final evals from GPU logup tower");
+
+            // Logup tower first layer should have 4 MLEs
+            assert_eq!(
+                first_layer_evals.len(),
+                4,
+                "Logup tower first layer should have 4 MLEs"
+            );
+
+            lk_out_evals.push(first_layer_evals);
+        }
+
+        (r_out_evals, w_out_evals, lk_out_evals)
     }
 }
 
@@ -206,7 +238,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, GpuBackend<E, PCS>>,
         records: &'c [ArcMultilinearExtension<'b, E>],
-        is_padded: bool,
+        _is_padded: bool,
         challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
@@ -217,25 +249,113 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         'a: 'b,
         'b: 'c,
     {
-        let cpu_input: &ProofInput<'a, CpuBackend<E, PCS>> = unsafe {
-            &*(input as *const ProofInput<'a, GpuBackend<E, PCS>>
-                as *const ProofInput<'a, CpuBackend<E, PCS>>)
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        } = composed_cs;
+        let num_instances_with_rotation =
+            input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
+        let chip_record_alpha = challenges[0];
+
+        // Parse records into different categories
+        let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+        let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+        let mut offset = 0;
+        let r_set_wit = &records[offset..][..num_reads];
+        assert_eq!(r_set_wit.len(), num_reads);
+        offset += num_reads;
+        let w_set_wit = &records[offset..][..num_writes];
+        assert_eq!(w_set_wit.len(), num_writes);
+        offset += num_writes;
+        let lk_n_wit = &records[offset..][..cs.lk_table_expressions.len()];
+        offset += cs.lk_table_expressions.len();
+        let lk_d_wit = if !cs.lk_table_expressions.is_empty() {
+            &records[offset..][..cs.lk_table_expressions.len()]
+        } else {
+            &records[offset..][..cs.lk_expressions.len()]
         };
-        let (out_evals, prod_specs_cpu, logup_specs_cpu) = self.inner_cpu.build_tower_witness(
-            composed_cs,
-            cpu_input,
-            records,
-            is_padded,
-            challenges,
-        );
-        let prod_specs = prod_specs_cpu
+
+        // GPU optimization: build the same tower structure as CPU but only keep the last layer
+        use crate::scheme::{
+            constants::{NUM_FANIN, NUM_FANIN_LOGUP},
+            utils::{
+                infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
+            },
+        };
+        use multilinear_extensions::mle::IntoMLE;
+
+        // Build last layer chunks exactly like CPU version
+        let mut r_set_last_layer = r_set_wit
+            .iter()
+            .chain(w_set_wit.iter())
+            .map(|wit| {
+                masked_mle_split_to_chunks(wit, num_instances_with_rotation, NUM_FANIN, E::ONE)
+            })
+            .collect::<Vec<_>>();
+        let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
+
+        let mut lk_numerator_last_layer = lk_n_wit
+            .iter()
+            .chain(lk_d_wit.iter())
+            .enumerate()
+            .map(|(i, wit)| {
+                let default = if i < lk_n_wit.len() {
+                    E::ONE
+                } else {
+                    chip_record_alpha
+                };
+                masked_mle_split_to_chunks(
+                    wit,
+                    num_instances_with_rotation,
+                    NUM_FANIN_LOGUP,
+                    default,
+                )
+            })
+            .collect::<Vec<_>>();
+        let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
+
+        // GPU optimization: only store the last layer since GPU prove_tower_relation
+        // builds the full tower on-demand using cuda_hal.tower.build_prod_tower()
+        let prod_specs: Vec<TowerProverSpec<GpuBackend<E, PCS>>> = r_set_last_layer
             .into_iter()
-            .map(|s| TowerProverSpec { witness: s.witness })
+            .chain(w_set_last_layer)
+            .map(|last_layer| TowerProverSpec {
+                witness: vec![last_layer], // Only store the last layer!
+            })
             .collect();
-        let logup_specs = logup_specs_cpu
-            .into_iter()
-            .map(|s| TowerProverSpec { witness: s.witness })
-            .collect();
+
+        // GPU optimization: only store the last layer for logup specs too
+        let logup_specs: Vec<TowerProverSpec<GpuBackend<E, PCS>>> =
+            if !lk_numerator_last_layer.is_empty() {
+                lk_numerator_last_layer
+                    .into_iter()
+                    .zip(lk_denominator_last_layer)
+                    .map(|(lk_n, lk_d)| {
+                        // Combine lk_n and lk_d into [p1, p2, q1, q2] format for the last layer
+                        let mut last_layer = lk_n;
+                        last_layer.extend(lk_d);
+                        TowerProverSpec {
+                            witness: vec![last_layer], // Only store the last layer!
+                        }
+                    })
+                    .collect()
+            } else {
+                lk_denominator_last_layer
+                    .into_iter()
+                    .map(|lk_d| {
+                        // Create [1, 1, q1, q2] format for the last layer
+                        let mut last_layer = vec![
+                            vec![E::ONE; 1 << lk_d[0].num_vars()].into_mle(),
+                            vec![E::ONE; 1 << lk_d[0].num_vars()].into_mle(),
+                        ];
+                        last_layer.extend(lk_d);
+                        TowerProverSpec {
+                            witness: vec![last_layer], // Only store the last layer!
+                        }
+                    })
+                    .collect()
+            };
+
+        let out_evals = vec![]; // gpu: not used
         (out_evals, prod_specs, logup_specs)
     }
 
@@ -247,20 +367,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
     )]
     fn prove_tower_relation<'a>(
         &self,
+        composed_cs: &ComposedConstrainSystem<E>,
+        mut _out_evals: Vec<Vec<Vec<E>>>,
         prod_specs: Vec<TowerProverSpec<'a, GpuBackend<E, PCS>>>,
         logup_specs: Vec<TowerProverSpec<'a, GpuBackend<E, PCS>>>,
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
-    ) -> (Point<E>, TowerProofs<E>) {
+    ) -> (
+        Point<E>,
+        TowerProofs<E>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+    ) {
         if std::any::TypeId::of::<E::BaseField>()
             != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
         {
             panic!("GPU backend only supports Goldilocks base field");
         }
-
         assert_eq!(num_fanin, 2, "tower prover currently assumes fan-in = 2");
-        println!("prod_specs: {}", prod_specs.len());
-        println!("logup_specs: {}", logup_specs.len());
+        // println!("prod_specs: {}", prod_specs.len());
+        // println!("logup_specs: {}", logup_specs.len());
+
+        // Calculate r_set_len directly from constraint system, not from out_evals
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs, ..
+        } = composed_cs;
+        let r_set_len = cs.r_expressions.len() + cs.r_table_expressions.len();
 
         // cuda hal
         let device = CUDA_DEVICE
@@ -349,6 +482,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         let basic_tr: &mut BasicTranscript<GoldilocksExt2> =
             unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GoldilocksExt2>) };
 
+        // GPU optimization: Extract out_evals from GPU-built towers before consuming them
+        // This is the true optimization - using GPU tower results instead of CPU inference
+        let (r_out_evals, w_out_evals, lk_out_evals) =
+            self.extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
+
         let input = ceno_gpu::TowerInput {
             prod_specs: prod_gpu,
             logup_specs: logup_gpu,
@@ -362,7 +500,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         // TowerProofs
         let point: Point<E> = unsafe { std::mem::transmute(point_gl) };
         let proof: TowerProofs<E> = unsafe { std::mem::transmute(proof_gpu) };
-        (point, proof)
+
+        (point, proof, lk_out_evals, w_out_evals, r_out_evals)
     }
 }
 

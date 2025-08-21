@@ -84,11 +84,19 @@ pub trait TowerProver<PB: ProverBackend> {
     // the validity of value of last layer in the tower tree through sumchecks
     fn prove_tower_relation<'a>(
         &self,
+        composed_cs: &ComposedConstrainSystem<PB::E>,
+        out_evals: Vec<Vec<Vec<PB::E>>>,
         prod_specs: Vec<TowerProverSpec<'a, PB>>,
         logup_specs: Vec<TowerProverSpec<'a, PB>>,
         num_fanin: usize,
         transcript: &mut impl Transcript<PB::E>,
-    ) -> (Point<PB::E>, TowerProofs<PB::E>);
+    ) -> (
+        Point<PB::E>,
+        TowerProofs<PB::E>,
+        Vec<Vec<PB::E>>,
+        Vec<Vec<PB::E>>,
+        Vec<Vec<PB::E>>,
+    );
 }
 
 pub struct MainSumcheckEvals<E: ExtensionField> {
