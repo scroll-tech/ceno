@@ -61,10 +61,12 @@ impl Display for Platform {
 pub const CENO_PLATFORM: Platform = Platform {
     rom: 0x2000_0000..0x2800_0000, // 128 MB
     prog_data: BTreeSet::new(),
-    stack: 0xB0000000..0xC0000000, // stack grows downward
-    heap: 0x8000_0000..0xFFFF_0000,
-    public_io: 0x3000_0000..0x3004_0000,
-    hints: 0x4000_0000..0x5000_0000, // 256 MB
+    stack: 0x2800_0000..0x3000_0000,     // stack grows downward 128MB, 0x4000 reserve for debug io
+    heap: 0x4000_0000..0x6000_0000,      // heap grows upward
+    public_io: 0x2000_0000..0x2800_0000, // 128 MB
+    // we make hints start from 0x3800_0000 thus reserve a 128MB gap for debug io
+    // at the end of stack
+    hints: 0x3000_0000..0x3800_0000, // 128 MB
     unsafe_ecall_nop: false,
     is_debug: false,
 };
