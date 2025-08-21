@@ -52,6 +52,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Cp
         out_point: &multilinear_extensions::mle::Point<E>,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> crate::gkr::layer::sumcheck_layer::LayerProof<E> {
+        println!("[CPU] LinearLayerProver::prove()");
         let evals: Vec<_> = wit
             .into_par_iter()
             .map(|base| base.evaluate(out_point))
@@ -80,6 +81,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> LayerProof<<CpuBackend<E, PCS> as ProverBackend>::E> {
+        println!("[CPU] SumcheckLayerProver::prove()");
         let builder = VirtualPolynomialsBuilder::new_with_mles(
             num_threads,
             max_num_variables,
@@ -118,6 +120,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         LayerProof<<CpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<CpuBackend<E, PCS> as ProverBackend>::E>,
     ) {
+        println!("[CPU] ZerocheckLayerProver::prove()");
         assert_eq!(challenges.len(), 2);
         assert_eq!(
             layer.out_sel_and_eval_exprs.len(),

@@ -4,24 +4,29 @@ use super::hal::{
 use crate::{
     error::ZKVMError,
     scheme::hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
-    structs::{ComposedConstrainSystem, TowerProofs},
+    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::{
-    gkr::GKRProof,
+    gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     gpu::{GpuBackend, GpuProver},
     hal::ProverBackend,
 };
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    mle::{ArcMultilinearExtension, MultilinearExtension},
+    Expression, Instance, WitnessId,
+    mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
+    virtual_poly::build_eq_x_r_vec,
+    virtual_polys::VirtualPolynomialsBuilder,
 };
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::IOPProverMessage,
+    structs::{IOPProverMessage, IOPProverState},
+    util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
@@ -605,18 +610,101 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         ),
         ZKVMError,
     > {
-        let cpu_input: &ProofInput<'a, CpuBackend<E, PCS>> = unsafe {
-            &*(input as *const ProofInput<'a, GpuBackend<E, PCS>>
-                as *const ProofInput<'a, CpuBackend<E, PCS>>)
-        };
-        self.inner_cpu.prove_main_constraints(
-            rt_tower,
-            vec![],
-            cpu_input,
-            composed_cs,
-            challenges,
-            transcript,
-        )
+        println!("[GPU] prove_main_constraints");
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit,
+        } = composed_cs;
+
+        let num_instances = input.num_instances;
+        let next_pow2_instances = next_pow2_instance_padding(num_instances);
+        let log2_num_instances = ceil_log2(next_pow2_instances);
+        let num_threads = optimal_sumcheck_threads(log2_num_instances);
+        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+
+        if let Some(gkr_circuit) = gkr_circuit {
+            let pub_io_evals = // get public io evaluations
+                cs.instance_name_map
+                    .keys()
+                    .sorted()
+                    .map(|Instance(inst_id)| {
+                        let mle = &input.public_input[*inst_id];
+                        assert_eq!(
+                            mle.evaluations.len(),
+                            1,
+                            "doesnt support instance with evaluation length > 1"
+                        );
+                        match mle.evaluations() {
+                            FieldType::Base(smart_slice) => E::from(smart_slice[0]),
+                            FieldType::Ext(smart_slice) => smart_slice[0],
+                            _ => unreachable!(),
+                        }
+                    })
+                    .collect_vec();
+            let GKRProverOutput {
+                gkr_proof,
+                opening_evaluations,
+            } = gkr_circuit.prove::<GpuBackend<E, PCS>, GpuProver<_>>(
+                num_threads,
+                num_var_with_rotation,
+                gkr::GKRCircuitWitness {
+                    layers: vec![LayerWitness(
+                        chain!(&input.witness, &input.structural_witness, &input.fixed)
+                            .cloned()
+                            .collect_vec(),
+                    )],
+                },
+                // eval value doesnt matter as it wont be used by prover
+                &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
+                &pub_io_evals,
+                challenges,
+                transcript,
+                num_instances,
+            )?;
+            Ok((
+                opening_evaluations[0].point.clone(),
+                MainSumcheckEvals {
+                    wits_in_evals: opening_evaluations
+                        .iter()
+                        .take(cs.num_witin as usize)
+                        .map(|Evaluation { value, .. }| value)
+                        .copied()
+                        .collect_vec(),
+                    fixed_in_evals: opening_evaluations
+                        .iter()
+                        .skip((cs.num_witin + cs.num_structural_witin) as usize)
+                        .take(cs.num_fixed)
+                        .map(|Evaluation { value, .. }| value)
+                        .copied()
+                        .collect_vec(),
+                },
+                None,
+                Some(gkr_proof),
+            ))
+        } else {
+            let span = entered_span!("fixed::evals + witin::evals");
+            // In table proof, we always skip same point sumcheck for now
+            // as tower sumcheck batch product argument/logup in same length
+            let mut evals = input
+                .witness
+                .par_iter()
+                .chain(input.fixed.par_iter())
+                .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
+                .collect::<Vec<_>>();
+            let fixed_in_evals = evals.split_off(input.witness.len());
+            let wits_in_evals = evals;
+            exit_span!(span);
+
+            Ok((
+                rt_tower,
+                MainSumcheckEvals {
+                    wits_in_evals,
+                    fixed_in_evals,
+                },
+                None,
+                None,
+            ))
+        }
     }
 }
 
