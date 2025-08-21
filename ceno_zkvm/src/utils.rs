@@ -178,3 +178,38 @@ pub fn print_allocated_bytes() {
     let allocated = stats::allocated::read().unwrap();
     tracing::info!("jemalloc total allocated bytes: {}", allocated);
 }
+
+#[cfg(test)]
+mod tests {
+    use std::iter;
+
+    use ff_ext::GoldilocksExt2;
+    use p3::field::FieldAlgebra;
+
+    use super::*;
+
+    type E = GoldilocksExt2;
+    use multilinear_extensions::mle::MultilinearExtension;
+
+    #[test]
+    fn test_eval_stacked_wellform_address_vec() {
+        let r = vec![
+            E::from_canonical_usize(123),
+            E::from_canonical_usize(456),
+            E::from_canonical_usize(789),
+            E::from_canonical_usize(3210),
+            E::from_canonical_usize(9876),
+        ];
+        for n in 2..=r.len() {
+            let v = iter::once(E::ZERO)
+                .chain((0..n).flat_map(|i| (0..(1 << i)).map(|j| E::from_canonical_usize(j))))
+                .collect::<Vec<E>>();
+            let poly: MultilinearExtension<'_, E> =
+                MultilinearExtension::from_evaluations_ext_vec(n + 1, v);
+            assert_eq!(
+                eval_stacked_wellform_address_vec(&r[0..n]),
+                poly.evaluate(&r[0..n])
+            )
+        }
+    }
+}
