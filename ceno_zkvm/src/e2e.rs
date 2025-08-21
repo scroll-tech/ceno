@@ -327,12 +327,12 @@ fn setup_platform_inner(
 
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
 
-    // let stack = if preset.is_debug {
-    //     (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end - 0x4000)
-    // } else {
-    //     // remove extra space for io for non-debug mode
-    //     (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end - 0x4000)
-    // };
+    let stack = if preset.is_debug {
+        (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end)
+    } else {
+        // remove extra space for io for non-debug mode
+        (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end - 0x4000)
+    };
 
     let heap = {
         // Detect heap as starting after program data.
@@ -353,7 +353,7 @@ fn setup_platform_inner(
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
         prog_data,
-        // stack,
+        stack,
         heap,
         public_io: preset.public_io.start..preset.public_io.start + pub_io_size.next_power_of_two(),
         ..preset
