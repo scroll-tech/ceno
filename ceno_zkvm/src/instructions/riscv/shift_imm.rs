@@ -33,15 +33,18 @@ mod test {
     use ff_ext::{ExtensionField, GoldilocksExt2};
 
     use super::{ShiftImmInstruction, SlliOp, SraiOp, SrliOp};
+    #[cfg(not(feature = "u16limb_circuit"))]
+    use crate::instructions::riscv::constants::UInt;
+    #[cfg(feature = "u16limb_circuit")]
+    use crate::instructions::riscv::constants::UInt8;
+    #[cfg(feature = "u16limb_circuit")]
+    use crate::utils::split_to_u8;
     use crate::{
+        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{
-            Instruction,
-            riscv::{RIVInstruction, constants::UInt8},
-        },
+        instructions::{Instruction, riscv::RIVInstruction},
         scheme::mock_prover::{MOCK_PC_START, MockProver},
         structs::ProgramParams,
-        utils::split_to_u8,
     };
     #[cfg(feature = "u16limb_circuit")]
     use ff_ext::BabyBearExt4;
@@ -52,7 +55,6 @@ mod test {
             // imm = 3
             ("32 << 3", 32, 3, 32 << 3),
             ("33 << 3", 33, 3, 33 << 3),
-
             // imm = 31
             ("32 << 31", 32, 31, 32 << 31),
             ("33 << 31", 33, 31, 33 << 31),
@@ -73,7 +75,6 @@ mod test {
             ("33 >> 3", 33, 3, 33 >> 3),
             ("32 >> 31", 32, 31, 32 >> 31),
             ("33 >> 31", 33, 31, 33 >> 31),
-
             // negative rs1
             ("-32 >> 3", (-32_i32) as u32, 3, (-32_i32 >> 3) as u32),
             ("-33 >> 3", (-33_i32) as u32, 3, (-33_i32 >> 3) as u32),
@@ -94,11 +95,9 @@ mod test {
             // imm = 3
             ("32 >> 3", 32, 3, 32 >> 3),
             ("33 >> 3", 33, 3, 33 >> 3),
-
             // imm = 31
             ("32 >> 31", 32, 31, 32 >> 31),
             ("33 >> 31", 33, 31, 33 >> 31),
-
             // rs1 top bit is 1
             ("-32 >> 3", (-32_i32) as u32, 3, ((-32_i32) as u32) >> 3),
         ];
@@ -157,6 +156,13 @@ mod test {
             .require_equal(
                 || format!("{prefix}_({name})_assert_rd_written"),
                 &mut cb,
+                #[cfg(not(feature = "u16limb_circuit"))]
+                &UInt::from_const_unchecked(
+                    Value::new_unchecked(expected_rd_written)
+                        .as_u16_limbs()
+                        .to_vec(),
+                ),
+                #[cfg(feature = "u16limb_circuit")]
                 &UInt8::from_const_unchecked(split_to_u8::<u8>(expected_rd_written)),
             )
             .unwrap();

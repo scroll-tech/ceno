@@ -29,6 +29,7 @@ pub fn split_to_u8<T: From<u8>>(value: u32) -> Vec<T> {
         .collect_vec()
 }
 
+#[allow(dead_code)]
 pub fn split_to_limb<T: From<u8>, const LIMB_BITS: usize>(value: u32) -> Vec<T> {
     (0..(u32::BITS as usize / LIMB_BITS))
         .scan(value, |acc, _| {

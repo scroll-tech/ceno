@@ -35,15 +35,19 @@ mod tests {
     use ff_ext::{ExtensionField, GoldilocksExt2};
 
     use super::{ShiftLogicalInstruction, SllOp, SraOp, SrlOp};
+    #[cfg(feature = "u16limb_circuit")]
+    use crate::instructions::riscv::constants::UInt8;
+    #[cfg(feature = "u16limb_circuit")]
+    use crate::utils::split_to_u8;
     use crate::{
+        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{
             Instruction,
-            riscv::{RIVInstruction, constants::UInt8},
+            riscv::{RIVInstruction, constants::UInt},
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
         structs::ProgramParams,
-        utils::split_to_u8,
     };
     #[cfg(feature = "u16limb_circuit")]
     use ff_ext::BabyBearExt4;
@@ -156,6 +160,13 @@ mod tests {
             .require_equal(
                 || format!("{prefix}_({name})_assert_rd_written"),
                 &mut cb,
+                #[cfg(not(feature = "u16limb_circuit"))]
+                &UInt::from_const_unchecked(
+                    Value::new_unchecked(expected_rd_written)
+                        .as_u16_limbs()
+                        .to_vec(),
+                ),
+                #[cfg(feature = "u16limb_circuit")]
                 &UInt8::from_const_unchecked(split_to_u8::<u8>(expected_rd_written)),
             )
             .unwrap();
