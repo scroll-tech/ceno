@@ -17,6 +17,35 @@ use ceno_gpu::BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu;
 #[cfg(feature = "gpu")]
 use ceno_gpu::gl64::buffer::BufferImpl;
 
+#[cfg(feature = "gpu")]
+pub mod gpu_prover {
+    use once_cell::sync::Lazy;
+    use std::sync::{Arc, Mutex};
+
+    use ceno_gpu::gl64::CudaHalGL64;
+    pub use ceno_gpu::gl64::convert_ceno_to_gpu_basefold_commitment;
+    use cudarc::driver::{CudaDevice, DriverError};
+
+    pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> =
+        Lazy::new(|| CudaDevice::new(0));
+
+    pub static CUDA_HAL: Lazy<
+        Result<Arc<Mutex<CudaHalGL64>>, Box<dyn std::error::Error + Send + Sync>>,
+    > = Lazy::new(|| {
+        let device = CUDA_DEVICE
+            .as_ref()
+            .map_err(|e| format!("Device init failed: {:?}", e))?;
+        device.bind_to_thread()?;
+
+        CudaHalGL64::new()
+            .map(|hal| Arc::new(Mutex::new(hal)))
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    });
+}
+
+#[cfg(feature = "gpu")]
+pub use gpu_prover::*;
+
 pub struct GpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: <PCS as PolynomialCommitmentScheme<E>>::ProverParam,
     pub vp: <PCS as PolynomialCommitmentScheme<E>>::VerifierParam,

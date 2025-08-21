@@ -29,6 +29,10 @@ thread_local.workspace = true
 tracing.workspace = true
 transcript.workspace = true
 witness.workspace = true
+tracing-forest.workspace = true
+tracing-subscriber.workspace = true
+once_cell = "1.21.3"
+cudarc = { version = "0.13.0", features = ["driver", "cuda-version-from-build-system"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
@@ -38,5 +42,6 @@ tikv-jemallocator = { version = "0.6", optional = true }
 criterion.workspace = true
 
 [features]
-gpu = ["dep:ceno_gpu"]
+default = []
+gpu = ["dep:ceno_gpu", "dep:cudarc"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
