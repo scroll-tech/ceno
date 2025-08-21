@@ -2,7 +2,7 @@ MEMORY
 {
     ROM           (rx) : ORIGIN = 0x10000000, LENGTH = 256M
     STACK_PUBIO   (rw) : ORIGIN = 0x20000000, LENGTH = 256M  /* PUBIO first 128M, Stack second 128M */
-    HINTS         (r)  : ORIGIN = 0x30000000, LENGTH = 128M  /* will shift hint to 0x38000000 with 128M to reserve gap*/
+    HINTS         (r)  : ORIGIN = 0x30000000, LENGTH = 256M  /* will shift hint to 0x38000000 with 128M to reserve gap*/
     RAM           (rw) : ORIGIN = 0x40000000, LENGTH = 512M   /* heap/data/bss */
 }
 

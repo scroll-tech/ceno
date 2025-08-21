@@ -1,7 +1,9 @@
 
-_hints_start = ORIGIN(REGION_HINTS);
+/* start to use hint from 0x3800_0000 */
+_hints_start = ORIGIN(REGION_HINTS) + 128M;
 _hints_length = 128M;
-_lengths_of_hints_start = ORIGIN(REGION_HINTS);
+_lengths_of_hints_start = ORIGIN(REGION_HINTS) + 128M;
+
 _lengths_of_pubio_start = ORIGIN(REGION_PUBIO);
 _pubio_start  = ORIGIN(REGION_PUBIO);             /* 0x20000000 */
 _pubio_end    = ORIGIN(REGION_PUBIO) + 128M;      /* PUBIO grows upward */

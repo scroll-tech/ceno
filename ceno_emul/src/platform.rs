@@ -66,7 +66,7 @@ pub const CENO_PLATFORM: Platform = Platform {
     public_io: 0x2000_0000..0x2800_0000, // 128 MB
     // we make hints start from 0x3800_0000 thus reserve a 128MB gap for debug io
     // at the end of stack
-    hints: 0x3000_0000..0x3800_0000, // 128 MB
+    hints: 0x3800_0000..0x4000_0000, // 128 MB
     unsafe_ecall_nop: false,
     is_debug: false,
 };
