@@ -35,17 +35,17 @@ mod tests {
     use ff_ext::{ExtensionField, GoldilocksExt2};
 
     use super::{ShiftLogicalInstruction, SllOp, SraOp, SrlOp};
+    #[cfg(not(feature = "u16limb_circuit"))]
+    use crate::Value;
+    #[cfg(not(feature = "u16limb_circuit"))]
+    use crate::instructions::riscv::constants::UInt;
     #[cfg(feature = "u16limb_circuit")]
     use crate::instructions::riscv::constants::UInt8;
     #[cfg(feature = "u16limb_circuit")]
     use crate::utils::split_to_u8;
     use crate::{
-        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{
-            Instruction,
-            riscv::{RIVInstruction, constants::UInt},
-        },
+        instructions::{Instruction, riscv::RIVInstruction},
         scheme::mock_prover::{MOCK_PC_START, MockProver},
         structs::ProgramParams,
     };
