@@ -10,6 +10,15 @@ pub use gkr_iop::utils::i64_to_base;
 use itertools::Itertools;
 use p3::field::Field;
 
+#[cfg(feature = "u16limb_circuit")]
+use crate::instructions::riscv::constants::UINT_LIMBS;
+#[cfg(feature = "u16limb_circuit")]
+use multilinear_extensions::Expression;
+#[cfg(feature = "u16limb_circuit")]
+use multilinear_extensions::ToExpr;
+#[cfg(feature = "u16limb_circuit")]
+use p3::field::FieldAlgebra;
+
 pub fn split_to_u8<T: From<u8>>(value: u32) -> Vec<T> {
     (0..(u32::BITS / 8))
         .scan(value, |acc, _| {
@@ -126,6 +135,35 @@ where
     panic::set_hook(original_hook);
 
     result
+}
+
+#[cfg(feature = "u16limb_circuit")]
+pub fn imm_sign_extend_circuit<E: ExtensionField>(
+    require_signed: bool,
+    is_signed: Expression<E>,
+    imm: Expression<E>,
+) -> [Expression<E>; UINT_LIMBS] {
+    if !require_signed {
+        [imm, E::BaseField::ZERO.expr()]
+    } else {
+        [
+            imm,
+            is_signed * E::BaseField::from_canonical_u16(0xffff).expr(),
+        ]
+    }
+}
+
+#[cfg(feature = "u16limb_circuit")]
+#[inline(always)]
+pub fn imm_sign_extend(is_signed_extension: bool, imm: i16) -> [u16; UINT_LIMBS] {
+    #[allow(clippy::if_same_then_else)]
+    if !is_signed_extension {
+        [imm as u16, 0]
+    } else if imm >= 0 {
+        [imm as u16, 0u16]
+    } else {
+        [imm as u16, 0xffff]
+    }
 }
 
 #[cfg(all(feature = "jemalloc", unix, not(test)))]

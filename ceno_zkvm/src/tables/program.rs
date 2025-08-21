@@ -1,9 +1,8 @@
-use std::{collections::HashMap, marker::PhantomData};
-
 use super::RMMCollections;
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     error::ZKVMError,
+    instructions::riscv::constants::LIMB_BITS,
     structs::{ProgramParams, ROMType},
     tables::TableCircuit,
 };
@@ -16,18 +15,34 @@ use itertools::Itertools;
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use std::{collections::HashMap, marker::PhantomData};
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
+
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
+#[cfg(not(feature = "u16limb_circuit"))]
 #[derive(Clone, Debug)]
 pub struct InsnRecord<T>([T; 6]);
+#[cfg(feature = "u16limb_circuit")]
+#[derive(Clone, Debug)]
+pub struct InsnRecord<T>([T; 7]);
 
 impl<T> InsnRecord<T> {
+    #[cfg(not(feature = "u16limb_circuit"))]
     pub fn new(pc: T, kind: T, rd: Option<T>, rs1: T, rs2: T, imm_internal: T) -> Self
     where
         T: From<u32>,
     {
         let rd = rd.unwrap_or_else(|| T::from(Instruction::RD_NULL));
         InsnRecord([pc, kind, rd, rs1, rs2, imm_internal])
+    }
+
+    #[cfg(feature = "u16limb_circuit")]
+    pub fn new(pc: T, kind: T, rd: Option<T>, rs1: T, rs2: T, imm_internal: T, imm_sign: T) -> Self
+    where
+        T: From<u32>,
+    {
+        let rd = rd.unwrap_or_else(|| T::from(Instruction::RD_NULL));
+        InsnRecord([pc, kind, rd, rs1, rs2, imm_internal, imm_sign])
     }
 
     pub fn as_slice(&self) -> &[T] {
@@ -37,18 +52,34 @@ impl<T> InsnRecord<T> {
 
 impl<F: SmallField> InsnRecord<F> {
     fn from_decoded(pc: u32, insn: &Instruction) -> Self {
-        InsnRecord([
-            (pc as u64).into_f(),
-            (insn.kind as u64).into_f(),
-            (insn.rd_internal() as u64).into_f(),
-            (insn.rs1_or_zero() as u64).into_f(),
-            (insn.rs2_or_zero() as u64).into_f(),
-            i64_to_base(InsnRecord::imm_internal(insn)),
-        ])
+        #[cfg(not(feature = "u16limb_circuit"))]
+        {
+            InsnRecord([
+                (pc as u64).into_f(),
+                (insn.kind as u64).into_f(),
+                (insn.rd_internal() as u64).into_f(),
+                (insn.rs1_or_zero() as u64).into_f(),
+                (insn.rs2_or_zero() as u64).into_f(),
+                InsnRecord::imm_internal(insn).1,
+            ])
+        }
+
+        #[cfg(feature = "u16limb_circuit")]
+        {
+            InsnRecord([
+                (pc as u64).into_f(),
+                (insn.kind as u64).into_f(),
+                (insn.rd_internal() as u64).into_f(),
+                (insn.rs1_or_zero() as u64).into_f(),
+                (insn.rs2_or_zero() as u64).into_f(),
+                InsnRecord::imm_internal(insn).1,
+                InsnRecord::<F>::imm_signed_internal(insn).1,
+            ])
+        }
     }
 }
 
-impl InsnRecord<()> {
+impl<F: SmallField> InsnRecord<F> {
     /// The internal view of the immediate in the program table.
     /// This is encoded in a way that is efficient for circuits, depending on the instruction.
     ///
@@ -56,17 +87,81 @@ impl InsnRecord<()> {
     /// - `as u32` and `as i32` as usual.
     /// - `i64_to_base(imm)` gives the field element going into the program table.
     /// - `as u64` in unsigned cases.
-    pub fn imm_internal(insn: &Instruction) -> i64 {
+    #[cfg(not(feature = "u16limb_circuit"))]
+    pub fn imm_internal(insn: &Instruction) -> (i64, F) {
         match (insn.kind, InsnFormat::from(insn.kind)) {
             // Prepare the immediate for ShiftImmInstruction.
             // The shift is implemented as a multiplication/division by 1 << immediate.
-            (SLLI | SRLI | SRAI, _) => 1 << insn.imm,
+            (SLLI | SRLI | SRAI, _) => (1 << insn.imm, i64_to_base(1 << insn.imm)),
             // Unsigned view.
-            // For example, u32::MAX is `u32::MAX mod p` in the finite field.
-            (_, R | U) | (ADDI | SLTIU | ANDI | XORI | ORI, _) => insn.imm as u32 as i64,
+            // For example, u32::MAX is `u32::MAX mod p` in the finite field
+            (_, R | U) | (ADDI | SLTIU | ANDI | XORI | ORI, _) => {
+                (insn.imm as u32 as i64, i64_to_base(insn.imm as u32 as i64))
+            }
             // Signed view.
             // For example, u32::MAX is `-1 mod p` in the finite field.
-            _ => insn.imm as i64,
+            _ => (insn.imm as i64, i64_to_base(insn.imm as i64)),
+        }
+    }
+
+    #[cfg(feature = "u16limb_circuit")]
+    pub fn imm_internal(insn: &Instruction) -> (i64, F) {
+        match (insn.kind, InsnFormat::from(insn.kind)) {
+            // Prepare the immediate for ShiftImmInstruction.
+            // The shift is implemented as a multiplication/division by 1 << immediate.
+            (SLLI | SRLI | SRAI, _) => (1 << insn.imm, i64_to_base(1 << insn.imm)),
+            // TODO convert to 2 limbs to support smaller field
+            (LB | LH | LW | LBU | LHU | SB | SH | SW, _) => {
+                (insn.imm as i64, i64_to_base(insn.imm as i64))
+            }
+            // logic imm
+            (XORI | ORI | ANDI, _) => (
+                insn.imm as i16 as i64,
+                F::from_canonical_u16(insn.imm as u16),
+            ),
+            // for imm operate with program counter => convert to field value
+            (_, B | J) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
+            // AUIPC
+            (AUIPC, U) => (
+                // riv32 u type lower 12 bits are 0
+                // take all except for least significant limb (8 bit)
+                (insn.imm as u32 >> 8) as i64,
+                F::from_wrapped_u32(insn.imm as u32 >> 8),
+            ),
+            // U type
+            (_, U) => (
+                (insn.imm as u32 >> 12) as i64,
+                F::from_wrapped_u32(insn.imm as u32 >> 12),
+            ),
+            // TODO JALR need to connecting register (2 limb) with pc (1 limb)
+            (JALR, _) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
+            // for default imm to operate with register value
+            _ => (
+                insn.imm as i16 as i64,
+                F::from_canonical_u16(insn.imm as i16 as u16),
+            ),
+        }
+    }
+
+    pub fn imm_signed_internal(insn: &Instruction) -> (i64, F) {
+        match (insn.kind, InsnFormat::from(insn.kind)) {
+            (SLLI | SRLI | SRAI, _) => (false as i64, F::from_bool(false)),
+            // TODO convert to 2 limbs to support smaller field
+            (LB | LH | LW | LBU | LHU | SB | SH | SW, _) => (false as i64, F::from_bool(false)),
+            // logic imm
+            (XORI | ORI | ANDI, _) => (
+                (insn.imm >> LIMB_BITS) as i16 as i64,
+                F::from_canonical_u16((insn.imm >> LIMB_BITS) as u16),
+            ),
+            // Unsigned view.
+            (_, R | U) => (false as i64, F::from_bool(false)),
+            // in particular imm operated with program counter
+            // encode as field element, which do not need extra sign extension of imm
+            (_, B | J) => (false as i64, F::from_bool(false)),
+            // TODO JALR need to connecting register (2 limb) with pc (1 limb)
+            (JALR, _) => (false as i64, F::from_bool(false)),
+            // Signed views
+            _ => ((insn.imm < 0) as i64, F::from_bool(insn.imm < 0)),
         }
     }
 }
@@ -96,6 +191,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<ProgramTableConfig, ZKVMError> {
+        #[cfg(not(feature = "u16limb_circuit"))]
         let record = InsnRecord([
             cb.create_fixed(|| "pc"),
             cb.create_fixed(|| "kind"),
@@ -103,6 +199,17 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             cb.create_fixed(|| "rs1"),
             cb.create_fixed(|| "rs2"),
             cb.create_fixed(|| "imm_internal"),
+        ]);
+
+        #[cfg(feature = "u16limb_circuit")]
+        let record = InsnRecord([
+            cb.create_fixed(|| "pc"),
+            cb.create_fixed(|| "kind"),
+            cb.create_fixed(|| "rd"),
+            cb.create_fixed(|| "rs1"),
+            cb.create_fixed(|| "rs2"),
+            cb.create_fixed(|| "imm_internal"),
+            cb.create_fixed(|| "imm_sign"),
         ]);
 
         let mlt = cb.create_witin(|| "mlt");
