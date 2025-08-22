@@ -101,8 +101,8 @@ pub fn eval_stacked_wellform_address_vec<E: ExtensionField>(r: &[E]) -> E {
     if r.len() < 2 {
         return E::ZERO;
     }
-    eval_stacked_wellform_address_vec(&r[..r.len() - 1]) * r[r.len() - 1]
-        + eval_wellform_address_vec(0, 1, &r[..r.len() - 1], false) * (E::ONE - r[r.len() - 1])
+    eval_stacked_wellform_address_vec(&r[..r.len() - 1]) * (E::ONE - r[r.len() - 1])
+        + eval_wellform_address_vec(0, 1, &r[..r.len() - 1], false) * r[r.len() - 1]
 }
 
 /// Evaluate MLE with the following evaluation over the hypercube:
