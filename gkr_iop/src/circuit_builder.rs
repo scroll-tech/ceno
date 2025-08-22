@@ -777,6 +777,20 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         }
     }
 
+    pub fn assert_dynamic_range<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+        bits: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.lk_record(name_fn, LookupTable::Dynamic, vec![expr, bits])?;
+        Ok(())
+    }
+
     /// Generates U16 lookups to prove that `value` fits on `size < 16` bits.
     /// In general it can be done by two U16 checks: one for `value` and one for
     /// `value << (16 - size)`.
