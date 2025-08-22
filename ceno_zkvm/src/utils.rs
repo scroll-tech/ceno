@@ -155,7 +155,7 @@ where
     // Save the current panic hook
     let original_hook = panic::take_hook();
 
-    // Set the new panic hook
+    // Set the new panic hook0
     panic::set_hook(hook);
 
     let result = f();
@@ -200,15 +200,14 @@ mod tests {
             E::from_canonical_usize(3210),
             E::from_canonical_usize(9876),
         ];
-        for n in 2..=r.len() {
+        for n in 0..r.len() {
             let v = iter::once(E::ZERO)
-                .chain((0..n).flat_map(|i| (0..(1 << i)).map(|j| E::from_canonical_usize(j))))
+                .chain((0..=n).flat_map(|i| (0..(1 << i)).map(|j| E::from_canonical_usize(j))))
                 .collect::<Vec<E>>();
-            let poly: MultilinearExtension<'_, E> =
-                MultilinearExtension::from_evaluations_ext_vec(n + 1, v);
+            let poly = MultilinearExtension::from_evaluations_ext_vec(n + 1, v);
             assert_eq!(
-                eval_stacked_wellform_address_vec(&r[0..n]),
-                poly.evaluate(&r[0..n])
+                eval_stacked_wellform_address_vec(&r[0..=n]),
+                poly.evaluate(&r[0..=n])
             )
         }
     }
