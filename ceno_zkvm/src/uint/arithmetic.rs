@@ -265,6 +265,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder.namespace(name_fn, |cb| {
             for (i, (limb_lhs, limb_rhs)) in self.expr().into_iter().zip_eq(rhs.expr()).enumerate()
             {
+                // skip when both expression are constant
+                if matches!(limb_lhs, Expression::Constant(_)) && matches!(limb_rhs, Expression::Constant(_)){
+                    continue
+                }
                 cb.require_equal(
                     || format!("lhs_limb[{i}] == rhs_limb[{i}]"),
                     limb_lhs,
