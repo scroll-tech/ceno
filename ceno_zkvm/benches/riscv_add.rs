@@ -18,20 +18,18 @@ use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
 
-cfg_if::cfg_if! {
-  if #[cfg(feature = "flamegraph")] {
-    criterion_group! {
-      name = op_add;
-      config = Criterion::default().warm_up_time(Duration::from_millis(3000)).with_profiler(pprof2::criterion::PProfProfiler::new(100, pprof2::criterion::Output::Flamegraph(None)));
-      targets = bench_add
-    }
-  } else {
-    criterion_group! {
-      name = op_add;
-      config = Criterion::default().warm_up_time(Duration::from_millis(3000));
-      targets = bench_add
-    }
-  }
+#[cfg(feature = "flamegraph")]
+criterion_group! {
+    name = op_add;
+    config = Criterion::default().warm_up_time(Duration::from_millis(3000)).with_profiler(pprof2::criterion::PProfProfiler::new(100, pprof2::criterion::Output::Flamegraph(None)));
+    targets = bench_add
+}
+
+#[cfg(not(feature = "flamegraph"))]
+criterion_group! {
+    name = op_add;
+    config = Criterion::default().warm_up_time(Duration::from_millis(3000));
+    targets = bench_add
 }
 
 criterion_main!(op_add);
