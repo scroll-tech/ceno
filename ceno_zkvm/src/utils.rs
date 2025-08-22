@@ -120,8 +120,8 @@ pub fn eval_stacked_constant_vec<E: ExtensionField>(r: &[E]) -> E {
     if r.len() < 2 {
         return E::ZERO;
     }
-    eval_stacked_constant_vec(&r[..r.len() - 1]) * r[r.len() - 1]
-        + E::from_canonical_usize(r.len() - 1) * (E::ONE - r[r.len() - 1])
+    eval_stacked_constant_vec(&r[..r.len() - 1]) * (E::ONE - r[r.len() - 1])
+        + E::from_canonical_usize(r.len() - 1) * r[r.len() - 1]
 }
 
 pub fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
@@ -207,6 +207,31 @@ mod tests {
             let poly = MultilinearExtension::from_evaluations_ext_vec(n + 1, v);
             assert_eq!(
                 eval_stacked_wellform_address_vec(&r[0..=n]),
+                poly.evaluate(&r[0..=n])
+            )
+        }
+    }
+
+    #[test]
+    fn test_eval_stacked_constant_vec() {
+        let r = vec![
+            E::from_canonical_usize(123),
+            E::from_canonical_usize(456),
+            E::from_canonical_usize(789),
+            E::from_canonical_usize(3210),
+            E::from_canonical_usize(9876),
+        ];
+        for n in 0..r.len() {
+            let v = iter::once(E::ZERO)
+                .chain((0..=n).flat_map(|i| {
+                    iter::repeat(i)
+                        .take(1 << i)
+                        .map(|j| E::from_canonical_usize(j))
+                }))
+                .collect::<Vec<E>>();
+            let poly = MultilinearExtension::from_evaluations_ext_vec(n + 1, v);
+            assert_eq!(
+                eval_stacked_constant_vec(&r[0..=n]),
                 poly.evaluate(&r[0..=n])
             )
         }
