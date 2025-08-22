@@ -1,6 +1,8 @@
 use ceno_emul::InsnKind;
 
+#[cfg(not(feature = "u16limb_circuit"))]
 mod div_circuit;
+#[cfg(feature = "u16limb_circuit")]
 mod div_circuit_v2;
 
 use super::RIVInstruction;
@@ -21,7 +23,7 @@ impl RIVInstruction for RemuOp {
 #[cfg(feature = "u16limb_circuit")]
 pub type RemuInstruction<E> = div_circuit_v2::ArithInstruction<E, RemuOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
-pub type DivuInstruction<E> = div_circuit::ArithInstruction<E, RemuOp>;
+pub type RemuInstruction<E> = div_circuit::ArithInstruction<E, RemuOp>;
 
 pub struct RemOp;
 impl RIVInstruction for RemOp {
@@ -30,7 +32,7 @@ impl RIVInstruction for RemOp {
 #[cfg(feature = "u16limb_circuit")]
 pub type RemInstruction<E> = div_circuit_v2::ArithInstruction<E, RemOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
-pub type DivuInstruction<E> = div_circuit::ArithInstruction<E, RemOp>;
+pub type RemInstruction<E> = div_circuit::ArithInstruction<E, RemOp>;
 
 pub struct DivOp;
 impl RIVInstruction for DivOp {
@@ -39,7 +41,7 @@ impl RIVInstruction for DivOp {
 #[cfg(feature = "u16limb_circuit")]
 pub type DivInstruction<E> = div_circuit_v2::ArithInstruction<E, DivOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
-pub type DivuInstruction<E> = div_circuit::ArithInstruction<E, DivOp>;
+pub type DivInstruction<E> = div_circuit::ArithInstruction<E, DivOp>;
 
 #[cfg(test)]
 mod test {

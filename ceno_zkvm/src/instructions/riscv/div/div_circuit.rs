@@ -88,8 +88,8 @@ use std::marker::PhantomData;
 pub struct DivRemConfig<E: ExtensionField> {
     dividend: UInt<E>, // rs1_read
     divisor: UInt<E>,  // rs2_read
-    quotient: UInt<E>,
-    remainder: UInt<E>,
+    pub(super) quotient: UInt<E>,
+    pub(super) remainder: UInt<E>,
 
     internal_config: InternalDivRem<E>,
 
