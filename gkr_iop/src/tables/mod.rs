@@ -12,6 +12,7 @@ pub enum LookupTable {
     U14,         // 2^14 = 16,384
     U16,         // 2^16 = 65,536
     U18,         // 2^18 = 262,144
+    Dynamic,     // Range type for all bits up to 18 bits
     And,         // a & b where a, b are bytes
     Or,          // a | b where a, b are bytes
     Xor,         // a ^ b where a, b are bytes

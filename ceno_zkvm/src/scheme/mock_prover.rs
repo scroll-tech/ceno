@@ -300,6 +300,9 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                         ROMType::U5 | ROMType::U8 | ROMType::U14 | ROMType::U16 | ROMType::U18 => {
                             format!("Element: {key:?}")
                         }
+                        ROMType::Dynamic => {
+                            format!("Dynamic Range Element: {key:?}")
+                        }
                         ROMType::And => {
                             let (a, b) = AndTable::unpack(key);
                             format!("Element: {a} && {b}")
@@ -727,6 +730,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         ROMType::U14 => lkm_from_cs.assert_ux::<14>(args_eval[0][inst_id]),
                         ROMType::U16 => lkm_from_cs.assert_ux::<16>(args_eval[0][inst_id]),
                         ROMType::U18 => lkm_from_cs.assert_ux::<18>(args_eval[0][inst_id]),
+                        ROMType::Dynamic => {
+                            lkm_from_cs
+                                .assert_dynamic_range(args_eval[0][inst_id], args_eval[1][inst_id]);
+                        }
                         ROMType::And => lkm_from_cs
                             .lookup_and_byte(args_eval[0][inst_id], args_eval[1][inst_id]),
                         ROMType::Or => {

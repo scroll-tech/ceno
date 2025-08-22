@@ -192,6 +192,11 @@ impl LkMultiplicity {
         );
     }
 
+    #[inline(always)]
+    pub fn assert_dynamic_range(&mut self, v: u64, bits: u64) {
+        self.increment(LookupTable::Dynamic, (1 << bits) + v);
+    }
+
     /// assert within range
     #[inline(always)]
     pub fn assert_ux_in_u16(&mut self, size: usize, v: u64) {
