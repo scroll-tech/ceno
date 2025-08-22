@@ -1,5 +1,5 @@
 
-/* start to use hint from 0x3800_0000 */
+/* start to use hint with 128MB offset */
 _hints_start = ORIGIN(REGION_HINTS) + 128M;
 _hints_length = 128M;
 _lengths_of_hints_start = ORIGIN(REGION_HINTS) + 128M;

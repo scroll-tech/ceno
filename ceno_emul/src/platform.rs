@@ -89,15 +89,15 @@ impl Display for Platform {
 // │
 // └───────────────────────────── 0x1000_0000 (rom base)
 pub const CENO_PLATFORM: Platform = Platform {
-    rom: 0x2000_0000..0x2800_0000, // 128 MB
-    prog_data: BTreeSet::new(),
-    stack: 0x2800_0000..0x3000_4000, // stack grows downward 128MB, 0x4000 reserved for debug io.
-    heap: 0x4000_0000..0x6000_0000,  // heap grows upward
-    public_io: 0x2000_0000..0x2800_0000, // 128 MB
+    rom: 0x0800_0000..0x1000_0000, // 128 MB
+    public_io: 0x1000_0000..0x1800_0000, // 128 MB
+    stack: 0x1800_0000..0x2000_4000, // stack grows downward 128MB, 0x4000 reserved for debug io.
     // we make hints start from 0x3800_0000 thus reserve a 128MB gap for debug io
     // at the end of stack
-    hints: 0x3800_0000..0x4000_0000, // 128 MB
+    hints: 0x2800_0000..0x3000_0000, // 128 MB
+    heap: 0x3000_0000..0x4000_0000,  // heap grows upward
     unsafe_ecall_nop: false,
+    prog_data: BTreeSet::new(),
     is_debug: false,
 };
 
