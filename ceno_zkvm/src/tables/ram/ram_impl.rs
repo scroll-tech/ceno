@@ -14,7 +14,9 @@ use crate::{
     structs::ProgramParams,
 };
 use ff_ext::FieldInto;
-use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
+use multilinear_extensions::{
+    Expression, Fixed, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
+};
 
 use super::{
     MemInitRecord,
@@ -317,10 +319,12 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         let max_len = DVRAM::max_len(params);
         let addr = cb.create_structural_witin(
             || "addr",
-            max_len,
-            DVRAM::offset_addr(params),
-            WORD_SIZE,
-            DVRAM::DESCENDING,
+            StructuralWitInType::EqualDistanceSequence {
+                max_len,
+                offset: DVRAM::offset_addr(params),
+                multi_factor: WORD_SIZE,
+                descending: DVRAM::DESCENDING,
+            },
         );
 
         let final_v = (0..DVRAM::V_LIMBS)

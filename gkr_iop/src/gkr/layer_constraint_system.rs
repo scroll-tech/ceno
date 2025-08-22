@@ -364,7 +364,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                             Expression::WitIn(fixed_offset + (*fixed_id as WitnessId))
                         },
                         &|id| Expression::WitIn(id),
-                        &|structural_wit_id, _, _, _| {
+                        &|structural_wit_id, _| {
                             Expression::WitIn(structural_witin_offset + structural_wit_id)
                         },
                         &|i| Expression::InstanceScalar(i),

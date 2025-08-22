@@ -11,7 +11,7 @@ use gkr_iop::{
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::Itertools;
-use multilinear_extensions::{ToExpr, WitIn, util::max_usable_threads};
+use multilinear_extensions::{StructuralWitInType, ToExpr, WitIn, util::max_usable_threads};
 use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
@@ -47,7 +47,15 @@ pub trait Instruction<E: ExtensionField> {
         let zero_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
-        let selector = cb.create_structural_witin(|| "selector", 0, 0, 0, false);
+        let selector = cb.create_structural_witin(
+            || "selector",
+            StructuralWitInType::EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        );
         let selector_type = SelectorType::Prefix(E::BaseField::ZERO, selector.expr());
 
         // all shared the same selector

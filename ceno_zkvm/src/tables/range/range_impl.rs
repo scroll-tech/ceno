@@ -10,7 +10,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     structs::ROMType,
 };
-use multilinear_extensions::{StructuralWitIn, ToExpr, WitIn};
+use multilinear_extensions::{StructuralWitIn, StructuralWitInType, ToExpr, WitIn};
 
 #[derive(Clone, Debug)]
 pub struct RangeTableConfig {
@@ -24,7 +24,15 @@ impl RangeTableConfig {
         rom_type: ROMType,
         table_len: usize,
     ) -> Result<Self, CircuitBuilderError> {
-        let range = cb.create_structural_witin(|| "structural range witin", table_len, 0, 1, false);
+        let range = cb.create_structural_witin(
+            || "structural range witin",
+            StructuralWitInType::EqualDistanceSequence {
+                max_len: table_len,
+                offset: 0,
+                multi_factor: 1,
+                descending: false,
+            },
+        );
         let mlt = cb.create_witin(|| "mlt");
 
         let record_exprs = vec![range.expr()];

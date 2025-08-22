@@ -1,6 +1,7 @@
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
-    Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn, WitnessId, rlc_chip_record,
+    Expression, Fixed, Instance, StructuralWitIn, StructuralWitInType, ToExpr, WitIn, WitnessId,
+    rlc_chip_record,
 };
 use serde::de::DeserializeOwned;
 use std::{cmp::Ordering, collections::HashMap, iter::once, marker::PhantomData};
@@ -203,17 +204,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn create_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         n: N,
-        max_len: usize,
-        offset: u32,
-        multi_factor: usize,
-        descending: bool,
+        witin_type: StructuralWitInType,
     ) -> StructuralWitIn {
         let wit_in = StructuralWitIn {
             id: self.num_structural_witin,
-            max_len,
-            offset,
-            multi_factor,
-            descending,
+            witin_type,
         };
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
@@ -513,17 +508,13 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn create_structural_witin<NR, N>(
         &mut self,
         name_fn: N,
-        max_len: usize,
-        offset: u32,
-        multi_factor: usize,
-        descending: bool,
+        witin_type: StructuralWitInType,
     ) -> StructuralWitIn
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs
-            .create_structural_witin(name_fn, max_len, offset, multi_factor, descending)
+        self.cs.create_structural_witin(name_fn, witin_type)
     }
 
     pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Fixed
