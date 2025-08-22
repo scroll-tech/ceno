@@ -14,7 +14,6 @@ anyhow.workspace = true
 ceno_emul = { path = "../ceno_emul" }
 itertools.workspace = true
 rkyv.workspace = true
-substrate-bn.workspace = true
 tiny-keccak.workspace = true
 
 [dev-dependencies]
