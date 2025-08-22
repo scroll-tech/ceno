@@ -262,7 +262,17 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UIntLimbs<M, C, E>,
     ) -> Result<(), CircuitBuilderError> {
-        circuit_builder.require_equal(name_fn, self.value(), rhs.value())
+        circuit_builder.namespace(name_fn, |cb| {
+            for (i, (limb_lhs, limb_rhs)) in self.expr().into_iter().zip_eq(rhs.expr()).enumerate()
+            {
+                cb.require_equal(
+                    || format!("lhs_limb[{i}] == rhs_limb[{i}]"),
+                    limb_lhs,
+                    limb_rhs,
+                )?;
+            }
+            Ok(())
+        })
     }
 
     pub fn is_equal(

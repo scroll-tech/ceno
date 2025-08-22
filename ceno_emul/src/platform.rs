@@ -98,7 +98,10 @@ pub const CENO_PLATFORM: Platform = Platform {
     // we make hints start from 0x2800_0000 thus reserve a 128MB gap for debug io
     // at the end of stack
     hints: 0x2800_0000..0x3000_0000, // 128 MB
-    heap: 0x3000_0000..0x4000_0000,  // heap grows upward, reserved 128 MB for it
+    // heap grows upward, reserved 128 MB for it
+    // the beginning of heap address got bss/sbss data
+    // and the real heap start from 0x3800_0000
+    heap: 0x3000_0000..0x4000_0000,
     unsafe_ecall_nop: false,
     prog_data: BTreeSet::new(),
     is_debug: false,

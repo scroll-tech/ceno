@@ -6,7 +6,10 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{
-            RIVInstruction, constants::UInt, im_insn::IMInstructionConfig, insn_base::MemAddr,
+            RIVInstruction,
+            constants::{MEM_BITS, UInt},
+            im_insn::IMInstructionConfig,
+            insn_base::MemAddr,
         },
     },
     structs::ProgramParams,
@@ -17,7 +20,7 @@ use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::FieldAlgebra;
+use p3::field::{Field, FieldAlgebra};
 use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {
@@ -25,6 +28,7 @@ pub struct LoadConfig<E: ExtensionField> {
 
     rs1_read: UInt<E>,
     imm: WitIn,
+    imm_sign: WitIn,
     memory_addr: MemAddr<E>,
 
     memory_read: UInt<E>,
@@ -47,22 +51,37 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
-        let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
+        let imm = circuit_builder.create_witin(|| "imm"); // signed 16-bit value
+        let imm_sign = circuit_builder.create_witin(|| "imm_sign");
+
         // skip read range check, assuming constraint in write.
         let memory_read = UInt::new_unchecked(|| "memory_read", circuit_builder)?;
 
         let memory_addr = match I::INST_KIND {
-            InsnKind::LW => MemAddr::construct_align4(circuit_builder),
-            InsnKind::LH | InsnKind::LHU => MemAddr::construct_align2(circuit_builder),
-            InsnKind::LB | InsnKind::LBU => MemAddr::construct_unaligned(circuit_builder),
+            InsnKind::LW => MemAddr::construct_with_max_bits(circuit_builder, 2, MEM_BITS),
+            InsnKind::LH | InsnKind::LHU => {
+                MemAddr::construct_with_max_bits(circuit_builder, 1, MEM_BITS)
+            }
+            InsnKind::LB | InsnKind::LBU => {
+                MemAddr::construct_with_max_bits(circuit_builder, 0, MEM_BITS)
+            }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         }?;
 
-        circuit_builder.require_equal(
-            || "memory_addr = rs1_read + imm",
-            memory_addr.expr_unaligned(),
-            rs1_read.value() + imm.expr(),
-        )?;
+        // rs1 + imm = mem_addr
+        let inv = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
+
+        let carry = (rs1_read.expr()[0].expr() + imm.expr()
+            - memory_addr.uint_unaligned().expr()[0].expr())
+            * inv.expr();
+        circuit_builder.assert_bit(|| "carry_lo_bit", carry.expr())?;
+
+        let imm_extend_limb = imm_sign.expr()
+            * E::BaseField::from_canonical_u32((1 << UInt::<E>::LIMB_BITS) - 1).expr();
+        let carry = (rs1_read.expr()[1].expr() + imm_extend_limb.expr() + carry
+            - memory_addr.uint_unaligned().expr()[1].expr())
+            * inv.expr();
+        circuit_builder.assert_bit(|| "overflow_bit", carry)?;
 
         let addr_low_bits = memory_addr.low_bit_exprs();
         let memory_value = memory_read.expr();
@@ -143,6 +162,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             circuit_builder,
             I::INST_KIND,
             &imm.expr(),
+            &imm_sign.expr(),
             rs1_read.register_expr(),
             memory_read.memory_expr(),
             memory_addr.expr_align4(),
@@ -153,6 +173,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             im_insn,
             rs1_read,
             imm,
+            imm_sign,
             memory_addr,
             memory_read,
             target_limb,
@@ -170,8 +191,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let memory_value = step.memory_op().unwrap().value.before;
         let memory_read = Value::new_unchecked(memory_value);
-        // imm is signed 12-bit value
+        // imm is signed 16-bit value
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
+        let imm_sign_extend = crate::utils::imm_sign_extend(true, step.insn().imm as i16);
+        set_val!(
+            instance,
+            config.imm_sign,
+            E::BaseField::from_bool(imm_sign_extend[1] > 0)
+        );
         let unaligned_addr =
             ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
         let shift = unaligned_addr.shift();
