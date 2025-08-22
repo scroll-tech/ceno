@@ -33,7 +33,7 @@ use sumcheck::{
     structs::{IOPProof, IOPProverState},
     util::get_challenge_pows,
 };
-use transcript::Transcript;
+use transcript::{BasicTranscript, Transcript};
 
 use crate::{
     gkr::layer::{
@@ -43,6 +43,8 @@ use crate::{
     },
     hal::ProverBackend,
 };
+
+use crate::gpu::gpu_prover::*;
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
@@ -183,6 +185,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .collect::<Vec<_>>();
         exit_span!(span);
 
+        let mut eqs_gpu = eqs.clone();
+
         // `wit` := witin ++ fixed
         // we concat eq in between `wit` := witin ++ eqs ++ fixed
         let all_witins = wit
@@ -207,9 +211,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             layer.n_fixed,
         );
 
+        let all_witins_gpu = wit
+            .iter()
+            .take(layer.n_witin)
+            .map(|mle| Either::Left(mle.as_ref()))
+            .chain(eqs_gpu.iter_mut().map(Either::Right))
+            .chain(
+                // fixed, start after `n_witin`
+                wit.iter()
+                    .skip(layer.n_witin + layer.n_structural_witin)
+                    .map(|mle| Either::Left(mle.as_ref())),
+            )
+            .collect_vec();
+
+        let span = entered_span!("IOPProverState::prove", profiling_4 = true);
         let builder =
             VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins);
-        let vp = builder.to_virtual_polys_with_monomial_terms(
+        let vps = builder.to_virtual_polys_with_monomial_terms(
             &layer
                 .main_sumcheck_expression_monomial_terms
                 .clone()
@@ -217,18 +235,70 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             pub_io_evals,
             &main_sumcheck_challenges,
         );
-
-        let span = entered_span!("IOPProverState::prove", profiling_4 = true);
-        let (proof, prover_state) = IOPProverState::prove(vp, transcript);
-
+        let mut transcript_cpu = transcript.clone();
+        let (proof, prover_state) = IOPProverState::prove(vps, &mut transcript_cpu);
         let evals = prover_state.get_mle_flatten_final_evaluations();
+
+        let device = CUDA_DEVICE
+            .as_ref()
+            .map_err(|e| format!("Device not available: {:?}", e))
+            .unwrap();
+        device.bind_to_thread().unwrap();
+        let hal_arc = CUDA_HAL
+            .as_ref()
+            .map_err(|e| format!("HAL not available: {:?}", e))
+            .unwrap();
+        let cuda_hal = hal_arc.lock().unwrap();
+
+        let builder =
+            VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins_gpu);
+        let vps = builder.to_virtual_polys_with_monomial_terms(
+            &layer
+                .main_sumcheck_expression_monomial_terms
+                .clone()
+                .unwrap(),
+            pub_io_evals,
+            &main_sumcheck_challenges,
+        );
+        let (vps_gpu, _) = vps.as_view().get_batched_polys();
+        assert_eq!(vps_gpu.len(), 1);
+        let vp_gpu = vps_gpu[0].clone();
+        type EGL64 = ff_ext::GoldilocksExt2;
+        use multilinear_extensions::virtual_poly::VirtualPolynomial;
+        let vp_gl64 = unsafe {
+            std::mem::transmute::<VirtualPolynomial<E>, VirtualPolynomial<EGL64>>(vp_gpu)
+        };
+        // let transcript_init = b"test virtual sumcheck ceno verify";
+        // transcript >>> BasicTranscript<GL64^2>
+        let basic_tr: &mut BasicTranscript<EGL64> =
+            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<EGL64>) };
+        let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal.sumcheck.prove_generic_sumcheck_tt(&cuda_hal, &vp_gl64, basic_tr).unwrap();
+        let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
+        let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
+
+        let proof_gpu_e = unsafe { std::mem::transmute::<IOPProof<EGL64>, IOPProof<E>>(proof_gpu) };
+        let evals_gpu_e = unsafe { std::mem::transmute::<Vec<EGL64>, Vec<E>>(evals_gpu) };
+        let row_challenges_e = unsafe { std::mem::transmute::<Vec<EGL64>, Vec<E>>(row_challenges) };
+        // assert_eq!(evals_gpu_e, evals);
+        for i in 0..evals_gpu_e.len() {
+            assert_eq!(evals_gpu_e[i], evals[i], "evals_gpu_e[{}] = {} != evals[{}] = {}", i, evals_gpu_e[i], i, evals[i]);
+        }
+
         exit_span!(span);
+        
+        // (
+        //     LayerProof {
+        //         main: SumcheckLayerProof { proof, evals },
+        //         rotation: rotation_proof,
+        //     },
+        //     prover_state.collect_raw_challenges(),
+        // )
         (
             LayerProof {
-                main: SumcheckLayerProof { proof, evals },
+                main: SumcheckLayerProof { proof: proof_gpu_e, evals: evals_gpu_e },
                 rotation: rotation_proof,
             },
-            prover_state.collect_raw_challenges(),
+            row_challenges_e,
         )
     }
 }

@@ -470,7 +470,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         } = composed_cs;
         let r_set_len = cs.r_expressions.len() + cs.r_table_expressions.len();
 
-        // cuda hal for transcript conversion
         let device = CUDA_DEVICE
             .as_ref()
             .map_err(|e| format!("Device not available: {:?}", e))
@@ -509,7 +508,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             self.extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
         exit_span!(span);
 
-        // transcript >>> BasicTranscript<GL64^2>
+        // transcript >>> BasicTranscript<E>
         let basic_tr: &mut BasicTranscript<GoldilocksExt2> =
             unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GoldilocksExt2>) };
 
