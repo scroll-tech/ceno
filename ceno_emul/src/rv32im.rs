@@ -502,7 +502,7 @@ fn step_store<M: EmuContext>(ctx: &mut M, kind: InsnKind, decoded: &Instruction)
     let addr = ByteAddr(rs1.wrapping_add(decoded.imm as u32));
     let shift = 8 * (addr.0 & 3);
     if !ctx.check_data_store(addr) {
-        tracing::error!("mstore: addr={:x?},rs1={:x}", addr, rs1);
+        println!("mstore: addr={:x?},rs1={:x}", addr, rs1);
         return ctx.trap(TrapCause::StoreAccessFault);
     }
     let mut data = ctx.peek_memory(addr.waddr());

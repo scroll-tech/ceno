@@ -58,44 +58,47 @@ impl Display for Platform {
 }
 
 /// alined with [`memory.x`]
-// ┌───────────────────────────── 0x6000_0000 (end of heap)
+// ┌───────────────────────────── 0x4000_0000 (end of _sheap, or heap)
 // │
-// │   HEAP (512 MB, grows upward)
-// │   0x4000_0000 .. 0x6000_0000
-// │
-// ├───────────────────────────── 0x4000_0000 (heap base / hints end)
-// │
-// │   HINTS (128 MB)
+// │   HEAP (128 MB, grows upward)
 // │   0x3800_0000 .. 0x4000_0000
 // │
-// │───────────────────────────── 0x3800_0000 (hint base / gap end)
-// │
-// │   [Reserved gap: 128 MB for debug I/O]
+// ├───────────────────────────── 0x3800_0000 (_sheap, align 0x800_0000)
+// │   RAM (128 MB)
 // │   0x3000_0000 .. 0x3800_0000
-// │───────────────────────────── 0x3000_0000 (gap / stack end)
+// ├───────────────────────────── 0x3000_0000 (RAM base / hints end)
 // │
-// │   STACK (≈128 MB, grows downward)
+// │   HINTS (128 MB)
 // │   0x2800_0000 .. 0x3000_0000
 // │
-// ├───────────────────────────── 0x2800_0000 (stack base / pubio end)
+// │───────────────────────────── 0x2800_0000 (hint base / gap end)
+// │
+// │   [Reserved gap: 128 MB for debug I/O]
+// │   0x2000_0000 .. 0x2800_0000
+// │───────────────────────────── 0x2000_0000 (gap / stack end)
+// │
+// │   STACK (≈128 MB, grows downward)
+// │   0x1800_0000 .. 0x2000_0000
+// │
+// ├───────────────────────────── 0x1800_0000 (stack base / pubio end)
 // │
 // │   PUBLIC I/O (128 MB)
-// │   0x2000_0000 .. 0x2800_0000
+// │   0x1000_0000 .. 0x1800_0000
 // │
-// ├───────────────────────────── 0x2000_0000 (pubio base / rom end)
+// ├───────────────────────────── 0x1000_0000 (pubio base / rom end)
 // │
-// │   ROM / TEXT / RODATA (256 MB)
-// │   0x1000_0000 .. 0x2000_0000
+// │   ROM / TEXT / RODATA (128 MB)
+// │   0x0800_0000 .. 0x1000_0000
 // │
-// └───────────────────────────── 0x1000_0000 (rom base)
+// └───────────────────────────── 0x8000_0000 (rom base)
 pub const CENO_PLATFORM: Platform = Platform {
-    rom: 0x0800_0000..0x1000_0000, // 128 MB
+    rom: 0x0800_0000..0x1000_0000,       // 128 MB
     public_io: 0x1000_0000..0x1800_0000, // 128 MB
     stack: 0x1800_0000..0x2000_4000, // stack grows downward 128MB, 0x4000 reserved for debug io.
-    // we make hints start from 0x3800_0000 thus reserve a 128MB gap for debug io
+    // we make hints start from 0x2800_0000 thus reserve a 128MB gap for debug io
     // at the end of stack
     hints: 0x2800_0000..0x3000_0000, // 128 MB
-    heap: 0x3000_0000..0x4000_0000,  // heap grows upward
+    heap: 0x3000_0000..0x4000_0000,  // heap grows upward, reserved 128 MB for it
     unsafe_ecall_nop: false,
     prog_data: BTreeSet::new(),
     is_debug: false,
