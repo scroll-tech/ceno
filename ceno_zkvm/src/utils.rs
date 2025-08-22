@@ -155,7 +155,7 @@ where
     // Save the current panic hook
     let original_hook = panic::take_hook();
 
-    // Set the new panic hook0
+    // Set the new panic hook
     panic::set_hook(hook);
 
     let result = f();
