@@ -61,6 +61,10 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --package ceno_zkvm --features u16limb_circuit --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/fibonacci
 
+      - name: Run gkr keccak (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Run fibonacci (release)
         env:
