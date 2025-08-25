@@ -1,3 +1,4 @@
+/// refer constraints implementation from https://github.com/openvm-org/openvm/blob/main/extensions/rv32im/circuit/src/divrem/core.rs
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use p3::field::Field;
@@ -55,9 +56,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        // The soundness analysis for these constraints is only valid for
-        // 32-bit registers represented over the Goldilocks field, so verify
-        // these parameters
         assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
         assert_eq!(UInt::<E>::LIMB_BITS, 16);
         assert_eq!(UInt::<E>::NUM_LIMBS, 2);
@@ -90,8 +88,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rd_written_e,
         )?;
 
-        let dividend_sign = cb.create_witin(|| "dividend_sign".to_string());
-        let divisor_sign = cb.create_witin(|| "divisor_sign".to_string());
+        let dividend_sign = cb.create_bit(|| "dividend_sign".to_string())?;
+        let divisor_sign = cb.create_bit(|| "divisor_sign".to_string())?;
         let dividend_ext: Expression<E> =
             dividend_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
         let divisor_ext: Expression<E> =
@@ -112,16 +110,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         }
 
         for (i, carry) in carry_expr.iter().enumerate() {
+            // TODO apply dynamic range check with quotient_expr
             cb.assert_ux::<_, _, 18>(|| format!("range_check_carry_{i}"), carry.clone())?;
         }
 
-        let quotient_sign = cb.create_witin(|| "quotient_sign".to_string());
+        let quotient_sign = cb.create_bit(|| "quotient_sign".to_string())?;
         let quotient_ext: Expression<E> =
             quotient_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
         let mut carry_ext: [Expression<E>; UINT_LIMBS] =
             array::from_fn(|_| E::BaseField::ZERO.expr());
 
-        let remainder_zero = cb.create_witin(|| "remainder_zero".to_string());
+        let remainder_zero = cb.create_bit(|| "remainder_zero".to_string())?;
         for j in 0..UINT_LIMBS {
             let expected_limb =
                 if j == 0 {
@@ -138,15 +137,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         }
 
         for (i, carry_ext) in carry_ext.iter().enumerate() {
+            // TODO apply dynamic range check with remainder
             cb.assert_ux::<_, _, 18>(|| format!("range_check_carry_ext_{i}"), carry_ext.clone())?;
         }
 
-        let divisor_zero = cb.create_witin(|| "divisor_zero".to_string());
+        let divisor_zero = cb.create_bit(|| "divisor_zero".to_string())?;
         cb.assert_bit(
             || "divisor_remainder_not_both_zero",
             divisor_zero.expr() + remainder_zero.expr(),
         )?;
-        cb.assert_bit(|| "divisor_zero_bool", divisor_zero.expr())?;
 
         for (i, (divisor_expr, quotient_expr)) in
             divisor_expr.iter().zip(quotient_expr.iter()).enumerate()
@@ -171,13 +170,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             .iter()
             .fold(E::BaseField::ZERO.expr(), |acc, d| acc + d.clone());
         let divisor_not_zero: Expression<E> = E::BaseField::ONE.expr() - divisor_zero.expr();
-        cb.condition_require_zero(
+        cb.condition_require_one(
             || "check_divisor_sum_inv",
             divisor_not_zero.clone(),
-            divisor_sum.clone() * divisor_sum_inv.expr() - E::BaseField::ONE.expr(),
+            divisor_sum.clone() * divisor_sum_inv.expr(),
         )?;
 
-        cb.assert_bit(|| "remainder_zero_bool", remainder_zero.expr())?;
         for (i, remainder_expr) in remainder_expr.iter().enumerate() {
             cb.condition_require_zero(
                 || format!("check_divisor_zero_{}", i),
@@ -191,14 +189,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             .fold(E::BaseField::ZERO.expr(), |acc, r| acc + r.clone());
         let divisor_remainder_not_zero: Expression<E> =
             E::BaseField::ONE.expr() - divisor_zero.expr() - remainder_zero.expr();
-        cb.condition_require_zero(
+        cb.condition_require_one(
             || "check_remainder_sum_inv",
             divisor_remainder_not_zero,
-            remainder_sum.clone() * remainder_sum_inv.expr() - E::BaseField::ONE.expr(),
+            remainder_sum.clone() * remainder_sum_inv.expr(),
         )?;
-
-        cb.assert_bit(|| "check_dividend_sign_bool", dividend_sign.expr())?;
-        cb.assert_bit(|| "check_divisor_sign_bool", divisor_sign.expr())?;
 
         // TODO: can directly define sign_xor as expr?
         // Tried once, it will cause degree too high (although increases just one).
@@ -217,7 +212,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let quotient_sum: Expression<E> = quotient_expr
             .iter()
             .fold(E::BaseField::ZERO.expr(), |acc, q| acc + q.clone());
-        cb.assert_bit(|| "quotient_sign_bool", quotient_sign.expr())?;
         cb.condition_require_zero(
             || "check_quotient_sign_eq_xor",
             quotient_sum * divisor_not_zero.clone(),
@@ -280,8 +274,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             )?;
         }
 
-        let lt_marker: [_; UINT_LIMBS] =
-            array::from_fn(|i| cb.create_witin(|| format!("lt_marker_{i}")));
+        let lt_marker: [_; UINT_LIMBS] = array::from_fn(|i| {
+            cb.create_bit(|| format!("lt_marker_{i}"))
+                .expect("create bit error")
+        });
         let mut prefix_sum: Expression<E> = divisor_zero.expr() + remainder_zero.expr();
         let lt_diff = cb.create_witin(|| "lt_diff");
 
@@ -293,7 +289,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     * (E::BaseField::ONE.expr()
                         - E::BaseField::from_canonical_u8(2).expr() * divisor_sign.expr());
             prefix_sum += lt_marker[i].expr();
-            cb.assert_bit(|| format!("lt_maker_bool_{}", i), lt_marker[i].expr())?;
             cb.require_zero(
                 || "prefix_sum_not_zero_or_diff_zero",
                 (E::BaseField::ONE.expr() - prefix_sum.clone()) * diff.clone(),
@@ -309,11 +304,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         //   where diff != 0. Constrains that diff == lt_diff where lt_diff is non-zero.
         // - If r_prime == divisor, then prefix_sum = 0. Here, prefix_sum cannot be 1 because all diff are
         //   zero, making diff == lt_diff fails.
-        cb.require_equal(
-            || "prefix_sum_one",
-            prefix_sum.clone(),
-            E::BaseField::ONE.expr(),
-        )?;
+        cb.require_one(|| "prefix_sum_one", prefix_sum.clone())?;
 
         // When not special case (divisor = 0 or remainder = 0), ensure lt_diff
         // is not zero by a range check
