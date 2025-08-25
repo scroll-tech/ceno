@@ -10,11 +10,9 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-criterion.workspace = true
 ff_ext = { path = "../ff_ext" }
 p3.workspace = true
 serde.workspace = true
-unroll = "0.1"
 
 [dev-dependencies]
 rand.workspace = true

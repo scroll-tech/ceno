@@ -53,8 +53,6 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             circuit_builder,
             InsnKind::JALR,
             imm.expr(),
-            #[cfg(feature = "u16limb_circuit")]
-            0.into(),
             rs1_read.register_expr(),
             rd_written.register_expr(),
             true,
