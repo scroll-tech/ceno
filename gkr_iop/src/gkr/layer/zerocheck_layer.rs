@@ -291,6 +291,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         // eval eq and set to respective witin
         izip!(&self.out_sel_and_eval_exprs, &eval_and_dedup_points).for_each(
             |((sel_type, _), (_, out_point))| {
+                // TODO: instead of overwrite main_evals, we should just read it out
+                //       and then compare it with expected value
                 sel_type.evaluate(
                     &mut main_evals,
                     out_point.as_ref().unwrap(),
