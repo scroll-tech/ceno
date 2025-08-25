@@ -54,10 +54,11 @@ fn test_ceno_rt_mem() -> Result<()> {
         prog_data: program.image.keys().copied().collect(),
         ..CENO_PLATFORM
     };
-    let mut state = VMState::new(platform.clone(), Arc::new(program.clone()));
+    let sheap = program.sheap.into();
+    let mut state = VMState::new(platform, Arc::new(program.clone()));
     let _steps = run(&mut state)?;
 
-    let value = state.peek_memory(program.sheap.into());
+    let value = state.peek_memory(sheap);
     assert_eq!(value, 6765, "Expected Fibonacci 20, got {}", value);
     Ok(())
 }
