@@ -791,7 +791,7 @@ where
                         let rep = MaskRepresentation::new(vec![(64, c64[i]).into()])
                             .convert(vec![15, 1, 15, 1, 15, 1, 15, 1])
                             .values();
-                        for (j, size) in [1, 15, 1, 15, 1, 15, 1, 15].iter().enumerate() {
+                        for (j, size) in [15, 1, 15, 1, 15, 1, 15, 1].iter().enumerate() {
                             lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
                         }
                         c_temp[i] = rep.try_into().unwrap();
@@ -835,11 +835,9 @@ where
                                     .convert(sizes.clone())
                                     .values();
                             for (j, size) in sizes.iter().enumerate() {
-                                if *size != 32 {
-                                    lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
-                                }
                                 match *size {
                                     32 | 1 => (),
+                                    18 => lk_multiplicity.assert_ux::<18>(rep[j]),
                                     16 => lk_multiplicity.assert_ux::<16>(rep[j]),
                                     14 => lk_multiplicity.assert_ux::<14>(rep[j]),
                                     8 => lk_multiplicity.assert_ux::<8>(rep[j]),
