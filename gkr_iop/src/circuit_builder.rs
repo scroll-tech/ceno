@@ -1098,6 +1098,9 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         for (i, (size, elem)) in split_rep.iter().enumerate() {
             match *size {
                 32 => (),
+                18 => {
+                    self.assert_ux::<_, _, 18>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
                 16 => {
                     self.assert_ux::<_, _, 16>(|| format!("{}_{}", name().into(), i), elem.clone())?
                 }
