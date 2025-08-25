@@ -4,15 +4,11 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{
-            RIVInstruction,
+            LbInstruction, LbuInstruction, LhInstruction, LhuInstruction, RIVInstruction,
             constants::UInt,
             memory::{
-                LwInstruction, SbInstruction, ShInstruction, SwInstruction,
-                load::{
-                    LbInstruction, LbOp, LbuInstruction, LbuOp, LhInstruction, LhOp,
-                    LhuInstruction, LhuOp, LwOp,
-                },
-                store::{SBOp, SHOp, SWOp},
+                LbOp, LbuOp, LhOp, LhuOp, LwInstruction, LwOp, SBOp, SHOp, SWOp, SbInstruction,
+                ShInstruction, SwInstruction,
             },
         },
     },

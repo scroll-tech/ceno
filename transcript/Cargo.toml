@@ -14,7 +14,6 @@ ff_ext = { path = "../ff_ext" }
 itertools.workspace = true
 p3.workspace = true
 poseidon.workspace = true
-serde.workspace = true
 
 [features]
 nightly-features = [

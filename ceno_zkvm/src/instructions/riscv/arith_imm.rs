@@ -1,122 +1,67 @@
-use std::marker::PhantomData;
+#[cfg(not(feature = "u16limb_circuit"))]
+mod arith_imm_circuit;
+#[cfg(feature = "u16limb_circuit")]
+mod arith_imm_circuit_v2;
 
-use ceno_emul::StepRecord;
-use ff_ext::ExtensionField;
+#[cfg(feature = "u16limb_circuit")]
+pub use crate::instructions::riscv::arith_imm::arith_imm_circuit_v2::AddiInstruction;
 
-use crate::{
-    Value, circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    structs::ProgramParams, tables::InsnRecord, witness::LkMultiplicity,
-};
+#[cfg(not(feature = "u16limb_circuit"))]
+pub use crate::instructions::riscv::arith_imm::arith_imm_circuit::AddiInstruction;
 
-use super::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig};
-
-pub struct AddiInstruction<E>(PhantomData<E>);
+use super::RIVInstruction;
 
 impl<E> RIVInstruction for AddiInstruction<E> {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::ADDI;
 }
 
-pub struct InstructionConfig<E: ExtensionField> {
-    i_insn: IInstructionConfig<E>,
-
-    rs1_read: UInt<E>,
-    imm: UInt<E>,
-    rd_written: UInt<E>,
-}
-
-impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
-    type InstructionConfig = InstructionConfig<E>;
-
-    fn name() -> String {
-        format!("{:?}", Self::INST_KIND)
-    }
-
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-        _params: &ProgramParams,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let imm = UInt::new(|| "imm", circuit_builder)?;
-        let rd_written = rs1_read.add(|| "rs1_read + imm", circuit_builder, &imm, true)?;
-
-        let i_insn = IInstructionConfig::<E>::construct_circuit(
-            circuit_builder,
-            Self::INST_KIND,
-            imm.value(),
-            rs1_read.register_expr(),
-            rd_written.register_expr(),
-            false,
-        )?;
-
-        Ok(InstructionConfig {
-            i_insn,
-            rs1_read,
-            imm,
-            rd_written,
-        })
-    }
-
-    fn assign_instance(
-        config: &Self::InstructionConfig,
-        instance: &mut [<E as ExtensionField>::BaseField],
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let rs1_read = Value::new_unchecked(step.rs1().unwrap().value);
-        let imm = Value::new(
-            InsnRecord::imm_internal(&step.insn()) as u32,
-            lk_multiplicity,
-        );
-
-        let result = rs1_read.add(&imm, lk_multiplicity, true);
-
-        config.rs1_read.assign_value(instance, rs1_read);
-        config.imm.assign_value(instance, imm);
-
-        config.rd_written.assign_add_outcome(instance, &result);
-
-        config
-            .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
-    use ff_ext::GoldilocksExt2;
-
+    use super::AddiInstruction;
     use crate::{
+        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::Instruction,
+        instructions::{Instruction, riscv::constants::UInt},
         scheme::mock_prover::{MOCK_PC_START, MockProver},
         structs::ProgramParams,
     };
-
-    use super::AddiInstruction;
+    use ceno_emul::{Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
+    #[cfg(feature = "u16limb_circuit")]
+    use ff_ext::BabyBearExt4;
+    use ff_ext::{ExtensionField, GoldilocksExt2};
+    use gkr_iop::circuit_builder::DebugIndex;
 
     #[test]
     fn test_opcode_addi() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let cases = vec![
+            (1000, 1003, 3), // positive immediate
+            (1000, 997, -3), // negative immediate
+        ];
+
+        for &(rs1, expected, imm) in &cases {
+            test_opcode_addi_internal::<GoldilocksExt2>(rs1, expected, imm);
+            #[cfg(feature = "u16limb_circuit")]
+            test_opcode_addi_internal::<BabyBearExt4>(rs1, expected, imm);
+        }
+    }
+
+    fn test_opcode_addi_internal<E: ExtensionField>(rs1: u32, rd: u32, imm: i32) {
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb
             .namespace(
                 || "addi",
                 |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    );
+                    let config =
+                        AddiInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )
             .unwrap()
             .unwrap();
 
-        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, 3);
-        let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
+        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm);
+        let (raw_witin, lkm) = AddiInstruction::<E>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -124,48 +69,21 @@ mod test {
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                 insn_code,
-                1000,
-                Change::new(0, 1003),
+                rs1,
+                Change::new(0, rd),
                 0,
             )],
         )
         .unwrap();
 
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
-    }
-
-    #[test]
-    fn test_opcode_addi_sub() {
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config = cb
-            .namespace(
-                || "addi",
-                |cb| {
-                    let config = AddiInstruction::<GoldilocksExt2>::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    );
-                    Ok(config)
-                },
-            )
-            .unwrap()
-            .unwrap();
-
-        let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, -3);
-
-        let (raw_witin, lkm) = AddiInstruction::<GoldilocksExt2>::assign_instances(
-            &config,
-            cb.cs.num_witin as usize,
-            cb.cs.num_structural_witin as usize,
-            vec![StepRecord::new_i_instruction(
-                3,
-                Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
-                insn_code,
-                1000,
-                Change::new(0, 997),
-                0,
-            )],
+        // verify rd_written
+        let expected_rd_written =
+            UInt::from_const_unchecked(Value::new_unchecked(rd).as_u16_limbs().to_vec());
+        let rd_written_expr = cb.get_debug_expr(DebugIndex::RdWrite as usize)[0].clone();
+        cb.require_equal(
+            || "assert_rd_written",
+            rd_written_expr,
+            expected_rd_written.value(),
         )
         .unwrap();
 

@@ -54,7 +54,9 @@ mod test {
         witness::LkMultiplicity,
     };
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
-    use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
+    #[cfg(feature = "u16limb_circuit")]
+    use ff_ext::BabyBearExt4;
+    use ff_ext::{ExtensionField, GoldilocksExt2};
     use gkr_iop::circuit_builder::DebugIndex;
 
     #[test]

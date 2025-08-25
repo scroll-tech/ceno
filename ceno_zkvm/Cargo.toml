@@ -29,7 +29,6 @@ witness = { path = "../witness" }
 
 itertools.workspace = true
 ndarray.workspace = true
-poseidon.workspace = true
 prettytable-rs.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
@@ -51,7 +50,6 @@ tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 tikv-jemallocator = { version = "0.6", optional = true }
 
 [dev-dependencies]
-cfg-if.workspace = true
 criterion.workspace = true
 pprof2.workspace = true
 proptest.workspace = true
@@ -61,7 +59,7 @@ ceno-examples = { path = "../examples-builder" }
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow", "u16limb_circuit"]
+default = ["forbid_overflow"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
@@ -71,13 +69,12 @@ nightly-features = [
   "ff_ext/nightly-features",
   "mpcs/nightly-features",
   "multilinear_extensions/nightly-features",
-  "poseidon/nightly-features",
   "sumcheck/nightly-features",
   "transcript/nightly-features",
   "witness/nightly-features",
 ]
 sanity-check = ["mpcs/sanity-check"]
-u16limb_circuit = []
+u16limb_circuit = ["ceno_emul/u16limb_circuit"]
 
 [[bench]]
 harness = false

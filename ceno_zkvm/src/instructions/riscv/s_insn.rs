@@ -48,6 +48,8 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             rs1.id.expr(),
             rs2.id.expr(),
             imm.clone(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
         ))?;
 
         // Memory
