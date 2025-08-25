@@ -772,7 +772,7 @@ where
                             c_aux64[i][j] = state64[j][i] ^ c_aux64[i][j - 1];
                             for k in 0..8 {
                                 lk_multiplicity
-                                    .lookup_xor_byte(state8[j][i][k], c_aux8[i][j - 1][k]);
+                                    .lookup_xor_byte(c_aux8[i][j - 1][k], state8[j][i][k]);
                             }
                             c_aux8[i][j] = conv64to8(c_aux64[i][j]);
                         }
@@ -792,7 +792,15 @@ where
                             .convert(vec![15, 1, 15, 1, 15, 1, 15, 1])
                             .values();
                         for (j, size) in [15, 1, 15, 1, 15, 1, 15, 1].iter().enumerate() {
-                            lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
+                            match *size {
+                                32 | 1 => (),
+                                18 => lk_multiplicity.assert_ux::<18>(rep[j]),
+                                16 => lk_multiplicity.assert_ux::<16>(rep[j]),
+                                14 => lk_multiplicity.assert_ux::<14>(rep[j]),
+                                8 => lk_multiplicity.assert_ux::<8>(rep[j]),
+                                5 => lk_multiplicity.assert_ux::<5>(rep[j]),
+                                _ => lk_multiplicity.assert_ux_in_u16(*size, rep[j]),
+                            }
                         }
                         c_temp[i] = rep.try_into().unwrap();
                     }
@@ -810,8 +818,8 @@ where
                         d64[x] = c64[(x + 4) % 5] ^ c64[(x + 1) % 5].rotate_left(1);
                         for k in 0..8 {
                             lk_multiplicity.lookup_xor_byte(
-                                crot8[(x + 1) % 5][k],
                                 c_aux8[(x + 5 - 1) % 5][4][k],
+                                crot8[(x + 1) % 5][k],
                             );
                         }
                         d8[x] = conv64to8(d64[x]);
