@@ -64,7 +64,9 @@ mod test {
         structs::ProgramParams,
     };
     use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
-    use ff_ext::{BabyBearExt4 as BE, ExtensionField, GoldilocksExt2 as GE};
+    #[cfg(feature = "u16limb_circuit")]
+    use ff_ext::BabyBearExt4 as BE;
+    use ff_ext::{ExtensionField, GoldilocksExt2 as GE};
     use itertools::Itertools;
     use rand::RngCore;
 
@@ -235,7 +237,9 @@ mod test {
     // Test unsigned opcodes
     type DivuG = DivuInstruction<GE>;
     type RemuG = RemuInstruction<GE>;
+    #[cfg(feature = "u16limb_circuit")]
     type DivuB = DivuInstruction<BE>;
+    #[cfg(feature = "u16limb_circuit")]
     type RemuB = RemuInstruction<BE>;
 
     #[test]
@@ -302,7 +306,9 @@ mod test {
     // Test signed opcodes
     type DivG = DivInstruction<GE>;
     type RemG = RemInstruction<GE>;
+    #[cfg(feature = "u16limb_circuit")]
     type DivB = DivInstruction<BE>;
+    #[cfg(feature = "u16limb_circuit")]
     type RemB = RemInstruction<BE>;
 
     #[test]
