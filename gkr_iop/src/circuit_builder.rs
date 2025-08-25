@@ -803,6 +803,26 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         }
     }
 
+    /// to replace `assert_ux`
+    pub fn assert_ux_v2<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+        max_bits: usize,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        match max_bits {
+            16 => self.assert_u16(name_fn, expr),
+            14 => self.assert_u14(name_fn, expr),
+            8 => self.assert_byte(name_fn, expr),
+            5 => self.assert_u5(name_fn, expr),
+            c => panic!("Unsupported bit range {c}"),
+        }
+    }
+
     /// Generates U16 lookups to prove that `value` fits on `size < 16` bits.
     /// In general it can be done by two U16 checks: one for `value` and one for
     /// `value << (16 - size)`.

@@ -202,6 +202,20 @@ impl LkMultiplicity {
         }
     }
 
+    #[inline(always)]
+    pub fn assert_ux_v2(&mut self, v: u64, max_bits: usize) {
+        self.increment(
+            match max_bits {
+                16 => LookupTable::U16,
+                14 => LookupTable::U14,
+                8 => LookupTable::U8,
+                5 => LookupTable::U5,
+                _ => panic!("Unsupported bit range"),
+            },
+            v,
+        );
+    }
+
     /// Track a lookup into a logic table (AndTable, etc).
     pub fn logic_u8<OP: OpsTable>(&mut self, a: u64, b: u64) {
         self.increment(OP::ROM_TYPE, OP::pack(a, b));
