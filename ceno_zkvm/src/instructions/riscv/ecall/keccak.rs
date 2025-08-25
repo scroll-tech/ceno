@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{ByteAddr, Cycle, InsnKind, Platform, StepRecord};
+use ceno_emul::{ByteAddr, Change, Cycle, InsnKind, KECCAK_PERMUTE, Platform, StepRecord, WriteOp};
 use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
@@ -24,8 +24,8 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{
-            constants::UInt,
-            ecall_base::WriteFixedRS,
+            constants::{LIMB_BITS, LIMB_MASK, UInt},
+            ecall_base::OpFixedRS,
             insn_base::{StateInOut, WriteMEM},
         },
     },
@@ -42,8 +42,8 @@ use crate::{
 pub struct EcallKeccakConfig<E: ExtensionField> {
     pub layout: KeccakLayout<E>,
     vm_state: StateInOut<E>,
-    ecall_id: (WriteFixedRS<E, { Platform::reg_ecall() }>, UInt<E>),
-    state_ptr: (WriteFixedRS<E, { Platform::reg_arg0() }>, UInt<E>),
+    ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
+    state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, UInt<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
@@ -71,19 +71,20 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         // constrain vmstate
         let vm_state = StateInOut::construct_circuit(cb, false)?;
 
-        let ecall_id_value = UInt::new_unchecked(|| "ecall_id", cb)?;
         let state_ptr_value = UInt::new_unchecked(|| "state_ptr", cb)?;
 
-        let ecall_id = (
-            WriteFixedRS::<_, { Platform::reg_ecall() }>::construct_circuit(
-                cb,
-                ecall_id_value.register_expr(),
-                vm_state.ts,
-            )?,
-            ecall_id_value,
-        );
+        let ecall_id = OpFixedRS::<_, { Platform::reg_ecall() }, false>::construct_circuit(
+            cb,
+            UInt::from_const_unchecked(vec![
+                KECCAK_PERMUTE & LIMB_MASK,
+                (KECCAK_PERMUTE >> LIMB_BITS) & 0xffff,
+            ])
+            .register_expr(),
+            vm_state.ts,
+        )?;
+
         let state_ptr = (
-            WriteFixedRS::<_, { Platform::reg_arg0() }>::construct_circuit(
+            OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
                 cb,
                 state_ptr_value.register_expr(),
                 vm_state.ts,
@@ -95,10 +96,10 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         cb.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
             InsnKind::ECALL.into(),
-            Some(E::BaseField::ZERO.expr()),
-            E::BaseField::ZERO.expr(),
-            E::BaseField::ZERO.expr(),
-            E::BaseField::ZERO.expr(),
+            None,
+            0.into(),
+            0.into(),
+            0.into(),
             #[cfg(feature = "u16limb_circuit")]
             0.into(),
         ))?;
@@ -115,7 +116,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                 WriteMEM::construct_circuit(
                     cb,
                     // mem address := state_ptr + i
-                    state_ptr.0.prev_value.value()
+                    // TODO use address
+                    state_ptr.0.prev_value.as_ref().unwrap().value()
                         + E::BaseField::from_canonical_u32(i as u32).expr(),
                     val_before.clone(),
                     val_after.clone(),
@@ -212,27 +214,26 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                             // vm_state
                             config.vm_state.assign_instance(instance, step)?;
 
-                            //  assign ecall_id
-                            config.ecall_id.1.assign_value(
-                                instance,
-                                Value::new_unchecked(ops.reg_ops[0].value.after),
-                            );
-                            config.ecall_id.0.assign_op(
+                            config.ecall_id.assign_op(
                                 instance,
                                 &mut lk_multiplicity,
                                 step.cycle(),
-                                &ops.reg_ops[0],
+                                &WriteOp::new_register_op(
+                                    Platform::reg_ecall(),
+                                    Change::new(KECCAK_PERMUTE, KECCAK_PERMUTE),
+                                    step.rs1().unwrap().previous_cycle,
+                                ),
                             )?;
-                            //  assign state_ptr
+                            // assign state_ptr
                             config.state_ptr.1.assign_value(
                                 instance,
-                                Value::new_unchecked(ops.reg_ops[1].value.after),
+                                Value::new_unchecked(ops.reg_ops[0].value.after),
                             );
                             config.state_ptr.0.assign_op(
                                 instance,
                                 &mut lk_multiplicity,
                                 step.cycle(),
-                                &ops.reg_ops[1],
+                                &ops.reg_ops[0],
                             )?;
                             // assign mem_rw
                             for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
@@ -243,6 +244,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                                     op,
                                 )?;
                             }
+                            // fetch
+                            lk_multiplicity.fetch(step.pc().before.0);
                         }
                         Ok(())
                     })

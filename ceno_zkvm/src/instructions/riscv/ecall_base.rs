@@ -16,30 +16,43 @@ use ceno_emul::Tracer;
 use multilinear_extensions::{ToExpr, WitIn};
 
 #[derive(Debug)]
-pub struct WriteFixedRS<E: ExtensionField, const REG_ID: usize> {
+pub struct OpFixedRS<E: ExtensionField, const REG_ID: usize, const RW: bool> {
     pub prev_ts: WitIn,
-    pub prev_value: UInt<E>,
+    pub prev_value: Option<UInt<E>>,
     pub lt_cfg: AssertLtConfig,
 }
 
-impl<E: ExtensionField, const REG_ID: usize> WriteFixedRS<E, REG_ID> {
+impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID, RW> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         rd_written: RegisterExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
         let prev_ts = circuit_builder.create_witin(|| "prev_rd_ts");
-        let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
-        let (_, lt_cfg) = circuit_builder.register_write(
-            || "write_rd",
-            E::BaseField::from_canonical_u64(REG_ID as u64),
-            prev_ts.expr(),
-            cur_ts.expr() + Tracer::SUBCYCLE_RD,
-            prev_value.register_expr(),
-            rd_written,
-        )?;
+        let (prev_value, lt_cfg) = if RW {
+            let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
+            let (_, lt_cfg) = circuit_builder.register_write(
+                || "write_rd",
+                E::BaseField::from_canonical_u64(REG_ID as u64),
+                prev_ts.expr(),
+                cur_ts.expr() + Tracer::SUBCYCLE_RD,
+                prev_value.register_expr(),
+                rd_written,
+            )?;
+            (Some(prev_value), lt_cfg)
+        } else {
+            let (_, lt_cfg) = circuit_builder.register_read(
+                || "read_rs",
+                E::BaseField::from_canonical_u64(REG_ID as u64),
+                prev_ts.expr(),
+                // share same ts with RS1
+                cur_ts.expr() + Tracer::SUBCYCLE_RS1,
+                rd_written,
+            )?;
+            (None, lt_cfg)
+        };
 
-        Ok(WriteFixedRS {
+        Ok(Self {
             prev_ts,
             prev_value,
             lt_cfg,
@@ -56,17 +69,23 @@ impl<E: ExtensionField, const REG_ID: usize> WriteFixedRS<E, REG_ID> {
         set_val!(instance, self.prev_ts, op.previous_cycle);
 
         // Register state
-        self.prev_value.assign_limbs(
-            instance,
-            Value::new_unchecked(op.value.before).as_u16_limbs(),
-        );
+        if let Some(prev_value) = self.prev_value.as_ref() {
+            prev_value.assign_limbs(
+                instance,
+                Value::new_unchecked(op.value.before).as_u16_limbs(),
+            );
+        }
 
         // Register write
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
             op.previous_cycle,
-            cycle + Tracer::SUBCYCLE_RD,
+            if RW {
+                cycle + Tracer::SUBCYCLE_RD
+            } else {
+                cycle + Tracer::SUBCYCLE_RS1
+            },
         )?;
 
         Ok(())

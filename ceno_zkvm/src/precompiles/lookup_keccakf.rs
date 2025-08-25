@@ -792,15 +792,7 @@ where
                             .convert(vec![15, 1, 15, 1, 15, 1, 15, 1])
                             .values();
                         for (j, size) in [15, 1, 15, 1, 15, 1, 15, 1].iter().enumerate() {
-                            match *size {
-                                32 | 1 => (),
-                                18 => lk_multiplicity.assert_ux::<18>(rep[j]),
-                                16 => lk_multiplicity.assert_ux::<16>(rep[j]),
-                                14 => lk_multiplicity.assert_ux::<14>(rep[j]),
-                                8 => lk_multiplicity.assert_ux::<8>(rep[j]),
-                                5 => lk_multiplicity.assert_ux::<5>(rep[j]),
-                                _ => lk_multiplicity.assert_ux_in_u16(*size, rep[j]),
-                            }
+                            lk_multiplicity.assert_ux_v2(rep[j], *size);
                         }
                         c_temp[i] = rep.try_into().unwrap();
                     }
@@ -843,15 +835,7 @@ where
                                     .convert(sizes.clone())
                                     .values();
                             for (j, size) in sizes.iter().enumerate() {
-                                match *size {
-                                    32 | 1 => (),
-                                    18 => lk_multiplicity.assert_ux::<18>(rep[j]),
-                                    16 => lk_multiplicity.assert_ux::<16>(rep[j]),
-                                    14 => lk_multiplicity.assert_ux::<14>(rep[j]),
-                                    8 => lk_multiplicity.assert_ux::<8>(rep[j]),
-                                    5 => lk_multiplicity.assert_ux::<5>(rep[j]),
-                                    _ => lk_multiplicity.assert_ux_in_u16(*size, rep[j]),
-                                }
+                                lk_multiplicity.assert_ux_v2(rep[j], *size);
                             }
                             rotation_witness.extend(rep);
                         }

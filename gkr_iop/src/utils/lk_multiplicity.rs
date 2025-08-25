@@ -204,16 +204,17 @@ impl LkMultiplicity {
 
     #[inline(always)]
     pub fn assert_ux_v2(&mut self, v: u64, max_bits: usize) {
-        self.increment(
-            match max_bits {
-                16 => LookupTable::U16,
-                14 => LookupTable::U14,
-                8 => LookupTable::U8,
-                5 => LookupTable::U5,
-                _ => panic!("Unsupported bit range"),
-            },
-            v,
-        );
+        if max_bits == 1 {
+            return;
+        }
+        match max_bits {
+            18 => self.increment(LookupTable::U18, v),
+            16 => self.increment(LookupTable::U16, v),
+            14 => self.increment(LookupTable::U14, v),
+            8 => self.increment(LookupTable::U8, v),
+            5 => self.increment(LookupTable::U5, v),
+            max_bits => self.assert_ux_in_u16(max_bits, v),
+        };
     }
 
     /// Track a lookup into a logic table (AndTable, etc).

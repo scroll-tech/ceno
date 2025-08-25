@@ -816,11 +816,16 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         match max_bits {
+            18 => self.assert_u18(name_fn, expr),
             16 => self.assert_u16(name_fn, expr),
             14 => self.assert_u14(name_fn, expr),
             8 => self.assert_byte(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
-            c => panic!("Unsupported bit range {c}"),
+            1 => self.assert_bit(name_fn, expr),
+            _ => {
+                let n = name_fn().into();
+                self.assert_ux_in_u16(|| n.clone(), max_bits, expr)
+            }
         }
     }
 
@@ -1096,30 +1101,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
         // Lookup ranges
         for (i, (size, elem)) in split_rep.iter().enumerate() {
-            match *size {
-                32 => (),
-                18 => {
-                    self.assert_ux::<_, _, 18>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                16 => {
-                    self.assert_ux::<_, _, 16>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                14 => {
-                    self.assert_ux::<_, _, 14>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                8 => {
-                    self.assert_ux::<_, _, 8>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                5 => {
-                    self.assert_ux::<_, _, 5>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                1 => self.assert_bit(|| format!("{}_{}", name().into(), i), elem.clone())?,
-                _ => self.assert_ux_in_u16(
-                    || format!("{}_{}", name().into(), i),
-                    *size,
-                    elem.clone(),
-                )?,
-            }
+            self.assert_ux_v2(|| format!("{}_{}", name().into(), i), elem.clone(), *size)?;
         }
 
         // constrain the fact that rep8 and repX.rotate_left(chunks_rotation) are

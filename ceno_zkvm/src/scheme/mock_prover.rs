@@ -746,8 +746,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             }
 
             errors.extend(compare_lkm(
-                lkm_from_cs.into_finalize_result(),
                 lkm_from_assignment,
+                lkm_from_cs.into_finalize_result(),
             ));
         }
 
