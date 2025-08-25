@@ -6,7 +6,6 @@ use super::{
 use crate::instructions::riscv::auipc::AuipcInstruction;
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::lui::LuiInstruction;
-
 use crate::{
     error::ZKVMError,
     instructions::{

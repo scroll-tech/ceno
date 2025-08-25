@@ -506,7 +506,6 @@ impl<E: ExtensionField> MemAddr<E> {
         // Range check the high limb.
         for i in 1..UINT_LIMBS {
             let high_u16 = (addr >> (i * 16)) & 0xffff;
-            println!("assignment max bit {}", (self.max_bits - i * 16).min(16));
             lkm.assert_ux_v2(high_u16 as u64, (self.max_bits - i * 16).min(16));
         }
 
