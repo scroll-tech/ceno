@@ -158,7 +158,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 (None, None, None, None)
             };
 
-        // 2th sumcheck: batch rotation with other constrains
+        // f(0, r1, r2, ...) = \sum_b eq(left_point, b) * f(b)
+        // f(1, r1, 1-r2,r3,...) = \sum_b eq(right_point, b) * f(b)
+        // g(r0, r1, r2, ...) = \sum_b eq(point, b) * g(b)
+
+        // 2th sumcheck: batch rotation with other constraints
         let span = entered_span!("build_out_points_eq", profiling_4 = true);
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
@@ -249,8 +253,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
     }
 }
 
-/// This is to prove the following n rotation arguments:
-/// For the i-th argument, we check rotated(rotation_expr[i].0) == rotation_expr[i].1
+/// This is to prove the following N rotation arguments:
+/// For the i-th argument, we check rotation_expr[i].0 == rotation_expr[i].1
 /// This is proved through the following arguments:
 ///     0 = \sum_{b = 0}^{N - 1} sel(b) * \sum_i alpha^i * (rotated_rotation_expr[i].0(b) - rotation_expr[i].1(b))
 /// With the randomness rx, we check: (currently we only support cycle with length 32)
@@ -274,6 +278,8 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
     // rotated_mles is non-deterministic input, rotated from existing witness polynomial
     // we will reduce it to zero check, and finally reduce to committed polynomial opening
     let (mut selector, mut rotated_mles) = {
+        // sanity check on max_num_variables
+        assert_eq!(rt.len(), max_num_variables);
         let eq = build_eq_x_r_vec(rt);
         let mut mles = raw_rotation_exprs
             .par_iter()
@@ -306,7 +312,8 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
     let builder = VirtualPolynomialsBuilder::new_with_mles(
         num_threads,
         max_num_variables,
-        // mles format [rotation_mle1, target_mle1, rotation_mle2, target_mle2, ....., selector, eq]
+        // keep the order of mles = [rotation_mle1, target_mle1, rotation_mle2, target_mle2, ....., selector]
+        // to be consistent with `rotation_sumcheck_expression`
         rotated_mles
             .iter_mut()
             .zip_eq(raw_rotation_exprs)

@@ -80,7 +80,7 @@ pub struct Layer<E: ExtensionField> {
     /// first tuple value is optional eq
     pub out_sel_and_eval_exprs: Vec<ExprEvalType<E>>,
 
-    // format: ([eq0, eq1, eq2], Vec<(rotatition_expr, expr)>) such that rotation_expr - expr == 0
+    // format: ([eq0, eq1, eq2], Vec<(rotation_expr, expr)>) such that rotation_expr - expr == 0
     // there got 3 different eq for (left, right, target) during rotation argument
     // refer https://hackmd.io/HAAj1JTQQiKfu0SIwOJDRw?view#Rotation
     pub rotation_exprs: RotateExprs<E>,
@@ -452,6 +452,9 @@ impl<E: ExtensionField> Layer<E> {
             else {
                 panic!("rotation params not set");
             };
+
+            // TODO: include rotation_eqs in out_sel_and_eval_exprs
+
             Layer::new(
                 layer_name,
                 LayerType::Zerocheck,
