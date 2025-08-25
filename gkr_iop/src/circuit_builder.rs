@@ -758,6 +758,23 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
+    pub fn condition_require_one<NR, N>(
+        &mut self,
+        name_fn: N,
+        cond: Expression<E>,
+        expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        // cond * expr
+        self.namespace(
+            || "cond_require_one",
+            |cb| cb.cs.require_zero(name_fn, cond * (expr.expr() - 1)),
+        )
+    }
+
     pub fn select(
         &mut self,
         cond: &Expression<E>,
