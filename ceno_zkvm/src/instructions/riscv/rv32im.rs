@@ -6,7 +6,7 @@ use super::{
 use crate::instructions::riscv::auipc::AuipcInstruction;
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::lui::LuiInstruction;
-#[cfg(feature = "u16limb_circuit")]
+#[cfg(not(feature = "u16limb_circuit"))]
 use crate::tables::PowTableCircuit;
 use crate::{
     error::ZKVMError,
