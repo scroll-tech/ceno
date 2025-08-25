@@ -186,7 +186,7 @@ impl InnerLtConfig {
         is_lt_expr: Expression<E>,
         max_bits: usize,
     ) -> Result<Self, CircuitBuilderError> {
-        assert!(E::BaseField::bits() > max_bits);
+        assert!(E::BaseField::bits() - 1 > max_bits);
         let mut diff = (0..max_bits / u16::BITS as usize)
             .map(|i| cb.create_u16(|| format!("diff_{i}")))
             .collect::<Result<Vec<WitIn>, _>>()?;

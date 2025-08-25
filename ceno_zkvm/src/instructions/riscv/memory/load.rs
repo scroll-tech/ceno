@@ -143,6 +143,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             circuit_builder,
             I::INST_KIND,
             &imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
             rs1_read.register_expr(),
             memory_read.memory_expr(),
             memory_addr.expr_align4(),

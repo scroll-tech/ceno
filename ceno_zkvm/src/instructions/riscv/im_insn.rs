@@ -27,6 +27,7 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
         imm: &Expression<E>,
+        #[cfg(feature = "u16limb_circuit")] imm_sign: &Expression<E>,
         rs1_read: RegisterExpr<E>,
         memory_read: MemoryExpr<E>,
         memory_addr: AddressExpr<E>,
@@ -51,7 +52,7 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
             0.into(),
             imm.clone(),
             #[cfg(feature = "u16limb_circuit")]
-            0.into(),
+            imm_sign.expr(),
         ))?;
 
         Ok(IMInstructionConfig {

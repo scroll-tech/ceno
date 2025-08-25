@@ -328,11 +328,10 @@ fn setup_platform_inner(
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
 
     let stack = if preset.is_debug {
-        // reserve some extra space for io
-        // thus memory consistent check could be satisfied
-        preset.stack.end - stack_size..(preset.stack.end + 0x4000)
+        (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end)
     } else {
-        preset.stack.end - stack_size..preset.stack.end
+        // remove extra space for io for non-debug mode
+        (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end - 0x4000)
     };
 
     let heap = {

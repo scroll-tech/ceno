@@ -89,6 +89,8 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             circuit_builder,
             I::INST_KIND,
             &imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.expr_align4(),

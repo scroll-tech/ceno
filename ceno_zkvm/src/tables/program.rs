@@ -107,10 +107,6 @@ impl<F: SmallField> InsnRecord<F> {
     #[cfg(feature = "u16limb_circuit")]
     pub fn imm_internal(insn: &Instruction) -> (i64, F) {
         match (insn.kind, InsnFormat::from(insn.kind)) {
-            // TODO convert to 2 limbs to support smaller field
-            (LB | LH | LW | LBU | LHU | SB | SH | SW, _) => {
-                (insn.imm as i64, i64_to_base(insn.imm as i64))
-            }
             // logic imm
             (XORI | ORI | ANDI, _) => (
                 insn.imm as i16 as i64,
@@ -145,8 +141,6 @@ impl<F: SmallField> InsnRecord<F> {
     pub fn imm_signed_internal(insn: &Instruction) -> (i64, F) {
         match (insn.kind, InsnFormat::from(insn.kind)) {
             (SLLI | SRLI | SRAI, _) => (false as i64, F::from_bool(false)),
-            // TODO convert to 2 limbs to support smaller field
-            (LB | LH | LW | LBU | LHU | SB | SH | SW, _) => (false as i64, F::from_bool(false)),
             // logic imm
             (XORI | ORI | ANDI, _) => (
                 (insn.imm >> LIMB_BITS) as i16 as i64,
