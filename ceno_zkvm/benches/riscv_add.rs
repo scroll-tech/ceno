@@ -10,10 +10,10 @@ mod alloc;
 use criterion::*;
 
 use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
-use ff_ext::GoldilocksExt2;
 use gkr_iop::cpu::{CpuBackend, CpuProver};
 use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
 
+use ff_ext::BabyBearExt4;
 use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
@@ -121,5 +121,5 @@ fn bench_add(c: &mut Criterion) {
         group.finish();
     }
 
-    type E = GoldilocksExt2;
+    type E = BabyBearExt4;
 }

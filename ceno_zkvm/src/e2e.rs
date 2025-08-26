@@ -71,8 +71,8 @@ pub enum PcsKind {
 )]
 pub enum FieldType {
     #[default]
-    Goldilocks,
     BabyBear,
+    Goldilocks,
 }
 
 pub struct FullMemState<Record> {

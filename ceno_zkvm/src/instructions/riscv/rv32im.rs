@@ -6,6 +6,8 @@ use super::{
 use crate::instructions::riscv::auipc::AuipcInstruction;
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::lui::LuiInstruction;
+#[cfg(not(feature = "u16limb_circuit"))]
+use crate::tables::PowTableCircuit;
 use crate::{
     error::ZKVMError,
     instructions::{
@@ -28,9 +30,8 @@ use crate::{
     },
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        AndTableCircuit, LtuTableCircuit, OrTableCircuit, PowTableCircuit, TableCircuit,
-        U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit, U18TableCircuit,
-        XorTableCircuit,
+        AndTableCircuit, LtuTableCircuit, OrTableCircuit, TableCircuit, U5TableCircuit,
+        U8TableCircuit, U14TableCircuit, U16TableCircuit, U18TableCircuit, XorTableCircuit,
     },
 };
 use ceno_emul::{
@@ -127,6 +128,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub or_table_config: <OrTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub xor_table_config: <XorTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub ltu_config: <LtuTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    #[cfg(not(feature = "u16limb_circuit"))]
     pub pow_config: <PowTableCircuit<E> as TableCircuit<E>>::TableConfig,
 }
 
@@ -204,6 +206,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let or_table_config = cs.register_table_circuit::<OrTableCircuit<E>>();
         let xor_table_config = cs.register_table_circuit::<XorTableCircuit<E>>();
         let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
+        #[cfg(not(feature = "u16limb_circuit"))]
         let pow_config = cs.register_table_circuit::<PowTableCircuit<E>>();
 
         Self {
@@ -272,6 +275,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             or_table_config,
             xor_table_config,
             ltu_config,
+            #[cfg(not(feature = "u16limb_circuit"))]
             pow_config,
         }
     }
@@ -350,6 +354,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &());
         fixed.register_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &());
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
+        #[cfg(not(feature = "u16limb_circuit"))]
         fixed.register_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &());
     }
 
@@ -480,6 +485,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness.assign_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &())?;
         witness.assign_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &())?;
         witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
+        #[cfg(not(feature = "u16limb_circuit"))]
         witness.assign_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &())?;
 
         Ok(())

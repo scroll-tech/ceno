@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use ceno_zkvm::precompiles::{run_faster_keccakf, setup_lookup_keccak_gkr_circuit};
 use criterion::*;
-use ff_ext::GoldilocksExt2;
+use ff_ext::BabyBearExt4;
 
 use itertools::Itertools;
 use mpcs::BasefoldDefault;
@@ -41,14 +41,13 @@ fn keccak_f_fn(c: &mut Criterion) {
                         let circuit =
                             setup_lookup_keccak_gkr_circuit().expect("setup circuit error");
                         #[allow(clippy::unit_arg)]
-                        let _ =
-                            run_faster_keccakf::<GoldilocksExt2, BasefoldDefault<GoldilocksExt2>>(
-                                circuit,
-                                black_box(states),
-                                false,
-                                false,
-                            )
-                            .expect("unable to get proof");
+                        let _ = run_faster_keccakf::<BabyBearExt4, BasefoldDefault<BabyBearExt4>>(
+                            circuit,
+                            black_box(states),
+                            false,
+                            false,
+                        )
+                        .expect("unable to get proof");
                         let elapsed = instant.elapsed();
                         println!(
                             "keccak_f::create_proof, instances = {}, time = {}",
