@@ -152,8 +152,7 @@ impl DynamicRangeTableConfig {
             .collect::<Vec<_>>();
         let bits_content = std::iter::once(F::ZERO)
             .chain((0..=max_bits).flat_map(|i| {
-                std::iter::repeat(i)
-                    .take(1 << i)
+                std::iter::repeat_n(i, 1 << i)
                     .map(|j| F::from_canonical_usize(j))
             }))
             .collect::<Vec<_>>();

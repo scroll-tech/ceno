@@ -390,13 +390,13 @@ fn load_tables<E: ExtensionField>(
             .chain((0..=MAX_BITS).flat_map(|i| (0..(1 << i))))
             .zip(
                 std::iter::once(0)
-                    .chain((0..=MAX_BITS).flat_map(|i| std::iter::repeat(i).take(1 << i))),
+                    .chain((0..=MAX_BITS).flat_map(|i| std::iter::repeat_n(i, 1 << i))),
             )
         {
             let rlc_record = cs.rlc_chip_record(vec![
                 (LookupTable::Dynamic as usize).into(),
                 (i as usize).into(),
-                (bits as usize).into(),
+                bits.into(),
             ]);
             let rlc_record = eval_by_expr(&[], &[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_canonical_u64_vec());
