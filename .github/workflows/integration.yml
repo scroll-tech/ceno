@@ -60,16 +60,15 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
-      - name: Run keccak_syscall (release)
-        env:
-          RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
-
       - name: Run fibonacci (release + goldilocks)
         env:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
+      - name: Run keccak_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Install cargo make
         run: |
