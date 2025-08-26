@@ -35,7 +35,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for CpuBacke
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> CpuBackend<E, PCS> {
     pub fn new(max_poly_size_log2: usize, security_level: SecurityLevel) -> Self {
-        let param = PCS::setup(E::BaseField::TWO_ADICITY, security_level).unwrap();
+        let param = PCS::setup(1 << E::BaseField::TWO_ADICITY, security_level).unwrap();
         let (pp, vp) = PCS::trim(param, 1 << max_poly_size_log2).unwrap();
         Self {
             pp,
