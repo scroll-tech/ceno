@@ -114,7 +114,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             cb.assert_dynamic_range(
                 || format!("range_check_carry_{i}"),
                 carry.clone(),
-                E::BaseField::from_canonical_u32(18),
+                E::BaseField::from_canonical_u32(18).expr(),
             )?;
         }
 
@@ -144,7 +144,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             cb.assert_dynamic_range(
                 || format!("range_check_carry_ext_{i}"),
                 carry_ext.clone(),
-                E::BaseField::from_canonical_u32(18),
+                E::BaseField::from_canonical_u32(18).expr(),
             )?;
         }
 
@@ -319,7 +319,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "lt_diff_nonzero",
             (lt_diff.expr() - E::BaseField::ONE.expr())
                 * (E::BaseField::ONE.expr() - divisor_zero.expr() - remainder_zero.expr()),
-            E::BaseField::from_canonical_u32(16),
+            E::BaseField::from_canonical_u32(16).expr(),
         )?;
 
         match I::INST_KIND {
@@ -329,14 +329,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                     E::BaseField::from_canonical_u32(2).expr()
                         * (dividend_expr[UINT_LIMBS - 1].clone()
                             - dividend_sign.expr() * sign_mask.expr()),
-                    E::BaseField::from_canonical_u32(16),
+                    E::BaseField::from_canonical_u32(16).expr(),
                 )?;
                 cb.assert_dynamic_range(
                     || "div_rem_range_check_divisor_last",
                     E::BaseField::from_canonical_u32(2).expr()
                         * (divisor_expr[UINT_LIMBS - 1].clone()
                             - divisor_sign.expr() * sign_mask.expr()),
-                    E::BaseField::from_canonical_u32(16),
+                    E::BaseField::from_canonical_u32(16).expr(),
                 )?;
             }
             InsnKind::DIVU | InsnKind::REMU => {
