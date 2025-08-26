@@ -329,6 +329,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
         fixed.register_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &());
         fixed.register_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &());
+        fixed.register_table_circuit::<DynamicRangeTableCircuit<E, 18>>(
+            cs,
+            &self.dynamic_range_config,
+            &(),
+        );
         fixed.register_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &());
         fixed.register_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &());
         fixed.register_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &());
@@ -455,6 +460,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
         witness.assign_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &())?;
         witness.assign_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &())?;
+        witness.assign_table_circuit::<DynamicRangeTableCircuit<E, 18>>(
+            cs,
+            &self.dynamic_range_config,
+            &(),
+        )?;
         witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &())?;
         witness.assign_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &())?;
         witness.assign_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &())?;
