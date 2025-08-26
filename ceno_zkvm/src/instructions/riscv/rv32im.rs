@@ -24,9 +24,9 @@ use crate::{
     },
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        AndTableCircuit, LtuTableCircuit, OrTableCircuit, PowTableCircuit, TableCircuit,
-        U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit, U18TableCircuit,
-        XorTableCircuit,
+        AndTableCircuit, DynamicRangeTableCircuit, LtuTableCircuit, OrTableCircuit,
+        PowTableCircuit, TableCircuit, U5TableCircuit, U8TableCircuit, U14TableCircuit,
+        U16TableCircuit, U18TableCircuit, XorTableCircuit,
     },
 };
 use ceno_emul::{
@@ -115,6 +115,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u8_range_config: <U8TableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub u5_range_config: <U5TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub dynamic_range_config: <DynamicRangeTableCircuit<E, 18> as TableCircuit<E>>::TableConfig,
     pub and_table_config: <AndTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub or_table_config: <OrTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub xor_table_config: <XorTableCircuit<E> as TableCircuit<E>>::TableConfig,
@@ -188,6 +189,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
         let u8_range_config = cs.register_table_circuit::<U8TableCircuit<E>>();
         let u5_range_config = cs.register_table_circuit::<U5TableCircuit<E>>();
+        let dynamic_range_config = cs.register_table_circuit::<DynamicRangeTableCircuit<E, 18>>();
         let and_table_config = cs.register_table_circuit::<AndTableCircuit<E>>();
         let or_table_config = cs.register_table_circuit::<OrTableCircuit<E>>();
         let xor_table_config = cs.register_table_circuit::<XorTableCircuit<E>>();
@@ -252,6 +254,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             u14_range_config,
             u8_range_config,
             u5_range_config,
+            dynamic_range_config,
             and_table_config,
             or_table_config,
             xor_table_config,
