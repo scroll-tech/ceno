@@ -10,7 +10,7 @@ use crate::{circuit_builder::CircuitBuilder, gadgets::AssertLtConfig};
 
 impl<E: ExtensionField> CircuitBuilder<'_, E> {
     // MAX_TS_BITS need to be smaller than prime field
-    pub const MAX_TS_BITS: usize = 30;
+    pub const MAX_TS_BITS: usize = 29;
 
     pub fn ram_type_read<const LIMBS: usize, NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,

@@ -3,7 +3,7 @@ use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
 use p3::field::{Field, FieldAlgebra};
 
-use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
+use super::constants::{BIT_WIDTH, PC_STEP_SIZE, UINT_LIMBS, UInt};
 use crate::{
     chip_handler::{
         AddressExpr, GlobalStateRegisterMachineChipOperations, MemoryChipOperations, MemoryExpr,
@@ -368,6 +368,7 @@ impl WriteMEM {
 pub struct MemAddr<E: ExtensionField> {
     addr: UInt<E>,
     low_bits: Vec<WitIn>,
+    max_bits: usize,
 }
 
 impl<E: ExtensionField> MemAddr<E> {
@@ -393,6 +394,17 @@ impl<E: ExtensionField> MemAddr<E> {
         self.addr.address_expr()
     }
 
+    pub fn uint_unaligned(&self) -> UInt<E> {
+        UInt::from_exprs_unchecked(self.addr.expr())
+    }
+
+    pub fn uint_align2(&self) -> UInt<E> {
+        UInt::from_exprs_unchecked(vec![
+            self.addr.limbs[0].expr() - &self.low_bit_exprs()[0],
+            self.addr.limbs[1].expr(),
+        ])
+    }
+
     /// Represent the address aligned to 2 bytes.
     pub fn expr_align2(&self) -> AddressExpr<E> {
         self.addr.address_expr() - &self.low_bit_exprs()[0]
@@ -404,6 +416,14 @@ impl<E: ExtensionField> MemAddr<E> {
         self.addr.address_expr() - &low_bits[1] * 2 - &low_bits[0]
     }
 
+    pub fn uint_align4(&self) -> UInt<E> {
+        let low_bits = self.low_bit_exprs();
+        UInt::from_exprs_unchecked(vec![
+            self.addr.limbs[0].expr() - &low_bits[1] * 2 - &low_bits[0],
+            self.addr.limbs[1].expr(),
+        ])
+    }
+
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
     pub fn low_bit_exprs(&self) -> Vec<Expression<E>> {
         iter::repeat_n(Expression::ZERO, self.n_zeros())
@@ -412,6 +432,14 @@ impl<E: ExtensionField> MemAddr<E> {
     }
 
     fn construct(cb: &mut CircuitBuilder<E>, n_zeros: usize) -> Result<Self, ZKVMError> {
+        Self::construct_with_max_bits(cb, n_zeros, BIT_WIDTH)
+    }
+
+    pub fn construct_with_max_bits(
+        cb: &mut CircuitBuilder<E>,
+        n_zeros: usize,
+        max_bits: usize,
+    ) -> Result<Self, ZKVMError> {
         assert!(n_zeros <= Self::N_LOW_BITS);
 
         // The address as two u16 limbs.
@@ -442,11 +470,19 @@ impl<E: ExtensionField> MemAddr<E> {
         cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
 
         // Range check the high limb.
-        for high_u16 in limbs.iter().skip(1) {
-            cb.assert_ux::<_, _, 16>(|| "high_u16", high_u16.clone())?;
+        for (i, high_limb) in limbs.iter().enumerate().skip(1) {
+            cb.assert_ux_v2(
+                || "high_limb",
+                high_limb.clone(),
+                (max_bits - i * 16).min(16),
+            )?;
         }
 
-        Ok(MemAddr { addr, low_bits })
+        Ok(MemAddr {
+            addr,
+            low_bits,
+            max_bits,
+        })
     }
 
     pub fn assign_instance(
@@ -470,7 +506,7 @@ impl<E: ExtensionField> MemAddr<E> {
         // Range check the high limb.
         for i in 1..UINT_LIMBS {
             let high_u16 = (addr >> (i * 16)) & 0xffff;
-            lkm.assert_ux::<16>(high_u16 as u64);
+            lkm.assert_ux_v2(high_u16 as u64, (self.max_bits - i * 16).min(16));
         }
 
         Ok(())

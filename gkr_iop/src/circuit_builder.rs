@@ -749,6 +749,23 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
+    pub fn condition_require_one<NR, N>(
+        &mut self,
+        name_fn: N,
+        cond: Expression<E>,
+        expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        // cond * expr
+        self.namespace(
+            || "cond_require_one",
+            |cb| cb.cs.require_zero(name_fn, cond * (expr.expr() - 1)),
+        )
+    }
+
     pub fn select(
         &mut self,
         cond: &Expression<E>,
@@ -777,18 +794,24 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         }
     }
 
-    pub fn assert_dynamic_range<NR, N>(
+    /// to replace `assert_ux`
+    pub fn assert_ux_v2<NR, N>(
         &mut self,
         name_fn: N,
         expr: Expression<E>,
-        bits: Expression<E>,
+        max_bits: usize,
     ) -> Result<(), CircuitBuilderError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.lk_record(name_fn, LookupTable::Dynamic, vec![expr, bits])?;
-        Ok(())
+        match max_bits {
+            16 => self.assert_u16(name_fn, expr),
+            14 => self.assert_u14(name_fn, expr),
+            8 => self.assert_byte(name_fn, expr),
+            5 => self.assert_u5(name_fn, expr),
+            c => panic!("Unsupported bit range {c}"),
+        }
     }
 
     /// Generates U16 lookups to prove that `value` fits on `size < 16` bits.
@@ -815,6 +838,20 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                 expr * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
             )?;
         }
+        Ok(())
+    }
+
+    pub fn assert_dynamic_range<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+        bits: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.lk_record(name_fn, LookupTable::Dynamic, vec![expr, bits])?;
         Ok(())
     }
 

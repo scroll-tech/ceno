@@ -11,7 +11,6 @@ use crate::{
     },
     structs::ProgramParams,
     tables::InsnRecord,
-    utils::i64_to_base,
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
@@ -35,38 +34,6 @@ pub struct LoadConfig<E: ExtensionField> {
 }
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
-
-pub struct LwOp;
-
-impl RIVInstruction for LwOp {
-    const INST_KIND: InsnKind = InsnKind::LW;
-}
-
-pub type LwInstruction<E> = LoadInstruction<E, LwOp>;
-
-pub struct LhOp;
-impl RIVInstruction for LhOp {
-    const INST_KIND: InsnKind = InsnKind::LH;
-}
-pub type LhInstruction<E> = LoadInstruction<E, LhOp>;
-
-pub struct LhuOp;
-impl RIVInstruction for LhuOp {
-    const INST_KIND: InsnKind = InsnKind::LHU;
-}
-pub type LhuInstruction<E> = LoadInstruction<E, LhuOp>;
-
-pub struct LbOp;
-impl RIVInstruction for LbOp {
-    const INST_KIND: InsnKind = InsnKind::LB;
-}
-pub type LbInstruction<E> = LoadInstruction<E, LbOp>;
-
-pub struct LbuOp;
-impl RIVInstruction for LbuOp {
-    const INST_KIND: InsnKind = InsnKind::LBU;
-}
-pub type LbuInstruction<E> = LoadInstruction<E, LbuOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
     type InstructionConfig = LoadConfig<E>;
@@ -176,6 +143,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             circuit_builder,
             I::INST_KIND,
             &imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
             rs1_read.register_expr(),
             memory_read.memory_expr(),
             memory_addr.expr_align4(),
@@ -204,15 +173,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         let memory_value = step.memory_op().unwrap().value.before;
         let memory_read = Value::new_unchecked(memory_value);
         // imm is signed 12-bit value
-        let imm = InsnRecord::imm_internal(&step.insn());
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let unaligned_addr =
-            ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm as i32));
+            ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
         let shift = unaligned_addr.shift();
         let addr_low_bits = [shift & 0x01, (shift >> 1) & 0x01];
         let target_limb = memory_read.as_u16_limbs()[addr_low_bits[1] as usize];
         let mut target_limb_bytes = target_limb.to_le_bytes();
 
-        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
+        set_val!(instance, config.imm, imm.1);
         config
             .im_insn
             .assign_instance(instance, lk_multiplicity, step)?;

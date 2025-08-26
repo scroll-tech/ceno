@@ -4,15 +4,11 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{
-            RIVInstruction,
+            LbInstruction, LbuInstruction, LhInstruction, LhuInstruction, RIVInstruction,
             constants::UInt,
             memory::{
-                LwInstruction, SbInstruction, ShInstruction, SwInstruction,
-                load::{
-                    LbInstruction, LbOp, LbuInstruction, LbuOp, LhInstruction, LhOp,
-                    LhuInstruction, LhuOp, LwOp,
-                },
-                store::{SBOp, SHOp, SWOp},
+                LbOp, LbuOp, LhOp, LhuOp, LwInstruction, LwOp, SBOp, SHOp, SWOp, SbInstruction,
+                ShInstruction, SwInstruction,
             },
         },
     },
@@ -20,6 +16,8 @@ use crate::{
     structs::ProgramParams,
 };
 use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, Word, WriteOp, encode_rv32};
+#[cfg(feature = "u16limb_circuit")]
+use ff_ext::BabyBearExt4;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::circuit_builder::DebugIndex;
 use std::hash::Hash;
@@ -202,83 +200,124 @@ fn impl_opcode_sw(imm: i32) {
 
 #[test]
 fn test_sb() {
-    impl_opcode_sb(0);
-    impl_opcode_sb(5);
-    impl_opcode_sb(10);
-    impl_opcode_sb(15);
+    let cases = vec![(0,), (5,), (10,), (15,), (-4,), (-3,), (-2,), (-1,)];
 
-    for i in -4..0 {
-        impl_opcode_sb(i);
+    for &(imm,) in &cases {
+        impl_opcode_sb(imm);
+        #[cfg(feature = "u16limb_circuit")]
+        impl_opcode_sb(imm);
     }
 }
 
 #[test]
 fn test_sh() {
-    impl_opcode_sh(0);
-    impl_opcode_sh(2);
+    let cases = vec![(0,), (2,), (-4,), (-2,)];
 
-    for i in [-4, -2] {
-        impl_opcode_sh(i)
+    for &(imm,) in &cases {
+        impl_opcode_sh(imm);
+        #[cfg(feature = "u16limb_circuit")]
+        impl_opcode_sh(imm);
     }
 }
 
 #[test]
 fn test_sw() {
-    impl_opcode_sw(0);
-    impl_opcode_sw(4);
+    let cases = vec![(0,), (4,), (-4,)];
 
-    impl_opcode_sw(-4);
+    for &(imm,) in &cases {
+        impl_opcode_sw(imm);
+        #[cfg(feature = "u16limb_circuit")]
+        impl_opcode_sw(imm);
+    }
 }
 
 #[test]
 fn test_lb() {
-    impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(0);
-    impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(1);
-    impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(2);
-    impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(3);
+    let cases = vec![
+        // positive immediates
+        (0,),
+        (1,),
+        (2,),
+        (3,),
+        // negative immediates
+        (-3,),
+        (-2,),
+        (-1,),
+    ];
 
-    for i in -3..0 {
-        impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(i);
+    for &(imm,) in &cases {
+        impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(imm);
+        #[cfg(feature = "u16limb_circuit")]
+        impl_opcode_load::<BabyBearExt4, LbOp, LbInstruction<BabyBearExt4>>(imm);
     }
 }
 
 #[test]
 fn test_lbu() {
-    impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(0);
-    impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(1);
-    impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(2);
-    impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(3);
+    let cases = vec![
+        // positive immediates
+        (0,),
+        (1,),
+        (2,),
+        (3,),
+        // negative immediates
+        (-3,),
+        (-2,),
+        (-1,),
+    ];
 
-    for i in -3..0 {
-        impl_opcode_load::<GoldilocksExt2, LbOp, LbInstruction<GoldilocksExt2>>(i);
+    for &(imm,) in &cases {
+        impl_opcode_load::<GoldilocksExt2, LbuOp, LbuInstruction<GoldilocksExt2>>(imm);
+        #[cfg(feature = "u16limb_circuit")]
+        impl_opcode_load::<BabyBearExt4, LbuOp, LbuInstruction<BabyBearExt4>>(imm);
     }
 }
 
 #[test]
 fn test_lh() {
-    impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(0);
-    impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(2);
-    impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(4);
+    let cases = vec![
+        // positive immediates
+        (0,),
+        (2,),
+        (4,),
+        // negative immediates
+        (-4,),
+        (-2,),
+    ];
 
-    for i in [-4, -2] {
-        impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(i);
+    for &(imm,) in &cases {
+        impl_opcode_load::<GoldilocksExt2, LhOp, LhInstruction<GoldilocksExt2>>(imm);
+        #[cfg(feature = "u16limb_circuit")]
+        impl_opcode_load::<BabyBearExt4, LhOp, LhInstruction<BabyBearExt4>>(imm);
     }
 }
 
 #[test]
 fn test_lhu() {
-    impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(0);
-    impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(2);
-    impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(4);
+    let cases = vec![
+        // positive immediates
+        (0,),
+        (2,),
+        (4,),
+        // negative immediates
+        (-4,),
+        (-2,),
+    ];
 
-    for i in [-4, -2] {
-        impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(i);
+    for &(imm,) in &cases {
+        impl_opcode_load::<GoldilocksExt2, LhuOp, LhuInstruction<GoldilocksExt2>>(imm);
+        #[cfg(feature = "u16limb_circuit")]
+        impl_opcode_load::<BabyBearExt4, LhuOp, LhuInstruction<BabyBearExt4>>(imm);
     }
 }
 
 #[test]
 fn test_lw() {
-    impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(0);
-    impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(4);
-    impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(-4);
+    let cases = vec![(0,), (4,), (-4,)];
+
+    for &(imm,) in &cases {
+        impl_opcode_load::<GoldilocksExt2, LwOp, LwInstruction<GoldilocksExt2>>(imm);
+        #[cfg(feature = "u16limb_circuit")]
+        impl_opcode_load::<BabyBearExt4, LwOp, LwInstruction<BabyBearExt4>>(imm);
+    }
 }

@@ -11,7 +11,6 @@ use crate::{
     },
     structs::ProgramParams,
     tables::InsnRecord,
-    utils::i64_to_base,
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
@@ -32,24 +31,6 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
 }
 
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
-
-pub struct SWOp;
-impl RIVInstruction for SWOp {
-    const INST_KIND: InsnKind = InsnKind::SW;
-}
-pub type SwInstruction<E> = StoreInstruction<E, SWOp, 2>;
-
-pub struct SHOp;
-impl RIVInstruction for SHOp {
-    const INST_KIND: InsnKind = InsnKind::SH;
-}
-pub type ShInstruction<E> = StoreInstruction<E, SHOp, 1>;
-
-pub struct SBOp;
-impl RIVInstruction for SBOp {
-    const INST_KIND: InsnKind = InsnKind::SB;
-}
-pub type SbInstruction<E> = StoreInstruction<E, SBOp, 0>;
 
 impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     for StoreInstruction<E, I, N_ZEROS>
@@ -108,6 +89,8 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             circuit_builder,
             I::INST_KIND,
             &imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.expr_align4(),
@@ -135,16 +118,16 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         let memory_op = step.memory_op().unwrap();
-        let imm = InsnRecord::imm_internal(&step.insn());
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let prev_mem_value = Value::new(memory_op.value.before, lk_multiplicity);
 
-        let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm as i32));
+        let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs1_read.assign_value(instance, rs1);
         config.rs2_read.assign_value(instance, rs2);
-        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
+        set_val!(instance, config.imm, imm.1);
         config
             .prev_memory_value
             .assign_value(instance, prev_mem_value);

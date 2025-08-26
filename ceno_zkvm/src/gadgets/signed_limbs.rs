@@ -15,6 +15,7 @@ use witness::set_val;
 ///
 /// this configuration structure allows flexible comparison logic depending on whether
 /// the operands should be interpreted as signed or unsigned integers.
+#[derive(Debug)]
 pub struct UIntLimbsLTConfig<E: ExtensionField> {
     // Most significant limb of a and b respectively as a field element, will be range
     // checked to be within [-32768, 32767) if signed and [0, 65536) if unsigned.
@@ -46,7 +47,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         a: &UInt<E>,
         b: &UInt<E>,
-        is_signed: bool,
+        is_sign_comparison: bool,
     ) -> Result<UIntLimbsLTConfig<E>, ZKVMError> {
         // 1 if a < b, 0 otherwise.
         let cmp_lt = circuit_builder.create_bit(|| "cmp_lt")?;
@@ -120,7 +121,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
         circuit_builder.assert_ux::<_, _, LIMB_BITS>(
             || "a_msb_f_signed_range_check",
             a_msb_f.expr()
-                + if is_signed {
+                + if is_sign_comparison {
                     E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr()
                 } else {
                     Expression::ZERO
@@ -130,7 +131,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
         circuit_builder.assert_ux::<_, _, LIMB_BITS>(
             || "b_msb_f_signed_range_check",
             b_msb_f.expr()
-                + if is_signed {
+                + if is_sign_comparison {
                     E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr()
                 } else {
                     Expression::ZERO
@@ -153,9 +154,9 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
         lkm: &mut gkr_iop::utils::lk_multiplicity::LkMultiplicity,
         a: &[u16],
         b: &[u16],
-        is_signed: bool,
+        is_sign_comparison: bool,
     ) -> Result<(), CircuitBuilderError> {
-        let (cmp_lt, diff_idx, is_a_neg, is_b_neg) = run_cmp(is_signed, a, b);
+        let (cmp_lt, diff_idx, is_a_neg, is_b_neg) = run_cmp(is_sign_comparison, a, b);
         config
             .diff_marker
             .iter()
@@ -175,7 +176,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
         } else {
             (
                 E::BaseField::from_canonical_u16(a[UINT_LIMBS - 1]),
-                a[UINT_LIMBS - 1] + ((is_signed as u16) << (LIMB_BITS - 1)),
+                a[UINT_LIMBS - 1] + ((is_sign_comparison as u16) << (LIMB_BITS - 1)),
             )
         };
         let (b_msb_f, b_msb_range) = if is_b_neg {
@@ -186,7 +187,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
         } else {
             (
                 E::BaseField::from_canonical_u16(b[UINT_LIMBS - 1]),
-                b[UINT_LIMBS - 1] + ((is_signed as u16) << (LIMB_BITS - 1)),
+                b[UINT_LIMBS - 1] + ((is_sign_comparison as u16) << (LIMB_BITS - 1)),
             )
         };
 

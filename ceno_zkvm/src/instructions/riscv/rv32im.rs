@@ -2,6 +2,10 @@ use super::{
     arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
     memory::LwInstruction,
 };
+#[cfg(feature = "u16limb_circuit")]
+use crate::instructions::riscv::auipc::AuipcInstruction;
+#[cfg(feature = "u16limb_circuit")]
+use crate::instructions::riscv::lui::LuiInstruction;
 use crate::{
     error::ZKVMError,
     instructions::{
@@ -83,6 +87,10 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub srai_config: <SraiInstruction<E> as Instruction<E>>::InstructionConfig,
     pub slti_config: <SltiInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sltiu_config: <SltiuInstruction<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "u16limb_circuit")]
+    pub lui_config: <LuiInstruction<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "u16limb_circuit")]
+    pub auipc_config: <AuipcInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // Branching Opcodes
     pub beq_config: <BeqInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -156,6 +164,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let srai_config = cs.register_opcode_circuit::<SraiInstruction<E>>();
         let slti_config = cs.register_opcode_circuit::<SltiInstruction<E>>();
         let sltiu_config = cs.register_opcode_circuit::<SltiuInstruction<E>>();
+        #[cfg(feature = "u16limb_circuit")]
+        let lui_config = cs.register_opcode_circuit::<LuiInstruction<E>>();
+        #[cfg(feature = "u16limb_circuit")]
+        let auipc_config = cs.register_opcode_circuit::<AuipcInstruction<E>>();
 
         // branching opcodes
         let beq_config = cs.register_opcode_circuit::<BeqInstruction<E>>();
@@ -226,6 +238,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             srai_config,
             slti_config,
             sltiu_config,
+            #[cfg(feature = "u16limb_circuit")]
+            lui_config,
+            #[cfg(feature = "u16limb_circuit")]
+            auipc_config,
             // branching opcodes
             beq_config,
             bne_config,
@@ -297,6 +313,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<SraiInstruction<E>>(cs, &self.srai_config);
         fixed.register_opcode_circuit::<SltiInstruction<E>>(cs, &self.slti_config);
         fixed.register_opcode_circuit::<SltiuInstruction<E>>(cs, &self.sltiu_config);
+        #[cfg(feature = "u16limb_circuit")]
+        fixed.register_opcode_circuit::<LuiInstruction<E>>(cs, &self.lui_config);
+        #[cfg(feature = "u16limb_circuit")]
+        fixed.register_opcode_circuit::<AuipcInstruction<E>>(cs, &self.auipc_config);
         // branching
         fixed.register_opcode_circuit::<BeqInstruction<E>>(cs, &self.beq_config);
         fixed.register_opcode_circuit::<BneInstruction<E>>(cs, &self.bne_config);
@@ -414,6 +434,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(SRAI, SraiInstruction<E>, srai_config);
         assign_opcode!(SLTI, SltiInstruction<E>, slti_config);
         assign_opcode!(SLTIU, SltiuInstruction<E>, sltiu_config);
+        #[cfg(feature = "u16limb_circuit")]
+        assign_opcode!(LUI, LuiInstruction<E>, lui_config);
+        #[cfg(feature = "u16limb_circuit")]
+        assign_opcode!(AUIPC, AuipcInstruction<E>, auipc_config);
         // branching
         assign_opcode!(BEQ, BeqInstruction<E>, beq_config);
         assign_opcode!(BNE, BneInstruction<E>, bne_config);

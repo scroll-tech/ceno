@@ -99,6 +99,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             E::BaseField::ZERO.expr(),
             E::BaseField::ZERO.expr(),
             E::BaseField::ZERO.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
         ))?;
 
         let mut layout = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(

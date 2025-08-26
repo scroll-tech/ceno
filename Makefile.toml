@@ -14,6 +14,22 @@ args = [
 command = "cargo"
 workspace = false
 
+[tasks.tests_v2]
+args = [
+  "test",
+  # Run everything but 'benches'.
+  "--lib",
+  "--bins",
+  "--tests",
+  "--examples",
+  "--workspace",
+  "--features",
+  "u16limb_circuit",
+]
+command = "cargo"
+workspace = false
+
+
 [tasks.riscv_stats]
 args = ["run", "--bin", "riscv_stats"]
 command = "cargo"
