@@ -59,9 +59,10 @@ ceno-examples = { path = "../examples-builder" }
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow"]
+default = ["forbid_overflow", "nightly-features", "u16limb_circuit"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
+goldilocks = ["forbid_overflow", "nightly-features"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 nightly-features = [
