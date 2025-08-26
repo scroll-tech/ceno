@@ -130,11 +130,11 @@ pub struct KeccakFixedCols<T> {
 pub struct KeccakWitCols<T> {
     pub input8: [T; 200],
     pub c_aux: [T; 200],
-    pub c_temp: [T; 30],
+    pub c_temp: [T; 40],
     pub c_rot: [T; 40],
     pub d: [T; 40],
     pub theta_output: [T; 200],
-    pub rotation_witness: [T; 146],
+    pub rotation_witness: [T; 196],
     pub rhopi_output: [T; 200],
     pub nonlinear: [T; 200],
     pub chi_output: [T; 8],
@@ -320,7 +320,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // documentation of `constrain_left_rotation64`. Here c_temp is the split
         // witness for a 1-rotation.
 
-        let c_temp: ArrayView<WitIn, Ix2> = ArrayView::from_shape((5, 6), c_temp).unwrap();
+        let c_temp: ArrayView<WitIn, Ix2> = ArrayView::from_shape((5, 8), c_temp).unwrap();
         let c_rot: ArrayView<WitIn, Ix2> = ArrayView::from_shape((5, 8), c_rot).unwrap();
 
         let (sizes, _) = rotation_split(1);
@@ -413,6 +413,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 )?;
             }
         }
+        assert!(rotation_witness.next().is_none());
 
         let mut chi_output = chi_output.to_vec();
         chi_output.extend(iota_output[8..].to_vec());
@@ -793,12 +794,12 @@ where
                         c8[x] = conv64to8(c64[x]);
                     }
 
-                    let mut c_temp = [[0u64; 6]; 5];
+                    let mut c_temp = [[0u64; 8]; 5];
                     for i in 0..5 {
                         let rep = MaskRepresentation::new(vec![(64, c64[i]).into()])
-                            .convert(vec![16, 15, 1, 16, 15, 1])
+                            .convert(vec![15, 1, 15, 1, 15, 1, 15, 1])
                             .values();
-                        for (j, size) in [16, 15, 1, 16, 15, 1].iter().enumerate() {
+                        for (j, size) in [15, 1, 15, 1, 15, 1, 15, 1].iter().enumerate() {
                             lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
                         }
                         c_temp[i] = rep.try_into().unwrap();
@@ -842,13 +843,20 @@ where
                                     .convert(sizes.clone())
                                     .values();
                             for (j, size) in sizes.iter().enumerate() {
-                                if *size != 32 {
-                                    lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
+                                match *size {
+                                    32 | 1 => (),
+                                    18 => lk_multiplicity.assert_ux::<18>(rep[j]),
+                                    16 => lk_multiplicity.assert_ux::<16>(rep[j]),
+                                    14 => lk_multiplicity.assert_ux::<14>(rep[j]),
+                                    8 => lk_multiplicity.assert_ux::<8>(rep[j]),
+                                    5 => lk_multiplicity.assert_ux::<5>(rep[j]),
+                                    _ => lk_multiplicity.assert_ux_in_u16(*size, rep[j]),
                                 }
                             }
                             rotation_witness.extend(rep);
                         }
                     }
+                    assert_eq!(rotation_witness.len(), rotation_witness_witin.len());
 
                     // Rho and Pi steps
                     let mut rhopi_output64 = [[0u64; 5]; 5];

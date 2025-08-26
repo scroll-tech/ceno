@@ -12,6 +12,7 @@ args = [
   "--workspace",
 ]
 command = "cargo"
+env = { RUST_MIN_STACK = "33554432" }
 workspace = false
 
 [tasks.tests_v2]
@@ -27,6 +28,7 @@ args = [
   "u16limb_circuit",
 ]
 command = "cargo"
+env = { RUST_MIN_STACK = "33554432" }
 workspace = false
 
 
