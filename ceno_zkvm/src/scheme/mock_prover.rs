@@ -20,7 +20,7 @@ use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use gkr_iop::{
     tables::{
-        OpsTable,
+        LookupTable, OpsTable,
         ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
     },
     utils::lk_multiplicity::{LkMultiplicityRaw, Multiplicity},
@@ -381,6 +381,28 @@ fn load_tables<E: ExtensionField>(
         }
     }
 
+    fn load_dynamic_range_table<E: ExtensionField, const MAX_BITS: usize>(
+        t_vec: &mut Vec<Vec<u64>>,
+        cs: &ConstraintSystem<E>,
+        challenge: [E; 2],
+    ) {
+        for (i, bits) in std::iter::once(0)
+            .chain((0..=MAX_BITS).flat_map(|i| (0..(1 << i))))
+            .zip(
+                std::iter::once(0)
+                    .chain((0..=MAX_BITS).flat_map(|i| std::iter::repeat(i).take(1 << i))),
+            )
+        {
+            let rlc_record = cs.rlc_chip_record(vec![
+                (LookupTable::Dynamic as usize).into(),
+                (i as usize).into(),
+                (bits as usize).into(),
+            ]);
+            let rlc_record = eval_by_expr(&[], &[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_canonical_u64_vec());
+        }
+    }
+
     fn load_op_table<OP: OpsTable, E: ExtensionField>(
         t_vec: &mut Vec<Vec<u64>>,
         cs: &ConstraintSystem<E>,
@@ -404,6 +426,7 @@ fn load_tables<E: ExtensionField>(
     load_range_table::<U14Table, _>(&mut table_vec, cs, challenge);
     load_range_table::<U16Table, _>(&mut table_vec, cs, challenge);
     load_range_table::<U18Table, _>(&mut table_vec, cs, challenge);
+    load_dynamic_range_table::<_, 18>(&mut table_vec, cs, challenge);
     load_op_table::<AndTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<OrTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<XorTable, _>(&mut table_vec, cs, challenge);
