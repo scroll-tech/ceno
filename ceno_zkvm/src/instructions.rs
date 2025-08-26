@@ -54,19 +54,22 @@ pub trait Instruction<E: ExtensionField> {
         let (out_evals, mut chip) = (
             [
                 // r_record
-                (selector_type.clone(), (0..r_len).collect_vec()),
+                (0..r_len).collect_vec(),
                 // w_record
-                (selector_type.clone(), (r_len..r_len + w_len).collect_vec()),
+                (r_len..r_len + w_len).collect_vec(),
                 // lk_record
-                (
-                    selector_type.clone(),
-                    (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                ),
+                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
                 // zero_record
-                (selector_type, (0..zero_len).collect_vec()),
+                (0..zero_len).collect_vec(),
             ],
             Chip::new_from_cb(cb, 0),
         );
+
+        // register selector to legacy constrain system
+        cb.cs.r_selector = Some(selector_type.clone());
+        cb.cs.w_selector = Some(selector_type.clone());
+        cb.cs.lk_selector = Some(selector_type.clone());
+        cb.cs.zero_selector = Some(selector_type.clone());
 
         let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
         chip.add_layer(layer);
