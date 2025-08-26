@@ -3,7 +3,7 @@ use multilinear_extensions::{
     Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn, WitnessId, rlc_chip_record,
 };
 use serde::de::DeserializeOwned;
-use std::{cmp::Ordering, collections::HashMap, iter::once, marker::PhantomData};
+use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
 
@@ -799,6 +799,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             14 => self.assert_u14(name_fn, expr),
             8 => self.assert_byte(name_fn, expr),
             5 => self.assert_u5(name_fn, expr),
+            1 => self.assert_bit(name_fn, expr),
             c => panic!("Unsupported bit range {c}"),
         }
     }
@@ -1095,8 +1096,29 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
         // Lookup ranges
         for (i, (size, elem)) in split_rep.iter().enumerate() {
-            if *size != 32 {
-                self.assert_ux_in_u16(|| format!("{}_{}", name().into(), i), *size, elem.clone())?;
+            match *size {
+                32 => (),
+                18 => {
+                    self.assert_ux::<_, _, 18>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                16 => {
+                    self.assert_ux::<_, _, 16>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                14 => {
+                    self.assert_ux::<_, _, 14>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                8 => {
+                    self.assert_ux::<_, _, 8>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                5 => {
+                    self.assert_ux::<_, _, 5>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                1 => self.assert_bit(|| format!("{}_{}", name().into(), i), elem.clone())?,
+                _ => self.assert_ux_in_u16(
+                    || format!("{}_{}", name().into(), i),
+                    *size,
+                    elem.clone(),
+                )?,
             }
         }
 
@@ -1110,25 +1132,26 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             let mut rep_x = rep_x.to_owned();
             rep_x.rotate_right(chunks_rotation);
 
-            for i in 0..2 {
-                // The respective 4 elements in the byte representation
-                let lhs = rep8[4 * i..4 * (i + 1)]
+            // 64 bits represent in 4 limb, each with 16 bits
+            let num_limbs = 4;
+            let mut rep_x_iter = rep_x.iter().cloned();
+            for limb_i in 0..num_limbs {
+                let lhs = rep8[2 * limb_i..2 * (limb_i + 1)]
                     .iter()
                     .map(|wit| (8, wit.expr()))
                     .collect_vec();
-                let cnt = rep_x.len() / 2;
-                let rhs = &rep_x[cnt * i..cnt * (i + 1)];
+                let rhs_limbs = take_til_threshold(&mut rep_x_iter, 16, &|limb| limb.0).unwrap();
 
-                assert_eq!(rhs.iter().map(|e| e.0).sum::<usize>(), 32);
+                assert_eq!(rhs_limbs.iter().map(|e| e.0).sum::<usize>(), 16);
 
-                self.require_reps_equal::<32, _, _>(
+                self.require_reps_equal::<16, _, _>(
                     ||format!(
-                        "rotation internal {}, round {i}, rot: {chunks_rotation}, delta: {delta}, {:?}",
+                        "rotation internal {}, round {limb_i}, rot: {chunks_rotation}, delta: {delta}, {:?}",
                         name().into(),
                         sizes
                     ),
                     &lhs,
-                    rhs,
+                    &rhs_limbs,
                 )?;
             }
             Ok(())
@@ -1150,34 +1173,64 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     }
 }
 
+/// take items from an iterator until the accumulated "weight" (measured by `f`)
+/// reaches exactly `threshold`.
+///
+/// - `iter`: a mutable iterator to consume items from
+/// - `threshold`: the sum of weights at which to stop and return the group
+/// - `f`: closure that extracts the "weight" (e.g., bit length) from each item
+///
+/// returns:
+/// - `Some(Vec<T>)` containing the next group of items whose weights sum to `threshold`
+/// - `None` if the iterator is exhausted and no items remain
+///
+/// panics if the sum of weights ever exceeds `threshold`.
+pub fn take_til_threshold<I, T, F>(iter: &mut I, threshold: usize, f: &F) -> Option<Vec<T>>
+where
+    I: Iterator<Item = T>,
+    F: Fn(&T) -> usize,
+{
+    let mut group = Vec::new();
+    let mut sum = 0;
+
+    for x in iter.by_ref() {
+        sum += f(&x);
+        group.push(x);
+
+        if sum == threshold {
+            return Some(group);
+        } else if sum > threshold {
+            panic!("sum exceeded threshold!");
+        }
+    }
+
+    if group.is_empty() {
+        None
+    } else {
+        Some(group) // leftover if input not perfectly divisible
+    }
+}
+
 /// Compute an adequate split of 64-bits into chunks for performing a rotation
 /// by `delta`. The first element of the return value is the vec of chunk sizes.
 /// The second one is the length of its suffix that needs to be rotated
 pub fn rotation_split(delta: usize) -> (Vec<usize>, usize) {
-    let delta = delta % 64;
-
     if delta == 0 {
-        return (vec![32, 32], 0);
+        return (vec![16, 16, 16, 16], 0);
     }
 
-    // This split meets all requirements except for <= 16 sizes
-    let split32 = match delta.cmp(&32) {
-        Ordering::Less => vec![32 - delta, delta, 32 - delta, delta],
-        Ordering::Equal => vec![32, 32],
-        Ordering::Greater => vec![32 - (delta - 32), delta - 32, 32 - (delta - 32), delta - 32],
-    };
-
-    // Split off large chunks
-    let split16 = split32
-        .into_iter()
-        .flat_map(|size| {
-            assert!(size < 32);
-            if size <= 16 {
-                vec![size]
+    let remainder = delta % 16;
+    let split16 = std::iter::repeat_with(|| [16 - remainder, remainder])
+        .flatten()
+        .scan(0, |sum, x| {
+            if *sum >= 64 {
+                None
             } else {
-                vec![16, size - 16]
+                *sum += x;
+                Some(x)
             }
         })
+        .filter(|v| *v > 0)
         .collect_vec();
 
     let mut sum = 0;
@@ -1188,7 +1241,7 @@ pub fn rotation_split(delta: usize) -> (Vec<usize>, usize) {
         }
     }
 
-    panic!();
+    panic!("delta {:?} split16 {:?}", remainder, split16);
 }
 
 pub fn expansion_expr<E: ExtensionField, const SIZE: usize>(
