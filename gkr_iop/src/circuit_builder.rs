@@ -16,6 +16,10 @@ pub mod ram;
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct RotationParams<E: ExtensionField> {
+    // TODO: explain this
+    // f(left_point) = \sum eq(left_point,b) * f(b)
+    // f(right_point) = \sum eq(right_point,b) * f(b)
+    // g(point) = \sum eq(point,b) * g(b)
     pub rotation_eqs: Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
     pub rotation_cyclic_group_log2: usize,
     pub rotation_cyclic_subgroup_size: usize,

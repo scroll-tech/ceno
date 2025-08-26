@@ -80,6 +80,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         // build rotation expression
         let num_rotations = self.rotation_exprs.1.len();
         let rotation_expr = if num_rotations > 0 {
+            // TODO: is there a more natural way to construct rotation sumcheck expression?
+            // 0 = \sum_i alpha^i * (rotate_i - target_i)
             let alpha_pows_expr = (2..)
                 .take(num_rotations)
                 .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
@@ -221,6 +223,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         if let Some(rotation_proof) = rotation_proof {
             // verify rotation proof
             let rt = eval_and_dedup_points
+                // TODO: why first?
                 .first()
                 .and_then(|(_, rt)| rt.as_ref())
                 .expect("rotation proof should have at least one point");
@@ -283,9 +286,13 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         );
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
+        // TODO: is there any check on eq_left, eq_right, eq for rotation argument?
+
         // eval eq and set to respective witin
         izip!(&self.out_sel_and_eval_exprs, &eval_and_dedup_points).for_each(
             |((sel_type, _), (_, out_point))| {
+                // TODO: instead of overwrite main_evals, we should just read it out
+                //       and then compare it with expected value
                 sel_type.evaluate(
                     &mut main_evals,
                     out_point.as_ref().unwrap(),
@@ -359,6 +366,7 @@ fn verify_rotation<E: ExtensionField>(
         },
         transcript,
     );
+    // TODO: this name is misleading
     let origin_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
     // compute the selector evaluation
@@ -387,6 +395,7 @@ fn verify_rotation<E: ExtensionField>(
                 right_evals.push(*right_eval);
                 target_evals.push(*target_eval);
                 [
+                    // e.g. in the case of keccak, it's (1-s4)*left_eval + s4*right_eval
                     (E::ONE - origin_point[rotation_cyclic_group_log2 - 1]) * *left_eval
                         + origin_point[rotation_cyclic_group_log2 - 1] * *right_eval,
                     *target_eval,
@@ -447,6 +456,7 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
             .zip_eq(alpha_pows_iter.by_ref().take(group_length))
             .map(|(expr, alpha)| alpha * expr)
             .sum::<Expression<E>>();
+        // TODO: why selectors are treated as WitIn?
         let expr = match sel_type {
             SelectorType::None => zero_check_expr,
             SelectorType::Whole(sel)
@@ -511,12 +521,18 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
                 Expression::StructuralWitIn(right_eq_id, ..),
                 Expression::StructuralWitIn(eq_id, ..),
             ) => (
+                // TODO: why convert to WitIn?
                 Expression::WitIn(offset_eq_id + *left_eq_id),
                 Expression::WitIn(offset_eq_id + *right_eq_id),
                 Expression::WitIn(offset_eq_id + *eq_id),
             ),
             invalid => panic!("invalid eq format {:?}", invalid),
         };
+
+        // f(left_point) = \sum_b eq(left_point, b) * f(b)
+        // f(right_point) = \sum_b eq(right_point, b) * f(b)
+        // g(target_point) = \sum_b eq(target_point, b) * g(b
+
         // add rotation left expr
         zero_check_exprs.push(rotation_left_eq_expr * left_rotation_expr);
         // add rotation right expr

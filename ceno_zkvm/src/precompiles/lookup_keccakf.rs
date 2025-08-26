@@ -184,6 +184,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 sel_mem_read,
                 sel_mem_write,
                 eq_zero,
+                // TODO: explain this??
                 eq_rotation_left,
                 eq_rotation_right,
                 eq_rotation,
@@ -221,10 +222,12 @@ impl<E: ExtensionField> KeccakLayout<E> {
             },
             selector_type_layout: SelectorTypeLayout {
                 sel_mem_read: SelectorType::OrderedSparse32 {
+                    // read at the first round
                     indices: vec![CYCLIC_POW2_5[0] as usize],
                     expression: sel_mem_read.expr(),
                 },
                 sel_mem_write: SelectorType::OrderedSparse32 {
+                    // write at the last round
                     indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
                     expression: sel_mem_write.expr(),
                 },
@@ -491,7 +494,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         layout.input32_exprs = keccak_input32.try_into().unwrap();
         layout.output32_exprs = keccak_output32.try_into().unwrap();
 
-        // rotation constrain: rotation(keccak_input8).next() == keccak_output8
+        // rotation constraint: rotation(keccak_input8).next() == keccak_output8
         izip!(keccak_input8, keccak_output8)
             .for_each(|(input, output)| system.rotate_and_assert_eq(input.expr(), output.expr()));
         system.set_rotation_params(RotationParams {

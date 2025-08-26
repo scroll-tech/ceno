@@ -22,7 +22,8 @@ pub fn rotation_next_base_mle<'a, E: ExtensionField>(
     cyclic_group_log2_size: usize,
 ) -> MultilinearExtension<'a, E> {
     let cyclic_group_size = 1 << cyclic_group_log2_size;
-    let rotation_index = bh.into_iter().take(cyclic_group_size + 1).collect_vec();
+    // TODO: why +1
+    let rotation_index = bh.into_iter().take(cyclic_group_size).collect_vec();
     let mut rotated_mle_evals = Vec::with_capacity(mle.evaluations().len());
     rotated_mle_evals.par_extend(
         (0..mle.evaluations().len())
@@ -42,11 +43,10 @@ pub fn rotation_next_base_mle<'a, E: ExtensionField>(
 
             rotate_chunk[0] = original_chunk[0];
 
-            for i in (0..rotation_index.len() - 1).rev() {
-                let to = rotation_index[i] as usize;
-                let from = rotation_index[i + 1] as usize;
-                rotate_chunk[to] = original_chunk[from];
-            }
+            rotation_index.iter().tuple_windows().for_each(|(cur, next)| {
+                // f'(b) = f(next(b))
+                rotate_chunk[*cur as usize] = original_chunk[*next as usize];
+            });
         });
     MultilinearExtension::from_evaluation_vec_smart(mle.num_vars(), rotated_mle_evals)
 }
@@ -160,6 +160,14 @@ pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>(
     (wits, fixed, eqs)
 }
 
+/// p(b) = eq(x,b) if b <= max_idx else 0
+/// 
+/// Its mle is defined as 
+/// 
+///     p(y) = \sum_b p(b)*eq(b,y) = \sum_{b <= max_idx} eq(x,b)*eq(b,y)
+/// 
+/// it's easy to see that eq(x,b)*eq(y,b) = eq(x,y,b).
+///
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
 /// [0..=max_idx]. Specifically, it is an MLE of the following vector:
 ///     partial_eq_{\mathbf{x}}(\mathbf{y})
@@ -239,8 +247,11 @@ mod tests {
         let mut rng = rand::thread_rng();
         let point: Vec<_> = (0..7).map(|_| E::random(&mut rng)).collect();
         let (left_point, right_point) = bh.get_rotation_points(&point);
+        // f(next(r)) = (1-r5)*f(0,r1,...) + r5*f(1,r1,1-r2,...)
         let rotated_eval = rotated.evaluate(&point);
+        // f(0,r1,...)
         let left_eval = poly.evaluate(&left_point);
+        // f(1,r1,1-r2,...)
         let right_eval = poly.evaluate(&right_point);
         assert_eq!(
             rotated_eval,

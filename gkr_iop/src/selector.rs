@@ -61,6 +61,7 @@ impl<E: ExtensionField> SelectorType<E> {
                             return;
                         }
 
+                        // TODO: no need to call .copied()
                         let mut indices_iter = indices.iter().copied();
                         let mut next_keep = indices_iter.next();
 
@@ -78,6 +79,7 @@ impl<E: ExtensionField> SelectorType<E> {
         }
     }
 
+    // TODO: correct the comment
     /// Evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
     pub fn evaluate(
         &self,
@@ -104,6 +106,10 @@ impl<E: ExtensionField> SelectorType<E> {
                 indices,
                 expression,
             } => {
+                // p(b) = eq(x,b) if b[..5] \in indices else 0
+                // p(y) = \sum_b p(b) * eq(y,b)
+                //      = \sum_{bl \in indices} eq(xl,bl)*eq(yl,bl) * \sum_{br <= num_instances-1} eq(xr,br)*eq(yr,br)
+                //      = \sum_{bl \in indices} eq(xl,yl,bl) * eq_eval_less_or_equal_than(num_instances-1, xr,yr)
                 let out_subgroup_eq = build_eq_x_r_vec(&out_point[..5]);
                 let in_subgroup_eq = build_eq_x_r_vec(&in_point[..5]);
                 let mut eval = E::ZERO;
