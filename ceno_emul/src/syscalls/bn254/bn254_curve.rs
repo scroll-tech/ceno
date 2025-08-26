@@ -72,19 +72,11 @@ pub fn bn254_add(vm: &VMState) -> SyscallEffects {
 pub fn bn254_double(vm: &VMState) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
 
-    // for compatibility with sp1 spec
-    assert_eq!(vm.peek_register(Platform::reg_arg1()), 0);
-
     // Read the argument pointers
     let reg_ops = vec![
         WriteOp::new_register_op(
             Platform::reg_arg0(),
             Change::new(p_ptr, p_ptr),
-            0, // Cycle set later in finalize().
-        ),
-        WriteOp::new_register_op(
-            Platform::reg_arg1(),
-            Change::new(0, 0),
             0, // Cycle set later in finalize().
         ),
     ];

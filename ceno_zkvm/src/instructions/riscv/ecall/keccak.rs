@@ -76,7 +76,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             cb,
             UInt::from_const_unchecked(vec![
                 KECCAK_PERMUTE & LIMB_MASK,
-                (KECCAK_PERMUTE >> LIMB_BITS) & 0xffff,
+                (KECCAK_PERMUTE >> LIMB_BITS) & LIMB_MASK,
             ])
             .register_expr(),
             vm_state.ts,
