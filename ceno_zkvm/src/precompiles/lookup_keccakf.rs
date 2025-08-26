@@ -507,10 +507,16 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>) {
+    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_challenges = self.n_challenges();
+
+        // register selector to legacy constrain system
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
 
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();
@@ -520,25 +526,13 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         (
             [
                 // r_record
-                (
-                    self.selector_type_layout.sel_mem_read.clone(),
-                    (0..r_len).collect_vec(),
-                ),
+                (0..r_len).collect_vec(),
                 // w_record
-                (
-                    self.selector_type_layout.sel_mem_write.clone(),
-                    (r_len..r_len + w_len).collect_vec(),
-                ),
+                (r_len..r_len + w_len).collect_vec(),
                 // lk_record
-                (
-                    self.selector_type_layout.sel_lookup.clone(),
-                    (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                ),
+                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
                 // zero_record
-                (
-                    self.selector_type_layout.sel_zero.clone(),
-                    (0..zero_len).collect_vec(),
-                ),
+                (0..zero_len).collect_vec(),
             ],
             Chip::new_from_cb(cb, self.n_challenges()),
         )
@@ -1008,7 +1002,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
         })
         .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-    let (out_evals, mut chip) = layout.finalize(&cb);
+    let (out_evals, mut chip) = layout.finalize(&mut cb);
 
     let layer =
         Layer::from_circuit_builder(&cb, "Rounds".to_string(), layout.n_challenges(), out_evals);
