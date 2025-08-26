@@ -6,7 +6,7 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube, layer::Layer},
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -31,8 +31,8 @@ use crate::{
         },
     },
     precompiles::{
-        KECCAK_ROUNDS, KeccakInstance, KeccakLayout, KeccakParams, KeccakStateInstance,
-        KeccakTrace, KeccakWitInstance,
+        KECCAK_ROUNDS, KECCAK_ROUNDS_CEIL_LOG2, KeccakInstance, KeccakLayout, KeccakParams,
+        KeccakStateInstance, KeccakTrace, KeccakWitInstance,
     },
     structs::ProgramParams,
     tables::{InsnRecord, RMMCollections},
@@ -202,14 +202,21 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .zip_eq(steps.par_chunks(num_instance_per_batch))
             .flat_map(|(instances, steps)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
+
                 instances
                     .chunks_mut(num_witin * KECCAK_ROUNDS.next_power_of_two())
                     .zip_eq(steps)
                     .map(|(instance_with_rotation, step)| {
                         let ops = &step.syscall().expect("syscall step");
 
-                        // assign full rotation with same witness
-                        for instance in instance_with_rotation.chunks_mut(num_witin) {
+                        let bh = BooleanHypercube::new(KECCAK_ROUNDS_CEIL_LOG2);
+                        let mut cyclic_group = bh.into_iter();
+
+                        for _ in 0..KECCAK_ROUNDS {
+                            let round_index = cyclic_group.next().unwrap();
+                            let instance = &mut instance_with_rotation
+                                [round_index as usize * num_witin..][..num_witin];
+
                             // vm_state
                             config.vm_state.assign_instance(instance, step)?;
 

@@ -48,7 +48,7 @@ use crate::{
 };
 
 pub const ROUNDS: usize = 24;
-const ROUNDS_CEIL_LOG2: usize = 5; // log_2(2^32)
+pub const ROUNDS_CEIL_LOG2: usize = 5; // log_2(2^32)
 
 const RC: [u64; ROUNDS] = [
     1u64,
