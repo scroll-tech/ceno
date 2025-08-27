@@ -1,13 +1,13 @@
 use crate::{
     LayerWitness,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness},
-    hal::{ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
+    hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
 use ff_ext::ExtensionField;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
-use multilinear_extensions::mle::{ArcMultilinearExtension, MultilinearExtension};
+use multilinear_extensions::mle::{ArcMultilinearExtension, MultilinearExtension, Point};
 use p3::field::TwoAdicField;
-use std::rc::Rc;
+use std::{rc::Rc, sync::Arc};
 use witness::RowMajorMatrix;
 
 use crate::cpu::{CpuBackend, CpuProver, default_backend_config};
@@ -23,6 +23,7 @@ pub mod gpu_prover {
     use std::sync::{Arc, Mutex};
 
     use ceno_gpu::gl64::CudaHalGL64;
+    #[allow(unused_imports)]
     use ceno_gpu::gl64::GpuPolynomialExt;
     pub use ceno_gpu::gl64::convert_ceno_to_gpu_basefold_commitment;
     use cudarc::driver::{CudaDevice, DriverError};
@@ -76,10 +77,53 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
     }
 }
 
+/// Stores a multilinear polynomial in dense evaluation form.
+#[derive(Clone, PartialEq, Eq, Default, Debug)]
+pub struct MultilinearExtensionGpu<'a, E: ExtensionField> {
+    mle: MultilinearExtension<'a, E>,
+}
+
+impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu<'a, E> {
+    fn num_vars(&self) -> usize {
+        self.mle.num_vars()
+    }
+
+    fn eval(&self, point: Point<E>) -> E {
+        self.mle.evaluate(&point)
+    }
+}
+
+impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
+    pub fn inner(&self) -> &MultilinearExtension<'a, E> {
+        &self.mle
+    }
+
+    /// Delegate to inner MultilinearExtension's evaluate method
+    pub fn evaluate(&self, point: &[E]) -> E {
+        self.mle.evaluate(point)
+    }
+
+    /// Delegate to inner MultilinearExtension's evaluations method
+    pub fn evaluations(&self) -> &multilinear_extensions::mle::FieldType<E> {
+        self.mle.evaluations()
+    }
+
+    /// Create a new MultilinearExtensionGpu from a MultilinearExtension
+    pub fn from_inner(inner: MultilinearExtension<'a, E>) -> Self {
+        Self { mle: inner }
+    }
+
+    pub fn get_ext_field_vec(&self) -> &[E] {
+        self.mle.get_ext_field_vec()
+    }
+}
+
+pub type ArcMultilinearExtensionGpu<'a, E> = Arc<MultilinearExtensionGpu<'a, E>>;
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
     type E = E;
     type Pcs = PCS;
-    type MultilinearPoly<'a> = MultilinearExtension<'a, E>;
+    type MultilinearPoly<'a> = MultilinearExtensionGpu<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
     type PcsData = BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<E::BaseField>>;
@@ -117,10 +161,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 {
     fn gkr_witness<'a, 'b>(
         circuit: &GKRCircuit<E>,
-        phase1_witness_group: &[ArcMultilinearExtension<'b, E>],
-        structural_witness: &[ArcMultilinearExtension<'b, E>],
-        fixed: &[ArcMultilinearExtension<'b, E>],
-        pub_io: &[ArcMultilinearExtension<'b, E>],
+        phase1_witness_group: &[Arc<MultilinearExtensionGpu<'b, E>>],
+        structural_witness: &[Arc<MultilinearExtensionGpu<'b, E>>],
+        fixed: &[Arc<MultilinearExtensionGpu<'b, E>>],
+        pub_io: &[Arc<MultilinearExtensionGpu<'b, E>>],
         challenges: &[E],
     ) -> (
         GKRCircuitWitness<'a, GpuBackend<E, PCS>>,
@@ -129,27 +173,55 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     where
         'b: 'a,
     {
+        // Convert GPU types to CPU types for processing
+        let cpu_phase1_witness_group: Vec<ArcMultilinearExtension<'b, E>> = phase1_witness_group
+            .iter()
+            .map(|gpu_mle| Arc::new(gpu_mle.inner().clone()))
+            .collect();
+        let cpu_structural_witness: Vec<ArcMultilinearExtension<'b, E>> = structural_witness
+            .iter()
+            .map(|gpu_mle| Arc::new(gpu_mle.inner().clone()))
+            .collect();
+        let cpu_fixed: Vec<ArcMultilinearExtension<'b, E>> = fixed
+            .iter()
+            .map(|gpu_mle| Arc::new(gpu_mle.inner().clone()))
+            .collect();
+        let cpu_pub_io: Vec<ArcMultilinearExtension<'b, E>> = pub_io
+            .iter()
+            .map(|gpu_mle| Arc::new(gpu_mle.inner().clone()))
+            .collect();
+
         // Use CPU version to generate witness
         let (cpu_witness, cpu_output) = <CpuProver<CpuBackend<E, PCS>> as ProtocolWitnessGeneratorProver<
             CpuBackend<E, PCS>,
         >>::gkr_witness(
             circuit,
-            phase1_witness_group,
-            structural_witness,
-            fixed,
-            pub_io,
+            &cpu_phase1_witness_group,
+            &cpu_structural_witness,
+            &cpu_fixed,
+            &cpu_pub_io,
             challenges,
         );
 
-        // Convert CPU return type to GPU backend type (the specific type of multilinear polynomial is the same)
+        // Convert CPU return type to GPU backend type
         let gpu_layers = cpu_witness
             .layers
             .into_iter()
-            .map(|lw| LayerWitness::<GpuBackend<E, PCS>>::new(lw.0, vec![]))
+            .map(|lw| {
+                let gpu_wits: Vec<Arc<MultilinearExtensionGpu<'_, E>>> = lw.0
+                    .into_iter()
+                    .map(|cpu_mle| Arc::new(MultilinearExtensionGpu::from_inner((*cpu_mle).clone())))
+                    .collect();
+                LayerWitness::<GpuBackend<E, PCS>>(gpu_wits)
+            })
             .collect();
         let GKRCircuitOutput(cpu_out_lw) = cpu_output;
+        let gpu_out_wits: Vec<Arc<MultilinearExtensionGpu<'_, E>>> = cpu_out_lw.0
+            .into_iter()
+            .map(|cpu_mle| Arc::new(MultilinearExtensionGpu::from_inner((*cpu_mle).clone())))
+            .collect();
         let gpu_output =
-            GKRCircuitOutput::<GpuBackend<E, PCS>>(LayerWitness::new(cpu_out_lw.0, vec![]));
+            GKRCircuitOutput::<GpuBackend<E, PCS>>(LayerWitness(gpu_out_wits));
 
         (GKRCircuitWitness { layers: gpu_layers }, gpu_output)
     }

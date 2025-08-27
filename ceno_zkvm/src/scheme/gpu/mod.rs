@@ -33,10 +33,14 @@ use witness::next_pow2_instance_padding;
 
 use gkr_iop::cpu::{CpuBackend, CpuProver};
 
+use gkr_iop::hal::MultilinearPolynomial;
+
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::gpu_prover::*;
 
 pub struct GpuTowerProver;
+
+use gkr_iop::gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu};
 
 /// Temporary wrapper for GPU prover that reuses CPU prover functionality
 /// during development phase. This struct will be refactored once GPU
@@ -120,8 +124,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         &mut self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
-        Vec<MultilinearExtension<'a, E>>,
-        <GpuBackend<E, PCS> as ProverBackend>::PcsData, /* PCS::CommitmentWithWitness = BasefoldCommitmentWithWitnessGpu */
+        Vec<MultilinearExtensionGpu<'a, E>>,
+        <GpuBackend<E, PCS> as ProverBackend>::PcsData,
         PCS::Commitment,
     ) {
         if std::any::TypeId::of::<E::BaseField>()
@@ -197,6 +201,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             panic!("GPU commitment data is not compatible with the PCS");
         };
 
+        let mles = mles.into_iter().map(|mle| MultilinearExtensionGpu::from_inner(mle)).collect_vec();
         (mles, pcs_data, commit)
     }
 }
@@ -204,7 +209,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
 fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
-    records: &[Arc<MultilinearExtension<'_, E>>],
+    records: &[ArcMultilinearExtensionGpu<'_, E>],
     challenges: &[E; 2],
     cuda_hal: &'hal ceno_gpu::gl64::CudaHalGL64,
     prod_buffers: &'buf mut Vec<ceno_gpu::gl64::buffer::BufferImpl<ff_ext::GoldilocksExt2>>,
@@ -417,7 +422,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         &self,
         _composed_cs: &ComposedConstrainSystem<E>,
         _input: &ProofInput<'a, GpuBackend<E, PCS>>,
-        _records: &'c [ArcMultilinearExtension<'b, E>],
+        _records: &'c [ArcMultilinearExtensionGpu<'b, E>],
         _is_padded: bool,
         _challenges: &[E; 2],
     ) -> (
@@ -443,7 +448,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, GpuBackend<E, PCS>>,
-        records: &'c [Arc<MultilinearExtension<'b, E>>],
+        records: &'c [ArcMultilinearExtensionGpu<'b, E>],
         _is_padded: bool,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
@@ -547,7 +552,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, GpuBackend<E, PCS>>,
         challenges: &[E; 2],
-    ) -> (Vec<ArcMultilinearExtension<'b, E>>, bool)
+    ) -> (Vec<ArcMultilinearExtensionGpu<'b, E>>, bool)
     where
         'a: 'b,
     {
@@ -555,8 +560,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             &*(input as *const ProofInput<'a, GpuBackend<E, PCS>>
                 as *const ProofInput<'a, CpuBackend<E, PCS>>)
         };
-        self.inner_cpu
-            .build_main_witness(composed_cs, cpu_input, challenges)
+        let (cpu_mles, is_padded) = self.inner_cpu
+            .build_main_witness(composed_cs, cpu_input, challenges);
+
+        let mles = cpu_mles.into_iter().map(|mle| Arc::new(MultilinearExtensionGpu::from_inner(mle.as_ref().clone()))).collect_vec();
+        (mles, is_padded)
     }
 
     #[allow(clippy::type_complexity)]
@@ -569,7 +577,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
-        _records: Vec<ArcMultilinearExtension<'b, E>>, // not used by GPU after delegation
+        _records: Vec<ArcMultilinearExtensionGpu<'b, E>>, // not used by GPU after delegation
         input: &'b ProofInput<'a, GpuBackend<E, PCS>>,
         composed_cs: &ComposedConstrainSystem<E>,
         challenges: &[E; 2],
@@ -603,7 +611,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                     .map(|Instance(inst_id)| {
                         let mle = &input.public_input[*inst_id];
                         assert_eq!(
-                            mle.evaluations.len(),
+                            mle.evaluations().len(),
                             1,
                             "doesnt support instance with evaluation length > 1"
                         );
@@ -843,6 +851,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
 
         let fixed_mles =
             PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());
+        let fixed_mles = fixed_mles.into_iter().map(|mle| Arc::new(MultilinearExtensionGpu::from_inner(mle.as_ref().clone()))).collect_vec();
 
         DeviceProvingKey {
             pcs_data,
@@ -853,8 +862,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
     fn transport_mles<'a>(
         &self,
         mles: Vec<MultilinearExtension<'a, E>>,
-    ) -> Vec<ArcMultilinearExtension<'a, E>> {
-        mles.into_iter().map(|mle| mle.into()).collect_vec()
+    ) -> Vec<ArcMultilinearExtensionGpu<'a, E>> {
+        mles.into_iter().map(|mle| Arc::new(MultilinearExtensionGpu::from_inner(mle))).collect_vec()
     }
 }
 
