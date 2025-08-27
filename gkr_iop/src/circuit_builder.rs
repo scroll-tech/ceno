@@ -784,15 +784,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        match C {
-            18 => self.assert_u18(name_fn, expr),
-            16 => self.assert_u16(name_fn, expr),
-            14 => self.assert_u14(name_fn, expr),
-            8 => self.assert_byte(name_fn, expr),
-            5 => self.assert_u5(name_fn, expr),
-            1 => self.assert_bit(name_fn, expr),
-            c => panic!("Unsupported bit range {c}"),
-        }
+        self.assert_const_range(name_fn, expr, C)
     }
 
     /// to replace `assert_ux`
@@ -806,13 +798,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        match max_bits {
-            16 => self.assert_u16(name_fn, expr),
-            14 => self.assert_u14(name_fn, expr),
-            8 => self.assert_byte(name_fn, expr),
-            5 => self.assert_u5(name_fn, expr),
-            c => panic!("Unsupported bit range {c}"),
-        }
+        self.assert_const_range(name_fn, expr, max_bits)
     }
 
     /// Generates U16 lookups to prove that `value` fits on `size < 16` bits.
@@ -828,18 +814,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: Fn() -> NR,
     {
-        assert!(size <= 16, "{size} > 16");
-        self.assert_u16(
-            || format!("assert_ux_in_u16_{}_check1", name_fn().into()),
-            expr.clone(),
-        )?;
-        if size < 16 {
-            self.assert_u16(
-                || format!("assert_ux_in_u16_{}_check2", name_fn().into()),
-                expr * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
-            )?;
-        }
-        Ok(())
+        self.assert_const_range(name_fn, expr, size)
     }
 
     pub fn assert_dynamic_range<NR, N>(
@@ -856,58 +831,26 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         Ok(())
     }
 
-    fn assert_u5<NR, N>(
+    pub fn assert_const_range<NR, N>(
         &mut self,
         name_fn: N,
         expr: Expression<E>,
+        max_bits: usize,
     ) -> Result<(), CircuitBuilderError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
         self.namespace(
-            || "assert_u5",
-            |cb| cb.lk_record(name_fn, LookupTable::U5, vec![expr]),
+            || "assert_const_range",
+            |cb| {
+                cb.lk_record(
+                    name_fn,
+                    LookupTable::Dynamic,
+                    vec![expr, E::BaseField::from_canonical_usize(max_bits).expr()],
+                )
+            },
         )
-    }
-
-    fn assert_u14<NR, N>(
-        &mut self,
-        name_fn: N,
-        expr: Expression<E>,
-    ) -> Result<(), CircuitBuilderError>
-    where
-        NR: Into<String>,
-        N: FnOnce() -> NR,
-    {
-        self.lk_record(name_fn, LookupTable::U14, vec![expr])?;
-        Ok(())
-    }
-
-    fn assert_u16<NR, N>(
-        &mut self,
-        name_fn: N,
-        expr: Expression<E>,
-    ) -> Result<(), CircuitBuilderError>
-    where
-        NR: Into<String>,
-        N: FnOnce() -> NR,
-    {
-        self.lk_record(name_fn, LookupTable::U16, vec![expr])?;
-        Ok(())
-    }
-
-    fn assert_u18<NR, N>(
-        &mut self,
-        name_fn: N,
-        expr: Expression<E>,
-    ) -> Result<(), CircuitBuilderError>
-    where
-        NR: Into<String>,
-        N: FnOnce() -> NR,
-    {
-        self.lk_record(name_fn, LookupTable::U18, vec![expr])?;
-        Ok(())
     }
 
     pub fn assert_byte<NR, N>(
@@ -919,8 +862,16 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.lk_record(name_fn, LookupTable::U8, vec![expr])?;
-        Ok(())
+        self.namespace(
+            || "assert_byte",
+            |cb| {
+                cb.lk_record(
+                    name_fn,
+                    LookupTable::Dynamic,
+                    vec![expr, E::BaseField::from_canonical_usize(8).expr()],
+                )
+            },
+        )
     }
 
     pub fn assert_bit<NR, N>(

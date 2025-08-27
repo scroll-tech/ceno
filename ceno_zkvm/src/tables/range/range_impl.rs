@@ -116,7 +116,7 @@ impl DynamicRangeTableConfig {
             || "record",
             SetTableSpec {
                 len: Some(1 << (max_bits + 1)),
-                structural_witins: vec![range],
+                structural_witins: vec![range, bits],
             },
             LookupTable::Dynamic,
             record_exprs,

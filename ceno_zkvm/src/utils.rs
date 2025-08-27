@@ -117,12 +117,27 @@ pub fn eval_wellform_address_vec<E: ExtensionField>(
 /// which is then prefixed by a single zero to make all the subvectors aligned to powers of two.
 /// This function is used to support dynamic range check.
 /// Note that this MLE has n+1 variables, so r should have length n+1.
+///
+/// conceptually, we traverse evaluations in the sequence:
+///   [0, 0], [0, 1], [0, 1, 2, 3], ...
+/// for every `next` element is already in a well-formed incremental structure,
+/// so we can reuse `eval_wellform_address_vec` to obtain its value.
+///
+/// at each step `i`, we combine:
+///   - the accumulated result so far, weighted by `(1 - r[i])`
+///   - the evaluation of the current prefix `r[..i]`, weighted by `r[i]`.
+///
+/// this iterative version avoids recursion for efficiency and clarity.
 pub fn eval_stacked_wellform_address_vec<E: ExtensionField>(r: &[E]) -> E {
     if r.len() < 2 {
         return E::ZERO;
     }
-    eval_stacked_wellform_address_vec(&r[..r.len() - 1]) * (E::ONE - r[r.len() - 1])
-        + eval_wellform_address_vec(0, 1, &r[..r.len() - 1], false) * r[r.len() - 1]
+
+    let mut res = E::ZERO;
+    for i in 1..r.len() {
+        res = res * (E::ONE - r[i]) + eval_wellform_address_vec(0, 1, &r[..i], false) * r[i];
+    }
+    res
 }
 
 /// Evaluate MLE with the following evaluation over the hypercube:
@@ -140,8 +155,12 @@ pub fn eval_stacked_constant_vec<E: ExtensionField>(r: &[E]) -> E {
     if r.len() < 2 {
         return E::ZERO;
     }
-    eval_stacked_constant_vec(&r[..r.len() - 1]) * (E::ONE - r[r.len() - 1])
-        + E::from_canonical_usize(r.len() - 1) * r[r.len() - 1]
+
+    let mut res = E::ZERO;
+    for (i, r) in r.iter().enumerate().skip(1) {
+        res = res * (E::ONE - *r) + E::from_canonical_usize(i) * *r;
+    }
+    res
 }
 
 pub fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
