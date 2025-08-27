@@ -114,7 +114,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 || format!("range_check_carry_{i}"),
                 carry.clone(),
                 // carry up to 16 + 2 = 18 bits
-                UINT_LIMBS + 2,
+                LIMB_BITS + 2,
             )?;
         }
 
@@ -145,7 +145,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 || format!("range_check_carry_ext_{i}"),
                 carry_ext.clone(),
                 // carry up to 16 + 2 = 18 bits
-                UINT_LIMBS + 2,
+                LIMB_BITS + 2,
             )?;
         }
 
@@ -429,8 +429,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         );
 
         for i in 0..UINT_LIMBS {
-            lkm.assert_dynamic_range(carries[i] as u64, 18);
-            lkm.assert_dynamic_range(carries[i + UINT_LIMBS] as u64, 18);
+            lkm.assert_dynamic_range(carries[i] as u64, LIMB_BITS as u64 + 2);
+            lkm.assert_dynamic_range(carries[i + UINT_LIMBS] as u64, LIMB_BITS as u64 + 2);
         }
 
         let sign_xor = dividend_sign ^ divisor_sign;

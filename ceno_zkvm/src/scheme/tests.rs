@@ -1,4 +1,3 @@
-use super::constants::DYNAMIC_RANGE_MAX_BITS;
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
@@ -7,6 +6,7 @@ use crate::{
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
     scheme::{
+        constants::DYNAMIC_RANGE_MAX_BITS,
         cpu::CpuTowerProver,
         hal::{ProofInput, TowerProverSpec},
         prover::ZkVMCpuProver,

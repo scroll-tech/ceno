@@ -1,6 +1,6 @@
 use super::{
-    arith::AddInstruction, branch::BltuInstruction, constants::DYNAMIC_RANGE_MAX_BITS,
-    ecall::HaltInstruction, jump::JalInstruction, memory::LwInstruction,
+    arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
+    memory::LwInstruction,
 };
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::auipc::AuipcInstruction;
@@ -28,6 +28,7 @@ use crate::{
             *,
         },
     },
+    scheme::constants::DYNAMIC_RANGE_MAX_BITS,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, DynamicRangeTableCircuit, LtuTableCircuit, OrTableCircuit, TableCircuit,

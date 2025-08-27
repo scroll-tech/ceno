@@ -253,6 +253,9 @@ mod tests {
         }
         let res = lkm.into_finalize_result();
         // check multiplicity counts of assert_byte
-        assert_eq!(res[LookupTable::Dynamic as usize][&(1 << 8 + 8)], thread_count);
+        assert_eq!(
+            res[LookupTable::Dynamic as usize][&((1 << 8) + 8)],
+            thread_count
+        );
     }
 }

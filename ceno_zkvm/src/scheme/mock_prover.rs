@@ -7,7 +7,7 @@ use crate::{
         ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
         ZKVMWitnesses,
     },
-    tables::{ProgramTableCircuit, RMMCollections, RangeTable, TableCircuit},
+    tables::{ProgramTableCircuit, RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -293,9 +293,8 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                     let element = match rom_type {
                         ROMType::Dynamic => {
                             let left = u64::BITS - 1 - key.leading_zeros();
-                            let table = 1 << left;
                             let element = key & ((1 << left) - 1);
-                            format!("Dynamic Range Table U{table} with Element: {element:?}")
+                            format!("Dynamic Range Table U{left} with Element: {element:?}")
                         }
                         ROMType::And => {
                             let (a, b) = AndTable::unpack(key);
@@ -1509,21 +1508,30 @@ mod tests {
         let result = MockProver::run_with_challenge(&builder, &[], &wits_in, &[], challenge, None);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
-        println!("err {:?}", err);
         assert_eq!(
             err,
             vec![MockProverError::LookupError {
                 rom_type: ROMType::Dynamic,
                 expression: Expression::Sum(
-                    Box::new(Expression::ScaledSum(
-                        Box::new(Expression::WitIn(0)),
+                    Box::new(Expression::Sum(
+                        Box::new(Expression::ScaledSum(
+                            Box::new(Expression::WitIn(0)),
+                            Box::new(Expression::Challenge(
+                                1,
+                                1,
+                                GoldilocksExt2::ONE,
+                                GoldilocksExt2::ZERO,
+                            )),
+                            Box::new(
+                                Goldilocks::from_canonical_u64(ROMType::Dynamic as u64).expr()
+                            ),
+                        )),
                         Box::new(Expression::Challenge(
                             1,
-                            1,
-                            GoldilocksExt2::ONE,
+                            2,
+                            5.into_f(),
                             GoldilocksExt2::ZERO,
-                        )),
-                        Box::new(Goldilocks::from_canonical_u64(ROMType::Dynamic as u64).expr()),
+                        ))
                     )),
                     Box::new(Expression::Challenge(
                         0,
@@ -1532,8 +1540,8 @@ mod tests {
                         GoldilocksExt2::ZERO,
                     )),
                 ),
-                evaluated: 123002.into_f(), // 123 * 1000 + 2
-                name: "test_lookup_error/assert_u5/assert u5".to_string(),
+                evaluated: 5123002.into_f(), // 123 * 1000 + 5 * (1000^2) + 2
+                name: "test_lookup_error/assert_const_range/assert u5".to_string(),
                 inst_id: 0,
             }]
         );
