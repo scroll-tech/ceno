@@ -7,12 +7,7 @@ use strum_macros::EnumIter;
 )]
 #[repr(usize)]
 pub enum LookupTable {
-    U5 = 0,      // 2^5 = 32
-    U8,          // 2^8 = 256
-    U14,         // 2^14 = 16,384
-    U16,         // 2^16 = 65,536
-    U18,         // 2^18 = 262,144
-    Dynamic,     // Range type for all bits up to 18 bits
+    Dynamic = 0, // Range type for all bits up to 18 bits
     And,         // a & b where a, b are bytes
     Or,          // a | b where a, b are bytes
     Xor,         // a ^ b where a, b are bytes

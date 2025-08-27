@@ -25,3 +25,5 @@ pub type UIntMul<E> = UIntLimbs<{ 2 * BIT_WIDTH }, LIMB_BITS, E>;
 pub type UInt8<E> = UIntLimbs<BIT_WIDTH, 8, E>;
 pub const UINT_LIMBS: usize = BIT_WIDTH.div_ceil(LIMB_BITS);
 pub const UINT_BYTE_LIMBS: usize = BIT_WIDTH.div_ceil(8);
+
+pub const DYNAMIC_RANGE_MAX_BITS: usize = 18;

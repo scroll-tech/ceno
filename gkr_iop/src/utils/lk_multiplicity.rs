@@ -179,17 +179,7 @@ impl LkMultiplicity {
     /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
-        self.increment(
-            match C {
-                18 => LookupTable::U18,
-                16 => LookupTable::U16,
-                14 => LookupTable::U14,
-                8 => LookupTable::U8,
-                5 => LookupTable::U5,
-                _ => panic!("Unsupported bit range"),
-            },
-            v,
-        );
+        self.increment(LookupTable::Dynamic, (1 << C) + v);
     }
 
     #[inline(always)]
@@ -200,25 +190,12 @@ impl LkMultiplicity {
     /// assert within range
     #[inline(always)]
     pub fn assert_ux_in_u16(&mut self, size: usize, v: u64) {
-        assert!(size <= 16, "{size} > 16");
-        self.assert_ux::<16>(v);
-        if size < 16 {
-            self.assert_ux::<16>(v * (1 << (16 - size)));
-        }
+        self.increment(LookupTable::Dynamic, (1 << size) + v);
     }
 
     #[inline(always)]
     pub fn assert_ux_v2(&mut self, v: u64, max_bits: usize) {
-        self.increment(
-            match max_bits {
-                16 => LookupTable::U16,
-                14 => LookupTable::U14,
-                8 => LookupTable::U8,
-                5 => LookupTable::U5,
-                _ => panic!("Unsupported bit range"),
-            },
-            v,
-        );
+        self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
     }
 
     /// Track a lookup into a logic table (AndTable, etc).
@@ -276,6 +253,6 @@ mod tests {
         }
         let res = lkm.into_finalize_result();
         // check multiplicity counts of assert_byte
-        assert_eq!(res[LookupTable::U8 as usize][&8], thread_count);
+        assert_eq!(res[LookupTable::Dynamic as usize][&(1 << 8 + 8)], thread_count);
     }
 }
