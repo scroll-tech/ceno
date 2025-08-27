@@ -23,6 +23,7 @@ pub mod gpu_prover {
     use std::sync::{Arc, Mutex};
 
     use ceno_gpu::gl64::CudaHalGL64;
+    use ceno_gpu::gl64::GpuPolynomialExt;
     pub use ceno_gpu::gl64::convert_ceno_to_gpu_basefold_commitment;
     use cudarc::driver::{CudaDevice, DriverError};
 

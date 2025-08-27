@@ -21,10 +21,11 @@ use multilinear_extensions::{
     monomial::Term,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
+    utils::eval_by_expr_with_instance,
 };
 use rayon::{
     iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+        IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator,
     },
     slice::ParallelSlice,
 };
@@ -34,6 +35,8 @@ use sumcheck::{
     util::get_challenge_pows,
 };
 use transcript::{BasicTranscript, Transcript};
+
+
 
 use crate::{
     gkr::layer::{
@@ -85,6 +88,51 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
     }
 }
 
+pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
+    monomial_terms: &[Term<Expression<E>, Expression<E>>],
+    all_mles: &[Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>],
+    public_io_evals: &[E],
+    challenges: &[E],
+) -> (Vec<E>, Vec<Vec<usize>>, Vec<(usize, usize)>) {
+    let mut term_coefficients = Vec::new();
+    let mut mle_indices_per_term = Vec::new();
+    let mut mle_size_info = Vec::new();
+    
+    for term in monomial_terms {
+        // scalar - convert Either<E::BaseField, E> to E
+        let scalar_either = eval_by_expr_with_instance(
+            &[], &[], &[], public_io_evals, challenges, &term.scalar
+        );
+        let scalar = match scalar_either {
+            Either::Left(base_field_val) => E::from(base_field_val),
+            Either::Right(ext_field_val) => ext_field_val,
+        };
+        term_coefficients.push(scalar);
+        
+        // MLE indices
+        let mut indices = Vec::new();
+        for expr in &term.product {
+            match expr {
+                Expression::WitIn(witin_id) => {
+                    indices.push(*witin_id as usize);
+                }
+                _ => panic!("Unsupported expression in product: {:?}", expr),
+            }
+        }
+        
+        // MLE size - get this before moving indices
+        let first_idx = indices.first().copied();
+        mle_indices_per_term.push(indices);
+        
+        if let Some(first_idx) = first_idx {
+            let num_vars = all_mles[first_idx].num_vars();
+            mle_size_info.push((num_vars, num_vars));
+        }
+    }
+    
+    (term_coefficients, mle_indices_per_term, mle_size_info)
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
@@ -119,6 +167,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             if let Some(rotation_sumcheck_expression) =
                 layer.rotation_sumcheck_expression_monomial_terms.as_ref()
             {
+                println!("  [GPU] call prove_rotation_gpu() with rotation_cyclic_group_log2 = {}", layer.rotation_cyclic_group_log2);
                 // 1st sumcheck: process rotation_exprs
                 let rt = out_points.first().unwrap();
                 let (
@@ -184,6 +233,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             }))
             .collect::<Vec<_>>();
         exit_span!(span);
+        println!("eqs.len() = {}", eqs.len());
 
         let mut eqs_gpu = eqs.clone();
 
@@ -236,7 +286,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             &main_sumcheck_challenges,
         );
         let mut transcript_cpu = transcript.clone();
-        let (proof, prover_state) = IOPProverState::prove(vps, &mut transcript_cpu);
+        let (_proof, prover_state) = IOPProverState::prove(vps, &mut transcript_cpu);
         let evals = prover_state.get_mle_flatten_final_evaluations();
 
         let device = CUDA_DEVICE
@@ -250,29 +300,76 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .unwrap();
         let cuda_hal = hal_arc.lock().unwrap();
 
-        let builder =
-            VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins_gpu);
-        let vps = builder.to_virtual_polys_with_monomial_terms(
+        let (term_coefficients, mle_indices_per_term, mle_size_info) = extract_mle_relationships_from_monomial_terms(
             &layer
                 .main_sumcheck_expression_monomial_terms
                 .clone()
                 .unwrap(),
+            &all_witins_gpu,
             pub_io_evals,
             &main_sumcheck_challenges,
         );
-        let (vps_gpu, _) = vps.as_view().get_batched_polys();
-        assert_eq!(vps_gpu.len(), 1);
-        let vp_gpu = vps_gpu[0].clone();
+        // Create ceno_mles for prove_generic_sumcheck_mles
         type EGL64 = ff_ext::GoldilocksExt2;
-        use multilinear_extensions::virtual_poly::VirtualPolynomial;
-        let vp_gl64 = unsafe {
-            std::mem::transmute::<VirtualPolynomial<E>, VirtualPolynomial<EGL64>>(vp_gpu)
-        };
+        let ceno_mles: Vec<multilinear_extensions::mle::MultilinearExtension<EGL64>> = all_witins_gpu.iter().map(|mle| {
+            match mle {
+                Either::Left(mle) => {
+                    // Convert MLE to the GPU field type
+                    unsafe { std::mem::transmute((*mle).clone()) }
+                }
+                Either::Right(mle) => {
+                    // Convert MLE to the GPU field type  
+                    unsafe { std::mem::transmute((*mle).clone()) }
+                }
+            }
+        }).collect();
+
+        // Calculate max_num_var and max_degree from the extracted relationships
+        let max_num_var = max_num_variables;
+        let max_degree = mle_indices_per_term.iter()
+            .map(|indices| indices.len())
+            .max()
+            .unwrap_or(0);
+
+        // let builder =
+        //     VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins_gpu);
+        // let vps = builder.to_virtual_polys_with_monomial_terms(
+        //     &layer
+        //         .main_sumcheck_expression_monomial_terms
+        //         .clone()
+        //         .unwrap(),
+        //     pub_io_evals,
+        //     &main_sumcheck_challenges,
+        // );
+        // let (vps_gpu, _) = vps.as_view().get_batched_polys();
+        // assert_eq!(vps_gpu.len(), 1);
+        // let vp_gpu = vps_gpu[0].clone();
+        // use multilinear_extensions::virtual_poly::VirtualPolynomial;
+        // let vp_gl64 = unsafe {
+        //     std::mem::transmute::<VirtualPolynomial<E>, VirtualPolynomial<EGL64>>(vp_gpu)
+        // };
         // let transcript_init = b"test virtual sumcheck ceno verify";
         // transcript >>> BasicTranscript<GL64^2>
         let basic_tr: &mut BasicTranscript<EGL64> =
             unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<EGL64>) };
-        let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal.sumcheck.prove_generic_sumcheck_tt(&cuda_hal, &vp_gl64, basic_tr).unwrap();
+        // let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal.sumcheck.prove_generic_sumcheck_tt(&cuda_hal, &vp_gl64, basic_tr).unwrap();
+        // let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
+        // let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
+
+        // let proof_gpu_e = unsafe { std::mem::transmute::<IOPProof<EGL64>, IOPProof<E>>(proof_gpu) };
+        // let evals_gpu_e = unsafe { std::mem::transmute::<Vec<EGL64>, Vec<E>>(evals_gpu) };
+        // let row_challenges_e = unsafe { std::mem::transmute::<Vec<EGL64>, Vec<E>>(row_challenges) };
+        // // assert_eq!(evals_gpu_e, evals);
+        // for i in 0..evals_gpu_e.len() {
+        //     assert_eq!(evals_gpu_e[i], evals[i], "evals_gpu_e[{}] = {} != evals[{}] = {}", i, evals_gpu_e[i], i, evals[i]);
+        // }
+
+        // Convert types for GPU function call
+        let term_coefficients_gl64: Vec<EGL64> = unsafe { std::mem::transmute(term_coefficients) };
+        let mle_size_info_gl64 = mle_size_info;
+        let mle_indices_per_term_gl64 = mle_indices_per_term;
+        
+        let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal.sumcheck.prove_generic_sumcheck_mles(&cuda_hal, &ceno_mles, &mle_size_info_gl64, &term_coefficients_gl64, &mle_indices_per_term_gl64, max_num_var, max_degree, basic_tr).unwrap();
         let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
         let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
 
@@ -326,6 +423,8 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     let num_threads = 1; // VP builder for GPU: do not use _num_threads
     let span = entered_span!("rotate_witin_selector", profiling_4 = true);
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
+    let rotation_index = bh.into_iter().take(rotation_cyclic_group_log2).collect_vec();
+    println!("rotation_index: {:?}", rotation_index);
     // rotated_mles is non-deterministic input, rotated from existing witness polynomial
     // we will reduce it to zero check, and finally reduce to committed polynomial opening
     let (mut selector, mut rotated_mles) = {
