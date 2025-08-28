@@ -28,10 +28,11 @@ use crate::{
             *,
         },
     },
+    scheme::constants::DYNAMIC_RANGE_MAX_BITS,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        AndTableCircuit, LtuTableCircuit, OrTableCircuit, TableCircuit, U5TableCircuit,
-        U8TableCircuit, U14TableCircuit, U16TableCircuit, U18TableCircuit, XorTableCircuit,
+        AndTableCircuit, DynamicRangeTableCircuit, LtuTableCircuit, OrTableCircuit, TableCircuit,
+        XorTableCircuit,
     },
 };
 use ceno_emul::{
@@ -119,11 +120,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
     // Tables.
-    pub u18_range_config: <U18TableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub u8_range_config: <U8TableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub u5_range_config: <U5TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub dynamic_range_config: <DynamicRangeTableCircuit<E, 18> as TableCircuit<E>>::TableConfig,
     pub and_table_config: <AndTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub or_table_config: <OrTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub xor_table_config: <XorTableCircuit<E> as TableCircuit<E>>::TableConfig,
@@ -197,11 +194,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
 
         // tables
-        let u18_range_config = cs.register_table_circuit::<U18TableCircuit<E>>();
-        let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
-        let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
-        let u8_range_config = cs.register_table_circuit::<U8TableCircuit<E>>();
-        let u5_range_config = cs.register_table_circuit::<U5TableCircuit<E>>();
+        let dynamic_range_config =
+            cs.register_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>();
         let and_table_config = cs.register_table_circuit::<AndTableCircuit<E>>();
         let or_table_config = cs.register_table_circuit::<OrTableCircuit<E>>();
         let xor_table_config = cs.register_table_circuit::<XorTableCircuit<E>>();
@@ -266,11 +260,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             halt_config,
             keccak_config,
             // tables
-            u18_range_config,
-            u16_range_config,
-            u14_range_config,
-            u8_range_config,
-            u5_range_config,
+            dynamic_range_config,
             and_table_config,
             or_table_config,
             xor_table_config,
@@ -345,11 +335,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs, &self.keccak_config);
 
         // table
-        fixed.register_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
-        fixed.register_table_circuit::<U18TableCircuit<E>>(cs, &self.u18_range_config, &());
-        fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
-        fixed.register_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &());
-        fixed.register_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &());
+        fixed.register_table_circuit::<DynamicRangeTableCircuit<E, 18>>(
+            cs,
+            &self.dynamic_range_config,
+            &(),
+        );
         fixed.register_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &());
         fixed.register_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &());
         fixed.register_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &());
@@ -476,11 +466,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
     ) -> Result<(), ZKVMError> {
-        witness.assign_table_circuit::<U18TableCircuit<E>>(cs, &self.u18_range_config, &())?;
-        witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
-        witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
-        witness.assign_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &())?;
-        witness.assign_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &())?;
+        witness.assign_table_circuit::<DynamicRangeTableCircuit<E, 18>>(
+            cs,
+            &self.dynamic_range_config,
+            &(),
+        )?;
         witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &())?;
         witness.assign_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &())?;
         witness.assign_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &())?;

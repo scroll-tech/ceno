@@ -9,7 +9,7 @@ use gkr_iop::gkr::GKRClaims;
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Instance, StructuralWitIn,
+    Instance, StructuralWitIn, StructuralWitInType,
     mle::IntoMLE,
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
@@ -27,7 +27,9 @@ use crate::{
     error::ZKVMError,
     scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::eval_wellform_address_vec,
+    utils::{
+        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
+    },
 };
 
 use super::{ZKVMChipProof, ZKVMProof};
@@ -461,9 +463,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     r.table_spec
                         .structural_witins
                         .iter()
-                        .map(|StructuralWitIn { max_len, .. }| {
+                        .map(|StructuralWitIn { witin_type, .. }| {
                             let hint_num_vars = log2_num_instances;
-                            assert!((1 << hint_num_vars) <= *max_len);
+                            assert!((1 << hint_num_vars) <= witin_type.max_len());
                             hint_num_vars
                         })
                         .max()
@@ -478,9 +480,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     l.table_spec
                         .structural_witins
                         .iter()
-                        .map(|StructuralWitIn { max_len, .. }| {
+                        .map(|StructuralWitIn { witin_type, .. }| {
                             let hint_num_vars = log2_num_instances;
-                            assert!((1 << hint_num_vars) <= *max_len);
+                            assert!((1 << hint_num_vars) <= witin_type.max_len());
                             hint_num_vars
                         })
                         .max()
@@ -539,21 +541,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 table_spec
                     .structural_witins
                     .iter()
-                    .map(
-                        |StructuralWitIn {
-                             offset,
-                             multi_factor,
-                             descending,
-                             ..
-                         }| {
-                            eval_wellform_address_vec(
-                                *offset as u64,
-                                *multi_factor as u64,
-                                &rt_tower,
-                                *descending,
-                            )
-                        },
-                    )
+                    .map(|structural_witin| match structural_witin.witin_type {
+                        StructuralWitInType::EqualDistanceSequence {
+                            offset,
+                            multi_factor,
+                            descending,
+                            ..
+                        } => eval_wellform_address_vec(
+                            offset as u64,
+                            multi_factor as u64,
+                            &rt_tower,
+                            descending,
+                        ),
+                        StructuralWitInType::StackedIncrementalSequence { .. } => {
+                            eval_stacked_wellform_address_vec(&rt_tower)
+                        }
+                        StructuralWitInType::StackedConstantSequence { .. } => {
+                            eval_stacked_constant_vec(&rt_tower)
+                        }
+                    })
                     .collect_vec()
             })
             .collect_vec();

@@ -7,10 +7,7 @@ use crate::{
         ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
         ZKVMWitnesses,
     },
-    tables::{
-        ProgramTableCircuit, RMMCollections, RangeTable, TableCircuit, U5Table, U8Table, U14Table,
-        U16Table, U18Table,
-    },
+    tables::{ProgramTableCircuit, RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -20,7 +17,7 @@ use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use gkr_iop::{
     tables::{
-        OpsTable,
+        LookupTable, OpsTable,
         ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
     },
     utils::lk_multiplicity::{LkMultiplicityRaw, Multiplicity},
@@ -115,9 +112,6 @@ pub enum MockProverError<E: ExtensionField, K: LkMultiplicityKey> {
         name: String,
         inst_id: usize,
     },
-    // TODO later
-    // r_expressions
-    // w_expressions
     LkMultiplicityError {
         rom_type: ROMType,
         key: K,
@@ -297,8 +291,10 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                         "assignments"
                     };
                     let element = match rom_type {
-                        ROMType::U5 | ROMType::U8 | ROMType::U14 | ROMType::U16 | ROMType::U18 => {
-                            format!("Element: {key:?}")
+                        ROMType::Dynamic => {
+                            let left = u64::BITS - 1 - key.leading_zeros();
+                            let element = key & ((1 << left) - 1);
+                            format!("Dynamic Range Table U{left} with Element: {element:?}")
                         }
                         ROMType::And => {
                             let (a, b) = AndTable::unpack(key);
@@ -365,14 +361,23 @@ fn load_tables<E: ExtensionField>(
     cs: &ConstraintSystem<E>,
     challenge: [E; 2],
 ) -> HashSet<Vec<u64>> {
-    fn load_range_table<RANGE: RangeTable, E: ExtensionField>(
+    fn load_dynamic_range_table<E: ExtensionField, const MAX_BITS: usize>(
         t_vec: &mut Vec<Vec<u64>>,
         cs: &ConstraintSystem<E>,
         challenge: [E; 2],
     ) {
-        for i in RANGE::content() {
-            let rlc_record =
-                cs.rlc_chip_record(vec![(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
+        for (i, bits) in std::iter::once(0)
+            .chain((0..=MAX_BITS).flat_map(|i| (0..(1 << i))))
+            .zip(
+                std::iter::once(0)
+                    .chain((0..=MAX_BITS).flat_map(|i| std::iter::repeat_n(i, 1 << i))),
+            )
+        {
+            let rlc_record = cs.rlc_chip_record(vec![
+                (LookupTable::Dynamic as usize).into(),
+                (i as usize).into(),
+                bits.into(),
+            ]);
             let rlc_record = eval_by_expr(&[], &[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_canonical_u64_vec());
         }
@@ -396,11 +401,7 @@ fn load_tables<E: ExtensionField>(
     }
 
     let mut table_vec = vec![];
-    load_range_table::<U5Table, _>(&mut table_vec, cs, challenge);
-    load_range_table::<U8Table, _>(&mut table_vec, cs, challenge);
-    load_range_table::<U14Table, _>(&mut table_vec, cs, challenge);
-    load_range_table::<U16Table, _>(&mut table_vec, cs, challenge);
-    load_range_table::<U18Table, _>(&mut table_vec, cs, challenge);
+    load_dynamic_range_table::<_, 18>(&mut table_vec, cs, challenge);
     load_op_table::<AndTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<OrTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<XorTable, _>(&mut table_vec, cs, challenge);
@@ -744,11 +745,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 // Count lookups infered from ConstraintSystem from all instances into lkm_from_cs.
                 for i in 0..selected_count {
                     match rom_type {
-                        ROMType::U5 => lkm_from_cs.assert_ux::<5>(args_eval[0][i]),
-                        ROMType::U8 => lkm_from_cs.assert_ux::<8>(args_eval[0][i]),
-                        ROMType::U14 => lkm_from_cs.assert_ux::<14>(args_eval[0][i]),
-                        ROMType::U16 => lkm_from_cs.assert_ux::<16>(args_eval[0][i]),
-                        ROMType::U18 => lkm_from_cs.assert_ux::<18>(args_eval[0][i]),
+                        ROMType::Dynamic => {
+                            lkm_from_cs.assert_dynamic_range(args_eval[0][i], args_eval[1][i]);
+                        }
                         ROMType::And => {
                             lkm_from_cs.lookup_and_byte(args_eval[0][i], args_eval[1][i])
                         }
@@ -1578,17 +1577,27 @@ mod tests {
         assert_eq!(
             err,
             vec![MockProverError::LookupError {
-                rom_type: ROMType::U5,
+                rom_type: ROMType::Dynamic,
                 expression: Expression::Sum(
-                    Box::new(Expression::ScaledSum(
-                        Box::new(Expression::WitIn(0)),
+                    Box::new(Expression::Sum(
+                        Box::new(Expression::ScaledSum(
+                            Box::new(Expression::WitIn(0)),
+                            Box::new(Expression::Challenge(
+                                1,
+                                1,
+                                GoldilocksExt2::ONE,
+                                GoldilocksExt2::ZERO,
+                            )),
+                            Box::new(
+                                Goldilocks::from_canonical_u64(ROMType::Dynamic as u64).expr()
+                            ),
+                        )),
                         Box::new(Expression::Challenge(
                             1,
-                            1,
-                            GoldilocksExt2::ONE,
+                            2,
+                            5.into_f(),
                             GoldilocksExt2::ZERO,
-                        )),
-                        Box::new(Goldilocks::from_canonical_u64(ROMType::U5 as u64).expr()),
+                        ))
                     )),
                     Box::new(Expression::Challenge(
                         0,
@@ -1597,8 +1606,8 @@ mod tests {
                         GoldilocksExt2::ZERO,
                     )),
                 ),
-                evaluated: 123002.into_f(), // 123 * 1000 + 2
-                name: "test_lookup_error/assert_u5/assert u5".to_string(),
+                evaluated: 5123002.into_f(), // 123 * 1000 + 5 * (1000^2) + 2
+                name: "test_lookup_error/assert_const_range/assert u5".to_string(),
                 inst_id: 0,
             }]
         );

@@ -7,11 +7,12 @@ use ceno_zkvm::{
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
 };
 mod alloc;
+use ceno_zkvm::scheme::verifier::ZKVMVerifier;
 use criterion::*;
-
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::{CpuBackend, CpuProver};
 use mpcs::BasefoldDefault;
+use transcript::BasicTranscript;
 
 criterion_group! {
   name = keccak_prove_group;
@@ -44,29 +45,28 @@ fn keccak_prove(c: &mut Criterion) {
     let _ = hints.write(&vec![1, 2, 3]);
     let max_steps = usize::MAX;
     // estimate proof size data first
-    // let result = run_e2e_with_checkpoint::<E, Pcs>(
-    //     program.clone(),
-    //     platform.clone(),
-    //     &Vec::from(&hints),
-    //     &[],
-    //     max_steps,
-    //     MAX_NUM_VARIABLES,
-    //     SecurityLevel::default(),
-    //     Checkpoint::Complete,
-    // );
-    // let proof = result.proof.expect("PrepSanityCheck do not provide proof");
-    // let vk = result.vk.expect("PrepSanityCheck do not provide verifier");
+    let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
+        CpuProver::new(backend.clone()),
+        program.clone(),
+        platform.clone(),
+        &Vec::from(&hints),
+        &[],
+        max_steps,
+        Checkpoint::Complete,
+    );
+    let proof = result.proof.expect("PrepSanityCheck do not provide proof");
+    let vk = result.vk.expect("PrepSanityCheck do not provide verifier");
 
-    // println!("e2e proof {}", proof);
-    // let transcript = BasicTranscript::new(b"riscv");
-    // let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
-    // assert!(
-    //     verifier
-    //         .verify_proof_halt(proof, transcript, false)
-    //         .expect("verify proof return with error"),
-    // );
-    // println!();
-    // println!("max_steps = {}", max_steps);
+    println!("e2e proof {}", proof);
+    let transcript = BasicTranscript::new(b"riscv");
+    let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
+    assert!(
+        verifier
+            .verify_proof_halt(proof, transcript, true)
+            .expect("verify proof return with error"),
+    );
+    println!();
+    println!("max_steps = {}", max_steps);
 
     // expand more input size once runtime is acceptable
     let mut group = c.benchmark_group(format!("keccak_max_steps_{}", max_steps));

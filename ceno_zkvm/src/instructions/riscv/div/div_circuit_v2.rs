@@ -110,8 +110,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         }
 
         for (i, carry) in carry_expr.iter().enumerate() {
-            // TODO apply dynamic range check with quotient_expr
-            cb.assert_ux::<_, _, 18>(|| format!("range_check_carry_{i}"), carry.clone())?;
+            cb.assert_const_range(
+                || format!("range_check_carry_{i}"),
+                carry.clone(),
+                // carry up to 16 + 2 = 18 bits
+                LIMB_BITS + 2,
+            )?;
         }
 
         let quotient_sign = cb.create_bit(|| "quotient_sign".to_string())?;
@@ -137,8 +141,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         }
 
         for (i, carry_ext) in carry_ext.iter().enumerate() {
-            // TODO apply dynamic range check with remainder
-            cb.assert_ux::<_, _, 18>(|| format!("range_check_carry_ext_{i}"), carry_ext.clone())?;
+            cb.assert_const_range(
+                || format!("range_check_carry_ext_{i}"),
+                carry_ext.clone(),
+                // carry up to 16 + 2 = 18 bits
+                LIMB_BITS + 2,
+            )?;
         }
 
         let divisor_zero = cb.create_bit(|| "divisor_zero".to_string())?;
@@ -308,25 +316,28 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         // When not special case (divisor = 0 or remainder = 0), ensure lt_diff
         // is not zero by a range check
-        cb.assert_ux::<_, _, 16>(
+        cb.assert_dynamic_range(
             || "lt_diff_nonzero",
             (lt_diff.expr() - E::BaseField::ONE.expr())
                 * (E::BaseField::ONE.expr() - divisor_zero.expr() - remainder_zero.expr()),
+            E::BaseField::from_canonical_u32(16).expr(),
         )?;
 
         match I::INST_KIND {
             InsnKind::DIV | InsnKind::REM => {
-                cb.assert_ux::<_, _, 16>(
+                cb.assert_dynamic_range(
                     || "div_rem_range_check_dividend_last",
                     E::BaseField::from_canonical_u32(2).expr()
                         * (dividend_expr[UINT_LIMBS - 1].clone()
                             - dividend_sign.expr() * sign_mask.expr()),
+                    E::BaseField::from_canonical_u32(16).expr(),
                 )?;
-                cb.assert_ux::<_, _, 16>(
+                cb.assert_dynamic_range(
                     || "div_rem_range_check_divisor_last",
                     E::BaseField::from_canonical_u32(2).expr()
                         * (divisor_expr[UINT_LIMBS - 1].clone()
                             - divisor_sign.expr() * sign_mask.expr()),
+                    E::BaseField::from_canonical_u32(16).expr(),
                 )?;
             }
             InsnKind::DIVU | InsnKind::REMU => {
@@ -418,8 +429,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         );
 
         for i in 0..UINT_LIMBS {
-            lkm.assert_ux::<18>(carries[i] as u64);
-            lkm.assert_ux::<18>(carries[i + UINT_LIMBS] as u64);
+            lkm.assert_dynamic_range(carries[i] as u64, LIMB_BITS as u64 + 2);
+            lkm.assert_dynamic_range(carries[i + UINT_LIMBS] as u64, LIMB_BITS as u64 + 2);
         }
 
         let sign_xor = dividend_sign ^ divisor_sign;
@@ -443,8 +454,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             } else {
                 0
             };
-            lkm.assert_ux::<16>((dividend_limbs[UINT_LIMBS - 1] as u64 - dividend_sign_mask) << 1);
-            lkm.assert_ux::<16>((divisor_limbs[UINT_LIMBS - 1] as u64 - divisor_sign_mask) << 1);
+            lkm.assert_dynamic_range(
+                (dividend_limbs[UINT_LIMBS - 1] as u64 - dividend_sign_mask) << 1,
+                16,
+            );
+            lkm.assert_dynamic_range(
+                (divisor_limbs[UINT_LIMBS - 1] as u64 - divisor_sign_mask) << 1,
+                16,
+            );
         }
 
         let divisor_sum_f = divisor_limbs.iter().fold(E::BaseField::ZERO, |acc, c| {
@@ -464,10 +481,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             } else {
                 divisor_limbs[idx] as u32 - remainder_prime[idx]
             };
-            lkm.assert_ux::<16>(val as u64 - 1);
+            lkm.assert_dynamic_range(val as u64 - 1, 16);
             (idx, val)
         } else {
-            lkm.assert_ux::<16>(0);
+            lkm.assert_dynamic_range(0, 16);
             (UINT_LIMBS, 0)
         };
 

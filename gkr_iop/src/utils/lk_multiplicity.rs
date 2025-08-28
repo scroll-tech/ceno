@@ -179,27 +179,27 @@ impl LkMultiplicity {
     /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
-        self.increment(
-            match C {
-                18 => LookupTable::U18,
-                16 => LookupTable::U16,
-                14 => LookupTable::U14,
-                8 => LookupTable::U8,
-                5 => LookupTable::U5,
-                _ => panic!("Unsupported bit range"),
-            },
-            v,
-        );
+        if C == 1 {
+            return;
+        }
+        self.increment(LookupTable::Dynamic, (1 << C) + v);
+    }
+
+    #[inline(always)]
+    pub fn assert_dynamic_range(&mut self, v: u64, max_bits: u64) {
+        if max_bits == 1 {
+            return;
+        }
+        self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
     }
 
     /// assert within range
     #[inline(always)]
-    pub fn assert_ux_in_u16(&mut self, size: usize, v: u64) {
-        assert!(size <= 16, "{size} > 16");
-        self.assert_ux::<16>(v);
-        if size < 16 {
-            self.assert_ux::<16>(v * (1 << (16 - size)));
+    pub fn assert_ux_in_u16(&mut self, max_bits: usize, v: u64) {
+        if max_bits == 1 {
+            return;
         }
+        self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
     }
 
     #[inline(always)]
@@ -207,14 +207,7 @@ impl LkMultiplicity {
         if max_bits == 1 {
             return;
         }
-        match max_bits {
-            18 => self.increment(LookupTable::U18, v),
-            16 => self.increment(LookupTable::U16, v),
-            14 => self.increment(LookupTable::U14, v),
-            8 => self.increment(LookupTable::U8, v),
-            5 => self.increment(LookupTable::U5, v),
-            max_bits => self.assert_ux_in_u16(max_bits, v),
-        };
+        self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
     }
 
     /// Track a lookup into a logic table (AndTable, etc).
@@ -272,6 +265,9 @@ mod tests {
         }
         let res = lkm.into_finalize_result();
         // check multiplicity counts of assert_byte
-        assert_eq!(res[LookupTable::U8 as usize][&8], thread_count);
+        assert_eq!(
+            res[LookupTable::Dynamic as usize][&((1 << 8) + 8)],
+            thread_count
+        );
     }
 }

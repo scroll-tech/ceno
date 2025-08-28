@@ -102,10 +102,10 @@ pub struct DivRemConfig<E: ExtensionField> {
 enum InternalDivRem<E: ExtensionField> {
     Unsigned,
     Signed {
-        dividend_signed: Signed<E>,
-        divisor_signed: Signed<E>,
-        quotient_signed: Signed<E>,
-        remainder_signed: Signed<E>,
+        dividend_signed: Box<Signed<E>>,
+        divisor_signed: Box<Signed<E>>,
+        quotient_signed: Box<Signed<E>>,
+        remainder_signed: Box<Signed<E>>,
         is_dividend_signed_min: IsEqualConfig,
         is_divisor_neg_one: IsEqualConfig,
         is_signed_overflow: WitIn,
@@ -230,10 +230,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
                 (
                     InternalDivRem::Signed {
-                        dividend_signed,
-                        divisor_signed,
-                        quotient_signed,
-                        remainder_signed,
+                        dividend_signed: Box::new(dividend_signed),
+                        divisor_signed: Box::new(divisor_signed),
+                        quotient_signed: Box::new(quotient_signed),
+                        remainder_signed: Box::new(remainder_signed),
                         is_dividend_signed_min,
                         is_divisor_neg_one,
                         is_signed_overflow,
