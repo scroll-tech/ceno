@@ -184,6 +184,7 @@ impl<E: ExtensionField> Layer<E> {
         num_instances: usize,
     ) -> LayerProof<E> {
         self.update_challenges(challenges, transcript);
+        // TODO: how to understand out_sel_and_eval_exprs??
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
         let (sumcheck_layer_proof, point) = match self.ty {
@@ -349,6 +350,10 @@ impl<E: ExtensionField> Layer<E> {
             .zip_eq(&r_record_evals.1)
             .enumerate()
         {
+            // with padding we have
+            // r_v = sel * r_expr + (1-sel) * 1
+            //     = sel * (r_expr - 1) + 1
+            // therefore we have r_v - 1 = sel * (r_expr - 1)
             expressions.push(ram_expr - E::BaseField::ONE.expr());
             evals.push(EvalExpression::<E>::Linear(
                 // evaluation = claim * one - one (padding)
@@ -369,6 +374,8 @@ impl<E: ExtensionField> Layer<E> {
             .zip_eq(&w_record_evals.1)
             .enumerate()
         {
+            // w_v = sel * w_expr + (1-sel) * 1
+            // therefore we have w_v - 1 = sel * (w_expr - 1)
             expressions.push(ram_expr - E::BaseField::ONE.expr());
             evals.push(EvalExpression::<E>::Linear(
                 // evaluation = claim * one - one (padding)
@@ -389,6 +396,8 @@ impl<E: ExtensionField> Layer<E> {
             .zip_eq(&lookup_evals.1)
             .enumerate()
         {
+            // lk_numerator_v = sel * lk_numerator + (1 - sel) * alpha
+            // therefore we have lk_numerator_v - alpha = sel * (lk_numerator - alpha)
             expressions.push(lookup - cb.cs.chip_record_alpha.clone());
             evals.push(EvalExpression::<E>::Linear(
                 // evaluation = claim * one - alpha (padding)
@@ -436,10 +445,10 @@ impl<E: ExtensionField> Layer<E> {
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
-                expressions,
+                expressions, // used to derive the sumcheck expression
                 n_challenges,
                 in_eval_expr,
-                expr_evals,
+                expr_evals, // used to derive the expected sum in the sumcheck
                 ((None, vec![]), 0, 0),
                 expr_names,
             )

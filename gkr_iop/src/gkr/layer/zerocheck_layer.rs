@@ -106,6 +106,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
             .collect();
+        // TODO: explain exprs_with_selector_out_eval_monomial_form???
         self.exprs_with_selector_out_eval_monomial_form = self
             .exprs
             .iter()
@@ -263,6 +264,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         )
         .collect_vec();
 
+        // expected sum in the main sumcheck
         let sigma = dot_product(
             main_sumcheck_challenges.iter().skip(2).copied(), // skip first 2 global challenges
             eval_and_dedup_points
@@ -447,6 +449,7 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
         invalid => panic!("invalid eq format {:?}", invalid),
     };
 
+    // the sumcheck expression in the zerocheck is \sum_i alpha^i * sel_i * expr_i
     for (sel_type, out_evals) in layer.out_sel_and_eval_exprs.iter() {
         let group_length = out_evals.len();
         let zero_check_expr = expr_iter
@@ -501,6 +504,8 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
         alpha * expr
     })
     .sum();
+
+    // batch 3 additional openings occurred in rotation argument into zerocheck argument
 
     // push rotation expr to zerocheck expr
     if let Some(

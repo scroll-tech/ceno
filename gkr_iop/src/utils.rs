@@ -43,10 +43,13 @@ pub fn rotation_next_base_mle<'a, E: ExtensionField>(
 
             rotate_chunk[0] = original_chunk[0];
 
-            rotation_index.iter().tuple_windows().for_each(|(cur, next)| {
-                // f'(b) = f(next(b))
-                rotate_chunk[*cur as usize] = original_chunk[*next as usize];
-            });
+            rotation_index
+                .iter()
+                .tuple_windows()
+                .for_each(|(cur, next)| {
+                    // f'(b) = f(next(b))
+                    rotate_chunk[*cur as usize] = original_chunk[*next as usize];
+                });
         });
     MultilinearExtension::from_evaluation_vec_smart(mle.num_vars(), rotated_mle_evals)
 }
@@ -161,11 +164,11 @@ pub const fn wits_fixed_and_eqs<const N: usize, const M: usize, const Q: usize>(
 }
 
 /// p(b) = eq(x,b) if b <= max_idx else 0
-/// 
-/// Its mle is defined as 
-/// 
+///
+/// Its mle is defined as
+///
 ///     p(y) = \sum_b p(b)*eq(b,y) = \sum_{b <= max_idx} eq(x,b)*eq(b,y)
-/// 
+///
 /// it's easy to see that eq(x,b)*eq(y,b) = eq(x,y,b).
 ///
 /// This is to compute a variant of eq(\mathbf{x}, \mathbf{y}) for indices in
