@@ -165,22 +165,13 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
 
         // Check that bit_shift and limb_shift are correct.
         let num_bits = E::BaseField::from_canonical_usize(NUM_LIMBS * LIMB_BITS);
-        // TODO switch to assert_ux_v2 once support dynamic table range check
-        // circuit_builder.assert_ux_v2(
-        //     || "bit_shift_vs_limb_shift",
-        //     (c[0].expr()
-        //         - limb_shift * E::BaseField::from_canonical_usize(LIMB_BITS).expr()
-        //         - bit_shift.expr())
-        //         * num_bits.inverse().expr(),
-        //     LIMB_BITS - ((NUM_LIMBS * LIMB_BITS) as u32).ilog2() as usize,
-        // )?;
-        circuit_builder.assert_ux_in_u16(
+        circuit_builder.assert_const_range(
             || "bit_shift_vs_limb_shift",
-            LIMB_BITS - ((NUM_LIMBS * LIMB_BITS) as u32).ilog2() as usize,
             (c[0].expr()
                 - limb_shift * E::BaseField::from_canonical_usize(LIMB_BITS).expr()
                 - bit_shift.expr())
                 * num_bits.inverse().expr(),
+            LIMB_BITS - ((NUM_LIMBS * LIMB_BITS) as u32).ilog2() as usize,
         )?;
         if !matches!(kind, InsnKind::SRA | InsnKind::SRAI) {
             circuit_builder.require_zero(|| "b_sign_zero", b_sign.expr())?;
@@ -196,13 +187,10 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         }
 
         for (i, carry) in bit_shift_carry.iter().enumerate() {
-            // TODO replace `LIMB_BITS` with `bit_shift` so we can support more strict range check
-            // `bit_shift` could be expression
-            // TODO refactor range check to support dynamic range
-            circuit_builder.assert_ux_v2(
+            circuit_builder.assert_dynamic_range(
                 || format!("bit_shift_carry_range_check_{i}"),
                 carry.expr(),
-                LIMB_BITS,
+                bit_shift.expr(),
             )?;
         }
 
@@ -252,7 +240,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         });
         for (val, witin) in bit_shift_carry.iter().zip_eq(&self.bit_shift_carry) {
             set_val!(instance, witin, E::BaseField::from_canonical_u32(*val));
-            lk_multiplicity.assert_ux_v2(*val as u64, LIMB_BITS);
+            lk_multiplicity.assert_dynamic_range(*val as u64, bit_shift as u64);
         }
         for (i, witin) in self.bit_shift_marker.iter().enumerate() {
             set_val!(instance, witin, E::BaseField::from_bool(i == bit_shift));
@@ -261,9 +249,9 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
             set_val!(instance, witin, E::BaseField::from_bool(i == limb_shift));
         }
         let num_bits_log = (NUM_LIMBS * LIMB_BITS).ilog2();
-        lk_multiplicity.assert_ux_in_u16(
-            LIMB_BITS - num_bits_log as usize,
+        lk_multiplicity.assert_dynamic_range(
             (((c[0] as usize) - bit_shift - limb_shift * LIMB_BITS) >> num_bits_log) as u64,
+            (LIMB_BITS - num_bits_log as usize) as u64,
         );
 
         let mut b_sign = 0;
