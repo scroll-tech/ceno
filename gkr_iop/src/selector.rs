@@ -115,7 +115,7 @@ impl<E: ExtensionField> SelectorType<E> {
                 (expression, eval * sel)
             }
         };
-        let Expression::StructuralWitIn(wit_id, _, _, _) = expr else {
+        let Expression::StructuralWitIn(wit_id, _) = expr else {
             panic!("Wrong selector expression format");
         };
         let wit_id = *wit_id as usize + offset_eq_id;

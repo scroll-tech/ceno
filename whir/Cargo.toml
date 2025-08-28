@@ -14,21 +14,14 @@ default-run = "main"
 
 [dependencies]
 bincode = "1.3.3"
-blake2 = "0.10"
-blake3 = "1.5.0"
 clap.workspace = true
-derivative = { version = "2", features = ["use_core"] }
 ff_ext = { path = "../ff_ext" }
-lazy_static = "1.4"
 multilinear_extensions = { path = "../multilinear_extensions" }
 p3.workspace = true
-poseidon = { path = "../poseidon" }
 rand = "0.8"
 rand_chacha = "0.3"
 rayon = { workspace = true, optional = true }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-sha3 = "0.10"
 sumcheck = { path = "../sumcheck" }
 tracing.workspace = true
 transcript = { path = "../transcript" }
@@ -36,12 +29,7 @@ transpose = "0.2.3"
 witness = { path = "../witness" }
 
 derive_more = { version = "1.0.0", features = ["debug"] }
-goldilocks = { git = "https://github.com/scroll-tech/ceno-Goldilocks" }
 itertools = "0.14.0"
-thiserror = "1"
-
-[profile.release]
-debug = true
 
 [features]
 asm = []
@@ -50,7 +38,6 @@ nightly-features = [
   "p3/nightly-features",
   "ff_ext/nightly-features",
   "multilinear_extensions/nightly-features",
-  "poseidon/nightly-features",
   "sumcheck/nightly-features",
   "transcript/nightly-features",
   "witness/nightly-features",

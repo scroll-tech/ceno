@@ -24,7 +24,7 @@ pub fn eval_by_expr_constant<E: ExtensionField>(
     expr.evaluate_with_instance(
         &|_| unimplemented!(),
         &|_| unimplemented!(),
-        &|_, _, _, _| unimplemented!(),
+        &|_, _| unimplemented!(),
         &|i| instance[i.0],
         &|scalar| scalar,
         &|challenge_id, pow, scalar, offset| {
@@ -64,7 +64,7 @@ pub fn eval_by_expr_with_fixed<E: ExtensionField>(
     expr.evaluate::<E>(
         &|f| fixed[f.0],
         &|witness_id| witnesses[witness_id as usize],
-        &|witness_id, _, _, _| structural_witnesses[witness_id as usize],
+        &|witness_id, _| structural_witnesses[witness_id as usize],
         &|scalar| {
             scalar
                 .map_either(|scalar| E::from(scalar), |scalar| scalar)
@@ -92,7 +92,7 @@ pub fn eval_by_expr_with_instance<E: ExtensionField>(
     expr.evaluate_with_instance::<Either<_, _>>(
         &|f| Either::Right(fixed[f.0]),
         &|witness_id| Either::Right(witnesses[witness_id as usize]),
-        &|witness_id, _, _, _| Either::Right(structural_witnesses[witness_id as usize]),
+        &|witness_id, _| Either::Right(structural_witnesses[witness_id as usize]),
         &|i| Either::Right(instance[i.0]),
         &|scalar| scalar,
         &|challenge_id, pow, scalar, offset| {
@@ -133,7 +133,7 @@ pub fn monomialize_expr_to_wit_terms<E: ExtensionField>(
              }| {
                 product.iter_mut().for_each(|t| match t {
                     Expression::WitIn(_) => (),
-                    Expression::StructuralWitIn(structural_wit_id, _, _, _) => {
+                    Expression::StructuralWitIn(structural_wit_id, _) => {
                         *t = Expression::WitIn(structural_witin_offset + *structural_wit_id);
                     }
                     Expression::Fixed(Fixed(fixed_id)) => {

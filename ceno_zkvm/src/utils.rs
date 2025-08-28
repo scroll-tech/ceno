@@ -106,6 +106,63 @@ pub fn eval_wellform_address_vec<E: ExtensionField>(
     offset + tmp
 }
 
+/// Evaluate MLE with the following evaluation over the hypercube:
+/// [0, 0, 0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, ..., 0, 1, 2, ..., 2^n-1]
+/// which is the concatenation of
+/// [0]
+/// [0, 1]
+/// [0, 1, 2, 3]
+/// ...
+/// [0, 1, 2, ..., 2^n-1]
+/// which is then prefixed by a single zero to make all the subvectors aligned to powers of two.
+/// This function is used to support dynamic range check.
+/// Note that this MLE has n+1 variables, so r should have length n+1.
+///
+/// conceptually, we traverse evaluations in the sequence:
+///   [0, 0], [0, 1], [0, 1, 2, 3], ...
+/// for every `next` element is already in a well-formed incremental structure,
+/// so we can reuse `eval_wellform_address_vec` to obtain its value.
+///
+/// at each step `i`, we combine:
+///   - the accumulated result so far, weighted by `(1 - r[i])`
+///   - the evaluation of the current prefix `r[..i]`, weighted by `r[i]`.
+///
+/// this iterative version avoids recursion for efficiency and clarity.
+pub fn eval_stacked_wellform_address_vec<E: ExtensionField>(r: &[E]) -> E {
+    if r.len() < 2 {
+        return E::ZERO;
+    }
+
+    let mut res = E::ZERO;
+    for i in 1..r.len() {
+        res = res * (E::ONE - r[i]) + eval_wellform_address_vec(0, 1, &r[..i], false) * r[i];
+    }
+    res
+}
+
+/// Evaluate MLE with the following evaluation over the hypercube:
+/// [0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, ..., n, n, n, ..., n]
+/// which is the concatenation of
+/// [0]
+/// [1, 1]
+/// [2, 2, 2, 2]
+/// ...
+/// [n, n, n, ..., n]
+/// which is then prefixed by a single zero to make all the subvectors aligned to powers of two.
+/// This function is used to support dynamic range check.
+/// Note that this MLE has n+1 variables, so r should have length n+1.
+pub fn eval_stacked_constant_vec<E: ExtensionField>(r: &[E]) -> E {
+    if r.len() < 2 {
+        return E::ZERO;
+    }
+
+    let mut res = E::ZERO;
+    for (i, r) in r.iter().enumerate().skip(1) {
+        res = res * (E::ONE - *r) + E::from_canonical_usize(i) * *r;
+    }
+    res
+}
+
 pub fn display_hashmap<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
     format!(
         "[{}]",
@@ -188,4 +245,59 @@ pub fn print_allocated_bytes() {
     // Read allocated bytes
     let allocated = stats::allocated::read().unwrap();
     tracing::info!("jemalloc total allocated bytes: {}", allocated);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::iter;
+
+    use ff_ext::GoldilocksExt2;
+    use p3::field::FieldAlgebra;
+
+    use super::*;
+
+    type E = GoldilocksExt2;
+    use multilinear_extensions::mle::MultilinearExtension;
+
+    #[test]
+    fn test_eval_stacked_wellform_address_vec() {
+        let r = [
+            E::from_canonical_usize(123),
+            E::from_canonical_usize(456),
+            E::from_canonical_usize(789),
+            E::from_canonical_usize(3210),
+            E::from_canonical_usize(9876),
+        ];
+        for n in 0..r.len() {
+            let v = iter::once(E::ZERO)
+                .chain((0..=n).flat_map(|i| (0..(1 << i)).map(E::from_canonical_usize)))
+                .collect::<Vec<E>>();
+            let poly = MultilinearExtension::from_evaluations_ext_vec(n + 1, v);
+            assert_eq!(
+                eval_stacked_wellform_address_vec(&r[0..=n]),
+                poly.evaluate(&r[0..=n])
+            )
+        }
+    }
+
+    #[test]
+    fn test_eval_stacked_constant_vec() {
+        let r = [
+            E::from_canonical_usize(123),
+            E::from_canonical_usize(456),
+            E::from_canonical_usize(789),
+            E::from_canonical_usize(3210),
+            E::from_canonical_usize(9876),
+        ];
+        for n in 0..r.len() {
+            let v = iter::once(E::ZERO)
+                .chain((0..=n).flat_map(|i| iter::repeat_n(i, 1 << i).map(E::from_canonical_usize)))
+                .collect::<Vec<E>>();
+            let poly = MultilinearExtension::from_evaluations_ext_vec(n + 1, v);
+            assert_eq!(
+                eval_stacked_constant_vec(&r[0..=n]),
+                poly.evaluate(&r[0..=n])
+            )
+        }
+    }
 }
