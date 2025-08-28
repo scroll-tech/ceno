@@ -132,7 +132,7 @@ mod tests {
         let folding_randomness = vec![F::from_canonical_u64(335), F::from_canonical_u64(222)];
 
         let new_eval_point = vec![F::from_canonical_u64(32); num_variables - folding_factor];
-        let folded_polynomial = polynomial.fix_variables(&folding_randomness);
+        let folded_polynomial = polynomial.fix_variables(&folding_randomness).unwrap();
         let new_fold_eval = folded_polynomial.evaluate(&new_eval_point);
 
         prover.compress(
@@ -189,7 +189,9 @@ mod tests {
 
         let sumcheck_poly_1 = prover.compute_sumcheck_polynomial(folding_factor);
 
-        let folded_poly_1 = polynomial.fix_variables(&folding_randomness_1.clone());
+        let folded_poly_1 = polynomial
+            .fix_variables(&folding_randomness_1.clone())
+            .unwrap();
         prover.compress(
             folding_factor,
             combination_randomness[0],
@@ -218,6 +220,7 @@ mod tests {
         let full_folding = [folding_randomness_1.clone(), folding_randomness_2.clone()].concat();
         let eval_coeff = match folded_poly_1
             .fix_variables(&folding_randomness_2)
+            .unwrap()
             .evaluations()
         {
             FieldType::Base(evals) => {
@@ -286,7 +289,9 @@ mod tests {
 
         let sumcheck_poly_1 = prover.compute_sumcheck_polynomial(folding_factor);
 
-        let folded_poly_1 = polynomial.fix_variables(&folding_randomness_1.clone());
+        let folded_poly_1 = polynomial
+            .fix_variables(&folding_randomness_1.clone())
+            .unwrap();
         prover.compress(
             folding_factor,
             combination_randomness_1[0],
@@ -299,7 +304,9 @@ mod tests {
 
         let sumcheck_poly_2 = prover.compute_sumcheck_polynomial(folding_factor);
 
-        let folded_poly_2 = folded_poly_1.fix_variables(&folding_randomness_2.clone());
+        let folded_poly_2 = folded_poly_1
+            .fix_variables(&folding_randomness_2.clone())
+            .unwrap();
         prover.compress(
             folding_factor,
             combination_randomness_2[0],
@@ -310,6 +317,7 @@ mod tests {
         let sumcheck_poly_3 = prover.compute_sumcheck_polynomial(folding_factor);
         let final_coeff = match folded_poly_2
             .fix_variables(&folding_randomness_3.clone())
+            .unwrap()
             .evaluations()
         {
             FieldType::Base(evals) => F::from_ref_base(&evals[0]),
