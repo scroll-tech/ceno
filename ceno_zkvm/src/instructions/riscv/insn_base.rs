@@ -522,6 +522,7 @@ mod test {
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
     use p3::goldilocks::Goldilocks as F;
+    use std::collections::HashSet;
     use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
     use crate::{
@@ -578,16 +579,21 @@ mod test {
 
         // Check the range lookups.
         let lkm = lkm.into_finalize_result();
-        lkm[ROMType::U14 as usize].iter().for_each(|(k, v)| {
-            assert_eq!(*k, 0xbeef >> 2);
-            assert_eq!(*v, num_rows);
-        });
-        assert_eq!(lkm[ROMType::U14 as usize].len(), 1);
-        lkm[ROMType::U16 as usize].iter().for_each(|(k, v)| {
-            assert_eq!(*k, 0xbead);
-            assert_eq!(*v, num_rows);
-        });
-        assert_eq!(lkm[ROMType::U16 as usize].len(), 1);
+        let expected = vec![
+            // 14 bits range
+            ((1u64 << 14) + (0xbeef >> 2), num_rows),
+            // 16 bits range
+            ((1 << 16) + 0xbead, num_rows),
+        ]
+        .into_iter()
+        .collect::<HashSet<(u64, usize)>>();
+
+        let result = lkm[ROMType::Dynamic as usize]
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect::<HashSet<(u64, usize)>>();
+        assert_eq!(expected, result);
+        assert_eq!(lkm[ROMType::Dynamic as usize].len(), 2);
 
         if is_ok {
             cb.require_equal(|| "", mem_addr.expr_unaligned(), addr.into())?;

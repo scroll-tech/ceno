@@ -8,9 +8,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     structs::{ProgramParams, ROMType},
-    tables::{RMMCollections, TableCircuit},
+    tables::{RMMCollections, TableCircuit, range::range_impl::DynamicRangeTableConfig},
 };
 use ff_ext::ExtensionField;
+use gkr_iop::tables::LookupTable;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 /// Use this trait as parameter to RangeTableCircuit.
@@ -69,5 +70,49 @@ impl<E: ExtensionField, RANGE: RangeTable> TableCircuit<E> for RangeTableCircuit
             RANGE::content(),
             RANGE::len(),
         )?)
+    }
+}
+
+pub struct DynamicRangeTableCircuit<E, const MAX_BITS: usize>(PhantomData<E>);
+
+impl<E: ExtensionField, const MAX_BITS: usize> TableCircuit<E>
+    for DynamicRangeTableCircuit<E, MAX_BITS>
+{
+    type TableConfig = DynamicRangeTableConfig;
+    type FixedInput = ();
+    type WitnessInput = ();
+
+    fn name() -> String {
+        format!("DYNAMIC_RANGE_{}", MAX_BITS)
+    }
+
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _params: &ProgramParams,
+    ) -> Result<DynamicRangeTableConfig, ZKVMError> {
+        Ok(cb.namespace(
+            || Self::name(),
+            |cb| DynamicRangeTableConfig::construct_circuit(cb, MAX_BITS),
+        )?)
+    }
+
+    fn generate_fixed_traces(
+        _config: &DynamicRangeTableConfig,
+        _num_fixed: usize,
+        _input: &(),
+    ) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
+    }
+
+    fn assign_instances(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        num_structural_witin: usize,
+        multiplicity: &[HashMap<u64, usize>],
+        _input: &(),
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        let multiplicity = &multiplicity[LookupTable::Dynamic as usize];
+
+        Ok(config.assign_instances(num_witin, num_structural_witin, multiplicity, MAX_BITS)?)
     }
 }

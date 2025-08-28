@@ -77,10 +77,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         }
 
         for (i, (rd_low, carry_low)) in rd_low.iter().zip(carry_low.iter()).enumerate() {
-            circuit_builder
-                .assert_ux::<_, _, 16>(|| format!("range_check_rd_low_{i}"), rd_low.expr())?;
-            circuit_builder
-                .assert_ux::<_, _, 18>(|| format!("range_check_carry_low_{i}"), carry_low.expr())?;
+            circuit_builder.assert_dynamic_range(
+                || format!("range_check_rd_low_{i}"),
+                rd_low.expr(),
+                E::BaseField::from_canonical_u32(16).expr(),
+            )?;
+            circuit_builder.assert_dynamic_range(
+                || format!("range_check_carry_low_{i}"),
+                carry_low.expr(),
+                E::BaseField::from_canonical_u32(18).expr(),
+            )?;
         }
 
         let (rd_high, rs1_ext, rs2_ext) = match I::INST_KIND {
@@ -110,13 +116,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
                 for (i, (rd_high, carry_high)) in rd_high.iter().zip(carry_high.iter()).enumerate()
                 {
-                    circuit_builder.assert_ux::<_, _, 16>(
+                    circuit_builder.assert_dynamic_range(
                         || format!("range_check_high_{i}"),
                         rd_high.expr(),
+                        E::BaseField::from_canonical_u32(16).expr(),
                     )?;
-                    circuit_builder.assert_ux::<_, _, 18>(
+                    circuit_builder.assert_dynamic_range(
                         || format!("range_check_carry_high_{i}"),
                         carry_high.expr(),
+                        E::BaseField::from_canonical_u32(18).expr(),
                     )?;
                 }
 
@@ -131,15 +139,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 match I::INST_KIND {
                     InsnKind::MULH => {
                         // Implement MULH circuit here
-                        circuit_builder.assert_ux::<_, _, 16>(
+                        circuit_builder.assert_dynamic_range(
                             || "mulh_range_check_rs1_last",
                             E::BaseField::from_canonical_u32(2).expr()
                                 * (rs1_expr[UINT_LIMBS - 1].clone() - rs1_sign * sign_mask.expr()),
+                            E::BaseField::from_canonical_u32(16).expr(),
                         )?;
-                        circuit_builder.assert_ux::<_, _, 16>(
+                        circuit_builder.assert_dynamic_range(
                             || "mulh_range_check_rs2_last",
                             E::BaseField::from_canonical_u32(2).expr()
                                 * (rs2_expr[UINT_LIMBS - 1].clone() - rs2_sign * sign_mask.expr()),
+                            E::BaseField::from_canonical_u32(16).expr(),
                         )?;
                     }
                     InsnKind::MULHU => {
@@ -151,14 +161,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                         // Implement MULHSU circuit here
                         circuit_builder
                             .require_zero(|| "mulhsu_rs2_sign_zero", rs2_sign.clone())?;
-                        circuit_builder.assert_ux::<_, _, 16>(
+                        circuit_builder.assert_dynamic_range(
                             || "mulhsu_range_check_rs1_last",
                             E::BaseField::from_canonical_u32(2).expr()
                                 * (rs1_expr[UINT_LIMBS - 1].clone() - rs1_sign * sign_mask.expr()),
+                            E::BaseField::from_canonical_u32(16).expr(),
                         )?;
-                        circuit_builder.assert_ux::<_, _, 16>(
+                        circuit_builder.assert_dynamic_range(
                             || "mulhsu_range_check_rs2_last",
                             rs2_expr[UINT_LIMBS - 1].clone() - rs2_sign * sign_mask.expr(),
+                            E::BaseField::from_canonical_u32(16).expr(),
                         )?;
                     }
                     InsnKind::MUL => (),
@@ -248,8 +260,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         );
 
         for (rd_low, carry_low) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
-            lk_multiplicity.assert_ux::<16>(*rd_low as u64);
-            lk_multiplicity.assert_ux::<18>(*carry_low as u64);
+            lk_multiplicity.assert_dynamic_range(*rd_low as u64, 16);
+            lk_multiplicity.assert_dynamic_range(*carry_low as u64, 18);
         }
 
         for i in 0..UINT_LIMBS {
@@ -268,8 +280,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                 set_val!(instance, config.rs2_ext.as_ref().unwrap(), rs2_ext as u64);
 
                 for (rd_high, carry_high) in rd_high.iter().zip(carry[UINT_LIMBS..].iter()) {
-                    lk_multiplicity.assert_ux::<16>(*rd_high as u64);
-                    lk_multiplicity.assert_ux::<18>(*carry_high as u64);
+                    lk_multiplicity.assert_dynamic_range(*rd_high as u64, 16);
+                    lk_multiplicity.assert_dynamic_range(*carry_high as u64, 18);
                 }
             }
             _ => (),
@@ -282,20 +294,24 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         match I::INST_KIND {
             InsnKind::MULH => {
-                lk_multiplicity.assert_ux::<16>(
+                lk_multiplicity.assert_dynamic_range(
                     (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
+                    16,
                 );
-                lk_multiplicity.assert_ux::<16>(
+                lk_multiplicity.assert_dynamic_range(
                     (2 * (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask)) as u64,
+                    16,
                 );
             }
             InsnKind::MULHU => {}
             InsnKind::MULHSU => {
-                lk_multiplicity.assert_ux::<16>(
+                lk_multiplicity.assert_dynamic_range(
                     (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
+                    16,
                 );
-                lk_multiplicity.assert_ux::<16>(
+                lk_multiplicity.assert_dynamic_range(
                     (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
+                    16,
                 );
             }
             InsnKind::MUL => {}
