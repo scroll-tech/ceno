@@ -1,4 +1,4 @@
-use std::slice;
+use std::{mem, slice};
 
 use crate::{
     Point,
@@ -228,7 +228,7 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                 // first folding challenge
                 let r = fold_challenges.first().unwrap();
                 let coeff = S::verifier_folding_coeffs(vp, log2_height, idx);
-                let (lo, hi) = reduced_openings_by_height[log2_height].unwrap();
+                let (lo, hi) = mem::take(&mut reduced_openings_by_height[log2_height]).unwrap();
                 let mut folded = codeword_fold_with_challenge(&[lo, hi], *r, coeff, inv_2);
 
                 for (
@@ -249,8 +249,10 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                     let idx_sibling = idx & 0x01;
                     let mut leafs = vec![*sibling_value; 2];
                     leafs[idx_sibling] = folded;
-                    if let Some((lo, hi)) = reduced_openings_by_height[log2_height].as_mut() {
-                        leafs[idx_sibling] += if idx_sibling == 1 { *hi } else { *lo };
+
+                    if let Some((lo, hi)) = mem::take(&mut reduced_openings_by_height[log2_height])
+                    {
+                        leafs[idx_sibling] += if idx_sibling == 1 { hi } else { lo };
                     }
 
                     idx >>= 1;
@@ -270,6 +272,24 @@ pub fn batch_verifier_query_phase<E: ExtensionField, S: EncodingScheme<E>>(
                     let coeff = S::verifier_folding_coeffs(vp, log2_height, idx);
                     folded = codeword_fold_with_challenge(&[leafs[0], leafs[1]], *r, coeff, inv_2);
                 }
+
+                // in the final folding round, we add the opening value associated with
+                // the current `log2_height` into the folded result.
+                // The choice between `lo` or `hi` depends on the sibling index.
+                // afterward, we check that the final folded value matches the expected
+                // entry in the `final_codeword`, as no merkle commitment exists for last round.
+                log2_height -= 1;
+                let idx_sibling = idx & 0x01;
+                if let Some((lo, hi)) = mem::take(&mut reduced_openings_by_height[log2_height]) {
+                    folded += if idx_sibling == 1 { hi } else { lo };
+                }
+
+                assert!(
+                    reduced_openings_by_height.iter().all(|v| v.is_none()),
+                    "there are unused openings remain"
+                );
+
+                // final value check: validate the folded result matches the final codeword entry
                 assert!(
                     final_codeword.values[idx] == folded,
                     "final_codeword.values[idx] value {:?} != folded {:?}",
