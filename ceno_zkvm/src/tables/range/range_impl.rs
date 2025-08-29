@@ -172,3 +172,98 @@ impl DynamicRangeTableConfig {
         Ok([witness, structural_witness])
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct DoubleRangeTableConfig {
+    range_a: StructuralWitIn,
+    range_b: StructuralWitIn,
+    mlt: WitIn,
+}
+
+impl DoubleRangeTableConfig {
+    pub fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        rom_type: ROMType,
+        range_a_bits: usize,
+        range_b_bits: usize,
+    ) -> Result<Self, CircuitBuilderError> {
+        let range_a = cb.create_structural_witin(
+            || "structural range witin a",
+            StructuralWitInType::InnerRepeatingIncrementalSequence {
+                k: range_a_bits,
+                n: range_a_bits + range_b_bits,
+            },
+        );
+        let range_b = cb.create_structural_witin(
+            || "structural range witin b",
+            StructuralWitInType::OuterRepeatingIncrementalSequence {
+                k: range_a_bits,
+                n: range_a_bits + range_b_bits,
+            },
+        );
+        let mlt = cb.create_witin(|| "mlt");
+
+        let record_exprs = vec![range_a.expr(), range_b.expr()];
+
+        cb.lk_table_record(
+            || "record",
+            SetTableSpec {
+                len: Some(1 << (range_a_bits + range_b_bits)),
+                structural_witins: vec![range_a, range_b],
+            },
+            rom_type,
+            record_exprs,
+            mlt.expr(),
+        )?;
+
+        Ok(Self {
+            range_a,
+            range_b,
+            mlt,
+        })
+    }
+
+    pub fn assign_instances<F: SmallField>(
+        &self,
+        num_witin: usize,
+        num_structural_witin: usize,
+        multiplicity: &HashMap<u64, usize>,
+        range_a_bits: usize,
+        range_b_bits: usize,
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        let length = 1 << (range_a_bits + range_b_bits);
+        let mut witness: RowMajorMatrix<F> =
+            RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
+        let mut structural_witness = RowMajorMatrix::<F>::new(
+            length,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
+
+        let mut mlts = vec![0; length];
+        for (idx, mlt) in multiplicity {
+            mlts[*idx as usize] = *mlt;
+        }
+
+        let range_a_content = (0..(1 << range_b_bits))
+            .flat_map(|i| std::iter::repeat_n(F::from_canonical_usize(i), 1 << range_a_bits))
+            .collect::<Vec<F>>();
+        let range_b_content = std::iter::repeat_n(0, 1 << range_b_bits)
+            .flat_map(|_| (0..(1 << range_a_bits)).map(F::from_canonical_usize))
+            .collect::<Vec<F>>();
+
+        witness
+            .par_rows_mut()
+            .zip(structural_witness.par_rows_mut())
+            .zip(mlts.par_iter())
+            .zip(range_a_content.par_iter())
+            .zip(range_b_content.par_iter())
+            .for_each(|((((row, structural_row), mlt), a), b)| {
+                set_val!(row, self.mlt, F::from_canonical_u64(*mlt as u64));
+                set_val!(structural_row, self.range_a, a);
+                set_val!(structural_row, self.range_b, b);
+            });
+
+        Ok([witness, structural_witness])
+    }
+}

@@ -8,6 +8,7 @@ use strum_macros::EnumIter;
 #[repr(usize)]
 pub enum LookupTable {
     Dynamic = 0, // Range type for all bits up to 18 bits
+    DoubleU8,    // Range type for two 8-bit checks toether
     And,         // a & b where a, b are bytes
     Or,          // a | b where a, b are bytes
     Xor,         // a ^ b where a, b are bytes
