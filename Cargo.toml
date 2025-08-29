@@ -7,16 +7,6 @@ members = [
   "ceno_zkvm",
   "examples-builder",
   "examples",
-  "mpcs",
-  "multilinear_extensions",
-  "sumcheck_macro",
-  "poseidon",
-  "gkr_iop",
-  "sumcheck",
-  "transcript",
-  "whir",
-  "witness",
-  "p3",
 ]
 resolver = "2"
 
@@ -30,6 +20,16 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [workspace.dependencies]
+ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", rev = "v1.0.0-alpha.2" }
+mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", rev = "v1.0.0-alpha.2" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", rev = "v1.0.0-alpha.2" }
+p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", rev = "v1.0.0-alpha.2" }
+poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", rev = "v1.0.0-alpha.2" }
+sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", rev = "v1.0.0-alpha.2" }
+transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", rev = "v1.0.0-alpha.2" }
+whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", rev = "v1.0.0-alpha.2" }
+witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", rev = "v1.0.0-alpha.2" }
+
 anyhow = { version = "1.0", default-features = false }
 bincode = "1"
 clap = { version = "4.5", features = ["derive"] }
@@ -37,27 +37,9 @@ criterion = { version = "0.5", features = ["html_reports"] }
 either = { version = "1.15.*", features = ["serde"] }
 itertools = "0.13"
 ndarray = "*"
-num-bigint = { version = "0.4.6" }
 num-derive = "0.4"
 num-traits = "0.2"
-p3 = { path = "p3" }
-p3-baby-bear = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-challenger = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-commit = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-dft = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-field = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-fri = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-goldilocks = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-matrix = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-maybe-rayon = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-mds = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-merkle-tree = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-poseidon = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-poseidon2 = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-symmetric = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-p3-util = { git = "https://github.com/Plonky3/plonky3", rev = "1ba4e5c" }
-paste = "1"
-poseidon = { path = "./poseidon" }
+
 pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"
 proptest = "1"
@@ -72,7 +54,6 @@ serde_json = "1.0"
 strum = "0.26"
 strum_macros = "0.26"
 substrate-bn = { version = "0.6.0" }
-sumcheck = { path = "sumcheck" }
 thiserror = "1" # do we need this?
 thread_local = "1.1"
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }

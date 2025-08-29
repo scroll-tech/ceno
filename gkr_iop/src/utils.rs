@@ -8,7 +8,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
-use p3_field::FieldAlgebra;
+use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
@@ -212,7 +212,7 @@ mod tests {
     use std::sync::Arc;
 
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
-    use p3_goldilocks::Goldilocks;
+    use p3::goldilocks::Goldilocks;
 
     use super::*;
 
