@@ -11,6 +11,7 @@ version.workspace = true
 
 [dependencies]
 bincode.workspace = true
+ceno_gpu = { workspace = true, optional = true }
 either.workspace = true
 ff_ext.workspace = true
 itertools.workspace = true
@@ -28,7 +29,6 @@ thread_local.workspace = true
 tracing.workspace = true
 transcript.workspace = true
 witness.workspace = true
-ceno_gpu = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
