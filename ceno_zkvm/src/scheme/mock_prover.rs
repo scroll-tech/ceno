@@ -7,23 +7,20 @@ use crate::{
         ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
         ZKVMWitnesses,
     },
-    tables::{
-        ProgramTableCircuit, RMMCollections, RangeTable, TableCircuit, U5Table, U8Table, U14Table,
-        U16Table,
-    },
+    tables::{ProgramTableCircuit, RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
 use either::Either;
-use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
+use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use gkr_iop::{
     tables::{
-        OpsTable,
+        LookupTable, OpsTable,
         ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
     },
-    utils::lk_multiplicity::LkMultiplicityRaw,
+    utils::lk_multiplicity::{LkMultiplicityRaw, Multiplicity},
 };
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
@@ -31,6 +28,7 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, IntoMLEs},
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
+use p3::field::{Field, FieldAlgebra};
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -45,7 +43,7 @@ use std::{
 use strum::IntoEnumIterator;
 use tiny_keccak::{Hasher, Keccak};
 
-const MAX_CONSTRAINT_DEGREE: usize = 2;
+const MAX_CONSTRAINT_DEGREE: usize = 3;
 const MOCK_PROGRAM_SIZE: usize = 32;
 pub const MOCK_PC_START: ByteAddr = ByteAddr({
     // This needs to be a static, because otherwise the compiler complains
@@ -114,9 +112,6 @@ pub enum MockProverError<E: ExtensionField, K: LkMultiplicityKey> {
         name: String,
         inst_id: usize,
     },
-    // TODO later
-    // r_expressions
-    // w_expressions
     LkMultiplicityError {
         rom_type: ROMType,
         key: K,
@@ -296,8 +291,10 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                         "assignments"
                     };
                     let element = match rom_type {
-                        ROMType::U5 | ROMType::U8 | ROMType::U14 | ROMType::U16 => {
-                            format!("Element: {key:?}")
+                        ROMType::Dynamic => {
+                            let left = u64::BITS - 1 - key.leading_zeros();
+                            let element = key & ((1 << left) - 1);
+                            format!("Dynamic Range Table U{left} with Element: {element:?}")
                         }
                         ROMType::And => {
                             let (a, b) = AndTable::unpack(key);
@@ -364,14 +361,23 @@ fn load_tables<E: ExtensionField>(
     cs: &ConstraintSystem<E>,
     challenge: [E; 2],
 ) -> HashSet<Vec<u64>> {
-    fn load_range_table<RANGE: RangeTable, E: ExtensionField>(
+    fn load_dynamic_range_table<E: ExtensionField, const MAX_BITS: usize>(
         t_vec: &mut Vec<Vec<u64>>,
         cs: &ConstraintSystem<E>,
         challenge: [E; 2],
     ) {
-        for i in RANGE::content() {
-            let rlc_record =
-                cs.rlc_chip_record(vec![(RANGE::ROM_TYPE as usize).into(), (i as usize).into()]);
+        for (i, bits) in std::iter::once(0)
+            .chain((0..=MAX_BITS).flat_map(|i| (0..(1 << i))))
+            .zip(
+                std::iter::once(0)
+                    .chain((0..=MAX_BITS).flat_map(|i| std::iter::repeat_n(i, 1 << i))),
+            )
+        {
+            let rlc_record = cs.rlc_chip_record(vec![
+                (LookupTable::Dynamic as usize).into(),
+                (i as usize).into(),
+                bits.into(),
+            ]);
             let rlc_record = eval_by_expr(&[], &[], &challenge, &rlc_record);
             t_vec.push(rlc_record.to_canonical_u64_vec());
         }
@@ -395,15 +401,15 @@ fn load_tables<E: ExtensionField>(
     }
 
     let mut table_vec = vec![];
-    load_range_table::<U5Table, _>(&mut table_vec, cs, challenge);
-    load_range_table::<U8Table, _>(&mut table_vec, cs, challenge);
-    load_range_table::<U14Table, _>(&mut table_vec, cs, challenge);
-    load_range_table::<U16Table, _>(&mut table_vec, cs, challenge);
+    load_dynamic_range_table::<_, 18>(&mut table_vec, cs, challenge);
     load_op_table::<AndTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<OrTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<XorTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<LtuTable, _>(&mut table_vec, cs, challenge);
-    load_op_table::<PowTable, _>(&mut table_vec, cs, challenge);
+    if E::BaseField::bits() > 32 {
+        // this pow table only work on large prime field
+        load_op_table::<PowTable, _>(&mut table_vec, cs, challenge);
+    }
 
     HashSet::from_iter(table_vec)
 }
@@ -454,13 +460,20 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
             Err(e) => panic!("{:?}", e),
         };
 
-        (challenge.map(|c| c.to_canonical_u64_vec()), table)
+        (
+            challenge.map(|c| {
+                c.as_base_slice()
+                    .iter()
+                    .map(|b| b.to_canonical_u64())
+                    .collect_vec()
+            }),
+            table,
+        )
     });
     // reinitialize per generic type E
     (
-        challenges_repr.clone().map(|repr| unsafe {
-            let ptr = repr.as_slice().as_ptr() as *const E;
-            *ptr
+        challenges_repr.clone().map(|repr| {
+            E::from_base_iter(repr.iter().copied().map(E::BaseField::from_canonical_u64))
         }),
         table.clone(),
     )
@@ -469,46 +482,72 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
 impl<'a, E: ExtensionField + Hash> MockProver<E> {
     pub fn run_with_challenge(
         cb: &CircuitBuilder<E>,
+        fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         challenge: [E; 2],
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        Self::run_maybe_challenge(cb, wits_in, &[], &[], Some(challenge), lkm)
+        Self::run_maybe_challenge(
+            cb,
+            fixed,
+            wits_in,
+            structural_witin,
+            &[],
+            &[],
+            Some(challenge),
+            lkm,
+        )
     }
 
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        Self::run_maybe_challenge(cb, wits_in, program, &[], None, lkm)
+        Self::run_maybe_challenge(cb, &[], wits_in, &[], program, &[], None, lkm)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_maybe_challenge(
         cb: &CircuitBuilder<E>,
+        fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         pi: &[ArcMultilinearExtension<'a, E>],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
         let program = Program::from(program);
         let (table, challenge) = Self::load_tables_with_program(cb.cs, &program, challenge);
 
-        Self::run_maybe_challenge_with_table(cb.cs, &table, wits_in, pi, 1, challenge, lkm)
-            .map(|_| ())
+        Self::run_maybe_challenge_with_table(
+            cb.cs,
+            &table,
+            fixed,
+            wits_in,
+            structural_witin,
+            pi,
+            1,
+            challenge,
+            lkm,
+        )
+        .map(|_| ())
     }
 
     #[allow(clippy::too_many_arguments)]
     fn run_maybe_challenge_with_table(
         cs: &ConstraintSystem<E>,
         table: &HashSet<Vec<u64>>,
+        fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         pi: &[ArcMultilinearExtension<'a, E>],
         num_instances: usize,
         challenge: [E; 2],
-        expected_lkm: Option<LkMultiplicity>,
+        expected_lkm: Option<Multiplicity<u64>>,
     ) -> Result<LkMultiplicityRaw<E>, Vec<MockProverError<E, u64>>> {
         let mut shared_lkm = LkMultiplicityRaw::<E>::default();
         let mut errors = vec![];
@@ -544,9 +583,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     cs.num_witin,
                     cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
-                    &[],
+                    fixed,
                     wits_in,
-                    &[],
+                    structural_witin,
                     pi,
                     &challenge,
                 );
@@ -557,9 +596,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     cs.num_witin,
                     cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
-                    &[],
+                    fixed,
                     wits_in,
-                    &[],
+                    structural_witin,
                     pi,
                     &challenge,
                 );
@@ -587,9 +626,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     cs.num_witin,
                     cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
-                    &[],
+                    fixed,
                     wits_in,
-                    &[],
+                    structural_witin,
                     pi,
                     &challenge,
                 );
@@ -620,9 +659,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 cs.num_witin,
                 cs.num_structural_witin,
                 cs.num_fixed as WitnessId,
-                &[],
+                fixed,
                 wits_in,
-                &[],
+                structural_witin,
                 pi,
                 &challenge,
             );
@@ -660,22 +699,21 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             cs.num_witin,
                             cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
-                            &[],
+                            fixed,
                             wits_in,
-                            &[],
+                            structural_witin,
                             pi,
                             &challenge,
                         );
                         let mut arg_eval = arg_eval
                             .get_ext_field_vec()
                             .iter()
-                            .map(|v| v.to_canonical_u64_vec()[0])
+                            .map(E::to_canonical_u64)
                             .take(num_instances)
                             .collect_vec();
 
                         // Constant terms will have single element in `args_expr_evaluated`, so let's fix that.
-                        if arg_expr.is_constant() {
-                            assert_eq!(arg_eval.len(), 1);
+                        if arg_expr.is_constant() && arg_eval.len() == 1 {
                             arg_eval.resize(num_instances, arg_eval[0])
                         }
                         arg_eval
@@ -685,10 +723,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 // Count lookups infered from ConstraintSystem from all instances into lkm_from_cs.
                 for inst_id in 0..num_instances {
                     match rom_type {
-                        ROMType::U5 => lkm_from_cs.assert_ux::<5>(args_eval[0][inst_id]),
-                        ROMType::U8 => lkm_from_cs.assert_ux::<8>(args_eval[0][inst_id]),
-                        ROMType::U14 => lkm_from_cs.assert_ux::<14>(args_eval[0][inst_id]),
-                        ROMType::U16 => lkm_from_cs.assert_ux::<16>(args_eval[0][inst_id]),
+                        ROMType::Dynamic => {
+                            lkm_from_cs
+                                .assert_dynamic_range(args_eval[0][inst_id], args_eval[1][inst_id]);
+                        }
                         ROMType::And => lkm_from_cs
                             .lookup_and_byte(args_eval[0][inst_id], args_eval[1][inst_id]),
                         ROMType::Or => {
@@ -707,7 +745,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             }
 
-            errors.extend(compare_lkm(lkm_from_cs, lkm_from_assignment));
+            errors.extend(compare_lkm(
+                lkm_from_cs.into_finalize_result(),
+                lkm_from_assignment,
+            ));
         }
 
         if errors.is_empty() {
@@ -755,20 +796,23 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         t_vec
     }
 
+    #[allow(clippy::too_many_arguments)]
     /// Run and check errors
     ///
     /// Panic, unless we see exactly the expected errors.
     /// (Expecting no errors is a valid expectation.)
     pub fn assert_with_expected_errors(
         cb: &CircuitBuilder<E>,
+        fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         constraint_names: &[&str],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) {
         let error_groups = if let Some(challenge) = challenge {
-            Self::run_with_challenge(cb, wits_in, challenge, lkm)
+            Self::run_with_challenge(cb, fixed, wits_in, structural_witin, challenge, lkm)
         } else {
             Self::run(cb, wits_in, program, lkm)
         }
@@ -805,27 +849,43 @@ Hints:
 
     pub fn assert_satisfied_raw(
         cb: &CircuitBuilder<E>,
-        [raw_witin, _raw_structural_witin]: RMMCollections<E::BaseField>,
+        [raw_witin, raw_structural_witin]: RMMCollections<E::BaseField>,
         program: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) {
         let wits_in = raw_witin
             .to_mles()
             .into_iter()
             .map(|v| v.into())
             .collect_vec();
-        Self::assert_satisfied(cb, &wits_in, program, challenge, lkm);
+        let structural_witin = raw_structural_witin
+            .to_mles()
+            .into_iter()
+            .map(|v| v.into())
+            .collect_vec();
+        Self::assert_satisfied(cb, &wits_in, &structural_witin, program, challenge, lkm);
     }
 
     pub fn assert_satisfied(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         challenge: Option<[E; 2]>,
-        lkm: Option<LkMultiplicity>,
+        lkm: Option<Multiplicity<u64>>,
     ) {
-        Self::assert_with_expected_errors(cb, wits_in, program, &[], challenge, lkm);
+        assert_eq!(cb.cs.num_fixed, 0);
+        Self::assert_with_expected_errors(
+            cb,
+            &[],
+            wits_in,
+            structural_witin,
+            program,
+            &[],
+            challenge,
+            lkm,
+        );
     }
 
     pub fn assert_satisfied_full(
@@ -913,14 +973,15 @@ Hints:
                 );
                 // Assert opcode and check single opcode lk multiplicity
                 // Also combine multiplicity in lkm_opcodes
-                let lkm_from_assignments = witnesses
-                    .get_lk_mlt(circuit_name)
-                    .map(LkMultiplicityRaw::deep_clone);
+                let lkm_from_assignments = witnesses.get_lk_mlt(circuit_name).cloned();
+
                 match Self::run_maybe_challenge_with_table(
                     cs,
                     &lookup_table,
+                    &fixed,
                     &witness,
-                    &[],
+                    &structural_witness,
+                    &pi_mles,
                     num_rows,
                     challenges,
                     lkm_from_assignments,
@@ -975,7 +1036,7 @@ Hints:
                         lkm_tables.set_count(
                             *rom_type,
                             key,
-                            multiplicity.to_canonical_u64_vec()[0] as usize,
+                            multiplicity.to_canonical_u64() as usize,
                         );
                     }
                 }
@@ -987,7 +1048,10 @@ Hints:
         }
 
         // Assert lkm between all tables and combined opcode circuits
-        let errors: Vec<MockProverError<E, E>> = compare_lkm(lkm_tables, lkm_opcodes);
+        let errors: Vec<MockProverError<E, E>> = compare_lkm(
+            lkm_tables.into_finalize_result(),
+            lkm_opcodes.into_finalize_result(),
+        );
 
         if errors.is_empty() {
             tracing::info!("Mock proving successful for tables");
@@ -1014,6 +1078,7 @@ Hints:
                 {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
+                    let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
                         continue;
@@ -1037,7 +1102,7 @@ Hints:
                             cs.num_fixed as WitnessId,
                             fixed,
                             witness,
-                            &[],
+                            structural_witness,
                             &pi_mles,
                             &challenges,
                         )
@@ -1058,7 +1123,7 @@ Hints:
                                         cs.num_fixed as WitnessId,
                                         fixed,
                                         witness,
-                                        &[],
+                                        structural_witness,
                                         &pi_mles,
                                         &challenges,
                                     );
@@ -1095,6 +1160,7 @@ Hints:
                 {
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
+                    let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
                         continue;
@@ -1118,7 +1184,7 @@ Hints:
                             cs.num_fixed as WitnessId,
                             fixed,
                             witness,
-                            &[],
+                            structural_witness,
                             &pi_mles,
                             &challenges,
                         )
@@ -1160,10 +1226,8 @@ Hints:
                         .filter(|(read, _)| !$writes.contains(read))
                         .take(10)
                         .for_each(|(_, row)| {
-                            let pc =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64_vec()[0]);
-                            let ts =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64_vec()[0]);
+                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
+                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} writes",
                                 annotation,
@@ -1198,10 +1262,8 @@ Hints:
                         .filter(|(write, _)| !$reads.contains(write))
                         .take(10)
                         .for_each(|(_, row)| {
-                            let pc =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64_vec()[0]);
-                            let ts =
-                                gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64_vec()[0]);
+                            let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
+                            let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
                                 "{} at row {} (pc={:x},ts={}) not found in {:?} reads",
                                 annotation,
@@ -1284,17 +1346,11 @@ Hints:
     }
 }
 
-fn compare_lkm<E, K>(
-    lkm_a: LkMultiplicityRaw<K>,
-    lkm_b: LkMultiplicityRaw<K>,
-) -> Vec<MockProverError<E, K>>
+fn compare_lkm<E, K>(lkm_a: Multiplicity<K>, lkm_b: Multiplicity<K>) -> Vec<MockProverError<E, K>>
 where
     E: ExtensionField,
     K: LkMultiplicityKey + Default + Ord,
 {
-    let lkm_a = lkm_a.into_finalize_result();
-    let lkm_b = lkm_b.into_finalize_result();
-
     // Compare each LK Multiplicity.
     izip!(ROMType::iter(), &lkm_a, &lkm_b)
         .flat_map(|(rom_type, a_map, b_map)| {
@@ -1399,7 +1455,7 @@ mod tests {
         .map(|f| f.into_mle().into())
         .collect_vec();
 
-        MockProver::assert_satisfied(&builder, &wits_in, &[], None, None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], &[], None, None);
     }
 
     #[derive(Debug)]
@@ -1435,7 +1491,7 @@ mod tests {
         ];
 
         let challenge = [1.into_f(), 1000.into_f()];
-        MockProver::assert_satisfied(&builder, &wits_in, &[], Some(challenge), None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], &[], Some(challenge), None);
     }
 
     #[test]
@@ -1449,23 +1505,33 @@ mod tests {
         let wits_in = vec![(vec![123u64.into_f()] as Vec<Goldilocks>).into_mle().into()];
 
         let challenge = [2.into_f(), 1000.into_f()];
-        let result = MockProver::run_with_challenge(&builder, &wits_in, challenge, None);
+        let result = MockProver::run_with_challenge(&builder, &[], &wits_in, &[], challenge, None);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
         assert_eq!(
             err,
             vec![MockProverError::LookupError {
-                rom_type: ROMType::U5,
+                rom_type: ROMType::Dynamic,
                 expression: Expression::Sum(
-                    Box::new(Expression::ScaledSum(
-                        Box::new(Expression::WitIn(0)),
+                    Box::new(Expression::Sum(
+                        Box::new(Expression::ScaledSum(
+                            Box::new(Expression::WitIn(0)),
+                            Box::new(Expression::Challenge(
+                                1,
+                                1,
+                                GoldilocksExt2::ONE,
+                                GoldilocksExt2::ZERO,
+                            )),
+                            Box::new(
+                                Goldilocks::from_canonical_u64(ROMType::Dynamic as u64).expr()
+                            ),
+                        )),
                         Box::new(Expression::Challenge(
                             1,
-                            1,
-                            GoldilocksExt2::ONE,
+                            2,
+                            5.into_f(),
                             GoldilocksExt2::ZERO,
-                        )),
-                        Box::new(Goldilocks::from_canonical_u64(ROMType::U5 as u64).expr()),
+                        ))
                     )),
                     Box::new(Expression::Challenge(
                         0,
@@ -1474,8 +1540,8 @@ mod tests {
                         GoldilocksExt2::ZERO,
                     )),
                 ),
-                evaluated: 123002.into_f(), // 123 * 1000 + 2
-                name: "test_lookup_error/assert_u5/assert u5".to_string(),
+                evaluated: 5123002.into_f(), // 123 * 1000 + 5 * (1000^2) + 2
+                name: "test_lookup_error/assert_const_range/assert u5".to_string(),
                 inst_id: 0,
             }]
         );

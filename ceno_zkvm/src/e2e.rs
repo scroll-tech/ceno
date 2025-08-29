@@ -71,8 +71,8 @@ pub enum PcsKind {
 )]
 pub enum FieldType {
     #[default]
-    Goldilocks,
     BabyBear,
+    Goldilocks,
 }
 
 pub struct FullMemState<Record> {
@@ -328,11 +328,10 @@ fn setup_platform_inner(
     let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
 
     let stack = if preset.is_debug {
-        // reserve some extra space for io
-        // thus memory consistent check could be satisfied
-        preset.stack.end - stack_size..(preset.stack.end + 0x4000)
+        (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end)
     } else {
-        preset.stack.end - stack_size..preset.stack.end
+        // remove extra space for io for non-debug mode
+        (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end - 0x4000)
     };
 
     let heap = {
@@ -449,7 +448,6 @@ pub fn generate_witness<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     emul_result: EmulationResult,
     program: &Program,
-    is_mock_proving: bool,
 ) -> ZKVMWitnesses<E> {
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
@@ -465,7 +463,7 @@ pub fn generate_witness<E: ExtensionField>(
         .dummy_config
         .assign_opcode_circuit(&system_config.zkvm_cs, &mut zkvm_witness, dummy_records)
         .unwrap();
-    zkvm_witness.finalize_lk_multiplicities(is_mock_proving);
+    zkvm_witness.finalize_lk_multiplicities();
 
     // assign table circuits
     system_config
@@ -723,17 +721,12 @@ pub fn run_e2e_with_checkpoint<
                 // When we run e2e and halt before generate_witness, this implies we are going to
                 // benchmark generate_witness performance. So we skip mock proving check on
                 // `generate_witness` to avoid it affecting the benchmark result.
-                _ = generate_witness(&ctx.system_config, emul_result, &ctx.program, false)
+                _ = generate_witness(&ctx.system_config, emul_result, &ctx.program)
             })),
         };
     }
 
-    let zkvm_witness = generate_witness(
-        &ctx.system_config,
-        emul_result,
-        &ctx.program,
-        is_mock_proving,
-    );
+    let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
 
     let mut prover = ZKVMProver::new(pk, device);
 
@@ -811,12 +804,7 @@ pub fn run_e2e_proof<
     let pi = emul_result.pi.clone();
 
     // Generate witness
-    let zkvm_witness = generate_witness(
-        &ctx.system_config,
-        emul_result,
-        &ctx.program,
-        is_mock_proving,
-    );
+    let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
 
     // proving
     let mut prover = ZKVMProver::new(pk, device);

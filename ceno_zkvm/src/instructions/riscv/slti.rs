@@ -1,42 +1,16 @@
-use std::marker::PhantomData;
+#[cfg(feature = "u16limb_circuit")]
+mod slti_circuit_v2;
 
-use ceno_emul::{InsnKind, SWord, StepRecord, Word};
-use ff_ext::ExtensionField;
+#[cfg(not(feature = "u16limb_circuit"))]
+mod slti_circuit;
 
-use super::{
-    RIVInstruction,
-    constants::{UINT_LIMBS, UInt},
-    i_insn::IInstructionConfig,
-};
-use crate::{
-    circuit_builder::CircuitBuilder,
-    error::ZKVMError,
-    gadgets::{IsLtConfig, SignedExtendConfig},
-    instructions::Instruction,
-    structs::ProgramParams,
-    tables::InsnRecord,
-    uint::Value,
-    utils::i64_to_base,
-    witness::{LkMultiplicity, set_val},
-};
-use ff_ext::FieldInto;
-use multilinear_extensions::{ToExpr, WitIn};
+#[cfg(feature = "u16limb_circuit")]
+use crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmInstruction;
 
-#[derive(Debug)]
-pub struct SetLessThanImmConfig<E: ExtensionField> {
-    i_insn: IInstructionConfig<E>,
+#[cfg(not(feature = "u16limb_circuit"))]
+use crate::instructions::riscv::slti::slti_circuit::SetLessThanImmInstruction;
 
-    rs1_read: UInt<E>,
-    imm: WitIn,
-    #[allow(dead_code)]
-    rd_written: UInt<E>,
-    lt: IsLtConfig,
-
-    // SLTI
-    is_rs1_neg: Option<SignedExtendConfig<E>>,
-}
-
-pub struct SetLessThanImmInstruction<E, I>(PhantomData<(E, I)>);
+use super::RIVInstruction;
 
 pub struct SltiOp;
 impl RIVInstruction for SltiOp {
@@ -50,138 +24,71 @@ impl RIVInstruction for SltiuOp {
 }
 pub type SltiuInstruction<E> = SetLessThanImmInstruction<E, SltiuOp>;
 
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInstruction<E, I> {
-    type InstructionConfig = SetLessThanImmConfig<E>;
-
-    fn name() -> String {
-        format!("{:?}", I::INST_KIND)
-    }
-
-    fn construct_circuit(
-        cb: &mut CircuitBuilder<E>,
-        _params: &ProgramParams,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        // If rs1_read < imm, rd_written = 1. Otherwise rd_written = 0
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", cb)?;
-        let imm = cb.create_witin(|| "imm");
-
-        let (value_expr, is_rs1_neg) = match I::INST_KIND {
-            InsnKind::SLTIU => (rs1_read.value(), None),
-            InsnKind::SLTI => {
-                let is_rs1_neg = rs1_read.is_negative(cb)?;
-                (rs1_read.to_field_expr(is_rs1_neg.expr()), Some(is_rs1_neg))
-            }
-            _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
-        };
-
-        let lt =
-            IsLtConfig::construct_circuit(cb, || "rs1 < imm", value_expr, imm.expr(), UINT_LIMBS)?;
-        let rd_written = UInt::from_exprs_unchecked(vec![lt.expr()]);
-
-        let i_insn = IInstructionConfig::<E>::construct_circuit(
-            cb,
-            I::INST_KIND,
-            imm.expr(),
-            rs1_read.register_expr(),
-            rd_written.register_expr(),
-            false,
-        )?;
-
-        Ok(SetLessThanImmConfig {
-            i_insn,
-            rs1_read,
-            imm,
-            rd_written,
-            is_rs1_neg,
-            lt,
-        })
-    }
-
-    fn assign_instance(
-        config: &Self::InstructionConfig,
-        instance: &mut [E::BaseField],
-        lkm: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config.i_insn.assign_instance(instance, lkm, step)?;
-
-        let rs1 = step.rs1().unwrap().value;
-        let rs1_value = Value::new_unchecked(rs1 as Word);
-        config
-            .rs1_read
-            .assign_value(instance, Value::new_unchecked(rs1));
-
-        let imm = InsnRecord::imm_internal(&step.insn());
-        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
-
-        match I::INST_KIND {
-            InsnKind::SLTIU => {
-                config
-                    .lt
-                    .assign_instance(instance, lkm, rs1 as u64, imm as u64)?;
-            }
-            InsnKind::SLTI => {
-                config.is_rs1_neg.as_ref().unwrap().assign_instance(
-                    instance,
-                    lkm,
-                    *rs1_value.as_u16_limbs().last().unwrap() as u64,
-                )?;
-                let (rs1, imm) = (rs1 as SWord, imm as SWord);
-                config
-                    .lt
-                    .assign_instance_signed(instance, lkm, rs1 as i64, imm as i64)?;
-            }
-            _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
-        }
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod test {
     use ceno_emul::{Change, PC_STEP_SIZE, StepRecord, encode_rv32};
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::{ExtensionField, GoldilocksExt2};
 
     use proptest::proptest;
 
     use super::*;
     use crate::{
+        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         instructions::{
             Instruction,
-            riscv::test_utils::{i32_extra, imm_extra, immu_extra, u32_extra},
+            riscv::{
+                constants::UInt,
+                test_utils::{i32_extra, imm_extra, immu_extra, u32_extra},
+            },
         },
         scheme::mock_prover::{MOCK_PC_START, MockProver},
+        structs::ProgramParams,
     };
+    #[cfg(feature = "u16limb_circuit")]
+    use ff_ext::BabyBearExt4;
 
     #[test]
     fn test_sltiu_true() {
-        let verify = |name, a, imm| verify::<SltiuOp>(name, a, imm, true);
-        verify("lt = true, 0 < 1", 0, 1);
-        verify("lt = true, 1 < 2", 1, 2);
-        verify("lt = true, 10 < 20", 10, 20);
-        verify("lt = true, 0 < imm upper boundary", 0, 2047);
-        // negative imm is treated as positive
-        verify("lt = true, 0 < u32::MAX-1", 0, -1);
-        verify("lt = true, 1 < u32::MAX-1", 1, -1);
-        verify("lt = true, 0 < imm lower bondary", 0, -2048);
+        let cases = vec![
+            ("lt = true, 0 < 1", 0, 1i32),
+            ("lt = true, 1 < 2", 1, 2),
+            ("lt = true, 10 < 20", 10, 20),
+            ("lt = true, 0 < imm upper boundary", 0, 2047),
+            // negative imm is treated as positive
+            ("lt = true, 0 < u32::MAX-1", 0, -1),
+            ("lt = true, 1 < u32::MAX-1", 1, -1),
+            ("lt = true, 0 < imm lower boundary", 0, -2048),
+            ("lt = true, 65535 < imm lower boundary", 65535, -1),
+        ];
+
+        for &(name, a, imm) in &cases {
+            verify::<SltiuOp, GoldilocksExt2>(name, a, imm, true);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<SltiuOp, BabyBearExt4>(name, a, imm, true);
+        }
     }
 
     #[test]
     fn test_sltiu_false() {
-        let verify = |name, a, imm| verify::<SltiuOp>(name, a, imm, false);
-        verify("lt = false, 1 < 0", 1, 0);
-        verify("lt = false, 2 < 1", 2, 1);
-        verify("lt = false, 100 < 50", 100, 50);
-        verify("lt = false, 500 < 100", 500, 100);
-        verify("lt = false, 100000 < 2047", 100000, 2047);
-        verify("lt = false, 100000 < 0", 100000, 0);
-        verify("lt = false, 0 == 0", 0, 0);
-        verify("lt = false, 1 == 1", 1, 1);
-        verify("lt = false, imm upper bondary", u32::MAX, 2047);
-        // negative imm is treated as positive
-        verify("lt = false, imm lower bondary", u32::MAX, -2048);
+        let cases = vec![
+            ("lt = false, 1 < 0", 1, 0i32),
+            ("lt = false, 2 < 1", 2, 1),
+            ("lt = false, 100 < 50", 100, 50),
+            ("lt = false, 500 < 100", 500, 100),
+            ("lt = false, 100000 < 2047", 100_000, 2047),
+            ("lt = false, 100000 < 0", 100_000, 0),
+            ("lt = false, 0 == 0", 0, 0),
+            ("lt = false, 1 == 1", 1, 1),
+            ("lt = false, imm upper boundary", u32::MAX, 2047),
+            ("lt = false, imm lower boundary", u32::MAX, -2048), /* negative imm treated as positive */
+        ];
+
+        for &(name, a, imm) in &cases {
+            verify::<SltiuOp, GoldilocksExt2>(name, a, imm, false);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<SltiuOp, BabyBearExt4>(name, a, imm, false);
+        }
     }
 
     proptest! {
@@ -190,37 +97,53 @@ mod test {
             a in u32_extra(),
             imm in immu_extra(12),
         ) {
-            verify::<SltiuOp>("random SltiuOp", a, imm as i32, a < imm);
+            verify::<SltiuOp, GoldilocksExt2>("random SltiuOp", a, imm as i32, a < imm);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<SltiuOp, BabyBearExt4>("random SltiuOp", a, imm as i32, a < imm);
         }
     }
 
     #[test]
     fn test_slti_true() {
-        let verify = |name, a: i32, imm| verify::<SltiOp>(name, a as u32, imm, true);
-        verify("lt = true, 0 < 1", 0, 1);
-        verify("lt = true, 1 < 2", 1, 2);
-        verify("lt = true, -1 < 0", -1, 0);
-        verify("lt = true, -1 < 1", -1, 1);
-        verify("lt = true, -2 < -1", -2, -1);
-        // -2048 <= imm <= 2047
-        verify("lt = true, imm upper bondary", i32::MIN, 2047);
-        verify("lt = true, imm lower bondary", i32::MIN, -2048);
+        let cases = vec![
+            ("lt = true, 0 < 1", 0, 1),
+            ("lt = true, 1 < 2", 1, 2),
+            ("lt = true, -1 < 0", -1, 0),
+            ("lt = true, -1 < 1", -1, 1),
+            ("lt = true, -2 < -1", -2, -1),
+            // -2048 <= imm <= 2047
+            ("lt = true, imm upper boundary", i32::MIN, 2047),
+            ("lt = true, imm lower boundary", i32::MIN, -2048),
+        ];
+
+        for &(name, a, imm) in &cases {
+            verify::<SltiOp, GoldilocksExt2>(name, a as u32, imm, true);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<SltiOp, BabyBearExt4>(name, a as u32, imm, true);
+        }
     }
 
     #[test]
     fn test_slti_false() {
-        let verify = |name, a: i32, imm| verify::<SltiOp>(name, a as u32, imm, false);
-        verify("lt = false, 1 < 0", 1, 0);
-        verify("lt = false, 2 < 1", 2, 1);
-        verify("lt = false, 0 < -1", 0, -1);
-        verify("lt = false, 1 < -1", 1, -1);
-        verify("lt = false, -1 < -2", -1, -2);
-        verify("lt = false, 0 == 0", 0, 0);
-        verify("lt = false, 1 == 1", 1, 1);
-        verify("lt = false, -1 == -1", -1, -1);
-        // -2048 <= imm <= 2047
-        verify("lt = false, imm upper bondary", i32::MAX, 2047);
-        verify("lt = false, imm lower bondary", i32::MAX, -2048);
+        let cases = vec![
+            ("lt = false, 1 < 0", 1, 0),
+            ("lt = false, 2 < 1", 2, 1),
+            ("lt = false, 0 < -1", 0, -1),
+            ("lt = false, 1 < -1", 1, -1),
+            ("lt = false, -1 < -2", -1, -2),
+            ("lt = false, 0 == 0", 0, 0),
+            ("lt = false, 1 == 1", 1, 1),
+            ("lt = false, -1 == -1", -1, -1),
+            // -2048 <= imm <= 2047
+            ("lt = false, imm upper boundary", i32::MAX, 2047),
+            ("lt = false, imm lower boundary", i32::MAX, -2048),
+        ];
+
+        for &(name, a, imm) in &cases {
+            verify::<SltiOp, GoldilocksExt2>(name, a as u32, imm, false);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<SltiOp, BabyBearExt4>(name, a as u32, imm, false);
+        }
     }
 
     proptest! {
@@ -229,13 +152,20 @@ mod test {
             a in i32_extra(),
             imm in imm_extra(12),
         ) {
-            verify::<SltiOp>("random SltiOp", a as u32, imm, a < imm);
+            verify::<SltiOp, GoldilocksExt2>("random SltiOp", a as u32, imm, a < imm);
+            #[cfg(feature = "u16limb_circuit")]
+            verify::<SltiOp, BabyBearExt4>("random SltiOp", a as u32, imm, a < imm);
         }
     }
 
-    fn verify<I: RIVInstruction>(name: &'static str, rs1_read: u32, imm: i32, expected_rd: bool) {
+    fn verify<I: RIVInstruction, E: ExtensionField>(
+        name: &'static str,
+        rs1_read: u32,
+        imm: i32,
+        expected_rd: bool,
+    ) {
         let expected_rd = expected_rd as u32;
-        let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);
@@ -244,18 +174,16 @@ mod test {
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
                 |cb| {
-                    Ok(
-                        SetLessThanImmInstruction::<GoldilocksExt2, I>::construct_circuit(
-                            cb,
-                            &ProgramParams::default(),
-                        ),
-                    )
+                    Ok(SetLessThanImmInstruction::<E, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
                 },
             )
             .unwrap()
             .unwrap();
 
-        let (raw_witin, lkm) = SetLessThanImmInstruction::<GoldilocksExt2, I>::assign_instances(
+        let (raw_witin, lkm) = SetLessThanImmInstruction::<E, I>::assign_instances(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,

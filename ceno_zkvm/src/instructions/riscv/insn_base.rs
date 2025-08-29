@@ -3,7 +3,7 @@ use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::Itertools;
 use p3::field::{Field, FieldAlgebra};
 
-use super::constants::{PC_STEP_SIZE, UINT_LIMBS, UInt};
+use super::constants::{BIT_WIDTH, PC_STEP_SIZE, UINT_LIMBS, UInt};
 use crate::{
     chip_handler::{
         AddressExpr, GlobalStateRegisterMachineChipOperations, MemoryChipOperations, MemoryExpr,
@@ -262,7 +262,7 @@ impl<E: ExtensionField> ReadMEM<E> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         mem_addr: AddressExpr<E>,
-        mem_read: Expression<E>,
+        mem_read: MemoryExpr<E>,
         cur_ts: WitIn,
     ) -> Result<Self, ZKVMError> {
         let prev_ts = circuit_builder.create_witin(|| "prev_ts");
@@ -368,6 +368,7 @@ impl WriteMEM {
 pub struct MemAddr<E: ExtensionField> {
     addr: UInt<E>,
     low_bits: Vec<WitIn>,
+    max_bits: usize,
 }
 
 impl<E: ExtensionField> MemAddr<E> {
@@ -393,6 +394,17 @@ impl<E: ExtensionField> MemAddr<E> {
         self.addr.address_expr()
     }
 
+    pub fn uint_unaligned(&self) -> UInt<E> {
+        UInt::from_exprs_unchecked(self.addr.expr())
+    }
+
+    pub fn uint_align2(&self) -> UInt<E> {
+        UInt::from_exprs_unchecked(vec![
+            self.addr.limbs[0].expr() - &self.low_bit_exprs()[0],
+            self.addr.limbs[1].expr(),
+        ])
+    }
+
     /// Represent the address aligned to 2 bytes.
     pub fn expr_align2(&self) -> AddressExpr<E> {
         self.addr.address_expr() - &self.low_bit_exprs()[0]
@@ -404,6 +416,14 @@ impl<E: ExtensionField> MemAddr<E> {
         self.addr.address_expr() - &low_bits[1] * 2 - &low_bits[0]
     }
 
+    pub fn uint_align4(&self) -> UInt<E> {
+        let low_bits = self.low_bit_exprs();
+        UInt::from_exprs_unchecked(vec![
+            self.addr.limbs[0].expr() - &low_bits[1] * 2 - &low_bits[0],
+            self.addr.limbs[1].expr(),
+        ])
+    }
+
     /// Expressions of the low bits of the address, LSB-first: [bit_0, bit_1].
     pub fn low_bit_exprs(&self) -> Vec<Expression<E>> {
         iter::repeat_n(Expression::ZERO, self.n_zeros())
@@ -412,6 +432,14 @@ impl<E: ExtensionField> MemAddr<E> {
     }
 
     fn construct(cb: &mut CircuitBuilder<E>, n_zeros: usize) -> Result<Self, ZKVMError> {
+        Self::construct_with_max_bits(cb, n_zeros, BIT_WIDTH)
+    }
+
+    pub fn construct_with_max_bits(
+        cb: &mut CircuitBuilder<E>,
+        n_zeros: usize,
+        max_bits: usize,
+    ) -> Result<Self, ZKVMError> {
         assert!(n_zeros <= Self::N_LOW_BITS);
 
         // The address as two u16 limbs.
@@ -442,11 +470,19 @@ impl<E: ExtensionField> MemAddr<E> {
         cb.assert_ux::<_, _, 14>(|| "mid_u14", mid_u14)?;
 
         // Range check the high limb.
-        for high_u16 in limbs.iter().skip(1) {
-            cb.assert_ux::<_, _, 16>(|| "high_u16", high_u16.clone())?;
+        for (i, high_limb) in limbs.iter().enumerate().skip(1) {
+            cb.assert_ux_v2(
+                || "high_limb",
+                high_limb.clone(),
+                (max_bits - i * 16).min(16),
+            )?;
         }
 
-        Ok(MemAddr { addr, low_bits })
+        Ok(MemAddr {
+            addr,
+            low_bits,
+            max_bits,
+        })
     }
 
     pub fn assign_instance(
@@ -470,7 +506,7 @@ impl<E: ExtensionField> MemAddr<E> {
         // Range check the high limb.
         for i in 1..UINT_LIMBS {
             let high_u16 = (addr >> (i * 16)) & 0xffff;
-            lkm.assert_ux::<16>(high_u16 as u64);
+            lkm.assert_ux_v2(high_u16 as u64, (self.max_bits - i * 16).min(16));
         }
 
         Ok(())
@@ -486,6 +522,7 @@ mod test {
     use ff_ext::GoldilocksExt2 as E;
     use itertools::Itertools;
     use p3::goldilocks::Goldilocks as F;
+    use std::collections::HashSet;
     use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
     use crate::{
@@ -542,16 +579,21 @@ mod test {
 
         // Check the range lookups.
         let lkm = lkm.into_finalize_result();
-        lkm[ROMType::U14 as usize].iter().for_each(|(k, v)| {
-            assert_eq!(*k, 0xbeef >> 2);
-            assert_eq!(*v, num_rows);
-        });
-        assert_eq!(lkm[ROMType::U14 as usize].len(), 1);
-        lkm[ROMType::U16 as usize].iter().for_each(|(k, v)| {
-            assert_eq!(*k, 0xbead);
-            assert_eq!(*v, num_rows);
-        });
-        assert_eq!(lkm[ROMType::U16 as usize].len(), 1);
+        let expected = vec![
+            // 14 bits range
+            ((1u64 << 14) + (0xbeef >> 2), num_rows),
+            // 16 bits range
+            ((1 << 16) + 0xbead, num_rows),
+        ]
+        .into_iter()
+        .collect::<HashSet<(u64, usize)>>();
+
+        let result = lkm[ROMType::Dynamic as usize]
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect::<HashSet<(u64, usize)>>();
+        assert_eq!(expected, result);
+        assert_eq!(lkm[ROMType::Dynamic as usize].len(), 2);
 
         if is_ok {
             cb.require_equal(|| "", mem_addr.expr_unaligned(), addr.into())?;
@@ -560,11 +602,13 @@ mod test {
         }
         MockProver::assert_with_expected_errors(
             &cb,
+            &[],
             &raw_witin
                 .to_mles()
                 .into_iter()
                 .map(|v| v.into())
                 .collect_vec(),
+            &[],
             &[],
             if is_ok { &[] } else { &["mid_u14"] },
             None,

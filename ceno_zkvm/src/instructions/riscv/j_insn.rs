@@ -45,6 +45,8 @@ impl<E: ExtensionField> JInstructionConfig<E> {
             0.into(),
             0.into(),
             vm_state.next_pc.unwrap().expr() - vm_state.pc.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
         ))?;
 
         Ok(JInstructionConfig { vm_state, rd })

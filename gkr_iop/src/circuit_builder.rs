@@ -1,9 +1,10 @@
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
-    Expression, Fixed, Instance, StructuralWitIn, ToExpr, WitIn, WitnessId, rlc_chip_record,
+    Expression, Fixed, Instance, StructuralWitIn, StructuralWitInType, ToExpr, WitIn, WitnessId,
+    rlc_chip_record,
 };
 use serde::de::DeserializeOwned;
-use std::{cmp::Ordering, collections::HashMap, iter::once, marker::PhantomData};
+use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use ff_ext::ExtensionField;
 
@@ -203,17 +204,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn create_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         n: N,
-        max_len: usize,
-        offset: u32,
-        multi_factor: usize,
-        descending: bool,
+        witin_type: StructuralWitInType,
     ) -> StructuralWitIn {
         let wit_in = StructuralWitIn {
             id: self.num_structural_witin,
-            max_len,
-            offset,
-            multi_factor,
-            descending,
+            witin_type,
         };
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
@@ -264,12 +259,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             std::iter::once(E::BaseField::from_canonical_u64(rom_type as u64).expr())
                 .chain(record.clone())
                 .collect(),
-        );
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc lk_record degree ({})",
-            name_fn().into()
         );
         self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
@@ -383,12 +372,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc read_record degree ({})",
-            name_fn().into()
-        );
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.r_expressions_namespace_map.push(path);
@@ -405,12 +388,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc write_record degree ({})",
-            name_fn().into()
-        );
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);
@@ -531,17 +508,13 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     pub fn create_structural_witin<NR, N>(
         &mut self,
         name_fn: N,
-        max_len: usize,
-        offset: u32,
-        multi_factor: usize,
-        descending: bool,
+        witin_type: StructuralWitInType,
     ) -> StructuralWitIn
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.cs
-            .create_structural_witin(name_fn, max_len, offset, multi_factor, descending)
+        self.cs.create_structural_witin(name_fn, witin_type)
     }
 
     pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Fixed
@@ -639,6 +612,17 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
         self.cs.rlc_chip_record(records)
+    }
+
+    pub fn create_bit<NR, N>(&mut self, name_fn: N) -> Result<WitIn, CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR + Clone,
+    {
+        let bit = self.cs.create_witin(name_fn.clone());
+        self.assert_bit(name_fn, bit.expr())?;
+
+        Ok(bit)
     }
 
     pub fn create_u8<NR, N>(&mut self, name_fn: N) -> Result<WitIn, CircuitBuilderError>
@@ -748,6 +732,40 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
+    pub fn condition_require_zero<NR, N>(
+        &mut self,
+        name_fn: N,
+        cond: Expression<E>,
+        expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        // cond * expr
+        self.namespace(
+            || "cond_require_zero",
+            |cb| cb.cs.require_zero(name_fn, cond * expr.expr()),
+        )
+    }
+
+    pub fn condition_require_one<NR, N>(
+        &mut self,
+        name_fn: N,
+        cond: Expression<E>,
+        expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        // cond * expr
+        self.namespace(
+            || "cond_require_one",
+            |cb| cb.cs.require_zero(name_fn, cond * (expr.expr() - 1)),
+        )
+    }
+
     pub fn select(
         &mut self,
         cond: &Expression<E>,
@@ -766,13 +784,21 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        match C {
-            16 => self.assert_u16(name_fn, expr),
-            14 => self.assert_u14(name_fn, expr),
-            8 => self.assert_byte(name_fn, expr),
-            5 => self.assert_u5(name_fn, expr),
-            c => panic!("Unsupported bit range {c}"),
-        }
+        self.assert_const_range(name_fn, expr, C)
+    }
+
+    /// to replace `assert_ux`
+    pub fn assert_ux_v2<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+        max_bits: usize,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.assert_const_range(name_fn, expr, max_bits)
     }
 
     /// Generates U16 lookups to prove that `value` fits on `size < 16` bits.
@@ -788,59 +814,43 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: Fn() -> NR,
     {
-        assert!(size <= 16, "{size} > 16");
-        self.assert_u16(
-            || format!("assert_ux_in_u16_{}_check1", name_fn().into()),
-            expr.clone(),
-        )?;
-        if size < 16 {
-            self.assert_u16(
-                || format!("assert_ux_in_u16_{}_check2", name_fn().into()),
-                expr * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
-            )?;
-        }
-        Ok(())
+        self.assert_const_range(name_fn, expr, size)
     }
 
-    fn assert_u5<NR, N>(
+    pub fn assert_dynamic_range<NR, N>(
         &mut self,
         name_fn: N,
         expr: Expression<E>,
+        bits: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.lk_record(name_fn, LookupTable::Dynamic, vec![expr, bits])?;
+        Ok(())
+    }
+
+    pub fn assert_const_range<NR, N>(
+        &mut self,
+        name_fn: N,
+        expr: Expression<E>,
+        max_bits: usize,
     ) -> Result<(), CircuitBuilderError>
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
         self.namespace(
-            || "assert_u5",
-            |cb| cb.lk_record(name_fn, LookupTable::U5, vec![expr]),
+            || "assert_const_range",
+            |cb| {
+                cb.lk_record(
+                    name_fn,
+                    LookupTable::Dynamic,
+                    vec![expr, E::BaseField::from_canonical_usize(max_bits).expr()],
+                )
+            },
         )
-    }
-
-    fn assert_u14<NR, N>(
-        &mut self,
-        name_fn: N,
-        expr: Expression<E>,
-    ) -> Result<(), CircuitBuilderError>
-    where
-        NR: Into<String>,
-        N: FnOnce() -> NR,
-    {
-        self.lk_record(name_fn, LookupTable::U14, vec![expr])?;
-        Ok(())
-    }
-
-    fn assert_u16<NR, N>(
-        &mut self,
-        name_fn: N,
-        expr: Expression<E>,
-    ) -> Result<(), CircuitBuilderError>
-    where
-        NR: Into<String>,
-        N: FnOnce() -> NR,
-    {
-        self.lk_record(name_fn, LookupTable::U16, vec![expr])?;
-        Ok(())
     }
 
     pub fn assert_byte<NR, N>(
@@ -852,8 +862,16 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.lk_record(name_fn, LookupTable::U8, vec![expr])?;
-        Ok(())
+        self.namespace(
+            || "assert_byte",
+            |cb| {
+                cb.lk_record(
+                    name_fn,
+                    LookupTable::Dynamic,
+                    vec![expr, E::BaseField::from_canonical_usize(8).expr()],
+                )
+            },
+        )
     }
 
     pub fn assert_bit<NR, N>(
@@ -1034,8 +1052,29 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
         // Lookup ranges
         for (i, (size, elem)) in split_rep.iter().enumerate() {
-            if *size != 32 {
-                self.assert_ux_in_u16(|| format!("{}_{}", name().into(), i), *size, elem.clone())?;
+            match *size {
+                32 => (),
+                18 => {
+                    self.assert_ux::<_, _, 18>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                16 => {
+                    self.assert_ux::<_, _, 16>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                14 => {
+                    self.assert_ux::<_, _, 14>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                8 => {
+                    self.assert_ux::<_, _, 8>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                5 => {
+                    self.assert_ux::<_, _, 5>(|| format!("{}_{}", name().into(), i), elem.clone())?
+                }
+                1 => self.assert_bit(|| format!("{}_{}", name().into(), i), elem.clone())?,
+                _ => self.assert_ux_in_u16(
+                    || format!("{}_{}", name().into(), i),
+                    *size,
+                    elem.clone(),
+                )?,
             }
         }
 
@@ -1049,25 +1088,26 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             let mut rep_x = rep_x.to_owned();
             rep_x.rotate_right(chunks_rotation);
 
-            for i in 0..2 {
-                // The respective 4 elements in the byte representation
-                let lhs = rep8[4 * i..4 * (i + 1)]
+            // 64 bits represent in 4 limb, each with 16 bits
+            let num_limbs = 4;
+            let mut rep_x_iter = rep_x.iter().cloned();
+            for limb_i in 0..num_limbs {
+                let lhs = rep8[2 * limb_i..2 * (limb_i + 1)]
                     .iter()
                     .map(|wit| (8, wit.expr()))
                     .collect_vec();
-                let cnt = rep_x.len() / 2;
-                let rhs = &rep_x[cnt * i..cnt * (i + 1)];
+                let rhs_limbs = take_til_threshold(&mut rep_x_iter, 16, &|limb| limb.0).unwrap();
 
-                assert_eq!(rhs.iter().map(|e| e.0).sum::<usize>(), 32);
+                assert_eq!(rhs_limbs.iter().map(|e| e.0).sum::<usize>(), 16);
 
-                self.require_reps_equal::<32, _, _>(
+                self.require_reps_equal::<16, _, _>(
                     ||format!(
-                        "rotation internal {}, round {i}, rot: {chunks_rotation}, delta: {delta}, {:?}",
+                        "rotation internal {}, round {limb_i}, rot: {chunks_rotation}, delta: {delta}, {:?}",
                         name().into(),
                         sizes
                     ),
                     &lhs,
-                    rhs,
+                    &rhs_limbs,
                 )?;
             }
             Ok(())
@@ -1089,34 +1129,64 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     }
 }
 
+/// take items from an iterator until the accumulated "weight" (measured by `f`)
+/// reaches exactly `threshold`.
+///
+/// - `iter`: a mutable iterator to consume items from
+/// - `threshold`: the sum of weights at which to stop and return the group
+/// - `f`: closure that extracts the "weight" (e.g., bit length) from each item
+///
+/// returns:
+/// - `Some(Vec<T>)` containing the next group of items whose weights sum to `threshold`
+/// - `None` if the iterator is exhausted and no items remain
+///
+/// panics if the sum of weights ever exceeds `threshold`.
+pub fn take_til_threshold<I, T, F>(iter: &mut I, threshold: usize, f: &F) -> Option<Vec<T>>
+where
+    I: Iterator<Item = T>,
+    F: Fn(&T) -> usize,
+{
+    let mut group = Vec::new();
+    let mut sum = 0;
+
+    for x in iter.by_ref() {
+        sum += f(&x);
+        group.push(x);
+
+        if sum == threshold {
+            return Some(group);
+        } else if sum > threshold {
+            panic!("sum exceeded threshold!");
+        }
+    }
+
+    if group.is_empty() {
+        None
+    } else {
+        Some(group) // leftover if input not perfectly divisible
+    }
+}
+
 /// Compute an adequate split of 64-bits into chunks for performing a rotation
 /// by `delta`. The first element of the return value is the vec of chunk sizes.
 /// The second one is the length of its suffix that needs to be rotated
 pub fn rotation_split(delta: usize) -> (Vec<usize>, usize) {
-    let delta = delta % 64;
-
     if delta == 0 {
-        return (vec![32, 32], 0);
+        return (vec![16, 16, 16, 16], 0);
     }
 
-    // This split meets all requirements except for <= 16 sizes
-    let split32 = match delta.cmp(&32) {
-        Ordering::Less => vec![32 - delta, delta, 32 - delta, delta],
-        Ordering::Equal => vec![32, 32],
-        Ordering::Greater => vec![32 - (delta - 32), delta - 32, 32 - (delta - 32), delta - 32],
-    };
-
-    // Split off large chunks
-    let split16 = split32
-        .into_iter()
-        .flat_map(|size| {
-            assert!(size < 32);
-            if size <= 16 {
-                vec![size]
+    let remainder = delta % 16;
+    let split16 = std::iter::repeat_with(|| [16 - remainder, remainder])
+        .flatten()
+        .scan(0, |sum, x| {
+            if *sum >= 64 {
+                None
             } else {
-                vec![16, size - 16]
+                *sum += x;
+                Some(x)
             }
         })
+        .filter(|v| *v > 0)
         .collect_vec();
 
     let mut sum = 0;
@@ -1127,7 +1197,7 @@ pub fn rotation_split(delta: usize) -> (Vec<usize>, usize) {
         }
     }
 
-    panic!();
+    panic!("delta {:?} split16 {:?}", remainder, split16);
 }
 
 pub fn expansion_expr<E: ExtensionField, const SIZE: usize>(
@@ -1150,6 +1220,7 @@ pub fn expansion_expr<E: ExtensionField, const SIZE: usize>(
 
 pub enum DebugIndex {
     RdWrite = 0,
+    MemWrite = 1,
 }
 
 impl<E: ExtensionField> CircuitBuilder<'_, E> {

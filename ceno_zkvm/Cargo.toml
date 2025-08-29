@@ -13,32 +13,27 @@ version.workspace = true
 base64 = "0.22"
 ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
-ceno_host = { path = "../ceno_host" }
 ceno_gpu = { workspace = true, optional = true }
+ceno_host = { path = "../ceno_host" }
+cudarc = { version = "0.13.0", features = ["driver", "cuda-version-from-build-system"], optional = true }
 either.workspace = true
-ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
+ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
-keccakf = "0.1.2"
-mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "7c277a1" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "7c277a1" }
+mpcs.workspace = true
+multilinear_extensions.workspace = true
+once_cell = "1.21.3"
 p3.workspace = true
-rand_chacha.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sumcheck.workspace = true
-transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "7c277a1" }
-witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "7c277a1" }
-once_cell = "1.21.3"
-cudarc = { version = "0.13.0", features = ["driver", "cuda-version-from-build-system"], optional = true }
+transcript.workspace = true
+whir.workspace = true
+witness.workspace = true
 
 itertools.workspace = true
 ndarray.workspace = true
-num-traits.workspace = true
-paste.workspace = true
-poseidon.workspace = true
 prettytable-rs.workspace = true
-rkyv.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 tracing.workspace = true
@@ -52,7 +47,6 @@ generic_static = "0.2"
 parse-size = "1.1"
 rand.workspace = true
 tempfile = "3.14"
-thread_local.workspace = true
 tiny-keccak.workspace = true
 
 [target.'cfg(unix)'.dependencies]
@@ -60,7 +54,6 @@ tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 tikv-jemallocator = { version = "0.6", optional = true }
 
 [dev-dependencies]
-cfg-if.workspace = true
 criterion.workspace = true
 pprof2.workspace = true
 proptest.workspace = true
@@ -70,9 +63,10 @@ ceno-examples = { path = "../examples-builder" }
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow"]
+default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
+goldilocks = ["forbid_overflow", "nightly-features"]
 gpu = ["gkr_iop/gpu", "dep:ceno_gpu", "dep:cudarc"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
@@ -81,12 +75,13 @@ nightly-features = [
   "ff_ext/nightly-features",
   "mpcs/nightly-features",
   "multilinear_extensions/nightly-features",
-  "poseidon/nightly-features",
   "sumcheck/nightly-features",
   "transcript/nightly-features",
   "witness/nightly-features",
 ]
+parallel = ["whir/parallel", "p3/parallel", "multilinear_extensions/parallel", "mpcs/parallel"]
 sanity-check = ["mpcs/sanity-check"]
+u16limb_circuit = ["ceno_emul/u16limb_circuit"]
 
 [[bench]]
 harness = false

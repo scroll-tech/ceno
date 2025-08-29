@@ -44,6 +44,8 @@ impl EcallInstructionConfig {
             0.into(),
             0.into(),
             0.into(), // imm = 0
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(), // imm_sign = 0
         ))?;
 
         let prev_x5_ts = cb.create_witin(|| "prev_x5_ts");

@@ -207,7 +207,7 @@ impl<
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
                 let num_instances = *wits_instances
                     .get(circuit_name)
-                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string()))?;
+                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string().into()))?;
                 let cs = pk.get_cs();
                 if num_instances == 0 {
                     // we need to drain respective fixed when num_instances is 0

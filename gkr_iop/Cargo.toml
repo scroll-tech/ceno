@@ -10,20 +10,13 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-ark-std = { version = "0.5" }
 bincode.workspace = true
-ceno_emul = { path = "../ceno_emul" }
-ceno_gpu = { workspace = true, optional = true }
-clap.workspace = true
 either.workspace = true
-ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
+ff_ext.workspace = true
 itertools.workspace = true
-mpcs = { git = "https://github.com/scroll-tech/ceno", package = "mpcs", rev = "7c277a1" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "7c277a1" }
+mpcs.workspace = true
+multilinear_extensions.workspace = true
 p3.workspace = true
-p3-field.workspace = true
-p3-goldilocks.workspace = true
-p3-util.workspace = true
 rand.workspace = true
 rayon.workspace = true
 serde.workspace = true
@@ -32,12 +25,10 @@ strum_macros.workspace = true
 sumcheck.workspace = true
 thiserror.workspace = true
 thread_local.workspace = true
-tiny-keccak.workspace = true
 tracing.workspace = true
-tracing-forest.workspace = true
-tracing-subscriber.workspace = true
-transcript = { git = "https://github.com/scroll-tech/ceno", package = "transcript", rev = "7c277a1" }
-witness = { git = "https://github.com/scroll-tech/ceno", package = "witness", rev = "7c277a1" }
+transcript.workspace = true
+witness.workspace = true
+ceno_gpu = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }

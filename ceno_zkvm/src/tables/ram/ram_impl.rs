@@ -14,7 +14,9 @@ use crate::{
     structs::ProgramParams,
 };
 use ff_ext::FieldInto;
-use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
+use multilinear_extensions::{
+    Expression, Fixed, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
+};
 
 use super::{
     MemInitRecord,
@@ -206,7 +208,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         let init_table = [
             vec![(NVRAM::RAM_TYPE as usize).into()],
             vec![Expression::Fixed(addr)],
-            vec![init_v.expr_as_instance()],
+            init_v.iter().map(|v| v.expr_as_instance()).collect_vec(),
             vec![Expression::ZERO], // Initial cycle.
         ]
         .concat();
@@ -215,7 +217,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             // a v t
             vec![(NVRAM::RAM_TYPE as usize).into()],
             vec![Expression::Fixed(addr)],
-            vec![init_v.expr_as_instance()],
+            init_v.iter().map(|v| v.expr_as_instance()).collect_vec(),
             vec![final_cycle.expr()],
         ]
         .concat();
@@ -317,10 +319,12 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         let max_len = DVRAM::max_len(params);
         let addr = cb.create_structural_witin(
             || "addr",
-            max_len,
-            DVRAM::offset_addr(params),
-            WORD_SIZE,
-            DVRAM::DESCENDING,
+            StructuralWitInType::EqualDistanceSequence {
+                max_len,
+                offset: DVRAM::offset_addr(params),
+                multi_factor: WORD_SIZE,
+                descending: DVRAM::DESCENDING,
+            },
         );
 
         let final_v = (0..DVRAM::V_LIMBS)
@@ -479,7 +483,7 @@ mod tests {
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            &lkm,
+            &lkm.0,
             &input,
         )
         .unwrap();

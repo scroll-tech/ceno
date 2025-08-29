@@ -18,7 +18,7 @@ pub mod ecall_base;
 pub mod jump;
 pub mod logic;
 pub mod logic_imm;
-pub mod mul;
+pub mod mulh;
 pub mod shift;
 pub mod shift_imm;
 pub mod slt;
@@ -32,7 +32,11 @@ mod r_insn;
 
 mod ecall_insn;
 
+#[cfg(feature = "u16limb_circuit")]
+mod auipc;
 mod im_insn;
+#[cfg(feature = "u16limb_circuit")]
+mod lui;
 mod memory;
 mod s_insn;
 #[cfg(test)]

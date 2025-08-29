@@ -13,7 +13,13 @@ use std::{
 use sumcheck::structs::IOPProverMessage;
 
 use crate::{
-    instructions::{Instruction, riscv::ecall::HaltInstruction},
+    instructions::{
+        Instruction,
+        riscv::{
+            constants::{LIMB_BITS, LIMB_MASK, UINT_LIMBS},
+            ecall::HaltInstruction,
+        },
+    },
     structs::{TowerProofs, ZKVMVerifyingKey},
 };
 
@@ -97,11 +103,24 @@ impl PublicValues {
             vec![E::BaseField::from_canonical_u64(self.init_cycle)],
             vec![E::BaseField::from_canonical_u32(self.end_pc)],
             vec![E::BaseField::from_canonical_u64(self.end_cycle)],
-            self.public_io
-                .iter()
-                .map(|e| E::BaseField::from_canonical_u32(*e))
-                .collect(),
         ]
+        .into_iter()
+        .chain(
+            // public io processed into UINT_LIMBS column
+            (0..UINT_LIMBS)
+                .map(|limb_index| {
+                    self.public_io
+                        .iter()
+                        .map(|value| {
+                            E::BaseField::from_canonical_u16(
+                                ((value >> (limb_index * LIMB_BITS)) & LIMB_MASK) as u16,
+                            )
+                        })
+                        .collect_vec()
+                })
+                .collect_vec(),
+        )
+        .collect::<Vec<_>>()
     }
 }
 

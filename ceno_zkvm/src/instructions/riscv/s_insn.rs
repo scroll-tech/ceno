@@ -27,6 +27,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
         imm: &Expression<E>,
+        #[cfg(feature = "u16limb_circuit")] imm_sign: &Expression<E>,
         rs1_read: RegisterExpr<E>,
         rs2_read: RegisterExpr<E>,
         memory_addr: AddressExpr<E>,
@@ -48,6 +49,8 @@ impl<E: ExtensionField> SInstructionConfig<E> {
             rs1.id.expr(),
             rs2.id.expr(),
             imm.clone(),
+            #[cfg(feature = "u16limb_circuit")]
+            imm_sign.expr(),
         ))?;
 
         // Memory

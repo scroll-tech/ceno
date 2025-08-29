@@ -30,7 +30,9 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             Self::NUM_LIMBS,
         )?;
         let Some(carries) = &c.carries else {
-            return Err(CircuitBuilderError::CircuitError("empty carry".to_string()));
+            return Err(CircuitBuilderError::CircuitError(
+                "empty carry".to_string().into(),
+            ));
         };
         carries.iter().enumerate().try_for_each(|(i, carry)| {
             circuit_builder.assert_bit(|| format!("carry_{i}_in_as_bit"), carry.expr())
@@ -144,7 +146,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     || format!("carry_{i}_in_less_than"),
                     carry.expr(),
                     (Self::MAX_DEGREE_2_MUL_CARRY_VALUE as usize).into(),
-                    Self::MAX_DEGREE_2_MUL_CARRY_U16_LIMB,
+                    Self::MAX_DEGREE_2_MUL_CARRY_BITS,
                 )
             })
             .collect::<Result<Vec<AssertLtConfig>, CircuitBuilderError>>()?;
@@ -260,7 +262,23 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         rhs: &UIntLimbs<M, C, E>,
     ) -> Result<(), CircuitBuilderError> {
-        circuit_builder.require_equal(name_fn, self.value(), rhs.value())
+        circuit_builder.namespace(name_fn, |cb| {
+            for (i, (limb_lhs, limb_rhs)) in self.expr().into_iter().zip_eq(rhs.expr()).enumerate()
+            {
+                // skip when both expression are constant
+                if matches!(limb_lhs, Expression::Constant(_))
+                    && matches!(limb_rhs, Expression::Constant(_))
+                {
+                    continue;
+                }
+                cb.require_equal(
+                    || format!("lhs_limb[{i}] == rhs_limb[{i}]"),
+                    limb_lhs,
+                    limb_rhs,
+                )?;
+            }
+            Ok(())
+        })
     }
 
     pub fn is_equal(
@@ -728,7 +746,8 @@ mod tests {
                 .flat_map(|carry| {
                     let max_carry_value = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_VALUE;
                     let max_carry_u16_limb = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_U16_LIMB;
-                    let diff = cal_lt_diff(true, max_carry_u16_limb, carry, max_carry_value);
+                    let max_carry_bit = UIntLimbs::<M, C, E>::MAX_DEGREE_2_MUL_CARRY_BITS;
+                    let diff = cal_lt_diff(true, max_carry_bit, carry, max_carry_value);
                     let mut diff_u16_limb = Value::new_unchecked(diff).as_u16_limbs().to_vec();
                     diff_u16_limb.resize(max_carry_u16_limb, 0);
                     diff_u16_limb.iter().map(|v| *v as u64).collect_vec()
@@ -773,7 +792,7 @@ mod tests {
                 .require_equal(|| "assert_g", &mut cb, &uint_e)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
         }
 
         #[test]
@@ -823,7 +842,7 @@ mod tests {
                 .require_equal(|| "assert_g", &mut cb, &uint_g)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
         }
 
         #[test]
@@ -862,7 +881,7 @@ mod tests {
                 .require_equal(|| "assert_e", &mut cb, &uint_e)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
         }
 
         #[test]
@@ -901,7 +920,7 @@ mod tests {
                 .require_equal(|| "assert_e", &mut cb, &uint_e)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
         }
 
         #[test]
@@ -938,7 +957,7 @@ mod tests {
                 .require_equal(|| "assert_g", &mut cb, &uint_c)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
         }
     }
 }

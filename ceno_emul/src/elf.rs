@@ -239,7 +239,7 @@ impl Program {
             ));
         }
 
-        // retrieve sheap from elf
+        // retrieve _sheap from elf
         let sheap = symbols
             .iter()
             .find(|(_, v)| *v == "_sheap")

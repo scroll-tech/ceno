@@ -9,7 +9,7 @@ use ceno_zkvm::{
 };
 mod alloc;
 use criterion::*;
-use ff_ext::GoldilocksExt2;
+use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
@@ -24,7 +24,7 @@ criterion_main!(quadratic_sorting);
 
 const NUM_SAMPLES: usize = 10;
 type Pcs = BasefoldDefault<E>;
-type E = GoldilocksExt2;
+type E = BabyBearExt4;
 
 // Relevant init data for fibonacci run
 fn setup() -> (Program, Platform) {
@@ -79,6 +79,4 @@ fn quadratic_sorting_1(c: &mut Criterion) {
 
         group.finish();
     }
-
-    type E = GoldilocksExt2;
 }

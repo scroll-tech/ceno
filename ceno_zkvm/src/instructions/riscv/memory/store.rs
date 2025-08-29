@@ -5,13 +5,12 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{
-            RIVInstruction, constants::UInt, insn_base::MemAddr, memory::gadget::MemWordChange,
+            RIVInstruction, constants::UInt, insn_base::MemAddr, memory::gadget::MemWordUtil,
             s_insn::SInstructionConfig,
         },
     },
     structs::ProgramParams,
     tables::InsnRecord,
-    utils::i64_to_base,
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
@@ -28,28 +27,10 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     prev_memory_value: UInt<E>,
 
     memory_addr: MemAddr<E>,
-    word_change: Option<MemWordChange<N_ZEROS>>,
+    next_memory_value: Option<MemWordUtil<E, N_ZEROS>>,
 }
 
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
-
-pub struct SWOp;
-impl RIVInstruction for SWOp {
-    const INST_KIND: InsnKind = InsnKind::SW;
-}
-pub type SwInstruction<E> = StoreInstruction<E, SWOp, 2>;
-
-pub struct SHOp;
-impl RIVInstruction for SHOp {
-    const INST_KIND: InsnKind = InsnKind::SH;
-}
-pub type ShInstruction<E> = StoreInstruction<E, SHOp, 1>;
-
-pub struct SBOp;
-impl RIVInstruction for SBOp {
-    const INST_KIND: InsnKind = InsnKind::SB;
-}
-pub type SbInstruction<E> = StoreInstruction<E, SBOp, 0>;
 
 impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     for StoreInstruction<E, I, N_ZEROS>
@@ -66,7 +47,6 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?; // unsigned 32-bit value
         let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-        // Memory initialization is not guaranteed to contain u32. Range-check it here.
         let prev_memory_value = UInt::new(|| "prev_memory_value", circuit_builder)?;
         let imm = circuit_builder.create_witin(|| "imm"); // signed 12-bit value
 
@@ -91,16 +71,16 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             rs1_read.value() + imm.expr(),
         )?;
 
-        let (new_memory_value, word_change) = match I::INST_KIND {
+        let (next_memory_value, next_memory) = match I::INST_KIND {
             InsnKind::SW => (rs2_read.memory_expr(), None),
             InsnKind::SH | InsnKind::SB => {
-                let change = MemWordChange::<N_ZEROS>::construct_circuit(
+                let next_memory = MemWordUtil::<E, N_ZEROS>::construct_circuit(
                     circuit_builder,
                     &memory_addr,
                     &prev_memory_value,
                     &rs2_read,
                 )?;
-                (prev_memory_value.value() + change.value(), Some(change))
+                (next_memory.as_lo_hi().clone(), Some(next_memory))
             }
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
@@ -109,11 +89,13 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             circuit_builder,
             I::INST_KIND,
             &imm.expr(),
+            #[cfg(feature = "u16limb_circuit")]
+            0.into(),
             rs1_read.register_expr(),
             rs2_read.register_expr(),
             memory_addr.expr_align4(),
             prev_memory_value.memory_expr(),
-            new_memory_value,
+            next_memory_value,
         )?;
 
         Ok(StoreConfig {
@@ -123,7 +105,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             imm,
             prev_memory_value,
             memory_addr,
-            word_change,
+            next_memory_value: next_memory,
         })
     }
 
@@ -136,16 +118,16 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let rs1 = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2 = Value::new_unchecked(step.rs2().unwrap().value);
         let memory_op = step.memory_op().unwrap();
-        let imm = InsnRecord::imm_internal(&step.insn());
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let prev_mem_value = Value::new(memory_op.value.before, lk_multiplicity);
 
-        let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm as i32));
+        let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
         config.rs1_read.assign_value(instance, rs1);
         config.rs2_read.assign_value(instance, rs2);
-        set_val!(instance, config.imm, i64_to_base::<E::BaseField>(imm));
+        set_val!(instance, config.imm, imm.1);
         config
             .prev_memory_value
             .assign_value(instance, prev_mem_value);
@@ -153,8 +135,8 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         config
             .memory_addr
             .assign_instance(instance, lk_multiplicity, addr.into())?;
-        if let Some(change) = config.word_change.as_ref() {
-            change.assign_instance::<E>(instance, lk_multiplicity, step, addr.shift())?;
+        if let Some(change) = config.next_memory_value.as_ref() {
+            change.assign_instance(instance, lk_multiplicity, step, addr.shift())?;
         }
 
         Ok(())

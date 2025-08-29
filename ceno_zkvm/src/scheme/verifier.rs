@@ -9,7 +9,7 @@ use gkr_iop::gkr::GKRClaims;
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Instance, StructuralWitIn,
+    Instance, StructuralWitIn, StructuralWitInType,
     mle::IntoMLE,
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
@@ -27,7 +27,9 @@ use crate::{
     error::ZKVMError,
     scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::eval_wellform_address_vec,
+    utils::{
+        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
+    },
 };
 
 use super::{ZKVMChipProof, ZKVMProof};
@@ -65,9 +67,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // require ecall/halt proof to exist, depending whether we expect a halt.
         let has_halt = vm_proof.has_halt(&self.vk);
         if has_halt != expect_halt {
-            return Err(ZKVMError::VerifyError(format!(
-                "ecall/halt mismatch: expected {expect_halt} != {has_halt}",
-            )));
+            return Err(ZKVMError::VerifyError(
+                format!("ecall/halt mismatch: expected {expect_halt} != {has_halt}",).into(),
+            ));
         }
 
         self.verify_proof_validity(vm_proof, transcript)
@@ -89,10 +91,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // subset of that of self.vk.circuit_vks
         for chip_idx in vm_proof.chip_proofs.keys() {
             if *chip_idx >= self.vk.circuit_vks.len() {
-                return Err(ZKVMError::VKNotFound(format!(
-                    "chip index {chip_idx} not found in vk set [0..{})",
-                    self.vk.circuit_vks.len()
-                )));
+                return Err(ZKVMError::VKNotFound(
+                    format!(
+                        "chip index {chip_idx} not found in vk set [0..{})",
+                        self.vk.circuit_vks.len()
+                    )
+                    .into(),
+                ));
             }
         }
 
@@ -110,9 +115,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .enumerate()
             .try_for_each(|(i, (raw, eval))| {
                 if raw.len() == 1 && E::from(raw[0]) != *eval {
-                    Err(ZKVMError::VerifyError(format!(
-                        "pub input on index {i} mismatch  {raw:?} != {eval:?}"
-                    )))
+                    Err(ZKVMError::VerifyError(
+                        format!("pub input on index {i} mismatch  {raw:?} != {eval:?}").into(),
+                    ))
                 } else {
                     Ok(())
                 }
@@ -163,31 +168,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             if proof.wits_in_evals.len() != circuit_vk.get_cs().num_witin()
                 || proof.fixed_in_evals.len() != circuit_vk.get_cs().num_fixed()
             {
-                return Err(ZKVMError::InvalidProof(format!(
-                    "witness/fixed evaluations length mismatch: ({}, {}) != ({}, {})",
-                    proof.wits_in_evals.len(),
-                    proof.fixed_in_evals.len(),
-                    circuit_vk.get_cs().num_witin(),
-                    circuit_vk.get_cs().num_fixed(),
-                )));
+                return Err(ZKVMError::InvalidProof(
+                    format!(
+                        "witness/fixed evaluations length mismatch: ({}, {}) != ({}, {})",
+                        proof.wits_in_evals.len(),
+                        proof.fixed_in_evals.len(),
+                        circuit_vk.get_cs().num_witin(),
+                        circuit_vk.get_cs().num_fixed(),
+                    )
+                    .into(),
+                ));
             }
             if proof.r_out_evals.len() != circuit_vk.get_cs().num_reads()
                 || proof.w_out_evals.len() != circuit_vk.get_cs().num_writes()
             {
-                return Err(ZKVMError::InvalidProof(format!(
-                    "read/write evaluations length mismatch: ({}, {}) != ({}, {})",
-                    proof.r_out_evals.len(),
-                    proof.w_out_evals.len(),
-                    circuit_vk.get_cs().num_reads(),
-                    circuit_vk.get_cs().num_writes(),
-                )));
+                return Err(ZKVMError::InvalidProof(
+                    format!(
+                        "read/write evaluations length mismatch: ({}, {}) != ({}, {})",
+                        proof.r_out_evals.len(),
+                        proof.w_out_evals.len(),
+                        circuit_vk.get_cs().num_reads(),
+                        circuit_vk.get_cs().num_writes(),
+                    )
+                    .into(),
+                ));
             }
             if proof.lk_out_evals.len() != circuit_vk.get_cs().num_lks() {
-                return Err(ZKVMError::InvalidProof(format!(
-                    "lookup evaluations length mismatch: {} != {}",
-                    proof.lk_out_evals.len(),
-                    circuit_vk.get_cs().num_lks(),
-                )));
+                return Err(ZKVMError::InvalidProof(
+                    format!(
+                        "lookup evaluations length mismatch: {} != {}",
+                        proof.lk_out_evals.len(),
+                        circuit_vk.get_cs().num_lks(),
+                    )
+                    .into(),
+                ));
             }
 
             let chip_logup_sum = proof
@@ -257,10 +271,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // check logup relation across all proofs
         if logup_sum != E::ZERO {
-            return Err(ZKVMError::VerifyError(format!(
-                "logup_sum({:?}) != 0",
-                logup_sum
-            )));
+            return Err(ZKVMError::VerifyError(
+                format!("logup_sum({:?}) != 0", logup_sum).into(),
+            ));
         }
 
         #[cfg(debug_assertions)]
@@ -443,9 +456,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     r.table_spec
                         .structural_witins
                         .iter()
-                        .map(|StructuralWitIn { max_len, .. }| {
+                        .map(|StructuralWitIn { witin_type, .. }| {
                             let hint_num_vars = log2_num_instances;
-                            assert!((1 << hint_num_vars) <= *max_len);
+                            assert!((1 << hint_num_vars) <= witin_type.max_len());
                             hint_num_vars
                         })
                         .max()
@@ -460,9 +473,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     l.table_spec
                         .structural_witins
                         .iter()
-                        .map(|StructuralWitIn { max_len, .. }| {
+                        .map(|StructuralWitIn { witin_type, .. }| {
                             let hint_num_vars = log2_num_instances;
-                            assert!((1 << hint_num_vars) <= *max_len);
+                            assert!((1 << hint_num_vars) <= witin_type.max_len());
                             hint_num_vars
                         })
                         .max()
@@ -521,21 +534,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 table_spec
                     .structural_witins
                     .iter()
-                    .map(
-                        |StructuralWitIn {
-                             offset,
-                             multi_factor,
-                             descending,
-                             ..
-                         }| {
-                            eval_wellform_address_vec(
-                                *offset as u64,
-                                *multi_factor as u64,
-                                &rt_tower,
-                                *descending,
-                            )
-                        },
-                    )
+                    .map(|structural_witin| match structural_witin.witin_type {
+                        StructuralWitInType::EqualDistanceSequence {
+                            offset,
+                            multi_factor,
+                            descending,
+                            ..
+                        } => eval_wellform_address_vec(
+                            offset as u64,
+                            multi_factor as u64,
+                            &rt_tower,
+                            descending,
+                        ),
+                        StructuralWitInType::StackedIncrementalSequence { .. } => {
+                            eval_stacked_wellform_address_vec(&rt_tower)
+                        }
+                        StructuralWitInType::StackedConstantSequence { .. } => {
+                            eval_stacked_constant_vec(&rt_tower)
+                        }
+                    })
                     .collect_vec()
             })
             .collect_vec();
@@ -580,9 +597,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .map(|point_and_eval| point_and_eval.eval),
             ) {
                 if expected_eval != &eval {
-                    return Err(ZKVMError::VerifyError(format!(
-                        "table {name} evaluation mismatch {expected_eval:?} != {eval:?}"
-                    )));
+                    return Err(ZKVMError::VerifyError(
+                        format!("table {name} evaluation mismatch {expected_eval:?} != {eval:?}")
+                            .into(),
+                    ));
                 }
             }
             rt_tower
@@ -673,9 +691,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let expected_eval = poly.evaluate(&input_opening_point[..poly.num_vars()]);
             let eval = pi[idx];
             if expected_eval != eval {
-                return Err(ZKVMError::VerifyError(format!(
-                    "pub input on index {idx} mismatch  {expected_eval:?} != {eval:?}"
-                )));
+                return Err(ZKVMError::VerifyError(
+                    format!("pub input on index {idx} mismatch  {expected_eval:?} != {eval:?}")
+                        .into(),
+                ));
             }
             tracing::trace!(
                 "[table {name}] verified public inputs on index {idx} with point {:?}",

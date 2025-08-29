@@ -1,5 +1,7 @@
 use ceno_emul::{ByteAddr, Change, PC_STEP_SIZE, StepRecord, Word, encode_rv32};
-use ff_ext::GoldilocksExt2;
+#[cfg(feature = "u16limb_circuit")]
+use ff_ext::BabyBearExt4;
+use ff_ext::{ExtensionField, GoldilocksExt2};
 
 use super::*;
 use crate::{
@@ -118,7 +120,6 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     };
 
     let insn_code = encode_rv32(InsnKind::BLTU, 2, 3, 0, -8);
-    println!("{:?}", insn_code);
     let (raw_witin, lkm) = BltuInstruction::assign_instances(
         &config,
         circuit_builder.cs.num_witin as usize,
@@ -184,20 +185,26 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
 
 #[test]
 fn test_blt_circuit() -> Result<(), ZKVMError> {
-    impl_blt_circuit(false, 0, 0)?;
-    impl_blt_circuit(true, 0, 1)?;
-
-    impl_blt_circuit(false, 1, -10)?;
-    impl_blt_circuit(false, -10, -10)?;
-    impl_blt_circuit(false, -9, -10)?;
-    impl_blt_circuit(true, -9, 1)?;
-    impl_blt_circuit(true, -10, -9)?;
+    let cases = vec![
+        (false, 0, 0),
+        (true, 0, 1),
+        (false, 1, -10),
+        (false, -10, -10),
+        (false, -9, -10),
+        (true, -9, 1),
+        (true, -10, -9),
+    ];
+    for &(expected, a, b) in &cases {
+        impl_blt_circuit::<GoldilocksExt2>(expected, a, b)?;
+        #[cfg(feature = "u16limb_circuit")]
+        impl_blt_circuit::<BabyBearExt4>(expected, a, b)?;
+    }
     Ok(())
 }
 
-fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
+fn impl_blt_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "riscv");
-    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+    let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
     let config =
         BltInstruction::construct_circuit(&mut circuit_builder, &ProgramParams::default())?;
 
@@ -229,20 +236,26 @@ fn impl_blt_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
 
 #[test]
 fn test_bge_circuit() -> Result<(), ZKVMError> {
-    impl_bge_circuit(true, 0, 0)?;
-    impl_bge_circuit(false, 0, 1)?;
-
-    impl_bge_circuit(true, 1, -10)?;
-    impl_bge_circuit(true, -10, -10)?;
-    impl_bge_circuit(true, -9, -10)?;
-    impl_bge_circuit(false, -9, 1)?;
-    impl_bge_circuit(false, -10, -9)?;
+    let cases = vec![
+        (true, 0, 0),
+        (false, 0, 1),
+        (true, 1, -10),
+        (true, -10, -10),
+        (true, -9, -10),
+        (false, -9, 1),
+        (false, -10, -9),
+    ];
+    for &(expected, a, b) in &cases {
+        impl_bge_circuit::<GoldilocksExt2>(expected, a, b)?;
+        #[cfg(feature = "u16limb_circuit")]
+        impl_bge_circuit::<BabyBearExt4>(expected, a, b)?;
+    }
     Ok(())
 }
 
-fn impl_bge_circuit(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
+fn impl_bge_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "riscv");
-    let mut circuit_builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
+    let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
     let config =
         BgeInstruction::construct_circuit(&mut circuit_builder, &ProgramParams::default())?;
 

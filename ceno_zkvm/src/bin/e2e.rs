@@ -264,7 +264,7 @@ fn main() {
                 max_steps,
                 args.proof_file,
                 args.vk_file,
-                Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+                Checkpoint::Complete,
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {

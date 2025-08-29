@@ -6,6 +6,7 @@ use crate::{
         riscv::{arith::AddInstruction, ecall::HaltInstruction},
     },
     scheme::{
+        constants::DYNAMIC_RANGE_MAX_BITS,
         cpu::CpuTowerProver,
         create_backend, create_prover,
         hal::{ProofInput, TowerProverSpec},
@@ -14,7 +15,7 @@ use crate::{
     structs::{
         PointAndEval, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
     },
-    tables::{ProgramTableCircuit, U16TableCircuit},
+    tables::ProgramTableCircuit,
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{
@@ -30,6 +31,14 @@ use std::marker::PhantomData;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
+use super::{
+    PublicValues,
+    constants::{MAX_NUM_VARIABLES, NUM_FANIN},
+    prover::ZKVMProver,
+    utils::infer_tower_product_witness,
+    verifier::{TowerVerify, ZKVMVerifier},
+};
+use crate::tables::DynamicRangeTableCircuit;
 use itertools::Itertools;
 use mpcs::{
     PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits, WhirDefault,
@@ -38,14 +47,6 @@ use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
 use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use transcript::{BasicTranscript, Transcript};
-
-use super::{
-    PublicValues,
-    constants::{MAX_NUM_VARIABLES, NUM_FANIN},
-    prover::ZKVMProver,
-    utils::infer_tower_product_witness,
-    verifier::{TowerVerify, ZKVMVerifier},
-};
 
 struct TestConfig {
     pub(crate) reg_id: WitIn,
@@ -252,7 +253,8 @@ fn test_single_add_instance_e2e() {
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
-    let u16_range_config = zkvm_cs.register_table_circuit::<U16TableCircuit<E>>();
+    let dynamic_range_config =
+        zkvm_cs.register_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>();
 
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
 
@@ -260,11 +262,12 @@ fn test_single_add_instance_e2e() {
     zkvm_fixed_traces.register_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config);
     zkvm_fixed_traces.register_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config);
 
-    zkvm_fixed_traces.register_table_circuit::<U16TableCircuit<E>>(
-        &zkvm_cs,
-        &u16_range_config,
-        &(),
-    );
+    zkvm_fixed_traces
+        .register_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>(
+            &zkvm_cs,
+            &dynamic_range_config,
+            &(),
+        );
 
     zkvm_fixed_traces.register_table_circuit::<ProgramTableCircuit<E>>(
         &zkvm_cs,
@@ -317,9 +320,13 @@ fn test_single_add_instance_e2e() {
     zkvm_witness
         .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
         .unwrap();
-    zkvm_witness.finalize_lk_multiplicities(false);
+    zkvm_witness.finalize_lk_multiplicities();
     zkvm_witness
-        .assign_table_circuit::<U16TableCircuit<E>>(&zkvm_cs, &u16_range_config, &())
+        .assign_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>(
+            &zkvm_cs,
+            &dynamic_range_config,
+            &(),
+        )
         .unwrap();
     zkvm_witness
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)

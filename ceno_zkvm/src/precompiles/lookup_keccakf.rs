@@ -20,7 +20,7 @@ use gkr_iop::{
 use itertools::{Itertools, iproduct, izip, zip_eq};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, StructuralWitIn, ToExpr, WitIn,
+    Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
     mle::PointAndEval,
     util::{ceil_log2, max_usable_threads},
 };
@@ -39,6 +39,7 @@ use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
+    chip_handler::MemoryExpr,
     error::ZKVMError,
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::utils::{
@@ -129,11 +130,11 @@ pub struct KeccakFixedCols<T> {
 pub struct KeccakWitCols<T> {
     pub input8: [T; 200],
     pub c_aux: [T; 200],
-    pub c_temp: [T; 30],
+    pub c_temp: [T; 40],
     pub c_rot: [T; 40],
     pub d: [T; 40],
     pub theta_output: [T; 200],
-    pub rotation_witness: [T; 146],
+    pub rotation_witness: [T; 196],
     pub rhopi_output: [T; 200],
     pub nonlinear: [T; 200],
     pub chi_output: [T; 8],
@@ -165,8 +166,8 @@ pub struct KeccakLayout<E: ExtensionField> {
     pub params: KeccakParams,
     pub layer_exprs: KeccakLayer<WitIn, StructuralWitIn>,
     pub selector_type_layout: SelectorTypeLayout<E>,
-    pub input32_exprs: [Expression<E>; KECCAK_INPUT32_SIZE],
-    pub output32_exprs: [Expression<E>; KECCAK_OUTPUT32_SIZE],
+    pub input32_exprs: [MemoryExpr<E>; KECCAK_INPUT32_SIZE],
+    pub output32_exprs: [MemoryExpr<E>; KECCAK_OUTPUT32_SIZE],
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
@@ -196,7 +197,15 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 //     cb.create_fixed(|| format!("keccak_fixed_{}", id))
                 // })),
                 array::from_fn(|id| {
-                    cb.create_structural_witin(|| format!("keccak_eq_{}", id), 0, 0, 0, false)
+                    cb.create_structural_witin(
+                        || format!("keccak_eq_{}", id),
+                        StructuralWitInType::EqualDistanceSequence {
+                            max_len: 0,
+                            offset: 0,
+                            multi_factor: 0,
+                            descending: false,
+                        },
+                    )
                 }),
             )
         };
@@ -236,8 +245,8 @@ impl<E: ExtensionField> KeccakLayout<E> {
                     expression: eq_zero.expr(),
                 },
             },
-            input32_exprs: array::from_fn(|_| Expression::WitIn(0)),
-            output32_exprs: array::from_fn(|_| Expression::WitIn(0)),
+            input32_exprs: array::from_fn(|_| array::from_fn(|_| Expression::WitIn(0))),
+            output32_exprs: array::from_fn(|_| array::from_fn(|_| Expression::WitIn(0))),
             n_fixed: 0,
             n_committed: 0,
             n_structural_witin: STRUCTURAL_WITIN,
@@ -311,7 +320,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // documentation of `constrain_left_rotation64`. Here c_temp is the split
         // witness for a 1-rotation.
 
-        let c_temp: ArrayView<WitIn, Ix2> = ArrayView::from_shape((5, 6), c_temp).unwrap();
+        let c_temp: ArrayView<WitIn, Ix2> = ArrayView::from_shape((5, 8), c_temp).unwrap();
         let c_rot: ArrayView<WitIn, Ix2> = ArrayView::from_shape((5, 8), c_rot).unwrap();
 
         let (sizes, _) = rotation_split(1);
@@ -404,6 +413,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 )?;
             }
         }
+        assert!(rotation_witness.next().is_none());
 
         let mut chi_output = chi_output.to_vec();
         chi_output.extend(iota_output[8..].to_vec());
@@ -453,14 +463,16 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         for x in 0..5 {
             for y in 0..5 {
                 for k in 0..2 {
-                    // create an expression combining 4 elements of state8 into a single 32-bit felt
-                    keccak_output32.push(expansion_expr::<E, 32>(
-                        &keccak_output8
-                            .slice(s![x, y, 4 * k..4 * (k + 1)])
-                            .iter()
-                            .map(|e| (8, e.expr()))
-                            .collect_vec(),
-                    ))
+                    // create an expression combining 4 elements of state8 into a 2x16-bit felt
+                    let output8_slice = keccak_output8
+                        .slice(s![x, y, 4 * k..4 * (k + 1)])
+                        .iter()
+                        .map(|e| (8, e.expr()))
+                        .collect_vec();
+                    keccak_output32.push([
+                        expansion_expr::<E, 16>(&output8_slice[0..2]),
+                        expansion_expr::<E, 16>(&output8_slice[2..4]),
+                    ])
                 }
             }
         }
@@ -470,15 +482,16 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         for x in 0..5 {
             for y in 0..5 {
                 for k in 0..2 {
-                    // create an expression combining 4 elements of state8 into a single 32-bit felt
-                    keccak_input32.push(expansion_expr::<E, 32>(
-                        keccak_input8
-                            .slice(s![x, y, 4 * k..4 * (k + 1)])
-                            .iter()
-                            .map(|e| (8, e.expr()))
-                            .collect_vec()
-                            .as_slice(),
-                    ))
+                    // create an expression combining 4 elements of state8 into a single 2x16-bit felt
+                    let input8_slice = keccak_input8
+                        .slice(s![x, y, 4 * k..4 * (k + 1)])
+                        .iter()
+                        .map(|e| (8, e.expr()))
+                        .collect_vec();
+                    keccak_input32.push([
+                        expansion_expr::<E, 16>(&input8_slice[0..2]),
+                        expansion_expr::<E, 16>(&input8_slice[2..4]),
+                    ])
                 }
             }
         }
@@ -551,12 +564,12 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         0
     }
 
-    fn n_layers(&self) -> usize {
-        1
-    }
-
     fn n_evaluations(&self) -> usize {
         unimplemented!()
+    }
+
+    fn n_layers(&self) -> usize {
+        1
     }
 }
 
@@ -781,12 +794,12 @@ where
                         c8[x] = conv64to8(c64[x]);
                     }
 
-                    let mut c_temp = [[0u64; 6]; 5];
+                    let mut c_temp = [[0u64; 8]; 5];
                     for i in 0..5 {
                         let rep = MaskRepresentation::new(vec![(64, c64[i]).into()])
-                            .convert(vec![16, 15, 1, 16, 15, 1])
+                            .convert(vec![15, 1, 15, 1, 15, 1, 15, 1])
                             .values();
-                        for (j, size) in [16, 15, 1, 16, 15, 1].iter().enumerate() {
+                        for (j, size) in [15, 1, 15, 1, 15, 1, 15, 1].iter().enumerate() {
                             lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
                         }
                         c_temp[i] = rep.try_into().unwrap();
@@ -830,13 +843,20 @@ where
                                     .convert(sizes.clone())
                                     .values();
                             for (j, size) in sizes.iter().enumerate() {
-                                if *size != 32 {
-                                    lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
+                                match *size {
+                                    32 | 1 => (),
+                                    18 => lk_multiplicity.assert_ux::<18>(rep[j]),
+                                    16 => lk_multiplicity.assert_ux::<16>(rep[j]),
+                                    14 => lk_multiplicity.assert_ux::<14>(rep[j]),
+                                    8 => lk_multiplicity.assert_ux::<8>(rep[j]),
+                                    5 => lk_multiplicity.assert_ux::<5>(rep[j]),
+                                    _ => lk_multiplicity.assert_ux_in_u16(*size, rep[j]),
                                 }
                             }
                             rotation_witness.extend(rep);
                         }
                     }
+                    assert_eq!(rotation_witness.len(), rotation_witness_witin.len());
 
                     // Rho and Pi steps
                     let mut rhopi_output64 = [[0u64; 5]; 5];
@@ -989,8 +1009,8 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
                 &mut cb,
                 // mem address := state_ptr + i
                 state_ptr.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
-                val_before.expr(),
-                val_after.expr(),
+                val_before.clone(),
+                val_after.clone(),
                 vm_state.ts,
             )
         })

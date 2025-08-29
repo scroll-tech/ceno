@@ -13,10 +13,9 @@ version.workspace = true
 anyhow.workspace = true
 ceno_rt = { path = "../ceno_rt" }
 elf = "0.7"
-ff_ext = { git = "https://github.com/scroll-tech/ceno", package = "ff_ext", rev = "7c277a1" }
+ff_ext.workspace = true
 itertools.workspace = true
-multilinear_extensions = { git = "https://github.com/scroll-tech/ceno", package = "multilinear_extensions", rev = "7c277a1" }
-num-bigint.workspace = true
+multilinear_extensions.workspace = true
 num-derive.workspace = true
 num-traits.workspace = true
 rrs_lib = { package = "rrs-succinct", version = "0.1.0" }
@@ -30,3 +29,4 @@ tracing.workspace = true
 [features]
 default = ["forbid_overflow"]
 forbid_overflow = []
+u16limb_circuit = []

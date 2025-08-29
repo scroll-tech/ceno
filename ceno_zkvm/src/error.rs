@@ -3,7 +3,7 @@ use mpcs::Error;
 
 #[derive(Debug)]
 pub enum UtilError {
-    UIntError(String),
+    UIntError(Box<str>),
 }
 
 #[derive(Debug)]
@@ -12,12 +12,12 @@ pub enum ZKVMError {
     CircuitBuilderError(CircuitBuilderError),
     BackendError(BackendError),
     UtilError(UtilError),
-    WitnessNotFound(String),
-    InvalidWitness(String),
-    InvalidProof(String),
-    VKNotFound(String),
-    FixedTraceNotFound(String),
-    VerifyError(String),
+    WitnessNotFound(Box<str>),
+    InvalidWitness(Box<str>),
+    InvalidProof(Box<str>),
+    VKNotFound(Box<str>),
+    FixedTraceNotFound(Box<str>),
+    VerifyError(Box<str>),
     PCSError(Error),
 }
 

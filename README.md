@@ -4,11 +4,14 @@ Please see [the slightly outdated paper](https://eprint.iacr.org/2024/387) for a
 
 🚧 This project is currently under construction and not suitable for use in production. 🚧
 
-If you are unfamiliar with the RISC-V instruction set, please have a look at the [RISC-V instruction set reference](https://github.com/jameslzhu/riscv-card/releases/download/latest/riscv-card.pdf).
+If you are unfamiliar with the RISC-V instruction set, please have a look at
+the [RISC-V instruction set reference](https://github.com/jameslzhu/riscv-card/releases/download/latest/riscv-card.pdf).
 
 ## Local build requirements
 
-Ceno is built in Rust, so [installing the Rust toolchain](https://www.rust-lang.org/tools/install) is a pre-requisite if you want to develop on your local machine.  We also use [cargo-make](https://sagiegurari.github.io/cargo-make/) to build Ceno. You can install cargo-make with the following command:
+Ceno is built in Rust, so [installing the Rust toolchain](https://www.rust-lang.org/tools/install) is a pre-requisite if
+you want to develop on your local machine. We also use [cargo-make](https://sagiegurari.github.io/cargo-make/) to build
+Ceno. You can install cargo-make with the following command:
 
 ```sh
 cargo install cargo-make
@@ -21,6 +24,7 @@ rustup target add riscv32im-unknown-none-elf
 ```
 
 ## Try end-to-end with examples
+
 A variety of [examples](https://github.com/scroll-tech/ceno/tree/master/examples/examples) are availables.
 
 To run an example in e2e, use the following command:
@@ -75,3 +79,15 @@ To set up docker container for CI, you can run the following command:
 docker build -t ceno-runner scripts/ci/
 docker run -d ceno-runner
 ```
+
+### Acknowledgements
+
+Ceno stands on the shoulders of remarkable projects in the zero-knowledge ecosystem.  
+We extend our appreciation to the following works, which have shaped Ceno's design and direction:
+
+- [Plonky3](https://github.com/Plonky3/Plonky3) — Inspired by Plonky3’s modular architecture, enabling support for
+  diverse field arithmetics.
+- [OpenVM](https://github.com/openvm-org/openvm) — Ceno's recursion stack builds upon OpenVM's eDSL + native VM, while
+  also borrowing its limb-based constraint design for RISC-V opcodes.
+- [SP1](https://github.com/succinctlabs/sp1) — Derived significant insights from SP1's RISC-V emulator and memory
+  layout strategy.

@@ -1,3 +1,13 @@
+use super::{
+    arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
+    memory::LwInstruction,
+};
+#[cfg(feature = "u16limb_circuit")]
+use crate::instructions::riscv::auipc::AuipcInstruction;
+#[cfg(feature = "u16limb_circuit")]
+use crate::instructions::riscv::lui::LuiInstruction;
+#[cfg(not(feature = "u16limb_circuit"))]
+use crate::tables::PowTableCircuit;
 use crate::{
     error::ZKVMError,
     instructions::{
@@ -11,17 +21,18 @@ use crate::{
             ecall::KeccakInstruction,
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
-            mul::MulhuInstruction,
+            mulh::MulhuInstruction,
             shift::{SllInstruction, SrlInstruction},
             shift_imm::{SlliInstruction, SraiInstruction, SrliInstruction},
             slti::SltiInstruction,
             *,
         },
     },
+    scheme::constants::DYNAMIC_RANGE_MAX_BITS,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        AndTableCircuit, LtuTableCircuit, OrTableCircuit, PowTableCircuit, TableCircuit,
-        U5TableCircuit, U8TableCircuit, U14TableCircuit, U16TableCircuit, XorTableCircuit,
+        AndTableCircuit, DynamicRangeTableCircuit, LtuTableCircuit, OrTableCircuit, TableCircuit,
+        XorTableCircuit,
     },
 };
 use ceno_emul::{
@@ -35,7 +46,7 @@ use dummy::LargeEcallDummy;
 use ecall::EcallDummy;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
-use mul::{MulInstruction, MulhInstruction, MulhsuInstruction};
+use mulh::{MulInstruction, MulhInstruction, MulhsuInstruction};
 use shift::SraInstruction;
 use slt::{SltInstruction, SltuInstruction};
 use slti::SltiuInstruction;
@@ -44,11 +55,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 use strum::IntoEnumIterator;
-
-use super::{
-    arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
-    memory::LwInstruction,
-};
 
 pub mod mmu;
 
@@ -83,6 +89,10 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub srai_config: <SraiInstruction<E> as Instruction<E>>::InstructionConfig,
     pub slti_config: <SltiInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sltiu_config: <SltiuInstruction<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "u16limb_circuit")]
+    pub lui_config: <LuiInstruction<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "u16limb_circuit")]
+    pub auipc_config: <AuipcInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // Branching Opcodes
     pub beq_config: <BeqInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -110,14 +120,12 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
     // Tables.
-    pub u16_range_config: <U16TableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub u14_range_config: <U14TableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub u8_range_config: <U8TableCircuit<E> as TableCircuit<E>>::TableConfig,
-    pub u5_range_config: <U5TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub dynamic_range_config: <DynamicRangeTableCircuit<E, 18> as TableCircuit<E>>::TableConfig,
     pub and_table_config: <AndTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub or_table_config: <OrTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub xor_table_config: <XorTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub ltu_config: <LtuTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    #[cfg(not(feature = "u16limb_circuit"))]
     pub pow_config: <PowTableCircuit<E> as TableCircuit<E>>::TableConfig,
 }
 
@@ -154,6 +162,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let srai_config = cs.register_opcode_circuit::<SraiInstruction<E>>();
         let slti_config = cs.register_opcode_circuit::<SltiInstruction<E>>();
         let sltiu_config = cs.register_opcode_circuit::<SltiuInstruction<E>>();
+        #[cfg(feature = "u16limb_circuit")]
+        let lui_config = cs.register_opcode_circuit::<LuiInstruction<E>>();
+        #[cfg(feature = "u16limb_circuit")]
+        let auipc_config = cs.register_opcode_circuit::<AuipcInstruction<E>>();
 
         // branching opcodes
         let beq_config = cs.register_opcode_circuit::<BeqInstruction<E>>();
@@ -182,14 +194,13 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
 
         // tables
-        let u16_range_config = cs.register_table_circuit::<U16TableCircuit<E>>();
-        let u14_range_config = cs.register_table_circuit::<U14TableCircuit<E>>();
-        let u8_range_config = cs.register_table_circuit::<U8TableCircuit<E>>();
-        let u5_range_config = cs.register_table_circuit::<U5TableCircuit<E>>();
+        let dynamic_range_config =
+            cs.register_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>();
         let and_table_config = cs.register_table_circuit::<AndTableCircuit<E>>();
         let or_table_config = cs.register_table_circuit::<OrTableCircuit<E>>();
         let xor_table_config = cs.register_table_circuit::<XorTableCircuit<E>>();
         let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
+        #[cfg(not(feature = "u16limb_circuit"))]
         let pow_config = cs.register_table_circuit::<PowTableCircuit<E>>();
 
         Self {
@@ -222,6 +233,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             srai_config,
             slti_config,
             sltiu_config,
+            #[cfg(feature = "u16limb_circuit")]
+            lui_config,
+            #[cfg(feature = "u16limb_circuit")]
+            auipc_config,
             // branching opcodes
             beq_config,
             bne_config,
@@ -245,14 +260,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             halt_config,
             keccak_config,
             // tables
-            u16_range_config,
-            u14_range_config,
-            u8_range_config,
-            u5_range_config,
+            dynamic_range_config,
             and_table_config,
             or_table_config,
             xor_table_config,
             ltu_config,
+            #[cfg(not(feature = "u16limb_circuit"))]
             pow_config,
         }
     }
@@ -291,6 +304,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<SraiInstruction<E>>(cs, &self.srai_config);
         fixed.register_opcode_circuit::<SltiInstruction<E>>(cs, &self.slti_config);
         fixed.register_opcode_circuit::<SltiuInstruction<E>>(cs, &self.sltiu_config);
+        #[cfg(feature = "u16limb_circuit")]
+        fixed.register_opcode_circuit::<LuiInstruction<E>>(cs, &self.lui_config);
+        #[cfg(feature = "u16limb_circuit")]
+        fixed.register_opcode_circuit::<AuipcInstruction<E>>(cs, &self.auipc_config);
         // branching
         fixed.register_opcode_circuit::<BeqInstruction<E>>(cs, &self.beq_config);
         fixed.register_opcode_circuit::<BneInstruction<E>>(cs, &self.bne_config);
@@ -318,14 +335,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs, &self.keccak_config);
 
         // table
-        fixed.register_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &());
-        fixed.register_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &());
-        fixed.register_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &());
-        fixed.register_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &());
+        fixed.register_table_circuit::<DynamicRangeTableCircuit<E, 18>>(
+            cs,
+            &self.dynamic_range_config,
+            &(),
+        );
         fixed.register_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &());
         fixed.register_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &());
         fixed.register_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &());
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
+        #[cfg(not(feature = "u16limb_circuit"))]
         fixed.register_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &());
     }
 
@@ -402,6 +421,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(SRAI, SraiInstruction<E>, srai_config);
         assign_opcode!(SLTI, SltiInstruction<E>, slti_config);
         assign_opcode!(SLTIU, SltiuInstruction<E>, sltiu_config);
+        #[cfg(feature = "u16limb_circuit")]
+        assign_opcode!(LUI, LuiInstruction<E>, lui_config);
+        #[cfg(feature = "u16limb_circuit")]
+        assign_opcode!(AUIPC, AuipcInstruction<E>, auipc_config);
         // branching
         assign_opcode!(BEQ, BeqInstruction<E>, beq_config);
         assign_opcode!(BNE, BneInstruction<E>, bne_config);
@@ -443,14 +466,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
     ) -> Result<(), ZKVMError> {
-        witness.assign_table_circuit::<U16TableCircuit<E>>(cs, &self.u16_range_config, &())?;
-        witness.assign_table_circuit::<U14TableCircuit<E>>(cs, &self.u14_range_config, &())?;
-        witness.assign_table_circuit::<U8TableCircuit<E>>(cs, &self.u8_range_config, &())?;
-        witness.assign_table_circuit::<U5TableCircuit<E>>(cs, &self.u5_range_config, &())?;
+        witness.assign_table_circuit::<DynamicRangeTableCircuit<E, 18>>(
+            cs,
+            &self.dynamic_range_config,
+            &(),
+        )?;
         witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &())?;
         witness.assign_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &())?;
         witness.assign_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &())?;
         witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
+        #[cfg(not(feature = "u16limb_circuit"))]
         witness.assign_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &())?;
 
         Ok(())

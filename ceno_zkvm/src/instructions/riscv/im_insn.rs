@@ -23,10 +23,12 @@ pub struct IMInstructionConfig<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> IMInstructionConfig<E> {
+    #[allow(clippy::too_many_arguments)]
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         insn_kind: InsnKind,
         imm: &Expression<E>,
+        #[cfg(feature = "u16limb_circuit")] imm_sign: &Expression<E>,
         rs1_read: RegisterExpr<E>,
         memory_read: MemoryExpr<E>,
         memory_addr: AddressExpr<E>,
@@ -50,6 +52,8 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
             rs1.id.expr(),
             0.into(),
             imm.clone(),
+            #[cfg(feature = "u16limb_circuit")]
+            imm_sign.expr(),
         ))?;
 
         Ok(IMInstructionConfig {

@@ -2,6 +2,7 @@ use crate::utils::i64_to_base;
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, WitIn, power_sequence};
+use p3::field::Field;
 use std::fmt::Display;
 use witness::set_val;
 
@@ -23,7 +24,7 @@ impl AssertLtConfig {
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
-        max_num_u16_limbs: usize,
+        max_bits: usize,
     ) -> Result<Self, CircuitBuilderError> {
         cb.namespace(
             || "assert_lt",
@@ -35,7 +36,7 @@ impl AssertLtConfig {
                     lhs,
                     rhs,
                     Expression::ONE,
-                    max_num_u16_limbs,
+                    max_bits,
                 )?;
                 Ok(Self(config))
             },
@@ -85,7 +86,7 @@ impl IsLtConfig {
         name_fn: N,
         lhs: Expression<E>,
         rhs: Expression<E>,
-        max_num_u16_limbs: usize,
+        max_bits: usize,
     ) -> Result<Self, CircuitBuilderError> {
         cb.namespace(
             || "is_lt",
@@ -94,14 +95,8 @@ impl IsLtConfig {
                 let is_lt = cb.create_witin(|| format!("{name} is_lt witin"));
                 cb.assert_bit(|| "is_lt_bit", is_lt.expr())?;
 
-                let config = InnerLtConfig::construct_circuit(
-                    cb,
-                    name,
-                    lhs,
-                    rhs,
-                    is_lt.expr(),
-                    max_num_u16_limbs,
-                )?;
+                let config =
+                    InnerLtConfig::construct_circuit(cb, name, lhs, rhs, is_lt.expr(), max_bits)?;
                 Ok(Self { is_lt, config })
             },
         )
@@ -149,29 +144,29 @@ impl IsLtConfig {
 #[derive(Debug, Clone)]
 pub struct InnerLtConfig {
     pub diff: Vec<WitIn>,
-    pub max_num_u16_limbs: usize,
+    pub max_bits: usize,
 }
 
 impl InnerLtConfig {
-    fn range(max_num_u16_limbs: usize) -> u64 {
-        1u64 << (u16::BITS as usize * max_num_u16_limbs)
+    fn range(max_bits: usize) -> u64 {
+        1u64 << max_bits
     }
 
     /// Construct an `InnerLtConfig` circuit which constrains two input
     /// expressions `lhs` and `rhs` to satisfy the relation
     ///
-    /// - `rhs - lhs \in {1, ..., 2^(16*max_num_u16_limbs)}` when `is_lt_expr = 1`; and
-    /// - `lhs - rhs \in {0, ..., 2^(16*max_num_u16_limbs) - 1}` when `is_lt_expr = 0`
+    /// - `rhs - lhs \in {1, ..., 2^(max_bits)}` when `is_lt_expr = 1`; and
+    /// - `lhs - rhs \in {0, ..., 2^(max_bits) - 1}` when `is_lt_expr = 0`
     ///
     /// In the above, values are to be interpreted as finite field elements.
     ///
-    /// This is accomplished by witnessing as a `16*max_num_u16_limbs`-bit value
-    /// using 16-bit unsigned limbs either `lhs - rhs` when `lhs` is required to
-    /// be at least as large as `rhs`, or `lhs - rhs + 2^ (16*max_num_u16_limbs)`
+    /// This is accomplished by witnessing as a `max_bits`-bit value
+    /// either `lhs - rhs` when `lhs` is required to
+    /// be at least as large as `rhs`, or `lhs - rhs + 2^ (max_bits)`
     /// when `lhs` is required to be smaller than `lhs`.
     ///
     /// Note that the specific values of `lhs` and `rhs` are not relevant to the
-    /// above conditions -- this means that the value of `max_num_u16_limbs`
+    /// above conditions -- this means that the value of `max_bits`
     /// only needs to depend on the size of the *difference* between values,
     /// not on their absolute magnitude.  That is, one limb is sufficient to
     /// express that 2^48 - 12 is less than 2^48 + 71, since their difference
@@ -189,39 +184,38 @@ impl InnerLtConfig {
         lhs: Expression<E>,
         rhs: Expression<E>,
         is_lt_expr: Expression<E>,
-        max_num_u16_limbs: usize,
+        max_bits: usize,
     ) -> Result<Self, CircuitBuilderError> {
-        assert!(max_num_u16_limbs >= 1);
-
-        let mut witin_u16 = |var_name: String| -> Result<WitIn, CircuitBuilderError> {
-            cb.namespace(
-                || format!("var {var_name}"),
-                |cb| {
-                    let witin = cb.create_witin(|| var_name.to_string());
-                    cb.assert_ux::<_, _, 16>(|| name.clone(), witin.expr())?;
-                    Ok(witin)
-                },
-            )
-        };
-
-        let diff = (0..max_num_u16_limbs)
-            .map(|i| witin_u16(format!("diff_{i}")))
+        assert!(E::BaseField::bits() - 1 > max_bits);
+        let mut diff = (0..max_bits / u16::BITS as usize)
+            .map(|i| cb.create_u16(|| format!("diff_{i}")))
             .collect::<Result<Vec<WitIn>, _>>()?;
+        let remain_bits = max_bits % u16::BITS as usize;
+        if remain_bits > 0 {
+            let msl = cb.create_witin(|| "msl");
+            match remain_bits {
+                14 => cb.assert_ux::<_, _, 14>(|| name.clone(), msl.expr())?,
+                8 => cb.assert_ux::<_, _, 8>(|| name.clone(), msl.expr())?,
+                5 => cb.assert_ux::<_, _, 5>(|| name.clone(), msl.expr())?,
+                1 => cb.assert_bit(|| name.clone(), msl.expr())?,
+                // TODO refactor range table to support arbitrary range check
+                _ => tracing::info!("not implement {} bit range check", remain_bits),
+            }
+            diff.push(msl);
+        }
 
         let pows = power_sequence((1 << u16::BITS).into());
 
+        // this operation is safe even limb
         let diff_expr = izip!(&diff, pows)
             .map(|(record, beta)| beta * record.expr())
             .sum::<Expression<E>>();
 
-        let range = Self::range(max_num_u16_limbs);
+        let range = Self::range(max_bits);
 
         cb.require_equal(|| name.clone(), lhs - rhs, diff_expr - is_lt_expr * range)?;
 
-        Ok(Self {
-            diff,
-            max_num_u16_limbs,
-        })
+        Ok(Self { diff, max_bits })
     }
 
     /// Assign instance values to this configuration where the ordering is
@@ -268,24 +262,41 @@ impl InnerLtConfig {
         is_lt: bool,
     ) -> Result<(), CircuitBuilderError> {
         let range_offset: F = if is_lt {
-            Self::range(self.max_num_u16_limbs).into_f()
+            Self::range(self.max_bits).into_f()
         } else {
             F::ZERO
         };
+
         let diff = (lhs - rhs + range_offset).to_canonical_u64();
-        self.diff.iter().enumerate().for_each(|(i, wit)| {
+        (0..self.max_bits / u16::BITS as usize).for_each(|i| {
+            let wit = &self.diff[i];
             // extract the 16 bit limb from diff and assign to instance
             let val = (diff >> (i * u16::BITS as usize)) & 0xffff;
             lkm.assert_ux::<16>(val);
             set_val!(instance, wit, val);
         });
+        let remain_bits = self.max_bits % u16::BITS as usize;
+        if remain_bits > 0 {
+            let wit = self.diff.last().unwrap();
+            // extract remaining bits limb from diff and assign to instance
+            let val = (diff >> ((self.diff.len() - 1) * u16::BITS as usize)) & 0xffff;
+            match remain_bits {
+                14 => lkm.assert_ux::<14>(val),
+                8 => lkm.assert_ux::<8>(val),
+                5 => lkm.assert_ux::<5>(val),
+                1 => (), // there is nothing to do with bool check
+                // TODO refactor range table to support arbitrary range check
+                _ => tracing::info!("not implement {} bit range check", remain_bits),
+            }
+            set_val!(instance, wit, val);
+        }
         Ok(())
     }
 }
 
-pub fn cal_lt_diff(is_lt: bool, max_num_u16_limbs: usize, lhs: u64, rhs: u64) -> u64 {
+pub fn cal_lt_diff(is_lt: bool, max_bits: usize, lhs: u64, rhs: u64) -> u64 {
     (if is_lt {
-        InnerLtConfig::range(max_num_u16_limbs)
+        InnerLtConfig::range(max_bits)
     } else {
         0
     } + lhs

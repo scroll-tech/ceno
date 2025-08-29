@@ -3,7 +3,7 @@ name: Tests
 on:
   merge_group:
   pull_request:
-    types: [synchronize, opened, reopened, ready_for_review]
+    types: [ synchronize, opened, reopened, ready_for_review ]
   push:
     branches:
       - master
@@ -44,3 +44,5 @@ jobs:
           cargo make --version || cargo install cargo-make
       - name: run test
         run: cargo make tests
+      - name: run test + feature u16limb_circuit
+        run: cargo make tests_v2
