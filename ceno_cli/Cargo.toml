@@ -40,7 +40,7 @@ vergen-git2 = { version = "1", features = ["build", "cargo", "rustc", "emit_and_
 jemalloc = ["dep:tikv-jemallocator", "ceno_zkvm/jemalloc"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 nightly-features = [
-    "ceno_zkvm/nightly-features",
-    "ff_ext/nightly-features",
-    "mpcs/nightly-features",
+  "ceno_zkvm/nightly-features",
+  "ff_ext/nightly-features",
+  "mpcs/nightly-features",
 ]
