@@ -11,6 +11,7 @@ version.workspace = true
 
 [dependencies]
 bincode.workspace = true
+ceno_gpu = { workspace = true, optional = true }
 either.workspace = true
 ff_ext.workspace = true
 itertools.workspace = true
@@ -37,4 +38,5 @@ tikv-jemallocator = { version = "0.6", optional = true }
 criterion.workspace = true
 
 [features]
+gpu = ["dep:ceno_gpu"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]

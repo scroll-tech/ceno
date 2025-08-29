@@ -8,6 +8,7 @@ use crate::{
     scheme::{
         constants::DYNAMIC_RANGE_MAX_BITS,
         cpu::CpuTowerProver,
+        create_backend, create_prover,
         hal::{ProofInput, TowerProverSpec},
         prover::ZkVMCpuProver,
     },
@@ -23,9 +24,9 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::cpu::{CpuBackend, CpuProver, default_backend_config};
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
-use std::{marker::PhantomData, rc::Rc};
+use std::marker::PhantomData;
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
@@ -100,7 +101,8 @@ fn test_rw_lk_expression_combination() {
     type E = GoldilocksExt2;
     type Pcs = WhirDefault<E>;
 
-    let backend: Rc<_> = CpuBackend::<E, Pcs>::new(8, Conjecture100bits).into();
+    let (max_num_variables, security_level) = (8, Conjecture100bits);
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
 
     fn test_rw_lk_expression_combination_inner<
         const L: usize,
@@ -218,9 +220,9 @@ fn test_rw_lk_expression_combination() {
     }
 
     // <lookup count, rw count>
-    test_rw_lk_expression_combination_inner::<19, 17, _, _>(CpuProver::new(backend.clone()));
-    test_rw_lk_expression_combination_inner::<61, 17, _, _>(CpuProver::new(backend.clone()));
-    test_rw_lk_expression_combination_inner::<17, 61, _, _>(CpuProver::new(backend.clone()));
+    test_rw_lk_expression_combination_inner::<19, 17, _, _>(create_prover(backend.clone()));
+    test_rw_lk_expression_combination_inner::<61, 17, _, _>(create_prover(backend.clone()));
+    test_rw_lk_expression_combination_inner::<17, 61, _, _>(create_prover(backend.clone()));
 }
 
 const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [
@@ -305,8 +307,9 @@ fn test_single_add_instance_e2e() {
     assert_eq!(halt_records.len(), 1);
 
     // proving
-    let backend: Rc<_> = CpuBackend::<E, Pcs>::new(24, Conjecture100bits).into();
-    let device = CpuProver::new(backend);
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let device = create_prover(backend);
     let mut prover = ZKVMProver::new(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();

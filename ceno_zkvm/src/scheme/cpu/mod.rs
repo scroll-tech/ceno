@@ -43,11 +43,18 @@ pub struct CpuTowerProver;
 
 impl CpuTowerProver {
     pub fn create_proof<'a, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+        mut out_evals: Vec<Vec<Vec<E>>>,
         prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
-    ) -> (Point<E>, TowerProofs<E>) {
+    ) -> (
+        Point<E>,
+        TowerProofs<E>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+    ) {
         #[derive(Debug, Clone)]
         enum GroupedMLE<'a, E: ExtensionField> {
             Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
@@ -237,7 +244,10 @@ impl CpuTowerProver {
         }
         let next_rt = out_rt;
 
-        (next_rt, proofs)
+        let lk_out_evals = out_evals.pop().unwrap();
+        let w_out_evals = out_evals.pop().unwrap();
+        let r_out_evals = out_evals.pop().unwrap();
+        (next_rt, proofs, lk_out_evals, w_out_evals, r_out_evals)
     }
 }
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBackend<E, PCS>>
@@ -500,14 +510,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         fields(profiling_3),
         level = "trace"
     )]
-    fn prove_tower_relation<'a>(
+    fn prove_tower_relation<'a, 'b, 'c>(
         &self,
-        prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
-        logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
-        num_fanin: usize,
+        composed_cs: &ComposedConstrainSystem<E>,
+        input: &ProofInput<'a, CpuBackend<E, PCS>>,
+        records: &'c [Arc<MultilinearExtension<'b, E>>],
+        is_padded: bool,
+        challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
-    ) -> (Point<E>, TowerProofs<E>) {
-        CpuTowerProver::create_proof(prod_specs, logup_specs, num_fanin, transcript)
+    ) -> (
+        Point<E>,
+        TowerProofs<E>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+        Vec<Vec<E>>,
+    )
+    where
+        'a: 'b,
+        'b: 'c,
+    {
+        // First build tower witness
+        let span = entered_span!("build_tower_witness", profiling_2 = true);
+        let (out_evals, prod_specs, logup_specs) =
+            self.build_tower_witness(composed_cs, input, records, is_padded, challenges);
+        exit_span!(span);
+
+        // Then prove the tower relation
+        let span = entered_span!("prove_tower_relation", profiling_2 = true);
+        let res = CpuTowerProver::create_proof(out_evals, prod_specs, logup_specs, 2, transcript);
+        exit_span!(span);
+        res
     }
 }
 

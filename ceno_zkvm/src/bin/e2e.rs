@@ -8,17 +8,14 @@ use ceno_zkvm::{
         setup_platform_debug, verify,
     },
     scheme::{
-        ZKVMProof, constants::MAX_NUM_VARIABLES, hal::ProverDevice, mock_prover::LkMultiplicityKey,
-        verifier::ZKVMVerifier,
+        ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
+        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
     },
     with_panic_hook,
 };
 use clap::Parser;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use gkr_iop::{
-    cpu::{CpuBackend, CpuProver},
-    hal::ProverBackend,
-};
+use gkr_iop::hal::ProverBackend;
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
@@ -239,13 +236,10 @@ fn main() {
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
-    // TODO support GPU backend
-
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
-            let backend =
-                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
-            let prover = CpuProver::new(backend);
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
             run_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, _, _>(
                 prover,
                 program,
@@ -259,9 +253,8 @@ fn main() {
             )
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
-            let backend =
-                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
-            let prover = CpuProver::new(backend);
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
             run_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, _, _>(
                 prover,
                 program,
@@ -275,9 +268,8 @@ fn main() {
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
-            let backend =
-                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
-            let prover = CpuProver::new(backend);
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
             run_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, _, _>(
                 prover,
                 program,
@@ -291,9 +283,8 @@ fn main() {
             )
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
-            let backend =
-                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
-            let prover = CpuProver::new(backend);
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
             run_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, _, _>(
                 prover,
                 program,

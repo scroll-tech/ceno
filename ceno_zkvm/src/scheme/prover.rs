@@ -28,7 +28,7 @@ use witness::RowMajorMatrix;
 
 use crate::{
     error::ZKVMError,
-    scheme::{constants::NUM_FANIN_LOGUP, hal::ProofInput},
+    scheme::hal::ProofInput,
     structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
@@ -80,7 +80,7 @@ impl<
         &mut self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
-        mut transcript: impl Transcript<E>,
+        mut transcript: (impl Transcript<E> + 'static),
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let raw_pi = pi.to_vec::<E>();
         let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
@@ -144,7 +144,7 @@ impl<
             transcript.append_message(&num_instance.to_le_bytes());
         }
 
-        let commit_to_traces_span = entered_span!("batch commit to traces", profiling_2 = true);
+        let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
         let mut wits_instances = BTreeMap::new();
         let mut wits_rmms = BTreeMap::new();
         let mut structural_wits = BTreeMap::new();
@@ -189,8 +189,10 @@ impl<
         exit_span!(commit_to_traces_span);
 
         // transfer pk to device
+        let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
         let device_pk = self.device.transport_proving_key(self.pk.clone());
         let mut fixed_mles = device_pk.fixed_mles;
+        exit_span!(transfer_pk_span);
 
         // squeeze two challenges from transcript
         let challenges = [
@@ -275,6 +277,7 @@ impl<
                 Ok((points, evaluations))
             },
         )?;
+        exit_span!(main_proofs_span);
 
         // batch opening pcs
         // generate static info from prover key for expected num variable
@@ -284,7 +287,7 @@ impl<
             .values()
             .map(|pk| (pk.get_cs().num_witin(), pk.get_cs().num_fixed()))
             .collect_vec();
-        let pcs_opening = entered_span!("pcs_opening");
+        let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
         let mpcs_opening_proof = self.device.open(
             witness_data,
             Some(device_pk.pcs_data),
@@ -294,7 +297,6 @@ impl<
             &num_instances_with_rotation,
             &mut transcript,
         );
-
         exit_span!(pcs_opening);
 
         let vm_proof = ZKVMProof::new(
@@ -304,7 +306,6 @@ impl<
             witin_commit,
             mpcs_opening_proof,
         );
-        exit_span!(main_proofs_span);
 
         Ok(vm_proof)
     }
@@ -330,19 +331,13 @@ impl<
         // build main witness
         let (records, is_padded) = self.device.build_main_witness(cs, &input, challenges);
 
-        // build tower witness
-        let (mut out_evals, prod_specs, lookup_specs) = self
-            .device
-            .build_tower_witness(cs, &input, &records, is_padded, challenges);
-
-        let lk_out_evals = out_evals.pop().unwrap();
-        let w_out_evals = out_evals.pop().unwrap();
-        let r_out_evals = out_evals.pop().unwrap();
-
+        let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
-        let (rt_tower, tower_proof) =
-            self.device
-                .prove_tower_relation(prod_specs, lookup_specs, NUM_FANIN_LOGUP, transcript);
+        // (internally calls build_tower_witness)
+        let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) = self
+            .device
+            .prove_tower_relation(cs, &input, &records, is_padded, challenges, transcript);
+        exit_span!(span);
 
         assert_eq!(
             rt_tower.len(), // num var length should equal to max_num_instance

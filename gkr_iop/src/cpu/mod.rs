@@ -22,14 +22,20 @@ pub struct CpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: <PCS as PolynomialCommitmentScheme<E>>::ProverParam,
     pub vp: <PCS as PolynomialCommitmentScheme<E>>::VerifierParam,
     pub max_poly_size_log2: usize,
+    pub security_level: SecurityLevel,
     _marker: std::marker::PhantomData<E>,
 }
 
 pub const DEFAULT_MAX_NUM_VARIABLES: usize = 24;
 
+pub fn default_backend_config() -> (usize, SecurityLevel) {
+    (DEFAULT_MAX_NUM_VARIABLES, Conjecture100bits)
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for CpuBackend<E, PCS> {
     fn default() -> Self {
-        Self::new(DEFAULT_MAX_NUM_VARIABLES, Conjecture100bits)
+        let (max_poly_size_log2, security_level) = default_backend_config();
+        Self::new(max_poly_size_log2, security_level)
     }
 }
 
@@ -41,6 +47,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> CpuBackend<E, PCS> {
             pp,
             vp,
             max_poly_size_log2,
+            security_level,
             _marker: std::marker::PhantomData,
         }
     }

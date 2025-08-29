@@ -82,13 +82,24 @@ pub trait TowerProver<PB: ProverBackend> {
 
     // the validity of value of first layer in the tower tree is reduced to
     // the validity of value of last layer in the tower tree through sumchecks
-    fn prove_tower_relation<'a>(
+    fn prove_tower_relation<'a, 'b, 'c>(
         &self,
-        prod_specs: Vec<TowerProverSpec<'a, PB>>,
-        logup_specs: Vec<TowerProverSpec<'a, PB>>,
-        num_fanin: usize,
+        composed_cs: &ComposedConstrainSystem<PB::E>,
+        input: &ProofInput<'a, PB>,
+        records: &'c [Arc<PB::MultilinearPoly<'b>>],
+        is_padded: bool,
+        challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
-    ) -> (Point<PB::E>, TowerProofs<PB::E>);
+    ) -> (
+        Point<PB::E>,
+        TowerProofs<PB::E>,
+        Vec<Vec<PB::E>>,
+        Vec<Vec<PB::E>>,
+        Vec<Vec<PB::E>>,
+    )
+    where
+        'a: 'b,
+        'b: 'c;
 }
 
 pub struct MainSumcheckEvals<E: ExtensionField> {
@@ -141,7 +152,7 @@ pub trait OpeningProver<PB: ProverBackend> {
         evals: Vec<Vec<PB::E>>,
         circuit_num_polys: &[(usize, usize)],
         num_instances: &[(usize, usize)],
-        transcript: &mut impl Transcript<PB::E>,
+        transcript: &mut (impl Transcript<PB::E> + 'static),
     ) -> <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Proof;
 }
 

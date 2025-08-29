@@ -23,6 +23,8 @@ pub mod error;
 pub mod evaluation;
 pub mod gadgets;
 pub mod gkr;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod hal;
 pub mod selector;
 pub mod tables;
