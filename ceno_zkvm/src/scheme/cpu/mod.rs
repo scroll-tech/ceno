@@ -675,7 +675,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
-        _records: Vec<ArcMultilinearExtension<'b, E>>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
         composed_cs: &ComposedConstrainSystem<E>,
         challenges: &[E; 2],

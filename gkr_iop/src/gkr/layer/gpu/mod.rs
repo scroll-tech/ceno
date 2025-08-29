@@ -61,7 +61,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Gp
     ) -> crate::gkr::layer::sumcheck_layer::LayerProof<E> {
         let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit.0
             .into_iter()
-            .map(|gpu_mle| Arc::new(gpu_mle.inner().clone()))
+            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
             .collect();
         let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
         <CpuProver<CpuBackend<E, PCS>> as LinearLayerProver<CpuBackend<E, PCS>>>::prove(
@@ -83,7 +83,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
     ) -> LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E> {
         let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit.0
             .into_iter()
-            .map(|gpu_mle| Arc::new(gpu_mle.inner().clone()))
+            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
             .collect();
         let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
         <CpuProver<CpuBackend<E, PCS>> as SumcheckLayerProver<CpuBackend<E, PCS>>>::prove(
@@ -99,7 +99,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
 
 pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
     monomial_terms: &[Term<Expression<E>, Expression<E>>],
-    all_mles: &[Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>],
+    all_mles: &Vec<Either<&'a MultilinearExtension<'a, E>, &'a mut MultilinearExtension<'a, E>>>,
+    // all_mles: &[Either<&GpuPolynomial, &mut GpuPolynomial>],
     public_io_evals: &[E],
     challenges: &[E],
 ) -> (Vec<E>, Vec<Vec<usize>>, Vec<(usize, usize)>) {
@@ -247,16 +248,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         // `wit` := witin ++ fixed
         // we concat eq in between `wit` := witin ++ eqs ++ fixed
         let mut eqs_cpu = eqs.clone();
-        let all_witins = wit
+        let mut all_witins = wit
             .iter()
             .take(layer.n_witin)
-            .map(|mle| Either::Left(mle.inner()))
+            .map(|mle| Either::Left(mle.inner_to_mle()))
             .chain(eqs_cpu.iter_mut().map(Either::Right))
             .chain(
                 // fixed, start after `n_witin`
                 wit.iter()
                     .skip(layer.n_witin + layer.n_structural_witin)
-                    .map(|mle| Either::Left(mle.inner())),
+                    .map(|mle| Either::Left(mle.inner_to_mle())),
             )
             .collect_vec();
         assert_eq!(
@@ -268,21 +269,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             layer.n_structural_witin,
             layer.n_fixed,
         );
-        // for gpu
+        let all_witins_ref: Vec<Either<&MultilinearExtension<'_, E>, &mut MultilinearExtension<'_, E>>> = 
+            all_witins.iter_mut().map(|either| {
+                match either {
+                    Either::Left(mle) => Either::Left(&*mle),  // &mut T -> &T
+                    Either::Right(mle_mut) => Either::Right(&mut **mle_mut), // &mut &mut T -> &mut T
+                }
+            }).collect_vec();
         let (term_coefficients, mle_indices_per_term, mle_size_info) = extract_mle_relationships_from_monomial_terms(
             &layer
                 .main_sumcheck_expression_monomial_terms
                 .clone()
                 .unwrap(),
-            &all_witins,
+            &all_witins_ref,
             pub_io_evals,
             &main_sumcheck_challenges,
         );
 
         // cpu
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
+        
         let builder =
-            VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins);
+            VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins_ref);
         let vps = builder.to_virtual_polys_with_monomial_terms(
             &layer
                 .main_sumcheck_expression_monomial_terms
@@ -308,20 +316,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .unwrap();
         let cuda_hal = hal_arc.lock().unwrap();
 
+        println!("all_witins_gpu begin");
         // Reconstruct the GPU-specific types for CUDA operations
-        let all_witins_gpu = wit
+        let mut all_witins_gpu = wit
             .iter()
             .take(layer.n_witin)
-            .map(|mle| Either::Left(mle.inner()))
+            .map(|mle| Either::Left(mle.inner_to_mle()))
             .chain(eqs.iter_mut().map(Either::Right))
             .chain(
                 // fixed, start after `n_witin`
                 wit.iter()
                     .skip(layer.n_witin + layer.n_structural_witin)
-                    .map(|mle| Either::Left(mle.inner())),
+                    .map(|mle| Either::Left(mle.inner_to_mle())),
             )
             .collect_vec();
-        let all_witins_gpu_gl64: Vec<Either<&MultilinearExtension<EGL64>, &mut MultilinearExtension<EGL64>>> = unsafe { std::mem::transmute(all_witins_gpu) };
+        let all_witins_ref: Vec<Either<&MultilinearExtension<'_, E>, &mut MultilinearExtension<'_, E>>> = 
+            all_witins_gpu.iter_mut().map(|either| {
+                match either {
+                    Either::Left(mle) => Either::Left(&*mle),  // &mut T -> &T
+                    Either::Right(mle_mut) => Either::Right(&mut **mle_mut), // &mut &mut T -> &mut T
+                }
+            }).collect_vec();
+        let all_witins_gpu_gl64: Vec<Either<&MultilinearExtension<EGL64>, &mut MultilinearExtension<EGL64>>> = unsafe { std::mem::transmute(all_witins_ref) };
 
         // Calculate max_num_var and max_degree from the extracted relationships
         let max_num_var = max_num_variables;
@@ -400,7 +416,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
             .map(|rotation_expr| match rotation_expr {
                 (Expression::WitIn(source_wit_id), _) => rotation_next_base_mle(
                     &bh,
-                    &Arc::new(wit[*source_wit_id as usize].inner().clone()),
+                    &Arc::new(wit[*source_wit_id as usize].inner_to_mle()),
                     rotation_cyclic_group_log2,
                 ),
                 _ => unimplemented!("unimplemented rotation"),
@@ -410,7 +426,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
                 &eq,
                 rotation_cyclic_subgroup_size,
                 rotation_cyclic_group_log2,
-                wit[0].evaluations().len(), // Take first mle just to retrieve total length
+                wit[0].evaluations_len(), // Take first mle just to retrieve total length
             )))
             .collect::<Vec<_>>();
         let selector = mles.pop().unwrap();
@@ -423,24 +439,34 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     .collect_vec();
     exit_span!(span);
     // TODO FIXME: we pick a random point from output point, does it sound?
+    let owned_mles: Vec<MultilinearExtension<E>> = rotated_mles
+        .iter()
+        .zip_eq(raw_rotation_exprs)
+        .filter_map(|(_, (_, expr))| match expr {
+            Expression::WitIn(wit_id) => Some(wit[*wit_id as usize].inner_to_mle()),
+            _ => None,
+        })
+        .collect();
+
+    let mut mles_cpu_ref: Vec<Either<&MultilinearExtension<'_, E>, &mut MultilinearExtension<'_, E>>> = Vec::new();
+
+    let mut owned_idx = 0;
+    for (mle, (_, expr)) in rotated_mles.iter_mut().zip_eq(raw_rotation_exprs) {
+    match expr {
+        Expression::WitIn(_) => {
+            mles_cpu_ref.push(Either::Right(mle));
+            mles_cpu_ref.push(Either::Left(&owned_mles[owned_idx]));
+            owned_idx += 1;
+        }
+        _ => panic!(""),
+    }
+    }
+    mles_cpu_ref.push(Either::Right(&mut selector));
     let builder = VirtualPolynomialsBuilder::new_with_mles(
         num_threads,
         max_num_variables,
         // mles format [rotation_mle1, target_mle1, rotation_mle2, target_mle2, ....., selector, eq]
-        rotated_mles
-            .iter_mut()
-            .zip_eq(raw_rotation_exprs)
-            .flat_map(|(mle, (_, expr))| match expr {
-                Expression::WitIn(wit_id) => {
-                    vec![
-                        Either::Right(mle),
-                        Either::Left(wit[*wit_id as usize].inner()),
-                    ]
-                }
-                _ => panic!(""),
-            })
-            .chain(std::iter::once(Either::Right(&mut selector)))
-            .collect_vec(),
+        mles_cpu_ref,
     );
     let vp = builder.to_virtual_polys_with_monomial_terms(
         &rotation_sumcheck_expression,
@@ -478,7 +504,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
             };
             let left_eval = match rotated_expr {
                 Expression::WitIn(source_wit_id) => {
-                    wit[*source_wit_id as usize].inner().evaluate(&left_point)
+                    wit[*source_wit_id as usize].evaluate(&left_point)
                 }
                 _ => unreachable!(),
             };

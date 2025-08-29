@@ -126,7 +126,6 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<PB::E>,
-        records: Vec<Arc<PB::MultilinearPoly<'b>>>,
         input: &'b ProofInput<'a, PB>,
         cs: &ComposedConstrainSystem<PB::E>,
         challenges: &[PB::E; 2],

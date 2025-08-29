@@ -348,7 +348,7 @@ impl<
         // 2. prove the relation between last layer in the tower and read/write/logup records
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) = self
             .device
-            .prove_main_constraints(rt_tower, records, &input, cs, challenges, transcript)?;
+            .prove_main_constraints(rt_tower, &input, cs, challenges, transcript)?;
         let MainSumcheckEvals {
             wits_in_evals,
             fixed_in_evals,
