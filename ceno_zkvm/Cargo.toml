@@ -15,17 +15,18 @@ ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
 either.workspace = true
-ff_ext = { path = "../ff_ext" }
+ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
-mpcs = { path = "../mpcs" }
-multilinear_extensions = { version = "0", path = "../multilinear_extensions" }
+whir.workspace = true
+mpcs.workspace = true
+multilinear_extensions.workspace = true
 p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sumcheck.workspace = true
-transcript = { path = "../transcript" }
-witness = { path = "../witness" }
+transcript.workspace = true
+witness.workspace = true
 
 itertools.workspace = true
 ndarray.workspace = true
@@ -59,20 +60,21 @@ ceno-examples = { path = "../examples-builder" }
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow", "nightly-features", "u16limb_circuit"]
+default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel"]
+parallel = ["whir/parallel", "p3/parallel", "multilinear_extensions/parallel", "mpcs/parallel"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 goldilocks = ["forbid_overflow", "nightly-features"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 nightly-features = [
-  "p3/nightly-features",
-  "ff_ext/nightly-features",
-  "mpcs/nightly-features",
-  "multilinear_extensions/nightly-features",
-  "sumcheck/nightly-features",
-  "transcript/nightly-features",
-  "witness/nightly-features",
+    "p3/nightly-features",
+    "ff_ext/nightly-features",
+    "mpcs/nightly-features",
+    "multilinear_extensions/nightly-features",
+    "sumcheck/nightly-features",
+    "transcript/nightly-features",
+    "witness/nightly-features",
 ]
 sanity-check = ["mpcs/sanity-check"]
 u16limb_circuit = ["ceno_emul/u16limb_circuit"]

@@ -4,7 +4,7 @@ use ff_ext::ExtensionField;
 use crate::circuit_builder::DebugIndex;
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, power_sequence};
-use p3_field::Field;
+use p3::field::Field;
 
 use crate::{circuit_builder::CircuitBuilder, gadgets::AssertLtConfig};
 
