@@ -296,6 +296,11 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                             let element = key & ((1 << left) - 1);
                             format!("Dynamic Range Table U{left} with Element: {element:?}")
                         }
+                        ROMType::DoubleU8 => {
+                            let a = (key >> 8) & ((1 << 8) - 1);
+                            let b = key & ((1 << 8) - 1);
+                            format!("Double U8 Range Table with Elements: ({a:?}, {b:?})")
+                        }
                         ROMType::And => {
                             let (a, b) = AndTable::unpack(key);
                             format!("Element: {a} && {b}")
@@ -383,6 +388,25 @@ fn load_tables<E: ExtensionField>(
         }
     }
 
+    fn load_double_u8_range_table<E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u64>>,
+        cs: &ConstraintSystem<E>,
+        challenge: [E; 2],
+    ) {
+        for (a, b) in (0..(1 << 8))
+            .flat_map(|i| std::iter::repeat_n(i, 1 << 8))
+            .zip(std::iter::repeat_n(0, 1 << 8).flat_map(|_| (0..(1 << 8))))
+        {
+            let rlc_record = cs.rlc_chip_record(vec![
+                (LookupTable::DoubleU8 as usize).into(),
+                a.into(),
+                b.into(),
+            ]);
+            let rlc_record = eval_by_expr(&[], &[], &challenge, &rlc_record);
+            t_vec.push(rlc_record.to_canonical_u64_vec());
+        }
+    }
+
     fn load_op_table<OP: OpsTable, E: ExtensionField>(
         t_vec: &mut Vec<Vec<u64>>,
         cs: &ConstraintSystem<E>,
@@ -402,6 +426,7 @@ fn load_tables<E: ExtensionField>(
 
     let mut table_vec = vec![];
     load_dynamic_range_table::<_, 18>(&mut table_vec, cs, challenge);
+    load_double_u8_range_table(&mut table_vec, cs, challenge);
     load_op_table::<AndTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<OrTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<XorTable, _>(&mut table_vec, cs, challenge);
@@ -726,6 +751,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         ROMType::Dynamic => {
                             lkm_from_cs
                                 .assert_dynamic_range(args_eval[0][inst_id], args_eval[1][inst_id]);
+                        }
+                        ROMType::DoubleU8 => {
+                            lkm_from_cs
+                                .assert_double_u8(args_eval[0][inst_id], args_eval[1][inst_id]);
                         }
                         ROMType::And => lkm_from_cs
                             .lookup_and_byte(args_eval[0][inst_id], args_eval[1][inst_id]),
