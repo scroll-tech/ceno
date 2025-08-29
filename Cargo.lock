@@ -982,7 +982,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "once_cell",
  "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -1625,7 +1625,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "aes",
  "bincode",
@@ -1680,7 +1680,7 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "either",
  "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -1896,6 +1896,28 @@ name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
+
+[[package]]
+name = "p3"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
+dependencies = [
+ "p3-baby-bear",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-fri",
+ "p3-goldilocks",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-mds",
+ "p3-merkle-tree",
+ "p3-poseidon",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
+]
 
 [[package]]
 name = "p3"
@@ -2266,7 +2288,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "criterion",
  "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -2889,7 +2911,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "crossbeam-channel",
  "either",
@@ -2926,7 +2948,7 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "itertools 0.13.0",
  "p3 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -3286,7 +3308,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "crossbeam-channel",
  "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
@@ -3563,7 +3585,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "bincode",
  "blake2",
@@ -3740,7 +3762,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
+source = "git+https://github.com/scroll-tech/ceno?rev=7c277a1#7c277a14e96c467f4cc26adc2547ff0487f8cf06"
 dependencies = [
  "ff_ext 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/ceno?rev=7c277a1)",
