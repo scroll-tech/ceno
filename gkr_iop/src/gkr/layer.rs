@@ -228,7 +228,7 @@ impl<E: ExtensionField> Layer<E> {
         proof: LayerProof<E>,
         claims: &mut [PointAndEval<E>],
         pub_io_evals: &[E],
-        challenges: &mut Vec<E>,
+        challenges: &mut Vec<E>, // TODO: can we avoid &mut here?
         transcript: &mut Trans,
         num_instances: usize,
     ) -> Result<(), BackendError> {

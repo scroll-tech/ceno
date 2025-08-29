@@ -131,6 +131,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
 
         let mut challenges = challenges.to_vec();
         let mut evaluations = out_evals.to_vec();
+        // TODO: can we avoid this resize?
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         for (i, (layer, layer_proof)) in izip!(&self.layers, sumcheck_proofs).enumerate() {
             tracing::debug!("verifier layer {i} layer with layer name {}", layer.name);
