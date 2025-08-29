@@ -482,7 +482,14 @@ where
 
 #[cfg(test)]
 mod test {
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::{BabyBearExt4, FromUniformBytes, GoldilocksExt2};
+    use itertools::Itertools;
+    use p3::field::{Field, FieldAlgebra, TwoAdicField};
+    use p3::babybear::BabyBear;
+    use p3::matrix::bitrev::BitReversableMatrix;
+    use p3::matrix::dense::RowMajorMatrix;
+    use p3::matrix::Matrix;
+    use crate::util::codeword_fold_with_challenge;
 
     use crate::{
         basefold::Basefold,
@@ -508,5 +515,36 @@ mod test {
             run_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21);
             run_batch_commit_open_verify::<GoldilocksExt2, PcsGoldilocksRSCode>(20, 21, 64);
         }
+    }
+
+    #[test]
+    fn test_fri_fold() {
+        type E = BabyBearExt4;
+        type F = BabyBear;
+
+        let mut rng = rand::thread_rng();
+        // fold a codeword of length 2^16 using random challenge
+        let codeword_log2_size = 16;
+        let codeword = E::random_vec(1 << codeword_log2_size, &mut rng);
+
+        let twiddle = F::GENERATOR.exp_power_of_2(F::TWO_ADICITY - codeword_log2_size);
+        let inv_2 = F::from_canonical_u64(2).inverse();
+
+        let challenge = E::random(&mut rng);
+
+        codeword.chunks(2).zip(twiddle.powers()).for_each(|(chunk, coeff)| {
+            codeword_fold_with_challenge(chunk, challenge, coeff, inv_2);
+        })
+    }
+
+    #[test]
+    fn test_bit_reverse() {
+        let v = (0..8).collect_vec();
+
+        let m = RowMajorMatrix::new(v, 1);
+        assert_eq!(
+            m.bit_reverse_rows().to_row_major_matrix().values,
+            vec![0b000, 0b100, 0b010, 0b110, 0b001, 0b101, 0b011, 0b111]
+        );
     }
 }
