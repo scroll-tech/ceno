@@ -449,7 +449,7 @@ impl<'a, E: ExtensionField> IOPProverState<'a, E> {
                     && matches!(poly_type, PolyMeta::Normal)
                 {
                     if !poly.is_mut() {
-                        *poly = Arc::new(poly.fix_variables(&[r]));
+                        *poly = Arc::new(poly.fix_variables(&[r]).unwrap());
                     } else {
                         let poly = Arc::get_mut(poly).unwrap();
                         poly.fix_variables_in_place(&[r])

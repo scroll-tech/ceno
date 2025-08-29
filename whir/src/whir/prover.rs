@@ -184,7 +184,7 @@ where
         // Fold the coefficients
         let folded_evaluations = round_state
             .evaluations
-            .fix_variables(&round_state.folding_randomness);
+            .fix_variables(&round_state.folding_randomness)?;
         let folded_evaluations_values = match folded_evaluations.evaluations() {
             FieldType::Ext(evals) => evals,
             _ => {
