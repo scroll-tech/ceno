@@ -25,7 +25,7 @@ use gkr_iop::{
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, WitnessId, fmt,
-    mle::{ArcMultilinearExtension, IntoMLEs},
+    mle::{ArcMultilinearExtension, IntoMLEs, MultilinearExtension},
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
 use p3::field::{Field, FieldAlgebra};
@@ -571,6 +571,16 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 });
             }
 
+            let zero_selector: ArcMultilinearExtension<_> =
+                if let Some(zero_selector) = &cs.zero_selector {
+                    structural_witin[zero_selector.selector_expr().id()].clone()
+                } else {
+                    let mut selector = vec![E::BaseField::ONE; num_instances];
+                    selector.resize(wits_in[0].evaluations().len(), E::BaseField::ZERO);
+                    MultilinearExtension::from_evaluation_vec_smart(wits_in[0].num_vars(), selector)
+                        .into()
+                };
+
             // require_equal does not always have the form of Expr::Sum as
             // the sum of witness and constant is expressed as scaled sum
             if let Expression::Sum(left, right) = expr
@@ -589,7 +599,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     pi,
                     &challenge,
                 );
-                let left_evaluated = &left_evaluated.get_ext_field_vec()[..num_instances];
+                let left_evaluated =
+                    filter_mle_by_selector_mle(left_evaluated, zero_selector.clone());
 
                 let right_evaluated = wit_infer_by_expr(
                     &right,
@@ -602,7 +613,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     pi,
                     &challenge,
                 );
-                let right_evaluated = &right_evaluated.get_ext_field_vec()[..num_instances];
+                let right_evaluated =
+                    filter_mle_by_selector_mle(right_evaluated, zero_selector.clone());
 
                 // left_evaluated.len() ?= right_evaluated.len() due to padding instance
                 for (inst_id, (left_element, right_element)) in
@@ -612,8 +624,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         errors.push(MockProverError::AssertEqualError {
                             left_expression: *left.clone(),
                             right_expression: right.clone(),
-                            left: Either::Right(*left_element),
-                            right: Either::Right(*right_element),
+                            left: Either::Right(left_element),
+                            right: Either::Right(right_element),
                             name: name.clone(),
                             inst_id,
                         });
@@ -632,13 +644,14 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     pi,
                     &challenge,
                 );
-                let expr_evaluated = &expr_evaluated.get_ext_field_vec()[..num_instances];
+                let expr_evaluated =
+                    filter_mle_by_selector_mle(expr_evaluated, zero_selector.clone());
 
                 for (inst_id, element) in enumerate(expr_evaluated) {
-                    if *element != E::ZERO {
+                    if element != E::ZERO {
                         errors.push(MockProverError::AssertZeroError {
                             expression: expr.clone(),
-                            evaluated: Either::Right(*element),
+                            evaluated: Either::Right(element),
                             name: name.clone(),
                             inst_id,
                         });
@@ -646,6 +659,14 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 }
             }
         }
+
+        let lk_selector: ArcMultilinearExtension<_> = if let Some(lk_selector) = &cs.lk_selector {
+            structural_witin[lk_selector.selector_expr().id()].clone()
+        } else {
+            let mut selector = vec![E::BaseField::ONE; num_instances];
+            selector.resize(wits_in[0].evaluations().len(), E::BaseField::ZERO);
+            MultilinearExtension::from_evaluation_vec_smart(wits_in[0].num_vars(), selector).into()
+        };
 
         // Lookup expressions
         for ((expr, name), (rom_type, _)) in cs
@@ -665,10 +686,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 pi,
                 &challenge,
             );
-            let expr_evaluated = &expr_evaluated.get_ext_field_vec()[..num_instances];
+            let expr_evaluated = filter_mle_by_selector_mle(expr_evaluated, lk_selector.clone());
 
             // Check each lookup expr exists in t vec
-            for (inst_id, element) in enumerate(expr_evaluated) {
+            for (inst_id, element) in enumerate(&expr_evaluated) {
                 if !table.contains(&element.to_canonical_u64_vec()) {
                     errors.push(MockProverError::LookupError {
                         rom_type: *rom_type,
@@ -682,12 +703,17 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
             // Increment shared LK Multiplicity
             for element in expr_evaluated {
-                shared_lkm.increment(*rom_type, *element);
+                shared_lkm.increment(*rom_type, element);
             }
         }
 
         // LK Multiplicity check
         if let Some(lkm_from_assignment) = expected_lkm {
+            let selected_count = lk_selector
+                .get_base_field_vec()
+                .iter()
+                .filter(|sel| **sel == E::BaseField::ONE)
+                .count();
             // Infer LK Multiplicity from constraint system.
             let mut lkm_from_cs = LkMultiplicity::default();
             for (rom_type, args) in &cs.lk_expressions_items_map {
@@ -705,49 +731,45 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             pi,
                             &challenge,
                         );
-                        let mut arg_eval = arg_eval
-                            .get_ext_field_vec()
-                            .iter()
-                            .map(E::to_canonical_u64)
-                            .take(num_instances)
-                            .collect_vec();
-
-                        // Constant terms will have single element in `args_expr_evaluated`, so let's fix that.
-                        if arg_expr.is_constant() && arg_eval.len() == 1 {
-                            arg_eval.resize(num_instances, arg_eval[0])
+                        if arg_expr.is_constant() && arg_eval.evaluations.len() == 1 {
+                            vec![arg_eval.get_ext_field_vec()[0].to_canonical_u64(); selected_count]
+                        } else {
+                            filter_mle_by_selector_mle(arg_eval, lk_selector.clone())
+                                .iter()
+                                .map(E::to_canonical_u64)
+                                .collect_vec()
                         }
-                        arg_eval
                     })
                     .collect();
 
                 // Count lookups infered from ConstraintSystem from all instances into lkm_from_cs.
-                for inst_id in 0..num_instances {
+                for i in 0..selected_count {
                     match rom_type {
                         ROMType::Dynamic => {
-                            lkm_from_cs
-                                .assert_dynamic_range(args_eval[0][inst_id], args_eval[1][inst_id]);
+                            lkm_from_cs.assert_dynamic_range(args_eval[0][i], args_eval[1][i]);
                         }
-                        ROMType::And => lkm_from_cs
-                            .lookup_and_byte(args_eval[0][inst_id], args_eval[1][inst_id]),
-                        ROMType::Or => {
-                            lkm_from_cs.lookup_or_byte(args_eval[0][inst_id], args_eval[1][inst_id])
+                        ROMType::And => {
+                            lkm_from_cs.lookup_and_byte(args_eval[0][i], args_eval[1][i])
                         }
-                        ROMType::Xor => lkm_from_cs
-                            .lookup_xor_byte(args_eval[0][inst_id], args_eval[1][inst_id]),
-                        ROMType::Ltu => lkm_from_cs
-                            .lookup_ltu_byte(args_eval[0][inst_id], args_eval[1][inst_id]),
+                        ROMType::Or => lkm_from_cs.lookup_or_byte(args_eval[0][i], args_eval[1][i]),
+                        ROMType::Xor => {
+                            lkm_from_cs.lookup_xor_byte(args_eval[0][i], args_eval[1][i])
+                        }
+                        ROMType::Ltu => {
+                            lkm_from_cs.lookup_ltu_byte(args_eval[0][i], args_eval[1][i])
+                        }
                         ROMType::Pow => {
-                            assert_eq!(args_eval[0][inst_id], 2);
-                            lkm_from_cs.lookup_pow2(args_eval[1][inst_id])
+                            assert_eq!(args_eval[0][i], 2);
+                            lkm_from_cs.lookup_pow2(args_eval[1][i])
                         }
-                        ROMType::Instruction => lkm_from_cs.fetch(args_eval[0][inst_id] as u32),
+                        ROMType::Instruction => lkm_from_cs.fetch(args_eval[0][i] as u32),
                     };
                 }
             }
 
             errors.extend(compare_lkm(
-                lkm_from_cs.into_finalize_result(),
                 lkm_from_assignment,
+                lkm_from_cs.into_finalize_result(),
             ));
         }
 
@@ -931,13 +953,12 @@ Hints:
         for (
             circuit_name,
             ComposedConstrainSystem {
-                zkvm_v1_css: cs, ..
+                zkvm_v1_css: cs,
+                gkr_circuit,
             },
         ) in &cs.circuit_css
         {
-            let is_opcode = cs.lk_table_expressions.is_empty()
-                && cs.r_table_expressions.is_empty()
-                && cs.w_table_expressions.is_empty();
+            let is_opcode = gkr_circuit.is_some();
             let [witness, structural_witness] = witnesses
                 .get_opcode_witness(circuit_name)
                 .or_else(|| witnesses.get_table_witness(circuit_name))
@@ -1079,10 +1100,25 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
+
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
                         continue;
                     }
+
+                    let w_selector: ArcMultilinearExtension<_> =
+                        if let Some(w_selector) = &cs.w_selector {
+                            structural_witness[w_selector.selector_expr().id()].clone()
+                        } else {
+                            let mut selector = vec![E::BaseField::ONE; *num_rows];
+                            selector.resize(witness[0].evaluations().len(), E::BaseField::ZERO);
+                            MultilinearExtension::from_evaluation_vec_smart(
+                                witness[0].num_vars(),
+                                selector,
+                            )
+                            .into()
+                        };
+
                     for ((w_rlc_expr, annotation), (_, w_exprs)) in (cs
                         .w_expressions
                         .iter()
@@ -1095,7 +1131,7 @@ Hints:
                     .zip_eq(cs.w_ram_types.iter())
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
-                        let write_rlc_records = (wit_infer_by_expr(
+                        let write_rlc_records = wit_infer_by_expr(
                             w_rlc_expr,
                             cs.num_witin,
                             cs.num_structural_witin,
@@ -1105,9 +1141,9 @@ Hints:
                             structural_witness,
                             &pi_mles,
                             &challenges,
-                        )
-                        .get_ext_field_vec())[..*num_rows]
-                            .to_vec();
+                        );
+                        let write_rlc_records =
+                            filter_mle_by_selector_mle(write_rlc_records, w_selector.clone());
 
                         if $ram_type == RAMType::GlobalState {
                             // w_exprs = [GlobalState, pc, timestamp]
@@ -1127,11 +1163,11 @@ Hints:
                                         &pi_mles,
                                         &challenges,
                                     );
-                                    v.get_ext_field_vec()[..*num_rows].to_vec()
+                                    filter_mle_by_selector_mle(v, w_selector.clone())
                                 })
                                 .collect_vec();
                             // convert [[pc], [timestamp]] into [[pc, timestamp]]
-                            let w = (0..*num_rows)
+                            let w = (0..w[0].len())
                                 // TODO: use transpose
                                 .map(|row| w.iter().map(|w| w[row]).collect_vec())
                                 .collect_vec();
@@ -1165,6 +1201,18 @@ Hints:
                     if *num_rows == 0 {
                         continue;
                     }
+                    let r_selector: ArcMultilinearExtension<_> =
+                        if let Some(r_selector) = &cs.r_selector {
+                            structural_witness[r_selector.selector_expr().id()].clone()
+                        } else {
+                            let mut selector = vec![E::BaseField::ONE; *num_rows];
+                            selector.resize(witness[0].evaluations().len(), E::BaseField::ZERO);
+                            MultilinearExtension::from_evaluation_vec_smart(
+                                witness[0].num_vars(),
+                                selector,
+                            )
+                            .into()
+                        };
                     for ((r_expr, annotation), _) in (cs
                         .r_expressions
                         .iter()
@@ -1187,9 +1235,9 @@ Hints:
                             structural_witness,
                             &pi_mles,
                             &challenges,
-                        )
-                        .get_ext_field_vec()[..*num_rows]
-                            .to_vec();
+                        );
+                        let read_records =
+                            filter_mle_by_selector_mle(read_records, r_selector.clone());
 
                         let mut records = vec![];
                         for (row, record) in enumerate(read_records) {
@@ -1388,6 +1436,24 @@ fn print_errors<E: ExtensionField, K: LkMultiplicityKey>(
     if panic_on_error {
         panic!("(Unexpected) Constraints not satisfied");
     }
+}
+
+fn filter_mle_by_selector_mle<E: ExtensionField>(
+    target_mle: ArcMultilinearExtension<E>,
+    selector: ArcMultilinearExtension<E>,
+) -> Vec<E> {
+    target_mle
+        .get_ext_field_vec()
+        .iter()
+        .zip_eq(selector.get_base_field_vec())
+        .filter_map(|(v, sel)| {
+            if *sel == E::BaseField::ONE {
+                Some(*v)
+            } else {
+                None
+            }
+        })
+        .collect_vec()
 }
 
 #[cfg(test)]

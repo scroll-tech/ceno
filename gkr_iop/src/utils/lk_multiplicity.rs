@@ -179,22 +179,34 @@ impl LkMultiplicity {
     /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
+        if C == 1 {
+            return;
+        }
         self.increment(LookupTable::Dynamic, (1 << C) + v);
     }
 
     #[inline(always)]
-    pub fn assert_dynamic_range(&mut self, v: u64, bits: u64) {
-        self.increment(LookupTable::Dynamic, (1 << bits) + v);
+    pub fn assert_dynamic_range(&mut self, v: u64, max_bits: u64) {
+        if max_bits == 1 {
+            return;
+        }
+        self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
     }
 
     /// assert within range
     #[inline(always)]
-    pub fn assert_ux_in_u16(&mut self, size: usize, v: u64) {
-        self.increment(LookupTable::Dynamic, (1 << size) + v);
+    pub fn assert_ux_in_u16(&mut self, max_bits: usize, v: u64) {
+        if max_bits == 1 {
+            return;
+        }
+        self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
     }
 
     #[inline(always)]
     pub fn assert_ux_v2(&mut self, v: u64, max_bits: usize) {
+        if max_bits == 1 {
+            return;
+        }
         self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
     }
 

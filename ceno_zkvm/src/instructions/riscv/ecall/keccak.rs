@@ -1,10 +1,12 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{ByteAddr, Cycle, InsnKind, Platform, StepRecord};
+use ceno_emul::{
+    ByteAddr, Change, Cycle, InsnKind, KECCAK_PERMUTE, Platform, StepRecord, WORD_SIZE, WriteOp,
+};
 use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube, layer::Layer},
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -17,21 +19,20 @@ use rayon::{
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
-    Value,
     chip_handler::general::InstFetch,
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
         Instruction,
         riscv::{
-            constants::UInt,
-            ecall_base::WriteFixedRS,
-            insn_base::{StateInOut, WriteMEM},
+            constants::{LIMB_BITS, LIMB_MASK, MEM_BITS, UInt},
+            ecall_base::OpFixedRS,
+            insn_base::{MemAddr, StateInOut, WriteMEM},
         },
     },
     precompiles::{
-        KECCAK_ROUNDS, KeccakInstance, KeccakLayout, KeccakParams, KeccakStateInstance,
-        KeccakTrace, KeccakWitInstance,
+        KECCAK_ROUNDS, KECCAK_ROUNDS_CEIL_LOG2, KeccakInstance, KeccakLayout, KeccakParams,
+        KeccakStateInstance, KeccakTrace, KeccakWitInstance,
     },
     structs::ProgramParams,
     tables::{InsnRecord, RMMCollections},
@@ -42,8 +43,8 @@ use crate::{
 pub struct EcallKeccakConfig<E: ExtensionField> {
     pub layout: KeccakLayout<E>,
     vm_state: StateInOut<E>,
-    ecall_id: (WriteFixedRS<E, { Platform::reg_ecall() }>, UInt<E>),
-    state_ptr: (WriteFixedRS<E, { Platform::reg_arg0() }>, UInt<E>),
+    ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
+    state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
@@ -71,34 +72,32 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         // constrain vmstate
         let vm_state = StateInOut::construct_circuit(cb, false)?;
 
-        let ecall_id_value = UInt::new_unchecked(|| "ecall_id", cb)?;
-        let state_ptr_value = UInt::new_unchecked(|| "state_ptr", cb)?;
+        let ecall_id = OpFixedRS::<_, { Platform::reg_ecall() }, false>::construct_circuit(
+            cb,
+            UInt::from_const_unchecked(vec![
+                KECCAK_PERMUTE & LIMB_MASK,
+                (KECCAK_PERMUTE >> LIMB_BITS) & LIMB_MASK,
+            ])
+            .register_expr(),
+            vm_state.ts,
+        )?;
 
-        let ecall_id = (
-            WriteFixedRS::<_, { Platform::reg_ecall() }>::construct_circuit(
-                cb,
-                ecall_id_value.register_expr(),
-                vm_state.ts,
-            )?,
-            ecall_id_value,
-        );
-        let state_ptr = (
-            WriteFixedRS::<_, { Platform::reg_arg0() }>::construct_circuit(
-                cb,
-                state_ptr_value.register_expr(),
-                vm_state.ts,
-            )?,
-            state_ptr_value,
-        );
+        let state_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
+
+        let state_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+            cb,
+            state_ptr_value.uint_unaligned().register_expr(),
+            vm_state.ts,
+        )?;
 
         // fetch
         cb.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
             InsnKind::ECALL.into(),
-            Some(E::BaseField::ZERO.expr()),
-            E::BaseField::ZERO.expr(),
-            E::BaseField::ZERO.expr(),
-            E::BaseField::ZERO.expr(),
+            None,
+            0.into(),
+            0.into(),
+            0.into(),
             #[cfg(feature = "u16limb_circuit")]
             0.into(),
         ))?;
@@ -114,9 +113,11 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .map(|(i, (val_before, val_after))| {
                 WriteMEM::construct_circuit(
                     cb,
-                    // mem address := state_ptr + i
-                    state_ptr.0.prev_value.value()
-                        + E::BaseField::from_canonical_u32(i as u32).expr(),
+                    state_ptr.prev_value.as_ref().unwrap().value()
+                        + E::BaseField::from_canonical_u32(
+                            ByteAddr::from((i * WORD_SIZE) as u32).0,
+                        )
+                        .expr(),
                     val_before.clone(),
                     val_after.clone(),
                     vm_state.ts,
@@ -137,7 +138,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                 layout,
                 vm_state,
                 ecall_id,
-                state_ptr,
+                state_ptr: (state_ptr, state_ptr_value),
                 mem_rw,
             },
             circuit,
@@ -201,38 +202,45 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .zip_eq(steps.par_chunks(num_instance_per_batch))
             .flat_map(|(instances, steps)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
+
                 instances
                     .chunks_mut(num_witin * KECCAK_ROUNDS.next_power_of_two())
                     .zip_eq(steps)
                     .map(|(instance_with_rotation, step)| {
                         let ops = &step.syscall().expect("syscall step");
 
-                        // assign full rotation with same witness
-                        for instance in instance_with_rotation.chunks_mut(num_witin) {
+                        let bh = BooleanHypercube::new(KECCAK_ROUNDS_CEIL_LOG2);
+                        let mut cyclic_group = bh.into_iter();
+
+                        for _ in 0..KECCAK_ROUNDS {
+                            let round_index = cyclic_group.next().unwrap();
+                            let instance = &mut instance_with_rotation
+                                [round_index as usize * num_witin..][..num_witin];
+
                             // vm_state
                             config.vm_state.assign_instance(instance, step)?;
 
-                            //  assign ecall_id
-                            config.ecall_id.1.assign_value(
-                                instance,
-                                Value::new_unchecked(ops.reg_ops[0].value.after),
-                            );
-                            config.ecall_id.0.assign_op(
+                            config.ecall_id.assign_op(
                                 instance,
                                 &mut lk_multiplicity,
                                 step.cycle(),
-                                &ops.reg_ops[0],
+                                &WriteOp::new_register_op(
+                                    Platform::reg_ecall(),
+                                    Change::new(KECCAK_PERMUTE, KECCAK_PERMUTE),
+                                    step.rs1().unwrap().previous_cycle,
+                                ),
                             )?;
-                            //  assign state_ptr
-                            config.state_ptr.1.assign_value(
+                            // assign state_ptr
+                            config.state_ptr.1.assign_instance(
                                 instance,
-                                Value::new_unchecked(ops.reg_ops[1].value.after),
-                            );
+                                &mut lk_multiplicity,
+                                ops.reg_ops[0].value.after,
+                            )?;
                             config.state_ptr.0.assign_op(
                                 instance,
                                 &mut lk_multiplicity,
                                 step.cycle(),
-                                &ops.reg_ops[1],
+                                &ops.reg_ops[0],
                             )?;
                             // assign mem_rw
                             for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
@@ -243,6 +251,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                                     op,
                                 )?;
                             }
+                            // fetch
+                            lk_multiplicity.fetch(step.pc().before.0);
                         }
                         Ok(())
                     })

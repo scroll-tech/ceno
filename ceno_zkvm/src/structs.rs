@@ -142,6 +142,14 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
             .as_ref()
             .map(|param| param.rotation_cyclic_group_log2)
     }
+
+    /// return rotation sub_group size
+    pub fn rotation_subgroup_size(&self) -> Option<usize> {
+        self.zkvm_v1_css
+            .rotation_params
+            .as_ref()
+            .map(|param| param.rotation_cyclic_subgroup_size)
+    }
 }
 
 #[derive(Clone)]
