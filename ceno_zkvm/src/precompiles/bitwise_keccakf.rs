@@ -780,7 +780,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     type Params = KeccakParams;
 
-    fn finalize(&mut self, _cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>) {
+    fn finalize(&mut self, _cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
         unimplemented!()
     }
 
