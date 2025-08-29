@@ -419,6 +419,7 @@ mod tests {
 
         let truth_value =
             poly.fix_variables(&folding_randomness)
+                .unwrap()
                 .evaluate(&expand_from_univariate(
                     root_of_unity.exp_u64(folding_factor_exp as u64 * index),
                     2,

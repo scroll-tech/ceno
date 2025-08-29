@@ -492,12 +492,10 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
         list
     }
 
-    pub fn fix_variables(&self, partial_point: &[E]) -> Self {
-        // TODO: return error.
-        assert!(
-            partial_point.len() <= self.num_vars(),
-            "invalid size of partial point"
-        );
+    pub fn fix_variables(&self, partial_point: &[E]) -> crate::Result<Self> {
+        if partial_point.len() > self.num_vars() {
+            return Err(crate::Error::InvalidSizeOfPartialPoint);
+        }
         let mut poly = Cow::Borrowed(self);
 
         // evaluate single variable of partial point from left to right
@@ -519,7 +517,7 @@ impl<'a, E: ExtensionField> MultilinearExtension<'a, E> {
             }
         }
         assert!(poly.num_vars == self.num_vars() - partial_point.len(),);
-        poly.into_owned()
+        Ok(poly.into_owned())
     }
 
     /// Reduce the number of variables of `self` by fixing the
