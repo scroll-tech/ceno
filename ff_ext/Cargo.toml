@@ -14,6 +14,7 @@ once_cell = "1.21.3"
 p3.workspace = true
 rand_core.workspace = true
 serde.workspace = true
+rand.workspace = true
 
 [features]
 nightly-features = ["p3/nightly-features"]

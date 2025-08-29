@@ -208,4 +208,46 @@ pub mod impl_babybear {
                 .collect()
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use p3::{
+            babybear::BabyBear,
+            field::{FieldAlgebra, FieldExtensionAlgebra},
+        };
+        use rand::thread_rng;
+
+        use crate::{BabyBearExt4, FromUniformBytes};
+
+        #[test]
+        fn test_ext_mul() {
+            for (a_limbs, b_limbs, c_limbs) in vec![
+                (vec![0, 1, 0, 0], vec![0, 0, 0, 1], vec![11, 0, 0, 0]), // x*x^3 = 11
+                (vec![0, 0, 1, 0], vec![0, 0, 0, 1], vec![0, 11, 0, 0]), // x^2*x^3 = 11*x
+                (vec![1, 2, 0, 0], vec![0, 0, 3, 4], vec![88, 0, 3, 10]), /* (1+2x)*(3x^2+4x^3) = 88 + 3x^2+10x^3 */
+                (vec![1, 2, 3, 4], vec![5, 6, 7, 8], vec![676, 588, 386, 60]),
+            ] {
+                let a = BabyBearExt4::from_base_iter(
+                    a_limbs.into_iter().map(BabyBear::from_canonical_u32),
+                );
+                let b = BabyBearExt4::from_base_iter(
+                    b_limbs.into_iter().map(BabyBear::from_canonical_u32),
+                );
+                let c = a * b;
+                assert_eq!(
+                    c,
+                    BabyBearExt4::from_base_iter(
+                        c_limbs.into_iter().map(BabyBear::from_canonical_u32)
+                    )
+                );
+            }
+
+            // print one random example
+            let mut rng = thread_rng();
+            let a = BabyBearExt4::random(&mut rng);
+            let b = BabyBearExt4::random(&mut rng);
+            let c = a * b;
+            println!("a: {:?}, b: {:?}, c: {:?}", a, b, c)
+        }
+    }
 }
