@@ -15,7 +15,7 @@ command = "cargo"
 env = { RUST_MIN_STACK = "33554432" }
 workspace = false
 
-[tasks.tests_v2]
+[tasks.tests_non_u16limb]
 args = [
   "test",
   # Run everything but 'benches'.
@@ -25,7 +25,7 @@ args = [
   "--examples",
   "--workspace",
   "--features",
-  "u16limb_circuit",
+  "goldilocks",
 ]
 command = "cargo"
 env = { RUST_MIN_STACK = "33554432" }

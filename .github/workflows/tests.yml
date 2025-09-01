@@ -44,5 +44,5 @@ jobs:
           cargo make --version || cargo install cargo-make
       - name: run test
         run: cargo make tests
-      - name: run test + feature u16limb_circuit
-        run: cargo make tests_v2
+      - name: run test w/o u16limb_circuit
+        run: cargo make tests_non_u16limb
