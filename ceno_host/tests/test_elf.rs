@@ -256,9 +256,8 @@ fn test_keccak_syscall() -> Result<()> {
 
     // Check the syscall effects.
     for (witness, expect) in izip!(syscalls, keccak_first_iter_outs) {
-        assert_eq!(witness.reg_ops.len(), 2);
+        assert_eq!(witness.reg_ops.len(), 1);
         assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
-        assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
 
         assert_eq!(witness.mem_ops.len(), expect.len() * 2);
         let got = witness
@@ -353,7 +352,7 @@ fn test_secp256k1_double() -> Result<()> {
     assert_eq!(syscalls.len(), 1);
 
     let witness = syscalls[0];
-    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops.len(), 1);
     assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
 
     let p_address = witness.reg_ops[0].value.after;
@@ -444,9 +443,8 @@ fn test_sha256_extend() -> Result<()> {
     assert_eq!(syscalls.len(), 1);
 
     let witness = syscalls[0];
-    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops.len(), 1);
     assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
-    assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
 
     let state_ptr = witness.reg_ops[0].value.after;
     assert_eq!(state_ptr, witness.reg_ops[0].value.before);

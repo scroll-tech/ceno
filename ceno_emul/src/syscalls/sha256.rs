@@ -45,22 +45,12 @@ pub fn sha_extend(w: &mut [u32]) {
 pub fn extend(vm: &VMState) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
-    // for compatibility with sp1 spec
-    assert_eq!(vm.peek_register(Platform::reg_arg1()), 0);
-
     // Read the argument `state_ptr`.
-    let reg_ops = vec![
-        WriteOp::new_register_op(
-            Platform::reg_arg0(),
-            Change::new(state_ptr, state_ptr),
-            0, // Cycle set later in finalize().
-        ),
-        WriteOp::new_register_op(
-            Platform::reg_arg1(),
-            Change::new(0, 0),
-            0, // Cycle set later in finalize().
-        ),
-    ];
+    let reg_ops = vec![WriteOp::new_register_op(
+        Platform::reg_arg0(),
+        Change::new(state_ptr, state_ptr),
+        0, // Cycle set later in finalize().
+    )];
 
     let mut state_view = MemoryView::<SHA_EXTEND_WORDS>::new(vm, state_ptr);
     let mut sha_extend_words = ShaExtendWords::from(state_view.words());
