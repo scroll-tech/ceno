@@ -297,8 +297,8 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                             format!("Dynamic Range Table U{left} with Element: {element:?}")
                         }
                         ROMType::DoubleU8 => {
-                            let a = (key >> 8) & ((1 << 8) - 1);
-                            let b = key & ((1 << 8) - 1);
+                            let a = (key >> 8) & u8::MAX as u64;
+                            let b = key & (u8::MAX as u64);
                             format!("Double U8 Range Table with Elements: ({a:?}, {b:?})")
                         }
                         ROMType::And => {

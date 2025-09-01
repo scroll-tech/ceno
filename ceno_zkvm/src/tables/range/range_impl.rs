@@ -176,7 +176,9 @@ impl DynamicRangeTableConfig {
 #[derive(Clone, Debug)]
 pub struct DoubleRangeTableConfig {
     range_a: StructuralWitIn,
+    range_a_bits: usize,
     range_b: StructuralWitIn,
+    range_b_bits: usize,
     mlt: WitIn,
 }
 
@@ -218,7 +220,9 @@ impl DoubleRangeTableConfig {
 
         Ok(Self {
             range_a,
+            range_a_bits,
             range_b,
+            range_b_bits,
             mlt,
         })
     }
@@ -228,10 +232,8 @@ impl DoubleRangeTableConfig {
         num_witin: usize,
         num_structural_witin: usize,
         multiplicity: &HashMap<u64, usize>,
-        range_a_bits: usize,
-        range_b_bits: usize,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        let length = 1 << (range_a_bits + range_b_bits);
+        let length = 1 << (self.range_a_bits + self.range_b_bits);
         let mut witness: RowMajorMatrix<F> =
             RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
         let mut structural_witness = RowMajorMatrix::<F>::new(
@@ -245,23 +247,16 @@ impl DoubleRangeTableConfig {
             mlts[*idx as usize] = *mlt;
         }
 
-        let range_a_content = (0..(1 << range_b_bits))
-            .flat_map(|i| std::iter::repeat_n(F::from_canonical_usize(i), 1 << range_a_bits))
-            .collect::<Vec<F>>();
-        let range_b_content = std::iter::repeat_n(0, 1 << range_b_bits)
-            .flat_map(|_| (0..(1 << range_a_bits)).map(F::from_canonical_usize))
-            .collect::<Vec<F>>();
-
         witness
             .par_rows_mut()
             .zip(structural_witness.par_rows_mut())
-            .zip(mlts.par_iter())
-            .zip(range_a_content.par_iter())
-            .zip(range_b_content.par_iter())
-            .for_each(|((((row, structural_row), mlt), a), b)| {
+            .zip(mlts.par_iter().enumerate())
+            .for_each(|((row, structural_row), (idx, mlt))| {
+                let a = idx >> self.range_a_bits;
+                let b = idx & ((1 << self.range_a_bits) - 1);
                 set_val!(row, self.mlt, F::from_canonical_u64(*mlt as u64));
-                set_val!(structural_row, self.range_a, a);
-                set_val!(structural_row, self.range_b, b);
+                set_val!(structural_row, self.range_a, F::from_canonical_usize(a));
+                set_val!(structural_row, self.range_b, F::from_canonical_usize(b));
             });
 
         Ok([witness, structural_witness])

@@ -116,15 +116,16 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                             .enumerate()
                             .map(|(i, chunk)| {
                                 if chunk.len() == 2 {
-                                    cb.assert_double_ux::<_, _, C>(
+                                    cb.assert_double_u8(
                                         || format!("limbs_{}_{}_in_{C}", i * 2, i * 2 + 1),
                                         chunk[0].expr(),
                                         chunk[1].expr(),
                                     )?;
                                 } else {
-                                    cb.assert_ux::<_, _, C>(
+                                    cb.assert_const_range(
                                         || format!("limb_{i}_in_{C}"),
                                         chunk[0].expr(),
+                                        C,
                                     )?;
                                 }
                                 Ok::<_, CircuitBuilderError>(())
@@ -161,7 +162,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         carries: Option<Vec<WitIn>>,
         carries_auxiliary_lt_config: Option<Vec<AssertLtConfig>>,
     ) -> Self {
-        assert!(limbs.len() == Self::NUM_LIMBS);
+        assert_eq!(limbs.len(), Self::NUM_LIMBS);
         if let Some(carries) = &carries {
             let diff = limbs.len() - carries.len();
             assert!(

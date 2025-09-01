@@ -904,22 +904,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
-    pub fn assert_double_ux<NR, N, const C: usize>(
-        &mut self,
-        name_fn: N,
-        a_expr: Expression<E>,
-        b_expr: Expression<E>,
-    ) -> Result<(), CircuitBuilderError>
-    where
-        NR: Into<String>,
-        N: FnOnce() -> NR,
-    {
-        match C {
-            8 => self.assert_double_u8(name_fn, a_expr, b_expr),
-            _ => unimplemented!("Only support double u8"),
-        }
-    }
-
     pub fn assert_bit<NR, N>(
         &mut self,
         name_fn: N,

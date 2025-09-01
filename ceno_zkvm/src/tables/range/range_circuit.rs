@@ -139,6 +139,7 @@ impl<E: ExtensionField, const MAX_BITS_1: usize, const MAX_BITS_2: usize, R: Ran
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<DoubleRangeTableConfig, ZKVMError> {
+        assert_eq!(MAX_BITS_1 + MAX_BITS_2, R::len().ilog2() as usize);
         Ok(cb.namespace(
             || Self::name(),
             |cb| DoubleRangeTableConfig::construct_circuit(cb, R::ROM_TYPE, MAX_BITS_1, MAX_BITS_2),
@@ -162,12 +163,6 @@ impl<E: ExtensionField, const MAX_BITS_1: usize, const MAX_BITS_2: usize, R: Ran
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[R::ROM_TYPE as usize];
 
-        Ok(config.assign_instances(
-            num_witin,
-            num_structural_witin,
-            multiplicity,
-            MAX_BITS_1,
-            MAX_BITS_2,
-        )?)
+        Ok(config.assign_instances(num_witin, num_structural_witin, multiplicity)?)
     }
 }
