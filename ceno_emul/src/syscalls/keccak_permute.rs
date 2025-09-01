@@ -13,7 +13,7 @@ pub struct KeccakSpec;
 impl SyscallSpec for KeccakSpec {
     const NAME: &'static str = "KECCAK";
 
-    const REG_OPS_COUNT: usize = 2;
+    const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = KECCAK_WORDS;
     const CODE: u32 = ceno_rt::syscalls::KECCAK_PERMUTE;
     const HAS_LOOKUPS: bool = true;
@@ -55,22 +55,12 @@ impl From<KeccakState> for [Word; KECCAK_WORDS] {
 pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
-    // for compatibility with sp1 spec
-    assert_eq!(vm.peek_register(Platform::reg_arg1()), 0);
-
     // Read the argument `state_ptr`.
-    let reg_ops = vec![
-        WriteOp::new_register_op(
-            Platform::reg_arg0(),
-            Change::new(state_ptr, state_ptr),
-            0, // Cycle set later in finalize().
-        ),
-        WriteOp::new_register_op(
-            Platform::reg_arg1(),
-            Change::new(0, 0),
-            0, // Cycle set later in finalize().
-        ),
-    ];
+    let reg_ops = vec![WriteOp::new_register_op(
+        Platform::reg_arg0(),
+        Change::new(state_ptr, state_ptr),
+        0, // Cycle set later in finalize().
+    )];
 
     let mut state_view = MemoryView::<KECCAK_WORDS>::new(vm, state_ptr);
     let mut state = KeccakState::from(state_view.words());

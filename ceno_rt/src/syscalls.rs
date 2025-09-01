@@ -28,7 +28,6 @@ pub fn syscall_keccak_permute(state: &mut [u64; 25]) {
             "ecall",
             in("t0") KECCAK_PERMUTE,
             in("a0") state as *mut [u64; 25],
-            in("a1") 0
         );
     }
     #[cfg(not(target_os = "zkvm"))]

@@ -48,7 +48,7 @@ use crate::{
 };
 
 pub const ROUNDS: usize = 24;
-const ROUNDS_CEIL_LOG2: usize = 5; // log_2(2^32)
+pub const ROUNDS_CEIL_LOG2: usize = 5; // log_2(24.next_pow2())
 
 const RC: [u64; ROUNDS] = [
     1u64,
@@ -515,10 +515,16 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>) {
+    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_challenges = self.n_challenges();
+
+        // register selector to legacy constrain system
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
 
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();
@@ -528,25 +534,13 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         (
             [
                 // r_record
-                (
-                    self.selector_type_layout.sel_mem_read.clone(),
-                    (0..r_len).collect_vec(),
-                ),
+                (0..r_len).collect_vec(),
                 // w_record
-                (
-                    self.selector_type_layout.sel_mem_write.clone(),
-                    (r_len..r_len + w_len).collect_vec(),
-                ),
+                (r_len..r_len + w_len).collect_vec(),
                 // lk_record
-                (
-                    self.selector_type_layout.sel_lookup.clone(),
-                    (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                ),
+                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
                 // zero_record
-                (
-                    self.selector_type_layout.sel_zero.clone(),
-                    (0..zero_len).collect_vec(),
-                ),
+                (0..zero_len).collect_vec(),
             ],
             Chip::new_from_cb(cb, self.n_challenges()),
         )
@@ -780,7 +774,7 @@ where
                             c_aux64[i][j] = state64[j][i] ^ c_aux64[i][j - 1];
                             for k in 0..8 {
                                 lk_multiplicity
-                                    .lookup_xor_byte(state8[j][i][k], c_aux8[i][j - 1][k]);
+                                    .lookup_xor_byte(c_aux8[i][j - 1][k], state8[j][i][k]);
                             }
                             c_aux8[i][j] = conv64to8(c_aux64[i][j]);
                         }
@@ -800,7 +794,7 @@ where
                             .convert(vec![15, 1, 15, 1, 15, 1, 15, 1])
                             .values();
                         for (j, size) in [15, 1, 15, 1, 15, 1, 15, 1].iter().enumerate() {
-                            lk_multiplicity.assert_ux_in_u16(*size, rep[j]);
+                            lk_multiplicity.assert_const_range(rep[j], *size);
                         }
                         c_temp[i] = rep.try_into().unwrap();
                     }
@@ -818,8 +812,8 @@ where
                         d64[x] = c64[(x + 4) % 5] ^ c64[(x + 1) % 5].rotate_left(1);
                         for k in 0..8 {
                             lk_multiplicity.lookup_xor_byte(
-                                crot8[(x + 1) % 5][k],
                                 c_aux8[(x + 5 - 1) % 5][4][k],
+                                crot8[(x + 1) % 5][k],
                             );
                         }
                         d8[x] = conv64to8(d64[x]);
@@ -843,15 +837,7 @@ where
                                     .convert(sizes.clone())
                                     .values();
                             for (j, size) in sizes.iter().enumerate() {
-                                match *size {
-                                    32 | 1 => (),
-                                    18 => lk_multiplicity.assert_ux::<18>(rep[j]),
-                                    16 => lk_multiplicity.assert_ux::<16>(rep[j]),
-                                    14 => lk_multiplicity.assert_ux::<14>(rep[j]),
-                                    8 => lk_multiplicity.assert_ux::<8>(rep[j]),
-                                    5 => lk_multiplicity.assert_ux::<5>(rep[j]),
-                                    _ => lk_multiplicity.assert_ux_in_u16(*size, rep[j]),
-                                }
+                                lk_multiplicity.assert_const_range(rep[j], *size);
                             }
                             rotation_witness.extend(rep);
                         }
@@ -1016,7 +1002,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
         })
         .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-    let (out_evals, mut chip) = layout.finalize(&cb);
+    let (out_evals, mut chip) = layout.finalize(&mut cb);
 
     let layer =
         Layer::from_circuit_builder(&cb, "Rounds".to_string(), layout.n_challenges(), out_evals);

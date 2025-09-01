@@ -9,9 +9,11 @@ use std::{collections::HashMap, iter::once, marker::PhantomData};
 use ff_ext::ExtensionField;
 
 use crate::{
-    RAMType, error::CircuitBuilderError, gkr::layer::ROTATION_OPENING_COUNT, tables::LookupTable,
+    RAMType, error::CircuitBuilderError, gkr::layer::ROTATION_OPENING_COUNT,
+    selector::SelectorType, tables::LookupTable,
 };
 use p3::field::FieldAlgebra;
+
 pub mod ram;
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -101,12 +103,14 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub instance_name_map: HashMap<Instance, String>,
 
+    pub r_selector: Option<SelectorType<E>>,
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
     // for each read expression we store its ram type and original value before doing RLC
     // the original value will be used for debugging
     pub r_ram_types: Vec<(RAMType, Vec<Expression<E>>)>,
 
+    pub w_selector: Option<SelectorType<E>>,
     pub w_expressions: Vec<Expression<E>>,
     pub w_expressions_namespace_map: Vec<String>,
     // for each write expression we store its ram type and original value before doing RLC
@@ -119,12 +123,14 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub w_table_expressions: Vec<SetTableExpression<E>>,
     pub w_table_expressions_namespace_map: Vec<String>,
 
+    pub lk_selector: Option<SelectorType<E>>,
     /// lookup expression
     pub lk_expressions: Vec<Expression<E>>,
     pub lk_table_expressions: Vec<LogupTableExpression<E>>,
     pub lk_expressions_namespace_map: Vec<String>,
     pub lk_expressions_items_map: Vec<(LookupTable, Vec<Expression<E>>)>,
 
+    pub zero_selector: Option<SelectorType<E>>,
     /// main constraints zero expression
     pub assert_zero_expressions: Vec<Expression<E>>,
     pub assert_zero_expressions_namespace_map: Vec<String>,
@@ -161,9 +167,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
             instance_name_map: HashMap::new(),
+            r_selector: None,
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
             r_ram_types: vec![],
+            w_selector: None,
             w_expressions: vec![],
             w_expressions_namespace_map: vec![],
             w_ram_types: vec![],
@@ -171,10 +179,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             r_table_expressions_namespace_map: vec![],
             w_table_expressions: vec![],
             w_table_expressions_namespace_map: vec![],
+            lk_selector: None,
             lk_expressions: vec![],
             lk_table_expressions: vec![],
             lk_expressions_namespace_map: vec![],
             lk_expressions_items_map: vec![],
+            zero_selector: None,
             assert_zero_expressions: vec![],
             assert_zero_expressions_namespace_map: vec![],
             assert_zero_sumcheck_expressions: vec![],
@@ -841,16 +851,20 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.namespace(
-            || "assert_const_range",
-            |cb| {
-                cb.lk_record(
-                    name_fn,
-                    LookupTable::Dynamic,
-                    vec![expr, E::BaseField::from_canonical_usize(max_bits).expr()],
-                )
-            },
-        )
+        if max_bits == 1 {
+            self.assert_bit(name_fn, expr)
+        } else {
+            self.namespace(
+                || "assert_const_range",
+                |cb| {
+                    cb.lk_record(
+                        name_fn,
+                        LookupTable::Dynamic,
+                        vec![expr, E::BaseField::from_canonical_usize(max_bits).expr()],
+                    )
+                },
+            )
+        }
     }
 
     pub fn assert_byte<NR, N>(
@@ -1052,30 +1066,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
         // Lookup ranges
         for (i, (size, elem)) in split_rep.iter().enumerate() {
-            match *size {
-                32 => (),
-                18 => {
-                    self.assert_ux::<_, _, 18>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                16 => {
-                    self.assert_ux::<_, _, 16>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                14 => {
-                    self.assert_ux::<_, _, 14>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                8 => {
-                    self.assert_ux::<_, _, 8>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                5 => {
-                    self.assert_ux::<_, _, 5>(|| format!("{}_{}", name().into(), i), elem.clone())?
-                }
-                1 => self.assert_bit(|| format!("{}_{}", name().into(), i), elem.clone())?,
-                _ => self.assert_ux_in_u16(
-                    || format!("{}_{}", name().into(), i),
-                    *size,
-                    elem.clone(),
-                )?,
-            }
+            self.assert_const_range(|| format!("{}_{}", name().into(), i), elem.clone(), *size)?;
         }
 
         // constrain the fact that rep8 and repX.rotate_left(chunks_rotation) are
