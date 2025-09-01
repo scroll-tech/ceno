@@ -331,8 +331,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let rs1_read = split_to_u8::<u16>(step.rs1().unwrap().value);
         // rd
         let rd_written = split_to_u8::<u16>(step.rd().unwrap().value.after);
-        for val in &rd_written {
-            lk_multiplicity.assert_ux::<8>(*val as u64);
+        for chunk in rd_written.chunks(2) {
+            if chunk.len() == 2 {
+                lk_multiplicity.assert_double_u8(chunk[0] as u64, chunk[1] as u64)
+            } else {
+                lk_multiplicity.assert_ux::<8>(chunk[0] as u64);
+            }
         }
 
         config.rs1_read.assign_limbs(instance, &rs1_read);
@@ -425,8 +429,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let rs1_read = split_to_u8::<u16>(step.rs1().unwrap().value);
         // rd
         let rd_written = split_to_u8::<u16>(step.rd().unwrap().value.after);
-        for val in &rd_written {
-            lk_multiplicity.assert_ux::<8>(*val as u64);
+        for chunk in rd_written.chunks(2) {
+            if chunk.len() == 2 {
+                lk_multiplicity.assert_double_u8(chunk[0] as u64, chunk[1] as u64)
+            } else {
+                lk_multiplicity.assert_ux::<8>(chunk[0] as u64);
+            }
         }
 
         config.rs1_read.assign_limbs(instance, &rs1_read);
