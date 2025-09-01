@@ -335,7 +335,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
             if chunk.len() == 2 {
                 lk_multiplicity.assert_double_u8(chunk[0] as u64, chunk[1] as u64)
             } else {
-                lk_multiplicity.assert_ux::<8>(chunk[0] as u64);
+                lk_multiplicity.assert_const_range(chunk[0] as u64, 8);
             }
         }
 
@@ -433,7 +433,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             if chunk.len() == 2 {
                 lk_multiplicity.assert_double_u8(chunk[0] as u64, chunk[1] as u64)
             } else {
-                lk_multiplicity.assert_ux::<8>(chunk[0] as u64);
+                lk_multiplicity.assert_const_range(chunk[0] as u64, 8);
             }
         }
 
