@@ -400,6 +400,7 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber",
  "transcript",
+ "whir",
  "witness",
 ]
 
@@ -757,29 +758,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
-name = "env_filter"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "186e05a59d4c50738528153b83b0b0194d3a29507dfec16eccd4b342903397d0"
-dependencies = [
- "log",
- "regex",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.11.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13c863f0904021b108aa8b2f55046443e6b1ebde8fd4a15c399893aae4fa069f"
-dependencies = [
- "anstream",
- "anstyle",
- "env_filter",
- "jiff",
- "log",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -815,6 +793,7 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
  "once_cell",
  "p3",
@@ -924,8 +903,6 @@ dependencies = [
  "mpcs",
  "multilinear_extensions",
  "p3",
- "p3-field",
- "p3-goldilocks",
  "rand",
  "rayon",
  "serde",
@@ -1207,30 +1184,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
-name = "jiff"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d07d8d955d798e7a4d6f9c58cd1f1916e790b42b092758a9ef6e16fef9f1b3fd"
-dependencies = [
- "jiff-static",
- "log",
- "portable-atomic",
- "portable-atomic-util",
- "serde",
-]
-
-[[package]]
-name = "jiff-static"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f244cfe006d98d26f859c7abd1318d85327e1882dc9cef80f62daeeb0adcf300"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "jobserver"
 version = "0.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1373,10 +1326,10 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
  "bincode",
  "clap",
- "criterion",
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
@@ -1397,18 +1350,15 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
- "criterion",
  "either",
- "env_logger",
  "ff_ext",
  "itertools 0.13.0",
- "log",
  "p3",
  "rand",
  "rayon",
  "serde",
- "serde_json",
  "tracing",
 ]
 
@@ -1605,6 +1555,7 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 [[package]]
 name = "p3"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
  "p3-baby-bear",
  "p3-challenger",
@@ -1955,10 +1906,10 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
  "ff_ext",
  "p3",
- "rand",
  "serde",
 ]
 
@@ -2544,16 +2495,13 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
- "criterion",
  "either",
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
  "p3",
- "p3-goldilocks",
- "poseidon",
- "rand",
  "rayon",
  "serde",
  "sumcheck_macro",
@@ -2565,15 +2513,13 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
- "ff_ext",
  "itertools 0.13.0",
- "multilinear_extensions",
  "p3",
  "proc-macro2",
  "quote",
  "rand",
- "sumcheck",
  "syn 2.0.101",
 ]
 
@@ -2838,7 +2784,6 @@ version = "0.1.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0"
 dependencies = [
- "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -2909,6 +2854,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -3156,6 +3102,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
  "bincode",
  "clap",
@@ -3300,6 +3247,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.2#3bb5e60cbf90bec644a320df50d45b2e190c7aae"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",

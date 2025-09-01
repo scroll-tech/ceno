@@ -8,7 +8,7 @@ use multilinear_extensions::{
     utils::{eval_by_expr, eval_by_expr_with_instance},
     virtual_poly::VPAuxInfo,
 };
-use p3_field::{FieldAlgebra, dot_product};
+use p3::field::{FieldAlgebra, dot_product};
 use std::{marker::PhantomData, ops::Neg};
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState, SumCheckSubClaim, VerifierError},

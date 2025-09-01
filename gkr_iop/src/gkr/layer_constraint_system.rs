@@ -10,7 +10,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitnessId, rlc_chip_record};
-use p3_field::FieldAlgebra;
+use p3::field::FieldAlgebra;
 
 #[derive(Clone, Debug, Default)]
 pub struct RotationParams<E: ExtensionField> {
