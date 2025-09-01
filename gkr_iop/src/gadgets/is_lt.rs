@@ -2,7 +2,7 @@ use crate::utils::i64_to_base;
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, WitIn, power_sequence};
-use p3_field::Field;
+use p3::field::Field;
 use std::fmt::Display;
 use witness::set_val;
 
