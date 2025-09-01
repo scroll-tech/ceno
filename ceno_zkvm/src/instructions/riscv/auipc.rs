@@ -47,6 +47,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     ) -> Result<AuipcConfig<E>, ZKVMError> {
         let rd_written = UInt8::<E>::new(|| "rd_written", circuit_builder)?;
         let rd_exprs = rd_written.expr();
+        // TODO: use double u8 for these limbs
         let pc_limbs = std::array::from_fn(|i| {
             circuit_builder
                 .create_u8(|| format!("pc_limbs_{}", i))
@@ -151,8 +152,12 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
 
         let rd_written = split_to_u8(step.rd().unwrap().value.after);
         config.rd_written.assign_limbs(instance, &rd_written);
-        for val in &rd_written {
-            lk_multiplicity.assert_ux::<8>(*val as u64);
+        for chunk in rd_written.chunks(2) {
+            if chunk.len() == 2 {
+                lk_multiplicity.assert_double_u8(chunk[0] as u64, chunk[1] as u64)
+            } else {
+                lk_multiplicity.assert_ux::<8>(chunk[0] as u64);
+            }
         }
         let pc = split_to_u8(step.pc().before.0);
         for (val, witin) in izip!(pc.iter().skip(1), config.pc_limbs) {

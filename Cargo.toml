@@ -76,3 +76,14 @@ opt-level = 3
 
 [profile.release]
 lto = "thin"
+
+[patch."https://github.com/scroll-tech/gkr-backend.git"]
+ff_ext = { path = "../gkr-backend/crates/ff_ext", package = "ff_ext"  }
+mpcs = { path = "../gkr-backend/crates/mpcs", package = "mpcs" }
+multilinear_extensions = { path = "../gkr-backend/crates/multilinear_extensions", package = "multilinear_extensions" }
+p3 = { path = "../gkr-backend/crates/p3", package = "p3" }
+poseidon = { path = "../gkr-backend/crates/poseidon", package = "poseidon" }
+sumcheck = { path = "../gkr-backend/crates/sumcheck", package = "sumcheck" }
+transcript = { path = "../gkr-backend/crates/transcript", package = "transcript" }
+whir = { path = "../gkr-backend/crates/whir", package = "whir" }
+witness = { path = "../gkr-backend/crates/witness", package = "witness" }
