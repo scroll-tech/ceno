@@ -317,7 +317,7 @@ impl<E: ExtensionField> Layer<E> {
         cb: &CircuitBuilder<E>,
         layer_name: String,
         n_challenges: usize,
-        out_evals: OutEvalGroups<E>,
+        out_evals: OutEvalGroups,
     ) -> Layer<E> {
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();
@@ -326,10 +326,10 @@ impl<E: ExtensionField> Layer<E> {
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
         let [r_record_evals, w_record_evals, lookup_evals, zero_evals] = out_evals;
-        assert_eq!(r_record_evals.1.len(), r_len);
-        assert_eq!(w_record_evals.1.len(), w_len);
-        assert_eq!(lookup_evals.1.len(), lk_len);
-        assert_eq!(zero_evals.1.len(), zero_len);
+        assert_eq!(r_record_evals.len(), r_len);
+        assert_eq!(w_record_evals.len(), w_len);
+        assert_eq!(lookup_evals.len(), lk_len);
+        assert_eq!(zero_evals.len(), zero_len);
 
         let non_zero_expr_len = cb.cs.w_expressions_namespace_map.len()
             + cb.cs.r_expressions_namespace_map.len()
@@ -342,13 +342,14 @@ impl<E: ExtensionField> Layer<E> {
         let mut expressions = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
 
         // process r_record
-        let evals = Self::dedup_last_selector_evals(&r_record_evals.0, &mut expr_evals);
+        let evals =
+            Self::dedup_last_selector_evals(cb.cs.r_selector.as_ref().unwrap(), &mut expr_evals);
         for (idx, ((ram_expr, name), ram_eval)) in cb
             .cs
             .r_expressions
             .iter()
             .zip_eq(&cb.cs.r_expressions_namespace_map)
-            .zip_eq(&r_record_evals.1)
+            .zip_eq(&r_record_evals)
             .enumerate()
         {
             expressions.push(ram_expr - E::BaseField::ONE.expr());
@@ -362,13 +363,14 @@ impl<E: ExtensionField> Layer<E> {
         }
 
         // process w_record
-        let evals = Self::dedup_last_selector_evals(&w_record_evals.0, &mut expr_evals);
+        let evals =
+            Self::dedup_last_selector_evals(cb.cs.w_selector.as_ref().unwrap(), &mut expr_evals);
         for (idx, ((ram_expr, name), ram_eval)) in cb
             .cs
             .w_expressions
             .iter()
             .zip_eq(&cb.cs.w_expressions_namespace_map)
-            .zip_eq(&w_record_evals.1)
+            .zip_eq(&w_record_evals)
             .enumerate()
         {
             expressions.push(ram_expr - E::BaseField::ONE.expr());
@@ -382,13 +384,14 @@ impl<E: ExtensionField> Layer<E> {
         }
 
         // process lookup records
-        let evals = Self::dedup_last_selector_evals(&lookup_evals.0, &mut expr_evals);
+        let evals =
+            Self::dedup_last_selector_evals(cb.cs.lk_selector.as_ref().unwrap(), &mut expr_evals);
         for (idx, ((lookup, name), lookup_eval)) in cb
             .cs
             .lk_expressions
             .iter()
             .zip_eq(&cb.cs.lk_expressions_namespace_map)
-            .zip_eq(&lookup_evals.1)
+            .zip_eq(&lookup_evals)
             .enumerate()
         {
             expressions.push(lookup - cb.cs.chip_record_alpha.clone());
@@ -402,7 +405,8 @@ impl<E: ExtensionField> Layer<E> {
         }
 
         // process zero_record
-        let evals = Self::dedup_last_selector_evals(&zero_evals.0, &mut expr_evals);
+        let evals =
+            Self::dedup_last_selector_evals(cb.cs.zero_selector.as_ref().unwrap(), &mut expr_evals);
         for (idx, (zero_expr, name)) in izip!(
             0..,
             chain!(

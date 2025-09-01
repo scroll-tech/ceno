@@ -217,9 +217,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let input_opening_point = if circuit_vk.get_cs().is_opcode_circuit() {
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks = circuit_vk.get_cs().num_lks();
-                let num_padded_instance =
-                    next_pow2_instance_padding(proof.num_instances) - proof.num_instances;
-                dummy_table_item_multiplicity += num_lks * num_padded_instance;
+                // each padding instance contribute to (2^rotation_vars) dummy lookup padding
+                let num_padded_instance = (next_pow2_instance_padding(proof.num_instances)
+                    - proof.num_instances)
+                    * (1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0));
+                // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
+                let num_instance_non_selected = proof.num_instances
+                    * ((1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0))
+                        - (circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0) + 1));
+                dummy_table_item_multiplicity +=
+                    num_lks * (num_padded_instance + num_instance_non_selected);
 
                 logup_sum += chip_logup_sum;
                 self.verify_opcode_proof(
