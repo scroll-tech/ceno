@@ -176,37 +176,35 @@ impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> 
 pub type LkMultiplicity = LkMultiplicityRaw<u64>;
 
 impl LkMultiplicity {
+    // TODO only preserve `assert_dynamic_range` & `assert_const_range`
+    // TODO remove all others `assert_ux_xxx`
+    #[inline(always)]
+    pub fn assert_dynamic_range(&mut self, v: u64, bits: u64) {
+        self.increment(LookupTable::Dynamic, (1 << bits) + v);
+    }
+
+    #[inline(always)]
+    pub fn assert_const_range(&mut self, v: u64, max_bits: usize) {
+        // skip max_bits = 1 range check as it was constrained as (v)*(1-v) without lookup
+        if max_bits > 1 {
+            self.assert_dynamic_range(v, max_bits as u64);
+        }
+    }
+
     /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
-        if C == 1 {
-            return;
-        }
         self.increment(LookupTable::Dynamic, (1 << C) + v);
-    }
-
-    #[inline(always)]
-    pub fn assert_dynamic_range(&mut self, v: u64, max_bits: u64) {
-        if max_bits == 1 {
-            return;
-        }
-        self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
     }
 
     /// assert within range
     #[inline(always)]
-    pub fn assert_ux_in_u16(&mut self, max_bits: usize, v: u64) {
-        if max_bits == 1 {
-            return;
-        }
-        self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
+    pub fn assert_ux_in_u16(&mut self, size: usize, v: u64) {
+        self.increment(LookupTable::Dynamic, (1 << size) + v);
     }
 
     #[inline(always)]
     pub fn assert_ux_v2(&mut self, v: u64, max_bits: usize) {
-        if max_bits == 1 {
-            return;
-        }
         self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
     }
 

@@ -794,7 +794,7 @@ where
                             .convert(vec![15, 1, 15, 1, 15, 1, 15, 1])
                             .values();
                         for (j, size) in [15, 1, 15, 1, 15, 1, 15, 1].iter().enumerate() {
-                            lk_multiplicity.assert_ux_v2(rep[j], *size);
+                            lk_multiplicity.assert_const_range(rep[j], *size);
                         }
                         c_temp[i] = rep.try_into().unwrap();
                     }
@@ -837,7 +837,7 @@ where
                                     .convert(sizes.clone())
                                     .values();
                             for (j, size) in sizes.iter().enumerate() {
-                                lk_multiplicity.assert_ux_v2(rep[j], *size);
+                                lk_multiplicity.assert_const_range(rep[j], *size);
                             }
                             rotation_witness.extend(rep);
                         }

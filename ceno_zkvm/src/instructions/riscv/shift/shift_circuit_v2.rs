@@ -249,9 +249,9 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
             set_val!(instance, witin, E::BaseField::from_bool(i == limb_shift));
         }
         let num_bits_log = (NUM_LIMBS * LIMB_BITS).ilog2();
-        lk_multiplicity.assert_dynamic_range(
+        lk_multiplicity.assert_const_range(
             (((c[0] as usize) - bit_shift - limb_shift * LIMB_BITS) >> num_bits_log) as u64,
-            (LIMB_BITS - num_bits_log as usize) as u64,
+            LIMB_BITS - num_bits_log as usize,
         );
 
         let mut b_sign = 0;
