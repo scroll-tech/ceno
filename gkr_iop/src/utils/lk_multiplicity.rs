@@ -197,6 +197,11 @@ impl LkMultiplicity {
         self.increment(LookupTable::Dynamic, (1 << C) + v);
     }
 
+    #[inline(always)]
+    pub fn assert_double_u8(&mut self, a: u64, b: u64) {
+        self.increment(LookupTable::DoubleU8, (a << 8) + b);
+    }
+
     /// assert within range
     #[inline(always)]
     pub fn assert_ux_in_u16(&mut self, size: usize, v: u64) {

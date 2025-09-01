@@ -105,19 +105,50 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         is_check: bool,
     ) -> Result<Self, CircuitBuilderError> {
         circuit_builder.namespace(name_fn, |cb| {
+            let witins = (0..Self::NUM_LIMBS)
+                .map(|i| cb.create_witin(|| format!("limb_{i}")))
+                .collect::<Vec<_>>();
+            if is_check {
+                match C {
+                    8 => {
+                        let _ = witins
+                            .chunks(2)
+                            .enumerate()
+                            .map(|(i, chunk)| {
+                                if chunk.len() == 2 {
+                                    cb.assert_double_u8(
+                                        || format!("limbs_{}_{}_in_{C}", i * 2, i * 2 + 1),
+                                        chunk[0].expr(),
+                                        chunk[1].expr(),
+                                    )?;
+                                } else {
+                                    cb.assert_const_range(
+                                        || format!("limb_{i}_in_{C}"),
+                                        chunk[0].expr(),
+                                        C,
+                                    )?;
+                                }
+                                Ok::<_, CircuitBuilderError>(())
+                            })
+                            .collect::<Vec<_>>();
+                    }
+                    _ => {
+                        let _ = witins
+                            .iter()
+                            .enumerate()
+                            .map(|(i, witin)| {
+                                cb.assert_ux::<_, _, C>(
+                                    || format!("limb_{i}_in_{C}"),
+                                    witin.expr(),
+                                )?;
+                                Ok::<_, CircuitBuilderError>(())
+                            })
+                            .collect::<Vec<_>>();
+                    }
+                }
+            }
             Ok(UIntLimbs {
-                limbs: UintLimb::WitIn(
-                    (0..Self::NUM_LIMBS)
-                        .map(|i| {
-                            let w = cb.create_witin(|| format!("limb_{i}"));
-                            if is_check {
-                                cb.assert_ux::<_, _, C>(|| format!("limb_{i}_in_{C}"), w.expr())?;
-                            }
-                            // skip range check
-                            Ok(w)
-                        })
-                        .collect::<Result<Vec<WitIn>, CircuitBuilderError>>()?,
-                ),
+                limbs: UintLimb::WitIn(witins),
                 carries: None,
                 carries_auxiliary_lt_config: None,
             })
@@ -131,7 +162,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         carries: Option<Vec<WitIn>>,
         carries_auxiliary_lt_config: Option<Vec<AssertLtConfig>>,
     ) -> Self {
-        assert!(limbs.len() == Self::NUM_LIMBS);
+        assert_eq!(limbs.len(), Self::NUM_LIMBS);
         if let Some(carries) = &carries {
             let diff = limbs.len() - carries.len();
             assert!(

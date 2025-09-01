@@ -28,6 +28,7 @@ use crate::{
     scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{
+        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
         eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
     },
 };
@@ -558,6 +559,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         }
                         StructuralWitInType::StackedConstantSequence { .. } => {
                             eval_stacked_constant_vec(&rt_tower)
+                        }
+                        StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
+                            eval_inner_repeated_incremental_vec(k as u64, &rt_tower)
+                        }
+                        StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
+                            eval_outer_repeated_incremental_vec(k as u64, &rt_tower)
                         }
                     })
                     .collect_vec()
