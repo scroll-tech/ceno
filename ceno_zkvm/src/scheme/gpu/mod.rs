@@ -181,7 +181,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             exit_span!(span);
 
             let span = entered_span!("[gpu] get_mle_witness_from_commitment", profiling_2 = true);
-            let basefold_mles = cuda_hal.basefold.get_mle_witness_from_commitment_gpu(&pcs_data);
+            let basefold_mles = cuda_hal
+                .basefold
+                .get_mle_witness_from_commitment_gpu(&pcs_data);
             exit_span!(span);
 
             let span = entered_span!("[gpu] transmute back", profiling_2 = true);
@@ -190,7 +192,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             // let mles: Vec<MultilinearExtension<'a, E>> =
             //     unsafe { std::mem::transmute_copy(&basefold_mles) };
             // std::mem::forget(basefold_mles);
-            let mles = basefold_mles.into_iter().map(|mle| MultilinearExtensionGpu::from_ceno_gpu(mle)).collect_vec();
+            let mles = basefold_mles
+                .into_iter()
+                .map(|mle| MultilinearExtensionGpu::from_ceno_gpu(mle))
+                .collect_vec();
             // transmute pcs_data from GPU specific type to generic PcsData type
             let pcs_data_generic: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
                 unsafe { std::mem::transmute_copy(&pcs_data) };
@@ -260,7 +265,12 @@ fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
         let data_gl: Vec<EGL64> = unsafe { std::mem::transmute(data) };
         let gpu_chunks = cuda_hal
             .tower
-            .masked_mle_split_to_chunks(&data_gl, num_instances_with_rotation, NUM_FANIN, EGL64::ONE)
+            .masked_mle_split_to_chunks(
+                &data_gl,
+                num_instances_with_rotation,
+                NUM_FANIN,
+                EGL64::ONE,
+            )
             .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for r_set: {:?}", e))?;
         r_set_gpu_chunks.push(gpu_chunks);
     }
@@ -271,7 +281,12 @@ fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
         let data_gl: Vec<EGL64> = unsafe { std::mem::transmute(data) };
         let gpu_chunks = cuda_hal
             .tower
-            .masked_mle_split_to_chunks(&data_gl, num_instances_with_rotation, NUM_FANIN, EGL64::ONE)
+            .masked_mle_split_to_chunks(
+                &data_gl,
+                num_instances_with_rotation,
+                NUM_FANIN,
+                EGL64::ONE,
+            )
             .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for w_set: {:?}", e))?;
         w_set_gpu_chunks.push(gpu_chunks);
     }
@@ -559,10 +574,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
     {
         println!("[GPU] build_main_witness");
         let cpu_input: ProofInput<'a, CpuBackend<E, PCS>> = {
-            let cpu_witness = input.witness.iter().map(|mle| Arc::new(mle.inner_to_mle())).collect_vec();
-            let cpu_structural_witness = input.structural_witness.iter().map(|mle| Arc::new(mle.inner_to_mle())).collect_vec();
-            let cpu_fixed = input.fixed.iter().map(|mle| Arc::new(mle.inner_to_mle())).collect_vec();
-            let cpu_public_input = input.public_input.iter().map(|mle| Arc::new(mle.inner_to_mle())).collect_vec();
+            let cpu_witness = input
+                .witness
+                .iter()
+                .map(|mle| Arc::new(mle.inner_to_mle()))
+                .collect_vec();
+            let cpu_structural_witness = input
+                .structural_witness
+                .iter()
+                .map(|mle| Arc::new(mle.inner_to_mle()))
+                .collect_vec();
+            let cpu_fixed = input
+                .fixed
+                .iter()
+                .map(|mle| Arc::new(mle.inner_to_mle()))
+                .collect_vec();
+            let cpu_public_input = input
+                .public_input
+                .iter()
+                .map(|mle| Arc::new(mle.inner_to_mle()))
+                .collect_vec();
             ProofInput {
                 witness: cpu_witness,
                 structural_witness: cpu_structural_witness,
@@ -573,11 +604,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         };
         println!("[GPU] cpu_input built");
 
-        let (cpu_mles, is_padded) = self.inner_cpu
-            .build_main_witness(composed_cs, &cpu_input, challenges);
+        let (cpu_mles, is_padded) =
+            self.inner_cpu
+                .build_main_witness(composed_cs, &cpu_input, challenges);
 
         let cuda_hal = CUDA_HAL.as_ref().unwrap().lock().unwrap();
-        let mles = cpu_mles.iter().map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle))).collect_vec();
+        let mles = cpu_mles
+            .iter()
+            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
+            .collect_vec();
         println!("[GPU] mles built");
         (mles, is_padded)
     }
@@ -631,7 +666,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                             "doesnt support instance with evaluation length > 1"
                         );
                         let mle_cpu = mle.inner_to_mle();
-                        match mle_cpu.evaluations() { 
+                        match mle_cpu.evaluations() {
                             FieldType::Base(smart_slice) => E::from(smart_slice[0]),
                             FieldType::Ext(smart_slice) => smart_slice[0],
                             _ => unreachable!(),
@@ -867,7 +902,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
 
         let fixed_mles =
             PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());
-        let fixed_mles = fixed_mles.iter().map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle))).collect_vec();
+        let fixed_mles = fixed_mles
+            .iter()
+            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
+            .collect_vec();
 
         DeviceProvingKey {
             pcs_data,
@@ -880,7 +918,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         mles: Vec<MultilinearExtension<'a, E>>,
     ) -> Vec<ArcMultilinearExtensionGpu<'a, E>> {
         let cuda_hal = CUDA_HAL.as_ref().unwrap().lock().unwrap();
-        mles.iter().map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle))).collect_vec()
+        mles.iter()
+            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
+            .collect_vec()
     }
 }
 
