@@ -518,32 +518,19 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     .collect_vec();
     exit_span!(span);
 
+    let span = entered_span!("rotation IOPProverState::prove", profiling_4 = true);
     // gpu mles
-    let mut transcript_gpu = transcript.clone();
-    let wit_mle_gpu: Vec<&MultilinearExtensionGpu<E>> = rotated_mles_gpu
+    let mle_gpu_ref: Vec<&MultilinearExtensionGpu<E>> = rotated_mles_gpu
         .iter()
         .zip_eq(raw_rotation_exprs)
-        .filter_map(|(_, (_, expr))| match expr {
-            Expression::WitIn(wit_id) => Some(wit[*wit_id as usize].as_ref()),
-            _ => None,
-        })
-        .collect_vec();
-    let mut gpu_owned_idx = 0;
-    let mut mle_gpu_ref: Vec<&MultilinearExtensionGpu<E>> = Vec::new();
-    for (mle, (_, expr)) in rotated_mles_gpu.iter().zip_eq(raw_rotation_exprs) {
-        match expr {
-            Expression::WitIn(_) => {
-                mle_gpu_ref.push(mle);
-                mle_gpu_ref.push(&wit_mle_gpu[gpu_owned_idx]);
-                gpu_owned_idx += 1;
+        .flat_map(|(mle, (_, expr))| match expr {
+            Expression::WitIn(wit_id) => {
+                vec![mle, wit[*wit_id as usize].as_ref()]
             }
             _ => panic!(""),
-        }
-    }
-    mle_gpu_ref.push(&selector_gpu);
-
-    let span = entered_span!("rotation IOPProverState::prove", profiling_4 = true);
-    // gpu prover
+        })
+        .chain(std::iter::once(&selector_gpu))
+        .collect_vec();
     // Calculate max_num_var and max_degree from the extracted relationships
     let (term_coefficients, mle_indices_per_term, mle_size_info) =
         extract_mle_relationships_from_monomial_terms(
@@ -561,13 +548,13 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
 
     // transcript >>> BasicTranscript<GL64^2>
     let basic_tr: &mut BasicTranscript<GL64Ext> =
-        unsafe { &mut *(&mut transcript_gpu as *mut _ as *mut BasicTranscript<GL64Ext>) };
+        unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GL64Ext>) };
     // Convert types for GPU function call
     let term_coefficients_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(term_coefficients) };
-    // let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal.sumcheck.prove_generic_sumcheck_mles(&cuda_hal, &all_witins_gpu_gl64, &mle_size_info, &term_coefficients_gl64, &mle_indices_per_term, max_num_var, max_degree, basic_tr).unwrap();
     let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
         unsafe { std::mem::transmute(mle_gpu_ref) };
     let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+    // gpu prover
     let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
         .sumcheck
         .prove_generic_sumcheck_gpu(
