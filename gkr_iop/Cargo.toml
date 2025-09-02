@@ -12,11 +12,13 @@ version.workspace = true
 [dependencies]
 bincode.workspace = true
 ceno_gpu = { workspace = true, optional = true }
+cudarc = { version = "0.13.0", features = ["driver", "cuda-version-from-build-system"], optional = true }
 either.workspace = true
 ff_ext.workspace = true
 itertools.workspace = true
 mpcs.workspace = true
 multilinear_extensions.workspace = true
+once_cell = "1.21.3"
 p3.workspace = true
 rand.workspace = true
 rayon.workspace = true
@@ -27,12 +29,10 @@ sumcheck.workspace = true
 thiserror.workspace = true
 thread_local.workspace = true
 tracing.workspace = true
-transcript.workspace = true
-witness.workspace = true
 tracing-forest.workspace = true
 tracing-subscriber.workspace = true
-once_cell = "1.21.3"
-cudarc = { version = "0.13.0", features = ["driver", "cuda-version-from-build-system"], optional = true }
+transcript.workspace = true
+witness.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }

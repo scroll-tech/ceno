@@ -9,7 +9,6 @@ use crate::{
         },
     },
     gpu::{GpuBackend, GpuProver},
-    utils::{rotation_next_base_mle, rotation_selector},
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -20,8 +19,6 @@ use multilinear_extensions::{
     mle::{MultilinearExtension, Point},
     monomial::Term,
     utils::eval_by_expr_with_instance,
-    virtual_poly::build_eq_x_r_vec,
-    virtual_polys::VirtualPolynomialsBuilder,
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
@@ -30,7 +27,7 @@ use rayon::{
 use std::sync::Arc;
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::{IOPProof, IOPProverState},
+    structs::IOPProof,
     util::get_challenge_pows,
 };
 use transcript::{BasicTranscript, Transcript};

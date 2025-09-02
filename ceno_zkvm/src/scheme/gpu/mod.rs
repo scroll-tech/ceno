@@ -15,18 +15,16 @@ use gkr_iop::{
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Expression, Instance, WitnessId,
-    mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
+    Instance,
+    mle::{FieldType, MultilinearExtension},
     util::ceil_log2,
-    virtual_poly::build_eq_x_r_vec,
-    virtual_polys::VirtualPolynomialsBuilder,
 };
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::{IOPProverMessage, IOPProverState},
-    util::{get_challenge_pows, optimal_sumcheck_threads},
+    structs::IOPProverMessage,
+    util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
@@ -261,12 +259,10 @@ fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
 
     // Process read set witnesses using GPU
     for wit in r_set_wit.iter() {
-        let data = wit.get_ext_field_vec();
-        let data_gl: Vec<EGL64> = unsafe { std::mem::transmute(data) };
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
-                &data_gl,
+                wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN,
                 EGL64::ONE,
@@ -277,12 +273,10 @@ fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
 
     // Process write set witnesses using GPU
     for wit in w_set_wit.iter() {
-        let data = wit.get_ext_field_vec();
-        let data_gl: Vec<EGL64> = unsafe { std::mem::transmute(data) };
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
-                &data_gl,
+                wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN,
                 EGL64::ONE,
@@ -296,12 +290,10 @@ fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
     let mut lk_denominator_gpu_chunks = Vec::new();
 
     for wit in lk_n_wit.iter() {
-        let data = wit.get_ext_field_vec();
-        let data_gl: Vec<EGL64> = unsafe { std::mem::transmute(data) };
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
-                &data_gl,
+                wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN_LOGUP,
                 EGL64::ONE,
@@ -311,8 +303,6 @@ fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
     }
 
     for wit in lk_d_wit.iter() {
-        let data = wit.get_ext_field_vec();
-        let data_gl: Vec<EGL64> = unsafe { std::mem::transmute(data) };
         // For GPU backend, E must be GoldilocksExt2. This is ensured by the caller.
         let chip_record_alpha_gl: EGL64 = unsafe {
             assert_eq!(std::mem::size_of::<E>(), std::mem::size_of::<EGL64>());
@@ -321,7 +311,7 @@ fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
-                &data_gl,
+                wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN_LOGUP,
                 chip_record_alpha_gl,
