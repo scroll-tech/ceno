@@ -203,12 +203,21 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         Self::from_ceno_gpu_base(mle_gpu)
     }
 
-    /// Get extension field vector
-    pub fn get_ext_field_vec(&self) -> Vec<E> {
-        let mle_cpu = self.inner_to_mle();
-        match mle_cpu.evaluations() {
-            FieldType::Ext(slice) => slice.to_vec(),
-            _ => panic!("evaluation not in extension field"),
+    /// get inner poly reference with base field claim
+    pub fn as_ceno_gpu_base(&self) -> &GpuPolynomial {
+        match &self.mle {
+            GpuFieldType::Base(poly) => poly,
+            GpuFieldType::Ext(_) => panic!("poly in ext field"),
+            GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
+        }
+    }
+
+    /// get inner poly reference with ext field claim
+    pub fn as_ceno_gpu_ext(&self) -> &GpuPolynomialExt {
+        match &self.mle {
+            GpuFieldType::Base(_) => panic!("poly in base field"),
+            GpuFieldType::Ext(poly) => poly,
+            GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         }
     }
 }
