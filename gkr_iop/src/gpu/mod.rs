@@ -20,12 +20,15 @@ use std::marker::PhantomData;
 pub mod gpu_prover {
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex};
-    pub use ceno_gpu::Buffer;
-
+    pub use ceno_gpu::{Buffer, CudaHal};
     pub use ceno_gpu::gl64::{CudaHalGL64, GpuFieldType};
     pub use ceno_gpu::gl64::{GpuPolynomial, GpuPolynomialExt};
     pub use ceno_gpu::gl64::convert_ceno_to_gpu_basefold_commitment;
+    pub use ceno_gpu::gl64::{rotation_next_base_mle_gpu, rotation_selector_gpu, build_mle_as_ceno, ordered_sparse32_selector_gpu};
     use cudarc::driver::{CudaDevice, DriverError};
+
+    pub type GL64Ext = ff_ext::GoldilocksExt2;
+    pub type GL64Base = p3::goldilocks::Goldilocks;
 
     pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> =
         Lazy::new(|| CudaDevice::new(0));
