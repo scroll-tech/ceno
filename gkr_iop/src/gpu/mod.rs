@@ -17,47 +17,12 @@ use ceno_gpu::gl64::buffer::BufferImpl;
 
 use std::marker::PhantomData;
 
-/// GPU version of field type enum, similar to FieldType in MultilinearExtension
-pub enum GpuFieldType {
-    /// Base field polynomial
-    Base(GpuPolynomial),
-    /// Extension field polynomial
-    Ext(GpuPolynomialExt),
-    Unreachable,
-}
-
-impl Default for GpuFieldType {
-    fn default() -> Self {
-        Self::Unreachable
-    }
-}
-
-impl GpuFieldType {
-    /// Get the number of variables
-    pub fn num_vars(&self) -> usize {
-        match self {
-            GpuFieldType::Base(poly) => poly.num_vars(),
-            GpuFieldType::Ext(poly) => poly.num_vars(),
-            GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
-        }
-    }
-
-    /// Get the length of evaluation data
-    pub fn evaluations_len(&self) -> usize {
-        match self {
-            GpuFieldType::Base(poly) => poly.evaluations().len(),
-            GpuFieldType::Ext(poly) => poly.evaluations().len(),
-            GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
-        }
-    }
-}
-
 pub mod gpu_prover {
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex};
     pub use ceno_gpu::Buffer;
 
-    pub use ceno_gpu::gl64::CudaHalGL64;
+    pub use ceno_gpu::gl64::{CudaHalGL64, GpuFieldType};
     pub use ceno_gpu::gl64::{GpuPolynomial, GpuPolynomialExt};
     pub use ceno_gpu::gl64::convert_ceno_to_gpu_basefold_commitment;
     use cudarc::driver::{CudaDevice, DriverError};
@@ -81,39 +46,11 @@ pub mod gpu_prover {
 
 pub use gpu_prover::*;
 
-pub struct GpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub pp: <PCS as PolynomialCommitmentScheme<E>>::ProverParam,
-    pub vp: <PCS as PolynomialCommitmentScheme<E>>::VerifierParam,
-    pub max_poly_size_log2: usize,
-    pub security_level: SecurityLevel,
-    _marker: std::marker::PhantomData<E>,
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for GpuBackend<E, PCS> {
-    fn default() -> Self {
-        let (max_poly_size_log2, security_level) = default_backend_config();
-        Self::new(max_poly_size_log2, security_level)
-    }
-}
-
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
-    pub fn new(max_poly_size_log2: usize, security_level: SecurityLevel) -> Self {
-        let param = PCS::setup(1 << E::BaseField::TWO_ADICITY, security_level).unwrap();
-        let (pp, vp) = PCS::trim(param, 1 << max_poly_size_log2).unwrap();
-        Self {
-            pp,
-            vp,
-            max_poly_size_log2,
-            security_level,
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
 
 /// Stores a multilinear polynomial in dense evaluation form.
 pub struct MultilinearExtensionGpu<'a, E: ExtensionField> {
     /// GPU polynomial data, supporting both base field and extension field
-    mle: GpuFieldType,
+    pub mle: GpuFieldType,
     _phantom: PhantomData<&'a E>,
 }
 
@@ -201,6 +138,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         // check type of mle
         match mle.evaluations {
             FieldType::Base(_) => {
+                // println!("from_ceno Base");
                 let mle_vec_ref = mle.get_base_field_vec();
                 let mle_vec_ref_gl64 = unsafe { std::mem::transmute(mle_vec_ref) };
                 let mle_gpu = GpuPolynomial::from_ceno_vec(&cuda_hal, mle_vec_ref_gl64, mle.num_vars()).unwrap();
@@ -210,6 +148,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                 }
             },
             FieldType::Ext(_) => {
+                // println!("from_ceno Ext");
                 let mle_vec_ref = mle.get_ext_field_vec();
                 let mle_vec_ref_gl64_ext = unsafe { std::mem::transmute(mle_vec_ref) };
                 let mle_gpu = GpuPolynomialExt::from_ceno_vec(&cuda_hal, mle_vec_ref_gl64_ext, mle.num_vars()).unwrap();
@@ -254,6 +193,34 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 }
 
+pub struct GpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    pub pp: <PCS as PolynomialCommitmentScheme<E>>::ProverParam,
+    pub vp: <PCS as PolynomialCommitmentScheme<E>>::VerifierParam,
+    pub max_poly_size_log2: usize,
+    pub security_level: SecurityLevel,
+    _marker: std::marker::PhantomData<E>,
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> Default for GpuBackend<E, PCS> {
+    fn default() -> Self {
+        let (max_poly_size_log2, security_level) = default_backend_config();
+        Self::new(max_poly_size_log2, security_level)
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
+    pub fn new(max_poly_size_log2: usize, security_level: SecurityLevel) -> Self {
+        let param = PCS::setup(E::BaseField::TWO_ADICITY, security_level).unwrap();
+        let (pp, vp) = PCS::trim(param, 1 << max_poly_size_log2).unwrap();
+        Self {
+            pp,
+            vp,
+            max_poly_size_log2,
+            security_level,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
 
 
 pub type ArcMultilinearExtensionGpu<'a, E> = Arc<MultilinearExtensionGpu<'a, E>>;

@@ -181,7 +181,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             exit_span!(span);
 
             let span = entered_span!("[gpu] get_mle_witness_from_commitment", profiling_2 = true);
-            let basefold_mles = cuda_hal.basefold.get_mle_witness_from_commitment(&pcs_data);
+            let basefold_mles = cuda_hal.basefold.get_mle_witness_from_commitment_gpu(&pcs_data);
             exit_span!(span);
 
             let span = entered_span!("[gpu] transmute back", profiling_2 = true);

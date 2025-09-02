@@ -49,6 +49,7 @@ use crate::{
 };
 
 use crate::gpu::gpu_prover::*;
+use crate::gpu::MultilinearExtensionGpu;
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
@@ -317,27 +318,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         let cuda_hal = hal_arc.lock().unwrap();
 
         println!("all_witins_gpu begin");
+        // println!("wit len = {}", wit.0.len());
+        // println!("eqs len = {}", eqs.len());
+        // println!("layer.n_witin = {}", layer.n_witin);
+        // println!("layer.n_structural_witin = {}", layer.n_structural_witin);
+        // println!("layer.n_fixed = {}", layer.n_fixed);
         // Reconstruct the GPU-specific types for CUDA operations
-        let mut all_witins_gpu = wit
+        let eqs_gpu: Vec<_> = eqs.iter()
+            .map(|mle| MultilinearExtensionGpu::<E>::from_ceno(&cuda_hal, &mle))
+            .collect();
+        let all_witins_gpu = wit
             .iter()
             .take(layer.n_witin)
-            .map(|mle| Either::Left(mle.inner_to_mle()))
-            .chain(eqs.iter_mut().map(Either::Right))
+            .map(|mle| mle.as_ref())
+            .chain(eqs_gpu.iter().map(|mle| mle))
             .chain(
                 // fixed, start after `n_witin`
                 wit.iter()
                     .skip(layer.n_witin + layer.n_structural_witin)
-                    .map(|mle| Either::Left(mle.inner_to_mle())),
+                    .map(|mle| mle.as_ref()),
             )
             .collect_vec();
-        let all_witins_ref: Vec<Either<&MultilinearExtension<'_, E>, &mut MultilinearExtension<'_, E>>> = 
-            all_witins_gpu.iter_mut().map(|either| {
-                match either {
-                    Either::Left(mle) => Either::Left(&*mle),  // &mut T -> &T
-                    Either::Right(mle_mut) => Either::Right(&mut **mle_mut), // &mut &mut T -> &mut T
-                }
-            }).collect_vec();
-        let all_witins_gpu_gl64: Vec<Either<&MultilinearExtension<EGL64>, &mut MultilinearExtension<EGL64>>> = unsafe { std::mem::transmute(all_witins_ref) };
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<EGL64>> = unsafe { std::mem::transmute(all_witins_gpu) };
+        let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
 
         // Calculate max_num_var and max_degree from the extracted relationships
         let max_num_var = max_num_variables;
@@ -351,7 +354,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<EGL64>) };
         // Convert types for GPU function call
         let term_coefficients_gl64: Vec<EGL64> = unsafe { std::mem::transmute(term_coefficients) };
-        let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal.sumcheck.prove_generic_sumcheck_mles(&cuda_hal, all_witins_gpu_gl64, &mle_size_info, &term_coefficients_gl64, &mle_indices_per_term, max_num_var, max_degree, basic_tr).unwrap();
+        // let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal.sumcheck.prove_generic_sumcheck_mles(&cuda_hal, &all_witins_gpu_gl64, &mle_size_info, &term_coefficients_gl64, &mle_indices_per_term, max_num_var, max_degree, basic_tr).unwrap();
+        let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal.sumcheck.prove_generic_sumcheck_gpu(
+                &cuda_hal, all_witins_gpu_type_gl64, 
+                &mle_size_info, &term_coefficients_gl64, &mle_indices_per_term, max_num_var, max_degree, basic_tr).unwrap();
         let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
         let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
 
