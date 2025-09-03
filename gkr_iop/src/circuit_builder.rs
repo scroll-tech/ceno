@@ -904,6 +904,35 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
+    pub fn assert_bytes<NR, N>(
+        &mut self,
+        name_fn: N,
+        exprs: &[impl ToExpr<E, Output = Expression<E>> + Clone],
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        let name = name_fn().into();
+        let mut index = 0;
+        while index + 1 < input.len() {
+            self.assert_double_u8(
+                || format!("{}_{index:?}", name),
+                input[index].clone(),
+                input[index + 1].clone(),
+            );
+            index += 2;
+        }
+        if index < input.len() {
+            self.assert_double_u8(
+                || format!("{}_{index:?}", name),
+                input[index].clone(),
+                Expression::ZERO,
+            );
+        }
+        Ok(())
+    }
+
     pub fn assert_bit<NR, N>(
         &mut self,
         name_fn: N,

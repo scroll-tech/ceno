@@ -1,7 +1,10 @@
 use ff_ext::ExtensionField;
+use generic_array::typenum::Unsigned;
+use gkr_iop::circuit_builder::expansion_expr;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr};
 use p3::field::FieldAlgebra;
+use sp1_curves::params::{Limbs, NumLimbs};
 
 pub fn not8_expr<E: ExtensionField>(expr: Expression<E>) -> Expression<E> {
     E::BaseField::from_canonical_u8(0xFF).expr() - expr
@@ -14,6 +17,42 @@ where
 {
     for (i, word) in iter.into_iter().enumerate() {
         dst[start_index + i] = E::BaseField::from_canonical_u64(word);
+    }
+}
+
+/// Merge a slice of u8 limbs into a slice of u32 represented by u16 limb pair.
+pub fn merge_u8_limbs_to_u16_limbs_pairs_and_extend<E: ExtensionField, P: NumLimbs>(
+    u8_limbs: &Limbs<impl ToExpr<E, Output = Expression<E>> + Clone, P::Limbs>,
+    dst: &mut Vec<[Expression<E>; 2]>,
+) {
+    for i in 0..P::Limbs::USIZE {
+        // create an expression combining 4 elements of bytes into a 2x16-bit felt
+        let output8_slice = u8_limbs.0[4 * i..4 * (i + 1)]
+            .iter()
+            .map(|e| (8, e.expr()))
+            .collect_vec();
+        dst.push([
+            expansion_expr::<E, 16>(&output8_slice[0..2]),
+            expansion_expr::<E, 16>(&output8_slice[2..4]),
+        ])
+    }
+}
+
+/// Merge a slice of u8 arrays into a slice of u32 represented by u16 limb pair.
+pub fn merge_u8_arrays_to_u16_limbs_pairs_and_extend<E: ExtensionField>(
+    u8_arrays: &[impl ToExpr<E, Output = Expression<E>> + Clone],
+    dst: &mut Vec<[Expression<E>; 2]>,
+) {
+    for i in 0..u8_arrays.len() {
+        // create an expression combining 4 elements of bytes into a 2x16-bit felt
+        let output8_slice = u8_arrays[4 * i..4 * (i + 1)]
+            .iter()
+            .map(|e| (8, e.expr()))
+            .collect_vec();
+        dst.push([
+            expansion_expr::<E, 16>(&output8_slice[0..2]),
+            expansion_expr::<E, 16>(&output8_slice[2..4]),
+        ])
     }
 }
 

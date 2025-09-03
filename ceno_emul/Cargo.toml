@@ -25,6 +25,7 @@ strum_macros.workspace = true
 substrate-bn.workspace = true
 tiny-keccak.workspace = true
 tracing.workspace = true
+serde = { version = "1.0.219", features = ["derive"] }
 
 [features]
 default = ["forbid_overflow"]

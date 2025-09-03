@@ -1,4 +1,5 @@
 use itertools::izip;
+use p3_field::PrimeField32;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -211,6 +212,32 @@ impl LkMultiplicity {
     #[inline(always)]
     pub fn assert_ux_v2(&mut self, v: u64, max_bits: usize) {
         self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
+    }
+
+    /// assert slices within range with U16 table
+    /// TODO: Optimize byte slice range check. Pair up the values within 16 bits and check them together.
+    #[inline]
+    pub fn assert_ux_slice_in_u16(&mut self, size: usize, vs: &[u64]) {
+        assert!(size <= 16, "{size} > 16");
+        for &v in vs {
+            self.assert_ux_in_u16(size, v);
+        }
+    }
+
+    /// assert slices within range
+    #[inline]
+    pub fn assert_ux_slice<const C: usize>(&mut self, vs: &[u64]) {
+        for &v in vs {
+            self.assert_ux::<C>(v);
+        }
+    }
+
+    /// assert slices within range
+    #[inline]
+    pub fn assert_ux_slice_fields<const C: usize, F: PrimeField32>(&mut self, vs: &[F]) {
+        for &v in vs {
+            self.assert_ux::<C>(v.as_canonical_u64());
+        }
     }
 
     /// Track a lookup into a logic table (AndTable, etc).

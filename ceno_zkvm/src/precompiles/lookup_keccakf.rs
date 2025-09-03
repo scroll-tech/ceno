@@ -42,8 +42,9 @@ use crate::{
     chip_handler::MemoryExpr,
     error::ZKVMError,
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
-    precompiles::utils::{
-        MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance,
+    precompiles::{
+        SelectorTypeLayout,
+        utils::{MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance},
     },
 };
 
@@ -103,13 +104,6 @@ pub const RANGE_LOOKUPS: usize = RANGE_LOOKUPS_PER_ROUND;
 pub const STRUCTURAL_WITIN: usize = 6;
 
 #[derive(Clone, Debug)]
-#[repr(C)]
-pub struct KeccakInOutCols<T> {
-    pub output32: [T; KECCAK_OUTPUT32_SIZE],
-    pub input32: [T; KECCAK_INPUT32_SIZE],
-}
-
-#[derive(Clone, Debug)]
 pub struct KeccakParams;
 
 #[derive(Clone, Debug)]
@@ -151,14 +145,6 @@ pub struct KeccakLayer<WitT, EqT> {
     pub(crate) eq_rotation_left: EqT,
     pub(crate) eq_rotation_right: EqT,
     pub(crate) eq_rotation: EqT,
-}
-
-#[derive(Clone, Debug)]
-pub struct SelectorTypeLayout<E: ExtensionField> {
-    pub sel_mem_read: SelectorType<E>,
-    pub sel_mem_write: SelectorType<E>,
-    pub sel_lookup: SelectorType<E>,
-    pub sel_zero: SelectorType<E>,
 }
 
 #[derive(Clone, Debug)]
@@ -518,7 +504,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
-        self.n_challenges = self.n_challenges();
+        self.n_challenges = 0;
 
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
@@ -542,28 +528,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 // zero_record
                 (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb, self.n_challenges()),
+            Chip::new_from_cb(cb, self.n_challenges),
         )
-    }
-
-    fn n_committed(&self) -> usize {
-        unimplemented!("retrieve from constrain system")
-    }
-
-    fn n_fixed(&self) -> usize {
-        unimplemented!("retrieve from constrain system")
-    }
-
-    fn n_challenges(&self) -> usize {
-        0
-    }
-
-    fn n_evaluations(&self) -> usize {
-        unimplemented!()
-    }
-
-    fn n_layers(&self) -> usize {
-        1
     }
 }
 
@@ -1005,7 +971,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     let (out_evals, mut chip) = layout.finalize(&mut cb);
 
     let layer =
-        Layer::from_circuit_builder(&cb, "Rounds".to_string(), layout.n_challenges(), out_evals);
+        Layer::from_circuit_builder(&cb, "Rounds".to_string(), layout.n_challenges, out_evals);
     chip.add_layer(layer);
 
     Ok((

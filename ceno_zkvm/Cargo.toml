@@ -39,10 +39,17 @@ tracing-subscriber.workspace = true
 
 
 bincode.workspace = true
+cfg-if.workspace = true
 clap.workspace = true
+generic-array.workspace = true
 generic_static = "0.2"
+num.workspace = true
+p3-field.workspace = true
 parse-size = "1.1"
 rand.workspace = true
+sp1-core-executor = "5.2.1"
+sp1-curves = { path = "../curves" }
+sp1-derive = "5.2.1"
 tempfile = "3.14"
 tiny-keccak.workspace = true
 
@@ -60,7 +67,8 @@ ceno-examples = { path = "../examples-builder" }
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel"]
+bigint-rug = ["sp1-curves/bigint-rug"]
+default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel", "bigint-rug"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 goldilocks = ["forbid_overflow", "nightly-features"]

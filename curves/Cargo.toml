@@ -1,0 +1,37 @@
+[package]
+categories = { workspace = true }
+description = "SP1 is a performant, 100% open-source, contributor-friendly zkVM."
+edition = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+name = "sp1-curves"
+readme = "../../README.md"
+repository = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = [
+  "bls381",
+] }
+dashu = "0.4.2"
+elliptic-curve = "0.13.8"
+generic-array.workspace = true
+k256 = { version = "0.13.3", features = ["expose-field"] }
+num.workspace = true
+p256 = { version = "0.13.2", features = ["expose-field"] }
+serde = { workspace = true, features = ["derive"] }
+typenum = "1.17.0"
+
+cfg-if.workspace = true
+itertools = { workspace = true }
+p3-field = { workspace = true }
+rug = { version = "1.26.1", optional = true }
+ff_ext = { version = "0.1.0", path = "../ff_ext" }
+multilinear_extensions = { version = "0.1.0", path = "../multilinear_extensions" }
+
+[dev-dependencies]
+num = { version = "0.4.3", features = ["rand"] }
+rand = "0.8.5"
+
+[features]
+bigint-rug = ["rug"]

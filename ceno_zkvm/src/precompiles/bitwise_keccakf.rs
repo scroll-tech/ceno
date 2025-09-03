@@ -659,10 +659,10 @@ impl<E: ExtensionField> KeccakLayout<E> {
     ) -> Result<(Self, Chip<E>), CircuitBuilderError> {
         let layout = Self::default();
         let mut chip = Chip {
-            n_fixed: layout.n_fixed(),
-            n_committed: layout.n_committed(),
-            n_challenges: layout.n_challenges(),
-            n_evaluations: layout.n_evaluations(),
+            n_fixed: 0,
+            n_committed: STATE_SIZE,
+            n_challenges: 0,
+            n_evaluations: KECCAK_ALL_IN_EVAL_SIZE + KECCAK_OUT_EVAL_SIZE,
             layers: vec![],
             final_out_evals: unsafe {
                 transmute::<KeccakOutEvals<usize>, [usize; KECCAK_OUT_EVAL_SIZE]>(
@@ -789,25 +789,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         _params: Self::Params,
     ) -> Result<Self, CircuitBuilderError> {
         unimplemented!()
-    }
-    fn n_committed(&self) -> usize {
-        STATE_SIZE
-    }
-
-    fn n_fixed(&self) -> usize {
-        0
-    }
-
-    fn n_challenges(&self) -> usize {
-        0
-    }
-
-    fn n_layers(&self) -> usize {
-        5 * ROUNDS + 1
-    }
-
-    fn n_evaluations(&self) -> usize {
-        KECCAK_ALL_IN_EVAL_SIZE + KECCAK_OUT_EVAL_SIZE
     }
 }
 
