@@ -9,7 +9,7 @@ In Ceno, this communication happens in two main ways:
 We saw both of these in the command used to run the Fibonacci example:
 
 ```sh
-... --hints=10 --public-io=4191 ...
+cargo ceno run --example fibonacci --hints=10 --public-io=4191
 ```
 
 ## Private Inputs (Hints)

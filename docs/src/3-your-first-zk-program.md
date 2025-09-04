@@ -77,3 +77,24 @@ ceno_rt::commit::<Archived<u32>, _>(&b);
 ```
 
 After the calculation is complete, `ceno_rt::commit()` is called. This function takes the final result (`b`) and commits it as a public output of the zkVM. The host can then verify that the program produced the correct public output. In our `run` command, this is checked against the `--public-io=4191` argument.
+
+
+## Building the Program
+
+To build this program so that it can be run inside the Ceno zkVM, you can use the `cargo ceno build` command:
+
+```sh
+cargo ceno build --example fibonacci
+```
+
+This will produce an ELF file at `examples/target/riscv32im-ceno-zkvm-elf/release/fibonacci`. This is the file that is executed by the `run` command.
+
+## Running the Program
+
+As you saw in the previous chapter, you can run the program with `cargo ceno run`:
+
+```sh
+cargo ceno run --example fibonacci --hints=10 --public-io=4191
+```
+
+Now that you understand the basic components of a Ceno program, the next chapter will explore the interaction between the host and the guest in more detail.
