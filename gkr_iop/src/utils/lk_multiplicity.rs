@@ -176,8 +176,6 @@ impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> 
 pub type LkMultiplicity = LkMultiplicityRaw<u64>;
 
 impl LkMultiplicity {
-    // TODO only preserve `assert_dynamic_range` & `assert_const_range`
-    // TODO remove all others `assert_ux_xxx`
     #[inline(always)]
     pub fn assert_dynamic_range(&mut self, v: u64, bits: u64) {
         self.increment(LookupTable::Dynamic, (1 << bits) + v);
@@ -191,10 +189,16 @@ impl LkMultiplicity {
         }
     }
 
+    /// TODO remove `assert_ux` and use `assert_const_range` instead
     /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
         self.increment(LookupTable::Dynamic, (1 << C) + v);
+    }
+
+    #[inline(always)]
+    pub fn assert_double_u8(&mut self, a: u64, b: u64) {
+        self.increment(LookupTable::DoubleU8, (a << 8) + b);
     }
 
     /// Track a lookup into a logic table (AndTable, etc).

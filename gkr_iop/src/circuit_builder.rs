@@ -858,6 +858,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
+    pub fn assert_double_u8<NR, N>(
+        &mut self,
+        name_fn: N,
+        a_expr: Expression<E>,
+        b_expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.namespace(
+            || "assert_double_u8",
+            |cb| cb.lk_record(name_fn, LookupTable::DoubleU8, vec![a_expr, b_expr]),
+        )
+    }
+
     pub fn assert_bit<NR, N>(
         &mut self,
         name_fn: N,
