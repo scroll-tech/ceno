@@ -1,6 +1,13 @@
 # Summary
 
-- [Overview](./1-overview.md)
-  - [Getting Started](./2-getting-started.md)
-  - [Your First ZK Program](./3-your-first-zk-program.md)
-  - [Host-Guest Interaction](./4-host-guest-interaction.md)
+- [Overview](./overview.md)
+- [Getting Started](./getting-started.md)
+- [Your First ZK Program](./your-first-zk-program.md)
+- [Host-Guest Interaction](./host-guest-interaction.md)
+- [Generating and Verifying Proofs](./generating-and-verifying-proofs.md)
+- [The `ceno` CLI](./ceno-cli.md)
+- [Guest Programming (`ceno_rt`)](./guest-programming.md)
+- [Accelerated Operations with Precompiles (Syscalls)](./precompiles.md)
+- [Profiling & Performance](./profiling.md)
+- [Walkthroughs of Examples](./examples-walkthrough.md)
+- [Advanced Topics](./advanced-topics.md)
