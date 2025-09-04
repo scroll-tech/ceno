@@ -471,7 +471,7 @@ impl<E: ExtensionField> MemAddr<E> {
 
         // Range check the high limb.
         for (i, high_limb) in limbs.iter().enumerate().skip(1) {
-            cb.assert_ux_v2(
+            cb.assert_const_range(
                 || "high_limb",
                 high_limb.clone(),
                 (max_bits - i * 16).min(16),
@@ -506,7 +506,7 @@ impl<E: ExtensionField> MemAddr<E> {
         // Range check the high limb.
         for i in 1..UINT_LIMBS {
             let high_u16 = (addr >> (i * 16)) & 0xffff;
-            lkm.assert_ux_v2(high_u16 as u64, (self.max_bits - i * 16).min(16));
+            lkm.assert_const_range(high_u16 as u64, (self.max_bits - i * 16).min(16));
         }
 
         Ok(())

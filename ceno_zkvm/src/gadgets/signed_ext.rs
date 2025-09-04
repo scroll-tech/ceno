@@ -58,15 +58,10 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         // assert 2*val - msb*2^N_BITS is within range [0, 2^N_BITS)
         // - if val < 2^(N_BITS-1), then 2*val < 2^N_BITS, msb can only be zero.
         // - otherwise, 2*val >= 2^N_BITS, then msb can only be one.
-        let assert_ux = match n_bits {
-            8 => CircuitBuilder::assert_ux::<_, _, 8>,
-            16 => CircuitBuilder::assert_ux::<_, _, 16>,
-            _ => unreachable!("unsupported n_bits = {}", n_bits),
-        };
-        assert_ux(
-            cb,
+        cb.assert_const_range(
             || "0 <= 2*val - msb*2^N_BITS < 2^N_BITS",
             2 * val - (msb.expr() << n_bits),
+            n_bits,
         )?;
 
         Ok(SignedExtendConfig {
@@ -95,14 +90,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         val: u64,
     ) -> Result<(), CircuitBuilderError> {
         let msb = val >> (self.n_bits - 1);
-
-        let assert_ux = match self.n_bits {
-            8 => LkMultiplicity::assert_ux::<8>,
-            16 => LkMultiplicity::assert_ux::<16>,
-            _ => unreachable!("unsupported n_bits = {}", self.n_bits),
-        };
-
-        assert_ux(lk_multiplicity, 2 * val - (msb << self.n_bits));
+        lk_multiplicity.assert_const_range(2 * val - (msb << self.n_bits), self.n_bits);
         set_val!(instance, self.msb, E::BaseField::from_canonical_u64(msb));
 
         Ok(())
