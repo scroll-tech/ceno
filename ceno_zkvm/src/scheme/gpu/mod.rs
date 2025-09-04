@@ -6,21 +6,26 @@ use crate::{
     scheme::hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
+use ceno_gpu::gl64::GpuPolynomialExt;
+use either::Either;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::{
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     gpu::{GpuBackend, GpuProver},
     hal::ProverBackend,
 };
-use itertools::{Itertools, chain};
+use itertools::{Itertools, chain, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Instance,
-    mle::{FieldType, MultilinearExtension},
+    Expression, Instance, WitnessId,
+    mle::{ArcMultilinearExtension, FieldType, MultilinearExtension},
+    monomial::Term,
     util::ceil_log2,
+    utils::{eval_by_expr_constant, eval_by_expr_with_instance},
+    wit_infer_by_expr,
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::{collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, iter, rc::Rc, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverMessage,
@@ -543,6 +548,311 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
     }
 }
 
+// TODO FIXME this is duplicated and could be shared with gpu prover
+fn gkr_witness<'a, 'b, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    circuit: &GKRCircuit<E>,
+    phase1_witness_group: &[ArcMultilinearExtensionGpu<'b, E>],
+    structural_witness: &[ArcMultilinearExtensionGpu<'b, E>],
+    fixed: &[ArcMultilinearExtensionGpu<'b, E>],
+    pub_io: &[ArcMultilinearExtensionGpu<'b, E>],
+    challenges: &[E],
+) -> (
+    GKRCircuitWitness<'a, GpuBackend<E, PCS>>,
+    GKRCircuitOutput<'a, GpuBackend<E, PCS>>,
+)
+where
+    'b: 'a,
+{
+    // layer order from output to input
+    let mut layer_wits =
+        Vec::<LayerWitness<GpuBackend<E, PCS>>>::with_capacity(circuit.layers.len() + 1);
+
+    let mut witness_mle_flatten = vec![None; circuit.n_evaluations];
+
+    // set input to witness_mle_flatten via first layer in_eval_expr
+    if let Some(first_layer) = circuit.layers.last() {
+        // process witin
+        first_layer
+            .in_eval_expr
+            .iter()
+            .take(phase1_witness_group.len())
+            .enumerate()
+            .for_each(|(index, witin)| {
+                witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
+            });
+
+        // TODO process fixed (and probably short) mle
+        assert_eq!(
+            first_layer.in_eval_expr.len(),
+            phase1_witness_group.len(),
+            "TODO process fixed (and probably short) mle"
+        );
+        // XXX currently fixed poly not support in layers > 1
+
+        // first_layer
+        //     .in_eval_expr
+        //     .par_iter()
+        //     .enumerate()
+        //     .skip(phase1_witness_group.len())
+        //     .map(|(index, witin)| {
+        //         (
+        //             *witin,
+        //             Some(
+        //                 fixed[index - phase1_witness_group.len()]
+        //                     .iter()
+        //                     .cycle()
+        //                     .cloned()
+        //                     .take(num_instances_with_rotation)
+        //                     .collect_vec()
+        //                     .into_mle()
+        //                     .into(),
+        //             ),
+        //         )
+        //     })
+        //     .collect::<HashMap<_, _>>()
+        //     .into_iter()
+        //     .for_each(|(witin, optional_mle)| witness_mle_flatten[witin] = optional_mle);
+    }
+
+    // generate all layer witness from input to output
+    for (i, layer) in circuit.layers.iter().rev().enumerate() {
+        tracing::debug!("generating input {i} layer with layer name {}", layer.name);
+        let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
+        // process in_evals to prepare layer witness
+        // This should assume the input of the first layer is the phase1 witness of the circuit.
+        let current_layer_wits = layer
+            .in_eval_expr
+            .iter()
+            .map(|witin| {
+                witness_mle_flatten[*witin]
+                    .clone()
+                    .expect("witness must exist")
+            })
+            .chain(if i == 0 {
+                // only supply structural witness for first layer
+                // TODO figure out how to support > 1 GKR layers
+                Either::Left(structural_witness.iter().cloned())
+            } else {
+                Either::Right(iter::empty())
+            })
+            .chain(fixed.iter().cloned())
+            .collect_vec();
+
+        // infer current layer output
+        let current_layer_output: Vec<ArcMultilinearExtensionGpu<'_, E>> =
+            layer_witness(layer, &current_layer_wits, pub_io, challenges);
+        layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
+
+        // process out to prepare output witness
+        layer
+            .out_sel_and_eval_exprs
+            .iter()
+            .flat_map(|(_, out_eval)| out_eval)
+            .zip_eq(&current_layer_output)
+            .for_each(|(out_eval, out_mle)| match out_eval {
+                // note: Linear (x - b)/a has been done and encode in expression
+                EvalExpression::Single(out) | EvalExpression::Linear(out, _, _) => {
+                    witness_mle_flatten[*out] = Some(out_mle.clone());
+                }
+                EvalExpression::Zero => { // zero expression
+                    // do nothing on zero expression
+                }
+                other => unimplemented!("{:?}", other),
+            });
+        exit_span!(span);
+    }
+    layer_wits.reverse();
+
+    // initialize a vector to store the final outputs of the GKR circuit.
+    let mut gkr_out_well_order = vec![Arc::default(); circuit.final_out_evals.len()];
+    circuit
+        .final_out_evals
+        .iter()
+        .for_each(|out| gkr_out_well_order[*out] = witness_mle_flatten[*out].clone().unwrap());
+
+    (
+        GKRCircuitWitness { layers: layer_wits },
+        GKRCircuitOutput(LayerWitness(gkr_out_well_order)),
+    )
+}
+
+pub fn layer_witness<'a, E>(
+    layer: &Layer<E>,
+    layer_wits: &[ArcMultilinearExtensionGpu<'a, E>],
+    pub_io_evals: &[ArcMultilinearExtensionGpu<'a, E>],
+    challenges: &[E],
+) -> Vec<ArcMultilinearExtensionGpu<'a, E>>
+where
+    E: ExtensionField,
+{
+    type EGL64 = ff_ext::GoldilocksExt2;
+
+    let out_evals: Vec<_> = layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .flat_map(|(sel_type, out_eval)| izip!(iter::repeat(sel_type), out_eval.iter()))
+        .collect();
+
+    // take public input from gpu to cpu for scalar evaluation
+    // assume public io is quite small, thus the cost is negligible
+    // evaluate all scalar terms first
+    // when instance was access in scalar, we only take its first item
+    // this operation is sound
+    let pub_io_evals = pub_io_evals
+        .iter()
+        .map(|mle| mle.inner_to_mle())
+        .map(|instance| instance.evaluations.index(0))
+        .collect_vec();
+
+    // pre-process and flatten indices into friendly GPU format
+    let (num_non_zero_expr, term_coefficients, mle_indices_per_term, mle_size_info) = layer
+        .exprs_with_selector_out_eval_monomial_form
+        .iter()
+        .zip_eq(out_evals.iter())
+        .filter(|(_, (_, out_eval))| {
+            match out_eval {
+                // only take linear/single to process
+                EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => true,
+                EvalExpression::Partition(..) => unimplemented!("Partition"),
+                EvalExpression::Zero => false,
+            }
+        })
+        .map(|(expr, _)| {
+            let (coeffs, indices, size_info) = extract_mle_relationships_from_monomial_terms(
+                expr,
+                layer_wits,
+                &pub_io_evals,
+                &challenges,
+            );
+            let coeffs_gl64: Vec<EGL64> = unsafe { std::mem::transmute(coeffs) };
+            (coeffs_gl64, indices, size_info)
+        })
+        .fold(
+            (0, Vec::new(), Vec::new(), Vec::new()),
+            |(mut num_non_zero_expr, mut coeff_acc, mut indices_acc, mut size_acc),
+             (coeffs, indices, size_info)| {
+                num_non_zero_expr += 1;
+                coeff_acc.push(coeffs);
+                indices_acc.push(indices);
+                size_acc.push(size_info);
+                (num_non_zero_expr, coeff_acc, indices_acc, size_acc)
+            },
+        );
+
+    let num_vars = mle_size_info
+        .first()
+        .and_then(|f| f.first())
+        .as_ref()
+        .unwrap()
+        .0;
+
+    let device = CUDA_DEVICE
+        .as_ref()
+        .map_err(|e| format!("Device not available: {:?}", e))
+        .unwrap();
+    device.bind_to_thread().unwrap();
+    let hal_arc = CUDA_HAL
+        .as_ref()
+        .map_err(|e| format!("HAL not available: {:?}", e))
+        .unwrap();
+    let cuda_hal = hal_arc.lock().unwrap();
+
+    // process & transmute poly
+    let all_witins_gpu = layer_wits.iter().map(|mle| mle.as_ref()).collect_vec();
+    let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<EGL64>> =
+        unsafe { std::mem::transmute(all_witins_gpu) };
+    let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+
+    // buffer for output witness from gpu
+    let mut next_witness_buf = (0..num_non_zero_expr)
+        .map(|_| {
+            cuda_hal
+                .alloc_ext_elems_on_device(1 << num_vars)
+                .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    cuda_hal
+        .witness_infer
+        .wit_infer_by_monomial_expr(
+            &cuda_hal,
+            all_witins_gpu_type_gl64,
+            &term_coefficients,
+            &mle_indices_per_term,
+            &mut next_witness_buf,
+        )
+        .unwrap();
+
+    // recover it back and interleaving with default gpu
+    let mut next_iter = next_witness_buf.into_iter();
+
+    out_evals
+        .into_iter()
+        .enumerate()
+        .map(|(i, (_, out_eval))| {
+            if matches!(
+                out_eval,
+                EvalExpression::Linear(..) | EvalExpression::Single(_)
+            ) {
+                // take next element from next_witness_buf
+                MultilinearExtensionGpu::from_ceno_gpu_ext(GpuPolynomialExt::new(
+                    next_iter
+                        .next()
+                        .expect("not enough elements in next_witness_buf"),
+                    num_vars,
+                ))
+            } else {
+                MultilinearExtensionGpu::default()
+            }
+        })
+        .map(Arc::new)
+        .collect_vec()
+}
+
+pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
+    monomial_terms: &[Term<Expression<E>, Expression<E>>],
+    all_mles: &[ArcMultilinearExtensionGpu<'a, E>],
+    public_io_evals: &[Either<E::BaseField, E>],
+    challenges: &[E],
+) -> (Vec<E>, Vec<Vec<usize>>, Vec<(usize, usize)>) {
+    let mut term_coefficients = Vec::new();
+    let mut mle_indices_per_term = Vec::new();
+    let mut mle_size_info = Vec::new();
+
+    for term in monomial_terms {
+        // scalar - convert Either<E::BaseField, E> to E
+        let scalar_either = eval_by_expr_constant(public_io_evals, challenges, &term.scalar);
+        let scalar = match scalar_either {
+            Either::Left(base_field_val) => E::from(base_field_val),
+            Either::Right(ext_field_val) => ext_field_val,
+        };
+        term_coefficients.push(scalar);
+
+        // MLE indices
+        let mut indices = Vec::new();
+        for expr in &term.product {
+            match expr {
+                Expression::WitIn(witin_id) => {
+                    indices.push(*witin_id as usize);
+                }
+                _ => panic!("Unsupported expression in product: {:?}", expr),
+            }
+        }
+
+        // MLE size - get this before moving indices
+        let first_idx = indices.first().copied();
+        mle_indices_per_term.push(indices);
+
+        if let Some(first_idx) = first_idx {
+            let num_vars = all_mles[first_idx].mle.num_vars();
+            mle_size_info.push((num_vars, num_vars));
+        }
+    }
+
+    (term_coefficients, mle_indices_per_term, mle_size_info)
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<GpuBackend<E, PCS>>
     for TemporaryGpuProver<E, PCS>
 {
@@ -562,48 +872,154 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
     where
         'a: 'b,
     {
-        println!("[GPU] build_main_witness");
-        let cpu_input: ProofInput<'a, CpuBackend<E, PCS>> = {
-            let cpu_witness = input
-                .witness
-                .iter()
-                .map(|mle| Arc::new(mle.inner_to_mle()))
-                .collect_vec();
-            let cpu_structural_witness = input
-                .structural_witness
-                .iter()
-                .map(|mle| Arc::new(mle.inner_to_mle()))
-                .collect_vec();
-            let cpu_fixed = input
-                .fixed
-                .iter()
-                .map(|mle| Arc::new(mle.inner_to_mle()))
-                .collect_vec();
-            let cpu_public_input = input
-                .public_input
-                .iter()
-                .map(|mle| Arc::new(mle.inner_to_mle()))
-                .collect_vec();
-            ProofInput {
-                witness: cpu_witness,
-                structural_witness: cpu_structural_witness,
-                fixed: cpu_fixed,
-                public_input: cpu_public_input,
-                num_instances: input.num_instances,
+        if std::any::TypeId::of::<E::BaseField>()
+            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
+        {
+            panic!("GPU backend only supports Goldilocks base field");
+        }
+
+        let (mles, is_padded) = {
+            let ComposedConstrainSystem {
+                zkvm_v1_css: cs,
+                gkr_circuit,
+            } = composed_cs;
+            let log2_num_instances = input.log2_num_instances();
+            let num_var_with_rotation =
+                log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+
+            // sanity check
+            assert_eq!(input.witness.len(), cs.num_witin as usize);
+
+            // structural witness can be empty. In this case they are `eq`, and will be filled later
+            assert!(
+                input.structural_witness.len() == cs.num_structural_witin as usize
+                    || input.structural_witness.is_empty(),
+            );
+            assert_eq!(input.fixed.len(), cs.num_fixed);
+
+            // check all witness size are power of 2
+            assert!(
+                input
+                    .witness
+                    .iter()
+                    .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
+            );
+
+            if let Some(gkr_circuit) = gkr_circuit {
+                println!("[GPU] build_main_witness");
+                // opcode must have at least one read/write/lookup
+                assert!(
+                    cs.lk_expressions.is_empty()
+                        || !cs.r_expressions.is_empty()
+                        || !cs.w_expressions.is_empty(),
+                    "assert opcode circuit"
+                );
+
+                let (_, gkr_circuit_out) = gkr_witness::<E, PCS>(
+                    gkr_circuit,
+                    &input.witness,
+                    &input.structural_witness,
+                    &input.fixed,
+                    &input.public_input,
+                    challenges,
+                );
+                println!("[GPU] mles built");
+                (gkr_circuit_out.0.0, true)
+            } else {
+                let cpu_input: ProofInput<'a, CpuBackend<E, PCS>> = {
+                    let cpu_witness = input
+                        .witness
+                        .iter()
+                        .map(|mle| Arc::new(mle.inner_to_mle()))
+                        .collect_vec();
+                    let cpu_structural_witness = input
+                        .structural_witness
+                        .iter()
+                        .map(|mle| Arc::new(mle.inner_to_mle()))
+                        .collect_vec();
+                    let cpu_fixed = input
+                        .fixed
+                        .iter()
+                        .map(|mle| Arc::new(mle.inner_to_mle()))
+                        .collect_vec();
+                    let cpu_public_input = input
+                        .public_input
+                        .iter()
+                        .map(|mle| Arc::new(mle.inner_to_mle()))
+                        .collect_vec();
+                    ProofInput {
+                        witness: cpu_witness,
+                        structural_witness: cpu_structural_witness,
+                        fixed: cpu_fixed,
+                        public_input: cpu_public_input,
+                        num_instances: input.num_instances,
+                    }
+                };
+                println!("[GPU] cpu_input built");
+
+                assert!(
+                    !cs.lk_table_expressions.is_empty()
+                        || !cs.r_table_expressions.is_empty()
+                        || !cs.w_table_expressions.is_empty(),
+                    "assert table circuit"
+                );
+
+                if !cpu_input.structural_witness.is_empty() {
+                    assert!(
+                        cpu_input
+                            .structural_witness
+                            .iter()
+                            .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
+                    );
+                }
+
+                assert!(
+                    cs.r_table_expressions
+                        .iter()
+                        .zip_eq(cs.w_table_expressions.iter())
+                        .all(|(r, w)| r.table_spec.len == w.table_spec.len)
+                );
+
+                // main constraint: lookup denominator and numerator record witness inference
+                let record_span = entered_span!("record");
+                let cpu_mles: Vec<ArcMultilinearExtension<'_, E>> = cs
+                    .r_table_expressions
+                    .par_iter()
+                    .map(|r| &r.expr)
+                    .chain(cs.r_expressions.par_iter())
+                    .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
+                    .chain(cs.w_expressions.par_iter())
+                    .chain(
+                        cs.lk_table_expressions
+                            .par_iter()
+                            .map(|lk| &lk.multiplicity),
+                    )
+                    .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
+                    .chain(cs.lk_expressions.par_iter())
+                    .map(|expr| {
+                        assert_eq!(expr.degree(), 1);
+                        wit_infer_by_expr(
+                            expr,
+                            cs.num_witin,
+                            cs.num_structural_witin,
+                            cs.num_fixed as WitnessId,
+                            &cpu_input.fixed,
+                            &cpu_input.witness,
+                            &cpu_input.structural_witness,
+                            &cpu_input.public_input,
+                            challenges,
+                        )
+                    })
+                    .collect();
+                exit_span!(record_span);
+                let cuda_hal = CUDA_HAL.as_ref().unwrap().lock().unwrap();
+                let mles = cpu_mles
+                    .iter()
+                    .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
+                    .collect_vec();
+                (mles, false)
             }
         };
-        println!("[GPU] cpu_input built");
-
-        let (cpu_mles, is_padded) =
-            self.inner_cpu
-                .build_main_witness(composed_cs, &cpu_input, challenges);
-
-        let cuda_hal = CUDA_HAL.as_ref().unwrap().lock().unwrap();
-        let mles = cpu_mles
-            .iter()
-            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
-            .collect_vec();
-        println!("[GPU] mles built");
         (mles, is_padded)
     }
 
@@ -730,7 +1146,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
     }
 }
 
+use gkr_iop::{
+    evaluation::EvalExpression,
+    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::Layer},
+};
 use p3::field::extension::BinomialExtensionField;
+
 type GL64 = p3::goldilocks::Goldilocks;
 type EGL64 = BinomialExtensionField<GL64, 2>;
 

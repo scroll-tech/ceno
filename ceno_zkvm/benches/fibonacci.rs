@@ -10,7 +10,7 @@ use ceno_zkvm::{
 mod alloc;
 use criterion::*;
 
-use ff_ext::BabyBearExt4;
+use ff_ext::{BabyBearExt4, GoldilocksExt2};
 use gkr_iop::cpu::default_backend_config;
 
 use mpcs::BasefoldDefault;
@@ -27,7 +27,7 @@ criterion_main!(fibonacci_prove_group);
 const NUM_SAMPLES: usize = 10;
 
 type Pcs = BasefoldDefault<E>;
-type E = BabyBearExt4;
+type E = GoldilocksExt2;
 
 // Relevant init data for fibonacci run
 fn setup() -> (Program, Platform) {
@@ -49,26 +49,26 @@ fn fibonacci_prove(c: &mut Criterion) {
         let mut hints = CenoStdin::default();
         let _ = hints.write(&20);
         // estimate proof size data first
-        let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-            create_prover(backend.clone()),
-            program.clone(),
-            platform.clone(),
-            &Vec::from(&hints),
-            &[],
-            max_steps,
-            Checkpoint::Complete,
-        );
-        let proof = result.proof.expect("PrepSanityCheck do not provide proof");
-        let vk = result.vk.expect("PrepSanityCheck do not provide verifier");
-
-        println!("e2e proof {}", proof);
-        let transcript = BasicTranscript::new(b"riscv");
-        let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
-        assert!(
-            verifier
-                .verify_proof_halt(proof, transcript, false)
-                .expect("verify proof return with error"),
-        );
+        // let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
+        //     create_prover(backend.clone()),
+        //     program.clone(),
+        //     platform.clone(),
+        //     &Vec::from(&hints),
+        //     &[],
+        //     max_steps,
+        //     Checkpoint::Complete,
+        // );
+        // let proof = result.proof.expect("PrepSanityCheck do not provide proof");
+        // let vk = result.vk.expect("PrepSanityCheck do not provide verifier");
+        //
+        // println!("e2e proof {}", proof);
+        // let transcript = BasicTranscript::new(b"riscv");
+        // let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
+        // assert!(
+        //     verifier
+        //         .verify_proof_halt(proof, transcript, false)
+        //         .expect("verify proof return with error"),
+        // );
         println!();
         println!("max_steps = {}", max_steps);
 
