@@ -193,14 +193,7 @@ impl InnerLtConfig {
         let remain_bits = max_bits % u16::BITS as usize;
         if remain_bits > 0 {
             let msl = cb.create_witin(|| "msl");
-            match remain_bits {
-                14 => cb.assert_ux::<_, _, 14>(|| name.clone(), msl.expr())?,
-                8 => cb.assert_ux::<_, _, 8>(|| name.clone(), msl.expr())?,
-                5 => cb.assert_ux::<_, _, 5>(|| name.clone(), msl.expr())?,
-                1 => cb.assert_bit(|| name.clone(), msl.expr())?,
-                // TODO refactor range table to support arbitrary range check
-                _ => tracing::info!("not implement {} bit range check", remain_bits),
-            }
+            cb.assert_ux_v2(|| name.clone(), msl.expr(), remain_bits)?;
             diff.push(msl);
         }
 
@@ -280,14 +273,7 @@ impl InnerLtConfig {
             let wit = self.diff.last().unwrap();
             // extract remaining bits limb from diff and assign to instance
             let val = (diff >> ((self.diff.len() - 1) * u16::BITS as usize)) & 0xffff;
-            match remain_bits {
-                14 => lkm.assert_ux::<14>(val),
-                8 => lkm.assert_ux::<8>(val),
-                5 => lkm.assert_ux::<5>(val),
-                1 => (), // there is nothing to do with bool check
-                // TODO refactor range table to support arbitrary range check
-                _ => tracing::info!("not implement {} bit range check", remain_bits),
-            }
+            lkm.assert_ux_v2(val, remain_bits);
             set_val!(instance, wit, val);
         }
         Ok(())
