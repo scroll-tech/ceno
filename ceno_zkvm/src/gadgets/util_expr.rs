@@ -1,10 +1,8 @@
 use ff_ext::ExtensionField;
 use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
 use multilinear_extensions::{Expression, ToExpr};
-use p3_field::FieldAlgebra;
-use sp1_curves::params::FieldParameters;
-
-use sp1_curves::polynomial::Polynomial;
+use p3::field::FieldAlgebra;
+use sp1_curves::{params::FieldParameters, polynomial::Polynomial};
 
 pub fn eval_field_operation<E: ExtensionField, P: FieldParameters>(
     builder: &mut CircuitBuilder<E>,

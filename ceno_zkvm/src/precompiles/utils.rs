@@ -38,24 +38,6 @@ pub fn merge_u8_limbs_to_u16_limbs_pairs_and_extend<E: ExtensionField, P: NumLim
     }
 }
 
-/// Merge a slice of u8 arrays into a slice of u32 represented by u16 limb pair.
-pub fn merge_u8_arrays_to_u16_limbs_pairs_and_extend<E: ExtensionField>(
-    u8_arrays: &[impl ToExpr<E, Output = Expression<E>> + Clone],
-    dst: &mut Vec<[Expression<E>; 2]>,
-) {
-    for i in 0..u8_arrays.len() {
-        // create an expression combining 4 elements of bytes into a 2x16-bit felt
-        let output8_slice = u8_arrays[4 * i..4 * (i + 1)]
-            .iter()
-            .map(|e| (8, e.expr()))
-            .collect_vec();
-        dst.push([
-            expansion_expr::<E, 16>(&output8_slice[0..2]),
-            expansion_expr::<E, 16>(&output8_slice[2..4]),
-        ])
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mask {
     pub size: usize,

@@ -531,6 +531,26 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
             Chip::new_from_cb(cb, self.n_challenges),
         )
     }
+
+    fn n_committed(&self) -> usize {
+        unimplemented!("retrieve from constrain system")
+    }
+
+    fn n_fixed(&self) -> usize {
+        unimplemented!("retrieve from constrain system")
+    }
+
+    fn n_challenges(&self) -> usize {
+        0
+    }
+
+    fn n_evaluations(&self) -> usize {
+        unimplemented!()
+    }
+
+    fn n_layers(&self) -> usize {
+        1
+    }
 }
 
 #[derive(Clone)]

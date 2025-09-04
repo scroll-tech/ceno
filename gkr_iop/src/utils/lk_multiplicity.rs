@@ -1,5 +1,5 @@
 use itertools::izip;
-use p3_field::PrimeField32;
+use p3::field::PrimeField32;
 use std::{
     cell::RefCell,
     collections::HashMap,

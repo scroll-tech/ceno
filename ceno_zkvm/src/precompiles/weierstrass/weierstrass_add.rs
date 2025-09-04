@@ -21,14 +21,14 @@ use multilinear_extensions::{
     util::{ceil_log2, max_usable_threads},
 };
 use num::{BigUint, Zero};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3::field::{FieldAlgebra, PrimeField32};
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::{IntoParallelRefIterator, ParallelBridge, ParallelSlice},
 };
 use sp1_curves::{
     AffinePoint, EllipticCurve,
-    params::{FieldParameters, NumWords},
+    params::{FieldParameters, Limbs, NumLimbs, NumWords},
     polynomial::Polynomial,
 };
 use sp1_derive::AlignedBorrow;
@@ -43,10 +43,7 @@ use crate::{
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
         SelectorTypeLayout,
-        utils::{
-            merge_u8_arrays_to_u16_limbs_pairs_and_extend,
-            merge_u8_limbs_to_u16_limbs_pairs_and_extend,
-        },
+        utils::merge_u8_limbs_to_u16_limbs_pairs_and_extend,
         weierstrass::{
             EllipticCurveAddInstance, EllipticCurveAddStateInstance, EllipticCurveAddWitInstance,
         },
@@ -61,14 +58,14 @@ pub const fn num_weierstrass_add_cols<P: FieldParameters + NumWords>() -> usize 
 
 #[derive(Clone, Debug, AlignedBorrow)]
 #[repr(C)]
-pub struct WeierstrassAddAssignWitCols<WitT, P: FieldParameters + NumWords> {
+pub struct WeierstrassAddAssignWitCols<WitT, P: FieldParameters + NumLimbs> {
     pub clk: WitT,
     pub p_ptr: WitT,
     pub q_ptr: WitT,
-    pub p_x: GenericArray<WitT, P::WordsCurvePoint>,
-    pub p_y: GenericArray<WitT, P::WordsCurvePoint>,
-    pub q_x: GenericArray<WitT, P::WordsCurvePoint>,
-    pub q_y: GenericArray<WitT, P::WordsCurvePoint>,
+    pub p_x: Limbs<WitT, P::Limbs>,
+    pub p_y: Limbs<WitT, P::Limbs>,
+    pub q_x: Limbs<WitT, P::Limbs>,
+    pub q_y: Limbs<WitT, P::Limbs>,
     pub(crate) slope_denominator: FieldOpCols<WitT, P>,
     pub(crate) slope_numerator: FieldOpCols<WitT, P>,
     pub(crate) slope: FieldOpCols<WitT, P>,
@@ -96,7 +93,6 @@ pub struct WeierstrassAddAssignLayout<E: ExtensionField, EC: EllipticCurve> {
     pub output32_exprs: GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsCurvePoint>,
     pub n_fixed: usize,
     pub n_committed: usize,
-    pub n_structural_witin: usize,
     pub n_challenges: usize,
 }
 
@@ -109,10 +105,10 @@ where
             clk: cb.create_witin(|| "clk"),
             p_ptr: cb.create_witin(|| "p_ptr"),
             q_ptr: cb.create_witin(|| "q_ptr"),
-            p_x: GenericArray::generate(|_| cb.create_witin(|| "p_x")),
-            p_y: GenericArray::generate(|_| cb.create_witin(|| "p_y")),
-            q_x: GenericArray::generate(|_| cb.create_witin(|| "q_x")),
-            q_y: GenericArray::generate(|_| cb.create_witin(|| "q_y")),
+            p_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_x"))),
+            p_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_y"))),
+            q_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "q_x"))),
+            q_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "q_y"))),
             slope_denominator: FieldOpCols::create(cb, || "slope_denominator"),
             slope_numerator: FieldOpCols::create(cb, || "slope_numerator"),
             slope: FieldOpCols::create(cb, || "slope"),
@@ -125,7 +121,7 @@ where
         };
 
         let eq = cb.create_structural_witin(
-            || format!("weierstrass_eq"),
+            || "weierstrass_eq",
             StructuralWitInType::EqualDistanceSequence {
                 max_len: 0,
                 offset: 0,
@@ -158,7 +154,6 @@ where
             output32_exprs,
             n_fixed: 0,
             n_committed: num_weierstrass_add_cols::<EC::BaseField>(),
-            n_structural_witin: 0,
             n_challenges: 0,
         }
     }
@@ -233,8 +228,6 @@ where
 impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E> for WeierstrassAddAssignLayout<E, EC>
 where
     E::BaseField: PrimeField32,
-    Polynomial<Expression<E>>:
-        From<GenericArray<WitIn, <EC::BaseField as NumWords>::WordsCurvePoint>>,
 {
     type Params = ();
 
@@ -248,17 +241,17 @@ where
         // slope = (q.y - p.y) / (q.x - p.x).
         let slope = {
             wits.slope_numerator
-                .eval(cb, &wits.q_y, &wits.p_y, FieldOperation::Sub);
+                .eval(cb, &wits.q_y, &wits.p_y, FieldOperation::Sub)?;
 
             wits.slope_denominator
-                .eval(cb, &wits.q_x, &wits.p_x, FieldOperation::Sub);
+                .eval(cb, &wits.q_x, &wits.p_x, FieldOperation::Sub)?;
 
             wits.slope.eval(
                 cb,
                 &wits.slope_numerator.result,
                 &wits.slope_denominator.result,
                 FieldOperation::Div,
-            );
+            )?;
 
             &wits.slope.result
         };
@@ -266,38 +259,39 @@ where
         // x = slope * slope - self.x - other.x.
         let x = {
             wits.slope_squared
-                .eval(cb, slope, slope, FieldOperation::Mul);
+                .eval(cb, slope, slope, FieldOperation::Mul)?;
 
             wits.p_x_plus_q_x
-                .eval(cb, &wits.p_x, &wits.q_x, FieldOperation::Add);
+                .eval(cb, &wits.p_x, &wits.q_x, FieldOperation::Add)?;
 
             wits.x3_ins.eval(
                 cb,
                 &wits.slope_squared.result,
                 &wits.p_x_plus_q_x.result,
                 FieldOperation::Sub,
-            );
+            )?;
 
             &wits.x3_ins.result
         };
 
         // y = slope * (p.x - x_3n) - q.y.
         {
-            wits.p_x_minus_x.eval(cb, &wits.p_x, x, FieldOperation::Sub);
+            wits.p_x_minus_x
+                .eval(cb, &wits.p_x, x, FieldOperation::Sub)?;
 
             wits.slope_times_p_x_minus_x.eval(
                 cb,
                 slope,
                 &wits.p_x_minus_x.result,
                 FieldOperation::Mul,
-            );
+            )?;
 
             wits.y3_ins.eval(
                 cb,
                 &wits.slope_times_p_x_minus_x.result,
                 &wits.p_y,
                 FieldOperation::Sub,
-            );
+            )?;
         }
 
         // Constraint output32 from wits.x3_ins || wits.y3_ins by converting 8-bit limbs to 2x16-bit felts
@@ -309,13 +303,13 @@ where
 
         let mut p_input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
         for limbs in [&wits.p_x, &wits.p_y] {
-            merge_u8_arrays_to_u16_limbs_pairs_and_extend(limbs, &mut p_input32);
+            merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(limbs, &mut p_input32);
         }
         let p_input32 = p_input32.try_into().unwrap();
 
         let mut q_input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
         for limbs in [&wits.q_x, &wits.q_y] {
-            merge_u8_arrays_to_u16_limbs_pairs_and_extend(limbs, &mut q_input32);
+            merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(limbs, &mut q_input32);
         }
         let q_input32 = q_input32.try_into().unwrap();
 
@@ -326,10 +320,16 @@ where
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &CircuitBuilder<E>) -> (OutEvalGroups<E>, Chip<E>) {
+    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_challenges = 0;
+
+        // register selector to legacy constrain system
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
 
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();
@@ -339,28 +339,36 @@ where
         (
             [
                 // r_record
-                (
-                    self.selector_type_layout.sel_mem_read.clone(),
-                    (0..r_len).collect_vec(),
-                ),
+                (0..r_len).collect_vec(),
                 // w_record
-                (
-                    self.selector_type_layout.sel_mem_write.clone(),
-                    (r_len..r_len + w_len).collect_vec(),
-                ),
+                (r_len..r_len + w_len).collect_vec(),
                 // lk_record
-                (
-                    self.selector_type_layout.sel_lookup.clone(),
-                    (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                ),
+                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
                 // zero_record
-                (
-                    self.selector_type_layout.sel_zero.clone(),
-                    (0..zero_len).collect_vec(),
-                ),
+                (0..zero_len).collect_vec(),
             ],
             Chip::new_from_cb(cb, self.n_challenges),
         )
+    }
+
+    fn n_committed(&self) -> usize {
+        todo!()
+    }
+
+    fn n_fixed(&self) -> usize {
+        todo!()
+    }
+
+    fn n_challenges(&self) -> usize {
+        todo!()
+    }
+
+    fn n_evaluations(&self) -> usize {
+        todo!()
+    }
+
+    fn n_layers(&self) -> usize {
+        todo!()
     }
 }
 
@@ -466,8 +474,6 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve>()
 -> Result<(TestWeierstrassAddLayout<E, EC>, GKRCircuit<E>, u16, u16), ZKVMError>
 where
     E::BaseField: PrimeField32,
-    Polynomial<Expression<E>>:
-        From<GenericArray<WitIn, <EC::BaseField as NumWords>::WordsCurvePoint>>,
 {
     let mut cs = ConstraintSystem::new(|| "weierstrass_add");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
@@ -512,7 +518,7 @@ where
             .collect::<Result<Vec<WriteMEM>, _>>()?,
     );
 
-    let (out_evals, mut chip) = layout.finalize(&cb);
+    let (out_evals, mut chip) = layout.finalize(&mut cb);
 
     let layer =
         Layer::from_circuit_builder(&cb, "Rounds".to_string(), layout.n_challenges, out_evals);
@@ -554,8 +560,6 @@ pub fn run_weierstrass_add<
 ) -> Result<GKRProof<E>, BackendError>
 where
     E::BaseField: PrimeField32,
-    Polynomial<Expression<E>>:
-        From<GenericArray<WitIn, <EC::BaseField as NumWords>::WordsCurvePoint>>,
 {
     let num_instances = points.len();
     let log2_num_instance = ceil_log2(num_instances);

@@ -915,20 +915,20 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         let name = name_fn().into();
         let mut index = 0;
-        while index + 1 < input.len() {
+        while index + 1 < exprs.len() {
             self.assert_double_u8(
                 || format!("{}_{index:?}", name),
-                input[index].clone(),
-                input[index + 1].clone(),
-            );
+                exprs[index].expr(),
+                exprs[index + 1].expr(),
+            )?;
             index += 2;
         }
-        if index < input.len() {
+        if index < exprs.len() {
             self.assert_double_u8(
                 || format!("{}_{index:?}", name),
-                input[index].clone(),
+                exprs[index].expr(),
                 Expression::ZERO,
-            );
+            )?;
         }
         Ok(())
     }

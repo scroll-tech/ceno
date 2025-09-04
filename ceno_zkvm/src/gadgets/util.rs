@@ -1,5 +1,5 @@
 use num::BigUint;
-use p3_field::PrimeField32;
+use p3::field::PrimeField32;
 use sp1_curves::polynomial::Polynomial;
 
 fn biguint_to_field<F: PrimeField32>(num: BigUint) -> F {

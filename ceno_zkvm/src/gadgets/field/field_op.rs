@@ -3,7 +3,7 @@ use generic_array::{GenericArray, sequence::GenericSequence, typenum::Unsigned};
 use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use num::BigUint;
-use p3_field::PrimeField32;
+use p3::field::PrimeField32;
 use sp1_curves::{
     params::{FieldParameters, Limbs},
     polynomial::Polynomial,

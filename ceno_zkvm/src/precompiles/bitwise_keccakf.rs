@@ -790,6 +790,26 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     ) -> Result<Self, CircuitBuilderError> {
         unimplemented!()
     }
+
+    fn n_committed(&self) -> usize {
+        STATE_SIZE
+    }
+
+    fn n_fixed(&self) -> usize {
+        0
+    }
+
+    fn n_challenges(&self) -> usize {
+        0
+    }
+
+    fn n_layers(&self) -> usize {
+        5 * ROUNDS + 1
+    }
+
+    fn n_evaluations(&self) -> usize {
+        KECCAK_ALL_IN_EVAL_SIZE + KECCAK_OUT_EVAL_SIZE
+    }
 }
 
 pub struct KeccakTrace<E: ExtensionField> {
