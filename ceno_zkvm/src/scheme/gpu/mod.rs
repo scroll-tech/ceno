@@ -6,7 +6,7 @@ use crate::{
     scheme::hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
-use ceno_gpu::gl64::GpuPolynomialExt;
+use ceno_gpu::gl64::{GpuFieldType, GpuPolynomialExt};
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::{
     gkr::{
@@ -19,15 +19,13 @@ use gkr_iop::{
 use itertools::{Itertools, chain, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Expression, Instance, WitnessId,
-    mle::{ArcMultilinearExtension, FieldType, MultilinearExtension},
-    monomial::Term,
+    Instance, WitnessId,
+    mle::{FieldType, MultilinearExtension},
+    monomialize_expr_to_wit_terms,
     util::ceil_log2,
-    utils::{eval_by_expr_constant, eval_by_expr_with_instance},
-    wit_infer_by_expr,
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::{collections::BTreeMap, iter, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverMessage,
@@ -559,36 +557,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         cs: &ConstraintSystem<<GpuBackend<E, PCS> as ProverBackend>::E>,
         challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
-        let cpu_input: ProofInput<'a, CpuBackend<E, PCS>> = {
-            let cpu_witness = input
-                .witness
-                .iter()
-                .map(|mle| Arc::new(mle.inner_to_mle()))
-                .collect_vec();
-            let cpu_structural_witness = input
-                .structural_witness
-                .iter()
-                .map(|mle| Arc::new(mle.inner_to_mle()))
-                .collect_vec();
-            let cpu_fixed = input
-                .fixed
-                .iter()
-                .map(|mle| Arc::new(mle.inner_to_mle()))
-                .collect_vec();
-            let cpu_public_input = input
-                .public_input
-                .iter()
-                .map(|mle| Arc::new(mle.inner_to_mle()))
-                .collect_vec();
-            ProofInput {
-                witness: cpu_witness,
-                structural_witness: cpu_structural_witness,
-                fixed: cpu_fixed,
-                public_input: cpu_public_input,
-                num_instances: input.num_instances,
-            }
-        };
-
         assert!(
             !cs.lk_table_expressions.is_empty()
                 || !cs.r_table_expressions.is_empty()
@@ -603,43 +571,106 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
 
+        let layer_witin = input
+            .witness
+            .iter()
+            .chain(&input.structural_witness)
+            .chain(&input.fixed)
+            .chain(&input.public_input)
+            .map(|w| w.as_ref())
+            .collect_vec();
+        let num_vars = input.witness[0].num_vars();
+
         // main constraint: lookup denominator and numerator record witness inference
         let record_span = entered_span!("record");
-        let cpu_mles: Vec<ArcMultilinearExtension<'_, E>> = cs
+        let (num_non_zero_expr, term_coefficients, mle_indices_per_term, _) = cs
             .r_table_expressions
-            .par_iter()
+            .iter()
             .map(|r| &r.expr)
-            .chain(cs.r_expressions.par_iter())
-            .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
-            .chain(cs.w_expressions.par_iter())
-            .chain(
-                cs.lk_table_expressions
-                    .par_iter()
-                    .map(|lk| &lk.multiplicity),
-            )
-            .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
-            .chain(cs.lk_expressions.par_iter())
+            .chain(cs.r_expressions.iter())
+            .chain(cs.w_table_expressions.iter().map(|w| &w.expr))
+            .chain(cs.w_expressions.iter())
+            .chain(cs.lk_table_expressions.iter().map(|lk| &lk.multiplicity))
+            .chain(cs.lk_table_expressions.iter().map(|lk| &lk.values))
+            .chain(cs.lk_expressions.iter())
             .map(|expr| {
                 assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(
-                    expr,
-                    cs.num_witin,
-                    cs.num_structural_witin,
+
+                let monomial_term = monomialize_expr_to_wit_terms(
+                    &expr,
+                    cs.num_witin as WitnessId,
+                    cs.num_structural_witin as WitnessId,
                     cs.num_fixed as WitnessId,
-                    &cpu_input.fixed,
-                    &cpu_input.witness,
-                    &cpu_input.structural_witness,
-                    &cpu_input.public_input,
-                    challenges,
-                )
+                );
+
+                let (coeffs, indices, size_info) = extract_mle_relationships_from_monomial_terms(
+                    &monomial_term,
+                    &layer_witin,
+                    &[],
+                    &challenges,
+                );
+                let coeffs_gl64: Vec<EGL64> = unsafe { std::mem::transmute(coeffs) };
+                (coeffs_gl64, indices, size_info)
             })
-            .collect();
+            .fold(
+                (0, Vec::new(), Vec::new(), Vec::new()),
+                |(mut num_non_zero_expr, mut coeff_acc, mut indices_acc, mut size_acc),
+                 (coeffs, indices, size_info)| {
+                    num_non_zero_expr += 1;
+                    coeff_acc.push(coeffs);
+                    indices_acc.push(indices);
+                    size_acc.push(size_info);
+                    (num_non_zero_expr, coeff_acc, indices_acc, size_acc)
+                },
+            );
+
+        let device = CUDA_DEVICE
+            .as_ref()
+            .map_err(|e| format!("Device not available: {:?}", e))
+            .unwrap();
+        device.bind_to_thread().unwrap();
+        let hal_arc = CUDA_HAL
+            .as_ref()
+            .map_err(|e| format!("HAL not available: {:?}", e))
+            .unwrap();
+        let cuda_hal = hal_arc.lock().unwrap();
+
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<EGL64>> =
+            unsafe { std::mem::transmute(layer_witin) };
+        let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+
+        // buffer for output witness from gpu
+        let mut next_witness_buf = (0..num_non_zero_expr)
+            .map(|_| {
+                cuda_hal
+                    .alloc_ext_elems_on_device(1 << num_vars)
+                    .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        cuda_hal
+            .witness_infer
+            .wit_infer_by_monomial_expr(
+                &cuda_hal,
+                all_witins_gpu_type_gl64,
+                &term_coefficients,
+                &mle_indices_per_term,
+                &mut next_witness_buf,
+            )
+            .unwrap();
+
+        let next_mles = next_witness_buf
+            .into_iter()
+            .map(|buf| {
+                Arc::new(MultilinearExtensionGpu::from_ceno_gpu_ext(
+                    GpuPolynomialExt::new(buf, num_vars),
+                ))
+            })
+            .collect_vec();
+
         exit_span!(record_span);
-        let cuda_hal = CUDA_HAL.as_ref().unwrap().lock().unwrap();
-        cpu_mles
-            .iter()
-            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
-            .collect_vec()
+        next_mles
     }
 
     #[allow(clippy::type_complexity)]
@@ -766,10 +797,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
 }
 
 use crate::circuit_builder::ConstraintSystem;
-use gkr_iop::{
-    evaluation::EvalExpression,
-    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::Layer},
-};
+use gkr_iop::{evaluation::EvalExpression, gkr::layer::Layer};
 use p3::field::extension::BinomialExtensionField;
 
 type GL64 = p3::goldilocks::Goldilocks;
@@ -1074,8 +1102,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         out_evals
             .into_iter()
-            .enumerate()
-            .map(|(i, (_, out_eval))| {
+            .map(|(_, out_eval)| {
                 if matches!(
                     out_eval,
                     EvalExpression::Linear(..) | EvalExpression::Single(_)

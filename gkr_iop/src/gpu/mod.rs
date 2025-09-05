@@ -1,32 +1,21 @@
 use crate::{
-    gkr::{
-        GKRCircuit, GKRCircuitOutput, GKRCircuitWitness,
-        layer::gpu::extract_mle_relationships_from_monomial_terms,
-    },
+    gkr::layer::gpu::extract_mle_relationships_from_monomial_terms,
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
 use ff_ext::ExtensionField;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
-use multilinear_extensions::mle::{
-    ArcMultilinearExtension, FieldType, MultilinearExtension, Point,
-};
+use multilinear_extensions::mle::{FieldType, MultilinearExtension, Point};
 use p3::field::TwoAdicField;
 use std::{rc::Rc, sync::Arc};
 use witness::RowMajorMatrix;
 
-use crate::cpu::{CpuBackend, CpuProver, default_backend_config};
+use crate::cpu::default_backend_config;
 
 use ceno_gpu::{
     BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu, gl64::buffer::BufferImpl,
 };
 
-use ceno_gpu::gl64::GpuPolynomialExt;
 use itertools::{Itertools, izip};
-use multilinear_extensions::{
-    WitnessId,
-    macros::{entered_span, exit_span},
-    wit_infer_by_expr,
-};
 use std::marker::PhantomData;
 
 pub mod gpu_prover {
@@ -418,8 +407,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         out_evals
             .into_iter()
-            .enumerate()
-            .map(|(i, (_, out_eval))| {
+            .map(|(_, out_eval)| {
                 if matches!(
                     out_eval,
                     EvalExpression::Linear(..) | EvalExpression::Single(_)

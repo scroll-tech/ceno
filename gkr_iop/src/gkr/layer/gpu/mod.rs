@@ -19,7 +19,7 @@ use multilinear_extensions::{
     Expression,
     mle::{MultilinearExtension, Point},
     monomial::Term,
-    utils::{eval_by_expr_constant, eval_by_expr_with_instance},
+    utils::eval_by_expr_constant,
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
