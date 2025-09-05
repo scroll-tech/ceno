@@ -371,6 +371,8 @@ dependencies = [
  "ceno_host",
  "clap",
  "criterion",
+ "cuda_hal",
+ "cudarc",
  "either",
  "ff_ext",
  "generic_static",
@@ -380,6 +382,7 @@ dependencies = [
  "mpcs",
  "multilinear_extensions",
  "ndarray",
+ "once_cell",
  "p3",
  "parse-size",
  "pprof2",
@@ -591,6 +594,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d02f3b0da4c6504f86e9cd789d8dbafab48c2321be74e9987593de5a894d93d"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "cuda_hal"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ff_ext",
+ "itertools 0.13.0",
+ "mpcs",
+ "multilinear_extensions",
+ "p3",
+ "rand",
+ "rayon",
+ "sumcheck",
+ "thiserror 1.0.69",
+ "tracing",
+ "transcript",
+ "witness",
+]
+
+[[package]]
+name = "cudarc"
+version = "0.13.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "486c221362668c63a1636cfa51463b09574433b39029326cff40864b3ba12b6e"
+dependencies = [
+ "libloading",
 ]
 
 [[package]]
@@ -897,11 +928,14 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "criterion",
+ "cuda_hal",
+ "cudarc",
  "either",
  "ff_ext",
  "itertools 0.13.0",
  "mpcs",
  "multilinear_extensions",
+ "once_cell",
  "p3",
  "rand",
  "rayon",
@@ -914,6 +948,8 @@ dependencies = [
  "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "tracing",
+ "tracing-forest",
+ "tracing-subscriber",
  "transcript",
  "witness",
 ]
@@ -1228,6 +1264,16 @@ dependencies = [
  "libc",
  "libz-sys",
  "pkg-config",
+]
+
+[[package]]
+name = "libloading"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
+dependencies = [
+ "cfg-if",
+ "windows-targets",
 ]
 
 [[package]]

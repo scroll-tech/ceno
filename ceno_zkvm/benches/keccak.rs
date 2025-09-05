@@ -1,16 +1,17 @@
-use std::{rc::Rc, time::Duration};
+use std::time::Duration;
 
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    scheme::{create_backend, create_prover},
 };
 mod alloc;
 use ceno_zkvm::scheme::verifier::ZKVMVerifier;
 use criterion::*;
 use ff_ext::BabyBearExt4;
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::cpu::default_backend_config;
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 
@@ -39,14 +40,15 @@ fn setup() -> (Program, Platform) {
 
 fn keccak_prove(c: &mut Criterion) {
     let (program, platform) = setup();
-    let backend: Rc<_> = CpuBackend::<E, Pcs>::default().into();
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
     // retrive 1 << 20th keccak element >> max_steps
     let mut hints = CenoStdin::default();
     let _ = hints.write(&vec![1, 2, 3]);
     let max_steps = usize::MAX;
     // estimate proof size data first
     let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-        CpuProver::new(backend.clone()),
+        create_prover(backend.clone()),
         program.clone(),
         platform.clone(),
         &Vec::from(&hints),
@@ -80,7 +82,7 @@ fn keccak_prove(c: &mut Criterion) {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
                     let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-                        CpuProver::new(backend.clone()),
+                        create_prover(backend.clone()),
                         program.clone(),
                         platform.clone(),
                         &Vec::from(&hints),

@@ -8,8 +8,8 @@ use crate::{
     scheme::{
         constants::DYNAMIC_RANGE_MAX_BITS,
         cpu::CpuTowerProver,
+        create_backend, create_prover,
         hal::{ProofInput, TowerProverSpec},
-        prover::ZkVMCpuProver,
     },
     structs::{
         PointAndEval, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
@@ -23,9 +23,14 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+use gkr_iop::cpu::default_backend_config;
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
-use std::{marker::PhantomData, rc::Rc};
+use std::marker::PhantomData;
+
+#[cfg(feature = "gpu")]
+use gkr_iop::gpu::{MultilinearExtensionGpu, gpu_prover::*};
+#[cfg(feature = "gpu")]
+use std::sync::Arc;
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
@@ -100,17 +105,16 @@ fn test_rw_lk_expression_combination() {
     type E = GoldilocksExt2;
     type Pcs = WhirDefault<E>;
 
-    let backend: Rc<_> = CpuBackend::<E, Pcs>::new(8, Conjecture100bits).into();
-
     fn test_rw_lk_expression_combination_inner<
         const L: usize,
         const RW: usize,
         E: ExtensionField,
         Pcs: PolynomialCommitmentScheme<E> + 'static,
-    >(
-        device: CpuProver<CpuBackend<E, Pcs>>,
-    ) {
+    >() {
         // configure
+        let (max_num_variables, security_level) = (8, Conjecture100bits);
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend.clone());
         let name = TestCircuit::<E, RW, L>::name();
         let mut zkvm_cs = ZKVMConstraintSystem::default();
         let config = zkvm_cs.register_opcode_circuit::<TestCircuit<E, RW, L>>();
@@ -142,7 +146,7 @@ fn test_rw_lk_expression_combination() {
             .unwrap();
 
         // get proof
-        let prover = ZkVMCpuProver::new(pk, device);
+        let prover = ZKVMProver::new(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
         let mut rmm = zkvm_witness.into_iter_sorted().next().unwrap().1;
         let (rmm, structural_rmm) = (rmm.remove(0), rmm.remove(0));
@@ -153,11 +157,33 @@ fn test_rw_lk_expression_combination() {
             Pcs::batch_commit_and_write(&prover.pk.pp, vec![rmm], &mut transcript).unwrap();
         let witin_commit = Pcs::get_pure_commitment(&commit_with_witness);
 
-        let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
-        let structural_in = structural_wits_in
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec();
+        // TODO: better way to handle this
+        #[cfg(not(feature = "gpu"))]
+        let (wits_in, structural_in) = {
+            (
+                wits_in.into_iter().map(|v| v.into()).collect_vec(),
+                structural_wits_in
+                    .into_iter()
+                    .map(|v| v.into())
+                    .collect_vec(),
+            )
+        };
+
+        #[cfg(feature = "gpu")]
+        let (wits_in, structural_in) = {
+            let cuda_hal = get_cuda_hal().unwrap();
+            (
+                wits_in
+                    .iter()
+                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                    .collect_vec(),
+                structural_in = structural_wits_in
+                    .iter()
+                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                    .collect_vec(),
+            )
+        };
+
         let prover_challenges = [
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
@@ -218,9 +244,9 @@ fn test_rw_lk_expression_combination() {
     }
 
     // <lookup count, rw count>
-    test_rw_lk_expression_combination_inner::<19, 17, _, _>(CpuProver::new(backend.clone()));
-    test_rw_lk_expression_combination_inner::<61, 17, _, _>(CpuProver::new(backend.clone()));
-    test_rw_lk_expression_combination_inner::<17, 61, _, _>(CpuProver::new(backend.clone()));
+    test_rw_lk_expression_combination_inner::<19, 17, E, Pcs>();
+    test_rw_lk_expression_combination_inner::<61, 17, E, Pcs>();
+    test_rw_lk_expression_combination_inner::<17, 61, E, Pcs>();
 }
 
 const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [
@@ -305,8 +331,9 @@ fn test_single_add_instance_e2e() {
     assert_eq!(halt_records.len(), 1);
 
     // proving
-    let backend: Rc<_> = CpuBackend::<E, Pcs>::new(24, Conjecture100bits).into();
-    let device = CpuProver::new(backend);
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let device = create_prover(backend);
     let mut prover = ZKVMProver::new(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();

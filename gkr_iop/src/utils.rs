@@ -22,7 +22,7 @@ pub fn rotation_next_base_mle<'a, E: ExtensionField>(
     cyclic_group_log2_size: usize,
 ) -> MultilinearExtension<'a, E> {
     let cyclic_group_size = 1 << cyclic_group_log2_size;
-    let rotation_index = bh.into_iter().take(cyclic_group_size + 1).collect_vec();
+    let rotation_index = bh.into_iter().take(cyclic_group_size).collect_vec();
     let mut rotated_mle_evals = Vec::with_capacity(mle.evaluations().len());
     rotated_mle_evals.par_extend(
         (0..mle.evaluations().len())
