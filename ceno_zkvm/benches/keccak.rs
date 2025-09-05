@@ -11,7 +11,7 @@ mod alloc;
 use ceno_zkvm::scheme::verifier::ZKVMVerifier;
 use criterion::*;
 use ff_ext::BabyBearExt4;
-use gkr_iop::cpu::default_backend_config;
+use gkr_iop::cpu::{CpuProver, default_backend_config};
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 

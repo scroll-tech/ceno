@@ -1,11 +1,15 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
+    circuit_builder::ConstraintSystem,
     error::ZKVMError,
     structs::{ComposedConstrainSystem, TowerProofs, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
-use gkr_iop::{gkr::GKRProof, hal::ProverBackend};
+use gkr_iop::{
+    gkr::GKRProof,
+    hal::{ProtocolWitnessGeneratorProver, ProverBackend},
+};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
 use sumcheck::structs::IOPProverMessage;
@@ -18,6 +22,7 @@ pub trait ProverDevice<PB>:
     + MainSumcheckProver<PB>
     + OpeningProver<PB>
     + DeviceTransporter<PB>
+    + ProtocolWitnessGeneratorProver<PB>
 // + FixedMLEPadder<PB>
 where
     PB: ProverBackend,
@@ -108,15 +113,13 @@ pub struct MainSumcheckEvals<E: ExtensionField> {
 }
 
 pub trait MainSumcheckProver<PB: ProverBackend> {
-    #[allow(clippy::type_complexity)]
-    fn build_main_witness<'a, 'b>(
+    fn table_witness<'a>(
         &self,
-        cs: &ComposedConstrainSystem<PB::E>,
         input: &ProofInput<'a, PB>,
-        challenge: &[PB::E; 2],
-    ) -> (Vec<Arc<PB::MultilinearPoly<'b>>>, bool)
-    where
-        'a: 'b;
+        cs: &ConstraintSystem<PB::E>,
+        challenges: &[PB::E],
+    ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
+
     // this prover aims to achieve two goals:
     // 1. the validity of last layer in the tower tree is reduced to
     //    the validity of read/write/logup records through sumchecks;

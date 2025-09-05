@@ -71,7 +71,9 @@ fn main() {
         .map(|_| std::array::from_fn(|_| rng.next_u64()))
         .collect_vec();
     run_bitwise_keccakf::<E, Pcs>(
-        setup_bitwise_keccak_gkr_circuit().expect("setup circuit error"),
+        setup_bitwise_keccak_gkr_circuit()
+            .expect("setup circuit error")
+            .1,
         states,
         false,
         false,
