@@ -16,7 +16,7 @@ use gkr_iop::{
 use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
+    Expression, StructuralWitInType, ToExpr, WitIn,
     macros::{entered_span, exit_span},
     util::{ceil_log2, max_usable_threads},
 };
@@ -29,7 +29,6 @@ use rayon::{
 use sp1_curves::{
     AffinePoint, EllipticCurve,
     params::{FieldParameters, Limbs, NumLimbs, NumWords},
-    polynomial::Polynomial,
 };
 use sp1_derive::AlignedBorrow;
 use sumcheck::util::optimal_sumcheck_threads;
@@ -51,10 +50,6 @@ use crate::{
     structs::PointAndEval,
     witness::LkMultiplicity,
 };
-
-pub const fn num_weierstrass_add_cols<P: FieldParameters + NumWords>() -> usize {
-    size_of::<WeierstrassAddAssignWitCols<u8, P>>()
-}
 
 #[derive(Clone, Debug, AlignedBorrow)]
 #[repr(C)]
@@ -79,20 +74,20 @@ pub struct WeierstrassAddAssignWitCols<WitT, P: FieldParameters + NumLimbs> {
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub struct WeierstrassAddAssignLayer<WitT, EqT, P: FieldParameters + NumWords> {
+pub struct WeierstrassAddAssignLayer<WitT, P: FieldParameters + NumWords> {
     pub wits: WeierstrassAddAssignWitCols<WitT, P>,
-    pub eq: EqT,
 }
 
 #[derive(Clone, Debug)]
 pub struct WeierstrassAddAssignLayout<E: ExtensionField, EC: EllipticCurve> {
-    pub layer_exprs: WeierstrassAddAssignLayer<WitIn, StructuralWitIn, EC::BaseField>,
+    pub layer_exprs: WeierstrassAddAssignLayer<WitIn, EC::BaseField>,
     pub selector_type_layout: SelectorTypeLayout<E>,
     pub input32_exprs:
         [GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsCurvePoint>; 2],
     pub output32_exprs: GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsCurvePoint>,
     pub n_fixed: usize,
     pub n_committed: usize,
+    pub n_structural: usize,
     pub n_challenges: usize,
 }
 
@@ -120,7 +115,17 @@ where
             slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
         };
 
-        let eq = cb.create_structural_witin(
+        // Although the eqs correspond to the same point, but the selectors have different pad. So we just create two eqs to derive the correct n_structural_wit.
+        let eq_0 = cb.create_structural_witin(
+            || "weierstrass_eq",
+            StructuralWitInType::EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        );
+        let eq_1 = cb.create_structural_witin(
             || "weierstrass_eq",
             StructuralWitInType::EqualDistanceSequence {
                 max_len: 0,
@@ -130,10 +135,10 @@ where
             },
         );
         let selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: SelectorType::Prefix(E::BaseField::ONE, eq.expr()),
-            sel_mem_write: SelectorType::Prefix(E::BaseField::ONE, eq.expr()),
-            sel_lookup: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_zero: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
+            sel_mem_read: SelectorType::Prefix(E::BaseField::ONE, eq_0.expr()),
+            sel_mem_write: SelectorType::Prefix(E::BaseField::ONE, eq_0.expr()),
+            sel_lookup: SelectorType::Prefix(E::BaseField::ZERO, eq_1.expr()),
+            sel_zero: SelectorType::Prefix(E::BaseField::ZERO, eq_1.expr()),
         };
 
         let input32_exprs: [GenericArray<
@@ -148,13 +153,14 @@ where
         > = GenericArray::generate(|_| array::from_fn(|_| Expression::WitIn(0)));
 
         Self {
-            layer_exprs: WeierstrassAddAssignLayer { wits, eq },
+            layer_exprs: WeierstrassAddAssignLayer { wits },
             selector_type_layout,
             input32_exprs,
             output32_exprs,
             n_fixed: 0,
-            n_committed: num_weierstrass_add_cols::<EC::BaseField>(),
+            n_committed: 0,
             n_challenges: 0,
+            n_structural: 0,
         }
     }
 
@@ -323,6 +329,11 @@ where
     fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
+        self.n_structural = cb.cs.num_structural_witin as usize;
+        println!(
+            "WeierstrassAddAssignLayout: n_fixed = {}, n_committed = {}, n_structural = {}",
+            self.n_fixed, self.n_committed, self.n_structural
+        );
         self.n_challenges = 0;
 
         // register selector to legacy constrain system
@@ -399,12 +410,13 @@ where
         lk_multiplicity: &mut LkMultiplicity,
     ) {
         let phase1 = &phase1.instances;
-        let num_cols = num_weierstrass_add_cols::<EC::BaseField>();
+        let num_cols = self.n_committed;
+        let num_wit_cols = size_of::<WeierstrassAddAssignWitCols<u8, EC::BaseField>>();
         let chunk_size = 64;
 
-        let mut dummy_row = vec![E::BaseField::ZERO; num_weierstrass_add_cols::<EC::BaseField>()];
+        let mut dummy_wit_row = vec![E::BaseField::ZERO; num_wit_cols];
         let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
-            dummy_row.as_mut_slice().borrow_mut();
+            dummy_wit_row.as_mut_slice().borrow_mut();
         let zero = BigUint::zero();
         Self::populate_field_ops(
             lk_multiplicity,
@@ -426,10 +438,10 @@ where
                     let idx = i * chunk_size + j;
                     if idx < phase1.len() {
                         let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
-                            row.borrow_mut();
+                            row[..num_wit_cols].borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
                         Self::populate_row(&phase1[idx], cols, &mut lk_multiplicity);
                     } else {
-                        row.copy_from_slice(&dummy_row);
+                        row[..num_wit_cols].copy_from_slice(&dummy_wit_row);
                     }
                 });
             });
@@ -478,12 +490,13 @@ where
     let mut cs = ConstraintSystem::new(|| "weierstrass_add");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
+    // Guarantee the witness occur at the beginning of the witness columns. This is for simple implementation.
+    let mut layout = WeierstrassAddAssignLayout::build_layer_logic(&mut cb, ())?;
+
     // constrain vmstate
     let vm_state = StateInOut::construct_circuit(&mut cb, false)?;
 
     let state_ptr = cb.create_witin(|| "state_ptr");
-
-    let mut layout = WeierstrassAddAssignLayout::build_layer_logic(&mut cb, ())?;
 
     // Write the result to the same address of the first input point.
     let mut mem_rw = izip!(&layout.input32_exprs[0], &layout.output32_exprs)
@@ -773,25 +786,27 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
     use super::*;
     use ff_ext::BabyBearExt4;
     use mpcs::BasefoldDefault;
-    use rand::{RngCore, SeedableRng};
-    use sp1_curves::weierstrass::{bls12_381::Bls12381, bn254::Bn254, secp256k1::Secp256k1};
+    use num::bigint::RandBigInt;
+    use rand::SeedableRng;
+    use sp1_curves::weierstrass::{
+        SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254, secp256k1::Secp256k1,
+        secp256r1::Secp256r1,
+    };
 
-    fn test_weierstrass_add_helper<EC: EllipticCurve>() {
+    fn test_weierstrass_add_helper<WP: WeierstrassParameters>() {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let num_instances = 8;
-        let mut states: Vec<[u64; 25]> = Vec::with_capacity(num_instances);
-        for _ in 0..num_instances {
-            states.push(std::array::from_fn(|_| rng.next_u64()));
-        }
-        let _ = run_weierstrass_add::<E, Pcs, EC>(
-            setup_gkr_circuit::<E, EC>().expect("setup gkr circuit failed"),
-            states,
+        let points = random_point_pairs::<WP>(8);
+
+        let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
+            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+            points,
             true,
             true,
         );
@@ -799,6 +814,14 @@ mod tests {
 
     #[test]
     fn test_weierstrass_add_bn254() {
+        thread::Builder::new()
+            .stack_size(64 * 1024 * 1024) // 64 MB
+            .spawn(|| {
+                // your code here
+            })
+            .unwrap()
+            .join()
+            .unwrap();
         test_weierstrass_add_helper::<Bn254>();
     }
 
@@ -812,21 +835,18 @@ mod tests {
         test_weierstrass_add_helper::<Secp256k1>();
     }
 
-    fn test_weierstrass_add_nonpow2_helper<EC: EllipticCurve>() {
+    #[test]
+    fn test_weierstrass_add_secp256r1() {
+        test_weierstrass_add_helper::<Secp256r1>();
+    }
+
+    fn test_weierstrass_add_nonpow2_helper<WP: WeierstrassParameters>() {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
-
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-
-        let num_instances = 5;
-        let mut states: Vec<[u64; 25]> = Vec::with_capacity(num_instances);
-        for _ in 0..num_instances {
-            states.push(std::array::from_fn(|_| rng.next_u64()));
-        }
-
-        let _ = run_weierstrass_add::<E, Pcs, EC>(
-            setup_gkr_circuit::<E, EC>().expect("setup gkr circuit failed"),
-            states,
+        let points = random_point_pairs::<WP>(5);
+        let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
+            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+            points,
             true,
             true,
         );
@@ -845,5 +865,34 @@ mod tests {
     #[test]
     fn test_weierstrass_add_nonpow2_secp256k1() {
         test_weierstrass_add_nonpow2_helper::<Secp256k1>();
+    }
+
+    #[test]
+    fn test_weierstrass_add_nonpow2_secp256r1() {
+        test_weierstrass_add_nonpow2_helper::<Secp256r1>();
+    }
+
+    fn random_point_pairs<WP: WeierstrassParameters>(
+        num_instances: usize,
+    ) -> Vec<[GenericArray<u32, <WP::BaseField as NumWords>::WordsCurvePoint>; 2]> {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let base = SwCurve::<WP>::generator();
+        (0..num_instances)
+            .map(|_| {
+                let x = rng.gen_biguint(24);
+
+                let mut y = rng.gen_biguint(24);
+                while y == x {
+                    y = rng.gen_biguint(24);
+                }
+
+                let x_base = base.clone().sw_scalar_mul(&x);
+                let y_base = base.clone().sw_scalar_mul(&y);
+                [
+                    x_base.to_words_le().try_into().unwrap(),
+                    y_base.to_words_le().try_into().unwrap(),
+                ]
+            })
+            .collect()
     }
 }

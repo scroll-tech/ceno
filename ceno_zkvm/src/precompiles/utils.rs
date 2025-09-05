@@ -4,7 +4,7 @@ use gkr_iop::circuit_builder::expansion_expr;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr};
 use p3::field::FieldAlgebra;
-use sp1_curves::params::{Limbs, NumLimbs};
+use sp1_curves::params::{Limbs, NumLimbs, NumWords};
 
 pub fn not8_expr<E: ExtensionField>(expr: Expression<E>) -> Expression<E> {
     E::BaseField::from_canonical_u8(0xFF).expr() - expr
@@ -21,11 +21,11 @@ where
 }
 
 /// Merge a slice of u8 limbs into a slice of u32 represented by u16 limb pair.
-pub fn merge_u8_limbs_to_u16_limbs_pairs_and_extend<E: ExtensionField, P: NumLimbs>(
+pub fn merge_u8_limbs_to_u16_limbs_pairs_and_extend<E: ExtensionField, P: NumLimbs + NumWords>(
     u8_limbs: &Limbs<impl ToExpr<E, Output = Expression<E>> + Clone, P::Limbs>,
     dst: &mut Vec<[Expression<E>; 2]>,
 ) {
-    for i in 0..P::Limbs::USIZE {
+    for i in 0..P::WordsFieldElement::USIZE {
         // create an expression combining 4 elements of bytes into a 2x16-bit felt
         let output8_slice = u8_limbs.0[4 * i..4 * (i + 1)]
             .iter()
