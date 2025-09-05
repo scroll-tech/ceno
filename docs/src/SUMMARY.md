@@ -12,3 +12,6 @@
   - [Accelerated Operations with Precompiles (Syscalls)](./precompiles.md)
   - [Profiling & Performance](./profiling.md)
   - [Differences from RISC-V](./differences-from-risc-v.md)
+- [Integration with Ethereum](./integration-with-ethereum.md)
+  - [Prover Network](./prover-network.md)
+  - [On-chain verification](./on-chain-verification.md)
