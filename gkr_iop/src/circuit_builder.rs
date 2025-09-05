@@ -797,36 +797,6 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.assert_const_range(name_fn, expr, C)
     }
 
-    /// to replace `assert_ux`
-    pub fn assert_ux_v2<NR, N>(
-        &mut self,
-        name_fn: N,
-        expr: Expression<E>,
-        max_bits: usize,
-    ) -> Result<(), CircuitBuilderError>
-    where
-        NR: Into<String>,
-        N: FnOnce() -> NR,
-    {
-        self.assert_const_range(name_fn, expr, max_bits)
-    }
-
-    /// Generates U16 lookups to prove that `value` fits on `size < 16` bits.
-    /// In general it can be done by two U16 checks: one for `value` and one for
-    /// `value << (16 - size)`.
-    pub fn assert_ux_in_u16<NR, N>(
-        &mut self,
-        name_fn: N,
-        size: usize,
-        expr: Expression<E>,
-    ) -> Result<(), CircuitBuilderError>
-    where
-        NR: Into<String>,
-        N: Fn() -> NR,
-    {
-        self.assert_const_range(name_fn, expr, size)
-    }
-
     pub fn assert_dynamic_range<NR, N>(
         &mut self,
         name_fn: N,
@@ -885,6 +855,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     vec![expr, E::BaseField::from_canonical_usize(8).expr()],
                 )
             },
+        )
+    }
+
+    pub fn assert_double_u8<NR, N>(
+        &mut self,
+        name_fn: N,
+        a_expr: Expression<E>,
+        b_expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.namespace(
+            || "assert_double_u8",
+            |cb| cb.lk_record(name_fn, LookupTable::DoubleU8, vec![a_expr, b_expr]),
         )
     }
 
