@@ -62,9 +62,9 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
             - rd_high.expr() * E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).expr();
         // rd range check
         // rd_low
-        circuit_builder.assert_ux_v2(|| "rd_low_u16", rd_low.expr(), UInt::<E>::LIMB_BITS)?;
+        circuit_builder.assert_const_range(|| "rd_low_u16", rd_low.expr(), UInt::<E>::LIMB_BITS)?;
         // rd_high
-        circuit_builder.assert_ux_v2(
+        circuit_builder.assert_const_range(
             || "rd_high_range",
             rd_high.expr(),
             PC_BITS - UInt::<E>::LIMB_BITS,
@@ -153,8 +153,8 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         );
         let rd = Value::new_unchecked(step.rd().unwrap().value.after);
         let rd_limb = rd.as_u16_limbs();
-        lk_multiplicity.assert_ux_v2(rd_limb[0] as u64, 16);
-        lk_multiplicity.assert_ux_v2(rd_limb[1] as u64, PC_BITS - 16);
+        lk_multiplicity.assert_const_range(rd_limb[0] as u64, 16);
+        lk_multiplicity.assert_const_range(rd_limb[1] as u64, PC_BITS - 16);
 
         config
             .rs1_read
