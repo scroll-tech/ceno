@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use crate::{
     circuit_builder::ConstraintSystem,
     error::ZKVMError,
-    structs::{ComposedConstrainSystem, TowerProofs, ZKVMProvingKey},
+    scheme::cpu::TowerRelationOutput,
+    structs::{ComposedConstrainSystem, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
 use gkr_iop::{
@@ -95,13 +96,7 @@ pub trait TowerProver<PB: ProverBackend> {
         is_padded: bool,
         challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
-    ) -> (
-        Point<PB::E>,
-        TowerProofs<PB::E>,
-        Vec<Vec<PB::E>>,
-        Vec<Vec<PB::E>>,
-        Vec<Vec<PB::E>>,
-    )
+    ) -> TowerRelationOutput<PB::E>
     where
         'a: 'b,
         'b: 'c;

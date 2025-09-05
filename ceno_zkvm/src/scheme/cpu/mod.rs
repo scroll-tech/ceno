@@ -40,6 +40,13 @@ use sumcheck::{
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
 
+pub type TowerRelationOutput<E> = (
+    Point<E>,
+    TowerProofs<E>,
+    Vec<Vec<E>>,
+    Vec<Vec<E>>,
+    Vec<Vec<E>>,
+);
 pub struct CpuTowerProver;
 
 impl CpuTowerProver {
@@ -509,13 +516,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         is_padded: bool,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
-    ) -> (
-        Point<E>,
-        TowerProofs<E>,
-        Vec<Vec<E>>,
-        Vec<Vec<E>>,
-        Vec<Vec<E>>,
-    )
+    ) -> TowerRelationOutput<E>
     where
         'a: 'b,
         'b: 'c,
