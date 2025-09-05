@@ -159,25 +159,30 @@ fn test_rw_lk_expression_combination() {
 
         // TODO: better way to handle this
         #[cfg(not(feature = "gpu"))]
-        let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
-        #[cfg(not(feature = "gpu"))]
-        let structural_in = structural_wits_in
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec();
+        let (wits_in, structural_in) = {
+            (
+                wits_in.into_iter().map(|v| v.into()).collect_vec(),
+                structural_wits_in
+                    .into_iter()
+                    .map(|v| v.into())
+                    .collect_vec(),
+            )
+        };
 
         #[cfg(feature = "gpu")]
-        let cuda_hal = get_cuda_hal().unwrap();
-        #[cfg(feature = "gpu")]
-        let wits_in = wits_in
-            .iter()
-            .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
-            .collect_vec();
-        #[cfg(feature = "gpu")]
-        let structural_in = structural_wits_in
-            .iter()
-            .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
-            .collect_vec();
+        let (wits_in, structural_in) = {
+            let cuda_hal = get_cuda_hal().unwrap();
+            (
+                wits_in
+                    .iter()
+                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                    .collect_vec(),
+                structural_in = structural_wits_in
+                    .iter()
+                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                    .collect_vec(),
+            )
+        };
 
         let prover_challenges = [
             transcript.read_challenge().elements,
