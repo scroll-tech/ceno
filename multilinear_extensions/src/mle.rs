@@ -1253,3 +1253,39 @@ macro_rules! commutative_op_mle_pair {
         commutative_op_mle_pair!(|$a, $b| $op, |out| out)
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::mle::{IntoMLE, MultilinearExtension};
+    use ff_ext::{BabyBearExt4, FromUniformBytes};
+    use itertools::Itertools;
+    use rand::thread_rng;
+
+    type E = BabyBearExt4;
+
+    #[test]
+    fn test_fix_var() {
+        let mut rng = thread_rng();
+        let mle: MultilinearExtension<'_, E> = MultilinearExtension::random(3, &mut rng);
+        let mle_clone = mle.clone();
+        let point = E::random(&mut rng);
+
+        let m1 = mle.fix_variables(&[point]);
+        let m2 = mle_clone
+            .as_view()
+            .get_base_field_vec()
+            .chunks(2)
+            .map(|chunk| {
+                // eq(1,r)*f(1) + eq(0,r)*f(0)
+                // r*f(1) + (1-r)*f(0)
+                let a = chunk[0];
+                let b = chunk[1];
+                point * (b - a) + a
+            })
+            .collect_vec()
+            .into_mle();
+
+        assert_eq!(m1.num_vars(), m2.num_vars());
+        assert_eq!(m1, m2,);
+    }
+}
