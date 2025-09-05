@@ -18,47 +18,9 @@ By using `cargo ceno prove`, you get a simplified experience that handles these 
 cargo ceno prove --example <GUEST_EXAMPLE_NAME> --hints=<HINTS_SEPARATED_BY_COMMA> --public-io=<PUBLIC_IO> --out-vk <PATH_TO_VERIFICATION_KEY_FILE> --out-proof target/fibonacci.proof
 ```
 
-## Concrete Example: Fibonacci
+## Concrete Example
 
-Let's walk through a concrete example using the `fibonacci` guest program included in the `examples` directory.
-
-### 1. Writing the Code
-
-The `fibonacci` example is already written. You can find it in `examples/examples/fibonacci.rs`. This program calculates the `n`-th Fibonacci number.
-
-### 2. Key Generation
-
-Before generating a proof, you need to generate a verification key. You can do this with the `keygen` subcommand:
-
-```bash
-cargo ceno keygen --example fibonacci --out-vk target/fibonacci.vk
-```
-
-This will create a `fibonacci.vk` file (the verification key) in the `target` directory.
-
-### 3. Generating the Proof
-
-To generate a proof for the `fibonacci` program, run the following command from the root of the project:
-
-```bash
-cargo ceno prove --example fibonacci --out-proof target/fibonacci.proof
-```
-
-This command will compile the `fibonacci` package, execute it in the ZKVM, and generate a proof file named `fibonacci.proof` in the `target` directory. It will also generate the verification key.
-
-### 4. Verifying the Proof
-
-Now that you have a proof file, you can verify it with the following command:
-
-```bash
-cargo ceno verify --proof target/fibonacci.proof --vk target/fibonacci.vk
-```
-
-If the proof is valid, you will see a confirmation message, and the command will exit successfully.
-
-## Using a custom program
-
-You can also use `ceno` to generate proofs for your own custom Rust programs. Let's walk through how to set up a new project and use `ceno` with it.
+You can use `ceno` to generate proofs for your own custom Rust programs. Let's walk through how to set up a new project and use `ceno` with it.
 
 ### 1. Project Setup
 
