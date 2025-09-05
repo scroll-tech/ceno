@@ -158,7 +158,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
 
             let span = entered_span!("[gpu] transmute back", profiling_2 = true);
             let commit: PCS::Commitment = unsafe { std::mem::transmute_copy(&basefold_commit) };
-            drop(basefold_commit);
             let mles = basefold_mles
                 .into_iter()
                 .map(|mle| MultilinearExtensionGpu::from_ceno_gpu(mle))

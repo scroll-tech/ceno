@@ -11,7 +11,7 @@ mod alloc;
 use ceno_zkvm::scheme::verifier::ZKVMVerifier;
 use criterion::*;
 use ff_ext::BabyBearExt4;
-use gkr_iop::cpu::{CpuProver, default_backend_config};
+use gkr_iop::cpu::default_backend_config;
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 
@@ -48,7 +48,7 @@ fn keccak_prove(c: &mut Criterion) {
     let max_steps = usize::MAX;
     // estimate proof size data first
     let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
-        CpuProver::new(backend.clone()),
+        create_prover(backend.clone()),
         program.clone(),
         platform.clone(),
         &Vec::from(&hints),

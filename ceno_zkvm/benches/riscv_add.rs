@@ -18,6 +18,13 @@ use rand::rngs::OsRng;
 use transcript::{BasicTranscript, Transcript};
 use witness::RowMajorMatrix;
 
+#[cfg(feature = "gpu")]
+use gkr_iop::gpu::{MultilinearExtensionGpu, gpu_prover::*};
+#[cfg(feature = "gpu")]
+use itertools::Itertools;
+#[cfg(feature = "gpu")]
+use std::sync::Arc;
+
 #[cfg(feature = "flamegraph")]
 criterion_group! {
     name = op_add;
@@ -89,6 +96,15 @@ fn bench_add(c: &mut Criterion) {
                             transcript.read_challenge().elements,
                             transcript.read_challenge().elements,
                         ];
+
+                        // TODO: better way to handle this
+                        #[cfg(feature = "gpu")]
+                        let cuda_hal = get_cuda_hal().unwrap();
+                        #[cfg(feature = "gpu")]
+                        let polys = polys
+                            .iter()
+                            .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                            .collect_vec();
 
                         let input = ProofInput {
                             fixed: vec![],
