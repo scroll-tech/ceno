@@ -29,6 +29,7 @@ use std::marker::PhantomData;
 
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::{MultilinearExtensionGpu, gpu_prover::*};
+#[cfg(feature = "gpu")]
 use std::sync::Arc;
 
 #[cfg(debug_assertions)]
@@ -157,6 +158,14 @@ fn test_rw_lk_expression_combination() {
         let witin_commit = Pcs::get_pure_commitment(&commit_with_witness);
 
         // TODO: better way to handle this
+        #[cfg(not(feature = "gpu"))]
+        let wits_in = wits_in.into_iter().map(|v| v.into()).collect_vec();
+        #[cfg(not(feature = "gpu"))]
+        let structural_in = structural_wits_in
+            .into_iter()
+            .map(|v| v.into())
+            .collect_vec();
+
         #[cfg(feature = "gpu")]
         let cuda_hal = get_cuda_hal().unwrap();
         #[cfg(feature = "gpu")]
