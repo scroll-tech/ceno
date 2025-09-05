@@ -745,15 +745,6 @@ pub fn run_e2e_with_checkpoint<
     let transcript = Transcript::new(b"riscv");
     let start = std::time::Instant::now();
     let zkvm_proof = prover
-        .create_proof(zkvm_witness.clone(), pi.clone(), transcript)
-        .expect("create_proof failed");
-    tracing::debug!("proof created in {:?}", start.elapsed());
-    tracing::info!("e2e proof stat: {}", zkvm_proof);
-
-    // after warmup, run proof again
-    let transcript = Transcript::new(b"riscv");
-    let start = std::time::Instant::now();
-    let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)
         .expect("create_proof failed");
     tracing::debug!("proof created in {:?}", start.elapsed());
