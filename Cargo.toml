@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "ceno_cli",
-    "ceno_emul",
-    "ceno_host",
-    "ceno_rt",
-    "ceno_zkvm",
-    "examples-builder",
-    "examples",
+  "ceno_cli",
+  "ceno_emul",
+  "ceno_host",
+  "ceno_rt",
+  "ceno_zkvm",
+  "examples-builder",
+  "examples",
 ]
 resolver = "2"
 
@@ -58,7 +58,7 @@ thiserror = "1" # do we need this?
 thread_local = "1.1"
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tracing = { version = "0.1", features = [
-    "attributes",
+  "attributes",
 ] }
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
