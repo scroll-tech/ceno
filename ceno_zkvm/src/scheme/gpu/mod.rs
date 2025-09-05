@@ -45,83 +45,57 @@ pub struct GpuTowerProver;
 
 use gkr_iop::gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu};
 
-/// Temporary wrapper for GPU prover that reuses CPU prover functionality
-/// during development phase. This struct will be refactored once GPU
-/// implementation is complete and CPU dependencies are removed.
-///
-/// TODO: Remove this wrapper and consolidate into a single GPU prover
-/// once all modules are fully migrated to GPU implementation.
-pub struct TemporaryGpuProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static> {
-    pub gpu: GpuProver<GpuBackend<E, PCS>>,
-    /// CPU prover used temporarily for modules not yet fully ported to GPU
-    pub inner_cpu: CpuProver<CpuBackend<E, PCS>>,
-}
+// Extract out_evals from GPU-built tower witnesses
+fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
+    prod_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built product towers
+    logup_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built logup towers
+    r_set_len: usize,
+) -> (Vec<Vec<E>>, Vec<Vec<E>>, Vec<Vec<E>>) {
+    // Extract product out_evals from GPU towers
+    let mut r_out_evals = Vec::new();
+    let mut w_out_evals = Vec::new();
+    for (i, gpu_spec) in prod_gpu.iter().enumerate() {
+        let first_layer_evals: Vec<E> = gpu_spec
+            .get_final_evals(0)
+            .expect("Failed to extract final evals from GPU product tower");
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static> TemporaryGpuProver<E, PCS> {
-    pub fn new(backend: Rc<GpuBackend<E, PCS>>) -> Self {
-        let gpu = GpuProver::new(backend.clone());
-        let cpu_backend = Rc::new(CpuBackend::<E, PCS>::new(
-            backend.max_poly_size_log2,
-            backend.security_level,
-        ));
-        let inner_cpu = CpuProver::new(cpu_backend);
-        Self { gpu, inner_cpu }
+        // Product tower first layer should have 2 MLEs
+        assert_eq!(
+            first_layer_evals.len(),
+            2,
+            "Product tower first layer should have 2 MLEs"
+        );
+
+        // Split into r_out_evals and w_out_evals based on r_set_len
+        if i < r_set_len {
+            r_out_evals.push(first_layer_evals);
+        } else {
+            w_out_evals.push(first_layer_evals);
+        }
     }
 
-    // Extract out_evals from GPU-built tower witnesses
-    // This is the true GPU optimization - directly using GPU tower results
-    fn extract_out_evals_from_gpu_towers(
-        &self,
-        prod_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built product towers
-        logup_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built logup towers
-        r_set_len: usize,
-    ) -> (Vec<Vec<E>>, Vec<Vec<E>>, Vec<Vec<E>>) {
-        // Extract product out_evals from GPU towers
-        let mut r_out_evals = Vec::new();
-        let mut w_out_evals = Vec::new();
-        for (i, gpu_spec) in prod_gpu.iter().enumerate() {
-            let first_layer_evals: Vec<E> = gpu_spec
-                .get_final_evals(0)
-                .expect("Failed to extract final evals from GPU product tower");
+    // Extract logup out_evals from GPU towers
+    let mut lk_out_evals = Vec::new();
+    for (_i, gpu_spec) in logup_gpu.iter().enumerate() {
+        let first_layer_evals: Vec<E> = gpu_spec
+            .get_final_evals(0)
+            .expect("Failed to extract final evals from GPU logup tower");
 
-            // Product tower first layer should have 2 MLEs
-            assert_eq!(
-                first_layer_evals.len(),
-                2,
-                "Product tower first layer should have 2 MLEs"
-            );
+        // Logup tower first layer should have 4 MLEs
+        assert_eq!(
+            first_layer_evals.len(),
+            4,
+            "Logup tower first layer should have 4 MLEs"
+        );
 
-            // Split into r_out_evals and w_out_evals based on r_set_len
-            if i < r_set_len {
-                r_out_evals.push(first_layer_evals);
-            } else {
-                w_out_evals.push(first_layer_evals);
-            }
-        }
-
-        // Extract logup out_evals from GPU towers
-        let mut lk_out_evals = Vec::new();
-        for (_i, gpu_spec) in logup_gpu.iter().enumerate() {
-            let first_layer_evals: Vec<E> = gpu_spec
-                .get_final_evals(0)
-                .expect("Failed to extract final evals from GPU logup tower");
-
-            // Logup tower first layer should have 4 MLEs
-            assert_eq!(
-                first_layer_evals.len(),
-                4,
-                "Logup tower first layer should have 4 MLEs"
-            );
-
-            lk_out_evals.push(first_layer_evals);
-        }
-
-        (r_out_evals, w_out_evals, lk_out_evals)
+        lk_out_evals.push(first_layer_evals);
     }
+
+    (r_out_evals, w_out_evals, lk_out_evals)
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBackend<E, PCS>>
-    for TemporaryGpuProver<E, PCS>
+    for GpuProver<GpuBackend<E, PCS>>
 {
     fn commit_traces<'a>(
         &mut self,
@@ -143,10 +117,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             .map(|trace| ceil_log2(next_pow2_instance_padding(trace.num_instances())))
             .max()
             .unwrap();
-        if max_poly_size_log2 > self.gpu.backend.max_poly_size_log2 {
+        if max_poly_size_log2 > self.backend.max_poly_size_log2 {
             panic!(
                 "max_poly_size_log2 {} > max_poly_size_log2 backend {}",
-                max_poly_size_log2, self.gpu.backend.max_poly_size_log2
+                max_poly_size_log2, self.backend.max_poly_size_log2
             )
         }
         exit_span!(span);
@@ -420,7 +394,7 @@ fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBackend<E, PCS>>
-    for TemporaryGpuProver<E, PCS>
+    for GpuProver<GpuBackend<E, PCS>>
 {
     #[allow(clippy::type_complexity)]
     #[tracing::instrument(
@@ -521,7 +495,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         // This is the true optimization - using GPU tower results instead of CPU inference
         let span = entered_span!("extract_out_evals_from_gpu_towers", profiling_2 = true);
         let (r_out_evals, w_out_evals, lk_out_evals) =
-            self.extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
+            extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
         exit_span!(span);
 
         // transcript >>> BasicTranscript<E>
@@ -549,7 +523,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<GpuBackend<E, PCS>>
-    for TemporaryGpuProver<E, PCS>
+    for GpuProver<GpuBackend<E, PCS>>
 {
     fn table_witness<'a>(
         &self,
@@ -804,7 +778,7 @@ type GL64 = p3::goldilocks::Goldilocks;
 type EGL64 = BinomialExtensionField<GL64, 2>;
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBackend<E, PCS>>
-    for TemporaryGpuProver<E, PCS>
+    for GpuProver<GpuBackend<E, PCS>>
 {
     fn open(
         &self,
@@ -872,7 +846,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         };
 
         // Type conversions using unsafe transmute
-        let prover_param = &self.gpu.backend.pp;
+        let prover_param = &self.backend.pp;
         let pp_gl64: &mpcs::basefold::structure::BasefoldProverParams<
             EGL64,
             mpcs::BasefoldRSParams,
@@ -924,7 +898,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<GpuBackend<E, PCS>>
-    for TemporaryGpuProver<E, PCS>
+    for GpuProver<GpuBackend<E, PCS>>
 {
     fn transport_proving_key(
         &self,
@@ -983,152 +957,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
     }
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
-    ProtocolWitnessGeneratorProver<GpuBackend<E, PCS>> for TemporaryGpuProver<E, PCS>
-{
-    fn layer_witness<'a>(
-        layer: &Layer<E>,
-        layer_wits: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
-        pub_io_evals: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
-        challenges: &[E],
-    ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
-        if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
-        {
-            panic!("GPU backend only supports Goldilocks base field");
-        }
-
-        type EGL64 = ff_ext::GoldilocksExt2;
-
-        let out_evals: Vec<_> = layer
-            .out_sel_and_eval_exprs
-            .iter()
-            .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
-            .collect();
-
-        // take public input from gpu to cpu for scalar evaluation
-        // assume public io is quite small, thus the cost is negligible
-        // evaluate all scalar terms first
-        // when instance was access in scalar, we only take its first item
-        // this operation is sound
-        let pub_io_evals = pub_io_evals
-            .iter()
-            .map(|mle| mle.inner_to_mle())
-            .map(|instance| instance.evaluations.index(0))
-            .collect_vec();
-
-        // pre-process and flatten indices into friendly GPU format
-        let (num_non_zero_expr, term_coefficients, mle_indices_per_term, mle_size_info) = layer
-            .exprs_with_selector_out_eval_monomial_form
-            .iter()
-            .zip_eq(out_evals.iter())
-            .filter(|(_, (_, out_eval))| {
-                match out_eval {
-                    // only take linear/single to process
-                    EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => true,
-                    EvalExpression::Partition(..) => unimplemented!("Partition"),
-                    EvalExpression::Zero => false,
-                }
-            })
-            .map(|(expr, _)| {
-                let (coeffs, indices, size_info) = extract_mle_relationships_from_monomial_terms(
-                    expr,
-                    &layer_wits.iter().map(|mle| mle.as_ref()).collect_vec(),
-                    &pub_io_evals,
-                    &challenges,
-                );
-                let coeffs_gl64: Vec<EGL64> = unsafe { std::mem::transmute(coeffs) };
-                (coeffs_gl64, indices, size_info)
-            })
-            .fold(
-                (0, Vec::new(), Vec::new(), Vec::new()),
-                |(mut num_non_zero_expr, mut coeff_acc, mut indices_acc, mut size_acc),
-                 (coeffs, indices, size_info)| {
-                    num_non_zero_expr += 1;
-                    coeff_acc.push(coeffs);
-                    indices_acc.push(indices);
-                    size_acc.push(size_info);
-                    (num_non_zero_expr, coeff_acc, indices_acc, size_acc)
-                },
-            );
-
-        let num_vars = mle_size_info
-            .first()
-            .and_then(|f| f.first())
-            .as_ref()
-            .unwrap()
-            .0;
-
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))
-            .unwrap();
-        device.bind_to_thread().unwrap();
-        let hal_arc = CUDA_HAL
-            .as_ref()
-            .map_err(|e| format!("HAL not available: {:?}", e))
-            .unwrap();
-        let cuda_hal = hal_arc.lock().unwrap();
-
-        // process & transmute poly
-        let all_witins_gpu = layer_wits.iter().map(|mle| mle.as_ref()).collect_vec();
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<EGL64>> =
-            unsafe { std::mem::transmute(all_witins_gpu) };
-        let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
-
-        // buffer for output witness from gpu
-        let mut next_witness_buf = (0..num_non_zero_expr)
-            .map(|_| {
-                cuda_hal
-                    .alloc_ext_elems_on_device(1 << num_vars)
-                    .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-
-        cuda_hal
-            .witness_infer
-            .wit_infer_by_monomial_expr(
-                &cuda_hal,
-                all_witins_gpu_type_gl64,
-                &term_coefficients,
-                &mle_indices_per_term,
-                &mut next_witness_buf,
-            )
-            .unwrap();
-
-        // recover it back and interleaving with default gpu
-        let mut next_iter = next_witness_buf.into_iter();
-
-        out_evals
-            .into_iter()
-            .map(|(_, out_eval)| {
-                if matches!(
-                    out_eval,
-                    EvalExpression::Linear(..) | EvalExpression::Single(_)
-                ) {
-                    // take next element from next_witness_buf
-                    MultilinearExtensionGpu::from_ceno_gpu_ext(GpuPolynomialExt::new(
-                        next_iter
-                            .next()
-                            .expect("not enough elements in next_witness_buf"),
-                        num_vars,
-                    ))
-                } else {
-                    MultilinearExtensionGpu::default()
-                }
-            })
-            .map(Arc::new)
-            .collect_vec()
-    }
-}
-
-impl<E, PCS> ProverDevice<GpuBackend<E, PCS>> for TemporaryGpuProver<E, PCS>
+impl<E, PCS> ProverDevice<GpuBackend<E, PCS>> for GpuProver<GpuBackend<E, PCS>>
 where
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E> + 'static,
 {
     fn get_pb(&self) -> &GpuBackend<E, PCS> {
-        self.gpu.backend.as_ref()
+        self.backend.as_ref()
     }
 }

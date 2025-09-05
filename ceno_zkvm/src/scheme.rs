@@ -316,6 +316,6 @@ pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 #[cfg(feature = "gpu")]
 pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     backend: Rc<gkr_iop::gpu::GpuBackend<E, PCS>>,
-) -> crate::scheme::gpu::TemporaryGpuProver<E, PCS> {
-    crate::scheme::gpu::TemporaryGpuProver::new(backend)
+) -> gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>> {
+    gkr_iop::gpu::GpuProver::new(backend)
 }
