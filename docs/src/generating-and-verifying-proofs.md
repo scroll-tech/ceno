@@ -62,7 +62,7 @@ _Note: For local development, you can use a path dependency: `ceno_rt = { path =
 
 ### 3. Writing the Guest Program
 
-Now, let's write a simple guest program in `src/main.rs`. This program will read two `u32` values from the input, add them, and write the result to the output.
+Now, let's write a simple guest program in `src/main.rs`. This program will read one `u32` values from the input, add a constant to it, and write the result to the output.
 
 ```rust
 extern crate ceno_rt;
