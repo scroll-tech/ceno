@@ -501,6 +501,8 @@ mod tests {
         );
         let v = E::random_vec(num_cols, &mut rng);
 
+        // matrix multiply vector
+        // codeword[i] = sum_j matrix[i][j] * v[j]
         let codeword = matrix.rows().map(|row| {
             v.iter().zip(row).map(|(a, b)| *a * b).sum::<E>()
         })
