@@ -11,3 +11,4 @@
   - [Guest Programming (`ceno_rt`)](./guest-programming.md)
   - [Accelerated Operations with Precompiles (Syscalls)](./precompiles.md)
   - [Profiling & Performance](./profiling.md)
+  - [Differences from RISC-V](./differences-from-risc-v.md)
