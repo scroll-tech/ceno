@@ -88,6 +88,7 @@ pub trait TowerProver<PB: ProverBackend> {
 
     // the validity of value of first layer in the tower tree is reduced to
     // the validity of value of last layer in the tower tree through sumchecks
+    #[allow(clippy::type_complexity)]
     fn prove_tower_relation<'a, 'b, 'c>(
         &self,
         composed_cs: &ComposedConstrainSystem<PB::E>,

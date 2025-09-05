@@ -1,46 +1,16 @@
 use crate::{
-    cpu::{CpuBackend, CpuProver},
-    gkr::{
-        booleanhypercube::BooleanHypercube,
-        layer::{
-            Layer, LayerWitness,
-            hal::{SumcheckLayerProver, ZerocheckLayerProver},
-            zerocheck_layer::RotationPoints,
-        },
-    },
-    gpu::{GpuBackend, GpuProver},
+    gkr::{booleanhypercube::BooleanHypercube, layer::LayerWitness},
+    gpu::GpuBackend,
 };
 use either::Either;
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain};
+use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression,
-    mle::{MultilinearExtension, Point},
-    monomial::Term,
-    utils::eval_by_expr_constant,
+    Expression, mle::Point, monomial::Term, utils::eval_by_expr_constant,
 };
-use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::ParallelSlice,
-};
-use std::sync::Arc;
-use sumcheck::{
-    macros::{entered_span, exit_span},
-    structs::IOPProof,
-    util::get_challenge_pows,
-};
-use transcript::{BasicTranscript, Transcript};
 
-use crate::{
-    gkr::layer::{
-        ROTATION_OPENING_COUNT,
-        hal::LinearLayerProver,
-        sumcheck_layer::{LayerProof, SumcheckLayerProof},
-    },
-    hal::ProverBackend,
-    selector::SelectorType,
-};
+use crate::selector::SelectorType;
 
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
@@ -124,7 +94,7 @@ pub fn build_eq_x_r_with_sel_gpu<'a, E: ExtensionField>(
     } else {
         let point_gl64: &Point<GL64Ext> = unsafe { std::mem::transmute(point) };
         let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len).unwrap();
-        let gpu_points = hal.alloc_ext_elems_from_host(&point_gl64).unwrap();
+        let gpu_points = hal.alloc_ext_elems_from_host(point_gl64).unwrap();
         build_mle_as_ceno(&hal.inner, &gpu_points, &mut gpu_output, num_instances).unwrap();
         GpuPolynomialExt::new(gpu_output, point.len())
     };
@@ -151,7 +121,7 @@ pub fn build_eq_x_r_gpu<'a, E: ExtensionField>(
     let point_gl64: &Point<GL64Ext> = unsafe { std::mem::transmute(point) };
     let eq_mle = {
         let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len).unwrap();
-        let gpu_points = hal.alloc_ext_elems_from_host(&point_gl64).unwrap();
+        let gpu_points = hal.alloc_ext_elems_from_host(point_gl64).unwrap();
         build_mle_as_ceno(&hal.inner, &gpu_points, &mut gpu_output, eq_len).unwrap();
         GpuPolynomialExt::new(gpu_output, point.len())
     };
@@ -190,7 +160,7 @@ pub fn build_rotation_mles_gpu<'a, E: ExtensionField, PCS: PolynomialCommitmentS
                 rotation_next_base_mle_gpu(
                     &cuda_hal.inner,
                     &mut output_buf,
-                    &input_buf,
+                    input_buf,
                     &rotation_index,
                     cyclic_group_size,
                 )
@@ -222,7 +192,7 @@ pub fn build_rotation_selector_gpu<'a, E: ExtensionField, PCS: PolynomialCommitm
     let total_len = wit[0].evaluations_len(); // Take first mle just to retrieve total length
     assert!(total_len.is_power_of_two());
     let mut output_buf = cuda_hal.alloc_ext_elems_on_device(total_len).unwrap();
-    let eq = build_eq_x_r_gpu(&cuda_hal, rt);
+    let eq = build_eq_x_r_gpu(cuda_hal, rt);
     let eq_buf = match &eq.mle {
         GpuFieldType::Base(_) => panic!("should be ext field"),
         GpuFieldType::Ext(mle) => mle.evaluations(),
@@ -236,7 +206,7 @@ pub fn build_rotation_selector_gpu<'a, E: ExtensionField, PCS: PolynomialCommitm
     rotation_selector_gpu(
         &cuda_hal.inner,
         &mut output_buf,
-        &eq_buf,
+        eq_buf,
         &rotation_index,
         1 << rotation_cyclic_group_log2,
         rotation_cyclic_subgroup_size,

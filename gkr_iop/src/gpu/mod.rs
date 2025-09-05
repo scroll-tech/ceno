@@ -11,20 +11,16 @@ use witness::RowMajorMatrix;
 
 use crate::cpu::default_backend_config;
 
-use ceno_gpu::{
-    BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu, gl64::buffer::BufferImpl,
-};
-
 use itertools::{Itertools, izip};
 use std::marker::PhantomData;
 
 pub mod gpu_prover {
     pub use ceno_gpu::{
-        Buffer, CudaHal,
+        BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu, Buffer, CudaHal,
         gl64::{
-            CudaHalGL64, GpuFieldType, GpuPolynomial, GpuPolynomialExt, build_mle_as_ceno,
-            convert_ceno_to_gpu_basefold_commitment, ordered_sparse32_selector_gpu,
-            rotation_next_base_mle_gpu, rotation_selector_gpu,
+            CudaHalGL64, GpuFieldType, GpuPolynomial, GpuPolynomialExt, buffer::BufferImpl,
+            build_mle_as_ceno, convert_ceno_to_gpu_basefold_commitment,
+            ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu, rotation_selector_gpu,
         },
     };
     use cudarc::driver::{CudaDevice, DriverError};
@@ -37,6 +33,7 @@ pub mod gpu_prover {
     pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> =
         Lazy::new(|| CudaDevice::new(0));
 
+    #[allow(clippy::type_complexity)]
     pub static CUDA_HAL: Lazy<
         Result<Arc<Mutex<CudaHalGL64>>, Box<dyn std::error::Error + Send + Sync>>,
     > = Lazy::new(|| {

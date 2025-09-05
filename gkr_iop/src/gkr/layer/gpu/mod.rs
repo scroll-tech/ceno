@@ -9,7 +9,6 @@ use crate::{
         },
     },
     gpu::{GpuBackend, GpuProver},
-    hal::MultilinearPolynomial,
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -19,7 +18,6 @@ use multilinear_extensions::{
     Expression,
     mle::{MultilinearExtension, Point},
     monomial::Term,
-    utils::eval_by_expr_constant,
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
@@ -40,7 +38,6 @@ use crate::{
         sumcheck_layer::{LayerProof, SumcheckLayerProof},
     },
     hal::ProverBackend,
-    selector::SelectorType,
 };
 
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
@@ -320,7 +317,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     );
     let selector_gpu = build_rotation_selector_gpu(
         &cuda_hal,
-        &wit,
+        wit,
         rt,
         &bh,
         rotation_cyclic_subgroup_size,
@@ -433,7 +430,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     (
         SumcheckLayerProof {
             proof: proof_gpu_e,
-            evals: evals,
+            evals,
         },
         RotationPoints {
             left: left_point,

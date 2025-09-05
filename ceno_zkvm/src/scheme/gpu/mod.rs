@@ -6,7 +6,7 @@ use crate::{
     scheme::hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
-use ceno_gpu::gl64::{GpuFieldType, GpuPolynomialExt};
+use ceno_gpu::gl64::GpuPolynomialExt;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::{
     gkr::{
@@ -16,7 +16,7 @@ use gkr_iop::{
     gpu::{GpuBackend, GpuProver},
     hal::ProverBackend,
 };
-use itertools::{Itertools, chain, izip};
+use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Instance, WitnessId,
@@ -25,7 +25,7 @@ use multilinear_extensions::{
     util::ceil_log2,
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::{collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverMessage,
@@ -34,9 +34,8 @@ use sumcheck::{
 use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
-use gkr_iop::cpu::{CpuBackend, CpuProver};
-
-use gkr_iop::hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver};
+use crate::circuit_builder::ConstraintSystem;
+use gkr_iop::hal::MultilinearPolynomial;
 
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::gpu_prover::*;
@@ -76,7 +75,7 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
 
     // Extract logup out_evals from GPU towers
     let mut lk_out_evals = Vec::new();
-    for (_i, gpu_spec) in logup_gpu.iter().enumerate() {
+    for gpu_spec in logup_gpu.iter() {
         let first_layer_evals: Vec<E> = gpu_spec
             .get_final_evals(0)
             .expect("Failed to extract final evals from GPU logup tower");
@@ -189,14 +188,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
     }
 }
 
-fn build_tower_witness_gpu<'hal, 'buf, E: ExtensionField>(
+fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
     records: &[ArcMultilinearExtensionGpu<'_, E>],
     challenges: &[E; 2],
-    cuda_hal: &'hal ceno_gpu::gl64::CudaHalGL64,
-    prod_buffers: &'buf mut Vec<ceno_gpu::gl64::buffer::BufferImpl<ff_ext::GoldilocksExt2>>,
-    logup_buffers: &'buf mut Vec<ceno_gpu::gl64::buffer::BufferImpl<ff_ext::GoldilocksExt2>>,
+    cuda_hal: &CudaHalGL64,
+    prod_buffers: &'buf mut Vec<BufferImpl<GL64Ext>>,
+    logup_buffers: &'buf mut Vec<BufferImpl<GL64Ext>>,
 ) -> Result<
     (
         Vec<ceno_gpu::GpuProverSpec<'buf>>,
@@ -428,6 +427,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         fields(profiling_3),
         level = "trace"
     )]
+    #[allow(clippy::type_complexity)]
     fn prove_tower_relation<'a, 'b, 'c>(
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
@@ -481,7 +481,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             input,
             records,
             challenges,
-            &*cuda_hal,
+            &cuda_hal,
             &mut _prod_buffers,
             &mut _logup_buffers,
         )
@@ -766,10 +766,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         }
     }
 }
-
-use crate::circuit_builder::ConstraintSystem;
-use gkr_iop::{evaluation::EvalExpression, gkr::layer::Layer};
-use p3::field::extension::BinomialExtensionField;
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
