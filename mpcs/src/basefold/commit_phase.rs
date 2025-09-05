@@ -479,3 +479,31 @@ where
 
     Some(next_challenge)
 }
+
+#[cfg(test)]
+mod tests {
+    use ff_ext::{BabyBearExt4, FromUniformBytes};
+    use rand::thread_rng;
+    use p3::{matrix::dense::RowMajorMatrix, matrix::Matrix};
+    use itertools::Itertools;
+
+    type E = BabyBearExt4;
+
+    #[test]
+    fn test_matrix_multiply_vector() {
+        let num_rows = 1<<10;
+        let num_cols = 32;
+
+        let mut rng = thread_rng();
+        let matrix = RowMajorMatrix::new(
+            E::random_vec(num_rows*num_cols, &mut rng), 
+            num_cols,
+        );
+        let v = E::random_vec(num_cols, &mut rng);
+
+        let codeword = matrix.rows().map(|row| {
+            v.iter().zip(row).map(|(a, b)| *a * b).sum::<E>()
+        })
+        .collect_vec();
+    }
+}

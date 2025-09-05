@@ -482,14 +482,14 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::util::codeword_fold_with_challenge;
     use ff_ext::{BabyBearExt4, FromUniformBytes, GoldilocksExt2};
     use itertools::Itertools;
-    use p3::field::{Field, FieldAlgebra, TwoAdicField};
-    use p3::babybear::BabyBear;
-    use p3::matrix::bitrev::BitReversableMatrix;
-    use p3::matrix::dense::RowMajorMatrix;
-    use p3::matrix::Matrix;
-    use crate::util::codeword_fold_with_challenge;
+    use p3::{
+        babybear::BabyBear,
+        field::{Field, FieldAlgebra, TwoAdicField},
+        matrix::{Matrix, bitrev::BitReversableMatrix, dense::RowMajorMatrix},
+    };
 
     use crate::{
         basefold::Basefold,
@@ -532,9 +532,12 @@ mod test {
 
         let challenge = E::random(&mut rng);
 
-        codeword.chunks(2).zip(twiddle.powers()).for_each(|(chunk, coeff)| {
-            codeword_fold_with_challenge(chunk, challenge, coeff, inv_2);
-        })
+        codeword
+            .chunks(2)
+            .zip(twiddle.powers())
+            .for_each(|(chunk, coeff)| {
+                codeword_fold_with_challenge(chunk, challenge, coeff, inv_2);
+            })
     }
 
     #[test]
