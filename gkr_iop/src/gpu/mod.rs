@@ -1,5 +1,5 @@
 use crate::{
-    gkr::layer::gpu::extract_mle_relationships_from_monomial_terms,
+    gkr::layer::gpu::utils::extract_mle_relationships_from_monomial_terms,
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
 use ff_ext::ExtensionField;
@@ -31,8 +31,8 @@ pub mod gpu_prover {
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex};
 
-    pub type GL64Ext = ff_ext::GoldilocksExt2;
     pub type GL64Base = p3::goldilocks::Goldilocks;
+    pub type GL64Ext = ff_ext::GoldilocksExt2;
 
     pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> =
         Lazy::new(|| CudaDevice::new(0));
@@ -299,8 +299,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             panic!("GPU backend only supports Goldilocks base field");
         }
 
-        type EGL64 = ff_ext::GoldilocksExt2;
-
         let out_evals: Vec<_> = layer
             .out_sel_and_eval_exprs
             .iter()
@@ -338,7 +336,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     &pub_io_evals,
                     &challenges,
                 );
-                let coeffs_gl64: Vec<EGL64> = unsafe { std::mem::transmute(coeffs) };
+                let coeffs_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(coeffs) };
                 (coeffs_gl64, indices, size_info)
             })
             .fold(
@@ -373,7 +371,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // process & transmute poly
         let all_witins_gpu = layer_wits.iter().map(|mle| mle.as_ref()).collect_vec();
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<EGL64>> =
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
 

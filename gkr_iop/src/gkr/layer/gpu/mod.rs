@@ -45,6 +45,9 @@ use crate::{
 
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
+pub mod utils;
+use utils::*;
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
@@ -90,125 +93,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
             cpu_wit,
             challenges,
             transcript,
-        )
-    }
-}
-
-pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
-    monomial_terms: &[Term<Expression<E>, Expression<E>>],
-    all_mles: &[&MultilinearExtensionGpu<'a, E>],
-    public_io_evals: &[Either<E::BaseField, E>],
-    challenges: &[E],
-) -> (Vec<E>, Vec<Vec<usize>>, Vec<(usize, usize)>) {
-    let mut term_coefficients = Vec::new();
-    let mut mle_indices_per_term = Vec::new();
-    let mut mle_size_info = Vec::new();
-
-    for term in monomial_terms {
-        // scalar - convert Either<E::BaseField, E> to E
-        let scalar_either = eval_by_expr_constant(public_io_evals, challenges, &term.scalar);
-        let scalar = match scalar_either {
-            Either::Left(base_field_val) => E::from(base_field_val),
-            Either::Right(ext_field_val) => ext_field_val,
-        };
-        term_coefficients.push(scalar);
-
-        // MLE indices
-        let mut indices = Vec::new();
-        for expr in &term.product {
-            match expr {
-                Expression::WitIn(witin_id) => {
-                    indices.push(*witin_id as usize);
-                }
-                _ => panic!("Unsupported expression in product: {:?}", expr),
-            }
-        }
-
-        // MLE size - get this before moving indices
-        let first_idx = indices.first().copied();
-        mle_indices_per_term.push(indices);
-
-        if let Some(first_idx) = first_idx {
-            let num_vars = all_mles[first_idx].mle.num_vars();
-            mle_size_info.push((num_vars, num_vars));
-        }
-    }
-
-    (term_coefficients, mle_indices_per_term, mle_size_info)
-}
-
-fn build_eq_x_r_with_sel_gpu<'a, E: ExtensionField>(
-    hal: &'a CudaHalGL64,
-    point: &Point<E>,
-    num_instances: usize,
-    selector: &SelectorType<E>,
-) -> MultilinearExtensionGpu<'a, E> {
-    if std::any::TypeId::of::<E::BaseField>()
-        != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
-    {
-        panic!("GPU backend only supports Goldilocks base field");
-    }
-
-    let eq_len = 1 << point.len();
-    let (num_instances, is_sp32, indices) = match selector {
-        SelectorType::None => panic!("SelectorType::None"),
-        SelectorType::Whole(_expr) => (eq_len, false, vec![]),
-        SelectorType::Prefix(_, _expr) => {
-            (num_instances, false, vec![])
-        }
-        SelectorType::OrderedSparse32 { indices, .. } => (num_instances, true, indices.clone()),
-    };
-
-    // type eq
-    let eq_mle = if is_sp32 {
-        let eq = build_eq_x_r_gpu(hal, point);
-        let mut eq_buf = match eq.mle {
-            GpuFieldType::Base(_) => panic!("should be ext field"),
-            GpuFieldType::Ext(mle) => mle,
-            GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
-        };
-        let indices_u32 = indices.iter().map(|x| *x as u32).collect_vec();
-        ordered_sparse32_selector_gpu(&hal.inner, &mut eq_buf.buf, &indices_u32, num_instances)
-            .unwrap();
-        eq_buf
-    } else {
-        let point_gl64: &Point<GL64Ext> = unsafe { std::mem::transmute(point) };
-        let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len).unwrap();
-        let gpu_points = hal.alloc_ext_elems_from_host(&point_gl64).unwrap();
-        build_mle_as_ceno(&hal.inner, &gpu_points, &mut gpu_output, num_instances).unwrap();
-        GpuPolynomialExt::new(gpu_output, point.len())
-    };
-    let mle_gl64 = MultilinearExtensionGpu::from_ceno_gpu_ext(eq_mle);
-    unsafe {
-        std::mem::transmute::<MultilinearExtensionGpu<'a, GL64Ext>, MultilinearExtensionGpu<'a, E>>(
-            mle_gl64,
-        )
-    }
-}
-
-fn build_eq_x_r_gpu<'a, E: ExtensionField>(
-    hal: &'a CudaHalGL64,
-    point: &Point<E>,
-) -> MultilinearExtensionGpu<'a, E> {
-    if std::any::TypeId::of::<E::BaseField>()
-        != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
-    {
-        panic!("GPU backend only supports Goldilocks base field");
-    }
-
-    let eq_len = 1 << point.len();
-    // type eq
-    let point_gl64: &Point<GL64Ext> = unsafe { std::mem::transmute(point) };
-    let eq_mle = {
-        let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len).unwrap();
-        let gpu_points = hal.alloc_ext_elems_from_host(&point_gl64).unwrap();
-        build_mle_as_ceno(&hal.inner, &gpu_points, &mut gpu_output, eq_len).unwrap();
-        GpuPolynomialExt::new(gpu_output, point.len())
-    };
-    let mle_gl64 = MultilinearExtensionGpu::from_ceno_gpu_ext(eq_mle);
-    unsafe {
-        std::mem::transmute::<MultilinearExtensionGpu<'a, GL64Ext>, MultilinearExtensionGpu<'a, E>>(
-            mle_gl64,
         )
     }
 }
@@ -282,10 +166,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         )
         .collect_vec();
 
-        // cpu
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
-        // gpu
-        type EGL64 = ff_ext::GoldilocksExt2;
         let device = CUDA_DEVICE
             .as_ref()
             .map_err(|e| format!("Device not available: {:?}", e))
@@ -358,13 +239,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .max()
             .unwrap_or(0);
 
-        // transcript >>> BasicTranscript<GL64^2>
-        let basic_tr: &mut BasicTranscript<EGL64> =
-            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<EGL64>) };
-        // Convert types for GPU function call
-        let term_coefficients_gl64: Vec<EGL64> = unsafe { std::mem::transmute(term_coefficients) };
-        // let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal.sumcheck.prove_generic_sumcheck_mles(&cuda_hal, &all_witins_gpu_gl64, &mle_size_info, &term_coefficients_gl64, &mle_indices_per_term, max_num_var, max_degree, basic_tr).unwrap();
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<EGL64>> =
+        // Convert types for GPU function Call
+        let basic_tr: &mut BasicTranscript<GL64Ext> =
+            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GL64Ext>) };
+        let term_coefficients_gl64: Vec<GL64Ext> =
+            unsafe { std::mem::transmute(term_coefficients) };
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
@@ -383,10 +263,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
         let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
 
-        // convert to cpu type
-        let proof_gpu_e = unsafe { std::mem::transmute::<IOPProof<EGL64>, IOPProof<E>>(proof_gpu) };
-        let evals_gpu_e = unsafe { std::mem::transmute::<Vec<EGL64>, Vec<E>>(evals_gpu) };
-        let row_challenges_e = unsafe { std::mem::transmute::<Vec<EGL64>, Vec<E>>(row_challenges) };
+        // convert back to E: ExtensionField
+        let proof_gpu_e =
+            unsafe { std::mem::transmute::<IOPProof<GL64Ext>, IOPProof<E>>(proof_gpu) };
+        let evals_gpu_e = unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(evals_gpu) };
+        let row_challenges_e =
+            unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(row_challenges) };
 
         exit_span!(span);
 
@@ -423,88 +305,27 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     global_challenges: &[E],
     transcript: &mut impl Transcript<E>,
 ) -> (SumcheckLayerProof<E>, RotationPoints<E>) {
-    let cuda_hal = CUDA_HAL.as_ref().unwrap().lock().unwrap();
-    let span = entered_span!("rotate_witin_selector", profiling_4 = true);
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
+    let cuda_hal = CUDA_HAL.as_ref().unwrap().lock().unwrap();
 
     // rotated_mles is non-deterministic input, rotated from existing witness polynomial
     // we will reduce it to zero check, and finally reduce to committed polynomial opening
-    let rotated_mles_gpu = raw_rotation_exprs
-        .iter()
-        .map(|rotation_expr| match rotation_expr {
-            (Expression::WitIn(source_wit_id), _) => {
-                let cyclic_group_size = 1 << rotation_cyclic_group_log2;
-                let rotation_index = bh
-                    .into_iter()
-                    .take(cyclic_group_size)
-                    .map(|x| x as u32)
-                    .collect_vec();
-                let input_mle = wit[*source_wit_id as usize].as_ref();
-                let input_buf = match &input_mle.mle {
-                    GpuFieldType::Base(poly) => poly.evaluations(),
-                    GpuFieldType::Ext(_) => panic!("should be base field"),
-                    _ => panic!("unimplemented input mle"),
-                };
-                let mut output_buf = cuda_hal.alloc_elems_on_device(input_buf.len()).unwrap();
-                rotation_next_base_mle_gpu(
-                    &cuda_hal.inner,
-                    &mut output_buf,
-                    &input_buf,
-                    &rotation_index,
-                    cyclic_group_size,
-                )
-                .unwrap();
-                let output_mle = MultilinearExtensionGpu::from_ceno_gpu_base(GpuPolynomial::new(
-                    output_buf,
-                    input_mle.mle.num_vars(),
-                ));
-                unsafe {
-                    std::mem::transmute::<
-                        MultilinearExtensionGpu<GL64Ext>,
-                        MultilinearExtensionGpu<'_, E>,
-                    >(output_mle)
-                }
-            }
-            _ => unimplemented!("unimplemented rotation"),
-        })
-        .collect::<Vec<_>>();
-
-    let eq = build_eq_x_r_gpu(&cuda_hal, rt);
-    let eq_buf = match &eq.mle {
-        GpuFieldType::Base(_) => panic!("should be ext field"),
-        GpuFieldType::Ext(mle) => mle.evaluations(),
-        GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
-    };
-    let selector_gpu = {
-        let total_len = wit[0].evaluations_len(); // Take first mle just to retrieve total length
-        assert!(total_len.is_power_of_two());
-        let mut output_buf = cuda_hal.alloc_ext_elems_on_device(total_len).unwrap();
-        // let eq_gl64 = unsafe { std::mem::transmute::<Vec<E>, Vec<GL64Ext>>(eq) };
-        // let input_buf = cuda_hal.alloc_ext_elems_from_host(&eq_gl64).unwrap();
-        let rotation_index = bh
-            .into_iter()
-            .take(rotation_cyclic_subgroup_size)
-            .map(|x| x as u32)
-            .collect_vec();
-        rotation_selector_gpu(
-            &cuda_hal.inner,
-            &mut output_buf,
-            &eq_buf,
-            &rotation_index,
-            1 << rotation_cyclic_group_log2,
-            rotation_cyclic_subgroup_size,
-        )
-        .unwrap();
-        let output_mle = MultilinearExtensionGpu::from_ceno_gpu_ext(GpuPolynomialExt::new(
-            output_buf,
-            total_len.ilog2() as usize,
-        ));
-        unsafe {
-            std::mem::transmute::<MultilinearExtensionGpu<GL64Ext>, MultilinearExtensionGpu<'_, E>>(
-                output_mle,
-            )
-        }
-    };
+    let span = entered_span!("rotate_witin_selector", profiling_4 = true);
+    let rotated_mles_gpu = build_rotation_mles_gpu(
+        &cuda_hal,
+        raw_rotation_exprs,
+        wit,
+        &bh,
+        rotation_cyclic_group_log2,
+    );
+    let selector_gpu = build_rotation_selector_gpu(
+        &cuda_hal,
+        &wit,
+        rt,
+        &bh,
+        rotation_cyclic_subgroup_size,
+        rotation_cyclic_group_log2,
+    );
     let rotation_challenges = chain!(
         global_challenges.iter().copied(),
         get_challenge_pows(raw_rotation_exprs.len(), transcript)
@@ -540,10 +361,9 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
         .max()
         .unwrap_or(0);
 
-    // transcript >>> BasicTranscript<GL64^2>
+    // Convert types for GPU function call
     let basic_tr: &mut BasicTranscript<GL64Ext> =
         unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GL64Ext>) };
-    // Convert types for GPU function call
     let term_coefficients_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(term_coefficients) };
     let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
         unsafe { std::mem::transmute(mle_gpu_ref) };
@@ -573,16 +393,6 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     exit_span!(span);
 
     let span = entered_span!("rotation derived left/right eval", profiling_4 = true);
-    // post process: giving opening of rotated polys (point, evals), derive original opening before rotate
-    // final format: [
-    //    left_eval_0th,
-    //    right_eval_0th,
-    //    target_eval_0th,
-    //    left_eval_1st,
-    //    right_eval_1st,
-    //    target_eval_1st,
-    //    ...
-    // ]
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
     let (left_point, right_point) = bh.get_rotation_points(&row_challenges_e);
     let evals = evals_gpu_e
