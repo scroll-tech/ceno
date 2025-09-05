@@ -26,13 +26,12 @@ use sumcheck::{
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
+use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 use crate::{
     error::ZKVMError,
-    scheme::hal::ProofInput,
+    scheme::{hal::ProofInput, utils::build_main_witness},
     structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
-
-use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 
 type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
 
@@ -329,7 +328,8 @@ impl<
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
         // build main witness
-        let (records, is_padded) = self.device.build_main_witness(cs, &input, challenges);
+        let (records, is_padded) =
+            build_main_witness::<E, PCS, PB, PD>(&self.device, cs, &input, challenges);
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower

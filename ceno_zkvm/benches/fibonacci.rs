@@ -5,7 +5,7 @@ use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::{create_backend, create_prover, verifier::ZKVMVerifier},
+    scheme::{create_backend, create_prover},
 };
 mod alloc;
 use criterion::*;
@@ -13,6 +13,7 @@ use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 
+use ceno_zkvm::scheme::verifier::ZKVMVerifier;
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 

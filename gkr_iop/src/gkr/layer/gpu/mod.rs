@@ -9,6 +9,7 @@ use crate::{
         },
     },
     gpu::{GpuBackend, GpuProver},
+    hal::MultilinearPolynomial,
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -18,7 +19,7 @@ use multilinear_extensions::{
     Expression,
     mle::{MultilinearExtension, Point},
     monomial::Term,
-    utils::eval_by_expr_with_instance,
+    utils::{eval_by_expr_constant, eval_by_expr_with_instance},
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
@@ -95,9 +96,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
 
 pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
     monomial_terms: &[Term<Expression<E>, Expression<E>>],
-    all_mles: &Vec<&MultilinearExtensionGpu<'a, E>>,
-    // all_mles: &[Either<&GpuPolynomial, &mut GpuPolynomial>],
-    public_io_evals: &[E],
+    all_mles: &[&MultilinearExtensionGpu<'a, E>],
+    public_io_evals: &[Either<E::BaseField, E>],
     challenges: &[E],
 ) -> (Vec<E>, Vec<Vec<usize>>, Vec<(usize, usize)>) {
     let mut term_coefficients = Vec::new();
@@ -106,8 +106,7 @@ pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
 
     for term in monomial_terms {
         // scalar - convert Either<E::BaseField, E> to E
-        let scalar_either =
-            eval_by_expr_with_instance(&[], &[], &[], public_io_evals, challenges, &term.scalar);
+        let scalar_either = eval_by_expr_constant(public_io_evals, challenges, &term.scalar);
         let scalar = match scalar_either {
             Either::Left(base_field_val) => E::from(base_field_val),
             Either::Right(ext_field_val) => ext_field_val,
@@ -355,7 +354,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     .clone()
                     .unwrap(),
                 &all_witins_gpu,
-                pub_io_evals,
+                &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
                 &main_sumcheck_challenges,
             );
         let max_num_var = max_num_variables;
