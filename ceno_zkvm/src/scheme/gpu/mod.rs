@@ -48,6 +48,7 @@ pub struct GpuTowerProver;
 use gkr_iop::gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu};
 
 // Extract out_evals from GPU-built tower witnesses
+#[allow(clippy::type_complexity)]
 fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     prod_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built product towers
     logup_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built logup towers
@@ -157,10 +158,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
 
             let span = entered_span!("[gpu] transmute back", profiling_2 = true);
             let commit: PCS::Commitment = unsafe { std::mem::transmute_copy(&basefold_commit) };
-            std::mem::forget(basefold_commit);
-            // let mles: Vec<MultilinearExtension<'a, E>> =
-            //     unsafe { std::mem::transmute_copy(&basefold_mles) };
-            // std::mem::forget(basefold_mles);
+            drop(basefold_commit);
             let mles = basefold_mles
                 .into_iter()
                 .map(|mle| MultilinearExtensionGpu::from_ceno_gpu(mle))
@@ -545,7 +543,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 assert_eq!(expr.degree(), 1);
 
                 let monomial_term = monomialize_expr_to_wit_terms(
-                    &expr,
+                    expr,
                     cs.num_witin as WitnessId,
                     cs.num_structural_witin as WitnessId,
                     cs.num_fixed as WitnessId,
@@ -555,7 +553,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                     &monomial_term,
                     &layer_witin,
                     &[],
-                    &challenges,
+                    challenges,
                 );
                 let coeffs_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(coeffs) };
                 (coeffs_gl64, indices, size_info)

@@ -169,13 +169,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .out_sel_and_eval_exprs
             .iter()
             .zip(out_points.iter())
-            .filter_map(|((sel_type, _), point)| {
-                Some(build_eq_x_r_with_sel_gpu(
-                    &cuda_hal,
-                    point,
-                    num_instances,
-                    sel_type,
-                ))
+            .map(|((sel_type, _), point)| {
+                build_eq_x_r_with_sel_gpu(&cuda_hal, point, num_instances, sel_type)
             })
             // for rotation left point
             .chain(
@@ -200,7 +195,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .iter()
             .take(layer.n_witin)
             .map(|mle| mle.as_ref())
-            .chain(eqs_gpu.iter().map(|mle| mle))
+            .chain(eqs_gpu.iter())
             .chain(
                 // fixed, start after `n_witin`
                 wit.iter()

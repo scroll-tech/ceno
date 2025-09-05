@@ -135,7 +135,8 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         match &self.mle {
             GpuFieldType::Base(poly) => {
                 let cpu_evaluations = poly.to_cpu_vec();
-                let cpu_evaluations_base = unsafe { std::mem::transmute(cpu_evaluations) };
+                let cpu_evaluations_base: Vec<E::BaseField> =
+                    unsafe { std::mem::transmute(cpu_evaluations) };
                 MultilinearExtension::from_evaluations_vec(
                     self.mle.num_vars(),
                     cpu_evaluations_base,
@@ -143,7 +144,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
             }
             GpuFieldType::Ext(poly) => {
                 let cpu_evaluations = poly.to_cpu_vec();
-                let cpu_evaluations_ext = unsafe { std::mem::transmute(cpu_evaluations) };
+                let cpu_evaluations_ext: Vec<E> = unsafe { std::mem::transmute(cpu_evaluations) };
                 MultilinearExtension::from_evaluations_ext_vec(
                     self.mle.num_vars(),
                     cpu_evaluations_ext,
@@ -164,9 +165,9 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         match mle.evaluations {
             FieldType::Base(_) => {
                 let mle_vec_ref = mle.get_base_field_vec();
-                let mle_vec_ref_gl64 = unsafe { std::mem::transmute(mle_vec_ref) };
+                let mle_vec_ref_gl64: &[GL64Base] = unsafe { std::mem::transmute(mle_vec_ref) };
                 let mle_gpu =
-                    GpuPolynomial::from_ceno_vec(&cuda_hal, mle_vec_ref_gl64, mle.num_vars())
+                    GpuPolynomial::from_ceno_vec(cuda_hal, mle_vec_ref_gl64, mle.num_vars())
                         .unwrap();
                 Self {
                     mle: GpuFieldType::Base(mle_gpu),
@@ -175,13 +176,10 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
             }
             FieldType::Ext(_) => {
                 let mle_vec_ref = mle.get_ext_field_vec();
-                let mle_vec_ref_gl64_ext = unsafe { std::mem::transmute(mle_vec_ref) };
-                let mle_gpu = GpuPolynomialExt::from_ceno_vec(
-                    &cuda_hal,
-                    mle_vec_ref_gl64_ext,
-                    mle.num_vars(),
-                )
-                .unwrap();
+                let mle_vec_ref_gl64_ext: &[GL64Ext] = unsafe { std::mem::transmute(mle_vec_ref) };
+                let mle_gpu =
+                    GpuPolynomialExt::from_ceno_vec(cuda_hal, mle_vec_ref_gl64_ext, mle.num_vars())
+                        .unwrap();
                 Self {
                     mle: GpuFieldType::Ext(mle_gpu),
                     _phantom: PhantomData,
@@ -348,7 +346,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     expr,
                     &layer_wits.iter().map(|mle| mle.as_ref()).collect_vec(),
                     &pub_io_evals,
-                    &challenges,
+                    challenges,
                 );
                 let coeffs_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(coeffs) };
                 (coeffs_gl64, indices, size_info)

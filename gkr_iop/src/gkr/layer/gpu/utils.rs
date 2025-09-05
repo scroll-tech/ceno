@@ -16,6 +16,7 @@ use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
 use crate::hal::MultilinearPolynomial;
 
+#[allow(clippy::type_complexity)]
 pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
     monomial_terms: &[Term<Expression<E>, Expression<E>>],
     all_mles: &[&MultilinearExtensionGpu<'a, E>],
