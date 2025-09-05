@@ -671,7 +671,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         ),
         ZKVMError,
     > {
-        println!("[GPU] prove_main_constraints");
         let ComposedConstrainSystem {
             zkvm_v1_css: cs,
             gkr_circuit,
@@ -881,19 +880,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
 
             let gpu_proof: PCS::Proof = unsafe { std::mem::transmute_copy(&gpu_proof_basefold) };
             std::mem::forget(gpu_proof_basefold);
-            println!("construct cpu commitment from gpu data");
             gpu_proof
         } else {
             panic!("GPU backend only supports Goldilocks base field");
         };
         gpu_proof
-
-        // PCS::batch_open(
-        //     self.pp.as_ref().unwrap(),
-        //     rounds,
-        //     transcript
-        // )
-        // .unwrap()
     }
 }
 

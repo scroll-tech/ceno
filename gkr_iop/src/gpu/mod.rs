@@ -120,7 +120,6 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     pub fn inner_to_mle(&self) -> MultilinearExtension<'a, E> {
         match &self.mle {
             GpuFieldType::Base(poly) => {
-                // println!("GpuFieldType::Base: {}", poly.num_vars());
                 let cpu_evaluations = poly.to_cpu_vec();
                 let cpu_evaluations_base = unsafe { std::mem::transmute(cpu_evaluations) };
                 MultilinearExtension::from_evaluations_vec(
@@ -129,7 +128,6 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                 )
             }
             GpuFieldType::Ext(poly) => {
-                // println!("GpuFieldType::Ext: {}", poly.num_vars());
                 let cpu_evaluations = poly.to_cpu_vec();
                 let cpu_evaluations_ext = unsafe { std::mem::transmute(cpu_evaluations) };
                 MultilinearExtension::from_evaluations_ext_vec(
@@ -151,7 +149,6 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         // check type of mle
         match mle.evaluations {
             FieldType::Base(_) => {
-                // println!("from_ceno Base");
                 let mle_vec_ref = mle.get_base_field_vec();
                 let mle_vec_ref_gl64 = unsafe { std::mem::transmute(mle_vec_ref) };
                 let mle_gpu =
@@ -163,7 +160,6 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                 }
             }
             FieldType::Ext(_) => {
-                // println!("from_ceno Ext");
                 let mle_vec_ref = mle.get_ext_field_vec();
                 let mle_vec_ref_gl64_ext = unsafe { std::mem::transmute(mle_vec_ref) };
                 let mle_gpu = GpuPolynomialExt::from_ceno_vec(

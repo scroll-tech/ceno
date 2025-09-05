@@ -154,7 +154,6 @@ fn build_eq_x_r_with_sel_gpu<'a, E: ExtensionField>(
         SelectorType::None => panic!("SelectorType::None"),
         SelectorType::Whole(_expr) => (eq_len, false, vec![]),
         SelectorType::Prefix(_, _expr) => {
-            println!("eq_len = {}, num_instances = {}", eq_len, num_instances);
             (num_instances, false, vec![])
         }
         SelectorType::OrderedSparse32 { indices, .. } => (num_instances, true, indices.clone()),
@@ -232,7 +231,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         Point<<GpuBackend<E, PCS> as ProverBackend>::E>,
     ) {
         let num_threads = 1; // VP builder for GPU: do not use _num_threads
-        println!("  [GPU] ZerocheckLayerProver::prove()");
 
         assert_eq!(challenges.len(), 2);
         assert_eq!(
@@ -248,10 +246,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             if let Some(rotation_sumcheck_expression) =
                 layer.rotation_sumcheck_expression_monomial_terms.as_ref()
             {
-                println!(
-                    "  [GPU] call prove_rotation_gpu() with rotation_cyclic_group_log2 = {}",
-                    layer.rotation_cyclic_group_log2
-                );
                 // 1st sumcheck: process rotation_exprs
                 let rt = out_points.first().unwrap();
                 let (
