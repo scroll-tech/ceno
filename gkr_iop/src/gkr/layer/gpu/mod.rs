@@ -164,17 +164,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         .collect_vec();
 
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))
-            .unwrap();
-        device.bind_to_thread().unwrap();
-        let hal_arc = CUDA_HAL
-            .as_ref()
-            .map_err(|e| format!("HAL not available: {:?}", e))
-            .unwrap();
-        let cuda_hal = hal_arc.lock().unwrap();
-
+        let cuda_hal = get_cuda_hal().unwrap();
         let eqs_gpu = layer
             .out_sel_and_eval_exprs
             .iter()
@@ -303,7 +293,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     transcript: &mut impl Transcript<E>,
 ) -> (SumcheckLayerProof<E>, RotationPoints<E>) {
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
-    let cuda_hal = CUDA_HAL.as_ref().unwrap().lock().unwrap();
+    let cuda_hal = get_cuda_hal().unwrap();
 
     // rotated_mles is non-deterministic input, rotated from existing witness polynomial
     // we will reduce it to zero check, and finally reduce to committed polynomial opening

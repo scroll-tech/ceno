@@ -25,7 +25,7 @@ pub mod gpu_prover {
     };
     use cudarc::driver::{CudaDevice, DriverError};
     use once_cell::sync::Lazy;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, MutexGuard};
 
     pub type GL64Base = p3::goldilocks::Goldilocks;
     pub type GL64Ext = ff_ext::GoldilocksExt2;
@@ -46,6 +46,23 @@ pub mod gpu_prover {
             .map(|hal| Arc::new(Mutex::new(hal)))
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     });
+
+    pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalGL64>, String> {
+        let device = CUDA_DEVICE
+            .as_ref()
+            .map_err(|e| format!("Device not available: {:?}", e))?;
+        device
+            .bind_to_thread()
+            .map_err(|e| format!("Failed to bind device to thread: {:?}", e))?;
+
+        let hal_arc = CUDA_HAL
+            .as_ref()
+            .map_err(|e| format!("HAL not available: {:?}", e))?;
+
+        hal_arc
+            .lock()
+            .map_err(|e| format!("Failed to lock HAL: {:?}", e))
+    }
 }
 
 use crate::{evaluation::EvalExpression, gkr::layer::Layer};
@@ -355,17 +372,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .unwrap()
             .0;
 
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))
-            .unwrap();
-        device.bind_to_thread().unwrap();
-        let hal_arc = CUDA_HAL
-            .as_ref()
-            .map_err(|e| format!("HAL not available: {:?}", e))
-            .unwrap();
-        let cuda_hal = hal_arc.lock().unwrap();
-
         // process & transmute poly
         let all_witins_gpu = layer_wits.iter().map(|mle| mle.as_ref()).collect_vec();
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
@@ -373,6 +379,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
 
         // buffer for output witness from gpu
+        let cuda_hal = get_cuda_hal().unwrap();
         let mut next_witness_buf = (0..num_non_zero_expr)
             .map(|_| {
                 cuda_hal

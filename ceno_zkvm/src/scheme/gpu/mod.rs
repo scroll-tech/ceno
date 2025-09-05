@@ -3,7 +3,10 @@ use super::hal::{
 };
 use crate::{
     error::ZKVMError,
-    scheme::hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
+    scheme::{
+        cpu::TowerRelationOutput,
+        hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
+    },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
 use ceno_gpu::gl64::GpuPolynomialExt;
@@ -132,17 +135,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 traces.into_values().collect();
 
             let span = entered_span!("[gpu] hal init", profiling_2 = true);
-            // let cuda_hal = CUDA_HAL.lock().unwrap(); // CudaHalGL64::new().unwrap();
-            let device = CUDA_DEVICE
-                .as_ref()
-                .map_err(|e| format!("Device not available: {:?}", e))
-                .unwrap();
-            device.bind_to_thread().unwrap();
-            let hal_arc = CUDA_HAL
-                .as_ref()
-                .map_err(|e| format!("HAL not available: {:?}", e))
-                .unwrap();
-            let cuda_hal = hal_arc.lock().unwrap();
+            let cuda_hal = get_cuda_hal().unwrap();
             exit_span!(span);
 
             let traces_gl64: Vec<witness::RowMajorMatrix<p3::goldilocks::Goldilocks>> =
@@ -427,7 +420,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         fields(profiling_3),
         level = "trace"
     )]
-    #[allow(clippy::type_complexity)]
     fn prove_tower_relation<'a, 'b, 'c>(
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
@@ -436,13 +428,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         _is_padded: bool,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
-    ) -> (
-        Point<E>,
-        TowerProofs<E>,
-        Vec<Vec<E>>,
-        Vec<Vec<E>>,
-        Vec<Vec<E>>,
-    )
+    ) -> TowerRelationOutput<E>
     where
         'a: 'b,
         'b: 'c,
@@ -459,23 +445,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         } = composed_cs;
         let r_set_len = cs.r_expressions.len() + cs.r_table_expressions.len();
 
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))
-            .unwrap();
-        device.bind_to_thread().unwrap();
-        let hal_arc = CUDA_HAL
-            .as_ref()
-            .map_err(|e| format!("HAL not available: {:?}", e))
-            .unwrap();
-        let cuda_hal = hal_arc.lock().unwrap();
-
         // GPU optimization: Use build_tower_witness_gpu which handles buffer allocation internally
         let mut _prod_buffers: Vec<ceno_gpu::gl64::buffer::BufferImpl<GL64Ext>> = Vec::new();
         let mut _logup_buffers: Vec<ceno_gpu::gl64::buffer::BufferImpl<GL64Ext>> = Vec::new();
 
         // Call build_tower_witness_gpu which will allocate buffers and build GPU specs
         let span = entered_span!("build_tower_witness", profiling_2 = true);
+        let cuda_hal = get_cuda_hal().unwrap();
         let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
             composed_cs,
             input,
@@ -596,17 +572,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 },
             );
 
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))
-            .unwrap();
-        device.bind_to_thread().unwrap();
-        let hal_arc = CUDA_HAL
-            .as_ref()
-            .map_err(|e| format!("HAL not available: {:?}", e))
-            .unwrap();
-        let cuda_hal = hal_arc.lock().unwrap();
-
+        let cuda_hal = get_cuda_hal().unwrap();
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
             unsafe { std::mem::transmute(layer_witin) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
@@ -786,17 +752,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
             panic!("GPU backend only supports Goldilocks base field");
         }
 
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))
-            .unwrap();
-        device.bind_to_thread().unwrap();
-        let hal_arc = CUDA_HAL
-            .as_ref()
-            .map_err(|e| format!("HAL not available: {:?}", e))
-            .unwrap();
-        let cuda_hal = hal_arc.lock().unwrap();
-
         let mut rounds = vec![];
         rounds.push((
             &witness_data,
@@ -826,10 +781,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
             ));
         }
 
-        use ceno_gpu::{
-            BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu,
-            gl64::buffer::BufferImpl,
-        };
+        // use ceno_gpu::{
+        //     BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu,
+        //     gl64::buffer::BufferImpl,
+        // };
 
         // Type conversions using unsafe transmute
         let prover_param = &self.backend.pp;
@@ -862,6 +817,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
                 .downcast_mut::<BasicTranscript<GoldilocksExt2>>()
                 .expect("Type should match");
 
+            let cuda_hal = get_cuda_hal().unwrap();
             let gpu_proof_basefold = cuda_hal
                 .basefold
                 .batch_open(&cuda_hal, pp_gl64, rounds_gl64, basic_transcript)
@@ -901,11 +857,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         let basefold_commitment: &mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2> =
             unsafe { std::mem::transmute_copy(&pcs_data_original.as_ref()) };
         // 2. convert from BasefoldCommitmentWithWitness<E> to BasefoldCommitmentWithWitness<GL64Base>
-        let hal_arc = CUDA_HAL
-            .as_ref()
-            .map_err(|e| format!("HAL not available: {:?}", e))
-            .unwrap();
-        let cuda_hal = hal_arc.lock().unwrap();
+        let cuda_hal = get_cuda_hal().unwrap();
         let pcs_data_basefold =
             convert_ceno_to_gpu_basefold_commitment(&cuda_hal, basefold_commitment);
         let pcs_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
@@ -930,7 +882,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         &self,
         mles: Vec<MultilinearExtension<'a, E>>,
     ) -> Vec<ArcMultilinearExtensionGpu<'a, E>> {
-        let cuda_hal = CUDA_HAL.as_ref().unwrap().lock().unwrap();
+        let cuda_hal = get_cuda_hal().unwrap();
         mles.iter()
             .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
             .collect_vec()
