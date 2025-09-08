@@ -1,0 +1,28 @@
+[package]
+edition = "2021"
+name = "cuda_hal"
+publish = false
+version = "0.1.0"
+
+[lib]
+name = "cuda_hal"
+path = "src/lib.rs"
+
+[dependencies]
+# Add dependencies that match what the real ceno_gpu needs
+anyhow = "1.0"
+ff_ext.workspace = true
+itertools = "0.13"
+mpcs.workspace = true
+multilinear_extensions.workspace = true
+p3.workspace = true
+rand = "0.8"
+rayon = "1.10"
+sumcheck.workspace = true
+thiserror = "1"
+tracing = "0.1"
+transcript.workspace = true
+witness.workspace = true
+
+[features]
+gpu = []

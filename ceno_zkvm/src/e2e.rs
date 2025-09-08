@@ -743,7 +743,6 @@ pub fn run_e2e_with_checkpoint<
 
     // Run proof phase
     let transcript = Transcript::new(b"riscv");
-
     let start = std::time::Instant::now();
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)
