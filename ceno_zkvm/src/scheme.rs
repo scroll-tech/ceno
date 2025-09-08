@@ -29,6 +29,7 @@ pub mod cpu;
 pub mod gpu;
 pub mod hal;
 pub mod prover;
+pub mod septic_curve;
 pub mod utils;
 pub mod verifier;
 
