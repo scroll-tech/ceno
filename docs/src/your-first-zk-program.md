@@ -114,4 +114,8 @@ fn main() {
 }
 ```
 
+**TODO:** support generating hints file by running the guest program (possibly in a different mode, say, hint generating mode)
+
+**TODO:** support providing public io also in binary file
+
 Now that you understand the basic components of a Ceno program, the next chapter will explore the interaction between the host and the guest in more detail.
