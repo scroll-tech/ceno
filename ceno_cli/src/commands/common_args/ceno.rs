@@ -295,7 +295,7 @@ impl CenoOptions {
                     self,
                     compilation_options,
                     elf_path,
-                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+                    Checkpoint::Complete,
                 )
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
