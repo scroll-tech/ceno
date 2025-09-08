@@ -82,42 +82,68 @@ fn main() {
 
 With your custom program ready, you can use `ceno` to manage the workflow. These commands are typically run from the root of your project (`my-ceno-program`).
 
-1.  **Build the program:**
+#### 4.1. Build the program
 
-    The `build` command compiles your guest program into a RISC-V ELF file.
+The `build` command compiles your guest program into a RISC-V ELF file.
 
-    ```bash
-    cargo ceno build
-    ```
+```bash
+cargo ceno build
+```
 
-    This will create an ELF file at `target/riscv32im-ceno-zkvm-elf/debug/my-ceno-program`.
+This will create an ELF file at `target/riscv32im-ceno-zkvm-elf/debug/my-ceno-program`.
 
-2.  **Generate Keys:**
+#### 4.2. Generate Keys
 
-    Next, generate the proving and verification keys.
+Next, generate the proving and verification keys.
 
-    ```bash
-    cargo ceno keygen --out-vk vk.bin
-    ```
+```bash
+cargo ceno keygen --out-vk vk.bin
+```
 
-    This will save the keys in a `keys` directory.
+This will save the keys in a `keys` directory.
 
-3.  **Generate a Proof:**
+#### 4.3. Generate a Proof
 
-    Now, run the program and generate a proof. You can provide input via the `--stdin` flag.
+Now, run the program and generate a proof. You can provide input via the `--stdin` flag.
 
-    ```bash
-    cargo ceno prove --hints=5 --public-io=8 --out-proof proof.bin
-    ```
+```bash
+cargo ceno prove --hints=5 --public-io=8 --out-proof proof.bin
+```
 
-    This command executes the ELF, generates a proof, and saves it as `proof.bin`. The output of the program will be printed to your console.
+This command executes the ELF, generates a proof, and saves it as `proof.bin`. The output of the program will be printed to your console.
 
-4.  **Verify the Proof:**
+#### 4.4. Providing Inputs via File
 
-    Finally, verify the generated proof.
+In addition to providing hints and public I/O directly on the command line, you can also use files to provide these inputs. This is particularly useful for larger inputs or when you want to reuse the same inputs across multiple runs.
 
-    ```bash
-    cargo ceno verify --vk vk.bin --proof proof.bin
-    ```
+**Hints via File**
+
+You can provide hints to the prover using the `--hints-file` flag. The hints file should be a raw binary file containing the hint data. You can create this file using a simple Rust program. For example, to create a hints file with the value `5u32` and `8u32`:
+
+```rust
+use std::fs::File;
+use std::io::Write;
+
+fn main() {
+    let mut file = File::create("hints.bin").unwrap();
+    file.write_all(&5u32.to_le_bytes()).unwrap();
+}
+```
+
+Then, you can use this file when generating a proof:
+
+```bash
+cargo ceno prove --hints-file hints.bin --public-io=8 --out-proof proof.bin
+```
+
+This approach is useful when you have a large amount of hint data that is inconvenient to pass through the command line.
+
+#### 4.5. Verify the Proof
+
+Finally, verify the generated proof.
+
+```bash
+cargo ceno verify --vk vk.bin --proof proof.bin
+```
 
 If the proof is valid, you'll see a success message. This workflow allows you to integrate `ceno`'s proving capabilities into your own Rust projects.
