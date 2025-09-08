@@ -6,12 +6,13 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::*,
     scheme::{
-        constants::MAX_NUM_VARIABLES, mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
+        constants::MAX_NUM_VARIABLES, create_backend, create_prover,
+        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
     },
 };
 use clap::Args;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
@@ -19,7 +20,6 @@ use serde::Serialize;
 use std::{
     fs::File,
     path::{Path, PathBuf},
-    rc::Rc,
 };
 
 /// Ceno options
@@ -373,12 +373,9 @@ fn run_elf_inner<
         platform.hints.len()
     );
 
-    // TODO support GPU backend + prover
-    let backend: Rc<_> =
-        CpuBackend::<E, PCS>::new(options.max_num_variables, options.security_level).into();
-
+    let backend = create_backend(options.max_num_variables, options.security_level);
     Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
-        CpuProver::new(backend.clone()),
+        create_prover(backend.clone()),
         program,
         platform,
         &hints,

@@ -1,7 +1,22 @@
+use crate::{
+    scheme::{
+        constants::MIN_PAR_SIZE,
+        hal::{MainSumcheckProver, ProofInput, ProverDevice},
+    },
+    structs::ComposedConstrainSystem,
+};
+use either::Either;
 use ff_ext::ExtensionField;
+use gkr_iop::{
+    evaluation::EvalExpression,
+    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness},
+    hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend},
+};
 use itertools::Itertools;
+use mpcs::PolynomialCommitmentScheme;
 pub use multilinear_extensions::wit_infer_by_expr;
 use multilinear_extensions::{
+    macros::{entered_span, exit_span},
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
@@ -12,9 +27,8 @@ use rayon::{
     },
     prelude::ParallelSliceMut,
 };
+use std::{iter, sync::Arc};
 use witness::next_pow2_instance_padding;
-
-use crate::scheme::constants::MIN_PAR_SIZE;
 
 // first computes the masked mle'[j] = mle[j] if j < num_instance, else default
 // then split it into `num_parts` smaller mles
@@ -281,6 +295,212 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
         });
     wit_layers.reverse();
     wit_layers
+}
+
+pub fn build_main_witness<
+    'a,
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB>,
+>(
+    device: &PD,
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'a, PB>,
+    challenges: &[E; 2],
+) -> (Vec<Arc<PB::MultilinearPoly<'a>>>, bool) {
+    let (mles, is_padded) = {
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit,
+        } = composed_cs;
+        let log2_num_instances = input.log2_num_instances();
+        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+
+        // sanity check
+        assert_eq!(input.witness.len(), cs.num_witin as usize);
+
+        // structural witness can be empty. In this case they are `eq`, and will be filled later
+        assert!(
+            input.structural_witness.len() == cs.num_structural_witin as usize
+                || input.structural_witness.is_empty(),
+        );
+        assert_eq!(input.fixed.len(), cs.num_fixed);
+
+        // check all witness size are power of 2
+        assert!(
+            input
+                .witness
+                .iter()
+                .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
+        );
+
+        if !input.structural_witness.is_empty() {
+            assert!(
+                input
+                    .structural_witness
+                    .iter()
+                    .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
+            );
+        }
+
+        if let Some(gkr_circuit) = gkr_circuit {
+            // opcode must have at least one read/write/lookup
+            assert!(
+                cs.lk_expressions.is_empty()
+                    || !cs.r_expressions.is_empty()
+                    || !cs.w_expressions.is_empty(),
+                "assert opcode circuit"
+            );
+
+            let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
+                gkr_circuit,
+                &input.witness,
+                &input.structural_witness,
+                &input.fixed,
+                &input.public_input,
+                challenges,
+            );
+            (gkr_circuit_out.0.0, true)
+        } else {
+            (
+                <PD as MainSumcheckProver<PB>>::table_witness(device, input, cs, challenges),
+                false,
+            )
+        }
+    };
+    (mles, is_padded)
+}
+
+pub fn gkr_witness<
+    'b,
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB>,
+>(
+    circuit: &GKRCircuit<E>,
+    phase1_witness_group: &[Arc<PB::MultilinearPoly<'b>>],
+    structural_witness: &[Arc<PB::MultilinearPoly<'b>>],
+    fixed: &[Arc<PB::MultilinearPoly<'b>>],
+    pub_io: &[Arc<PB::MultilinearPoly<'b>>],
+    challenges: &[E],
+) -> (GKRCircuitWitness<'b, PB>, GKRCircuitOutput<'b, PB>) {
+    // layer order from output to input
+    let mut layer_wits = Vec::<LayerWitness<PB>>::with_capacity(circuit.layers.len() + 1);
+
+    let mut witness_mle_flatten = vec![None; circuit.n_evaluations];
+
+    // set input to witness_mle_flatten via first layer in_eval_expr
+    if let Some(first_layer) = circuit.layers.last() {
+        // process witin
+        first_layer
+            .in_eval_expr
+            .iter()
+            .take(phase1_witness_group.len())
+            .enumerate()
+            .for_each(|(index, witin)| {
+                witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
+            });
+
+        // TODO process fixed (and probably short) mle
+        assert_eq!(
+            first_layer.in_eval_expr.len(),
+            phase1_witness_group.len(),
+            "TODO process fixed (and probably short) mle"
+        );
+        // XXX currently fixed poly not support in layers > 1
+
+        // first_layer
+        //     .in_eval_expr
+        //     .par_iter()
+        //     .enumerate()
+        //     .skip(phase1_witness_group.len())
+        //     .map(|(index, witin)| {
+        //         (
+        //             *witin,
+        //             Some(
+        //                 fixed[index - phase1_witness_group.len()]
+        //                     .iter()
+        //                     .cycle()
+        //                     .cloned()
+        //                     .take(num_instances_with_rotation)
+        //                     .collect_vec()
+        //                     .into_mle()
+        //                     .into(),
+        //             ),
+        //         )
+        //     })
+        //     .collect::<HashMap<_, _>>()
+        //     .into_iter()
+        //     .for_each(|(witin, optional_mle)| witness_mle_flatten[witin] = optional_mle);
+    }
+
+    // generate all layer witness from input to output
+    for (i, layer) in circuit.layers.iter().rev().enumerate() {
+        tracing::debug!("generating input {i} layer with layer name {}", layer.name);
+        let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
+        // process in_evals to prepare layer witness
+        // This should assume the input of the first layer is the phase1 witness of the circuit.
+        let current_layer_wits = layer
+            .in_eval_expr
+            .iter()
+            .map(|witin| {
+                witness_mle_flatten[*witin]
+                    .clone()
+                    .expect("witness must exist")
+            })
+            .chain(if i == 0 {
+                // only supply structural witness for first layer
+                // TODO figure out how to support > 1 GKR layers
+                Either::Left(structural_witness.iter().cloned())
+            } else {
+                Either::Right(iter::empty())
+            })
+            .chain(fixed.iter().cloned())
+            .collect_vec();
+
+        // infer current layer output
+        let current_layer_output: Vec<Arc<PB::MultilinearPoly<'b>>> =
+            <PD as ProtocolWitnessGeneratorProver<PB>>::layer_witness(
+                layer,
+                &current_layer_wits,
+                pub_io,
+                challenges,
+            );
+        layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
+
+        // process out to prepare output witness
+        layer
+            .out_sel_and_eval_exprs
+            .iter()
+            .flat_map(|(_, out_eval)| out_eval)
+            .zip_eq(&current_layer_output)
+            .for_each(|(out_eval, out_mle)| match out_eval {
+                // note: Linear (x - b)/a has been done and encode in expression
+                EvalExpression::Single(out) | EvalExpression::Linear(out, _, _) => {
+                    witness_mle_flatten[*out] = Some(out_mle.clone());
+                }
+                EvalExpression::Zero => { // zero expression
+                    // do nothing on zero expression
+                }
+                other => unimplemented!("{:?}", other),
+            });
+        exit_span!(span);
+    }
+    layer_wits.reverse();
+
+    // initialize a vector to store the final outputs of the GKR circuit.
+    let mut gkr_out_well_order = vec![Arc::default(); circuit.final_out_evals.len()];
+    circuit
+        .final_out_evals
+        .iter()
+        .for_each(|out| gkr_out_well_order[*out] = witness_mle_flatten[*out].clone().unwrap());
+
+    (
+        GKRCircuitWitness { layers: layer_wits },
+        GKRCircuitOutput(LayerWitness(gkr_out_well_order)),
+    )
 }
 
 #[cfg(test)]

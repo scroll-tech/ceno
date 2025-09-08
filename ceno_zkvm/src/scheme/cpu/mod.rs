@@ -2,6 +2,7 @@ use super::hal::{
     DeviceTransporter, MainSumcheckProver, OpeningProver, ProverDevice, TowerProver, TraceCommitter,
 };
 use crate::{
+    circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP},
@@ -18,7 +19,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
-    hal::{ProtocolWitnessGeneratorProver, ProverBackend},
+    hal::ProverBackend,
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -39,6 +40,13 @@ use sumcheck::{
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
 
+pub type TowerRelationOutput<E> = (
+    Point<E>,
+    TowerProofs<E>,
+    Vec<Vec<E>>,
+    Vec<Vec<E>>,
+    Vec<Vec<E>>,
+);
 pub struct CpuTowerProver;
 
 impl CpuTowerProver {
@@ -500,14 +508,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         fields(profiling_3),
         level = "trace"
     )]
-    fn prove_tower_relation<'a>(
+    fn prove_tower_relation<'a, 'b, 'c>(
         &self,
-        prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
-        logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
-        num_fanin: usize,
+        composed_cs: &ComposedConstrainSystem<E>,
+        input: &ProofInput<'a, CpuBackend<E, PCS>>,
+        records: &'c [Arc<MultilinearExtension<'b, E>>],
+        is_padded: bool,
+        challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
-    ) -> (Point<E>, TowerProofs<E>) {
-        CpuTowerProver::create_proof(prod_specs, logup_specs, num_fanin, transcript)
+    ) -> TowerRelationOutput<E>
+    where
+        'a: 'b,
+        'b: 'c,
+    {
+        // First build tower witness
+        let span = entered_span!("build_tower_witness", profiling_2 = true);
+        let (mut out_evals, prod_specs, logup_specs) =
+            self.build_tower_witness(composed_cs, input, records, is_padded, challenges);
+        exit_span!(span);
+
+        // Then prove the tower relation
+        let span = entered_span!("prove_tower_relation", profiling_2 = true);
+        let (rt, proofs) = CpuTowerProver::create_proof(prod_specs, logup_specs, 2, transcript);
+
+        let lk_out_evals = out_evals.pop().unwrap();
+        let w_out_evals = out_evals.pop().unwrap();
+        let r_out_evals = out_evals.pop().unwrap();
+        exit_span!(span);
+        (rt, proofs, lk_out_evals, w_out_evals, r_out_evals)
     }
 }
 
@@ -515,122 +543,46 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
     for CpuProver<CpuBackend<E, PCS>>
 {
     #[allow(clippy::type_complexity)]
-    #[tracing::instrument(
-        skip_all,
-        name = "build_main_witness",
-        fields(profiling_3),
-        level = "trace"
-    )]
-    fn build_main_witness<'a, 'b>(
+    #[tracing::instrument(skip_all, name = "table_witness", fields(profiling_3), level = "trace")]
+    fn table_witness<'a>(
         &self,
-        composed_cs: &ComposedConstrainSystem<E>,
-        input: &ProofInput<'a, CpuBackend<E, PCS>>,
-        challenges: &[E; 2],
-    ) -> (Vec<ArcMultilinearExtension<'b, E>>, bool)
-    where
-        'a: 'b,
-    {
-        let ComposedConstrainSystem {
-            zkvm_v1_css: cs,
-            gkr_circuit,
-        } = composed_cs;
-        let log2_num_instances = input.log2_num_instances();
-        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
-
-        // sanity check
-        assert_eq!(input.witness.len(), cs.num_witin as usize);
-
-        // structural witness can be empty. In this case they are `eq`, and will be filled later
-        assert!(
-            input.structural_witness.len() == cs.num_structural_witin as usize
-                || input.structural_witness.is_empty(),
-        );
-        assert_eq!(input.fixed.len(), cs.num_fixed);
-
-        // check all witness size are power of 2
-        assert!(
-            input
-                .witness
-                .iter()
-                .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
-        );
-
-        if let Some(gkr_circuit) = gkr_circuit {
-            // opcode must have at least one read/write/lookup
-            assert!(
-                cs.lk_expressions.is_empty()
-                    || !cs.r_expressions.is_empty()
-                    || !cs.w_expressions.is_empty(),
-                "assert opcode circuit"
-            );
-
-            let (_, gkr_circuit_out) = Self::gkr_witness(
-                gkr_circuit,
-                &input.witness,
-                &input.structural_witness,
-                &input.fixed,
-                &input.public_input,
-                challenges,
-            );
-            (gkr_circuit_out.0.0, true)
-        } else {
-            assert!(
-                !cs.lk_table_expressions.is_empty()
-                    || !cs.r_table_expressions.is_empty()
-                    || !cs.w_table_expressions.is_empty(),
-                "assert table circuit"
-            );
-
-            if !input.structural_witness.is_empty() {
-                assert!(
-                    input
-                        .structural_witness
-                        .iter()
-                        .all(|v| { v.evaluations().len() == 1 << num_var_with_rotation })
-                );
-            }
-
-            assert!(
-                cs.r_table_expressions
-                    .iter()
-                    .zip_eq(cs.w_table_expressions.iter())
-                    .all(|(r, w)| r.table_spec.len == w.table_spec.len)
-            );
-
-            // main constraint: lookup denominator and numerator record witness inference
-            let record_span = entered_span!("record");
-            let records: Vec<ArcMultilinearExtension<'_, E>> = cs
-                .r_table_expressions
-                .par_iter()
-                .map(|r| &r.expr)
-                .chain(cs.r_expressions.par_iter())
-                .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
-                .chain(cs.w_expressions.par_iter())
-                .chain(
-                    cs.lk_table_expressions
-                        .par_iter()
-                        .map(|lk| &lk.multiplicity),
+        input: &ProofInput<'a, CpuBackend<<CpuBackend<E, PCS> as ProverBackend>::E, PCS>>,
+        cs: &ConstraintSystem<<CpuBackend<E, PCS> as ProverBackend>::E>,
+        challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
+    ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        // main constraint: lookup denominator and numerator record witness inference
+        let record_span = entered_span!("record");
+        let records: Vec<ArcMultilinearExtension<'_, E>> = cs
+            .r_table_expressions
+            .par_iter()
+            .map(|r| &r.expr)
+            .chain(cs.r_expressions.par_iter())
+            .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
+            .chain(cs.w_expressions.par_iter())
+            .chain(
+                cs.lk_table_expressions
+                    .par_iter()
+                    .map(|lk| &lk.multiplicity),
+            )
+            .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
+            .chain(cs.lk_expressions.par_iter())
+            .map(|expr| {
+                assert_eq!(expr.degree(), 1);
+                wit_infer_by_expr(
+                    expr,
+                    cs.num_witin,
+                    cs.num_structural_witin,
+                    cs.num_fixed as WitnessId,
+                    &input.fixed,
+                    &input.witness,
+                    &input.structural_witness,
+                    &input.public_input,
+                    challenges,
                 )
-                .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
-                .chain(cs.lk_expressions.par_iter())
-                .map(|expr| {
-                    assert_eq!(expr.degree(), 1);
-                    wit_infer_by_expr(
-                        expr,
-                        cs.num_witin,
-                        cs.num_structural_witin,
-                        cs.num_fixed as WitnessId,
-                        &input.fixed,
-                        &input.witness,
-                        &input.structural_witness,
-                        &input.public_input,
-                        challenges,
-                    )
-                })
-                .collect();
-            exit_span!(record_span);
-            (records, false)
-        }
+            })
+            .collect();
+        exit_span!(record_span);
+        records
     }
 
     #[allow(clippy::type_complexity)]
@@ -643,7 +595,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
-        _records: Vec<ArcMultilinearExtension<'b, E>>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
         composed_cs: &ComposedConstrainSystem<E>,
         challenges: &[E; 2],

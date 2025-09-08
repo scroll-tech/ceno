@@ -3,14 +3,17 @@ use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::mle::Point;
 use std::{fmt::Debug, sync::Arc};
 
-use crate::gkr::{
-    GKRCircuit, GKRCircuitOutput, GKRCircuitWitness,
-    layer::hal::{LinearLayerProver, SumcheckLayerProver, ZerocheckLayerProver},
+use crate::gkr::layer::{
+    Layer,
+    hal::{LinearLayerProver, SumcheckLayerProver, ZerocheckLayerProver},
 };
 
 pub trait MultilinearPolynomial<E: ExtensionField> {
     fn num_vars(&self) -> usize;
     fn eval(&self, point: Point<E>) -> E;
+
+    /// Get the length of evaluation data
+    fn evaluations_len(&self) -> usize;
 }
 
 /// Defines basic types like field, pcs that are common among all devices
@@ -22,7 +25,7 @@ pub trait ProverBackend {
 
     /// device-specific types
     // TODO: remove lifetime bound
-    type MultilinearPoly<'a>: Send + Sync + Clone + Debug + MultilinearPolynomial<Self::E>;
+    type MultilinearPoly<'a>: Send + Sync + Clone + Debug + Default + MultilinearPolynomial<Self::E>;
     type Matrix: Send + Sync + Clone;
     type PcsData;
 
@@ -41,14 +44,10 @@ where
 }
 
 pub trait ProtocolWitnessGeneratorProver<PB: ProverBackend> {
-    fn gkr_witness<'a, 'b>(
-        circuit: &GKRCircuit<PB::E>,
-        phase1_witness_group: &[Arc<PB::MultilinearPoly<'b>>],
-        structural_witness: &[Arc<PB::MultilinearPoly<'b>>],
-        fixed: &[Arc<PB::MultilinearPoly<'b>>],
-        pub_io: &[Arc<PB::MultilinearPoly<'b>>],
+    fn layer_witness<'a>(
+        layer: &Layer<PB::E>,
+        layer_wits: &[Arc<PB::MultilinearPoly<'a>>],
+        pub_io_evals: &[Arc<PB::MultilinearPoly<'a>>],
         challenges: &[PB::E],
-    ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>)
-    where
-        'b: 'a;
+    ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
