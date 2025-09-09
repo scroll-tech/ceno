@@ -1,7 +1,7 @@
 // The extension field and curve definition are adapted from
 // https://github.com/succinctlabs/sp1/blob/v5.2.1/crates/stark/src/septic_curve.rs
 use p3::field::Field;
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Deref, Mul, Sub};
 
 /// F[z] / (z^6 - z - 4)
 ///
@@ -35,6 +35,23 @@ pub struct SexticExtension<F>([F; 6]);
 /// ```
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SepticExtension<F>(pub [F; 7]);
+
+impl<F: Copy + Clone + Default> From<&[F]> for SepticExtension<F> {
+    fn from(slice: &[F]) -> Self {
+        assert!(slice.len() == 7);
+        let mut arr = [F::default(); 7];
+        arr.copy_from_slice(&slice[0..7]);
+        Self(arr)
+    }
+}
+
+impl<F> Deref for SepticExtension<F> {
+    type Target = [F];
+
+    fn deref(&self) -> &[F] {
+        &self.0
+    }
+}
 
 impl<F: Field> SepticExtension<F> {
     pub fn is_zero(&self) -> bool {

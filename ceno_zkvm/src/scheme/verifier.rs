@@ -25,7 +25,10 @@ use witness::next_pow2_instance_padding;
 
 use crate::{
     error::ZKVMError,
-    scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
+    scheme::{
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
+        septic_curve::SepticPoint,
+    },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{
         eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
@@ -734,8 +737,10 @@ pub type TowerVerifyResult<E> = Result<
 
 impl TowerVerify {
     pub fn verify<E: ExtensionField>(
+        // TODO: unify prod/logup/ec_add
         prod_out_evals: Vec<Vec<E>>,
         logup_out_evals: Vec<Vec<E>>,
+        ecc_out_evals: Vec<SepticPoint<E::BaseField>>,
         tower_proofs: &TowerProofs<E>,
         num_variables: Vec<usize>,
         num_fanin: usize,
@@ -755,6 +760,7 @@ impl TowerVerify {
         assert!(logup_out_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
         }));
+        assert_eq!(ecc_out_evals.len(), 2);
         assert_eq!(num_variables.len(), num_prod_spec + num_logup_spec);
 
         let alpha_pows = get_challenge_pows(
@@ -792,6 +798,31 @@ impl TowerVerify {
                 )
             })
             .unzip::<_, _, Vec<_>, Vec<_>>();
+        let ecc_eval = {
+            let SepticPoint { x, y } = &ecc_out_evals[0];
+            let SepticPoint { x: x2, y: y2 } = &ecc_out_evals[1];
+
+            let xs =
+                x.0.iter()
+                    .cloned()
+                    .zip(x2.iter().cloned())
+                    .map(|(xi, x2i): (E::BaseField, E::BaseField)| {
+                        vec![xi, x2i].into_mle().evaluate(&initial_rt)
+                    })
+                    .collect_vec();
+
+            let ys =
+                y.0.iter()
+                    .cloned()
+                    .zip(y2.iter().cloned())
+                    .map(|(yi, y2i): (E::BaseField, E::BaseField)| {
+                        vec![yi, y2i].into_mle().evaluate(&initial_rt)
+                    })
+                    .collect_vec();
+
+            vec![xs, ys].concat()
+        };
+
         let initial_claim = izip!(&prod_spec_point_n_eval, &alpha_pows)
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
             .sum::<E>()
@@ -800,7 +831,10 @@ impl TowerVerify {
                 &alpha_pows[num_prod_spec..]
             )
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
-            .sum::<E>();
+            .sum::<E>()
+            + izip!(ecc_eval, &alpha_pows[num_prod_spec + num_logup_spec * 2..])
+                .map(|(eval, alpha)| eval * *alpha)
+                .sum::<E>();
 
         let max_num_variables = num_variables.iter().max().unwrap();
 
