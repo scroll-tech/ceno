@@ -341,12 +341,12 @@ fn run_elf_inner<
     let public_io = options
         .read_public_io()
         .context("failed to read public io")?;
-    let pubic_io_size = options.public_io_size;
+    let public_io_size = options.public_io_size;
     assert!(
-        public_io.len() <= pubic_io_size as usize / WORD_SIZE,
+        public_io.len() <= public_io_size as usize / WORD_SIZE,
         "require pub io length {} < max public_io_size {}",
         public_io.len(),
-        pubic_io_size as usize / WORD_SIZE
+        public_io_size as usize / WORD_SIZE
     );
 
     let platform = if compilation_options.release {
@@ -355,7 +355,7 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            pubic_io_size,
+            public_io_size,
         )
     } else {
         setup_platform_debug(
@@ -363,7 +363,7 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            pubic_io_size,
+            public_io_size,
         )
     };
     tracing::info!("Running on platform {:?} {}", options.platform, platform);
