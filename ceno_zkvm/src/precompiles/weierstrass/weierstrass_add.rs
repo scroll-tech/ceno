@@ -817,12 +817,11 @@ mod tests {
         thread::Builder::new()
             .stack_size(64 * 1024 * 1024) // 64 MB
             .spawn(|| {
-                // your code here
+                test_weierstrass_add_helper::<Bn254>();
             })
             .unwrap()
             .join()
             .unwrap();
-        test_weierstrass_add_helper::<Bn254>();
     }
 
     #[test]
