@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
+use p3::field::Field;
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
@@ -27,7 +28,7 @@ use crate::{
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
-        septic_curve::SepticPoint,
+        septic_curve::{SepticExtension, SepticPoint},
     },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{
@@ -736,6 +737,34 @@ pub type TowerVerifyResult<E> = Result<
 >;
 
 impl TowerVerify {
+    fn get_ecc_eval<E: ExtensionField, F: Field>(
+        p1: &SepticPoint<F>,
+        p2: &SepticPoint<F>,
+        rt: &[E],
+    ) -> SepticPoint<E> {
+        let SepticPoint { x, y } = p1;
+        let SepticPoint { x: x2, y: y2 } = p2;
+
+        let xs =
+            x.0.iter()
+                .cloned()
+                .zip(x2.iter().cloned())
+                .map(|(xi, x2i)| vec![xi, x2i].into_mle().evaluate(rt))
+                .collect_vec();
+
+        let ys =
+            y.0.iter()
+                .cloned()
+                .zip(y2.iter().cloned())
+                .map(|(yi, y2i)| vec![yi, y2i].into_mle().evaluate(rt))
+                .collect_vec();
+
+        SepticPoint {
+            x: xs.as_slice().into(),
+            y: ys.as_slice().into(),
+        }
+    }
+
     pub fn verify<E: ExtensionField>(
         // TODO: unify prod/logup/ec_add
         prod_out_evals: Vec<Vec<E>>,
@@ -764,7 +793,7 @@ impl TowerVerify {
         assert_eq!(num_variables.len(), num_prod_spec + num_logup_spec);
 
         let alpha_pows = get_challenge_pows(
-            num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
+            num_prod_spec + num_logup_spec * 2 + 14, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
@@ -798,31 +827,9 @@ impl TowerVerify {
                 )
             })
             .unzip::<_, _, Vec<_>, Vec<_>>();
-        let ecc_eval = {
-            let SepticPoint { x, y } = &ecc_out_evals[0];
-            let SepticPoint { x: x2, y: y2 } = &ecc_out_evals[1];
+        let mut ecc_eval = Self::get_ecc_eval(&ecc_out_evals[0], &ecc_out_evals[1], &initial_rt);
 
-            let xs =
-                x.0.iter()
-                    .cloned()
-                    .zip(x2.iter().cloned())
-                    .map(|(xi, x2i): (E::BaseField, E::BaseField)| {
-                        vec![xi, x2i].into_mle().evaluate(&initial_rt)
-                    })
-                    .collect_vec();
-
-            let ys =
-                y.0.iter()
-                    .cloned()
-                    .zip(y2.iter().cloned())
-                    .map(|(yi, y2i): (E::BaseField, E::BaseField)| {
-                        vec![yi, y2i].into_mle().evaluate(&initial_rt)
-                    })
-                    .collect_vec();
-
-            vec![xs, ys].concat()
-        };
-
+        // initial claim = \sum_j alpha^j * out_j[rt]
         let initial_claim = izip!(&prod_spec_point_n_eval, &alpha_pows)
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
             .sum::<E>()
@@ -831,10 +838,7 @@ impl TowerVerify {
                 &alpha_pows[num_prod_spec..]
             )
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
-            .sum::<E>()
-            + izip!(ecc_eval, &alpha_pows[num_prod_spec + num_logup_spec * 2..])
-                .map(|(eval, alpha)| eval * *alpha)
-                .sum::<E>();
+            .sum::<E>();
 
         let max_num_variables = num_variables.iter().max().unwrap();
 
@@ -863,12 +867,14 @@ impl TowerVerify {
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
-                let expected_evaluation: E = (0..num_prod_spec)
+                let eq = eq_eval(out_rt, &rt);
+                let mut expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
-                        eq_eval(out_rt, &rt)
-                            * *alpha
+                        // prod[b] = prod'[0,b] * prod'[1,b]
+                        // prod[out_rt] = \sum_b eq(out_rt, b) * prod[b] = \sum_b eq(out_rt, b) * prod'[0,b] * prod'[1,b]
+                        eq * *alpha
                             * if round < *max_round-1 {tower_proofs.prod_specs_eval[spec_index][round].iter().copied().product()} else {
                                 E::ZERO
                             }
@@ -878,8 +884,12 @@ impl TowerVerify {
                         .zip_eq(alpha_pows[num_prod_spec..].chunks(2))
                         .zip_eq(num_variables[num_prod_spec..].iter())
                         .map(|((spec_index, alpha), max_round)| {
+                            // logup_q[b] = logup_q'[0,b] * logup_q'[1,b]
+                            // logup_p[b] = logup_p'[0,b] * logup_q'[1,b] + logup_p'[1,b] * logup_q'[0,b]
+                            // logup_p[out_rt] = \sum_b eq(out_rt, b) * (logup_p'[0,b] * logup_q'[1,b] + logup_p'[1,b] * logup_q'[0,b])
+                            // logup_q[out_rt] = \sum_b eq(out_rt, b) * logup_q'[0,b] * logup_q'[1,b]
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
-                            eq_eval(out_rt, &rt) * if round < *max_round-1 {
+                            eq * if round < *max_round-1 {
                                 let evals = &tower_proofs.logup_specs_eval[spec_index][round];
                                 let (p1, p2, q1, q2) =
                                         (evals[0], evals[1], evals[2], evals[3]);
@@ -890,6 +900,23 @@ impl TowerVerify {
                             }
                         })
                         .sum::<E>();
+                // 0 = \sum_b eq(out_rt, b) * (ecc_x[b] + ecc_x'[0,b] + ecc_x'[1,b]) 
+                //       * (ecc_x'[1,b] - ecc_x'[0,b])^2 
+                //       - (ecc_y'[1,b] - ecc_y'[0,b])^2 
+                let SepticPoint { x, y } = &ecc_eval;
+                let SepticPoint { x: x1, y: y1 } = &tower_proofs.ecc_evals[round][0];
+                let SepticPoint { x: x2, y: y2 } = &tower_proofs.ecc_evals[round][1];
+
+                // TODO: avoid clone
+                let xs = (x.clone() + x1 + x2) * (x2.clone() - x1) * (x2.clone() - x1)
+                    - (y2.clone() - y1) * (y2.clone() - y1);
+
+                // 0 = (ecc_y + ecc_y'[0]) * (ecc_x'[1] - ecc_x'[0])
+                //       - (ecc_y'[1] - ecc_y'[0]) * (ecc_x'[0] - ecc_x)
+                let ys = (y.clone() + y1) * (x2.clone() - x1) - (y2.clone() - y1) * (x1.clone() - x);
+                expected_evaluation += izip!(xs.0.iter(), alpha_pows[num_prod_spec + num_logup_spec * 2..].iter().take(7)).map(|(&xi, &alpha)| eq * xi * alpha).sum::<E>();
+                expected_evaluation += izip!(ys.0.iter(), alpha_pows[num_prod_spec + num_logup_spec * 2..].iter().skip(7).take(7)).map(|(&yi, &alpha)| eq * yi * alpha).sum::<E>();
+
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
                     return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));
                 }
@@ -912,6 +939,7 @@ impl TowerVerify {
                     .zip(next_alpha_pows.iter())
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
+                        // prod'[rt,r_merge] = \sum_b eq(r_merge, b) * prod'[b,rt]
                         if round < max_round -1 {
                             // merged evaluation
                             let evals = izip!(
@@ -967,6 +995,12 @@ impl TowerVerify {
                         }
                     })
                     .sum::<E>();
+                // update ecc_eval
+                ecc_eval = Self::get_ecc_eval(
+                    &tower_proofs.ecc_evals[round][0],
+                    &tower_proofs.ecc_evals[round][1],
+                    &rt_prime,
+                );
                 // sum evaluation from different specs
                 let next_eval = next_prod_spec_evals + next_logup_spec_evals;
                 Ok((PointAndEval {
