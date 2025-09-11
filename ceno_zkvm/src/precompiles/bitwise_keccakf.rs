@@ -1,3 +1,4 @@
+use crate::scheme::utils::gkr_witness;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, iproduct, izip};
 use mpcs::PolynomialCommitmentScheme;
@@ -889,7 +890,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
 }
 
 pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
-    (layout, gkr_circuit): (KeccakLayout<E>, GKRCircuit<E>),
+    gkr_circuit: GKRCircuit<E>,
     states: Vec<[u64; 25]>,
     verify: bool,
     test: bool,
@@ -914,7 +915,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
         .map(Arc::new)
         .collect_vec();
     #[allow(clippy::type_complexity)]
-    let (gkr_witness, gkr_output) = KeccakLayout::gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
+    let (gkr_witness, gkr_output) = gkr_witness::<E, PCS, CpuBackend<E, PCS>, CpuProver<_>>(
         &gkr_circuit,
         &phase1_witness_group,
         &[],
@@ -1030,7 +1031,7 @@ mod tests {
             .map(|_| std::array::from_fn(|_| rng.next_u64()))
             .collect_vec();
         run_keccakf::<E, Pcs>(
-            setup_gkr_circuit().expect("setup gkr circuit error"),
+            setup_gkr_circuit().expect("setup gkr circuit error").1,
             states,
             false,
             true,

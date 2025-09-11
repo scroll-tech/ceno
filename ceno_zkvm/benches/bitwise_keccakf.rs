@@ -36,7 +36,9 @@ fn keccak_f_fn(c: &mut Criterion) {
 
                         #[allow(clippy::unit_arg)]
                         run_bitwise_keccakf::<GoldilocksExt2, BasefoldDefault<GoldilocksExt2>>(
-                            setup_bitwise_keccak_gkr_circuit().expect("setup circuit error"),
+                            setup_bitwise_keccak_gkr_circuit()
+                                .expect("setup circuit error")
+                                .1,
                             black_box(states),
                             false,
                             false,

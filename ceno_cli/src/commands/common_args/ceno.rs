@@ -6,12 +6,13 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::*,
     scheme::{
-        constants::MAX_NUM_VARIABLES, mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
+        constants::MAX_NUM_VARIABLES, create_backend, create_prover,
+        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
     },
 };
 use clap::Args;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use gkr_iop::cpu::{CpuBackend, CpuProver};
+
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
@@ -19,7 +20,6 @@ use serde::Serialize;
 use std::{
     fs::File,
     path::{Path, PathBuf},
-    rc::Rc,
 };
 
 /// Ceno options
@@ -55,6 +55,10 @@ pub struct CenoOptions {
     /// Public constrained input.
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
+
+    /// pub io size in byte
+    #[arg(long, default_value = "1k", value_parser = parse_size)]
+    public_io_size: u32,
 
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
@@ -295,7 +299,7 @@ impl CenoOptions {
                     self,
                     compilation_options,
                     elf_path,
-                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+                    Checkpoint::Complete,
                 )
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
@@ -337,10 +341,13 @@ fn run_elf_inner<
     let public_io = options
         .read_public_io()
         .context("failed to read public io")?;
-    // estimate required pub io size, which is required in platform/key setup phase
-    let pub_io_size: u32 = ((public_io.len() * WORD_SIZE) as u32)
-        .next_power_of_two()
-        .max(16);
+    let public_io_size = options.public_io_size;
+    assert!(
+        public_io.len() <= public_io_size as usize / WORD_SIZE,
+        "require pub io length {} < max public_io_size {}",
+        public_io.len(),
+        public_io_size as usize / WORD_SIZE
+    );
 
     let platform = if compilation_options.release {
         setup_platform(
@@ -348,7 +355,7 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            pub_io_size,
+            public_io_size,
         )
     } else {
         setup_platform_debug(
@@ -356,7 +363,7 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            pub_io_size,
+            public_io_size,
         )
     };
     tracing::info!("Running on platform {:?} {}", options.platform, platform);
@@ -373,12 +380,9 @@ fn run_elf_inner<
         platform.hints.len()
     );
 
-    // TODO support GPU backend + prover
-    let backend: Rc<_> =
-        CpuBackend::<E, PCS>::new(options.max_num_variables, options.security_level).into();
-
+    let backend = create_backend(options.max_num_variables, options.security_level);
     Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
-        CpuProver::new(backend.clone()),
+        create_prover(backend.clone()),
         program,
         platform,
         &hints,

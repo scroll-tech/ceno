@@ -13,12 +13,15 @@ version.workspace = true
 base64 = "0.22"
 ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
+ceno_gpu = { workspace = true, optional = true }
 ceno_host = { path = "../ceno_host" }
+cudarc = { version = "0.13.0", features = ["driver", "cuda-version-from-build-system"], optional = true }
 either.workspace = true
 ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
 mpcs.workspace = true
 multilinear_extensions.workspace = true
+once_cell = "1.21.3"
 p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
@@ -71,6 +74,7 @@ default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel",
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 goldilocks = ["forbid_overflow", "nightly-features"]
+gpu = ["gkr_iop/gpu", "dep:ceno_gpu"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 nightly-features = [

@@ -1,17 +1,13 @@
 #![feature(variant_count)]
 #![feature(strict_overflow_ops)]
 use crate::{
-    chip::Chip,
-    circuit_builder::CircuitBuilder,
-    error::CircuitBuilderError,
-    hal::{ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
+    chip::Chip, circuit_builder::CircuitBuilder, error::CircuitBuilderError,
     utils::lk_multiplicity::LkMultiplicity,
 };
 use either::Either;
 use ff_ext::ExtensionField;
-use gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness};
 use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -22,6 +18,8 @@ pub mod error;
 pub mod evaluation;
 pub mod gadgets;
 pub mod gkr;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod hal;
 pub mod selector;
 pub mod tables;
@@ -69,25 +67,6 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
         wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         lk_multiplicity: &mut LkMultiplicity,
     );
-
-    /// GKR witness.
-    fn gkr_witness<'a, PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
-        circuit: &GKRCircuit<PB::E>,
-        phase1_witness_group: &[Arc<PB::MultilinearPoly<'a>>],
-        structural_witness: &[Arc<PB::MultilinearPoly<'a>>],
-        fixed: &[Arc<PB::MultilinearPoly<'a>>],
-        pub_io: &[Arc<PB::MultilinearPoly<'a>>],
-        challenges: &[PB::E],
-    ) -> (GKRCircuitWitness<'a, PB>, GKRCircuitOutput<'a, PB>) {
-        <PD as ProtocolWitnessGeneratorProver<PB>>::gkr_witness(
-            circuit,
-            phase1_witness_group,
-            structural_witness,
-            fixed,
-            pub_io,
-            challenges,
-        )
-    }
 }
 
 // TODO: the following trait consists of `commit_phase1`, `commit_phase2`,

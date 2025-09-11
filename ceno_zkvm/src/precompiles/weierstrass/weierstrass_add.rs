@@ -25,13 +25,12 @@ use num::{BigUint, Zero};
 use p3::field::{FieldAlgebra, PrimeField32};
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
-    prelude::{IntoParallelRefIterator, ParallelBridge, ParallelSlice},
+    prelude::{IntoParallelRefIterator, ParallelSlice},
     slice::ParallelSliceMut,
 };
 use sp1_curves::{
     AffinePoint, EllipticCurve,
     params::{FieldParameters, Limbs, NumLimbs, NumWords},
-    utils::{biguint_from_limbs, biguint_to_limbs},
 };
 use sp1_derive::AlignedBorrow;
 use sumcheck::util::optimal_sumcheck_threads;
@@ -50,6 +49,7 @@ use crate::{
             EllipticCurveAddInstance, EllipticCurveAddStateInstance, EllipticCurveAddWitInstance,
         },
     },
+    scheme::utils::gkr_witness,
     structs::PointAndEval,
     witness::LkMultiplicity,
 };
@@ -320,10 +320,6 @@ where
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
-        println!(
-            "WeierstrassAddAssignLayout: n_fixed = {}, n_committed = {}, n_structural_witin = {}",
-            self.n_fixed, self.n_committed, self.n_structural_witin
-        );
         self.n_challenges = 0;
 
         // register selector to legacy constrain system
@@ -444,6 +440,9 @@ where
                         }
                     } else {
                         row[..num_wit_cols].copy_from_slice(&dummy_wit_row);
+                        for x in eqs.iter_mut() {
+                            *x = E::BaseField::ZERO;
+                        }
                     }
                 });
             });
@@ -613,18 +612,18 @@ where
 
     let mut lk_multiplicity = LkMultiplicity::default();
     let mut phase1_witness = RowMajorMatrix::<E::BaseField>::new(
-        num_instances.next_power_of_two(),
+        layout.layout.phase1_witin_rmm_height(instances.len()),
         num_witin as usize,
         InstancePaddingStrategy::Default,
     );
     let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
-        num_instances.next_power_of_two(),
+        layout.layout.phase1_witin_rmm_height(instances.len()),
         num_structual_witin as usize,
         InstancePaddingStrategy::Default,
     );
     let raw_witin_iter = phase1_witness.par_batch_iter_mut(num_instance_per_batch);
     raw_witin_iter
-        .zip_eq(instances.par_chunks(num_instance_per_batch))
+        .zip(instances.par_chunks(num_instance_per_batch))
         .for_each(|(instances, steps)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
@@ -691,15 +690,14 @@ where
         .map(Arc::new)
         .collect_vec();
     #[allow(clippy::type_complexity)]
-    let (gkr_witness, gkr_output) =
-        WeierstrassAddAssignLayout::<E, EC>::gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
-            &gkr_circuit,
-            &phase1_witness_group,
-            &structural_witness,
-            &fixed,
-            &[],
-            &challenges,
-        );
+    let (gkr_witness, gkr_output) = gkr_witness::<E, PCS, CpuBackend<E, PCS>, CpuProver<_>>(
+        &gkr_circuit,
+        &phase1_witness_group,
+        &structural_witness,
+        &fixed,
+        &[],
+        &challenges,
+    );
     exit_span!(span);
 
     let span = entered_span!("out_eval", profiling_2 = true);
@@ -768,14 +766,11 @@ where
             assert_eq!(expected_outputs, got_outputs);
         }
 
-        println!("gkr output len: {}", gkr_output.0.0.len());
         let out_evals = gkr_output
             .0
             .par_iter()
             .map(|wit| {
                 let point = point[point.len() - wit.num_vars()..point.len()].to_vec();
-                println!("wit: {:?}", wit);
-                println!("point: {:?}", point);
                 PointAndEval {
                     point: point.clone(),
                     eval: wit.evaluate(&point),
@@ -802,7 +797,6 @@ where
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
-    println!("prover layer: {:?}", gkr_circuit.layers);
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -865,22 +859,17 @@ mod tests {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
-        let points = random_point_pairs::<WP>(8);
-
-        let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
-            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-            points,
-            true,
-            false,
-        );
-    }
-
-    #[test]
-    fn test_weierstrass_add_bn254() {
         thread::Builder::new()
-            .stack_size(64 * 1024 * 1024) // 64 MB
+            .stack_size(32 * 1024 * 1024) // 64 MB
             .spawn(|| {
-                test_weierstrass_add_helper::<Bn254>();
+                let points = random_point_pairs::<WP>(8);
+
+                let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
+                    setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+                    points,
+                    true,
+                    false,
+                );
             })
             .unwrap()
             .join()
@@ -888,8 +877,20 @@ mod tests {
     }
 
     #[test]
+    fn test_weierstrass_add_bn254() {
+        test_weierstrass_add_helper::<Bn254>();
+    }
+
+    #[test]
     fn test_weierstrass_add_bls12381() {
-        test_weierstrass_add_helper::<Bls12381>();
+        thread::Builder::new()
+            .stack_size(32 * 1024 * 1024) // 64 MB
+            .spawn(|| {
+                test_weierstrass_add_helper::<Bls12381>();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
@@ -905,13 +906,21 @@ mod tests {
     fn test_weierstrass_add_nonpow2_helper<WP: WeierstrassParameters>() {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
-        let points = random_point_pairs::<WP>(5);
-        let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
-            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-            points,
-            true,
-            true,
-        );
+
+        thread::Builder::new()
+            .stack_size(32 * 1024 * 1024) // 64 MB
+            .spawn(|| {
+                let points = random_point_pairs::<WP>(5);
+                let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
+                    setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+                    points,
+                    true,
+                    false,
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

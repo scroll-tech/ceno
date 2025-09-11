@@ -177,8 +177,6 @@ impl<K: Copy + Clone + Debug + Default + Eq + Hash + Send> LkMultiplicityRaw<K> 
 pub type LkMultiplicity = LkMultiplicityRaw<u64>;
 
 impl LkMultiplicity {
-    // TODO only preserve `assert_dynamic_range` & `assert_const_range`
-    // TODO remove all others `assert_ux_xxx`
     #[inline(always)]
     pub fn assert_dynamic_range(&mut self, v: u64, bits: u64) {
         self.increment(LookupTable::Dynamic, (1 << bits) + v);
@@ -192,6 +190,7 @@ impl LkMultiplicity {
         }
     }
 
+    /// TODO remove `assert_ux` and use `assert_const_range` instead
     /// assert within range
     #[inline(always)]
     pub fn assert_ux<const C: usize>(&mut self, v: u64) {
@@ -201,35 +200,6 @@ impl LkMultiplicity {
     #[inline(always)]
     pub fn assert_double_u8(&mut self, a: u64, b: u64) {
         self.increment(LookupTable::DoubleU8, (a << 8) + b);
-    }
-
-    /// assert within range
-    #[inline(always)]
-    pub fn assert_ux_in_u16(&mut self, size: usize, v: u64) {
-        self.increment(LookupTable::Dynamic, (1 << size) + v);
-    }
-
-    #[inline(always)]
-    pub fn assert_ux_v2(&mut self, v: u64, max_bits: usize) {
-        self.increment(LookupTable::Dynamic, (1 << max_bits) + v);
-    }
-
-    /// assert slices within range with U16 table
-    /// TODO: Optimize byte slice range check. Pair up the values within 16 bits and check them together.
-    #[inline]
-    pub fn assert_ux_slice_in_u16(&mut self, size: usize, vs: &[u64]) {
-        assert!(size <= 16, "{size} > 16");
-        for &v in vs {
-            self.assert_ux_in_u16(size, v);
-        }
-    }
-
-    /// assert slices within range
-    #[inline]
-    pub fn assert_ux_slice<const C: usize>(&mut self, vs: &[u64]) {
-        for &v in vs {
-            self.assert_ux::<C>(v);
-        }
     }
 
     /// assert slices within range

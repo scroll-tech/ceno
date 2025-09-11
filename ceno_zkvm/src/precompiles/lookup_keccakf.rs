@@ -46,6 +46,7 @@ use crate::{
         SelectorTypeLayout,
         utils::{MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance},
     },
+    scheme::utils::gkr_witness,
 };
 
 pub const ROUNDS: usize = 24;
@@ -1142,7 +1143,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         .map(Arc::new)
         .collect_vec();
     #[allow(clippy::type_complexity)]
-    let (gkr_witness, gkr_output) = KeccakLayout::gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
+    let (gkr_witness, gkr_output) = gkr_witness::<E, PCS, CpuBackend<E, PCS>, CpuProver<_>>(
         &gkr_circuit,
         &phase1_witness_group,
         &structural_witness,

@@ -8,17 +8,14 @@ use ceno_zkvm::{
         setup_platform_debug, verify,
     },
     scheme::{
-        ZKVMProof, constants::MAX_NUM_VARIABLES, hal::ProverDevice, mock_prover::LkMultiplicityKey,
-        verifier::ZKVMVerifier,
+        ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
+        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
     },
     with_panic_hook,
 };
 use clap::Parser;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use gkr_iop::{
-    cpu::{CpuBackend, CpuProver},
-    hal::ProverBackend,
-};
+use gkr_iop::hal::ProverBackend;
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
@@ -104,6 +101,10 @@ struct Args {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
+    /// pub io size in byte
+    #[arg(long, default_value = "1k", value_parser = parse_size)]
+    public_io_size: u32,
+
     /// The security level to use.
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
@@ -171,11 +172,12 @@ fn main() {
             }
         })
         .unwrap_or_default();
-
-    // estimate required pub io size, which is required in platform/key setup phase
-    let pub_io_size: u32 = ((public_io.len() * WORD_SIZE) as u32)
-        .next_power_of_two()
-        .max(16);
+    assert!(
+        public_io.len() <= args.public_io_size as usize / WORD_SIZE,
+        "require pub io length {} < max public_io_size {}",
+        public_io.len(),
+        args.public_io_size as usize / WORD_SIZE
+    );
 
     tracing::info!("Loading ELF file: {}", args.elf.display());
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
@@ -186,7 +188,7 @@ fn main() {
             &program,
             args.stack_size,
             args.heap_size,
-            pub_io_size,
+            args.public_io_size,
         )
     } else {
         setup_platform(
@@ -194,7 +196,7 @@ fn main() {
             &program,
             args.stack_size,
             args.heap_size,
-            pub_io_size,
+            args.public_io_size,
         )
     };
     tracing::info!("Running on platform {:?} {}", args.platform, platform);
@@ -239,13 +241,10 @@ fn main() {
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
 
-    // TODO support GPU backend
-
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
-            let backend =
-                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
-            let prover = CpuProver::new(backend);
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
             run_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, _, _>(
                 prover,
                 program,
@@ -259,9 +258,8 @@ fn main() {
             )
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
-            let backend =
-                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
-            let prover = CpuProver::new(backend);
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
             run_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, _, _>(
                 prover,
                 program,
@@ -275,9 +273,8 @@ fn main() {
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
-            let backend =
-                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
-            let prover = CpuProver::new(backend);
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
             run_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, _, _>(
                 prover,
                 program,
@@ -291,9 +288,8 @@ fn main() {
             )
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
-            let backend =
-                CpuBackend::<_, _>::new(args.max_num_variables, args.security_level).into();
-            let prover = CpuProver::new(backend);
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
             run_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, _, _>(
                 prover,
                 program,
