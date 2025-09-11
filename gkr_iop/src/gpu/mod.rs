@@ -266,7 +266,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
     type MultilinearPoly<'a> = MultilinearExtensionGpu<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
-    type PcsData = BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<'static, E::BaseField>>;
+    type PcsData =
+        BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<'static, E::BaseField>>;
     #[cfg(not(feature = "gpu"))]
     type PcsData = <PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
