@@ -907,13 +907,12 @@ impl TowerVerify {
                 let SepticPoint { x: x1, y: y1 } = &tower_proofs.ecc_evals[round][0];
                 let SepticPoint { x: x2, y: y2 } = &tower_proofs.ecc_evals[round][1];
 
-                // TODO: avoid clone
-                let xs = (x.clone() + x1 + x2) * (x2.clone() - x1) * (x2.clone() - x1)
-                    - (y2.clone() - y1) * (y2.clone() - y1);
+                let xs = (x + x1 + x2) * (x2 - x1) * (x2 - x1)
+                    - (y2 - y1) * (y2 - y1);
 
                 // 0 = (ecc_y + ecc_y'[0]) * (ecc_x'[1] - ecc_x'[0])
                 //       - (ecc_y'[1] - ecc_y'[0]) * (ecc_x'[0] - ecc_x)
-                let ys = (y.clone() + y1) * (x2.clone() - x1) - (y2.clone() - y1) * (x1.clone() - x);
+                let ys = (y + y1) * (x2 - x1) - (y2 - y1) * (x1 - x);
                 expected_evaluation += izip!(xs.0.iter(), alpha_pows[num_prod_spec + num_logup_spec * 2..].iter().take(7)).map(|(&xi, &alpha)| eq * xi * alpha).sum::<E>();
                 expected_evaluation += izip!(ys.0.iter(), alpha_pows[num_prod_spec + num_logup_spec * 2..].iter().skip(7).take(7)).map(|(&yi, &alpha)| eq * yi * alpha).sum::<E>();
 

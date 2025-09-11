@@ -1,7 +1,7 @@
 // The extension field and curve definition are adapted from
 // https://github.com/succinctlabs/sp1/blob/v5.2.1/crates/stark/src/septic_curve.rs
-use p3::field::Field;
-use serde::{Serialize, Deserialize};
+use p3::field::{Field, FieldAlgebra};
+use serde::{Deserialize, Serialize};
 use std::ops::{Add, Deref, Mul, Sub};
 
 /// F[z] / (z^6 - z - 4)
@@ -120,8 +120,8 @@ impl<F: Field> From<[u32; 7]> for SepticExtension<F> {
     }
 }
 
-impl<F: Field> Add<&Self> for SepticExtension<F> {
-    type Output = Self;
+impl<F: FieldAlgebra + Copy> Add<&Self> for SepticExtension<F> {
+    type Output = SepticExtension<F>;
 
     fn add(self, other: &Self) -> Self {
         let mut result = [F::ZERO; 7];
@@ -132,7 +132,19 @@ impl<F: Field> Add<&Self> for SepticExtension<F> {
     }
 }
 
-impl<F: Field> Add for SepticExtension<F> {
+impl<F: FieldAlgebra + Copy> Add<Self> for &SepticExtension<F> {
+    type Output = SepticExtension<F>;
+
+    fn add(self, other: Self) -> SepticExtension<F> {
+        let mut result = [F::ZERO; 7];
+        for i in 0..7 {
+            result[i] = self.0[i] + other.0[i];
+        }
+        SepticExtension(result)
+    }
+}
+
+impl<F: FieldAlgebra + Copy> Add for SepticExtension<F> {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
@@ -140,8 +152,8 @@ impl<F: Field> Add for SepticExtension<F> {
     }
 }
 
-impl<F: Field> Sub<&Self> for SepticExtension<F> {
-    type Output = Self;
+impl<F: FieldAlgebra + Copy> Sub<&Self> for SepticExtension<F> {
+    type Output = SepticExtension<F>;
 
     fn sub(self, other: &Self) -> Self {
         let mut result = [F::ZERO; 7];
@@ -152,7 +164,19 @@ impl<F: Field> Sub<&Self> for SepticExtension<F> {
     }
 }
 
-impl<F: Field> Sub for SepticExtension<F> {
+impl<F: FieldAlgebra + Copy> Sub<Self> for &SepticExtension<F> {
+    type Output = SepticExtension<F>;
+
+    fn sub(self, other: Self) -> SepticExtension<F> {
+        let mut result = [F::ZERO; 7];
+        for i in 0..7 {
+            result[i] = self.0[i] - other.0[i];
+        }
+        SepticExtension(result)
+    }
+}
+
+impl<F: FieldAlgebra + Copy> Sub for SepticExtension<F> {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
