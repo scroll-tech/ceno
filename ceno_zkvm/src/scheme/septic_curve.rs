@@ -1,6 +1,7 @@
 // The extension field and curve definition are adapted from
 // https://github.com/succinctlabs/sp1/blob/v5.2.1/crates/stark/src/septic_curve.rs
 use p3::field::Field;
+use serde::{Serialize, Deserialize};
 use std::ops::{Add, Deref, Mul, Sub};
 
 /// F[z] / (z^6 - z - 4)
@@ -33,7 +34,7 @@ pub struct SexticExtension<F>([F; 6]);
 /// # check if f(x) is irreducible
 /// print(f.is_irreducible())
 /// ```
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SepticExtension<F>(pub [F; 7]);
 
 impl<F: Copy + Clone + Default> From<&[F]> for SepticExtension<F> {
@@ -197,9 +198,9 @@ impl<F: Field> Mul for SepticExtension<F> {
 /// over the extension field F[z] / (z^7 - 2z - 5).
 ///
 /// Note that
-/// 1. its cofactor is 1
-/// 2. its order is a large prime number of 31x7 bits
-#[derive(Clone, Debug, Default, PartialEq)]
+/// 1. The curve's cofactor is 1
+/// 2. The curve's order is a large prime number of 31x7 bits
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SepticPoint<F> {
     pub x: SepticExtension<F>,
     pub y: SepticExtension<F>,
