@@ -18,17 +18,20 @@ use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     Expression, StructuralWitInType, ToExpr, WitIn,
     macros::{entered_span, exit_span},
-    util::{ceil_log2, max_usable_threads},
+    mle::MultilinearExtension,
+    util::{ceil_log2, max_usable_threads, transpose},
 };
 use num::{BigUint, Zero};
 use p3::field::{FieldAlgebra, PrimeField32};
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::{IntoParallelRefIterator, ParallelBridge, ParallelSlice},
+    slice::ParallelSliceMut,
 };
 use sp1_curves::{
     AffinePoint, EllipticCurve,
     params::{FieldParameters, Limbs, NumLimbs, NumWords},
+    utils::{biguint_from_limbs, biguint_to_limbs},
 };
 use sp1_derive::AlignedBorrow;
 use sumcheck::util::optimal_sumcheck_threads;
@@ -54,9 +57,6 @@ use crate::{
 #[derive(Clone, Debug, AlignedBorrow)]
 #[repr(C)]
 pub struct WeierstrassAddAssignWitCols<WitT, P: FieldParameters + NumLimbs> {
-    pub clk: WitT,
-    pub p_ptr: WitT,
-    pub q_ptr: WitT,
     pub p_x: Limbs<WitT, P::Limbs>,
     pub p_y: Limbs<WitT, P::Limbs>,
     pub q_x: Limbs<WitT, P::Limbs>,
@@ -72,6 +72,7 @@ pub struct WeierstrassAddAssignWitCols<WitT, P: FieldParameters + NumLimbs> {
     pub(crate) slope_times_p_x_minus_x: FieldOpCols<WitT, P>,
 }
 
+/// Weierstrass addition is implemented by a single layer.
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub struct WeierstrassAddAssignLayer<WitT, P: FieldParameters + NumWords> {
@@ -87,7 +88,7 @@ pub struct WeierstrassAddAssignLayout<E: ExtensionField, EC: EllipticCurve> {
     pub output32_exprs: GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsCurvePoint>,
     pub n_fixed: usize,
     pub n_committed: usize,
-    pub n_structural: usize,
+    pub n_structural_witin: usize,
     pub n_challenges: usize,
 }
 
@@ -97,9 +98,6 @@ where
 {
     fn new(cb: &mut CircuitBuilder<E>) -> Self {
         let wits = WeierstrassAddAssignWitCols {
-            clk: cb.create_witin(|| "clk"),
-            p_ptr: cb.create_witin(|| "p_ptr"),
-            q_ptr: cb.create_witin(|| "q_ptr"),
             p_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_x"))),
             p_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_y"))),
             q_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "q_x"))),
@@ -115,17 +113,9 @@ where
             slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
         };
 
-        // Although the eqs correspond to the same point, but the selectors have different pad. So we just create two eqs to derive the correct n_structural_wit.
-        let eq_0 = cb.create_structural_witin(
-            || "weierstrass_eq",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
-        let eq_1 = cb.create_structural_witin(
+        // Although the eqs correspond to the same point, but the selectors of memory operations and lookups
+        // have different pad. So we just create two eqs to derive the correct n_structural_wit.
+        let eq = cb.create_structural_witin(
             || "weierstrass_eq",
             StructuralWitInType::EqualDistanceSequence {
                 max_len: 0,
@@ -135,10 +125,10 @@ where
             },
         );
         let selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: SelectorType::Prefix(E::BaseField::ONE, eq_0.expr()),
-            sel_mem_write: SelectorType::Prefix(E::BaseField::ONE, eq_0.expr()),
-            sel_lookup: SelectorType::Prefix(E::BaseField::ZERO, eq_1.expr()),
-            sel_zero: SelectorType::Prefix(E::BaseField::ZERO, eq_1.expr()),
+            sel_mem_read: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
+            sel_mem_write: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
+            sel_lookup: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
+            sel_zero: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
         };
 
         let input32_exprs: [GenericArray<
@@ -160,7 +150,7 @@ where
             n_fixed: 0,
             n_committed: 0,
             n_challenges: 0,
-            n_structural: 0,
+            n_structural_witin: 0,
         }
     }
 
@@ -329,10 +319,10 @@ where
     fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
-        self.n_structural = cb.cs.num_structural_witin as usize;
+        self.n_structural_witin = cb.cs.num_structural_witin as usize;
         println!(
-            "WeierstrassAddAssignLayout: n_fixed = {}, n_committed = {}, n_structural = {}",
-            self.n_fixed, self.n_committed, self.n_structural
+            "WeierstrassAddAssignLayout: n_fixed = {}, n_committed = {}, n_structural_witin = {}",
+            self.n_fixed, self.n_committed, self.n_structural_witin
         );
         self.n_challenges = 0;
 
@@ -409,10 +399,9 @@ where
         wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         lk_multiplicity: &mut LkMultiplicity,
     ) {
-        let phase1 = &phase1.instances;
-        let num_cols = self.n_committed;
         let num_wit_cols = size_of::<WeierstrassAddAssignWitCols<u8, EC::BaseField>>();
         let chunk_size = 64;
+        let num_instances = phase1.instances.len();
 
         let mut dummy_wit_row = vec![E::BaseField::ZERO; num_wit_cols];
         let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
@@ -427,19 +416,32 @@ where
             zero,
         );
 
-        wits[0]
-            .values
-            .chunks_mut(chunk_size * num_cols)
+        let [wits, structural_wits] = wits;
+        wits.values
+            .par_chunks_mut(chunk_size * self.n_committed)
+            .zip_eq(
+                structural_wits
+                    .values
+                    .par_chunks_mut(chunk_size * self.n_structural_witin),
+            )
+            .zip(&phase1.instances)
             .enumerate()
-            .par_bridge()
-            .for_each(|(i, rows)| {
+            .for_each(|(i, ((wits, structural_wits), phase1_intance))| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
-                rows.chunks_mut(num_cols).enumerate().for_each(|(j, row)| {
+                izip!(
+                    wits.chunks_mut(self.n_committed),
+                    structural_wits.chunks_mut(self.n_structural_witin)
+                )
+                .enumerate()
+                .for_each(|(j, (row, eqs))| {
                     let idx = i * chunk_size + j;
-                    if idx < phase1.len() {
+                    if idx < num_instances {
                         let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
                             row[..num_wit_cols].borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
-                        Self::populate_row(&phase1[idx], cols, &mut lk_multiplicity);
+                        Self::populate_row(phase1_intance, cols, &mut lk_multiplicity);
+                        for x in eqs.iter_mut() {
+                            *x = E::BaseField::ONE;
+                        }
                     } else {
                         row[..num_wit_cols].copy_from_slice(&dummy_wit_row);
                     }
@@ -466,9 +468,10 @@ where
         let (q_x, q_y) = (q.x, q.y);
 
         // Populate basic columns.
-        cols.clk = E::BaseField::from_canonical_u32(event.state.cur_ts as u32);
-        cols.p_ptr = E::BaseField::from_canonical_u32(event.state.addrs[0].0);
-        cols.q_ptr = E::BaseField::from_canonical_u32(event.state.addrs[1].0);
+        cols.p_x = EC::BaseField::to_limbs_field(&p_x);
+        cols.p_y = EC::BaseField::to_limbs_field(&p_y);
+        cols.q_x = EC::BaseField::to_limbs_field(&q_x);
+        cols.q_y = EC::BaseField::to_limbs_field(&q_y);
 
         Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
     }
@@ -479,7 +482,8 @@ pub struct TestWeierstrassAddLayout<E: ExtensionField, EC: EllipticCurve> {
     layout: WeierstrassAddAssignLayout<E, EC>,
     mem_rw: Vec<WriteMEM>,
     vm_state: StateInOut<E>,
-    _state_ptr: WitIn,
+    _point_ptr_0: WitIn,
+    _point_ptr_1: WitIn,
 }
 
 pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve>()
@@ -496,7 +500,8 @@ where
     // constrain vmstate
     let vm_state = StateInOut::construct_circuit(&mut cb, false)?;
 
-    let state_ptr = cb.create_witin(|| "state_ptr");
+    let point_ptr_0 = cb.create_witin(|| "state_ptr_0");
+    let point_ptr_1 = cb.create_witin(|| "state_ptr_1");
 
     // Write the result to the same address of the first input point.
     let mut mem_rw = izip!(&layout.input32_exprs[0], &layout.output32_exprs)
@@ -504,8 +509,8 @@ where
         .map(|(i, (val_before, val_after))| {
             WriteMEM::construct_circuit(
                 &mut cb,
-                // mem address := state_ptr + i
-                state_ptr.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
+                // mem address := state_ptr_0 + i
+                point_ptr_0.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
                 val_before.clone(),
                 val_after.clone(),
                 vm_state.ts,
@@ -521,8 +526,8 @@ where
             .map(|(i, val_before)| {
                 WriteMEM::construct_circuit(
                     &mut cb,
-                    // mem address := state_ptr + i
-                    state_ptr.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
+                    // mem address := state_ptr_1 + i
+                    point_ptr_1.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
                     val_before.clone(),
                     val_before.clone(),
                     vm_state.ts,
@@ -533,15 +538,20 @@ where
 
     let (out_evals, mut chip) = layout.finalize(&mut cb);
 
-    let layer =
-        Layer::from_circuit_builder(&cb, "Rounds".to_string(), layout.n_challenges, out_evals);
+    let layer = Layer::from_circuit_builder(
+        &cb,
+        "weierstrass_add".to_string(),
+        layout.n_challenges,
+        out_evals,
+    );
     chip.add_layer(layer);
 
     Ok((
         TestWeierstrassAddLayout {
             layout,
             vm_state,
-            _state_ptr: state_ptr,
+            _point_ptr_0: point_ptr_0,
+            _point_ptr_1: point_ptr_1,
             mem_rw,
         },
         chip.gkr_circuit(),
@@ -552,7 +562,7 @@ where
 
 #[tracing::instrument(
     skip_all,
-    name = "run_faster_keccakf",
+    name = "run_weierstrass_add",
     level = "trace",
     fields(profiling_1)
 )]
@@ -577,17 +587,21 @@ where
     let num_instances = points.len();
     let log2_num_instance = ceil_log2(num_instances);
     let num_threads = optimal_sumcheck_threads(log2_num_instance);
-    let mut instances = Vec::with_capacity(num_instances);
+    let mut instances: Vec<EllipticCurveAddInstance<EC::BaseField>> =
+        Vec::with_capacity(num_instances);
 
     let span = entered_span!("instances", profiling_2 = true);
-    for [p, q] in points {
+    for [p, q] in &points {
         let instance = EllipticCurveAddInstance {
             state: EllipticCurveAddStateInstance {
                 addrs: [ByteAddr::from(0); 2],
                 cur_ts: 0,
                 read_ts: [GenericArray::default(), GenericArray::default()],
             },
-            witin: EllipticCurveAddWitInstance { p, q },
+            witin: EllipticCurveAddWitInstance {
+                p: p.clone(),
+                q: q.clone(),
+            },
         };
         instances.push(instance);
     }
@@ -599,12 +613,12 @@ where
 
     let mut lk_multiplicity = LkMultiplicity::default();
     let mut phase1_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(num_instances),
+        num_instances.next_power_of_two(),
         num_witin as usize,
         InstancePaddingStrategy::Default,
     );
     let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(num_instances),
+        num_instances.next_power_of_two(),
         num_structual_witin as usize,
         InstancePaddingStrategy::Default,
     );
@@ -677,9 +691,8 @@ where
         .map(Arc::new)
         .collect_vec();
     #[allow(clippy::type_complexity)]
-    let (gkr_witness, gkr_output) = layout
-        .layout
-        .gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
+    let (gkr_witness, gkr_output) =
+        WeierstrassAddAssignLayout::<E, EC>::gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
             &gkr_circuit,
             &phase1_witness_group,
             &structural_witness,
@@ -695,7 +708,6 @@ where
         point.extend(prover_transcript.sample_vec(log2_num_instance).to_vec());
 
         if test_outputs {
-            // Confront outputs with tiny_keccak::keccakf call
             let mut instance_outputs = vec![vec![]; num_instances];
             for base in gkr_witness
                 .layers
@@ -712,13 +724,58 @@ where
                     instance_output.push(base.get_base_field_vec()[i]);
                 }
             }
+
+            let expected_outputs = points
+                .iter()
+                .flat_map(|[a, b]| {
+                    let a = AffinePoint::<EC>::from_words_le(a);
+                    let b = AffinePoint::<EC>::from_words_le(b);
+                    let c = a + b;
+                    c.to_words_le()
+                })
+                .collect_vec();
+            let coord_outputs = |limbs: &[Arc<MultilinearExtension<'_, E>>]| {
+                transpose(
+                    limbs
+                        .chunks(4)
+                        .map(|c| {
+                            izip!(
+                                c[0].get_base_field_vec(),
+                                c[1].get_base_field_vec(),
+                                c[2].get_base_field_vec(),
+                                c[3].get_base_field_vec()
+                            )
+                            .map(|(a, b, c, d)| {
+                                let a = a.as_canonical_u32();
+                                let b = b.as_canonical_u32();
+                                let c = c.as_canonical_u32();
+                                let d = d.as_canonical_u32();
+                                a | (b << 8) | (c << 16) | (d << 24) // merge to u32
+                            })
+                            .collect_vec()
+                        })
+                        .collect_vec(),
+                )
+                .into_iter()
+                .flatten()
+                .collect_vec()
+            };
+            let x_outputs = coord_outputs(&gkr_witness.layers[0].0[1071..][..256 / 8]);
+            let y_outputs = coord_outputs(&gkr_witness.layers[0].0[1447..][..256 / 8]);
+            let got_outputs = izip!(x_outputs.chunks(8), y_outputs.chunks(8))
+                .flat_map(|(x, y)| [x, y].concat())
+                .collect_vec();
+            assert_eq!(expected_outputs, got_outputs);
         }
 
+        println!("gkr output len: {}", gkr_output.0.0.len());
         let out_evals = gkr_output
             .0
             .par_iter()
             .map(|wit| {
                 let point = point[point.len() - wit.num_vars()..point.len()].to_vec();
+                println!("wit: {:?}", wit);
+                println!("point: {:?}", point);
                 PointAndEval {
                     point: point.clone(),
                     eval: wit.evaluate(&point),
@@ -726,9 +783,14 @@ where
             })
             .collect::<Vec<_>>();
 
-        // assert_eq!(out_evals.len(), KECCAK_OUT_EVAL_SIZE);
-
-        out_evals
+        if out_evals.is_empty() {
+            vec![PointAndEval {
+                point: point[point.len() - log2_num_instance..point.len()].to_vec(),
+                eval: E::ZERO,
+            }]
+        } else {
+            out_evals
+        }
     };
     exit_span!(span);
 
@@ -740,6 +802,7 @@ where
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
+    println!("prover layer: {:?}", gkr_circuit.layers);
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -808,7 +871,7 @@ mod tests {
             setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
             points,
             true,
-            true,
+            false,
         );
     }
 

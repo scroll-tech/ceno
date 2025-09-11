@@ -72,7 +72,6 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
 
     /// GKR witness.
     fn gkr_witness<'a, PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
-        &self,
         circuit: &GKRCircuit<PB::E>,
         phase1_witness_group: &[Arc<PB::MultilinearPoly<'a>>],
         structural_witness: &[Arc<PB::MultilinearPoly<'a>>],

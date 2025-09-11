@@ -1142,16 +1142,14 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         .map(Arc::new)
         .collect_vec();
     #[allow(clippy::type_complexity)]
-    let (gkr_witness, gkr_output) = layout
-        .layout
-        .gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
-            &gkr_circuit,
-            &phase1_witness_group,
-            &structural_witness,
-            &fixed,
-            &[],
-            &challenges,
-        );
+    let (gkr_witness, gkr_output) = KeccakLayout::gkr_witness::<CpuBackend<E, PCS>, CpuProver<_>>(
+        &gkr_circuit,
+        &phase1_witness_group,
+        &structural_witness,
+        &fixed,
+        &[],
+        &challenges,
+    );
     exit_span!(span);
 
     let span = entered_span!("out_eval", profiling_2 = true);
