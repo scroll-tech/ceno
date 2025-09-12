@@ -485,9 +485,11 @@ mod tests {
     use ff_ext::{BabyBearExt4, FromUniformBytes};
     use rand::thread_rng;
     use p3::{matrix::dense::RowMajorMatrix, matrix::Matrix};
+    use p3::babybear::BabyBear;
     use itertools::Itertools;
 
     type E = BabyBearExt4;
+    type F = BabyBear;
 
     #[test]
     fn test_matrix_multiply_vector() {
@@ -496,14 +498,14 @@ mod tests {
 
         let mut rng = thread_rng();
         let matrix = RowMajorMatrix::new(
-            E::random_vec(num_rows*num_cols, &mut rng), 
+            F::random_vec(num_rows*num_cols, &mut rng),
             num_cols,
         );
         let v = E::random_vec(num_cols, &mut rng);
 
         // matrix multiply vector
         // codeword[i] = sum_j matrix[i][j] * v[j]
-        let codeword = matrix.rows().map(|row| {
+        let _codeword = matrix.rows().map(|row| {
             v.iter().zip(row).map(|(a, b)| *a * b).sum::<E>()
         })
         .collect_vec();
