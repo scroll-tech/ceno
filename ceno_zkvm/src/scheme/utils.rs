@@ -2,6 +2,7 @@ use crate::{
     scheme::{
         constants::MIN_PAR_SIZE,
         hal::{MainSumcheckProver, ProofInput, ProverDevice},
+        septic_curve::{SepticExtension, SepticPoint},
     },
     structs::ComposedConstrainSystem,
 };
@@ -20,6 +21,7 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
+use p3::matrix::{Matrix, dense::RowMajorMatrix};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
@@ -295,6 +297,76 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
         });
     wit_layers.reverse();
     wit_layers
+}
+
+pub fn log2_strict_usize(n: usize) -> usize {
+    assert!(n.is_power_of_two());
+    n.trailing_zeros() as usize
+}
+
+pub fn infer_septic_sum_witness<E: ExtensionField>(
+    p_mles: RowMajorMatrix<E::BaseField>,
+    q_mles: RowMajorMatrix<E::BaseField>,
+) -> Vec<Vec<MultilinearExtension<E>>> {
+    assert!(p_mles.width() > 0);
+    let num_layers = log2_strict_usize(p_mles.height());
+
+    let mut layers = Vec::with_capacity(num_layers);
+    layers.push(vec![p_mles, q_mles]);
+    for i in (0..num_layers).rev() {
+        let last_layer = layers.last().unwrap();
+        let (p, q) = (&last_layer[0], &last_layer[1]);
+
+        let num_rows = p.height();
+        let new_p = RowMajorMatrix::new(
+            (0..num_rows / 2)
+                .into_par_iter()
+                .flat_map_iter(|row| {
+                    let p = p.row_slice(row);
+                    let q = q.row_slice(row);
+
+                    let p1 = SepticPoint {
+                        x: SepticExtension(std::array::from_fn(|i| p[i])),
+                        y: SepticExtension(std::array::from_fn(|i| p[i + 7])),
+                    };
+                    let p2 = SepticPoint {
+                        x: SepticExtension(std::array::from_fn(|i| q[i])),
+                        y: SepticExtension(std::array::from_fn(|i| q[i + 7])),
+                    };
+                    let q = p1 + p2;
+                    q.x.0.iter().chain(q.y.0.iter()).copied()
+                })
+                .collect::<Vec<_>>(),
+            14,
+        );
+        let new_q = RowMajorMatrix::new(
+            ((num_rows / 2)..num_rows)
+                .into_par_iter()
+                .flat_map_iter(|row| {
+                    let p = p.row_slice(row);
+                    let q = q.row_slice(row);
+
+                    let p1 = SepticPoint {
+                        x: SepticExtension(std::array::from_fn(|i| p[i])),
+                        y: SepticExtension(std::array::from_fn(|i| p[i + 7])),
+                    };
+                    let p2 = SepticPoint {
+                        x: SepticExtension(std::array::from_fn(|i| q[i])),
+                        y: SepticExtension(std::array::from_fn(|i| q[i + 7])),
+                    };
+                    let q = p1 + p2;
+                    q.x.0.iter().chain(q.y.0.iter()).copied()
+                })
+                .collect::<Vec<_>>(),
+            14,
+        );
+        layers.push(vec![new_p, new_q]);
+    }
+
+    layers
+        .iter()
+        .rev()
+        .map(|layer| layer.iter().map(|m| m.into_mles()).collect::<Vec<_>>())
 }
 
 pub fn build_main_witness<
