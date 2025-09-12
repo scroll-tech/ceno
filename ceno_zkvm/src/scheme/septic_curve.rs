@@ -1,3 +1,6 @@
+use either::Either;
+use ff_ext::ExtensionField;
+use multilinear_extensions::Expression;
 // The extension field and curve definition are adapted from
 // https://github.com/succinctlabs/sp1/blob/v5.2.1/crates/stark/src/septic_curve.rs
 use p3::field::{Field, FieldAlgebra};
@@ -214,6 +217,140 @@ impl<F: Field> Mul for SepticExtension<F> {
 
     fn mul(self, other: Self) -> Self {
         self.mul(&other)
+    }
+}
+
+pub struct SymbolicSepticExtension<E: ExtensionField>(pub Vec<Expression<E>>);
+
+impl<E: ExtensionField> Add<Self> for &SymbolicSepticExtension<E> {
+    type Output = SymbolicSepticExtension<E>;
+
+    fn add(self, other: Self) -> Self::Output {
+        let res = self
+            .0
+            .iter()
+            .zip(other.0.iter())
+            .map(|(a, b)| a.clone() + b.clone())
+            .collect();
+
+        SymbolicSepticExtension(res)
+    }
+}
+
+impl<E: ExtensionField> Add<&Self> for SymbolicSepticExtension<E> {
+    type Output = Self;
+
+    fn add(self, other: &Self) -> Self {
+        (&self).add(other)
+    }
+}
+
+impl<E: ExtensionField> Add for SymbolicSepticExtension<E> {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        (&self).add(&other)
+    }
+}
+
+impl<E: ExtensionField> Sub<Self> for &SymbolicSepticExtension<E> {
+    type Output = SymbolicSepticExtension<E>;
+
+    fn sub(self, other: Self) -> Self::Output {
+        let res = self
+            .0
+            .iter()
+            .zip(other.0.iter())
+            .map(|(a, b)| a.clone() - b.clone())
+            .collect();
+
+        SymbolicSepticExtension(res)
+    }
+}
+
+impl<E: ExtensionField> Sub<&Self> for SymbolicSepticExtension<E> {
+    type Output = Self;
+
+    fn sub(self, other: &Self) -> Self {
+        (&self).sub(other)
+    }
+}
+
+impl<E: ExtensionField> Sub for SymbolicSepticExtension<E> {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        (&self).sub(&other)
+    }
+}
+
+impl<E: ExtensionField> Mul<Self> for &SymbolicSepticExtension<E> {
+    type Output = SymbolicSepticExtension<E>;
+
+    fn mul(self, other: Self) -> Self::Output {
+        let mut result = vec![Expression::Constant(Either::Left(E::BaseField::ZERO)); 7];
+        let five = Expression::Constant(Either::Left(E::BaseField::from_canonical_u32(5)));
+        let two = Expression::Constant(Either::Left(E::BaseField::from_canonical_u32(2)));
+
+        for i in 0..7 {
+            for j in 0..7 {
+                let term = self.0[i].clone() * other.0[j].clone();
+                let mut index = i + j;
+                if index < 7 {
+                    result[index] += term;
+                } else {
+                    index -= 7;
+                    // x^7 = 2x + 5
+                    result[index] += five.clone() * term.clone();
+                    result[index + 1] += two.clone() * term.clone();
+                }
+            }
+        }
+        SymbolicSepticExtension(result)
+    }
+}
+
+impl<E: ExtensionField> Mul<&Self> for SymbolicSepticExtension<E> {
+    type Output = Self;
+
+    fn mul(self, other: &Self) -> Self {
+        (&self).mul(other)
+    }
+}
+
+impl<E: ExtensionField> Mul for SymbolicSepticExtension<E> {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        (&self).mul(&other)
+    }
+}
+
+impl<E: ExtensionField> Mul<&Expression<E>> for SymbolicSepticExtension<E> {
+    type Output = SymbolicSepticExtension<E>;
+
+    fn mul(self, other: &Expression<E>) -> Self::Output {
+        let res = self.0.iter().map(|a| a.clone() * other.clone()).collect();
+        SymbolicSepticExtension(res)
+    }
+}
+
+impl<E: ExtensionField> Mul<Expression<E>> for SymbolicSepticExtension<E> {
+    type Output = SymbolicSepticExtension<E>;
+
+    fn mul(self, other: Expression<E>) -> Self::Output {
+        self.mul(&other)
+    }
+}
+
+impl<E: ExtensionField> SymbolicSepticExtension<E> {
+    pub fn new(exprs: Vec<Expression<E>>) -> Self {
+        assert!(exprs.len() == 7);
+        Self(exprs)
+    }
+
+    pub fn to_exprs(&self) -> Vec<Expression<E>> {
+        self.0.clone()
     }
 }
 

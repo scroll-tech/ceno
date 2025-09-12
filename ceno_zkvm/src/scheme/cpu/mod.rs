@@ -7,6 +7,7 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP},
         hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
+        septic_curve::{SepticExtension, SymbolicSepticExtension},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
             wit_infer_by_expr,
@@ -53,13 +54,20 @@ impl CpuTowerProver {
     pub fn create_proof<'a, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
+        ecc_spec: Option<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
     ) -> (Point<E>, TowerProofs<E>) {
         #[derive(Debug, Clone)]
         enum GroupedMLE<'a, E: ExtensionField> {
             Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
-            Logup((usize, Vec<MultilinearExtension<'a, E>>)), /* usize is the index in logup_specs */
+            Logup((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in logup_specs
+            EcAdd(
+                (
+                    Vec<MultilinearExtension<'a, E>>,
+                    Vec<MultilinearExtension<'a, E>>,
+                ),
+            ),
         }
 
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
@@ -82,7 +90,8 @@ impl CpuTowerProver {
         let alpha_pows = get_challenge_pows(
             prod_specs_len +
                 // logup occupy 2 sumcheck: numerator and denominator
-                logup_specs_len * 2,
+                logup_specs_len * 2
+                + ecc_spec.as_ref().map_or(0, |_| 14),
             transcript,
         );
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
@@ -110,6 +119,16 @@ impl CpuTowerProver {
         // merge logup_specs
         for (i, spec) in logup_specs.into_iter().enumerate() {
             merge_spec_witness(&mut layer_witness, spec, i, GroupedMLE::Logup);
+        }
+
+        if let Some(ecc_spec) = ecc_spec {
+            for i in 0..max_round_index {
+                layer_witness[i + 1].push(GroupedMLE::EcAdd((
+                    // TODO: avoid clone
+                    ecc_spec.witness[i].clone(),
+                    ecc_spec.witness[i + 1].clone(),
+                )));
+            }
         }
 
         // skip(1) for output layer
@@ -188,6 +207,59 @@ impl CpuTowerProver {
                             eq_expr.clone()
                                 * (alpha_numerator * (p1 * q2.clone() + p2 * q1.clone())
                                     + alpha_denominator * q1 * q2),
+                        );
+                    }
+                    GroupedMLE::EcAdd((prev_layer, curr_layer)) => {
+                        assert_eq!(curr_layer.len(), 2 * 14); // 3 points, each point has 14 polys
+                        assert_eq!(prev_layer.len(), 2 * 14);
+                        let (x1, rest) = curr_layer.split_at(7);
+                        let (y1, rest) = rest.split_at(7);
+                        let (x2, rest) = rest.split_at(7);
+                        let (y2, _) = rest.split_at(7);
+                        let (x3, y3) = prev_layer.split_at(7);
+
+                        let x1 = &SymbolicSepticExtension::new(
+                            x1.into_iter()
+                                .map(|x| expr_builder.lift(Either::Left(x)))
+                                .collect(),
+                        );
+                        let y1 = &SymbolicSepticExtension::new(
+                            y1.into_iter()
+                                .map(|y| expr_builder.lift(Either::Left(y)))
+                                .collect(),
+                        );
+                        let x2 = &SymbolicSepticExtension::new(
+                            x2.into_iter()
+                                .map(|x| expr_builder.lift(Either::Left(x)))
+                                .collect(),
+                        );
+                        let y2 = &SymbolicSepticExtension::new(
+                            y2.into_iter()
+                                .map(|y| expr_builder.lift(Either::Left(y)))
+                                .collect(),
+                        );
+                        let x3 = &SymbolicSepticExtension::new(
+                            x3.into_iter()
+                                .map(|x| expr_builder.lift(Either::Left(x)))
+                                .collect(),
+                        );
+                        let y3 = &SymbolicSepticExtension::new(
+                            y3.into_iter()
+                                .map(|y| expr_builder.lift(Either::Left(y)))
+                                .collect(),
+                        );
+
+                        // 0 = eq * ((x3 + x1 + x2) * (x2 - x1)^2 - (y2 - y1)^2)
+                        exprs.extend(
+                            (((x3 + x1 + x2) * (x2 - x1) * (x2 - x1) - (y2 - y1) * (y2 - y1))
+                                * &eq_expr)
+                                .to_exprs(),
+                        );
+                        // 0 = eq * ((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3))
+                        exprs.extend(
+                            (((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3))
+                                * &eq_expr)
+                                .to_exprs(),
                         );
                     }
                 }
@@ -334,6 +406,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         } else {
             &records[offset..][..cs.lk_expressions.len()]
         };
+
+        // infer last layer witness for septic points' accumulation
 
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_last_layer");
@@ -828,5 +902,14 @@ where
 {
     fn get_pb(&self) -> &CpuBackend<E, PCS> {
         self.backend.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_ecc_tower_prover() {
+
     }
 }
