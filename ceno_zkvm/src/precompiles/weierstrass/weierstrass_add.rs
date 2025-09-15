@@ -43,11 +43,8 @@ use crate::{
     gadgets::{FieldOperation, field_op::FieldOpCols},
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
-        SelectorTypeLayout,
-        utils::merge_u8_limbs_to_u16_limbs_pairs_and_extend,
-        weierstrass::{
-            EllipticCurveAddInstance, EllipticCurveAddStateInstance, EllipticCurveAddWitInstance,
-        },
+        SelectorTypeLayout, utils::merge_u8_limbs_to_u16_limbs_pairs_and_extend,
+        weierstrass::EllipticCurveAddInstance,
     },
     scheme::utils::gkr_witness,
     structs::PointAndEval,
@@ -420,21 +417,22 @@ where
                     .values
                     .par_chunks_mut(chunk_size * self.n_structural_witin),
             )
-            .zip(&phase1.instances)
+            .zip(phase1.instances.par_chunks(chunk_size))
             .enumerate()
-            .for_each(|(i, ((wits, structural_wits), phase1_intance))| {
+            .for_each(|(i, ((wits, structural_wits), phase1_intances))| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 izip!(
                     wits.chunks_mut(self.n_committed),
-                    structural_wits.chunks_mut(self.n_structural_witin)
+                    structural_wits.chunks_mut(self.n_structural_witin),
+                    phase1_intances
                 )
                 .enumerate()
-                .for_each(|(j, (row, eqs))| {
+                .for_each(|(j, (row, eqs, phase1_instance))| {
                     let idx = i * chunk_size + j;
                     if idx < num_instances {
                         let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
                             row[..num_wit_cols].borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
-                        Self::populate_row(phase1_intance, cols, &mut lk_multiplicity);
+                        Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
                         for x in eqs.iter_mut() {
                             *x = E::BaseField::ONE;
                         }
@@ -459,8 +457,8 @@ where
         new_byte_lookup_events: &mut LkMultiplicity,
     ) {
         // Decode affine points.
-        let p = &event.witin.p;
-        let q = &event.witin.q;
+        let p = &event.p;
+        let q = &event.q;
         let p = AffinePoint::<EC>::from_words_le(p);
         let (p_x, p_y) = (p.x, p.y);
         let q = AffinePoint::<EC>::from_words_le(q);
@@ -592,15 +590,8 @@ where
     let span = entered_span!("instances", profiling_2 = true);
     for [p, q] in &points {
         let instance = EllipticCurveAddInstance {
-            state: EllipticCurveAddStateInstance {
-                addrs: [ByteAddr::from(0); 2],
-                cur_ts: 0,
-                read_ts: [GenericArray::default(), GenericArray::default()],
-            },
-            witin: EllipticCurveAddWitInstance {
-                p: p.clone(),
-                q: q.clone(),
-            },
+            p: p.clone(),
+            q: q.clone(),
         };
         instances.push(instance);
     }
@@ -755,14 +746,27 @@ where
                         .collect_vec(),
                 )
                 .into_iter()
+                .take(num_instances)
                 .flatten()
                 .collect_vec()
             };
-            let x_outputs = coord_outputs(&gkr_witness.layers[0].0[1071..][..256 / 8]);
-            let y_outputs = coord_outputs(&gkr_witness.layers[0].0[1447..][..256 / 8]);
-            let got_outputs = izip!(x_outputs.chunks(8), y_outputs.chunks(8))
-                .flat_map(|(x, y)| [x, y].concat())
-                .collect_vec();
+
+            let x_outputs = coord_outputs(
+                &gkr_witness.layers[0].0
+                    [layout.layout.layer_exprs.wits.x3_ins.result[0].id as usize..]
+                    [..<EC::BaseField as NumLimbs>::Limbs::USIZE],
+            );
+            let y_outputs = coord_outputs(
+                &gkr_witness.layers[0].0
+                    [layout.layout.layer_exprs.wits.y3_ins.result[0].id as usize..]
+                    [..<EC::BaseField as NumLimbs>::Limbs::USIZE],
+            );
+            let got_outputs = izip!(
+                x_outputs.chunks(<EC::BaseField as NumWords>::WordsFieldElement::USIZE),
+                y_outputs.chunks(<EC::BaseField as NumWords>::WordsFieldElement::USIZE)
+            )
+            .flat_map(|(x, y)| [x, y].concat())
+            .collect_vec();
             assert_eq!(expected_outputs, got_outputs);
         }
 
@@ -868,7 +872,7 @@ mod tests {
                     setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
                     points,
                     true,
-                    false,
+                    true,
                 );
             })
             .unwrap()
@@ -915,7 +919,7 @@ mod tests {
                     setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
                     points,
                     true,
-                    false,
+                    true,
                 );
             })
             .unwrap()

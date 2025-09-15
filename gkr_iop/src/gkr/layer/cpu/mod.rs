@@ -200,12 +200,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 
         // `wit` := witin ++ fixed
         // we concat eq in between `wit` := witin ++ eqs ++ fixed
-        println!(
-            "ZerocheckLayerProver::prove: wit.len() = {}, eqs.len() = {}, fixed.len() = {}",
-            wit.0.len(),
-            eqs.len(),
-            layer.n_fixed,
-        );
         let all_witins = wit
             .iter()
             .take(layer.n_witin)
