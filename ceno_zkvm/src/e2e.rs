@@ -349,13 +349,17 @@ fn setup_platform_inner(
         heap.start..heap_end as u32
     };
 
+    assert!(
+        pub_io_size.is_power_of_two(),
+        "pub io size {pub_io_size} must be a power of two"
+    );
     let platform = Platform {
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
         prog_data,
         stack,
         heap,
-        public_io: preset.public_io.start..preset.public_io.start + pub_io_size.next_power_of_two(),
+        public_io: preset.public_io.start..preset.public_io.start + pub_io_size,
         ..preset
     };
     assert!(

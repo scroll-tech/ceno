@@ -56,6 +56,10 @@ pub struct CenoOptions {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
+    /// pub io size in byte
+    #[arg(long, default_value = "1k", value_parser = parse_size)]
+    public_io_size: u32,
+
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
@@ -295,7 +299,7 @@ impl CenoOptions {
                     self,
                     compilation_options,
                     elf_path,
-                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+                    Checkpoint::Complete,
                 )
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
@@ -337,10 +341,13 @@ fn run_elf_inner<
     let public_io = options
         .read_public_io()
         .context("failed to read public io")?;
-    // estimate required pub io size, which is required in platform/key setup phase
-    let pub_io_size: u32 = ((public_io.len() * WORD_SIZE) as u32)
-        .next_power_of_two()
-        .max(16);
+    let public_io_size = options.public_io_size;
+    assert!(
+        public_io.len() <= public_io_size as usize / WORD_SIZE,
+        "require pub io length {} < max public_io_size {}",
+        public_io.len(),
+        public_io_size as usize / WORD_SIZE
+    );
 
     let platform = if compilation_options.release {
         setup_platform(
@@ -348,7 +355,7 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            pub_io_size,
+            public_io_size,
         )
     } else {
         setup_platform_debug(
@@ -356,7 +363,7 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            pub_io_size,
+            public_io_size,
         )
     };
     tracing::info!("Running on platform {:?} {}", options.platform, platform);
