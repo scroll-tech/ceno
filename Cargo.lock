@@ -1129,7 +1129,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "once_cell",
  "p3",
@@ -1777,7 +1777,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "bincode",
  "clap",
@@ -1801,7 +1801,7 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "either",
  "ff_ext",
@@ -2083,7 +2083,7 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "p3-baby-bear 0.1.0",
  "p3-challenger 0.1.0",
@@ -2698,7 +2698,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "ff_ext",
  "p3",
@@ -3411,7 +3411,7 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -3619,7 +3619,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "either",
  "ff_ext",
@@ -3637,7 +3637,7 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "itertools 0.13.0",
  "p3",
@@ -4002,7 +4002,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -4274,7 +4274,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "bincode",
  "clap",
@@ -4548,7 +4548,7 @@ checksum = "5c573471f125075647d03df72e026074b7203790d41351cd6edc96f46bcccd36"
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#b998a7cc8d713fcaf6bac114e59ce12c3c4c44dd"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#53df788c6713403d1e22f4c9c6dc2383a9a4f4c6"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",
