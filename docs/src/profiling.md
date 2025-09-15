@@ -4,11 +4,12 @@ Ceno includes tools to help you analyze and optimize the performance of your ZK 
 
 ## Execution Profiling
 
-You can profile the execution of your guest program by using the `--profiling` flag with the `ceno run` or other binary commands. This will output detailed statistics about the execution, such as cycle counts for different parts of the program.
+You can profile the execution of your guest program by using the `--profiling` flag with the `cargo ceno run` or other binary commands. This will output detailed statistics about the execution, such as cycle counts for different parts of the program.
 
 For example:
+
 ```bash
-ceno run --profiling=1 -- <your_program>
+cargo ceno run --profiling=1 -- <your_program>
 ```
 
 The value passed to `--profiling` controls the granularity of the profiling information.
