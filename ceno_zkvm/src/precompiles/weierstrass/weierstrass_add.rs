@@ -396,18 +396,7 @@ where
         let chunk_size = 64;
         let num_instances = phase1.instances.len();
 
-        let mut dummy_wit_row = vec![E::BaseField::ZERO; num_wit_cols];
-        let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
-            dummy_wit_row.as_mut_slice().borrow_mut();
-        let zero = BigUint::zero();
-        Self::populate_field_ops(
-            lk_multiplicity,
-            cols,
-            zero.clone(),
-            zero.clone(),
-            zero.clone(),
-            zero,
-        );
+        let dummy_wit_row = vec![E::BaseField::ZERO; num_wit_cols];
 
         let [wits, structural_wits] = wits;
         wits.values
