@@ -257,9 +257,7 @@ impl CpuTowerProver {
                         );
                         // 0 = eq * ((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3))
                         exprs.extend(
-                            (((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3))
-                                * &eq_expr)
-                                .to_exprs(),
+                            (((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3)) * &eq_expr).to_exprs(),
                         );
                     }
                 }
@@ -910,6 +908,10 @@ mod tests {
 
     #[test]
     fn test_ecc_tower_prover() {
+        // generate 1 product witness spec
 
+        // generate 1 logup witness spec
+
+        // generate 1 ecc add witness
     }
 }

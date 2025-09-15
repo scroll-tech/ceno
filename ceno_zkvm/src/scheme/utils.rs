@@ -159,6 +159,11 @@ macro_rules! tower_mle_4 {
     }};
 }
 
+pub fn log2_strict_usize(n: usize) -> usize {
+    assert!(n.is_power_of_two());
+    n.trailing_zeros() as usize
+}
+
 /// infer logup witness from last layer
 /// return is the ([p1,p2], [q1,q2]) for each layer
 pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
@@ -257,116 +262,172 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
         .collect_vec()
 }
 
-/// infer tower witness from last layer
-pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
+/// Infer tower witness from input layer (layer 0 is the output layer and layer n is the input layer).
+/// The relation between layer i and layer i+1 is as follows:
+///      prod[i][b] = ∏_s prod[i+1][s,b]
+/// where 2^s is the fanin of the product gate `num_product_fanin`.
+pub fn infer_tower_product_witness<E: ExtensionField>(
     num_vars: usize,
     last_layer: Vec<MultilinearExtension<'_, E>>,
     num_product_fanin: usize,
 ) -> Vec<Vec<MultilinearExtension<'_, E>>> {
+    // sanity check
     assert!(last_layer.len() == num_product_fanin);
-    assert_eq!(num_product_fanin % 2, 0);
-    let log2_num_product_fanin = ceil_log2(num_product_fanin);
-    let mut wit_layers =
-        (0..(num_vars / log2_num_product_fanin) - 1).fold(vec![last_layer], |mut acc, _| {
-            let next_layer = acc.last().unwrap();
-            let cur_len = next_layer[0].evaluations().len() / num_product_fanin;
-            let cur_layer: Vec<MultilinearExtension<E>> = (0..num_product_fanin)
-                .map(|index| {
-                    let mut evaluations = vec![E::ONE; cur_len];
-                    next_layer.chunks_exact(2).for_each(|f| {
-                        match (f[0].evaluations(), f[1].evaluations()) {
-                            (FieldType::Ext(f1), FieldType::Ext(f2)) => {
-                                let start: usize = index * cur_len;
-                                (start..(start + cur_len))
+    assert!(num_product_fanin.is_power_of_two());
+
+    let log2_num_product_fanin = log2_strict_usize(num_product_fanin);
+    assert!(num_vars % log2_num_product_fanin == 0);
+    assert!(
+        last_layer
+            .iter()
+            .all(|p| p.num_vars() == num_vars - log2_num_product_fanin)
+    );
+
+    let num_layers = num_vars / log2_num_product_fanin;
+
+    let mut wit_layers = Vec::with_capacity(num_layers);
+    wit_layers.push(last_layer);
+
+    for _ in (0..num_layers - 1).rev() {
+        let input_layer = wit_layers.last().unwrap();
+        let output_len = input_layer[0].evaluations().len() / num_product_fanin;
+
+        let output_layer: Vec<MultilinearExtension<E>> = (0..num_product_fanin)
+            .map(|index| {
+                // avoid the overhead of vector initialization
+                let mut evaluations: Vec<E> = Vec::with_capacity(output_len);
+                unsafe {
+                    // will be filled immediately
+                    evaluations.set_len(output_len);
+                }
+
+                input_layer.chunks_exact(2).enumerate().for_each(|(i, f)| {
+                    match (f[0].evaluations(), f[1].evaluations()) {
+                        (FieldType::Ext(f1), FieldType::Ext(f2)) => {
+                            let start: usize = index * output_len;
+
+                            if i == 0 {
+                                (start..(start + output_len))
                                     .into_par_iter()
                                     .zip(evaluations.par_iter_mut())
                                     .with_min_len(MIN_PAR_SIZE)
-                                    .map(|(index, evaluations)| {
+                                    .for_each(|(index, evaluations)| {
+                                        *evaluations = f1[index] * f2[index]
+                                    });
+                            } else {
+                                (start..(start + output_len))
+                                    .into_par_iter()
+                                    .zip(evaluations.par_iter_mut())
+                                    .with_min_len(MIN_PAR_SIZE)
+                                    .for_each(|(index, evaluations)| {
                                         *evaluations *= f1[index] * f2[index]
-                                    })
-                                    .collect()
+                                    });
                             }
-                            _ => unreachable!("must be extension field"),
                         }
-                    });
-                    evaluations.into_mle()
-                })
-                .collect_vec();
-            acc.push(cur_layer);
-            acc
-        });
+                        _ => unreachable!("must be extension field"),
+                    }
+                });
+                evaluations.into_mle()
+            })
+            .collect_vec();
+        wit_layers.push(output_layer);
+    }
+
     wit_layers.reverse();
+
     wit_layers
 }
 
-pub fn log2_strict_usize(n: usize) -> usize {
-    assert!(n.is_power_of_two());
-    n.trailing_zeros() as usize
-}
-
+/// Infer from input layer (layer 0) to the output layer (layer n)
+/// Note that each layer has 2 * 7 * 2 multilinear polynomials.
+///
+/// The relation between layer i and layer i+1 is as follows:
+///     0 = p[i][b] - (p[i+1][0,b] + p[i+1][1,b])
+///
 pub fn infer_septic_sum_witness<E: ExtensionField>(
-    p_mles: RowMajorMatrix<E::BaseField>,
-    q_mles: RowMajorMatrix<E::BaseField>,
+    p_mles: Vec<MultilinearExtension<E>>,
 ) -> Vec<Vec<MultilinearExtension<E>>> {
-    assert!(p_mles.width() > 0);
-    let num_layers = log2_strict_usize(p_mles.height());
+    assert_eq!(p_mles.len(), 2 * 7 * 2);
+    assert!(p_mles.iter().map(|p| p.num_vars()).all_equal());
+
+    // +1 as the input layer has 2*N points where N = 2^num_vars
+    // and the output layer has 2 points
+    let num_layers = p_mles[0].num_vars() + 1; 
 
     let mut layers = Vec::with_capacity(num_layers);
-    layers.push(vec![p_mles, q_mles]);
-    for i in (0..num_layers).rev() {
-        let last_layer = layers.last().unwrap();
-        let (p, q) = (&last_layer[0], &last_layer[1]);
+    layers.push(p_mles);
 
-        let num_rows = p.height();
-        let new_p = RowMajorMatrix::new(
-            (0..num_rows / 2)
+    for _ in (0..num_layers-1).rev() {
+        let input_layer = layers.last().unwrap();
+        let p = input_layer[0..14]
+            .iter()
+            .map(|mle| mle.get_base_field_vec())
+            .collect_vec();
+        let q = input_layer[14..28]
+            .iter()
+            .map(|mle| mle.get_base_field_vec())
+            .collect_vec();
+
+        let output_len = p[0].len() / 2;
+        let mut outputs: Vec<E::BaseField> = Vec::with_capacity(28 * output_len);
+        unsafe {
+            // will be filled immediately
+            outputs.set_len(28 * output_len);
+        }
+
+        (0..2).into_iter().for_each(|chunk| {
+            (0..output_len)
                 .into_par_iter()
-                .flat_map_iter(|row| {
-                    let p = p.row_slice(row);
-                    let q = q.row_slice(row);
+                .with_min_len(MIN_PAR_SIZE)
+                .zip(outputs.par_chunks_mut(28))
+                .for_each(|(idx, output)| {
+                    let row = chunk * output_len + idx;
+                    let offset = chunk * 14;
 
                     let p1 = SepticPoint {
-                        x: SepticExtension(std::array::from_fn(|i| p[i])),
-                        y: SepticExtension(std::array::from_fn(|i| p[i + 7])),
+                        x: SepticExtension(std::array::from_fn(|i| p[offset + i][row])),
+                        y: SepticExtension(std::array::from_fn(|i| p[offset + i + 7][row])),
                     };
                     let p2 = SepticPoint {
-                        x: SepticExtension(std::array::from_fn(|i| q[i])),
-                        y: SepticExtension(std::array::from_fn(|i| q[i + 7])),
+                        x: SepticExtension(std::array::from_fn(|i| q[offset + i][row])),
+                        y: SepticExtension(std::array::from_fn(|i| q[offset + i + 7][row])),
                     };
-                    let q = p1 + p2;
-                    q.x.0.iter().chain(q.y.0.iter()).copied()
-                })
-                .collect::<Vec<_>>(),
-            14,
-        );
-        let new_q = RowMajorMatrix::new(
-            ((num_rows / 2)..num_rows)
-                .into_par_iter()
-                .flat_map_iter(|row| {
-                    let p = p.row_slice(row);
-                    let q = q.row_slice(row);
 
-                    let p1 = SepticPoint {
-                        x: SepticExtension(std::array::from_fn(|i| p[i])),
-                        y: SepticExtension(std::array::from_fn(|i| p[i + 7])),
-                    };
-                    let p2 = SepticPoint {
-                        x: SepticExtension(std::array::from_fn(|i| q[i])),
-                        y: SepticExtension(std::array::from_fn(|i| q[i + 7])),
-                    };
-                    let q = p1 + p2;
-                    q.x.0.iter().chain(q.y.0.iter()).copied()
-                })
-                .collect::<Vec<_>>(),
-            14,
-        );
-        layers.push(vec![new_p, new_q]);
+                    let p3 = p1 + p2;
+
+                    output[offset..]
+                        .iter_mut()
+                        .take(7)
+                        .enumerate()
+                        .for_each(|(i, out)| {
+                            *out = p3.x.0[i];
+                        });
+                    output[offset..]
+                        .iter_mut()
+                        .skip(7)
+                        .take(7)
+                        .enumerate()
+                        .for_each(|(i, out)| {
+                            *out = p3.y.0[i];
+                        });
+                });
+        });
+
+        // transpose
+        let output_mles = (0..28)
+            .map(|i| {
+                (0..output_len)
+                    .into_par_iter()
+                    .map(|j| outputs[j * 28 + i])
+                    .collect::<Vec<_>>()
+                    .into_mle()
+            })
+            .collect_vec();
+        layers.push(output_mles);
     }
 
+    layers.reverse();
     layers
-        .iter()
-        .rev()
-        .map(|layer| layer.iter().map(|m| m.into_mles()).collect::<Vec<_>>())
 }
 
 pub fn build_main_witness<
