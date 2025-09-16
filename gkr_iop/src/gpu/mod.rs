@@ -5,7 +5,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::mle::{FieldType, MultilinearExtension, Point};
-use p3::field::TwoAdicField;
+use p3::field::{FieldAlgebra, TwoAdicField};
 use std::{rc::Rc, sync::Arc};
 use witness::RowMajorMatrix;
 
@@ -121,6 +121,38 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu
     /// Get the length of evaluation data
     fn evaluations_len(&self) -> usize {
         self.mle.evaluations_len()
+    }
+
+    fn bh_signature(&self) -> E {
+        if std::any::TypeId::of::<E::BaseField>()
+            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
+        {
+            panic!("GPU backend only supports Goldilocks");
+        }
+
+        match &self.mle {
+            GpuFieldType::Base(poly) => {
+                let cpu_evaluations_base: Vec<E::BaseField> =
+                    unsafe { std::mem::transmute(poly.to_cpu_vec()) };
+                E::from(
+                    cpu_evaluations_base
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, v)| E::BaseField::from_canonical_u32(i as u32 + 1) + v)
+                        .product::<E::BaseField>(),
+                )
+            }
+            GpuFieldType::Ext(poly) => {
+                let cpu_evaluations_ext: Vec<E::BaseField> =
+                    unsafe { std::mem::transmute(poly.to_cpu_vec()) };
+                cpu_evaluations_ext
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, v)| E::from_canonical_u32(i as u32 + 1) + v)
+                    .product::<E>()
+            }
+            GpuFieldType::Unreachable => unreachable!(),
+        }
     }
 }
 
