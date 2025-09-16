@@ -1,9 +1,10 @@
 use either::Either;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FromUniformBytes};
 use multilinear_extensions::Expression;
 // The extension field and curve definition are adapted from
 // https://github.com/succinctlabs/sp1/blob/v5.2.1/crates/stark/src/septic_curve.rs
 use p3::field::{Field, FieldAlgebra};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, Deref, Mul, Sub};
 
@@ -62,11 +63,148 @@ impl<F: Field> SepticExtension<F> {
         self.0.iter().all(|c| *c == F::ZERO)
     }
 
+    // returns z^{i*p} for i = 0..6
+    //
+    // The sage script to compute z^{i*p} is as follows:
+    // ```sage
+    // p = 2^31 - 2^27 + 1
+    // Fp = GF(p)
+    // R.<z> = PolynomialRing(Fp)
+    // mod_poly = z^7 - 2*z - 5
+    // Q = R.quotient(mod_poly)
+    //
+    // # compute z^(i*p) for i = 1..6
+    // for k in range(1, 7):
+    //     power = k * p
+    //     z_power = Q(z)^power
+    //     print(f"z^({k}*p) = {z_power}")
+    // ```
+    fn z_pow_p(i: usize) -> Self {
+        match i {
+            0 => [1, 0, 0, 0, 0, 0, 0].into(),
+            1 => [
+                954599710, 1359279693, 566669999, 1982781815, 1735718361, 1174868538, 1120871770,
+            ]
+            .into(),
+            2 => [
+                862825265, 597046311, 978840770, 1790138282, 1044777201, 835869808, 1342179023,
+            ]
+            .into(),
+            3 => [
+                596273169, 658837454, 1515468261, 367059247, 781278880, 1544222616, 155490465,
+            ]
+            .into(),
+            4 => [
+                557608863, 1173670028, 1749546888, 1086464137, 803900099, 1288818584, 1184677604,
+            ]
+            .into(),
+            5 => [
+                763416381, 1252567168, 628856225, 1771903394, 650712211, 19417363, 57990258,
+            ]
+            .into(),
+            6 => [
+                1734711039, 1749813853, 1227235221, 1707730636, 424560395, 1007029514, 498034669,
+            ]
+            .into(),
+            _ => unimplemented!("i should be in [0, 7]"),
+        }
+    }
+
+    // returns z^{i*p^2} for i = 0..6
+    // we can change the above sage script to compute z^{i*p^2} by replacing
+    // `power = k * p` with `power = k * p * p`
+    fn z_pow_p_square(i: usize) -> Self {
+        match i {
+            0 => [1, 0, 0, 0, 0, 0, 0].into(),
+            1 => [
+                1013489358, 1619071628, 304593143, 1949397349, 1564307636, 327761151, 415430835,
+            ]
+            .into(),
+            2 => [
+                209824426, 1313900768, 38410482, 256593180, 1708830551, 1244995038, 1555324019,
+            ]
+            .into(),
+            3 => [
+                1475628651, 777565847, 704492386, 1218528120, 1245363405, 475884575, 649166061,
+            ]
+            .into(),
+            4 => [
+                550038364, 948935655, 68722023, 1251345762, 1692456177, 1177958698, 350232928,
+            ]
+            .into(),
+            5 => [
+                882720258, 821925756, 199955840, 812002876, 1484951277, 1063138035, 491712810,
+            ]
+            .into(),
+            6 => [
+                738287111, 1955364991, 552724293, 1175775744, 341623997, 1454022463, 408193320,
+            ]
+            .into(),
+            _ => unimplemented!("i should be in [0, 7]"),
+        }
+    }
+
+    // returns self^p = (a0 + a1*z^p + ... + a6*z^(6p))
+    pub fn frobenius(&self) -> Self {
+        Self::z_pow_p(0) * self.0[0]
+            + Self::z_pow_p(1) * self.0[1]
+            + Self::z_pow_p(2) * self.0[2]
+            + Self::z_pow_p(3) * self.0[3]
+            + Self::z_pow_p(4) * self.0[4]
+            + Self::z_pow_p(5) * self.0[5]
+            + Self::z_pow_p(6) * self.0[6]
+    }
+
+    // returns self^(p^2) = (a0 + a1*z^(p^2) + ... + a6*z^(6*p^2))
+    pub fn double_frobenius(&self) -> Self {
+        Self::z_pow_p_square(0) * self.0[0]
+            + Self::z_pow_p_square(1) * self.0[1]
+            + Self::z_pow_p_square(2) * self.0[2]
+            + Self::z_pow_p_square(3) * self.0[3]
+            + Self::z_pow_p_square(4) * self.0[4]
+            + Self::z_pow_p_square(5) * self.0[5]
+            + Self::z_pow_p_square(6) * self.0[6]
+    }
+
+    // returns self^(p + p^2 + ... + p^6)
+    fn norm_sub(&self) -> Self {
+        let a = self.frobenius() * self.double_frobenius();
+        let b = a.double_frobenius();
+        let c = b.double_frobenius();
+
+        a * b * c
+    }
+
+    // norm = self^(1 + p + ... + p^6)
+    //      = self^((p^7-1)/(p-1))
+    // it's a field element in F since norm^p = norm
+    fn norm(&self) -> F {
+        (self.norm_sub() * self).0[0]
+    }
+
+    pub fn is_square(&self) -> bool {
+        // since a^((p^7 - 1)/2) = norm(a)^((p-1)/2)
+        // to test if self^((p^7 - 1) / 2) == 1?
+        // we can just test if norm(a)^((p-1)/2) == 1?
+        let power_digits = ((F::order() - 1u32) / 2u32).to_u64_digits();
+        debug_assert!(power_digits.len() == 1);
+        let power = power_digits[0];
+
+        self.norm().exp_u64(power) == F::ONE
+    }
+
     pub fn inverse(&self) -> Option<Self> {
         match self.is_zero() {
             true => None,
             false => {
-                todo!()
+                // since norm(a)^(-1) * a^(p + p^2 + ... + p^6) * a = 1
+                // it's easy to see a^(-1) = norm(a)^(-1) * a^(p + p^2 + ... + p^6)
+                let x = self.norm_sub();
+                let norm = (self * &x).0[0];
+                // since self is not zero, norm is not zero
+                let norm_inv = norm.try_inverse().unwrap();
+
+                Some(x * norm_inv)
             }
         }
     }
@@ -91,7 +229,7 @@ impl<F: Field> SepticExtension<F> {
                 }
             }
         }
-        // i == j
+        // i == j: i \in [0, 3]
         result[0] += self.0[0] * self.0[0];
         result[2] += self.0[1] * self.0[1];
         result[4] += self.0[2] * self.0[2];
@@ -110,6 +248,20 @@ impl<F: Field> SepticExtension<F> {
         result[6] += two * term;
 
         Self(result)
+    }
+
+    pub fn sqrt(&self) -> Option<Self> {
+        todo!()
+    }
+}
+
+impl<F: Field + FromUniformBytes> SepticExtension<F> {
+    pub fn random(mut rng: impl RngCore) -> Self {
+        let mut arr = [F::ZERO; 7];
+        for i in 0..7 {
+            arr[i] = F::random(&mut rng);
+        }
+        Self(arr)
     }
 }
 
@@ -187,10 +339,30 @@ impl<F: FieldAlgebra + Copy> Sub for SepticExtension<F> {
     }
 }
 
-impl<F: Field> Mul<&Self> for SepticExtension<F> {
-    type Output = Self;
+impl<F: Field> Mul<F> for &SepticExtension<F> {
+    type Output = SepticExtension<F>;
 
-    fn mul(self, other: &Self) -> Self {
+    fn mul(self, other: F) -> Self::Output {
+        let mut result = [F::ZERO; 7];
+        for i in 0..7 {
+            result[i] = self.0[i] * other;
+        }
+        SepticExtension(result)
+    }
+}
+
+impl<F: Field> Mul<F> for SepticExtension<F> {
+    type Output = SepticExtension<F>;
+
+    fn mul(self, other: F) -> Self::Output {
+        (&self).mul(other)
+    }
+}
+
+impl<F: Field> Mul<Self> for &SepticExtension<F> {
+    type Output = SepticExtension<F>;
+
+    fn mul(self, other: Self) -> Self::Output {
         let mut result = [F::ZERO; 7];
         let five = F::from_canonical_u32(5);
         let two = F::from_canonical_u32(2);
@@ -208,7 +380,7 @@ impl<F: Field> Mul<&Self> for SepticExtension<F> {
                 }
             }
         }
-        Self(result)
+        SepticExtension(result)
     }
 }
 
@@ -216,7 +388,15 @@ impl<F: Field> Mul for SepticExtension<F> {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
-        self.mul(&other)
+        (&self).mul(&other)
+    }
+}
+
+impl<F: Field> Mul<&Self> for SepticExtension<F> {
+    type Output = Self;
+
+    fn mul(self, other: &Self) -> Self {
+        (&self).mul(other)
     }
 }
 
@@ -380,10 +560,38 @@ impl<F: Field> Add<Self> for SepticPoint<F> {
     }
 }
 
+impl<F: Field> SepticPoint<F> {
+    pub fn is_on_curve(&self) -> bool {
+        let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
+        let a: F = F::from_canonical_u32(2);
+
+        self.y.square() == self.x.square() * &self.x + (&self.x * a) + b
+    }
+}
+
+impl<F: Field + FromUniformBytes> SepticPoint<F> {
+    pub fn random(mut rng: impl RngCore) -> Self {
+        let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
+        let a: F = F::from_canonical_u32(2);
+
+        loop {
+            let x = SepticExtension::random(&mut rng);
+            let y2 = x.square() * &x + (&x * a) + &b;
+            if y2.is_square() {
+                let y = y2.sqrt().unwrap();
+
+                return Self { x, y };
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::SepticExtension;
-    use p3::babybear::BabyBear;
+    use crate::scheme::septic_curve::SepticPoint;
+    use p3::{babybear::BabyBear, field::Field};
+    use rand::thread_rng;
 
     type F = BabyBear;
     #[test]
@@ -392,10 +600,24 @@ mod tests {
         let a: SepticExtension<F> = SepticExtension::from([0, 1, 0, 0, 0, 0, 0]);
         let b: SepticExtension<F> = SepticExtension::from([0, 0, 0, 0, 1, 1, 1]);
 
-        assert_eq!(
-            a * b,
-            // z^5 + z^6 + 2*z + 5
-            SepticExtension::from([5, 2, 0, 0, 0, 1, 1])
-        )
+        let c = SepticExtension::from([5, 2, 0, 0, 0, 1, 1]);
+        assert_eq!(a * b, c);
+
+        // a^(p^2) = (a^p)^p
+        assert_eq!(c.double_frobenius(), c.frobenius().frobenius());
+
+        // norm_sub(a) * a must be in F
+        let norm = c.norm_sub() * &c;
+        assert!(norm.0[1..7].iter().all(|x| x.is_zero()));
+    }
+
+    #[test]
+    fn test_septic_curve_arithmetic() {
+        let mut rng = thread_rng();
+        let p1 = SepticPoint::<F>::random(&mut rng);
+        let p2 = SepticPoint::<F>::random(&mut rng);
+
+        let p3 = p1 + p2;
+        assert!(p3.is_on_curve());
     }
 }
