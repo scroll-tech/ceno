@@ -3,10 +3,11 @@ use ff_ext::{ExtensionField, FromUniformBytes};
 use multilinear_extensions::Expression;
 // The extension field and curve definition are adapted from
 // https://github.com/succinctlabs/sp1/blob/v5.2.1/crates/stark/src/septic_curve.rs
+use num_bigint::BigUint;
 use p3::field::{Field, FieldAlgebra};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use std::ops::{Add, Deref, Mul, Sub};
+use std::ops::{Add, Deref, Mul, MulAssign, Sub};
 
 /// F[z] / (z^6 - z - 4)
 ///
@@ -61,6 +62,16 @@ impl<F> Deref for SepticExtension<F> {
 impl<F: Field> SepticExtension<F> {
     pub fn is_zero(&self) -> bool {
         self.0.iter().all(|c| *c == F::ZERO)
+    }
+
+    pub fn zero() -> Self {
+        Self([F::ZERO; 7])
+    }
+
+    pub fn one() -> Self {
+        let mut arr = [F::ZERO; 7];
+        arr[0] = F::ONE;
+        Self(arr)
     }
 
     // returns z^{i*p} for i = 0..6
@@ -186,11 +197,11 @@ impl<F: Field> SepticExtension<F> {
         // since a^((p^7 - 1)/2) = norm(a)^((p-1)/2)
         // to test if self^((p^7 - 1) / 2) == 1?
         // we can just test if norm(a)^((p-1)/2) == 1?
-        let power_digits = ((F::order() - 1u32) / 2u32).to_u64_digits();
-        debug_assert!(power_digits.len() == 1);
-        let power = power_digits[0];
+        let exp_digits = ((F::order() - 1u32) / 2u32).to_u64_digits();
+        debug_assert!(exp_digits.len() == 1);
+        let exp = exp_digits[0];
 
-        self.norm().exp_u64(power) == F::ONE
+        self.norm().exp_u64(exp) == F::ONE
     }
 
     pub fn inverse(&self) -> Option<Self> {
@@ -250,8 +261,140 @@ impl<F: Field> SepticExtension<F> {
         Self(result)
     }
 
+    pub fn pow(&self, exp: u64) -> Self {
+        let mut result = Self::one();
+        let num_bits = 64 - exp.leading_zeros();
+        for j in (0..num_bits).rev() {
+            result = result.square();
+            if (exp >> j) & 1u64 == 1u64 {
+                result = result * self;
+            }
+        }
+        result
+    }
+
     pub fn sqrt(&self) -> Option<Self> {
-        todo!()
+        // the algorithm is adapted from [Cipolla's algorithm](https://en.wikipedia.org/wiki/Cipolla%27s_algorithm
+        // the code is taken from https://github.com/succinctlabs/sp1/blob/dev/crates/stark/src/septic_extension.rs#L623
+        let n = self.clone();
+
+        if n == Self::zero() || n == Self::one() {
+            return Some(n);
+        }
+
+        // norm = n^(1 + p + ... + p^6) = n^(p^7-1)/(p-1)
+        let norm = n.norm();
+        let exp = ((F::order() - 1u32) / 2u32).to_u64_digits()[0];
+        // euler's criterion n^((p^7-1)/2) == 1 iff n is quadratic residue
+        if norm.exp_u64(exp) != F::ONE {
+            // it's not a square
+            return None;
+        };
+
+        // n_power = n^((p+1)/2)
+        let exp = ((F::order() + 1u32) / 2u32).to_u64_digits()[0];
+        let n_power = self.pow(exp);
+
+        // n^((p^2 + p)/2)
+        let mut n_frobenius = n_power.frobenius();
+        let mut denominator = n_frobenius.clone();
+
+        // n^((p^4 + p^3)/2)
+        n_frobenius = n_frobenius.double_frobenius();
+        denominator *= n_frobenius.clone();
+        // n^((p^6 + p^5)/2)
+        n_frobenius = n_frobenius.double_frobenius();
+        // d = n^((p^6 + p^5 + p^4 + p^3 + p^2 + p) / 2)
+        // d^2 * n = norm
+        denominator *= n_frobenius;
+        // d' = d*n
+        denominator *= n;
+
+        let base = norm.inverse(); // norm^(-1)
+        let g = F::GENERATOR;
+        let mut a = F::ONE;
+        let mut non_residue = F::ONE - base;
+        let legendre_exp = (F::order() - 1u32) / 2u32; // (p-1)/2
+
+        // non_residue = a^2 - 1/norm
+        // find `a` such that non_residue is not a square in F
+        while non_residue.exp_u64(legendre_exp.to_u64_digits()[0]) == F::ONE {
+            a *= g;
+            non_residue = a.square() - base;
+        }
+
+        // (p+1)/2
+        let cipolla_exp = ((F::order() + 1u32) / 2u32).to_u64_digits()[0];
+        // x = (a+i)^((p+1)/2) where a in Fp
+        // x^2 = (a+i) * (a+i)^p = (a+i)*(a-i) = a^2 - i^2
+        //     = a^2 - non_residue = 1/norm
+        // therefore, x is the square root of 1/norm
+        let mut x = QuadraticExtension::new(a, F::ONE, non_residue);
+        x = x.pow(cipolla_exp);
+
+        // (x*d')^2 = x^2 * d^2 * n^2 = 1/norm * norm * n
+        Some(denominator * x.real)
+    }
+}
+
+// a + bi where i^2 = non_residue
+#[derive(Clone, Debug)]
+pub struct QuadraticExtension<F> {
+    pub real: F,
+    pub imag: F,
+    pub non_residue: F,
+}
+
+impl<F: Field> QuadraticExtension<F> {
+    pub fn new(real: F, imag: F, non_residue: F) -> Self {
+        Self {
+            real,
+            imag,
+            non_residue,
+        }
+    }
+
+    pub fn square(&self) -> Self {
+        // (a + bi)^2 = (a^2 + b^2*i^2) + 2ab*i
+        let real = self.real * self.real + self.non_residue * self.imag * self.imag;
+        let mut imag = self.real * self.imag;
+        imag += imag;
+
+        Self {
+            real,
+            imag,
+            non_residue: self.non_residue,
+        }
+    }
+
+    pub fn mul(&self, other: &Self) -> Self {
+        // (a + bi)(c + di) = (ac + bd*i^2) + (ad + bc)i
+        let real = self.real * other.real + self.non_residue * self.imag * other.imag;
+        let imag = self.real * other.imag + self.imag * other.real;
+
+        Self {
+            real,
+            imag,
+            non_residue: self.non_residue,
+        }
+    }
+
+    pub fn pow(&self, exp: u64) -> Self {
+        let mut result = Self {
+            real: F::ONE,
+            imag: F::ZERO,
+            non_residue: self.non_residue,
+        };
+
+        let num_bits = 64 - exp.leading_zeros();
+        for j in (0..num_bits).rev() {
+            result = result.square();
+            if (exp >> j) & 1u64 == 1u64 {
+                result = result.mul(self);
+            }
+        }
+
+        result
     }
 }
 
@@ -397,6 +540,12 @@ impl<F: Field> Mul<&Self> for SepticExtension<F> {
 
     fn mul(self, other: &Self) -> Self {
         (&self).mul(other)
+    }
+}
+
+impl<F: Field> MulAssign<Self> for SepticExtension<F> {
+    fn mul_assign(&mut self, other: Self) {
+        *self = (&*self).mul(&other);
     }
 }
 
@@ -596,6 +745,7 @@ mod tests {
     type F = BabyBear;
     #[test]
     fn test_septic_extension_arithmetic() {
+        let mut rng = thread_rng();
         // a = z, b = z^6 + z^5 + z^4
         let a: SepticExtension<F> = SepticExtension::from([0, 1, 0, 0, 0, 0, 0]);
         let b: SepticExtension<F> = SepticExtension::from([0, 0, 0, 0, 1, 1, 1]);
@@ -609,6 +759,14 @@ mod tests {
         // norm_sub(a) * a must be in F
         let norm = c.norm_sub() * &c;
         assert!(norm.0[1..7].iter().all(|x| x.is_zero()));
+
+        let d: SepticExtension<F> = SepticExtension::random(&mut rng);
+        let e = d.square();
+        assert!(e.is_square());
+
+        let f = e.sqrt().unwrap();
+        let zero = SepticExtension::zero();
+        assert!(f == d || f == zero - d);
     }
 
     #[test]

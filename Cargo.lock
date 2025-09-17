@@ -382,6 +382,7 @@ dependencies = [
  "mpcs",
  "multilinear_extensions",
  "ndarray",
+ "num-bigint",
  "once_cell",
  "p3",
  "parse-size",
