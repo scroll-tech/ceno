@@ -702,8 +702,8 @@ impl<F: Field> Add<Self> for SepticPoint<F> {
     fn add(self, other: Self) -> Self {
         assert!(other.x != self.x, "other = self or other = -self");
         let slope = (other.y - &self.y) * (other.x.clone() - &self.x).inverse().unwrap();
-        let x = slope.square() - (self.x.clone() + other.x);
-        let y = slope * (x.clone() - self.x) - self.y;
+        let x = slope.square() - (&self.x + &other.x);
+        let y = slope * (self.x - &x) - self.y;
 
         Self { x, y }
     }
