@@ -7,10 +7,10 @@ use ff_ext::ExtensionField;
 use itertools::izip;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
-    mle::{ArcMultilinearExtension, FieldType, MultilinearExtension, Point},
+    mle::{ArcMultilinearExtension, MultilinearExtension, Point},
     wit_infer_by_monomial_expr,
 };
-use p3::field::{FieldAlgebra, TwoAdicField};
+use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{iter, rc::Rc, sync::Arc};
 use witness::RowMajorMatrix;
@@ -64,21 +64,7 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtension<'a
     }
 
     fn bh_signature(&self) -> E {
-        match &self.evaluations() {
-            FieldType::Base(slice) => E::from(
-                slice
-                    .iter()
-                    .enumerate()
-                    .map(|(i, v)| E::BaseField::from_canonical_u32(i as u32 + 1) + *v)
-                    .product::<E::BaseField>(),
-            ),
-            FieldType::Ext(slice) => slice
-                .iter()
-                .enumerate()
-                .map(|(i, v)| E::from_canonical_u32(i as u32 + 1) + *v)
-                .product::<E>(),
-            _ => unreachable!(),
-        }
+        self.bh_signature()
     }
 }
 
