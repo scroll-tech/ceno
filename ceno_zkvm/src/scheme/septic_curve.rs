@@ -3,11 +3,13 @@ use ff_ext::{ExtensionField, FromUniformBytes};
 use multilinear_extensions::Expression;
 // The extension field and curve definition are adapted from
 // https://github.com/succinctlabs/sp1/blob/v5.2.1/crates/stark/src/septic_curve.rs
-use num_bigint::BigUint;
 use p3::field::{Field, FieldAlgebra};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use std::ops::{Add, Deref, Mul, MulAssign, Sub};
+use std::{
+    iter::Sum,
+    ops::{Add, Deref, Mul, MulAssign, Sub},
+};
 
 /// F[z] / (z^6 - z - 4)
 ///
@@ -694,23 +696,63 @@ impl<E: ExtensionField> SymbolicSepticExtension<E> {
 pub struct SepticPoint<F> {
     pub x: SepticExtension<F>,
     pub y: SepticExtension<F>,
+    pub is_infinity: bool,
+}
+
+impl<F: Field> SepticPoint<F> {
+    pub fn double(&self) -> Self {
+        todo!()
+    }
 }
 
 impl<F: Field> Add<Self> for SepticPoint<F> {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        assert!(other.x != self.x, "other = self or other = -self");
+        if self.is_infinity {
+            return other;
+        }
+
+        if other.is_infinity {
+            return self;
+        }
+
+        if self.x == other.x {
+            if self.y == other.y {
+                return self.double();
+            } else {
+                return Self {
+                    x: SepticExtension::zero(),
+                    y: SepticExtension::zero(),
+                    is_infinity: true,
+                };
+            }
+        }
+
         let slope = (other.y - &self.y) * (other.x.clone() - &self.x).inverse().unwrap();
         let x = slope.square() - (&self.x + &other.x);
         let y = slope * (self.x - &x) - self.y;
 
-        Self { x, y }
+        Self {
+            x,
+            y,
+            is_infinity: false,
+        }
+    }
+}
+
+impl<F: Field> Sum<Self> for SepticPoint<F> {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), |acc, p| acc + p)
     }
 }
 
 impl<F: Field> SepticPoint<F> {
     pub fn is_on_curve(&self) -> bool {
+        if self.is_infinity && self.x.is_zero() && self.y.is_zero() {
+            return true;
+        }
+
         let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
         let a: F = F::from_canonical_u32(2);
 
@@ -729,7 +771,11 @@ impl<F: Field + FromUniformBytes> SepticPoint<F> {
             if y2.is_square() {
                 let y = y2.sqrt().unwrap();
 
-                return Self { x, y };
+                return Self {
+                    x,
+                    y,
+                    is_infinity: false,
+                };
             }
         }
     }

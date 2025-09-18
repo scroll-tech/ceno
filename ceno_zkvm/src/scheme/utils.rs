@@ -29,7 +29,7 @@ use rayon::{
     },
     prelude::ParallelSliceMut,
 };
-use std::{iter, sync::Arc};
+use std::{array::from_fn, iter, sync::Arc};
 use witness::next_pow2_instance_padding;
 
 // first computes the masked mle'[j] = mle[j] if j < num_instance, else default
@@ -343,7 +343,6 @@ pub fn infer_tower_product_witness<E: ExtensionField>(
 ///
 /// The relation between layer i and layer i+1 is as follows:
 ///     0 = p[i][b] - (p[i+1][0,b] + p[i+1][1,b])
-///
 pub fn infer_septic_sum_witness<E: ExtensionField>(
     p_mles: Vec<MultilinearExtension<E>>,
 ) -> Vec<Vec<MultilinearExtension<E>>> {
@@ -352,12 +351,12 @@ pub fn infer_septic_sum_witness<E: ExtensionField>(
 
     // +1 as the input layer has 2*N points where N = 2^num_vars
     // and the output layer has 2 points
-    let num_layers = p_mles[0].num_vars() + 1; 
+    let num_layers = p_mles[0].num_vars() + 1;
 
     let mut layers = Vec::with_capacity(num_layers);
     layers.push(p_mles);
 
-    for _ in (0..num_layers-1).rev() {
+    for _ in (0..num_layers - 1).rev() {
         let input_layer = layers.last().unwrap();
         let p = input_layer[0..14]
             .iter()
@@ -385,31 +384,22 @@ pub fn infer_septic_sum_witness<E: ExtensionField>(
                     let offset = chunk * 14;
 
                     let p1 = SepticPoint {
-                        x: SepticExtension(std::array::from_fn(|i| p[offset + i][row])),
-                        y: SepticExtension(std::array::from_fn(|i| p[offset + i + 7][row])),
+                        x: SepticExtension(from_fn(|i| p[i][row])),
+                        y: SepticExtension(from_fn(|i| p[i + 7][row])),
+                        is_infinity: false,
                     };
                     let p2 = SepticPoint {
-                        x: SepticExtension(std::array::from_fn(|i| q[offset + i][row])),
-                        y: SepticExtension(std::array::from_fn(|i| q[offset + i + 7][row])),
+                        x: SepticExtension(from_fn(|i| q[i][row])),
+                        y: SepticExtension(from_fn(|i| q[i + 7][row])),
+                        is_infinity: false,
                     };
+                    // TODO: change to debug_assert
+                    assert!(p1.is_on_curve() && p2.is_on_curve());
 
                     let p3 = p1 + p2;
 
-                    output[offset..]
-                        .iter_mut()
-                        .take(7)
-                        .enumerate()
-                        .for_each(|(i, out)| {
-                            *out = p3.x.0[i];
-                        });
-                    output[offset..]
-                        .iter_mut()
-                        .skip(7)
-                        .take(7)
-                        .enumerate()
-                        .for_each(|(i, out)| {
-                            *out = p3.y.0[i];
-                        });
+                    output[offset..offset + 7].clone_from_slice(&p3.x);
+                    output[offset + 7..offset + 14].clone_from_slice(&p3.y);
                 });
         });
 
@@ -639,18 +629,22 @@ pub fn gkr_witness<
 #[cfg(test)]
 mod tests {
 
-    use ff_ext::{FieldInto, GoldilocksExt2};
+    use ff_ext::{BabyBearExt4, FieldInto, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
         commutative_op_mle_pair,
         mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
         smart_slice::SmartSlice,
-        util::ceil_log2,
+        util::{ceil_log2, transpose},
     };
-    use p3::field::FieldAlgebra;
+    use p3::{babybear::BabyBear, field::FieldAlgebra};
 
-    use crate::scheme::utils::{
-        infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+    use crate::scheme::{
+        septic_curve::{SepticExtension, SepticPoint},
+        utils::{
+            infer_septic_sum_witness, infer_tower_logup_witness, infer_tower_product_witness,
+            interleaving_mles_to_mles,
+        },
     };
 
     #[test]
@@ -956,5 +950,58 @@ mod tests {
                     .sum::<E>(),
             ]))
         );
+    }
+
+    #[test]
+    fn test_infer_septic_addition_witness() {
+        type F = BabyBear;
+        type E = BabyBearExt4;
+
+        let n_points = 1 << 4;
+        let mut rng = rand::thread_rng();
+        let points = (0..n_points)
+            .map(|_| SepticPoint::<F>::random(&mut rng))
+            .collect_vec();
+
+        // transform points to row major matrix
+        let trace = points
+            .chunks_exact(2)
+            .map(|points| {
+                points
+                    .iter()
+                    .flat_map(|p| p.x.0.iter().chain(p.y.0.iter()).copied())
+                    .collect_vec()
+            })
+            .collect_vec();
+
+        let p_mles: Vec<MultilinearExtension<E>> = transpose(trace)
+            .into_iter()
+            .map(|v| v.into_mle())
+            .collect_vec();
+
+        let layers = infer_septic_sum_witness(p_mles);
+        let output_layer = &layers[0];
+        assert!(output_layer.iter().all(|mle| mle.num_vars() == 0));
+        assert!(output_layer.len() == 28);
+
+        // recover points from output layer
+        let output_points: Vec<SepticPoint<F>> = output_layer
+            .chunks_exact(14)
+            .map(|mles| {
+                mles.iter()
+                    .map(|mle| mle.get_base_field_vec()[0])
+                    .collect_vec()
+            })
+            .map(|chunk| SepticPoint {
+                x: SepticExtension(chunk[0..7].try_into().unwrap()),
+                y: SepticExtension(chunk[7..14].try_into().unwrap()),
+                is_infinity: false,
+            })
+            .collect_vec();
+        assert!(output_points.iter().all(|p| p.is_on_curve()));
+
+        let point_acc: SepticPoint<F> = output_points.into_iter().sum();
+        let expected_acc: SepticPoint<F> = points.into_iter().sum();
+        assert_eq!(point_acc, expected_acc);
     }
 }
