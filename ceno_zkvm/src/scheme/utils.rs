@@ -393,8 +393,7 @@ pub fn infer_septic_sum_witness<E: ExtensionField>(
                         y: SepticExtension(from_fn(|i| q[i + 7][row])),
                         is_infinity: false,
                     };
-                    // TODO: change to debug_assert
-                    assert!(p1.is_on_curve() && p2.is_on_curve());
+                    debug_assert!(p1.is_on_curve() && p2.is_on_curve());
 
                     let p3 = p1 + p2;
 
@@ -959,21 +958,25 @@ mod tests {
 
         let n_points = 1 << 4;
         let mut rng = rand::thread_rng();
+        // sample n points
         let points = (0..n_points)
             .map(|_| SepticPoint::<F>::random(&mut rng))
             .collect_vec();
-
+        
         // transform points to row major matrix
-        let trace = points
-            .chunks_exact(2)
-            .map(|points| {
-                points
+        let trace = points[0..n_points / 2]
+            .iter()
+            .zip(points[n_points / 2..n_points].iter())
+            .map(|(p, q)| {
+                [p, q]
                     .iter()
-                    .flat_map(|p| p.x.0.iter().chain(p.y.0.iter()).copied())
+                    .flat_map(|p| p.x.0.iter().chain(p.y.0.iter()))
+                    .copied()
                     .collect_vec()
             })
             .collect_vec();
 
+        // transpose row major matrix to column major matrix
         let p_mles: Vec<MultilinearExtension<E>> = transpose(trace)
             .into_iter()
             .map(|v| v.into_mle())
@@ -999,6 +1002,7 @@ mod tests {
             })
             .collect_vec();
         assert!(output_points.iter().all(|p| p.is_on_curve()));
+        assert_eq!(output_points.len(), 2);
 
         let point_acc: SepticPoint<F> = output_points.into_iter().sum();
         let expected_acc: SepticPoint<F> = points.into_iter().sum();
