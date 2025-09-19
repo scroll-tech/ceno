@@ -692,7 +692,7 @@ impl<E: ExtensionField> SymbolicSepticExtension<E> {
 /// Note that
 /// 1. The curve's cofactor is 1
 /// 2. The curve's order is a large prime number of 31x7 bits
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SepticPoint<F> {
     pub x: SepticExtension<F>,
     pub y: SepticExtension<F>,
@@ -702,6 +702,16 @@ pub struct SepticPoint<F> {
 impl<F: Field> SepticPoint<F> {
     pub fn double(&self) -> Self {
         todo!()
+    }
+}
+
+impl<F: Field> Default for SepticPoint<F> {
+    fn default() -> Self {
+        Self {
+            x: SepticExtension::zero(),
+            y: SepticExtension::zero(),
+            is_infinity: true,
+        }
     }
 }
 
@@ -721,6 +731,8 @@ impl<F: Field> Add<Self> for SepticPoint<F> {
             if self.y == other.y {
                 return self.double();
             } else {
+                assert!((self.y + other.y).is_zero());
+
                 return Self {
                     x: SepticExtension::zero(),
                     y: SepticExtension::zero(),
