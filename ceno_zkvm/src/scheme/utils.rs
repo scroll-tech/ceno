@@ -2,6 +2,7 @@ use crate::{
     scheme::{
         constants::MIN_PAR_SIZE,
         hal::{MainSumcheckProver, ProofInput, ProverDevice},
+        septic_curve::{SepticExtension, SepticPoint},
     },
     structs::ComposedConstrainSystem,
 };
@@ -20,6 +21,7 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
+use p3::matrix::{Matrix, dense::RowMajorMatrix};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
@@ -27,7 +29,7 @@ use rayon::{
     },
     prelude::ParallelSliceMut,
 };
-use std::{iter, sync::Arc};
+use std::{array::from_fn, iter, sync::Arc};
 use witness::next_pow2_instance_padding;
 
 // first computes the masked mle'[j] = mle[j] if j < num_instance, else default
@@ -157,6 +159,11 @@ macro_rules! tower_mle_4 {
     }};
 }
 
+pub fn log2_strict_usize(n: usize) -> usize {
+    assert!(n.is_power_of_two());
+    n.trailing_zeros() as usize
+}
+
 /// infer logup witness from last layer
 /// return is the ([p1,p2], [q1,q2]) for each layer
 pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
@@ -255,46 +262,161 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
         .collect_vec()
 }
 
-/// infer tower witness from last layer
-pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
+/// Infer tower witness from input layer (layer 0 is the output layer and layer n is the input layer).
+/// The relation between layer i and layer i+1 is as follows:
+///      prod[i][b] = ∏_s prod[i+1][s,b]
+/// where 2^s is the fanin of the product gate `num_product_fanin`.
+pub fn infer_tower_product_witness<E: ExtensionField>(
     num_vars: usize,
     last_layer: Vec<MultilinearExtension<'_, E>>,
     num_product_fanin: usize,
 ) -> Vec<Vec<MultilinearExtension<'_, E>>> {
+    // sanity check
     assert!(last_layer.len() == num_product_fanin);
-    assert_eq!(num_product_fanin % 2, 0);
-    let log2_num_product_fanin = ceil_log2(num_product_fanin);
-    let mut wit_layers =
-        (0..(num_vars / log2_num_product_fanin) - 1).fold(vec![last_layer], |mut acc, _| {
-            let next_layer = acc.last().unwrap();
-            let cur_len = next_layer[0].evaluations().len() / num_product_fanin;
-            let cur_layer: Vec<MultilinearExtension<E>> = (0..num_product_fanin)
-                .map(|index| {
-                    let mut evaluations = vec![E::ONE; cur_len];
-                    next_layer.chunks_exact(2).for_each(|f| {
-                        match (f[0].evaluations(), f[1].evaluations()) {
-                            (FieldType::Ext(f1), FieldType::Ext(f2)) => {
-                                let start: usize = index * cur_len;
-                                (start..(start + cur_len))
+    assert!(num_product_fanin.is_power_of_two());
+
+    let log2_num_product_fanin = log2_strict_usize(num_product_fanin);
+    assert!(num_vars % log2_num_product_fanin == 0);
+    assert!(
+        last_layer
+            .iter()
+            .all(|p| p.num_vars() == num_vars - log2_num_product_fanin)
+    );
+
+    let num_layers = num_vars / log2_num_product_fanin;
+
+    let mut wit_layers = Vec::with_capacity(num_layers);
+    wit_layers.push(last_layer);
+
+    for _ in (0..num_layers - 1).rev() {
+        let input_layer = wit_layers.last().unwrap();
+        let output_len = input_layer[0].evaluations().len() / num_product_fanin;
+
+        let output_layer: Vec<MultilinearExtension<E>> = (0..num_product_fanin)
+            .map(|index| {
+                // avoid the overhead of vector initialization
+                let mut evaluations: Vec<E> = Vec::with_capacity(output_len);
+                unsafe {
+                    // will be filled immediately
+                    evaluations.set_len(output_len);
+                }
+
+                input_layer.chunks_exact(2).enumerate().for_each(|(i, f)| {
+                    match (f[0].evaluations(), f[1].evaluations()) {
+                        (FieldType::Ext(f1), FieldType::Ext(f2)) => {
+                            let start: usize = index * output_len;
+
+                            if i == 0 {
+                                (start..(start + output_len))
                                     .into_par_iter()
                                     .zip(evaluations.par_iter_mut())
                                     .with_min_len(MIN_PAR_SIZE)
-                                    .map(|(index, evaluations)| {
+                                    .for_each(|(index, evaluations)| {
+                                        *evaluations = f1[index] * f2[index]
+                                    });
+                            } else {
+                                (start..(start + output_len))
+                                    .into_par_iter()
+                                    .zip(evaluations.par_iter_mut())
+                                    .with_min_len(MIN_PAR_SIZE)
+                                    .for_each(|(index, evaluations)| {
                                         *evaluations *= f1[index] * f2[index]
-                                    })
-                                    .collect()
+                                    });
                             }
-                            _ => unreachable!("must be extension field"),
                         }
-                    });
-                    evaluations.into_mle()
-                })
-                .collect_vec();
-            acc.push(cur_layer);
-            acc
-        });
+                        _ => unreachable!("must be extension field"),
+                    }
+                });
+                evaluations.into_mle()
+            })
+            .collect_vec();
+        wit_layers.push(output_layer);
+    }
+
     wit_layers.reverse();
+
     wit_layers
+}
+
+/// Infer from input layer (layer 0) to the output layer (layer n)
+/// Note that each layer has 2 * 7 * 2 multilinear polynomials.
+///
+/// The relation between layer i and layer i+1 is as follows:
+///     0 = p[i][b] - (p[i+1][0,b] + p[i+1][1,b])
+pub fn infer_septic_sum_witness<E: ExtensionField>(
+    p_mles: Vec<MultilinearExtension<E>>,
+) -> Vec<Vec<MultilinearExtension<E>>> {
+    assert_eq!(p_mles.len(), 2 * 7 * 2);
+    assert!(p_mles.iter().map(|p| p.num_vars()).all_equal());
+
+    // +1 as the input layer has 2*N points where N = 2^num_vars
+    // and the output layer has 2 points
+    let num_layers = p_mles[0].num_vars() + 1;
+
+    let mut layers = Vec::with_capacity(num_layers);
+    layers.push(p_mles);
+
+    for _ in (0..num_layers - 1).rev() {
+        let input_layer = layers.last().unwrap();
+        let p = input_layer[0..14]
+            .iter()
+            .map(|mle| mle.get_base_field_vec())
+            .collect_vec();
+        let q = input_layer[14..28]
+            .iter()
+            .map(|mle| mle.get_base_field_vec())
+            .collect_vec();
+
+        let output_len = p[0].len() / 2;
+        let mut outputs: Vec<E::BaseField> = Vec::with_capacity(28 * output_len);
+        unsafe {
+            // will be filled immediately
+            outputs.set_len(28 * output_len);
+        }
+
+        (0..2).into_iter().for_each(|chunk| {
+            (0..output_len)
+                .into_par_iter()
+                .with_min_len(MIN_PAR_SIZE)
+                .zip(outputs.par_chunks_mut(28))
+                .for_each(|(idx, output)| {
+                    let row = chunk * output_len + idx;
+                    let offset = chunk * 14;
+
+                    let p1 = SepticPoint {
+                        x: SepticExtension(from_fn(|i| p[i][row])),
+                        y: SepticExtension(from_fn(|i| p[i + 7][row])),
+                        is_infinity: false,
+                    };
+                    let p2 = SepticPoint {
+                        x: SepticExtension(from_fn(|i| q[i][row])),
+                        y: SepticExtension(from_fn(|i| q[i + 7][row])),
+                        is_infinity: false,
+                    };
+                    debug_assert!(p1.is_on_curve() && p2.is_on_curve());
+
+                    let p3 = p1 + p2;
+
+                    output[offset..offset + 7].clone_from_slice(&p3.x);
+                    output[offset + 7..offset + 14].clone_from_slice(&p3.y);
+                });
+        });
+
+        // transpose
+        let output_mles = (0..28)
+            .map(|i| {
+                (0..output_len)
+                    .into_par_iter()
+                    .map(|j| outputs[j * 28 + i])
+                    .collect::<Vec<_>>()
+                    .into_mle()
+            })
+            .collect_vec();
+        layers.push(output_mles);
+    }
+
+    layers.reverse();
+    layers
 }
 
 pub fn build_main_witness<
@@ -506,18 +628,22 @@ pub fn gkr_witness<
 #[cfg(test)]
 mod tests {
 
-    use ff_ext::{FieldInto, GoldilocksExt2};
+    use ff_ext::{BabyBearExt4, FieldInto, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
         commutative_op_mle_pair,
         mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
         smart_slice::SmartSlice,
-        util::ceil_log2,
+        util::{ceil_log2, transpose},
     };
-    use p3::field::FieldAlgebra;
+    use p3::{babybear::BabyBear, field::FieldAlgebra};
 
-    use crate::scheme::utils::{
-        infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+    use crate::scheme::{
+        septic_curve::{SepticExtension, SepticPoint},
+        utils::{
+            infer_septic_sum_witness, infer_tower_logup_witness, infer_tower_product_witness,
+            interleaving_mles_to_mles,
+        },
     };
 
     #[test]
@@ -823,5 +949,63 @@ mod tests {
                     .sum::<E>(),
             ]))
         );
+    }
+
+    #[test]
+    fn test_infer_septic_addition_witness() {
+        type F = BabyBear;
+        type E = BabyBearExt4;
+
+        let n_points = 1 << 4;
+        let mut rng = rand::thread_rng();
+        // sample n points
+        let points = (0..n_points)
+            .map(|_| SepticPoint::<F>::random(&mut rng))
+            .collect_vec();
+        
+        // transform points to row major matrix
+        let trace = points[0..n_points / 2]
+            .iter()
+            .zip(points[n_points / 2..n_points].iter())
+            .map(|(p, q)| {
+                [p, q]
+                    .iter()
+                    .flat_map(|p| p.x.0.iter().chain(p.y.0.iter()))
+                    .copied()
+                    .collect_vec()
+            })
+            .collect_vec();
+
+        // transpose row major matrix to column major matrix
+        let p_mles: Vec<MultilinearExtension<E>> = transpose(trace)
+            .into_iter()
+            .map(|v| v.into_mle())
+            .collect_vec();
+
+        let layers = infer_septic_sum_witness(p_mles);
+        let output_layer = &layers[0];
+        assert!(output_layer.iter().all(|mle| mle.num_vars() == 0));
+        assert!(output_layer.len() == 28);
+
+        // recover points from output layer
+        let output_points: Vec<SepticPoint<F>> = output_layer
+            .chunks_exact(14)
+            .map(|mles| {
+                mles.iter()
+                    .map(|mle| mle.get_base_field_vec()[0])
+                    .collect_vec()
+            })
+            .map(|chunk| SepticPoint {
+                x: SepticExtension(chunk[0..7].try_into().unwrap()),
+                y: SepticExtension(chunk[7..14].try_into().unwrap()),
+                is_infinity: false,
+            })
+            .collect_vec();
+        assert!(output_points.iter().all(|p| p.is_on_curve()));
+        assert_eq!(output_points.len(), 2);
+
+        let point_acc: SepticPoint<F> = output_points.into_iter().sum();
+        let expected_acc: SepticPoint<F> = points.into_iter().sum();
+        assert_eq!(point_acc, expected_acc);
     }
 }
