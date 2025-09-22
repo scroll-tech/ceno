@@ -118,8 +118,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .zip_eq(layer.expr_names.par_iter())
             .zip_eq(out_evals.par_iter())
             .map(|((expr, expr_name), (_, out_eval))| {
-                if cfg!(debug_assertions) {
-                    if let EvalExpression::Zero = out_eval {
+                if cfg!(debug_assertions)
+                    && let EvalExpression::Zero = out_eval {
                         assert!(
                             wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
                                 .evaluations()
@@ -128,7 +128,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                             layer.name
                         );
                     }
-                };
+                ;
                 match out_eval {
                     EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
                         wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
@@ -161,8 +161,8 @@ where
         .zip_eq(layer.expr_names.par_iter())
         .zip_eq(out_evals.par_iter())
         .map(|((expr, expr_name), (_, out_eval))| {
-            if cfg!(debug_assertions) {
-                if let EvalExpression::Zero = out_eval {
+            if cfg!(debug_assertions)
+                && let EvalExpression::Zero = out_eval {
                     assert!(
                         wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
                             .evaluations()
@@ -171,7 +171,7 @@ where
                         layer.name
                     );
                 }
-            };
+            ;
             match out_eval {
                 EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
                     wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)

@@ -51,11 +51,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     let next_carry = carries.get(i);
 
                     let mut limb_expr = a.clone() + b.clone();
-                    if carry.is_some() {
-                        limb_expr = limb_expr.clone() + carry.unwrap().expr();
+                    if let Some(carry) = carry {
+                        limb_expr = limb_expr.clone() + carry.expr();
                     }
-                    if next_carry.is_some() {
-                        limb_expr = limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+                    if let Some(next_carry) = next_carry {
+                        limb_expr = limb_expr.clone() - next_carry.expr() * Self::POW_OF_C;
                     }
 
                     circuit_builder
@@ -197,11 +197,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             let carry = if i > 0 { c_carries.get(i - 1) } else { None };
             let next_carry = c_carries.get(i);
             result_c[i] = result_c[i].clone() - c_limb.expr();
-            if carry.is_some() {
-                result_c[i] = result_c[i].clone() + carry.unwrap().expr();
+            if let Some(carry) = carry {
+                result_c[i] = result_c[i].clone() + carry.expr();
             }
-            if next_carry.is_some() {
-                result_c[i] = result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+            if let Some(next_carry) = next_carry {
+                result_c[i] = result_c[i].clone() - next_carry.expr() * Self::POW_OF_C;
             }
             circuit_builder.require_zero(|| format!("mul_zero_{i}"), result_c[i].clone())?;
             Ok::<(), CircuitBuilderError>(())

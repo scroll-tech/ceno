@@ -1,5 +1,4 @@
 #![deny(clippy::cargo)]
-#![feature(strict_overflow_ops)]
 #![feature(linkage)]
 use getrandom::{Error, register_custom_getrandom};
 

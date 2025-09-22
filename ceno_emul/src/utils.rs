@@ -13,7 +13,7 @@ impl<'a, const LENGTH: usize> MemoryView<'a, LENGTH> {
     /// Creates a new memory segment view
     /// Asserts that `start` is a multiple of `WORD_SIZE`
     pub fn new(vm: &'a VMState, start: u32) -> Self {
-        assert!(start % WORD_SIZE as u32 == 0);
+        assert!(start.is_multiple_of(WORD_SIZE as u32));
         // TODO: do we need stricter alignment requirements for keccak (u64 array)
         MemoryView {
             vm,
