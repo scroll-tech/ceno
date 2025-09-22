@@ -119,16 +119,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .zip_eq(out_evals.par_iter())
             .map(|((expr, expr_name), (_, out_eval))| {
                 if cfg!(debug_assertions)
-                    && let EvalExpression::Zero = out_eval {
-                        assert!(
-                            wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
-                                .evaluations()
-                                .is_zero(),
-                            "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
-                            layer.name
-                        );
-                    }
-                ;
+                    && let EvalExpression::Zero = out_eval
+                {
+                    assert!(
+                        wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
+                            .evaluations()
+                            .is_zero(),
+                        "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
+                        layer.name
+                    );
+                };
                 match out_eval {
                     EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
                         wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
@@ -162,16 +162,16 @@ where
         .zip_eq(out_evals.par_iter())
         .map(|((expr, expr_name), (_, out_eval))| {
             if cfg!(debug_assertions)
-                && let EvalExpression::Zero = out_eval {
-                    assert!(
-                        wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
-                            .evaluations()
-                            .is_zero(),
-                        "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
-                        layer.name
-                    );
-                }
-            ;
+                && let EvalExpression::Zero = out_eval
+            {
+                assert!(
+                    wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
+                        .evaluations()
+                        .is_zero(),
+                    "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
+                    layer.name
+                );
+            };
             match out_eval {
                 EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
                     wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)

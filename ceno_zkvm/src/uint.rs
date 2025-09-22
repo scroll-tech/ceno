@@ -328,7 +328,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn from_u8_limbs(
         x: &UIntLimbs<M, 8, E>,
     ) -> Result<UIntLimbs<M, C, E>, CircuitBuilderError> {
-        assert!(C.is_multiple_of(8), "we only support multiple of 8 limb sizes");
+        assert!(
+            C.is_multiple_of(8),
+            "we only support multiple of 8 limb sizes"
+        );
         assert!(x.carries.is_none());
         let k = C / 8;
         let shift_pows = {
@@ -358,7 +361,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         x: UIntLimbs<M, C, E>,
     ) -> UIntLimbs<M, 8, E> {
-        assert!(C.is_multiple_of(8), "we only support multiple of 8 limb sizes");
+        assert!(
+            C.is_multiple_of(8),
+            "we only support multiple of 8 limb sizes"
+        );
         assert!(x.carries.is_none());
         let k = C / 8;
         let shift_pows = {

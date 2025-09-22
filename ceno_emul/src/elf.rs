@@ -271,9 +271,10 @@ fn collect_addr_symbols_mapping<'data>(
     if let Some((symtab, strtab)) = elf.symbol_table()? {
         for symbol in symtab.iter() {
             if let Ok(name) = strtab.get(symbol.st_name as usize)
-                && !name.is_empty() && symbol.st_value != 0 {
-                    symbols.insert(symbol.st_value, name.to_string());
-
+                && !name.is_empty()
+                && symbol.st_value != 0
+            {
+                symbols.insert(symbol.st_value, name.to_string());
             }
         }
     }
