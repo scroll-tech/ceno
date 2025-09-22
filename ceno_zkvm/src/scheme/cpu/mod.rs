@@ -48,6 +48,7 @@ pub type TowerRelationOutput<E> = (
     Vec<Vec<E>>,
     Vec<Vec<E>>,
 );
+
 pub struct CpuTowerProver;
 
 impl CpuTowerProver {
@@ -81,6 +82,7 @@ impl CpuTowerProver {
         let max_round_index = prod_specs
             .iter()
             .chain(logup_specs.iter())
+            .chain(ecc_spec.iter())
             .map(|m| m.witness.len())
             .max()
             .unwrap()
@@ -141,7 +143,11 @@ impl CpuTowerProver {
             let mut witness_lk_expr = vec![vec![]; logup_specs_len];
 
             let mut eq: MultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle();
+            let eq_len = eq.evaluations.len();
+            let mut eq_prime = eq.get_ext_field_vec()[0..eq_len / 2].to_vec().into_mle();
+
             let eq_expr = expr_builder.lift(Either::Right(&mut eq));
+            let eq_prime_expr = expr_builder.lift(Either::Right(&mut eq_prime));
 
             // processing exprs
             for group_witness in layer_witness.iter_mut() {
@@ -210,13 +216,22 @@ impl CpuTowerProver {
                         );
                     }
                     GroupedMLE::EcAdd((prev_layer, curr_layer)) => {
-                        assert_eq!(curr_layer.len(), 2 * 14); // 3 points, each point has 14 polys
-                        assert_eq!(prev_layer.len(), 2 * 14);
+                        assert_eq!(curr_layer.len(), 3 * 14); // 3 points, each point has 14 polys
+                        assert_eq!(prev_layer.len(), 3 * 14);
                         let (x1, rest) = curr_layer.split_at(7);
                         let (y1, rest) = rest.split_at(7);
                         let (x2, rest) = rest.split_at(7);
-                        let (y2, _) = rest.split_at(7);
-                        let (x3, y3) = prev_layer.split_at(7);
+                        let (y2, rest) = rest.split_at(7);
+                        let (x3, y3) = rest.split_at(7);
+
+                        // x1'[b] = x3[0,b]
+                        // y1'[b] = y3[0,b]
+                        // x2'[b] = x3[1,b]
+                        // y2'[b] = y3[1,b]
+                        let (x1_prime, rest) = prev_layer.split_at_mut(7);
+                        let (y1_prime, rest) = rest.split_at_mut(7);
+                        let (x2_prime, rest) = rest.split_at_mut(7);
+                        let (y2_prime, _) = rest.split_at_mut(7);
 
                         let x1 = &SymbolicSepticExtension::new(
                             x1.into_iter()
@@ -248,17 +263,60 @@ impl CpuTowerProver {
                                 .map(|y| expr_builder.lift(Either::Left(y)))
                                 .collect(),
                         );
+                        let x1_prime_expr = SymbolicSepticExtension::new(
+                            x1_prime
+                                .iter_mut()
+                                .map(|x| expr_builder.lift(x.to_either()))
+                                .collect(),
+                        );
+                        let y1_prime_expr = SymbolicSepticExtension::new(
+                            y1_prime
+                                .iter_mut()
+                                .map(|y| expr_builder.lift(y.to_either()))
+                                .collect(),
+                        );
+                        let x2_prime_expr = SymbolicSepticExtension::new(
+                            x2_prime
+                                .iter_mut()
+                                .map(|x| expr_builder.lift(x.to_either()))
+                                .collect(),
+                        );
+                        let y2_prime_expr = SymbolicSepticExtension::new(
+                            y2_prime
+                                .iter_mut()
+                                .map(|y| expr_builder.lift(y.to_either()))
+                                .collect(),
+                        );
 
-                        // 0 = eq * ((x3 + x1 + x2) * (x2 - x1)^2 - (y2 - y1)^2)
+                        // layer i: x3', y3', x1', y1', x2', y2', each has `i` variables
+                        // we copy the first half of x3 to x1', 2nd half to x2' and
+                        // copy the first half of y3 to y1', 2nd half to y2'.
+                        //
+                        // x1'[b] = x3[0,b], y1'[b] = y3[0,b]
+                        // x2'[b] = x3[1,b], y2'[b] = y3[1,b]
+                        //
+                        // layer i+1: x3, y3, x1, y1, x2, y2, each has `i+1` variables
+                        // we requires the elliptic curve addition constraints hold at layer i+1.
+                        // 1. 0 = \sum_b eq(rt,b) * ((x3 + x1 + x2) * (x2 - x1)^2 - (y2 - y1)^2)
                         exprs.extend(
                             (((x3 + x1 + x2) * (x2 - x1) * (x2 - x1) - (y2 - y1) * (y2 - y1))
                                 * &eq_expr)
                                 .to_exprs(),
                         );
-                        // 0 = eq * ((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3))
+                        // 2. 0 = \sum_b eq(rt,b) * ((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3))
                         exprs.extend(
                             (((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3)) * &eq_expr).to_exprs(),
                         );
+
+                        // with len = rt.len(), rt' = rt[0..len-1]
+                        // x1'[rt'] = \sum_b' eq(rt',b') * x3[0,b']
+                        // y1'[rt'] = \sum_b' eq(rt',b') * y3[0,b']
+                        // x2'[rt'] = \sum_b' eq(rt',b') * x3[1,b']
+                        // y2'[rt'] = \sum_b' eq(rt',b') * y3[1,b']
+                        exprs.extend((x1_prime_expr * &eq_prime_expr).to_exprs());
+                        exprs.extend((y1_prime_expr * &eq_prime_expr).to_exprs());
+                        exprs.extend((x2_prime_expr * &eq_prime_expr).to_exprs());
+                        exprs.extend((y2_prime_expr * &eq_prime_expr).to_exprs());
                     }
                 }
             }
@@ -601,7 +659,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 
         // Then prove the tower relation
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
-        let (rt, proofs) = CpuTowerProver::create_proof(prod_specs, logup_specs, 2, transcript);
+        let (rt, proofs) =
+            CpuTowerProver::create_proof(prod_specs, logup_specs, None, 2, transcript);
 
         let lk_out_evals = out_evals.pop().unwrap();
         let w_out_evals = out_evals.pop().unwrap();
@@ -905,13 +964,68 @@ where
 
 #[cfg(test)]
 mod tests {
+    use ff_ext::BabyBearExt4;
+    use gkr_iop::cpu::CpuBackend;
+    use itertools::Itertools;
+    use mpcs::{Basefold, BasefoldRSParams};
+    use multilinear_extensions::{
+        mle::{IntoMLE, MultilinearExtension},
+        util::transpose,
+    };
+    use p3::babybear::BabyBear;
+    use transcript::BasicTranscript;
+
+    use crate::scheme::{
+        cpu::CpuTowerProver, hal::TowerProverSpec, septic_curve::SepticPoint,
+        utils::infer_septic_sum_witness,
+    };
 
     #[test]
     fn test_ecc_tower_prover() {
+        type E = BabyBearExt4;
+        type F = BabyBear;
+        type PCS = Basefold<E, BasefoldRSParams>;
+
         // generate 1 product witness spec
 
         // generate 1 logup witness spec
+        // if layer i <x3, y3, x1, y1, x2, y2> has n variables,
+        // then layer i+1 has n-1 variables.
 
         // generate 1 ecc add witness
+        let ecc_spec: TowerProverSpec<'_, CpuBackend<E, PCS>> = {
+            let n_points = 1 << 4;
+            let mut rng = rand::thread_rng();
+            // sample n points
+            let points = (0..n_points)
+                .map(|_| SepticPoint::<F>::random(&mut rng))
+                .collect_vec();
+
+            // transform points to row major matrix
+            let trace = points[0..n_points / 2]
+                .iter()
+                .zip(points[n_points / 2..n_points].iter())
+                .map(|(p, q)| {
+                    [p, q]
+                        .iter()
+                        .flat_map(|p| p.x.0.iter().chain(p.y.0.iter()))
+                        .copied()
+                        .collect_vec()
+                })
+                .collect_vec();
+
+            // transpose row major matrix to column major matrix
+            let p_mles: Vec<MultilinearExtension<E>> = transpose(trace)
+                .into_iter()
+                .map(|v| v.into_mle())
+                .collect_vec();
+
+            crate::scheme::hal::TowerProverSpec {
+                witness: infer_septic_sum_witness(p_mles),
+            }
+        };
+        let mut transcript = BasicTranscript::new(b"test");
+        let prover =
+            CpuTowerProver::create_proof(vec![], vec![], Some(ecc_spec), 2, &mut transcript);
     }
 }
