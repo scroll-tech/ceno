@@ -8,7 +8,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{
     iter::Sum,
-    ops::{Add, Deref, Mul, MulAssign, Sub},
+    ops::{Add, Deref, Mul, MulAssign, Neg, Sub},
 };
 
 /// F[z] / (z^6 - z - 4)
@@ -452,6 +452,18 @@ impl<F: FieldAlgebra + Copy> Add for SepticExtension<F> {
     }
 }
 
+impl<F: FieldAlgebra + Copy> Neg for SepticExtension<F> {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        let mut result = [F::ZERO; 7];
+        for i in 0..7 {
+            result[i] = -self.0[i];
+        }
+        Self(result)
+    }
+}
+
 impl<F: FieldAlgebra + Copy> Sub<&Self> for SepticExtension<F> {
     type Output = SepticExtension<F>;
 
@@ -481,6 +493,25 @@ impl<F: FieldAlgebra + Copy> Sub for SepticExtension<F> {
 
     fn sub(self, other: Self) -> Self {
         self.sub(&other)
+    }
+}
+
+impl<F: Field> Add<F> for &SepticExtension<F> {
+    type Output = SepticExtension<F>;
+
+    fn add(self, other: F) -> Self::Output {
+        let mut result = self.clone();
+        result.0[0] += other;
+
+        result
+    }
+}
+
+impl<F: Field> Add<F> for SepticExtension<F> {
+    type Output = SepticExtension<F>;
+
+    fn add(self, other: F) -> Self::Output {
+        (&self).add(other)
     }
 }
 
@@ -701,7 +732,25 @@ pub struct SepticPoint<F> {
 
 impl<F: Field> SepticPoint<F> {
     pub fn double(&self) -> Self {
-        todo!()
+        let a = F::from_canonical_u32(2);
+        let three = F::from_canonical_u32(3);
+        let two = F::from_canonical_u32(2);
+
+        let x1 = &self.x;
+        let y1 = &self.y;
+        let x1_sqr = x1.square();
+
+        // x3 = (3*x1^2 + a)^2 / (2*y1)^2 - x1 - x1
+        let slope = (x1_sqr * three + a) * (y1 * two).inverse().unwrap();
+        let x3 = slope.square() - x1 - x1;
+        // y3 = slope * (x1 - x3) - y1
+        let y3 = slope * (x1 - &x3) - y1;
+
+        Self {
+            x: x3,
+            y: y3,
+            is_infinity: false,
+        }
     }
 }
 
@@ -711,6 +760,22 @@ impl<F: Field> Default for SepticPoint<F> {
             x: SepticExtension::zero(),
             y: SepticExtension::zero(),
             is_infinity: true,
+        }
+    }
+}
+
+impl<F: Field> Neg for SepticPoint<F> {
+    type Output = SepticPoint<F>;
+
+    fn neg(self) -> Self::Output {
+        if self.is_infinity {
+            return self;
+        }
+
+        Self {
+            x: self.x,
+            y: -self.y,
+            is_infinity: false,
         }
     }
 }
@@ -770,6 +835,10 @@ impl<F: Field> SepticPoint<F> {
 
         self.y.square() == self.x.square() * &self.x + (&self.x * a) + b
     }
+
+    pub fn point_at_infinity() -> Self {
+        Self::default()
+    }
 }
 
 impl<F: Field + FromUniformBytes> SepticPoint<F> {
@@ -793,10 +862,186 @@ impl<F: Field + FromUniformBytes> SepticPoint<F> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SepticJacobianPoint<F> {
+    pub x: SepticExtension<F>,
+    pub y: SepticExtension<F>,
+    pub z: SepticExtension<F>,
+}
+
+impl<F: Field> From<SepticPoint<F>> for SepticJacobianPoint<F> {
+    fn from(p: SepticPoint<F>) -> Self {
+        if p.is_infinity {
+            Self::default()
+        } else {
+            Self {
+                x: p.x,
+                y: p.y,
+                z: SepticExtension::one(),
+            }
+        }
+    }
+}
+
+impl<F: Field> Default for SepticJacobianPoint<F> {
+    fn default() -> Self {
+        // return the point at infinity
+        Self {
+            x: SepticExtension::zero(),
+            y: SepticExtension::one(),
+            z: SepticExtension::zero(),
+        }
+    }
+}
+
+impl<F: Field> SepticJacobianPoint<F> {
+    pub fn point_at_infinity() -> Self {
+        Self::default()
+    }
+
+    pub fn is_on_curve(&self) -> bool {
+        if self.z.is_zero() {
+            return self.x.is_zero() && !self.y.is_zero();
+        }
+
+        let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
+        let a: F = F::from_canonical_u32(2);
+
+        let z2 = self.z.square();
+        let z4 = z2.square();
+        let z6 = &z4 * &z2;
+
+        // y^2 = x^3 + 2x*z^4 + b*z^6
+        self.y.square() == self.x.square() * &self.x + (&self.x * a * z4) + (b * &z6)
+    }
+
+    pub fn into_affine(self) -> SepticPoint<F> {
+        if self.z.is_zero() {
+            return SepticPoint::point_at_infinity();
+        }
+
+        let z_inv = self.z.inverse().unwrap();
+        let z_inv2 = z_inv.square();
+        let z_inv3 = &z_inv2 * &z_inv;
+
+        let x = &self.x * &z_inv2;
+        let y = &self.y * &z_inv3;
+
+        SepticPoint {
+            x,
+            y,
+            is_infinity: false,
+        }
+    }
+}
+
+impl<F: Field> Add<Self> for &SepticJacobianPoint<F> {
+    type Output = SepticJacobianPoint<F>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        // https://hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-3.html#addition-add-2007-bl
+        if self.z.is_zero() {
+            return rhs.clone();
+        }
+
+        if rhs.z.is_zero() {
+            return self.clone();
+        }
+
+        let z1z1 = self.z.square();
+        let z2z2 = rhs.z.square();
+
+        let u1 = &self.x * &z2z2;
+        let u2 = &rhs.x * &z1z1;
+
+        let s1 = &self.y * &z2z2 * &rhs.z;
+        let s2 = &rhs.y * &z1z1 * &self.z;
+
+        if u1 == u2 {
+            if s1 == s2 {
+                return self.double();
+            } else {
+                return SepticJacobianPoint::point_at_infinity();
+            }
+        }
+
+        let two = F::from_canonical_u32(2);
+        let h = u2 - &u1;
+        let i = (&h * two).square();
+        let j = &h * &i;
+        let r = (s2 - &s1) * two;
+        let v = u1 * &i;
+
+        let x3 = r.square() - &j - &v * two;
+        let y3 = r * (v - &x3) - s1 * &j * two;
+        let z3 = (&self.z + &rhs.z).square() - &z1z1 - &z2z2;
+        let z3 = z3 * h;
+
+        Self::Output {
+            x: x3,
+            y: y3,
+            z: z3,
+        }
+    }
+}
+
+impl<F: Field> SepticJacobianPoint<F> {
+    pub fn double(&self) -> Self {
+        // https://hyperelliptic.org/EFD/g1p/auto-shortw-jacobian.html#doubling-dbl-2007-bl
+
+        // y = 0 means self.order = 2
+        if self.y.is_zero() {
+            return SepticJacobianPoint::point_at_infinity();
+        }
+
+        let two = F::from_canonical_u32(2);
+        let three = F::from_canonical_u32(3);
+        let eight = F::from_canonical_u32(8);
+        let a = F::from_canonical_u32(2); // The curve coefficient a
+
+        // xx = x1^2
+        let xx = self.x.square();
+
+        // yy = y1^2
+        let yy = self.y.square();
+
+        // yyyy = yy^2
+        let yyyy = yy.square();
+
+        // zz = z1^2
+        let zz = self.z.square();
+
+        // S = 2*((x1 + y1^2)^2 - x1^2 - y1^4)
+        let s = (&self.x + &yy).square() - &xx - &yyyy;
+        let s = s * two;
+
+        // M = 3*x1^2 + a*z1^4
+        let m = &xx * three + zz.square() * a;
+
+        // T = M^2 - 2*S
+        let t = m.square() - &s * two;
+
+        // Y3 = M*(S-T)-8*y^4
+        let y3 = m * (&s - &t) - &yyyy * eight;
+
+        // X3 = T
+        let x3 = t;
+
+        // Z3 = (y1+z1)^2 - y1^2 - z1^2
+        let z3 = (&self.y + &self.z).square() - &yy - &zz;
+
+        Self {
+            x: x3,
+            y: y3,
+            z: z3,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::SepticExtension;
-    use crate::scheme::septic_curve::SepticPoint;
+    use crate::scheme::septic_curve::{SepticJacobianPoint, SepticPoint};
     use p3::{babybear::BabyBear, field::Field};
     use rand::thread_rng;
 
@@ -833,7 +1078,27 @@ mod tests {
         let p1 = SepticPoint::<F>::random(&mut rng);
         let p2 = SepticPoint::<F>::random(&mut rng);
 
+        let j1 = SepticJacobianPoint::from(p1.clone());
+        let j2 = SepticJacobianPoint::from(p2.clone());
+
         let p3 = p1 + p2;
+        let j3 = &j1 + &j2;
+
+        assert!(j1.is_on_curve());
+        assert!(j2.is_on_curve());
+
+        assert!(j3.is_on_curve());
         assert!(p3.is_on_curve());
+
+        assert_eq!(p3, j3.clone().into_affine());
+
+        // 2*p3 - p3 = p3
+        let p4 = p3.double();
+        assert_eq!((-p3.clone() + p4.clone()), p3);
+        
+        // 2*j3 = 2*p3
+        let j4 = j3.double();
+        assert!(j4.is_on_curve());
+        assert_eq!(j4.into_affine(), p4);
     }
 }
