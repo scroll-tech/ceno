@@ -11,6 +11,7 @@ version = "0.1.0"
 
 [dependencies]
 ceno_rt = { path = "../ceno_rt" }
+ceno_keccak = { path = "../guest_libs/keccak" }
 rand.workspace = true
 tiny-keccak.workspace = true
 
