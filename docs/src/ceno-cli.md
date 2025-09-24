@@ -14,4 +14,4 @@ The available commands are:
 - `cargo ceno raw-prove`: A lower-level command to prove a program from a compiled ELF file and a witness.
 - `cargo ceno raw-run`: A lower-level command to run a program without the full proof generation, useful for debugging.
 
-For detailed usage of each command, you can use the `--help` flag, for example: `cargo ceno run --help`.
+For detailed usage of each command, you can use the `--help` flag, for example: `cargo ceno run --help`. The next sections will explain the three core commands.

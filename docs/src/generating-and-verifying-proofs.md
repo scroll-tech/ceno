@@ -15,7 +15,7 @@ Here's a more detailed look at the steps involved in generating a proof:
 By using `cargo ceno prove`, you get a simplified experience that handles these steps for you. For most use cases, `cargo ceno prove` and `cargo ceno verify` are the primary commands you will use.
 
 ```bash
-cargo ceno prove --example <GUEST_EXAMPLE_NAME> --hints=<HINTS_SEPARATED_BY_COMMA> --public-io=<PUBLIC_IO> --out-vk <PATH_TO_VERIFICATION_KEY_FILE> --out-proof target/fibonacci.proof
+cargo ceno prove --example <GUEST_EXAMPLE_NAME> --hints=<HINTS_SEPARATED_BY_COMMA> --public-io=<PUBLIC_IO> --out-proof target/fibonacci.proof
 ```
 
 ## Concrete Example
@@ -110,7 +110,7 @@ Now, run the program and generate a proof. You can provide input via the `--stdi
 cargo ceno prove --hints=5 --public-io=8 --out-proof proof.bin
 ```
 
-This command executes the ELF, generates a proof, and saves it as `proof.bin`. The output of the program will be printed to your console.
+This command executes the ELF, generates a proof, and saves it as `proof.bin`.
 
 #### 4.4. Providing Inputs via File
 
