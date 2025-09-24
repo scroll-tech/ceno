@@ -985,6 +985,14 @@ impl<F: Field> Add<Self> for &SepticJacobianPoint<F> {
     }
 }
 
+impl<F: Field> Add<Self> for SepticJacobianPoint<F> {
+    type Output = SepticJacobianPoint<F>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        (&self).add(&rhs)
+    }
+}
+
 impl<F: Field> SepticJacobianPoint<F> {
     pub fn double(&self) -> Self {
         // https://hyperelliptic.org/EFD/g1p/auto-shortw-jacobian.html#doubling-dbl-2007-bl
@@ -1035,6 +1043,18 @@ impl<F: Field> SepticJacobianPoint<F> {
             y: y3,
             z: z3,
         }
+    }
+}
+
+impl<F: Field> Sum<Self> for SepticJacobianPoint<F> {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), |acc, p| acc + p)
+    }
+}
+
+impl<F: Field + FromUniformBytes> SepticJacobianPoint<F> {
+    pub fn random(rng: impl RngCore) -> Self {
+        SepticPoint::random(rng).into()
     }
 }
 
@@ -1095,7 +1115,7 @@ mod tests {
         // 2*p3 - p3 = p3
         let p4 = p3.double();
         assert_eq!((-p3.clone() + p4.clone()), p3);
-        
+
         // 2*j3 = 2*p3
         let j4 = j3.double();
         assert!(j4.is_on_curve());

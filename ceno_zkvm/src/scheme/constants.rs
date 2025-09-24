@@ -7,3 +7,5 @@ pub const NUM_FANIN_LOGUP: usize = 2;
 pub const MAX_NUM_VARIABLES: usize = 24;
 
 pub const DYNAMIC_RANGE_MAX_BITS: usize = 18;
+
+pub const SEPTIC_JACOBIAN_NUM_MLES: usize = 3 * 7;
