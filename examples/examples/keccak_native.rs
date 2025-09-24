@@ -1,16 +1,13 @@
-//! Compute the Keccak-256 over a message and log the state.
+//! Compute the Keccak-256 using alloy-primitives with native-keccak hook.
 
 extern crate ceno_rt;
 
-use ceno_keccak::{Hasher, Keccak};
+use alloy_primitives::keccak256;
 
 const MESSAGE: &[u8] = b"Hello, world!";
 
 fn main() {
-    let mut hasher = Keccak::v256();
-    hasher.update(MESSAGE);
-    let mut output = [0u8; 32];
-    hasher.finalize(&mut output);
+    let output = keccak256(MESSAGE);
     log_digest(&output);
 }
 

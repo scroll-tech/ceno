@@ -204,6 +204,33 @@ mod parallel_hash;
 #[cfg(feature = "parallel_hash")]
 pub use parallel_hash::{ParallelHash, ParallelHashXof};
 
+/// Native hook for keccak256 for use with `alloy-primitives` "native-keccak" feature.
+///
+/// # Safety
+///
+/// The VM accepts the preimage by pointer and length, and writes the
+/// 32-byte hash.
+/// - `bytes` must point to an input buffer at least `len` long.
+/// - `output` must point to a buffer that is at least 32-bytes long.
+///
+/// [`keccak256`]: https://en.wikipedia.org/wiki/SHA-3
+/// [`sha3`]: https://docs.rs/sha3/latest/sha3/
+/// [`tiny_keccak`]: https://docs.rs/tiny-keccak/latest/tiny_keccak/
+#[cfg(all(target_arch = "riscv32", any(feature = "keccak")))]
+#[inline(always)]
+#[no_mangle]
+pub extern "C" fn native_keccak256(bytes: *const u8, len: usize, output: *mut u8) {
+    use crate::{Hasher, Keccak};
+
+    unsafe {
+        let input = core::slice::from_raw_parts(bytes, len);
+        let out = core::slice::from_raw_parts_mut(output, 32);
+        let mut hasher = Keccak::v256();
+        hasher.update(input);
+        hasher.finalize(out);
+    }
+}
+
 /// A trait for hashing an arbitrary stream of bytes.
 ///
 /// # Example
