@@ -1,0 +1,72 @@
+[package]
+authors = ["debris <marek.kotewicz@gmail.com>", "Scroll Tech"]
+categories = ["cryptography", "zk", "blockchain", "ceno"]
+description = "Ceno runtime library"
+edition = "2021"
+keywords = ["cryptography", "zk", "blockchain", "ceno"]
+license = "MIT OR Apache-2.0"
+name = "ceno_keccak"
+readme = "README.md"
+repository = "https://github.com/scroll-tech/ceno"
+version = "0.1.0"
+
+[dependencies]
+crunchy = "0.2.2"
+cfg-if = "1.0"
+ceno_rt = { path = "../../ceno_rt" }
+
+[profile.dev]
+opt-level = 3  # Controls the --opt-level the compiler builds with
+debug = false   # Controls whether the compiler passes `-g`
+
+[profile.test]
+opt-level = 3  # Controls the --opt-level the compiler bcduilds with
+debug = false   # Controls whether the compiler passes `-g`
+
+[features]
+default = ["keccak"]
+cshake = []
+fips202 = ["keccak", "shake", "sha3"]
+k12 = []
+keccak = []
+kmac = ["cshake"]
+parallel_hash = ["cshake"]
+sha3 = []
+shake = []
+sp800 = ["cshake", "kmac", "tuple_hash"]
+tuple_hash = ["cshake"]
+
+[[test]]
+name = "keccak"
+required-features = ["keccak"]
+
+[[test]]
+name = "cshake"
+required-features = ["cshake"]
+
+[[test]]
+name = "tuple_hash"
+required-features = ["tuple_hash"]
+
+[[test]]
+name = "kangaroo"
+required-features = ["k12"]
+
+[[test]]
+name = "sha3"
+required-features = ["sha3"]
+
+[[test]]
+name = "shake"
+required-features = ["shake"]
+
+[[test]]
+name = "kmac"
+required-features = ["kmac"]
+
+[[test]]
+name = "parallel_hash"
+required-features = ["parallel_hash"]
+
+[package.metadata.docs.rs]
+all-features = true

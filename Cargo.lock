@@ -353,6 +353,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ceno_keccak"
+version = "0.1.0"
+dependencies = [
+ "ceno_rt",
+ "cfg-if",
+ "crunchy",
+]
+
+[[package]]
 name = "ceno_rt"
 version = "0.1.0"
 dependencies = [
