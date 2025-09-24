@@ -25,6 +25,19 @@ fn test_ceno_rt_mini() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_ceno_bincode() -> Result<()> {
+    let program_elf = ceno_examples::bincode_decode;
+    let program = Program::load_elf(program_elf, u32::MAX)?;
+    let platform = Platform {
+        prog_data: program.image.keys().copied().collect(),
+        ..CENO_PLATFORM
+    };
+    let mut state = VMState::new(platform, Arc::new(program));
+    let _steps = run(&mut state)?;
+    Ok(())
+}
+
 // TODO(Matthias): We are using Rust's standard library's default panic handler now,
 // and they are indicated with a different instruction than our ecall.  (But still work,
 // as you can tell, because this tests panics.)  However, we should adapt this test

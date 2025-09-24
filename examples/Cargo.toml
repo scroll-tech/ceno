@@ -12,10 +12,12 @@ version = "0.1.0"
 [dependencies]
 ceno_rt = { path = "../ceno_rt" }
 rand.workspace = true
+bincode = { version = "2.0", features = ["serde"] }
 tiny-keccak.workspace = true
 
 rkyv = { version = "0.8", default-features = false, features = [
-  "alloc",
-  "bytecheck",
+    "alloc",
+    "bytecheck",
 ] }
 substrate-bn.workspace = true
+serde = { version = "1.0.219", features = ["derive"] }
