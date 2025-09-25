@@ -1,4 +1,5 @@
 use itertools::izip;
+use p3::field::PrimeField32;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -199,6 +200,14 @@ impl LkMultiplicity {
     #[inline(always)]
     pub fn assert_double_u8(&mut self, a: u64, b: u64) {
         self.increment(LookupTable::DoubleU8, (a << 8) + b);
+    }
+
+    /// assert slices within range
+    #[inline]
+    pub fn assert_ux_slice_fields<const C: usize, F: PrimeField32>(&mut self, vs: &[F]) {
+        for &v in vs {
+            self.assert_ux::<C>(v.as_canonical_u64());
+        }
     }
 
     /// Track a lookup into a logic table (AndTable, etc).
