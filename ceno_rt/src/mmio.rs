@@ -1,12 +1,11 @@
 //! Memory-mapped I/O (MMIO) functions.
 
 use rkyv::{
-    Archived, Deserialize, Portable, api::high::HighValidator, bytecheck::CheckBytes,
+    Archived, Deserialize, Portable, api::high::{HighValidator, HighDeserializer}, bytecheck::CheckBytes,
     rancor::Failure,
 };
 
 use core::slice::from_raw_parts;
-use rkyv::api::high::HighDeserializer;
 
 /// The memory region with our hints.
 ///
