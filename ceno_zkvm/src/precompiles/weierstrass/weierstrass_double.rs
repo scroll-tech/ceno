@@ -21,7 +21,7 @@ use multilinear_extensions::{
     mle::MultilinearExtension,
     util::{ceil_log2, max_usable_threads, transpose},
 };
-use num::{BigUint, One, Zero};
+use num::BigUint;
 use p3::field::{FieldAlgebra, PrimeField32};
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
@@ -497,6 +497,7 @@ pub struct TestWeierstrassDoubleLayout<E: ExtensionField, EC: EllipticCurve> {
     _point_ptr_0: WitIn,
 }
 
+#[allow(clippy::type_complexity)]
 pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>()
 -> Result<(TestWeierstrassDoubleLayout<E, EC>, GKRCircuit<E>, u16, u16), ZKVMError>
 where
@@ -856,7 +857,7 @@ mod tests {
         thread::Builder::new()
             .stack_size(32 * 1024 * 1024) // 64 MB
             .spawn(|| {
-                let points = random_point_pairs::<WP>(8);
+                let points = random_points::<WP>(8);
 
                 let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
                     setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
@@ -904,7 +905,7 @@ mod tests {
         thread::Builder::new()
             .stack_size(32 * 1024 * 1024) // 64 MB
             .spawn(|| {
-                let points = random_point_pairs::<WP>(5);
+                let points = random_points::<WP>(5);
                 let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
                     setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
                     points,
@@ -937,7 +938,7 @@ mod tests {
         test_weierstrass_double_nonpow2_helper::<Secp256r1>();
     }
 
-    fn random_point_pairs<WP: WeierstrassParameters>(
+    fn random_points<WP: WeierstrassParameters>(
         num_instances: usize,
     ) -> Vec<GenericArray<u32, <WP::BaseField as NumWords>::WordsCurvePoint>> {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
