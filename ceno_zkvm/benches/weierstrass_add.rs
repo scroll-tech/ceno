@@ -19,7 +19,20 @@ criterion_group!(
     weierstrass_add_fn_secp256k1,
     weierstrass_add_fn_secp256r1
 );
-criterion_main!(benches);
+
+fn real_main() {
+    benches();
+    Criterion::default().configure_from_args().final_summary();
+}
+
+fn main() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024) // 32MB
+        .spawn(real_main)
+        .unwrap()
+        .join()
+        .unwrap();
+}
 
 const NUM_SAMPLES: usize = 10;
 
