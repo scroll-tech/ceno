@@ -300,7 +300,7 @@ impl StepRecord {
 
 #[derive(Debug)]
 pub struct Tracer {
-    record: StepRecord,
+    pub record: StepRecord,
 
     // record each section max access address
     // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))

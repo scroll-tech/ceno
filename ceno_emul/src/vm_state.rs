@@ -92,6 +92,9 @@ impl VMState {
     }
 
     fn step(&mut self) -> Result<StepRecord> {
+        if self.get_pc() == ByteAddr::from(0x8001a00) {
+            println!("ts {}", self.tracer.record.cycle());
+        };
         crate::rv32im::step(self)?;
         let step = self.tracer.advance();
         if step.is_busy_loop() && !self.halted() {

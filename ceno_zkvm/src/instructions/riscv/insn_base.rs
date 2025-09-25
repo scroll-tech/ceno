@@ -366,8 +366,8 @@ impl WriteMEM {
 
 #[derive(Debug)]
 pub struct MemAddr<E: ExtensionField> {
-    addr: UInt<E>,
-    low_bits: Vec<WitIn>,
+    pub addr: UInt<E>,
+    pub low_bits: Vec<WitIn>,
     max_bits: usize,
 }
 
@@ -413,7 +413,7 @@ impl<E: ExtensionField> MemAddr<E> {
     /// Represent the address aligned to 4 bytes.
     pub fn expr_align4(&self) -> AddressExpr<E> {
         let low_bits = self.low_bit_exprs();
-        self.addr.address_expr() - &low_bits[1] * 2 - &low_bits[0]
+        self.addr.address_expr() - (&low_bits[1] << 1) - &low_bits[0]
     }
 
     pub fn uint_align4(&self) -> UInt<E> {

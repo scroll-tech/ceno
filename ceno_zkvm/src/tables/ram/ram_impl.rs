@@ -365,6 +365,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             },
             init_table,
         )?;
+        println!("construct circuit read from {}", DVRAM::name());
         cb.r_table_record(
             || "final_table",
             DVRAM::RAM_TYPE,
@@ -394,6 +395,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         assert!(final_mem.len() <= DVRAM::max_len(&self.params));
         assert!(DVRAM::max_len(&self.params).is_power_of_two());
 
+        let circuit_name = DVRAM::name();
+
         let params = self.params.clone();
         let addr_id = self.addr.id as u64;
         let addr_padding_fn = move |row: u64, col: u64| {
@@ -410,8 +413,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         );
 
         witness
-            .par_rows_mut()
-            .zip(structural_witness.par_rows_mut())
+            .rows_mut()
+            .zip(structural_witness.rows_mut())
             .zip(final_mem)
             .enumerate()
             .for_each(|(i, ((row, structural_row), rec))| {
@@ -422,6 +425,13 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                     rec.addr,
                     DVRAM::addr(&self.params, i),
                 );
+
+                if circuit_name == "HeapTable" {
+                    println!(
+                        "rec addr {:x}, cycle {}, value {:x}",
+                        rec.addr, rec.cycle, rec.value
+                    );
+                }
 
                 if self.final_v.len() == 1 {
                     // Assign value directly.
@@ -436,6 +446,22 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                 set_val!(row, self.final_cycle, rec.cycle);
 
                 set_val!(structural_row, self.addr, rec.addr as u64);
+
+                if circuit_name == "HeapTable" {
+                    println!(
+                        "heap final ts {} value {:?} address {:x}",
+                        row[self.final_cycle.id as usize].to_canonical_u64(),
+                        self.final_v
+                            .iter()
+                            .enumerate()
+                            .map(|(i, limb)| format!(
+                                "value.{i} value {:x}",
+                                row[limb.id as usize].to_canonical_u64()
+                            ))
+                            .collect_vec(),
+                        structural_row[self.addr.id as usize].to_canonical_u64(),
+                    );
+                }
             });
 
         structural_witness.padding_by_strategy();

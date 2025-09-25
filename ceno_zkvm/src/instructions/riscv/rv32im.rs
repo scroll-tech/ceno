@@ -37,7 +37,7 @@ use crate::{
 };
 use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
-    Bn254FpMulSpec,
+    Bn254FpMulSpec, ByteAddr,
     InsnKind::{self, *},
     KeccakSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec,
     Sha256ExtendSpec, StepRecord, SyscallSpec,
@@ -380,6 +380,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 // other type of ecalls are handled by dummy ecall instruction
                 _ => {
                     // it's safe to unwrap as all_records are initialized with Vec::new()
+                    // let pc = record.pc().before;
+                    // if pc == ByteAddr::from(0x8001a00) {
+                    //     println!("record at {:x} are categoriezed as {}", pc.0, insn_kind);
+                    // }
                     all_records.get_mut(&insn_kind).unwrap().push(record);
                 }
             }

@@ -336,9 +336,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             rlc_record.degree()
         );
         self.r_table_expressions.push(SetTableExpression {
-            expr: rlc_record,
+            expr: rlc_record.clone(),
             table_spec,
         });
+        println!("read rlc {}", rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.r_table_expressions_namespace_map.push(path);
         self.r_ram_types.push((ram_type, record));
@@ -398,6 +399,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
+        println!("write_record rlc_record {}", rlc_record.clone());
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);

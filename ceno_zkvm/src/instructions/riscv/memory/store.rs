@@ -14,12 +14,14 @@ use crate::{
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
-use ff_ext::{ExtensionField, FieldInto};
+use ff_ext::{ExtensionField, FieldInto, SmallField};
+use itertools::Itertools;
 use multilinear_extensions::{ToExpr, WitIn};
+use p3::field::PrimeField;
 use std::marker::PhantomData;
 
 pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
-    s_insn: SInstructionConfig<E>,
+    pub s_insn: SInstructionConfig<E>,
 
     rs1_read: UInt<E>,
     rs2_read: UInt<E>,
@@ -85,6 +87,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             _ => unreachable!("Unsupported instruction kind {:?}", I::INST_KIND),
         };
 
+        println!("StoreOpCircuit");
         let s_insn = SInstructionConfig::<E>::construct_circuit(
             circuit_builder,
             I::INST_KIND,
@@ -122,6 +125,16 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         let prev_mem_value = Value::new(memory_op.value.before, lk_multiplicity);
 
         let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
+        if N_ZEROS == 2 && step.pc().before.0 == 0x8001a00 {
+            println!(
+                "in store word pc {:x}, addr {:x}, mem write value {:x} ts + 3 {}, rs2 {:?}",
+                step.pc().before.0,
+                step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32),
+                step.rs2().unwrap().value,
+                step.cycle() + 3,
+                rs2,
+            );
+        }
         config
             .s_insn
             .assign_instance(instance, lk_multiplicity, step)?;
@@ -137,6 +150,37 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             .assign_instance(instance, lk_multiplicity, addr.into())?;
         if let Some(change) = config.next_memory_value.as_ref() {
             change.assign_instance(instance, lk_multiplicity, step, addr.shift())?;
+        }
+
+        // show result for debugging
+        // assigned value
+        if step.pc().before.0 == 0x8001a00 {
+            println!(
+                "pc {:x} ts {} rs2 {:?} address {:?}",
+                instance[config.s_insn.vm_state.pc.id as usize].to_canonical_u64(),
+                instance[config.s_insn.vm_state.ts.id as usize].to_canonical_u64(),
+                config
+                    .rs2_read
+                    .limbs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, limb)| format!(
+                        "rs2.{i} value {:x}",
+                        instance[limb.id as usize].to_canonical_u64()
+                    ))
+                    .collect_vec(),
+                config
+                    .memory_addr
+                    .addr
+                    .limbs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, w)| format!(
+                        "addr.{i} value {:x}",
+                        instance[w.id as usize].to_canonical_u64()
+                    ))
+                    .collect_vec()
+            );
         }
 
         Ok(())

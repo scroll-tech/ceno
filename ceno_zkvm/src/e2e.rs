@@ -238,6 +238,7 @@ pub fn emulate_program(
 
     // get heap access by min/max range
     let heap_start_waddr = ByteAddr::from(platform.heap.start).waddr();
+    println!("heap_start_waddr {:x}", heap_start_waddr.baddr().0);
     // note: min_waddr for the heap is intentionally ignored
     // as the actual starting address may be shifted due to alignment requirements
     // e.g. heap start addr 0x90000000 + 32 bytes alignment => 0x90000000 % 32 = 16 → offset = 16 bytes → moves to 0x90000010.
@@ -248,6 +249,7 @@ pub fn emulate_program(
         (heap_start_waddr..max_waddr)
             .map(|vma| {
                 let byte_addr = vma.baddr();
+                println!("heap vma byte_addr {:x}", byte_addr.0);
                 MemFinalRecord {
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
@@ -336,6 +338,7 @@ fn setup_platform_inner(
 
     let heap = {
         // Detect heap as starting after program data.
+        println!("program.sheap {:x}", program.sheap);
         let heap_start = program.sheap;
         let heap = heap_start..heap_start + heap_size;
         // pad the total size to the next power of two.

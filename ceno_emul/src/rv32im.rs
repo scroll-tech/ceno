@@ -281,12 +281,15 @@ pub fn step<C: EmuContext>(ctx: &mut C) -> Result<()> {
     };
 
     tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
+    if pc == ByteAddr::from(0x8001a00) {
+        println!("pc {:x} insn.kind {}", pc.0, insn.kind);
+    };
 
     if match InsnCategory::from(insn.kind) {
         InsnCategory::Compute => step_compute(ctx, insn.kind, &insn)?,
         InsnCategory::Branch => step_branch(ctx, insn.kind, &insn)?,
         InsnCategory::Load => step_load(ctx, insn.kind, &insn)?,
-        InsnCategory::Store => step_store(ctx, insn.kind, &insn)?,
+        InsnCategory::Store => step_store(ctx, insn.kind, &insn, pc)?,
         InsnCategory::System => step_system(ctx, insn.kind, &insn)?,
         InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(insn.raw))?,
     } {
@@ -496,11 +499,19 @@ fn step_load<M: EmuContext>(ctx: &mut M, kind: InsnKind, decoded: &Instruction) 
     Ok(true)
 }
 
-fn step_store<M: EmuContext>(ctx: &mut M, kind: InsnKind, decoded: &Instruction) -> Result<bool> {
+fn step_store<M: EmuContext>(
+    ctx: &mut M,
+    kind: InsnKind,
+    decoded: &Instruction,
+    pc: ByteAddr,
+) -> Result<bool> {
     let rs1 = ctx.load_register(decoded.rs1)?;
     let rs2 = ctx.load_register(decoded.rs2)?;
     let addr = ByteAddr(rs1.wrapping_add(decoded.imm as u32));
     let shift = 8 * (addr.0 & 3);
+    if pc == ByteAddr::from(0x8001a00) {
+        println!("store addr {:x}", addr.0);
+    }
     if !ctx.check_data_store(addr) {
         tracing::error!("mstore: addr={:x?},rs1={:x}", addr, rs1);
         return ctx.trap(TrapCause::StoreAccessFault);
