@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use ceno_zkvm::precompiles::{
-    random_point_pairs, run_weierstrass_add, setup_weierstrass_add_circuit,
+    random_points, run_weierstrass_double, setup_weierstrass_double_circuit,
 };
 use criterion::*;
 use ff_ext::BabyBearExt4;
@@ -14,38 +14,38 @@ mod alloc;
 
 criterion_group!(
     benches,
-    weierstrass_add_fn_bn254,
-    weierstrass_add_fn_bls12_381,
-    weierstrass_add_fn_secp256k1,
-    weierstrass_add_fn_secp256r1
+    weierstrass_double_fn_bn254,
+    weierstrass_double_fn_bls12_381,
+    weierstrass_double_fn_secp256k1,
+    weierstrass_double_fn_secp256r1
 );
 criterion_main!(benches);
 
 const NUM_SAMPLES: usize = 10;
 
-fn weierstrass_add_fn_helper<WP: WeierstrassParameters>(c: &mut Criterion) {
+fn weierstrass_double_fn_helper<WP: WeierstrassParameters>(c: &mut Criterion) {
     // Benchmark the proving time
     for log_instances in 12..14 {
         let num_instances = 1 << log_instances;
         // expand more input size once runtime is acceptable
-        let mut group = c.benchmark_group(format!("weierstrass_add_{}", num_instances));
+        let mut group = c.benchmark_group(format!("weierstrass_double_{}", num_instances));
         group.sample_size(NUM_SAMPLES);
         group.bench_function(
             BenchmarkId::new(
-                "weierstrass_add",
-                format!("prove_weierstrass_add_{}", num_instances),
+                "weierstrass_double",
+                format!("prove_weierstrass_double_{}", num_instances),
             ),
             |b| {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
-                        let points = random_point_pairs::<WP>(5);
+                        let points = random_points::<WP>(5);
                         let instant = std::time::Instant::now();
 
-                        let circuit = setup_weierstrass_add_circuit::<_, SwCurve<WP>>()
+                        let circuit = setup_weierstrass_double_circuit::<_, SwCurve<WP>>()
                             .expect("setup circuit error");
                         #[allow(clippy::unit_arg)]
-                        let _ = run_weierstrass_add::<
+                        let _ = run_weierstrass_double::<
                             BabyBearExt4,
                             BasefoldDefault<BabyBearExt4>,
                             SwCurve<WP>,
@@ -53,7 +53,7 @@ fn weierstrass_add_fn_helper<WP: WeierstrassParameters>(c: &mut Criterion) {
                         .expect("unable to get proof");
                         let elapsed = instant.elapsed();
                         println!(
-                            "weierstrass_add::create_proof, instances = {}, time = {}",
+                            "weierstrass_double::create_proof, instances = {}, time = {}",
                             num_instances,
                             elapsed.as_secs_f64()
                         );
@@ -68,18 +68,18 @@ fn weierstrass_add_fn_helper<WP: WeierstrassParameters>(c: &mut Criterion) {
     }
 }
 
-fn weierstrass_add_fn_bn254(c: &mut Criterion) {
-    weierstrass_add_fn_helper::<Bn254>(c);
+fn weierstrass_double_fn_bn254(c: &mut Criterion) {
+    weierstrass_double_fn_helper::<Bn254>(c);
 }
 
-fn weierstrass_add_fn_bls12_381(c: &mut Criterion) {
-    weierstrass_add_fn_helper::<Bls12381>(c);
+fn weierstrass_double_fn_bls12_381(c: &mut Criterion) {
+    weierstrass_double_fn_helper::<Bls12381>(c);
 }
 
-fn weierstrass_add_fn_secp256k1(c: &mut Criterion) {
-    weierstrass_add_fn_helper::<Secp256k1>(c);
+fn weierstrass_double_fn_secp256k1(c: &mut Criterion) {
+    weierstrass_double_fn_helper::<Secp256k1>(c);
 }
 
-fn weierstrass_add_fn_secp256r1(c: &mut Criterion) {
-    weierstrass_add_fn_helper::<Secp256r1>(c);
+fn weierstrass_double_fn_secp256r1(c: &mut Criterion) {
+    weierstrass_double_fn_helper::<Secp256r1>(c);
 }

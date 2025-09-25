@@ -18,6 +18,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::selector::SelectorType;
 pub use weierstrass::{
     EllipticCurveAddInstance, EllipticCurveDoubleInstance,
+    test_utils::{random_point_pairs, random_points},
     weierstrass_add::{
         WeierstrassAddAssignLayout, run_weierstrass_add,
         setup_gkr_circuit as setup_weierstrass_add_circuit,
