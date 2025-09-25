@@ -1,6 +1,10 @@
 //! The `Keccak` hash functions.
 
-use super::{Hasher, KeccakState, bits_to_rate, keccakf::KeccakF};
+use crate::{
+    Hasher,
+    keccakf::KeccakF,
+    vendor::{KeccakState, bits_to_rate},
+};
 
 /// The `Keccak` hash functions defined in [`Keccak SHA3 submission`].
 ///

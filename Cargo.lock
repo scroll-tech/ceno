@@ -563,7 +563,7 @@ version = "0.1.0"
 dependencies = [
  "ceno_rt",
  "cfg-if",
- "crunchy",
+ "tiny-keccak",
 ]
 
 [[package]]
