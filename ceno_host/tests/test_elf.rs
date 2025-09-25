@@ -477,7 +477,7 @@ fn test_sha256_extend() -> Result<()> {
 
 #[test]
 fn test_sha256_full() -> Result<()> {
-    let public_io: &Vec<u32> = &vec![
+    let public_io: &[u32; 8] = &[
         30689455, 3643278932, 1489987339, 1626711444, 3610619649, 1925764735, 581441152, 321290698,
     ];
     let hints: &Vec<u32> = &vec![0u32; 10];
