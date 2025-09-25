@@ -12,9 +12,9 @@ pub use vendor::keccak::Keccak;
 
 cfg_if::cfg_if! {
     if #[cfg(not(target_arch = "riscv32"))] {
-        pub use ceno_rt::syscalls::syscall_keccak_permute as keccakf;
-    } else {
         pub use tiny_keccak::keccakf;
+    } else {
+        pub use ceno_rt::syscalls::syscall_keccak_permute as keccakf;
     }
 }
 
@@ -48,7 +48,7 @@ mod keccakf {
 #[cfg(target_arch = "riscv32")]
 #[inline(always)]
 #[no_mangle]
-pub extern "C" fn native_keccak256(bytes: *const u8, len: usize, output: *mut u8) {
+pub unsafe extern "C" fn native_keccak256(bytes: *const u8, len: usize, output: *mut u8) {
     use crate::{Hasher, Keccak};
 
     unsafe {

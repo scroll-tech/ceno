@@ -1,6 +1,7 @@
 //! Compute the Keccak-256 using alloy-primitives with native-keccak hook.
 
-extern crate ceno_rt;
+extern crate ceno_keccak;
+extern crate ceno_rt; // Make sure the native keccak hook is linked in.
 
 use alloy_primitives::keccak256;
 
