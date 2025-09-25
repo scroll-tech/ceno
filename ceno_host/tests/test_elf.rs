@@ -622,6 +622,24 @@ fn test_keccak_no_syscall() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_keccak_guest() -> Result<()> {
+    let _ = ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::keccak_lib,
+        &CenoStdin::default(),
+        None,
+    );
+
+    let _ = ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::keccak_native,
+        &CenoStdin::default(),
+        None,
+    );
+    Ok(())
+}
+
 fn unsafe_platform() -> Platform {
     let mut platform = CENO_PLATFORM;
     platform.unsafe_ecall_nop = true;
