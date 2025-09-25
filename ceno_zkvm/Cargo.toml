@@ -120,3 +120,11 @@ name = "bitwise_keccakf"
 [[bench]]
 harness = false
 name = "lookup_keccakf"
+
+[[bench]]
+harness = false
+name = "weierstrass_add"
+
+[[bench]]
+harness = false
+name = "weierstrass_double"

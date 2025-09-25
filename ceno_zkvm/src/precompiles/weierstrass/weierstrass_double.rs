@@ -801,12 +801,12 @@ mod tests {
     use super::*;
     use ff_ext::BabyBearExt4;
     use mpcs::BasefoldDefault;
-    use num::bigint::RandBigInt;
-    use rand::SeedableRng;
     use sp1_curves::weierstrass::{
         SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254, secp256k1::Secp256k1,
         secp256r1::Secp256r1,
     };
+
+    use crate::precompiles::weierstrass::test_utils::random_points;
 
     fn test_weierstrass_double_helper<WP: WeierstrassParameters>() {
         type E = BabyBearExt4;
@@ -894,19 +894,5 @@ mod tests {
     #[test]
     fn test_weierstrass_double_nonpow2_secp256r1() {
         test_weierstrass_double_nonpow2_helper::<Secp256r1>();
-    }
-
-    fn random_points<WP: WeierstrassParameters>(
-        num_instances: usize,
-    ) -> Vec<GenericArray<u32, <WP::BaseField as NumWords>::WordsCurvePoint>> {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let base = SwCurve::<WP>::generator();
-        (0..num_instances)
-            .map(|_| {
-                let x = rng.gen_biguint(24);
-                let x_base = base.clone().sw_scalar_mul(&x);
-                x_base.to_words_le().try_into().unwrap()
-            })
-            .collect()
     }
 }

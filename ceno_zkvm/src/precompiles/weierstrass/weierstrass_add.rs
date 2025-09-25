@@ -316,6 +316,10 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E>
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
         self.n_challenges = 0;
 
+        // println!("n_fixed: {}", self.n_fixed);
+        println!("n_committed: {}", self.n_committed);
+        println!("n_structural_witin: {}", self.n_structural_witin);
+
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
         cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
@@ -792,10 +796,9 @@ mod tests {
     use std::thread;
 
     use super::*;
+    use crate::precompiles::weierstrass::test_utils::random_point_pairs;
     use ff_ext::BabyBearExt4;
     use mpcs::BasefoldDefault;
-    use num::bigint::RandBigInt;
-    use rand::SeedableRng;
     use sp1_curves::weierstrass::{
         SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254, secp256k1::Secp256k1,
         secp256r1::Secp256r1,
@@ -806,7 +809,7 @@ mod tests {
         type Pcs = BasefoldDefault<E>;
 
         thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
+            .stack_size(32 * 1024 * 1024)
             .spawn(|| {
                 let points = random_point_pairs::<WP>(8);
 
@@ -830,7 +833,7 @@ mod tests {
     #[test]
     fn test_weierstrass_add_bls12381() {
         thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
+            .stack_size(32 * 1024 * 1024)
             .spawn(|| {
                 test_weierstrass_add_helper::<Bls12381>();
             })
@@ -854,7 +857,7 @@ mod tests {
         type Pcs = BasefoldDefault<E>;
 
         thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
+            .stack_size(32 * 1024 * 1024)
             .spawn(|| {
                 let points = random_point_pairs::<WP>(5);
                 let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
@@ -887,29 +890,5 @@ mod tests {
     #[test]
     fn test_weierstrass_add_nonpow2_secp256r1() {
         test_weierstrass_add_nonpow2_helper::<Secp256r1>();
-    }
-
-    fn random_point_pairs<WP: WeierstrassParameters>(
-        num_instances: usize,
-    ) -> Vec<[GenericArray<u32, <WP::BaseField as NumWords>::WordsCurvePoint>; 2]> {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let base = SwCurve::<WP>::generator();
-        (0..num_instances)
-            .map(|_| {
-                let x = rng.gen_biguint(24);
-
-                let mut y = rng.gen_biguint(24);
-                while y == x {
-                    y = rng.gen_biguint(24);
-                }
-
-                let x_base = base.clone().sw_scalar_mul(&x);
-                let y_base = base.clone().sw_scalar_mul(&y);
-                [
-                    x_base.to_words_le().try_into().unwrap(),
-                    y_base.to_words_le().try_into().unwrap(),
-                ]
-            })
-            .collect()
     }
 }

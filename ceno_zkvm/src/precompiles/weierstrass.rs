@@ -1,6 +1,7 @@
 use generic_array::GenericArray;
 use sp1_curves::params::NumWords;
 
+pub mod test_utils;
 pub mod weierstrass_add;
 pub mod weierstrass_double;
 

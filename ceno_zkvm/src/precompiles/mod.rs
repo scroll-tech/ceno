@@ -17,11 +17,18 @@ pub use bitwise_keccakf::{
 use ff_ext::ExtensionField;
 use gkr_iop::selector::SelectorType;
 pub use weierstrass::{
-    weierstrass_add::{run_weierstrass_add, setup_gkr_circuit as setup_weierstrass_add_circuit},
+    EllipticCurveAddInstance, EllipticCurveDoubleInstance,
+    test_utils::{random_point_pairs, random_points},
+    weierstrass_add::{
+        WeierstrassAddAssignLayout, run_weierstrass_add,
+        setup_gkr_circuit as setup_weierstrass_add_circuit,
+    },
     weierstrass_double::{
-        run_weierstrass_double, setup_gkr_circuit as setup_weierstrass_double_circuit,
+        WeierstrassDoubleAssignLayout, run_weierstrass_double,
+        setup_gkr_circuit as setup_weierstrass_double_circuit,
     },
 };
+
 #[derive(Clone, Debug)]
 pub struct SelectorTypeLayout<E: ExtensionField> {
     pub sel_mem_read: SelectorType<E>,
