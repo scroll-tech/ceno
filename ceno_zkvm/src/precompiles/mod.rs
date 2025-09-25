@@ -16,6 +16,9 @@ pub use bitwise_keccakf::{
 };
 use ff_ext::ExtensionField;
 use gkr_iop::selector::SelectorType;
+pub use weierstrass::weierstrass_add::{
+    run_weierstrass_add, setup_gkr_circuit as setup_weierstrass_add_circuit,
+};
 
 #[derive(Clone, Debug)]
 pub struct SelectorTypeLayout<E: ExtensionField> {

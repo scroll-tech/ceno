@@ -1,7 +1,7 @@
 use generic_array::GenericArray;
 use sp1_curves::params::NumWords;
 
-mod weierstrass_add;
+pub mod weierstrass_add;
 
 #[derive(Clone, Default, Debug)]
 pub struct EllipticCurveAddInstance<P: NumWords> {

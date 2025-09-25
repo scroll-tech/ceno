@@ -21,7 +21,7 @@ use multilinear_extensions::{
     mle::MultilinearExtension,
     util::{ceil_log2, max_usable_threads, transpose},
 };
-use num::{BigUint, Zero};
+use num::BigUint;
 use p3::field::{FieldAlgebra, PrimeField32};
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
@@ -472,6 +472,7 @@ pub struct TestWeierstrassAddLayout<E: ExtensionField, EC: EllipticCurve> {
     _point_ptr_1: WitIn,
 }
 
+#[allow(clippy::type_complexity)]
 pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve>()
 -> Result<(TestWeierstrassAddLayout<E, EC>, GKRCircuit<E>, u16, u16), ZKVMError>
 where
