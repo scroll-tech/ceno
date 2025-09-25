@@ -12,6 +12,3 @@ version = "0.1.0"
 [dependencies]
 ceno_rt = { path = "../../ceno_rt" }
 tiny-keccak = { workspace = true }
-
-[[test]]
-name = "keccak"
