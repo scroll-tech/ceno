@@ -11,9 +11,9 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [dependencies]
-tiny-keccak = { workspace = true }
-cfg-if = "1.0"
 ceno_rt = { path = "../../ceno_rt" }
+cfg-if = "1.0"
+tiny-keccak = { workspace = true }
 
 [[test]]
 name = "keccak"
