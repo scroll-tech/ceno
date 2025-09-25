@@ -635,7 +635,7 @@ impl ValueMul {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Value<'a, T: Into<u64> + From<u32> + Copy + Default> {
     val: T,
     pub limbs: Cow<'a, [u16]>,
