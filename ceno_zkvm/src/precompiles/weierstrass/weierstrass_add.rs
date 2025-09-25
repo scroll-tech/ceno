@@ -319,6 +319,10 @@ where
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
         self.n_challenges = 0;
 
+        // println!("n_fixed: {}", self.n_fixed);
+        println!("n_committed: {}", self.n_committed);
+        println!("n_structural_witin: {}", self.n_structural_witin);
+
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
         cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
@@ -331,7 +335,7 @@ where
         let zero_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
         (
-            [
+            [ 
                 // r_record
                 (0..r_len).collect_vec(),
                 // w_record
@@ -902,7 +906,7 @@ mod tests {
         type Pcs = BasefoldDefault<E>;
 
         thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
+            .stack_size(32 * 1024 * 1024) // 32 MB
             .spawn(|| {
                 let points = random_point_pairs::<WP>(5);
                 let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
