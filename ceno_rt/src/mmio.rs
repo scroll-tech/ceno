@@ -1,7 +1,9 @@
 //! Memory-mapped I/O (MMIO) functions.
 
 use rkyv::{
-    Archived, Deserialize, Portable, api::high::{HighValidator, HighDeserializer}, bytecheck::CheckBytes,
+    Archived, Deserialize, Portable,
+    api::high::{HighDeserializer, HighValidator},
+    bytecheck::CheckBytes,
     rancor::Failure,
 };
 
