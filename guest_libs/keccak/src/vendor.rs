@@ -12,29 +12,12 @@ impl Buffer {
         &mut self.0
     }
 
-    #[cfg(target_endian = "little")]
     #[inline]
     pub fn execute<F: FnOnce(&mut [u8])>(&mut self, offset: usize, len: usize, f: F) {
+        // # Safety: little-endian target
         let buffer: &mut [u8; KECCAK_STATE_WORDS * 8] =
             unsafe { core::mem::transmute(&mut self.0) };
         f(&mut buffer[offset..][..len]);
-    }
-
-    #[cfg(target_endian = "big")]
-    #[inline]
-    pub fn execute<F: FnOnce(&mut [u8])>(&mut self, offset: usize, len: usize, f: F) {
-        fn swap_endianess(buffer: &mut [u64]) {
-            for item in buffer {
-                *item = item.swap_bytes();
-            }
-        }
-
-        let start = offset / 8;
-        let end = (offset + len + 7) / 8;
-        swap_endianess(&mut self.0[start..end]);
-        let buffer: &mut [u8; WORDS * 8] = unsafe { core::mem::transmute(&mut self.0) };
-        f(&mut buffer[offset..][..len]);
-        swap_endianess(&mut self.0[start..end]);
     }
 
     pub fn setout(&mut self, dst: &mut [u8], offset: usize, len: usize) {

@@ -10,13 +10,7 @@ pub use tiny_keccak::{self, Hasher};
 mod vendor;
 pub use vendor::keccak::Keccak;
 
-cfg_if::cfg_if! {
-    if #[cfg(not(target_arch = "riscv32"))] {
-        pub use tiny_keccak::keccakf;
-    } else {
-        pub use ceno_rt::syscalls::syscall_keccak_permute as keccakf;
-    }
-}
+pub use ceno_rt::syscalls::syscall_keccak_permute as keccakf;
 
 mod keccakf {
     use crate::{
@@ -45,7 +39,6 @@ mod keccakf {
 /// [`keccak256`]: https://en.wikipedia.org/wiki/SHA-3
 /// [`sha3`]: https://docs.rs/sha3/latest/sha3/
 /// [`tiny_keccak`]: https://docs.rs/tiny-keccak/latest/tiny_keccak/
-#[cfg(target_arch = "riscv32")]
 #[inline(always)]
 #[no_mangle]
 pub unsafe extern "C" fn native_keccak256(bytes: *const u8, len: usize, output: *mut u8) {
