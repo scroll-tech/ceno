@@ -10,6 +10,8 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [dependencies]
+alloy-primitives = { version = "1.3", features = ["native-keccak"] }
+ceno_keccak = { path = "../guest_libs/keccak" }
 ceno_rt = { path = "../ceno_rt" }
 rand.workspace = true
 tiny-keccak.workspace = true
