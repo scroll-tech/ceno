@@ -45,6 +45,7 @@ use gkr_iop::gpu::gpu_prover::*;
 
 pub struct GpuTowerProver;
 
+use crate::scheme::constants::NUM_FANIN;
 use gkr_iop::gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu};
 
 // Extract out_evals from GPU-built tower witnesses
@@ -59,7 +60,7 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     let mut w_out_evals = Vec::new();
     for (i, gpu_spec) in prod_gpu.iter().enumerate() {
         let first_layer_evals: Vec<E> = gpu_spec
-            .get_final_evals(0)
+            .get_output_evals()
             .expect("Failed to extract final evals from GPU product tower");
 
         // Product tower first layer should have 2 MLEs
@@ -81,7 +82,7 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     let mut lk_out_evals = Vec::new();
     for gpu_spec in logup_gpu.iter() {
         let first_layer_evals: Vec<E> = gpu_spec
-            .get_final_evals(0)
+            .get_output_evals()
             .expect("Failed to extract final evals from GPU logup tower");
 
         // Logup tower first layer should have 4 MLEs
@@ -481,7 +482,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         let (point_gl, proof_gpu) = cuda_hal
             .tower
-            .create_proof(&input, basic_tr)
+            .create_proof(&cuda_hal, &input, NUM_FANIN, basic_tr)
             .expect("gpu tower create_proof failed");
         exit_span!(span);
 

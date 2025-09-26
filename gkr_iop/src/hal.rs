@@ -1,12 +1,11 @@
-use ff_ext::ExtensionField;
-use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::mle::Point;
-use std::{fmt::Debug, sync::Arc};
-
 use crate::gkr::layer::{
     Layer,
     hal::{LinearLayerProver, SumcheckLayerProver, ZerocheckLayerProver},
 };
+use ff_ext::ExtensionField;
+use mpcs::PolynomialCommitmentScheme;
+use multilinear_extensions::mle::Point;
+use std::{fmt::Debug, sync::Arc};
 
 pub trait MultilinearPolynomial<E: ExtensionField> {
     fn num_vars(&self) -> usize;
@@ -14,6 +13,10 @@ pub trait MultilinearPolynomial<E: ExtensionField> {
 
     /// Get the length of evaluation data
     fn evaluations_len(&self) -> usize;
+
+    /// Debug utility: generate a semantic signature value to represent the whole boolean hypercube elements
+    /// this function is very heavily as traverse whole boolean hypercube
+    fn bh_signature(&self) -> E;
 }
 
 /// Defines basic types like field, pcs that are common among all devices

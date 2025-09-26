@@ -71,8 +71,8 @@ pub use gpu_prover::*;
 /// Stores a multilinear polynomial in dense evaluation form.
 pub struct MultilinearExtensionGpu<'a, E: ExtensionField> {
     /// GPU polynomial data, supporting both base field and extension field
-    pub mle: GpuFieldType,
-    _phantom: PhantomData<&'a E>,
+    pub mle: GpuFieldType<'a>,
+    _phantom: PhantomData<E>,
 }
 
 impl<'a, E: ExtensionField> Default for MultilinearExtensionGpu<'a, E> {
@@ -121,6 +121,26 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu
     /// Get the length of evaluation data
     fn evaluations_len(&self) -> usize {
         self.mle.evaluations_len()
+    }
+
+    fn bh_signature(&self) -> E {
+        if std::any::TypeId::of::<E::BaseField>()
+            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
+        {
+            panic!("GPU backend only supports Goldilocks");
+        }
+
+        match &self.mle {
+            GpuFieldType::Base(poly) => {
+                let res: Vec<E> = unsafe { std::mem::transmute(vec![poly.bh_signature()]) };
+                res[0]
+            }
+            GpuFieldType::Ext(poly) => {
+                let res: Vec<E> = unsafe { std::mem::transmute(vec![poly.bh_signature()]) };
+                res[0]
+            }
+            GpuFieldType::Unreachable => unreachable!(),
+        }
     }
 }
 
@@ -190,7 +210,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Create from base field GpuPolynomial
-    pub fn from_ceno_gpu_base(mle_gpu: GpuPolynomial) -> Self {
+    pub fn from_ceno_gpu_base(mle_gpu: GpuPolynomial<'a>) -> Self {
         Self {
             mle: GpuFieldType::Base(mle_gpu),
             _phantom: PhantomData,
@@ -198,7 +218,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Create from extension field GpuPolynomialExt
-    pub fn from_ceno_gpu_ext(mle_gpu: GpuPolynomialExt) -> Self {
+    pub fn from_ceno_gpu_ext(mle_gpu: GpuPolynomialExt<'a>) -> Self {
         Self {
             mle: GpuFieldType::Ext(mle_gpu),
             _phantom: PhantomData,
@@ -206,7 +226,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Method for backward compatibility
-    pub fn from_ceno_gpu(mle_gpu: GpuPolynomial) -> Self {
+    pub fn from_ceno_gpu(mle_gpu: GpuPolynomial<'a>) -> Self {
         Self::from_ceno_gpu_base(mle_gpu)
     }
 
@@ -266,7 +286,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
     type MultilinearPoly<'a> = MultilinearExtensionGpu<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
-    type PcsData = BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<E::BaseField>>;
+    type PcsData =
+        BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<'static, E::BaseField>>;
     #[cfg(not(feature = "gpu"))]
     type PcsData = <PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
