@@ -44,14 +44,13 @@ tracing-subscriber.workspace = true
 bincode.workspace = true
 cfg-if.workspace = true
 clap.workspace = true
+derive = { path = "../derive" }
 generic-array.workspace = true
 generic_static = "0.2"
 num.workspace = true
 parse-size = "1.1"
 rand.workspace = true
-sp1-core-executor = "5.2.1"
 sp1-curves.workspace = true
-sp1-derive = "5.2.1"
 tempfile = "3.14"
 tiny-keccak.workspace = true
 
