@@ -2,6 +2,7 @@ use std::{array, fmt::Debug, sync::Arc};
 
 use ceno_emul::{ByteAddr, MemOp, StepRecord};
 use core::{borrow::BorrowMut, mem::size_of};
+use derive::AlignedBorrow;
 use ff_ext::ExtensionField;
 use generic_array::{GenericArray, sequence::GenericSequence, typenum::Unsigned};
 use gkr_iop::{
@@ -33,7 +34,6 @@ use sp1_curves::{
     params::{FieldParameters, Limbs, NumLimbs, NumWords},
     weierstrass::WeierstrassParameters,
 };
-use sp1_derive::AlignedBorrow;
 use sumcheck::util::optimal_sumcheck_threads;
 use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
