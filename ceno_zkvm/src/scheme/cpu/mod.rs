@@ -5,7 +5,9 @@ use crate::{
     circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP},
+        constants::{
+            NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE, SEPTIC_JACOBIAN_NUM_MLES,
+        },
         hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
         septic_curve::{SepticExtension, SymbolicSepticExtension},
         utils::{
@@ -63,12 +65,7 @@ impl CpuTowerProver {
         enum GroupedMLE<'a, E: ExtensionField> {
             Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
             Logup((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in logup_specs
-            EcAdd(
-                (
-                    Vec<MultilinearExtension<'a, E>>,
-                    Vec<MultilinearExtension<'a, E>>,
-                ),
-            ),
+            EcAdd(Vec<MultilinearExtension<'a, E>>),         // 2 points, each point has 21 polys
         }
 
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
@@ -93,7 +90,7 @@ impl CpuTowerProver {
             prod_specs_len +
                 // logup occupy 2 sumcheck: numerator and denominator
                 logup_specs_len * 2
-                + ecc_spec.as_ref().map_or(0, |_| 14),
+                + ecc_spec.as_ref().map_or(0, |_| SEPTIC_JACOBIAN_NUM_MLES),
             transcript,
         );
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
@@ -124,13 +121,9 @@ impl CpuTowerProver {
         }
 
         if let Some(ecc_spec) = ecc_spec {
-            for i in 0..max_round_index {
-                layer_witness[i + 1].push(GroupedMLE::EcAdd((
-                    // TODO: avoid clone
-                    ecc_spec.witness[i].clone(),
-                    ecc_spec.witness[i + 1].clone(),
-                )));
-            }
+            merge_spec_witness(&mut layer_witness, ecc_spec, 0, |(_, v)| {
+                GroupedMLE::EcAdd(v)
+            });
         }
 
         // skip(1) for output layer
@@ -143,11 +136,7 @@ impl CpuTowerProver {
             let mut witness_lk_expr = vec![vec![]; logup_specs_len];
 
             let mut eq: MultilinearExtension<E> = build_eq_x_r_vec(&out_rt).into_mle();
-            let eq_len = eq.evaluations.len();
-            let mut eq_prime = eq.get_ext_field_vec()[0..eq_len / 2].to_vec().into_mle();
-
             let eq_expr = expr_builder.lift(Either::Right(&mut eq));
-            let eq_prime_expr = expr_builder.lift(Either::Right(&mut eq_prime));
 
             // processing exprs
             for group_witness in layer_witness.iter_mut() {
@@ -215,112 +204,89 @@ impl CpuTowerProver {
                                     + alpha_denominator * q1 * q2),
                         );
                     }
-                    GroupedMLE::EcAdd((prev_layer, curr_layer)) => {
-                        assert_eq!(curr_layer.len(), 3 * 14); // 3 points, each point has 14 polys
-                        assert_eq!(prev_layer.len(), 3 * 14);
-                        let (x1, rest) = curr_layer.split_at(7);
-                        let (y1, rest) = rest.split_at(7);
-                        let (x2, rest) = rest.split_at(7);
-                        let (y2, rest) = rest.split_at(7);
-                        let (x3, y3) = rest.split_at(7);
+                    GroupedMLE::EcAdd(layer_polys) => {
+                        assert_eq!(layer_polys.len(), 2 * SEPTIC_JACOBIAN_NUM_MLES); // 2 points, each point has 21 polys
 
-                        // x1'[b] = x3[0,b]
-                        // y1'[b] = y3[0,b]
-                        // x2'[b] = x3[1,b]
-                        // y2'[b] = y3[1,b]
-                        let (x1_prime, rest) = prev_layer.split_at_mut(7);
-                        let (y1_prime, rest) = rest.split_at_mut(7);
-                        let (x2_prime, rest) = rest.split_at_mut(7);
-                        let (y2_prime, _) = rest.split_at_mut(7);
+                        let (x1, rest) = layer_polys.split_at_mut(SEPTIC_EXTENSION_DEGREE);
+                        let (y1, rest) = rest.split_at_mut(SEPTIC_EXTENSION_DEGREE);
+                        let (z1, rest) = rest.split_at_mut(SEPTIC_EXTENSION_DEGREE);
+                        let (x2, rest) = rest.split_at_mut(SEPTIC_EXTENSION_DEGREE);
+                        let (y2, z2) = rest.split_at_mut(SEPTIC_EXTENSION_DEGREE);
 
                         let x1 = &SymbolicSepticExtension::new(
                             x1.into_iter()
-                                .map(|x| expr_builder.lift(Either::Left(x)))
+                                .map(|x| expr_builder.lift(x.to_either()))
                                 .collect(),
                         );
                         let y1 = &SymbolicSepticExtension::new(
                             y1.into_iter()
-                                .map(|y| expr_builder.lift(Either::Left(y)))
+                                .map(|y| expr_builder.lift(y.to_either()))
+                                .collect(),
+                        );
+                        let z1 = &SymbolicSepticExtension::new(
+                            z1.into_iter()
+                                .map(|z| expr_builder.lift(z.to_either()))
                                 .collect(),
                         );
                         let x2 = &SymbolicSepticExtension::new(
                             x2.into_iter()
-                                .map(|x| expr_builder.lift(Either::Left(x)))
+                                .map(|x| expr_builder.lift(x.to_either()))
                                 .collect(),
                         );
                         let y2 = &SymbolicSepticExtension::new(
                             y2.into_iter()
-                                .map(|y| expr_builder.lift(Either::Left(y)))
-                                .collect(),
-                        );
-                        let x3 = &SymbolicSepticExtension::new(
-                            x3.into_iter()
-                                .map(|x| expr_builder.lift(Either::Left(x)))
-                                .collect(),
-                        );
-                        let y3 = &SymbolicSepticExtension::new(
-                            y3.into_iter()
-                                .map(|y| expr_builder.lift(Either::Left(y)))
-                                .collect(),
-                        );
-                        let x1_prime_expr = SymbolicSepticExtension::new(
-                            x1_prime
-                                .iter_mut()
-                                .map(|x| expr_builder.lift(x.to_either()))
-                                .collect(),
-                        );
-                        let y1_prime_expr = SymbolicSepticExtension::new(
-                            y1_prime
-                                .iter_mut()
                                 .map(|y| expr_builder.lift(y.to_either()))
                                 .collect(),
                         );
-                        let x2_prime_expr = SymbolicSepticExtension::new(
-                            x2_prime
-                                .iter_mut()
-                                .map(|x| expr_builder.lift(x.to_either()))
-                                .collect(),
-                        );
-                        let y2_prime_expr = SymbolicSepticExtension::new(
-                            y2_prime
-                                .iter_mut()
-                                .map(|y| expr_builder.lift(y.to_either()))
+                        let z2 = &SymbolicSepticExtension::new(
+                            z2.into_iter()
+                                .map(|z| expr_builder.lift(z.to_either()))
                                 .collect(),
                         );
 
-                        // layer i: x3', y3', x1', y1', x2', y2', each has `i` variables
-                        // we copy the first half of x3 to x1', 2nd half to x2' and
-                        // copy the first half of y3 to y1', 2nd half to y2'.
-                        //
-                        // x1'[b] = x3[0,b], y1'[b] = y3[0,b]
-                        // x2'[b] = x3[1,b], y2'[b] = y3[1,b]
-                        //
-                        // layer i+1: x3, y3, x1, y1, x2, y2, each has `i+1` variables
-                        // we requires the elliptic curve addition constraints hold at layer i+1.
-                        // 1. 0 = \sum_b eq(rt,b) * ((x3 + x1 + x2) * (x2 - x1)^2 - (y2 - y1)^2)
-                        exprs.extend(
-                            (((x3 + x1 + x2) * (x2 - x1) * (x2 - x1) - (y2 - y1) * (y2 - y1))
-                                * &eq_expr)
-                                .to_exprs(),
-                        );
-                        // 2. 0 = \sum_b eq(rt,b) * ((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3))
-                        exprs.extend(
-                            (((y3 + y1) * (x2 - x1) - (y2 - y1) * (x1 - x3)) * &eq_expr).to_exprs(),
-                        );
+                        let two: Expression<E> = 2.into();
+                        let four: Expression<E> = 4.into();
+                        let z1_squared = z1 * z1;
+                        println!("z1_squared: {:?}", z1_squared);
+                        let z1_cubed = &z1_squared * z1;
+                        let z2_squared = z2 * z2;
+                        let z2_cubed = &z2_squared * z2;
 
-                        // with len = rt.len(), rt' = rt[0..len-1]
-                        // x1'[rt'] = \sum_b' eq(rt',b') * x3[0,b']
-                        // y1'[rt'] = \sum_b' eq(rt',b') * y3[0,b']
-                        // x2'[rt'] = \sum_b' eq(rt',b') * x3[1,b']
-                        // y2'[rt'] = \sum_b' eq(rt',b') * y3[1,b']
-                        exprs.extend((x1_prime_expr * &eq_prime_expr).to_exprs());
-                        exprs.extend((y1_prime_expr * &eq_prime_expr).to_exprs());
-                        exprs.extend((x2_prime_expr * &eq_prime_expr).to_exprs());
-                        exprs.extend((y2_prime_expr * &eq_prime_expr).to_exprs());
+                        // U1 = X1*Z2^2, U2 = X2*Z1^2
+                        let u1 = x1 * &z2_squared;
+                        let u2 = x2 * &z1_squared;
+
+                        // S1 = Y1*Z2^3, S2 = Y2*Z1^3
+                        let s1 = y1 * &z2_cubed;
+                        let s2 = y2 * &z1_cubed;
+
+                        // H = U2-U1, R = S2-S1
+                        let h = u2 - &u1;
+                        let h_squared = &h * &h;
+                        let h_cubed = &h_squared * &h;
+
+                        let i = h_squared * &four;
+                        let j = h_cubed * &four;
+                        let r = (&s2 - &s1) * &two;
+                        let v = &u1 * &i;
+
+                        // Check the formulas for X3, Y3, Z3
+                        // X3 = R^2 - J - 2*V
+                        let x3 = &r * &r - j.clone() - v.clone() * &two;
+                        // Y3 = R*(V - X3) - 2*S1*J
+                        let y3 = r * (&v - &x3) - s1 * j * &two;
+                        // Z3 = (Z1 + Z2)^2 - Z1Z1 - Z2Z2) * H
+                        let z3 = z1 * z2 * h * &two;
+                        // exprs.extend((x3 * &eq_expr).to_exprs());
+                        // exprs.extend((y3 * &eq_expr).to_exprs());
+                        // exprs.extend((z3 * &eq_expr).to_exprs());
                     }
                 }
             }
 
+            for expr in exprs.iter() {
+                println!("expr: {:?}", expr);
+            }
             let wrap_batch_span = entered_span!("wrap_batch");
             let (sumcheck_proofs, state) = IOPProverState::prove(
                 expr_builder.to_virtual_polys(&[exprs.into_iter().sum()], &[]),
@@ -976,8 +942,12 @@ mod tests {
     use transcript::BasicTranscript;
 
     use crate::scheme::{
-        cpu::CpuTowerProver, hal::TowerProverSpec, septic_curve::SepticPoint,
+        constants::SEPTIC_JACOBIAN_NUM_MLES,
+        cpu::CpuTowerProver,
+        hal::TowerProverSpec,
+        septic_curve::{SepticExtension, SepticJacobianPoint, SepticPoint},
         utils::infer_septic_sum_witness,
+        verifier::TowerVerify,
     };
 
     #[test]
@@ -986,19 +956,15 @@ mod tests {
         type F = BabyBear;
         type PCS = Basefold<E, BasefoldRSParams>;
 
-        // generate 1 product witness spec
-
-        // generate 1 logup witness spec
-        // if layer i <x3, y3, x1, y1, x2, y2> has n variables,
-        // then layer i+1 has n-1 variables.
+        let log2_n = 6;
+        let n_points = 1 << log2_n;
+        let mut rng = rand::thread_rng();
 
         // generate 1 ecc add witness
         let ecc_spec: TowerProverSpec<'_, CpuBackend<E, PCS>> = {
-            let n_points = 1 << 4;
-            let mut rng = rand::thread_rng();
             // sample n points
             let points = (0..n_points)
-                .map(|_| SepticPoint::<F>::random(&mut rng))
+                .map(|_| SepticJacobianPoint::<F>::random(&mut rng))
                 .collect_vec();
 
             // transform points to row major matrix
@@ -1008,7 +974,7 @@ mod tests {
                 .map(|(p, q)| {
                     [p, q]
                         .iter()
-                        .flat_map(|p| p.x.0.iter().chain(p.y.0.iter()))
+                        .flat_map(|p| p.x.0.iter().chain(p.y.0.iter()).chain(p.z.0.iter()))
                         .copied()
                         .collect_vec()
                 })
@@ -1024,8 +990,38 @@ mod tests {
                 witness: infer_septic_sum_witness(p_mles),
             }
         };
+        let output_layer = &ecc_spec.witness[0];
+        let ecc_out_evals: Vec<SepticJacobianPoint<F>> = output_layer
+            .chunks_exact(SEPTIC_JACOBIAN_NUM_MLES)
+            .map(|mles| {
+                mles.iter()
+                    .map(|mle| mle.get_base_field_vec()[0])
+                    .collect_vec()
+            })
+            .map(|chunk| SepticJacobianPoint {
+                x: SepticExtension(chunk[0..7].try_into().unwrap()),
+                y: SepticExtension(chunk[7..14].try_into().unwrap()),
+                z: SepticExtension(chunk[14..21].try_into().unwrap()),
+            })
+            .collect_vec();
+
         let mut transcript = BasicTranscript::new(b"test");
-        let prover =
+        println!("begin to create tower proof");
+        let (_, tower_proof) =
             CpuTowerProver::create_proof(vec![], vec![], Some(ecc_spec), 2, &mut transcript);
+
+        let mut transcript = BasicTranscript::new(b"test");
+        assert!(
+            TowerVerify::verify(
+                vec![],
+                vec![],
+                ecc_out_evals,
+                &tower_proof,
+                vec![],
+                2,
+                &mut transcript
+            )
+            .is_ok()
+        );
     }
 }

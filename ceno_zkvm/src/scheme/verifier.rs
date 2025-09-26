@@ -31,7 +31,7 @@ use crate::{
             NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE, SEPTIC_EXTENSION_DEGREE,
             SEPTIC_JACOBIAN_NUM_MLES,
         },
-        septic_curve::{SepticJacobianPoint},
+        septic_curve::SepticJacobianPoint,
     },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{
@@ -1063,7 +1063,6 @@ impl TowerVerify {
                         next_eval += next_round_expected_eval;
                     }
                 }
-                
                 Ok((PointAndEval {
                     point: rt_prime,
                     eval: next_eval,

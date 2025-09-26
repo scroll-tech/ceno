@@ -582,6 +582,7 @@ impl<F: Field> MulAssign<Self> for SepticExtension<F> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct SymbolicSepticExtension<E: ExtensionField>(pub Vec<Expression<E>>);
 
 impl<E: ExtensionField> Add<Self> for &SymbolicSepticExtension<E> {
