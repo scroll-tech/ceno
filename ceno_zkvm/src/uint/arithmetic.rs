@@ -494,7 +494,9 @@ mod tests {
                     if i != 0 {
                         result[i] += carries[i - 1];
                     }
-                    if let Some(carry) = carry && !overflow {
+                    if let Some(carry) = carry
+                        && !overflow
+                    {
                         result[i] -= carry * pow_of_c;
                     }
                 });
