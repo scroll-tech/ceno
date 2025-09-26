@@ -1,17 +1,21 @@
 use crate::{RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
 use anyhow::Result;
 
+pub mod bls12381;
 pub mod bn254;
 pub mod keccak_permute;
 pub mod secp256k1;
+pub mod secp256r1;
 pub mod sha256;
 
 // Using the same function codes as sp1:
 // https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/code.rs
 
 pub use ceno_rt::syscalls::{
-    BN254_ADD, BN254_DOUBLE, BN254_FP_ADD, BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL,
-    KECCAK_PERMUTE, SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SHA_EXTEND,
+    BLS12381_ADD, BLS12381_DECOMPRESS, BLS12381_DOUBLE, BN254_ADD, BN254_DOUBLE, BN254_FP_ADD,
+    BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL, KECCAK_PERMUTE, SECP256K1_ADD,
+    SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SECP256R1_ADD, SECP256R1_DECOMPRESS, SECP256R1_DOUBLE,
+    SHA_EXTEND,
 };
 
 pub trait SyscallSpec {

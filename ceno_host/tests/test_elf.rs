@@ -2,9 +2,9 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 
 use anyhow::Result;
 use ceno_emul::{
-    BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, COORDINATE_WORDS,
-    EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS, SHA_EXTEND_WORDS, StepRecord,
-    VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, EmuContext, InsnKind,
+    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, SHA_EXTEND_WORDS,
+    StepRecord, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
     host_utils::{read_all_messages, read_all_messages_as_words},
 };
 use ceno_host::CenoStdin;
@@ -411,9 +411,14 @@ fn test_secp256k1_decompress() -> Result<()> {
     // Writes should cover the Y coordinate, i.e latter half of the repr
     let expect = bytes_to_words(decompressed)[8..].to_vec();
 
-    assert_eq!(witness.mem_ops.len(), 2 * COORDINATE_WORDS);
+    assert_eq!(witness.mem_ops.len(), 2 * SECP256K1_COORDINATE_WORDS);
     // Reads on X
-    for (i, write_op) in witness.mem_ops.iter().take(COORDINATE_WORDS).enumerate() {
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .take(SECP256K1_COORDINATE_WORDS)
+        .enumerate()
+    {
         assert_eq!(write_op.addr, x_address + i);
         assert_eq!(write_op.value.after, write_op.value.before);
     }
@@ -422,8 +427,8 @@ fn test_secp256k1_decompress() -> Result<()> {
     for (i, write_op) in witness
         .mem_ops
         .iter()
-        .skip(COORDINATE_WORDS)
-        .take(COORDINATE_WORDS)
+        .skip(SECP256K1_COORDINATE_WORDS)
+        .take(SECP256K1_COORDINATE_WORDS)
         .enumerate()
     {
         assert_eq!(write_op.addr, y_address + i);

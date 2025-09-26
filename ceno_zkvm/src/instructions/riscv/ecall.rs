@@ -1,6 +1,8 @@
 mod halt;
 mod keccak;
+mod weierstrass_add;
 pub use keccak::KeccakInstruction;
+pub use weierstrass_add::WeierstrassAddAssignInstruction;
 
 use ceno_emul::InsnKind;
 pub use halt::HaltInstruction;

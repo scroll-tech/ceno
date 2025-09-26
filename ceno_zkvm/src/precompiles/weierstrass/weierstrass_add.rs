@@ -126,12 +126,14 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
             sel_zero: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
         };
 
+        // Default expression, will be updated in build_layer_logic
         let input32_exprs: [GenericArray<
             MemoryExpr<E>,
             <EC::BaseField as NumWords>::WordsCurvePoint,
         >; 2] = array::from_fn(|_| {
             GenericArray::generate(|_| array::from_fn(|_| Expression::WitIn(0)))
         });
+        // Default expression, will be updated in build_layer_logic
         let output32_exprs: GenericArray<
             MemoryExpr<E>,
             <EC::BaseField as NumWords>::WordsCurvePoint,
@@ -415,7 +417,8 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolWitnessGenerator<E>
                     let idx = i * chunk_size + j;
                     if idx < num_instances {
                         let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
-                            row[..num_wit_cols].borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
+                            row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
+                                .borrow_mut();
                         Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
                         for x in eqs.iter_mut() {
                             *x = E::BaseField::ONE;
@@ -461,7 +464,6 @@ pub struct TestWeierstrassAddLayout<E: ExtensionField, EC: EllipticCurve> {
     mem_rw: Vec<WriteMEM>,
     vm_state: StateInOut<E>,
     _point_ptr_0: WitIn,
-    _point_ptr_1: WitIn,
 }
 
 #[allow(clippy::type_complexity)]
@@ -469,15 +471,12 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve>()
 -> Result<(TestWeierstrassAddLayout<E, EC>, GKRCircuit<E>, u16, u16), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "weierstrass_add");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
-
-    // Guarantee the witness occur at the beginning of the witness columns. This is for simple implementation.
-    let mut layout = WeierstrassAddAssignLayout::build_layer_logic(&mut cb, ())?;
-
     // constrain vmstate
     let vm_state = StateInOut::construct_circuit(&mut cb, false)?;
 
     let point_ptr_0 = cb.create_witin(|| "state_ptr_0");
-    let point_ptr_1 = cb.create_witin(|| "state_ptr_1");
+
+    let mut layout = WeierstrassAddAssignLayout::build_layer_logic(&mut cb, ())?;
 
     // Write the result to the same address of the first input point.
     let mut mem_rw = izip!(&layout.input32_exprs[0], &layout.output32_exprs)
@@ -503,7 +502,11 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve>()
                 WriteMEM::construct_circuit(
                     &mut cb,
                     // mem address := state_ptr_1 + i
-                    point_ptr_1.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
+                    point_ptr_0.expr()
+                        + E::BaseField::from_canonical_u32(
+                            (layout.output32_exprs.len() + i) as u32,
+                        )
+                        .expr(),
                     val_before.clone(),
                     val_before.clone(),
                     vm_state.ts,
@@ -527,7 +530,6 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve>()
             layout,
             vm_state,
             _point_ptr_0: point_ptr_0,
-            _point_ptr_1: point_ptr_1,
             mem_rw,
         },
         chip.gkr_circuit(),
@@ -596,9 +598,9 @@ pub fn run_weierstrass_add<
             instances
                 .chunks_mut(num_witin as usize)
                 .zip_eq(steps)
-                .for_each(|(instance_with_rotation, _step)| {
+                .for_each(|(instances, _step)| {
                     // assign full rotation with same witness
-                    for instance in instance_with_rotation.chunks_mut(num_witin as usize) {
+                    for instance in instances.chunks_mut(num_witin as usize) {
                         layout
                             .vm_state
                             .assign_instance(

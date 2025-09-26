@@ -20,11 +20,11 @@ pub use weierstrass::{
     EllipticCurveAddInstance, EllipticCurveDoubleInstance,
     test_utils::{random_point_pairs, random_points},
     weierstrass_add::{
-        WeierstrassAddAssignLayout, run_weierstrass_add,
+        WeierstrassAddAssignLayout, WeierstrassAddAssignTrace, run_weierstrass_add,
         setup_gkr_circuit as setup_weierstrass_add_circuit,
     },
     weierstrass_double::{
-        WeierstrassDoubleAssignLayout, run_weierstrass_double,
+        WeierstrassDoubleAssignLayout, WeierstrassDoubleAssignTrace, run_weierstrass_double,
         setup_gkr_circuit as setup_weierstrass_double_circuit,
     },
 };
