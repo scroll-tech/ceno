@@ -1,4 +1,5 @@
 extern crate ceno_rt;
+
 use ceno_rt::syscalls::syscall_sha256_extend;
 use rkyv::vec::ArchivedVec;
 
@@ -65,16 +66,8 @@ fn main() {
     }
 
     // Output the final hash values one by one
-    ceno_rt::commit::<ArchivedVec<u32>, SHA256Result>(&SHA256Result(h.to_vec()));
+    ceno_rt::commit(&h);
     // debug_print!("{:x}", h[0]);
-}
-
-#[derive(Debug, PartialEq)]
-struct SHA256Result(Vec<u32>);
-impl From<&ArchivedVec<u32>> for SHA256Result {
-    fn from(value: &ArchivedVec<u32>) -> Self {
-        SHA256Result(value.to_vec())
-    }
 }
 
 fn process_block(h: &mut [u32; 8], w: &[u32; 64]) {
