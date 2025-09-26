@@ -17,8 +17,9 @@ use std::marker::PhantomData;
 pub mod gpu_prover {
     pub use ceno_gpu::{
         BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu, Buffer, CudaHal,
+        common::buffer::BufferImpl,
         gl64::{
-            CudaHalGL64, GpuFieldType, GpuPolynomial, GpuPolynomialExt, buffer::BufferImpl,
+            CudaHalGL64, GpuFieldType, GpuPolynomial, GpuPolynomialExt,
             build_mle_as_ceno, convert_ceno_to_gpu_basefold_commitment,
             ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu, rotation_selector_gpu,
         },
@@ -391,7 +392,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         cuda_hal
             .witness_infer
             .wit_infer_by_monomial_expr(
-                &cuda_hal,
+                &*cuda_hal,
                 all_witins_gpu_type_gl64,
                 &term_coefficients,
                 &mle_indices_per_term,
