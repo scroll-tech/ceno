@@ -39,7 +39,7 @@ mod keccakf {
 /// [`keccak256`]: https://en.wikipedia.org/wiki/SHA-3
 /// [`sha3`]: https://docs.rs/sha3/latest/sha3/
 /// [`tiny_keccak`]: https://docs.rs/tiny-keccak/latest/tiny_keccak/
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn native_keccak256(bytes: *const u8, len: usize, output: *mut u8) {
     use crate::{Hasher, Keccak};
 

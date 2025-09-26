@@ -24,19 +24,19 @@ pub use params::*;
 
 pub mod syscalls;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[linkage = "weak"]
 pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
     0
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[linkage = "weak"]
 pub extern "C" fn sys_alloc_words(nwords: usize) -> *mut u32 {
     unsafe { alloc_zeroed(Layout::from_size_align(4 * nwords, 4).unwrap()) as *mut u32 }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[linkage = "weak"]
 pub extern "C" fn sys_getenv(_name: *const u8) -> *const u8 {
     null()
@@ -48,7 +48,7 @@ pub extern "C" fn sys_getenv(_name: *const u8) -> *const u8 {
 ///
 /// Make sure that `buf` has at least `nwords` words.
 /// This generator is terrible. :)
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[linkage = "weak"]
 pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
     unsafe fn step() -> u32 {
@@ -56,17 +56,21 @@ pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
         // We are stealing Borland Delphi's random number generator.
         // The random numbers here are only good enough to make eg
         // HashMap work.
-        X = X.wrapping_mul(134775813) + 1;
-        X
+        unsafe {
+            X = X.wrapping_mul(134775813) + 1;
+            X
+        }
     }
     // TODO(Matthias): this is a bit inefficient,
     // we could fill whole u32 words at a time.
     // But it's just for testing.
     for i in 0..words {
-        let element = recv_buf.add(i);
-        // The lower bits ain't really random, so might as well take
-        // the higher order ones, if we are only using 8 bits.
-        *element = step().to_le_bytes()[3];
+        unsafe {
+            let element = recv_buf.add(i);
+            // The lower bits ain't really random, so might as well take
+            // the higher order ones, if we are only using 8 bits.
+            *element = step().to_le_bytes()[3];
+        }
     }
 }
 
@@ -130,7 +134,7 @@ _start:
     ",
 );
 
-extern "C" {
+unsafe extern "C" {
     // The address of this variable is the start of the stack (growing downwards).
     static _stack_start: u8;
 }
