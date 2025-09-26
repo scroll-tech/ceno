@@ -1,0 +1,17 @@
+[package]
+categories = ["cryptography", "zk", "blockchain", "ceno"]
+description = "Ceno zkVM Crypto Guest Library"
+edition = "2021"
+keywords = ["cryptography", "zk", "blockchain", "ceno"]
+license = "MIT OR Apache-2.0"
+name = "ceno_crypto"
+readme = "README.md"
+repository = "https://github.com/scroll-tech/ceno"
+version = "0.1.0"
+
+[dependencies]
+ceno_rt = { path = "../../ceno_rt" }
+thiserror.workspace = true
+
+[dev-dependencies]
+revm-precompile = "27"
