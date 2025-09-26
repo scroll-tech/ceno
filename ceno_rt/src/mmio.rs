@@ -14,7 +14,7 @@ use core::slice::from_raw_parts;
 /// Logically, this is a static constant, but the type system doesn't see it that way.
 /// (We hope that the optimiser is smart enough to see that it is a constant.)
 fn hints_region<'a>() -> &'a [u8] {
-    extern "C" {
+    unsafe extern "C" {
         /// The address of this variable is the start of the hints ROM.
         ///
         /// It is defined in the linker script.  The value of this variable is undefined.
@@ -32,7 +32,7 @@ fn hints_region<'a>() -> &'a [u8] {
 
 /// Get the length of the next hint
 fn hint_len() -> usize {
-    extern "C" {
+    unsafe extern "C" {
         /// The address of this variable is the start of the slice that holds the length of the hints.
         ///
         /// It is defined in the linker script.  The value of this variable is undefined.
@@ -59,7 +59,7 @@ where
 
 /// The memory region with public io.
 fn pubio_region<'a>() -> &'a [u8] {
-    extern "C" {
+    unsafe extern "C" {
         /// The address of this variable is the start of the hints ROM.
         ///
         /// It is defined in the linker script.  The value of this variable is undefined.
@@ -77,7 +77,7 @@ fn pubio_region<'a>() -> &'a [u8] {
 
 /// Get the length of the next pubio
 fn pubio_len() -> usize {
-    extern "C" {
+    unsafe extern "C" {
         /// The address of this variable is the start of the slice that holds the length of the hints.
         ///
         /// It is defined in the linker script.  The value of this variable is undefined.

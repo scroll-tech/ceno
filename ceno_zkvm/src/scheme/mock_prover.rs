@@ -372,7 +372,7 @@ fn load_tables<E: ExtensionField>(
         challenge: [E; 2],
     ) {
         for (i, bits) in std::iter::once(0)
-            .chain((0..=MAX_BITS).flat_map(|i| (0..(1 << i))))
+            .chain((0..=MAX_BITS).flat_map(|i| 0..(1 << i)))
             .zip(
                 std::iter::once(0)
                     .chain((0..=MAX_BITS).flat_map(|i| std::iter::repeat_n(i, 1 << i))),
@@ -395,7 +395,7 @@ fn load_tables<E: ExtensionField>(
     ) {
         for (a, b) in (0..(1 << 8))
             .flat_map(|i| std::iter::repeat_n(i, 1 << 8))
-            .zip(std::iter::repeat_n(0, 1 << 8).flat_map(|_| (0..(1 << 8))))
+            .zip(std::iter::repeat_n(0, 1 << 8).flat_map(|_| 0..(1 << 8)))
         {
             let rlc_record = cs.rlc_chip_record(vec![
                 (LookupTable::DoubleU8 as usize).into(),

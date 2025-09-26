@@ -960,7 +960,7 @@ where
                     push_instance::<E, _>(
                         wits,
                         rc_witin[0].id.into(),
-                        (0..8).map(|i| ((RC[round] >> (i << 3)) & 0xFF)),
+                        (0..8).map(|i| (RC[round] >> (i << 3)) & 0xFF),
                     );
 
                     state64 = iota_output64;
@@ -1214,7 +1214,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             // }
         }
 
-        let out_evals = gkr_output
+        gkr_output
             .0
             .par_iter()
             .map(|wit| {
@@ -1224,11 +1224,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                     eval: wit.evaluate(&point),
                 }
             })
-            .collect::<Vec<_>>();
-
-        // assert_eq!(out_evals.len(), KECCAK_OUT_EVAL_SIZE);
-
-        out_evals
+            .collect::<Vec<_>>()
     };
     exit_span!(span);
 

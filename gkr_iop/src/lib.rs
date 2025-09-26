@@ -1,5 +1,4 @@
 #![feature(variant_count)]
-#![feature(strict_overflow_ops)]
 use crate::{
     chip::Chip, circuit_builder::CircuitBuilder, error::CircuitBuilderError,
     utils::lk_multiplicity::LkMultiplicity,

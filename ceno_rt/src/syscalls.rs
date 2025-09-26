@@ -149,7 +149,7 @@ pub fn syscall_sha256_extend(w: *mut [u32; 64]) {
 /// The caller must ensure that `p` and `q` are valid pointers to data that is aligned along a four
 /// byte boundary.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -174,7 +174,7 @@ pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
 /// The caller must ensure that `p` is valid pointer to data that is aligned along a four byte
 /// boundary.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -194,7 +194,7 @@ pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
 ///
 /// The result is written over the first input.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_fp_addmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -214,7 +214,7 @@ pub extern "C" fn syscall_bn254_fp_addmod(x: *mut u32, y: *const u32) {
 ///
 /// The result is written over the first input.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_fp_mulmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -234,7 +234,7 @@ pub extern "C" fn syscall_bn254_fp_mulmod(x: *mut u32, y: *const u32) {
 ///
 /// The result is written over the first input.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_fp2_addmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -254,7 +254,7 @@ pub extern "C" fn syscall_bn254_fp2_addmod(x: *mut u32, y: *const u32) {
 ///
 /// The result is written over the first input.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_fp2_mulmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
