@@ -3,7 +3,7 @@ use std::{array, fmt::Debug, sync::Arc};
 use ceno_emul::{ByteAddr, MemOp, StepRecord};
 use core::{borrow::BorrowMut, mem::size_of};
 use derive::AlignedBorrow;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 use generic_array::{GenericArray, sequence::GenericSequence, typenum::Unsigned};
 use gkr_iop::{
     OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
@@ -18,12 +18,10 @@ use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     Expression, StructuralWitInType, ToExpr, WitIn,
-    macros::{entered_span, exit_span},
-    mle::MultilinearExtension,
-    util::{ceil_log2, max_usable_threads, transpose},
+    util::{ceil_log2, max_usable_threads},
 };
 use num::BigUint;
-use p3::field::{FieldAlgebra, PrimeField32};
+use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::{IntoParallelRefIterator, ParallelSlice},
@@ -34,7 +32,10 @@ use sp1_curves::{
     params::{FieldParameters, Limbs, NumLimbs, NumWords},
     weierstrass::WeierstrassParameters,
 };
-use sumcheck::util::optimal_sumcheck_threads;
+use sumcheck::{
+    macros::{entered_span, exit_span},
+    util::optimal_sumcheck_threads,
+};
 use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
@@ -91,8 +92,6 @@ pub struct WeierstrassDoubleAssignLayout<E: ExtensionField, EC: EllipticCurve> {
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
     WeierstrassDoubleAssignLayout<E, EC>
-where
-    E::BaseField: PrimeField32,
 {
     fn new(cb: &mut CircuitBuilder<E>) -> Self {
         let wits = WeierstrassDoubleAssignWitCols {
@@ -235,8 +234,6 @@ where
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuilder<E>
     for WeierstrassDoubleAssignLayout<E, EC>
-where
-    E::BaseField: PrimeField32,
 {
     type Params = ();
 
@@ -349,6 +346,10 @@ where
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
         self.n_challenges = 0;
 
+        // println!("n_fixed: {}", self.n_fixed);
+        println!("n_committed: {}", self.n_committed);
+        println!("n_structural_witin: {}", self.n_structural_witin);
+
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
         cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
@@ -403,14 +404,8 @@ pub struct WeierstrassDoubleAssignTrace<P: NumWords> {
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitnessGenerator<E>
     for WeierstrassDoubleAssignLayout<E, EC>
-where
-    E::BaseField: PrimeField32,
 {
     type Trace = WeierstrassDoubleAssignTrace<EC::BaseField>;
-
-    fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize {
-        num_instances.next_power_of_two()
-    }
 
     fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
         RowMajorMatrix::new(0, 0, InstancePaddingStrategy::Default)
@@ -450,7 +445,8 @@ where
                     let idx = i * chunk_size + j;
                     if idx < num_instances {
                         let cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField> =
-                            row[..num_wit_cols].borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
+                            row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
+                                .borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
                         Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
                         for x in eqs.iter_mut() {
                             *x = E::BaseField::ONE;
@@ -468,8 +464,6 @@ where
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
     WeierstrassDoubleAssignLayout<E, EC>
-where
-    E::BaseField: PrimeField32,
 {
     pub fn populate_row(
         event: &EllipticCurveDoubleInstance<EC::BaseField>,
@@ -499,20 +493,16 @@ pub struct TestWeierstrassDoubleLayout<E: ExtensionField, EC: EllipticCurve> {
 
 #[allow(clippy::type_complexity)]
 pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>()
--> Result<(TestWeierstrassDoubleLayout<E, EC>, GKRCircuit<E>, u16, u16), ZKVMError>
-where
-    E::BaseField: PrimeField32,
-{
+-> Result<(TestWeierstrassDoubleLayout<E, EC>, GKRCircuit<E>, u16, u16), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "weierstrass_double");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
-
-    // Guarantee the witness occur at the beginning of the witness columns. This is for simple implementation.
-    let mut layout = WeierstrassDoubleAssignLayout::build_layer_logic(&mut cb, ())?;
 
     // constrain vmstate
     let vm_state = StateInOut::construct_circuit(&mut cb, false)?;
 
     let point_ptr_0 = cb.create_witin(|| "state_ptr_0");
+
+    let mut layout = WeierstrassDoubleAssignLayout::build_layer_logic(&mut cb, ())?;
 
     // Write the result to the same address of the first input point.
     let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
@@ -572,10 +562,7 @@ pub fn run_weierstrass_double<
     points: Vec<GenericArray<u32, <EC::BaseField as NumWords>::WordsCurvePoint>>,
     verify: bool,
     test_outputs: bool,
-) -> Result<GKRProof<E>, BackendError>
-where
-    E::BaseField: PrimeField32,
-{
+) -> Result<GKRProof<E>, BackendError> {
     let num_instances = points.len();
     let log2_num_instance = ceil_log2(num_instances);
     let num_threads = optimal_sumcheck_threads(log2_num_instance);
@@ -648,6 +635,50 @@ where
 
     exit_span!(span);
 
+    if test_outputs {
+        // test got output == expected output
+        // n_points x (result_x_words || result_y_words) in little endian
+        let expected_outputs = points
+            .iter()
+            .map(|a| {
+                let a = AffinePoint::<EC>::from_words_le(a);
+                let c = EC::ec_double(&a);
+                c.to_words_le()
+                    .into_iter()
+                    .flat_map(|word| {
+                        [
+                            word & 0xFF,
+                            (word >> 8) & 0xFF,
+                            (word >> 16) & 0xFF,
+                            (word >> 24) & 0xFF,
+                        ]
+                    })
+                    .collect_vec()
+            })
+            .collect_vec();
+
+        let x_output_index_start = layout.layout.layer_exprs.wits.x3_ins.result[0].id as usize;
+        let y_output_index_start = layout.layout.layer_exprs.wits.y3_ins.result[0].id as usize;
+        let got_outputs = phase1_witness
+            .iter_rows()
+            .take(num_instances)
+            .map(|cols| {
+                [
+                    cols[x_output_index_start..][..<EC::BaseField as NumLimbs>::Limbs::USIZE]
+                        .iter()
+                        .map(|x| x.to_canonical_u64() as u32)
+                        .collect_vec(),
+                    cols[y_output_index_start..][..<EC::BaseField as NumLimbs>::Limbs::USIZE]
+                        .iter()
+                        .map(|y| y.to_canonical_u64() as u32)
+                        .collect_vec(),
+                ]
+                .concat()
+            })
+            .collect_vec();
+        assert_eq!(expected_outputs, got_outputs);
+    }
+
     let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
     let challenges = [
         prover_transcript.read_challenge().elements,
@@ -687,79 +718,6 @@ where
     let out_evals = {
         let mut point = Vec::with_capacity(log2_num_instance);
         point.extend(prover_transcript.sample_vec(log2_num_instance).to_vec());
-
-        if test_outputs {
-            let mut instance_outputs = vec![vec![]; num_instances];
-            for base in gkr_witness
-                .layers
-                .last()
-                .unwrap()
-                .iter()
-                .take(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE)
-            {
-                assert_eq!(base.evaluations().len(), num_instances.next_power_of_two());
-
-                for (i, instance_output) in
-                    instance_outputs.iter_mut().enumerate().take(num_instances)
-                {
-                    instance_output.push(base.get_base_field_vec()[i]);
-                }
-            }
-
-            let expected_outputs = points
-                .iter()
-                .flat_map(|a| {
-                    let a = AffinePoint::<EC>::from_words_le(a);
-                    let c = EC::ec_double(&a);
-                    c.to_words_le()
-                })
-                .collect_vec();
-            let coord_outputs = |limbs: &[Arc<MultilinearExtension<'_, E>>]| {
-                transpose(
-                    limbs
-                        .chunks(4)
-                        .map(|c| {
-                            izip!(
-                                c[0].get_base_field_vec(),
-                                c[1].get_base_field_vec(),
-                                c[2].get_base_field_vec(),
-                                c[3].get_base_field_vec()
-                            )
-                            .map(|(a, b, c, d)| {
-                                let a = a.as_canonical_u32();
-                                let b = b.as_canonical_u32();
-                                let c = c.as_canonical_u32();
-                                let d = d.as_canonical_u32();
-                                a | (b << 8) | (c << 16) | (d << 24) // merge to u32
-                            })
-                            .collect_vec()
-                        })
-                        .collect_vec(),
-                )
-                .into_iter()
-                .take(num_instances)
-                .flatten()
-                .collect_vec()
-            };
-
-            let x_outputs = coord_outputs(
-                &gkr_witness.layers[0].0
-                    [layout.layout.layer_exprs.wits.x3_ins.result[0].id as usize..]
-                    [..<EC::BaseField as NumLimbs>::Limbs::USIZE],
-            );
-            let y_outputs = coord_outputs(
-                &gkr_witness.layers[0].0
-                    [layout.layout.layer_exprs.wits.y3_ins.result[0].id as usize..]
-                    [..<EC::BaseField as NumLimbs>::Limbs::USIZE],
-            );
-            let got_outputs = izip!(
-                x_outputs.chunks(<EC::BaseField as NumWords>::WordsFieldElement::USIZE),
-                y_outputs.chunks(<EC::BaseField as NumWords>::WordsFieldElement::USIZE)
-            )
-            .flat_map(|(x, y)| [x, y].concat())
-            .collect_vec();
-            assert_eq!(expected_outputs, got_outputs);
-        }
 
         let out_evals = gkr_output
             .0
