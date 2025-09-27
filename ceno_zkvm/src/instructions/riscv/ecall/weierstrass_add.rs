@@ -308,12 +308,6 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                     .map(|op| (op.value.before, op.previous_cycle))
                     .unzip();
 
-                println!(
-                    "WeierstrassAddAssign input instance: len({:?}) {:?}",
-                    instance.len(),
-                    instance
-                );
-
                 let p = GenericArray::try_from(
                     instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
                 );

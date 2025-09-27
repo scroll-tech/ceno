@@ -120,8 +120,8 @@ pub struct Rv32imConfig<E: ExtensionField> {
     // Ecall Opcodes
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub bn254_add_config:
-        <WeierstrassAddAssignInstruction<E, SwCurve<Bn254>> as Instruction<E>>::InstructionConfig,
+    // pub bn254_add_config:
+    //     <WeierstrassAddAssignInstruction<E, SwCurve<Bn254>> as Instruction<E>>::InstructionConfig,
     // pub bls12381_add_config:
         // <WeierstrassAddAssignInstruction<E, SwCurve<Bls12381>> as Instruction<E>>::InstructionConfig,
     pub secp256k1_add_config:
@@ -203,8 +203,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // ecall opcodes
         let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
         let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
-        let bn254_add_config =
-            cs.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>();
+        // let bn254_add_config =
+        //     cs.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>();
         // let bls12381_add_config =
         //     cs.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bls12381>>>();
         let secp256k1_add_config =
@@ -279,7 +279,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             // ecall opcodes
             halt_config,
             keccak_config,
-            bn254_add_config,
+            // bn254_add_config,
             // bls12381_add_config,
             secp256k1_add_config,
             // secp256r1_add_config,
@@ -358,10 +358,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // system
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config);
         fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs, &self.keccak_config);
-        fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
-            cs,
-            &self.bn254_add_config,
-        );
+        // fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
+        //     cs,
+        //     &self.bn254_add_config,
+        // );
         // fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bls12381>>>(
         //     cs,
         //     &self.bls12381_add_config,
@@ -405,7 +405,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             .collect();
         let mut halt_records = Vec::new();
         let mut keccak_records = Vec::new();
-        let mut bn254_add_records = Vec::new();
+        // let mut bn254_add_records = Vec::new();
         // let mut bls12381_add_records = Vec::new();
         let mut secp256k1_add_records = Vec::new();
         // let mut secp256r1_add_records = Vec::new();
@@ -419,9 +419,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => {
                     keccak_records.push(record);
                 }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254AddSpec::CODE => {
-                    bn254_add_records.push(record);
-                }
+                // InsnKind::ECALL if record.rs1().unwrap().value == Bn254AddSpec::CODE => {
+                //     bn254_add_records.push(record);
+                // }
                 // InsnKind::ECALL if record.rs1().unwrap().value == Bls12381AddSpec::CODE => {
                 //     bls12381_add_records.push(record);
                 // }
@@ -514,11 +514,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             &self.keccak_config,
             keccak_records,
         )?;
-        witness.assign_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
-            cs,
-            &self.bn254_add_config,
-            bn254_add_records,
-        )?;
+        // witness.assign_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
+        //     cs,
+        //     &self.bn254_add_config,
+        //     bn254_add_records,
+        // )?;
         witness.assign_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>>(
             cs,
             &self.secp256k1_add_config,
@@ -573,7 +573,7 @@ pub struct DummyExtraConfig<E: ExtensionField> {
         <LargeEcallDummy<E, Secp256k1DecompressSpec> as Instruction<E>>::InstructionConfig,
     sha256_extend_config:
         <LargeEcallDummy<E, Sha256ExtendSpec> as Instruction<E>>::InstructionConfig,
-    // bn254_add_config: <LargeEcallDummy<E, Bn254AddSpec> as Instruction<E>>::InstructionConfig,
+    bn254_add_config: <LargeEcallDummy<E, Bn254AddSpec> as Instruction<E>>::InstructionConfig,
     bn254_double_config: <LargeEcallDummy<E, Bn254DoubleSpec> as Instruction<E>>::InstructionConfig,
     bn254_fp_add_config: <LargeEcallDummy<E, Bn254FpAddSpec> as Instruction<E>>::InstructionConfig,
     bn254_fp_mul_config: <LargeEcallDummy<E, Bn254FpMulSpec> as Instruction<E>>::InstructionConfig,
@@ -594,7 +594,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>();
         let sha256_extend_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>();
-        // let bn254_add_config = cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>();
+        let bn254_add_config = cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>();
         let bn254_double_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>();
         let bn254_fp_add_config =
@@ -612,7 +612,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             secp256k1_double_config,
             secp256k1_decompress_config,
             sha256_extend_config,
-            // bn254_add_config,
+            bn254_add_config,
             bn254_double_config,
             bn254_fp_add_config,
             bn254_fp_mul_config,
@@ -635,22 +635,22 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs,
             &self.secp256k1_decompress_config,
         );
-        // fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(
-        //     cs,
-        //     &self.secp256k1_double_config,
-        // );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DoubleSpec>>(
+            cs,
+            &self.secp256k1_double_config,
+        );
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
             cs,
             &self.sha256_extend_config,
         );
-        // fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(
-        //     cs,
-        //     &self.bn254_add_config,
-        // );
-        // fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(
-        //     cs,
-        //     &self.bn254_double_config,
-        // );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(
+            cs,
+            &self.bn254_add_config,
+        );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(
+            cs,
+            &self.bn254_double_config,
+        );
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(
             cs,
             &self.bn254_fp_add_config,
@@ -681,7 +681,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let mut secp256k1_double_steps = Vec::new();
         let mut secp256k1_decompress_steps = Vec::new();
         let mut sha256_extend_steps = Vec::new();
-        // let mut bn254_add_steps = Vec::new();
+        let mut bn254_add_steps = Vec::new();
         let mut bn254_double_steps = Vec::new();
         let mut bn254_fp_add_steps = Vec::new();
         let mut bn254_fp_mul_steps = Vec::new();
@@ -696,7 +696,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
                     Secp256k1DoubleSpec::CODE => secp256k1_double_steps.push(step),
                     Secp256k1DecompressSpec::CODE => secp256k1_decompress_steps.push(step),
                     Sha256ExtendSpec::CODE => sha256_extend_steps.push(step),
-                    // Bn254AddSpec::CODE => bn254_add_steps.push(step),
+                    Bn254AddSpec::CODE => bn254_add_steps.push(step),
                     Bn254DoubleSpec::CODE => bn254_double_steps.push(step),
                     Bn254FpAddSpec::CODE => bn254_fp_add_steps.push(step),
                     Bn254FpMulSpec::CODE => bn254_fp_mul_steps.push(step),
@@ -729,11 +729,11 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             &self.sha256_extend_config,
             sha256_extend_steps,
         )?;
-        // witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(
-        //     cs,
-        //     &self.bn254_add_config,
-        //     bn254_add_steps,
-        // )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254AddSpec>>(
+            cs,
+            &self.bn254_add_config,
+            bn254_add_steps,
+        )?;
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254DoubleSpec>>(
             cs,
             &self.bn254_double_config,
