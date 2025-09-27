@@ -1,5 +1,5 @@
+use ff_ext::SmallField;
 use itertools::izip;
-use p3::field::PrimeField32;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -202,11 +202,19 @@ impl LkMultiplicity {
         self.increment(LookupTable::DoubleU8, (a << 8) + b);
     }
 
-    /// assert slices within range
+    /// assert slices of field elements within range
     #[inline]
-    pub fn assert_ux_slice_fields<const C: usize, F: PrimeField32>(&mut self, vs: &[F]) {
-        for &v in vs {
-            self.assert_ux::<C>(v.as_canonical_u64());
+    pub fn assert_byte_fields<F: SmallField>(&mut self, vs: &[F]) {
+        let mut index = 0;
+        while index + 1 < vs.len() {
+            self.assert_double_u8(
+                vs[index].to_canonical_u64(),
+                vs[index + 1].to_canonical_u64(),
+            );
+            index += 2;
+        }
+        if index < vs.len() {
+            self.assert_double_u8(vs[index].to_canonical_u64(), 0);
         }
     }
 

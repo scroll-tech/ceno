@@ -1,9 +1,8 @@
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 use generic_array::{GenericArray, sequence::GenericSequence, typenum::Unsigned};
 use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use num::BigUint;
-use p3::field::PrimeField32;
 use sp1_curves::{
     params::{FieldParameters, Limbs},
     polynomial::Polynomial,
@@ -66,7 +65,7 @@ impl<P: FieldParameters> FieldOpCols<WitIn, P> {
     }
 }
 
-impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
+impl<F: SmallField, P: FieldParameters> FieldOpCols<F, P> {
     #[allow(clippy::too_many_arguments)]
     /// Populate result and carry columns from the equation (a*b + c) % modulus
     pub fn populate_mul_and_carry(
@@ -117,10 +116,10 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         self.witness_low = Limbs(p_witness_low.try_into().unwrap());
         self.witness_high = Limbs(p_witness_high.try_into().unwrap());
 
-        record.assert_ux_slice_fields::<8, _>(&self.result.0);
-        record.assert_ux_slice_fields::<8, _>(&self.carry.0);
-        record.assert_ux_slice_fields::<8, _>(&self.witness_low.0);
-        record.assert_ux_slice_fields::<8, _>(&self.witness_high.0);
+        record.assert_byte_fields(&self.result.0);
+        record.assert_byte_fields(&self.carry.0);
+        record.assert_byte_fields(&self.witness_low.0);
+        record.assert_byte_fields(&self.witness_high.0);
 
         (result, carry)
     }
@@ -252,10 +251,10 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         };
 
         // Range checks
-        record.assert_ux_slice_fields::<8, _>(&self.result.0);
-        record.assert_ux_slice_fields::<8, _>(&self.carry.0);
-        record.assert_ux_slice_fields::<8, _>(&self.witness_low.0);
-        record.assert_ux_slice_fields::<8, _>(&self.witness_high.0);
+        record.assert_byte_fields(&self.result.0);
+        record.assert_byte_fields(&self.carry.0);
+        record.assert_byte_fields(&self.witness_low.0);
+        record.assert_byte_fields(&self.witness_high.0);
 
         result
     }
