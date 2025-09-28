@@ -1130,7 +1130,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "sumcheck",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tracing",
  "transcript",
  "witness",
