@@ -3,14 +3,14 @@
 //!
 //! This crate is revm version ir-relevant, unless the signature of the precompiles change.
 
-/// SHA-256 implementation.
-pub mod sha256;
 /// BN254 elliptic curve
 pub mod bn254;
 /// secp256k1
 pub mod secp256k1;
 /// secp256r1
 pub mod secp256r1;
+/// SHA-256 implementation.
+pub mod sha256;
 
 /// Error returned when trying to install the crypto provider more than once.
 #[derive(Debug, thiserror::Error)]
@@ -79,8 +79,12 @@ macro_rules! declare_precompile {
 
         fn __map_err(e: $crate::CenoCryptoError) -> __rp::PrecompileError {
             match e {
-                $crate::CenoCryptoError::Bn254FieldPointNotAMember => __rp::PrecompileError::Bn254FieldPointNotAMember,
-                $crate::CenoCryptoError::Bn254AffineGFailedToCreate => __rp::PrecompileError::Bn254AffineGFailedToCreate,
+                $crate::CenoCryptoError::Bn254FieldPointNotAMember => {
+                    __rp::PrecompileError::Bn254FieldPointNotAMember
+                }
+                $crate::CenoCryptoError::Bn254AffineGFailedToCreate => {
+                    __rp::PrecompileError::Bn254AffineGFailedToCreate
+                }
                 $crate::CenoCryptoError::Bn254PairLength => __rp::PrecompileError::Bn254PairLength,
                 _ => __rp::PrecompileError::Other(e.to_string()),
             }
@@ -92,15 +96,26 @@ macro_rules! declare_precompile {
                 $crate::sha256::sha256(input)
             }
             #[inline]
-            fn bn254_g1_add(&self, p1: &[u8], p2: &[u8]) -> Result<[u8; 64], __rp::PrecompileError> {
+            fn bn254_g1_add(
+                &self,
+                p1: &[u8],
+                p2: &[u8],
+            ) -> Result<[u8; 64], __rp::PrecompileError> {
                 $crate::bn254::bn254_g1_add(p1, p2).map_err(__map_err)
             }
             #[inline]
-            fn bn254_g1_mul(&self, point: &[u8], scalar: &[u8]) -> Result<[u8; 64], __rp::PrecompileError> {
+            fn bn254_g1_mul(
+                &self,
+                point: &[u8],
+                scalar: &[u8],
+            ) -> Result<[u8; 64], __rp::PrecompileError> {
                 $crate::bn254::bn254_g1_mul(point, scalar).map_err(__map_err)
             }
             #[inline]
-            fn bn254_pairing_check(&self, pairs: &[(&[u8], &[u8])]) -> Result<bool, __rp::PrecompileError> {
+            fn bn254_pairing_check(
+                &self,
+                pairs: &[(&[u8], &[u8])],
+            ) -> Result<bool, __rp::PrecompileError> {
                 $crate::bn254::bn254_pairing_check(pairs).map_err(__map_err)
             }
             #[inline]
@@ -113,11 +128,16 @@ macro_rules! declare_precompile {
                 $crate::secp256k1::secp256k1_ecrecover(sig, recid, msg).map_err(__map_err)
             }
             #[inline]
-            fn secp256r1_verify_signature(&self, msg: &[u8; 32], sig: &[u8; 64], pk: &[u8; 64]) -> bool {
+            fn secp256r1_verify_signature(
+                &self,
+                msg: &[u8; 32],
+                sig: &[u8; 64],
+                pk: &[u8; 64],
+            ) -> bool {
                 $crate::secp256r1::secp256r1_verify_signature(msg, sig, pk)
             }
         }
-    }
+    };
 }
 
 #[cfg(test)]
