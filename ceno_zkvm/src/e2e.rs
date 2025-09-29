@@ -845,7 +845,7 @@ fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState,
         .tracer()
         .final_accesses()
         .iter()
-        .filter(|(_, &cycle)| (cycle != 0))
+        .filter(|&(_, cycle)| *cycle != 0)
         .map(|(&addr, _)| addr.baddr())
         .filter(|addr| vm.platform().can_read(addr.0))
         .collect_vec();

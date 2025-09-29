@@ -90,7 +90,7 @@ impl ByteAddr {
     }
 
     pub const fn is_aligned(&self) -> bool {
-        self.0 % WORD_SIZE as u32 == 0
+        self.0.is_multiple_of(WORD_SIZE as u32)
     }
 
     pub const fn is_null(&self) -> bool {
