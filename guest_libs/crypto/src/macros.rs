@@ -1,9 +1,9 @@
 /// Declare a crypto operations provider using the Ceno zkVM guest implementations.
 #[macro_export]
-macro_rules! declare_precompile {
+macro_rules! ceno_crypto {
     ( $( $key:ident = $val:tt ),* $(,)? ) => {
         // default values
-        declare_precompile!(@parse {
+        ceno_crypto!(@parse {
             revm_precompile: ::revm_precompile,
             alloy_consensus: ::alloy_consensus,
             address_type:    ::alloy_primitives::Address,
@@ -15,25 +15,25 @@ macro_rules! declare_precompile {
     (@parse { revm_precompile: $r:path, alloy_consensus: $ac:path, address_type: $addr:path, name: $n:tt }
         revm_precompile = $nr:path $(, $($rest:tt)*)?
     ) => {
-        declare_precompile!(@parse { revm_precompile: $nr, alloy_consensus: $ac, address_type: $addr, name: $n } $($($rest)*)? );
+        ceno_crypto!(@parse { revm_precompile: $nr, alloy_consensus: $ac, address_type: $addr, name: $n } $($($rest)*)? );
     };
 
     (@parse { revm_precompile: $r:path, alloy_consensus: $ac:path, address_type: $addr:path, name: $n:tt }
         alloy_consensus = $nac:path $(, $($rest:tt)*)?
     ) => {
-        declare_precompile!(@parse { revm_precompile: $r,  alloy_consensus: $nac, address_type: $addr, name: $n } $($($rest)*)? );
+        ceno_crypto!(@parse { revm_precompile: $r,  alloy_consensus: $nac, address_type: $addr, name: $n } $($($rest)*)? );
     };
 
     (@parse { revm_precompile: $r:path, alloy_consensus: $ac:path, address_type: $addr:path, name: $n:tt }
         address_type = $na:path $(, $($rest:tt)*)?
     ) => {
-        declare_precompile!(@parse { revm_precompile: $r,  alloy_consensus: $ac,  address_type: $na,   name: $n } $($($rest)*)? );
+        ceno_crypto!(@parse { revm_precompile: $r,  alloy_consensus: $ac,  address_type: $na,   name: $n } $($($rest)*)? );
     };
 
     (@parse { revm_precompile: $r:path, alloy_consensus: $ac:path, address_type: $addr:path, name: $n:tt }
         name = $nn:ident $(, $($rest:tt)*)?
     ) => {
-        declare_precompile!(@parse { revm_precompile: $r,  alloy_consensus: $ac,  address_type: $addr, name: $nn } $($($rest)*)? );
+        ceno_crypto!(@parse { revm_precompile: $r,  alloy_consensus: $ac,  address_type: $addr, name: $nn } $($($rest)*)? );
     };
 
     // unknown key

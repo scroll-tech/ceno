@@ -44,28 +44,28 @@ mod test {
     #[test]
     fn test_install() {
         {
-            declare_precompile!(name = MyCustomName);
+            ceno_crypto!(name = MyCustomName);
         }
         {
             use revm_precompile as another_crate;
-            declare_precompile!(revm_precompile = another_crate);
+            ceno_crypto!(revm_precompile = another_crate);
         }
         {
             use alloy_consensus as another_crate;
-            declare_precompile!(alloy_consensus = another_crate);
+            ceno_crypto!(alloy_consensus = another_crate);
         }
         {
             use alloy_primitives::Address as AnotherAddress;
-            declare_precompile!(address_type = AnotherAddress);
+            ceno_crypto!(address_type = AnotherAddress);
         }
         {
             use alloy_primitives::Address as AnotherAddress;
-            declare_precompile!(address_type = AnotherAddress);
+            ceno_crypto!(address_type = AnotherAddress);
         }
         {
             use alloy_consensus as another_crate;
             use alloy_primitives::Address as AnotherAddress;
-            declare_precompile!(
+            ceno_crypto!(
                 address_type = AnotherAddress,
                 alloy_consensus = another_crate
             );
@@ -73,13 +73,13 @@ mod test {
         {
             use alloy_consensus as another_crate;
             use alloy_primitives::Address as AnotherAddress;
-            declare_precompile!(
+            ceno_crypto!(
                 alloy_consensus = another_crate,
                 address_type = AnotherAddress
             );
         }
 
-        declare_precompile!();
+        ceno_crypto!();
         CenoCrypto::install();
     }
 }
