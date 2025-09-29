@@ -15,3 +15,5 @@ thiserror.workspace = true
 
 [dev-dependencies]
 revm-precompile = "27"
+alloy-consensus = { version =  "1.0", features = ["crypto-backend"] }
+alloy-primitives = "1.4"
