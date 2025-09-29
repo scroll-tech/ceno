@@ -7,6 +7,8 @@ allowed-duplicate-crates = [
   "regex-automata",
   "regex-syntax",
   "syn",
+  "thiserror",
+  "thiserror-impl",
   "windows-sys",
   "tracing-subscriber",
   "wasi",
