@@ -740,46 +740,6 @@ pub type TowerVerifyResult<E> = Result<
 >;
 
 impl TowerVerify {
-    fn get_ecc_eval<E: ExtensionField, F: Field>(
-        p1: &SepticJacobianPoint<F>,
-        p2: &SepticJacobianPoint<F>,
-        rt: &[E],
-    ) -> Vec<PointAndEval<E>> {
-        let SepticJacobianPoint { x, y, z } = p1;
-        let SepticJacobianPoint {
-            x: x2,
-            y: y2,
-            z: z2,
-        } = p2;
-
-        let xs =
-            x.0.iter()
-                .cloned()
-                .zip(x2.iter().cloned())
-                .map(|(xi, x2i)| vec![xi, x2i].into_mle().evaluate(rt))
-                .collect_vec();
-
-        let ys =
-            y.0.iter()
-                .cloned()
-                .zip(y2.iter().cloned())
-                .map(|(yi, y2i)| vec![yi, y2i].into_mle().evaluate(rt))
-                .collect_vec();
-
-        let zs =
-            z.0.iter()
-                .cloned()
-                .zip(z2.iter().cloned())
-                .map(|(zi, z2i)| vec![zi, z2i].into_mle().evaluate(rt))
-                .collect_vec();
-
-        xs.into_iter()
-            .chain(ys.into_iter())
-            .chain(zs.into_iter())
-            .map(|eval| PointAndEval::new(rt.to_vec(), eval))
-            .collect_vec()
-    }
-
     pub fn verify<E: ExtensionField>(
         prod_out_evals: Vec<Vec<E>>,
         logup_out_evals: Vec<Vec<E>>,
@@ -813,9 +773,6 @@ impl TowerVerify {
         // out_j[rt] := (record_{j}[rt])
         // out_j[rt] := (logup_p{j}[rt])
         // out_j[rt] := (logup_q{j}[rt])
-        // out_j[rt] := ecc_x{j}[rt]
-        // out_j[rt] := ecc_y{j}[rt]
-        // out_j[rt] := ecc_z{j}[rt]
 
         // bookkeeping records of latest (point, evaluation) of each layer
         // prod argument
