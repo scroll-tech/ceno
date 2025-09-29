@@ -1,6 +1,11 @@
 //! Memory-mapped I/O (MMIO) functions.
 
-use rkyv::{Portable, api::high::HighValidator, bytecheck::CheckBytes, rancor::Failure};
+use rkyv::{
+    Archived, Deserialize, Portable,
+    api::high::{HighDeserializer, HighValidator},
+    bytecheck::CheckBytes,
+    rancor::Failure,
+};
 
 use core::slice::from_raw_parts;
 
@@ -9,7 +14,7 @@ use core::slice::from_raw_parts;
 /// Logically, this is a static constant, but the type system doesn't see it that way.
 /// (We hope that the optimiser is smart enough to see that it is a constant.)
 fn hints_region<'a>() -> &'a [u8] {
-    extern "C" {
+    unsafe extern "C" {
         /// The address of this variable is the start of the hints ROM.
         ///
         /// It is defined in the linker script.  The value of this variable is undefined.
@@ -27,7 +32,7 @@ fn hints_region<'a>() -> &'a [u8] {
 
 /// Get the length of the next hint
 fn hint_len() -> usize {
-    extern "C" {
+    unsafe extern "C" {
         /// The address of this variable is the start of the slice that holds the length of the hints.
         ///
         /// It is defined in the linker script.  The value of this variable is undefined.
@@ -54,7 +59,7 @@ where
 
 /// The memory region with public io.
 fn pubio_region<'a>() -> &'a [u8] {
-    extern "C" {
+    unsafe extern "C" {
         /// The address of this variable is the start of the hints ROM.
         ///
         /// It is defined in the linker script.  The value of this variable is undefined.
@@ -72,7 +77,7 @@ fn pubio_region<'a>() -> &'a [u8] {
 
 /// Get the length of the next pubio
 fn pubio_len() -> usize {
-    extern "C" {
+    unsafe extern "C" {
         /// The address of this variable is the start of the slice that holds the length of the hints.
         ///
         /// It is defined in the linker script.  The value of this variable is undefined.
@@ -90,12 +95,16 @@ pub fn pubio_read_slice<'a>() -> &'a [u8] {
     &pubio_region()[..pubio_len()]
 }
 
-pub fn commit<'a, T, F: From<&'a T> + core::fmt::Debug + PartialEq>(v: &F)
+/// Read a value from public io, deserialize it, and assert that it matches the given value.
+pub fn commit<T>(v: &T)
 where
-    T: Portable + for<'c> CheckBytes<HighValidator<'c, Failure>> + 'a,
+    T: rkyv::Archive + core::fmt::Debug + PartialEq,
+    T::Archived:
+        for<'c> CheckBytes<HighValidator<'c, Failure>> + Deserialize<T, HighDeserializer<Failure>>,
 {
-    let expected: F = rkyv::access::<T, Failure>(pubio_read_slice())
-        .expect("Deserialised access failed.")
-        .into();
-    assert_eq!(*v, expected);
+    let expected = rkyv::access::<Archived<T>, Failure>(pubio_read_slice())
+        .expect("Deserialised access failed.");
+    let expected_deserialized: T =
+        rkyv::deserialize::<T, Failure>(expected).expect("Deserialised value failed.");
+    assert_eq!(*v, expected_deserialized);
 }

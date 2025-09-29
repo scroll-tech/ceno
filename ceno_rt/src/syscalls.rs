@@ -13,6 +13,8 @@ pub const BN254_FP_MUL: u32 = 0x00_01_01_28;
 pub const BN254_FP2_ADD: u32 = 0x00_01_01_29;
 pub const BN254_FP2_MUL: u32 = 0x00_01_01_2B;
 
+pub const KECCAK_STATE_WORDS: usize = 25;
+
 /// Based on https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/zkvm/entrypoint/src/syscalls/keccak_permute.rs
 /// Executes the Keccak256 permutation on the given state.
 ///
@@ -21,7 +23,7 @@ pub const BN254_FP2_MUL: u32 = 0x00_01_01_2B;
 /// - The caller must ensure that `state` is valid pointer to data that is aligned along a four
 ///   byte boundary.
 #[allow(unused_variables)]
-pub fn syscall_keccak_permute(state: &mut [u64; 25]) {
+pub fn syscall_keccak_permute(state: &mut [u64; KECCAK_STATE_WORDS]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
@@ -147,7 +149,7 @@ pub fn syscall_sha256_extend(w: *mut [u32; 64]) {
 /// The caller must ensure that `p` and `q` are valid pointers to data that is aligned along a four
 /// byte boundary.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -172,7 +174,7 @@ pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
 /// The caller must ensure that `p` is valid pointer to data that is aligned along a four byte
 /// boundary.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -192,7 +194,7 @@ pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
 ///
 /// The result is written over the first input.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_fp_addmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -212,7 +214,7 @@ pub extern "C" fn syscall_bn254_fp_addmod(x: *mut u32, y: *const u32) {
 ///
 /// The result is written over the first input.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_fp_mulmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -232,7 +234,7 @@ pub extern "C" fn syscall_bn254_fp_mulmod(x: *mut u32, y: *const u32) {
 ///
 /// The result is written over the first input.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_fp2_addmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -252,7 +254,7 @@ pub extern "C" fn syscall_bn254_fp2_addmod(x: *mut u32, y: *const u32) {
 ///
 /// The result is written over the first input.
 #[allow(unused_variables)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn syscall_bn254_fp2_mulmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {

@@ -106,7 +106,7 @@ impl MaskRepresentation {
     pub fn to_bits(&self) -> Vec<u64> {
         self.rep
             .iter()
-            .flat_map(|mask| (0..mask.size).map(move |i| ((mask.value >> i) & 1)))
+            .flat_map(|mask| (0..mask.size).map(move |i| (mask.value >> i) & 1))
             .collect()
     }
 

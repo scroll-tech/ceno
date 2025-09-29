@@ -761,7 +761,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
                 <CpuBackend<E, PCS> as ProverBackend>::Pcs,
             >,
         >,
-    ) -> DeviceProvingKey<CpuBackend<E, PCS>> {
+    ) -> DeviceProvingKey<'_, CpuBackend<E, PCS>> {
         let pcs_data = pk.fixed_commit_wd.clone().unwrap();
         let fixed_mles =
             PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());
