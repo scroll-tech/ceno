@@ -27,9 +27,12 @@ use gkr_iop::{
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension}, util::ceil_log2, virtual_poly::{build_eq_x_r_vec, eq_eval}, virtual_polys::VirtualPolynomialsBuilder, Expression, Instance, WitnessId
+    Expression, Instance, WitnessId,
+    mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
+    util::ceil_log2,
+    virtual_poly::{build_eq_x_r_vec, eq_eval},
+    virtual_polys::VirtualPolynomialsBuilder,
 };
-use p3::field::PackedValue;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
@@ -65,7 +68,7 @@ impl CpuEccProver {
         mut ys: Vec<MultilinearExtension<'a, E>>,
         invs: Vec<MultilinearExtension<'a, E>>,
         transcript: &mut impl Transcript<E>,
-    ) {
+    ) -> EccQuarkProof<E> {
         assert_eq!(xs.len(), SEPTIC_EXTENSION_DEGREE);
         assert_eq!(ys.len(), SEPTIC_EXTENSION_DEGREE);
 
@@ -144,23 +147,33 @@ impl CpuEccProver {
         // zerocheck: 0 = s[0,b]^2 - x[b,0] - x[b,1] - x[1,b]
 
         // zerocheck: 0 = s[0,b] * (x[b,0] - x[1,b]) - y[b,0] - y[1,b]
-
-        // reduced to s[0,rt], x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt]
-
-        let (sumcheck_proofs, state) = IOPProverState::prove(
+        let (zerocheck_proof, state) = IOPProverState::prove(
             expr_builder
                 .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>() * eq_expr], &[]),
             transcript,
         );
 
         let rt = state.collect_raw_challenges();
+        // TODO: fix this assertion
+        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
         let evals = state.get_mle_flatten_final_evaluations();
 
         #[cfg(feature = "sanity-check")]
         {
             let s = invs.iter().map(|x| x.as_view_slice(2, 0)).collect_vec();
+            let x0 = filter_bj(&xs, 0);
+            // check evaluations
             assert_eq!(eq_eval(&out_rt, &rt), evals[0]);
-            assert_eq!(s[0].evaluate(&rt), evals[1]);
+            for i in 0..SEPTIC_EXTENSION_DEGREE {
+                assert_eq!(s[i].evaluate(&rt), evals[1 + i]);
+                assert_eq!(x0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE + 1 + i]);
+            }
+        }
+
+        // TODO: prove the validity of s[0,rt], x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt]
+        EccQuarkProof {
+            zerocheck_proof,
+            evals,
         }
     }
 }
