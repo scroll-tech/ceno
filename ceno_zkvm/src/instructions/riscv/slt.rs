@@ -1,4 +1,6 @@
+#[cfg(not(feature = "u16limb_circuit"))]
 mod slt_circuit;
+#[cfg(feature = "u16limb_circuit")]
 mod slt_circuit_v2;
 
 use ceno_emul::InsnKind;

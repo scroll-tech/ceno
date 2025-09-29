@@ -372,7 +372,7 @@ fn load_tables<E: ExtensionField>(
         challenge: [E; 2],
     ) {
         for (i, bits) in std::iter::once(0)
-            .chain((0..=MAX_BITS).flat_map(|i| (0..(1 << i))))
+            .chain((0..=MAX_BITS).flat_map(|i| 0..(1 << i)))
             .zip(
                 std::iter::once(0)
                     .chain((0..=MAX_BITS).flat_map(|i| std::iter::repeat_n(i, 1 << i))),
@@ -395,7 +395,7 @@ fn load_tables<E: ExtensionField>(
     ) {
         for (a, b) in (0..(1 << 8))
             .flat_map(|i| std::iter::repeat_n(i, 1 << 8))
-            .zip(std::iter::repeat_n(0, 1 << 8).flat_map(|_| (0..(1 << 8))))
+            .zip(std::iter::repeat_n(0, 1 << 8).flat_map(|_| 0..(1 << 8)))
         {
             let rlc_record = cs.rlc_chip_record(vec![
                 (LookupTable::DoubleU8 as usize).into(),
@@ -1147,7 +1147,7 @@ Hints:
                             .into()
                         };
 
-                    for ((w_rlc_expr, annotation), (_, w_exprs)) in (cs
+                    for ((w_rlc_expr, annotation), _) in (cs
                         .w_expressions
                         .iter()
                         .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
@@ -1173,35 +1173,6 @@ Hints:
                         let write_rlc_records =
                             filter_mle_by_selector_mle(write_rlc_records, w_selector.clone());
 
-                        if $ram_type == RAMType::GlobalState {
-                            // w_exprs = [GlobalState, pc, timestamp]
-                            assert_eq!(w_exprs.len(), 3);
-                            let w = w_exprs
-                                .into_iter()
-                                .skip(1)
-                                .map(|expr| {
-                                    let v = wit_infer_by_expr(
-                                        expr,
-                                        cs.num_witin,
-                                        cs.num_structural_witin,
-                                        cs.num_fixed as WitnessId,
-                                        fixed,
-                                        witness,
-                                        structural_witness,
-                                        &pi_mles,
-                                        &challenges,
-                                    );
-                                    filter_mle_by_selector_mle(v, w_selector.clone())
-                                })
-                                .collect_vec();
-                            // convert [[pc], [timestamp]] into [[pc, timestamp]]
-                            let w = (0..w[0].len())
-                                // TODO: use transpose
-                                .map(|row| w.iter().map(|w| w[row]).collect_vec())
-                                .collect_vec();
-
-                            assert!(gs.insert(circuit_name.clone(), w).is_none());
-                        };
                         let mut records = vec![];
                         for (row, record_rlc) in enumerate(write_rlc_records) {
                             // TODO: report error
@@ -1241,7 +1212,7 @@ Hints:
                             )
                             .into()
                         };
-                    for ((r_expr, annotation), _) in (cs
+                    for ((r_rlc_expr, annotation), (_, r_exprs)) in (cs
                         .r_expressions
                         .iter()
                         .chain(cs.r_table_expressions.iter().map(|expr| &expr.expr)))
@@ -1254,7 +1225,7 @@ Hints:
                     .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
                         let read_records = wit_infer_by_expr(
-                            r_expr,
+                            r_rlc_expr,
                             cs.num_witin,
                             cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
@@ -1266,6 +1237,36 @@ Hints:
                         );
                         let read_records =
                             filter_mle_by_selector_mle(read_records, r_selector.clone());
+
+                        if $ram_type == RAMType::GlobalState {
+                            // r_exprs = [GlobalState, pc, timestamp]
+                            assert_eq!(r_exprs.len(), 3);
+                            let r = r_exprs
+                                .into_iter()
+                                .skip(1)
+                                .map(|expr| {
+                                    let v = wit_infer_by_expr(
+                                        expr,
+                                        cs.num_witin,
+                                        cs.num_structural_witin,
+                                        cs.num_fixed as WitnessId,
+                                        fixed,
+                                        witness,
+                                        structural_witness,
+                                        &pi_mles,
+                                        &challenges,
+                                    );
+                                    filter_mle_by_selector_mle(v, r_selector.clone())
+                                })
+                                .collect_vec();
+                            // convert [[pc], [timestamp]] into [[pc, timestamp]]
+                            let r = (0..r[0].len())
+                                // TODO: use transpose
+                                .map(|row| r.iter().map(|r| r[row]).collect_vec())
+                                .collect_vec();
+
+                            assert!(gs.insert(circuit_name.clone(), r).is_none());
+                        };
 
                         let mut records = vec![];
                         for (row, record) in enumerate(read_records) {
