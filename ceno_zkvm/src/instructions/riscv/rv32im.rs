@@ -50,7 +50,7 @@ use mulh::{MulInstruction, MulhInstruction, MulhsuInstruction};
 use shift::SraInstruction;
 use slt::{SltInstruction, SltuInstruction};
 use slti::SltiuInstruction;
-use sp1_curves::weierstrass::{SwCurve, bn254::Bn254, secp256k1::Secp256k1};
+use sp1_curves::weierstrass::{SwCurve, secp256k1::Secp256k1};
 use std::{
     cmp::Reverse,
     collections::{BTreeMap, BTreeSet},

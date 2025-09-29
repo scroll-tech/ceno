@@ -46,7 +46,8 @@ pub struct EcallWeierstrassAddAssignConfig<E: ExtensionField, EC: EllipticCurve>
     pub layout: WeierstrassAddAssignLayout<E, EC>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    point_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    point_ptr_1: (OpFixedRS<E, { Platform::reg_arg1() }, true>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
@@ -96,11 +97,18 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             vm_state.ts,
         )?;
 
-        let state_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
+        let point_ptr_value_0 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
+        let point_ptr_value_1 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
 
-        let state_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let point_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
             cb,
-            state_ptr_value.uint_unaligned().register_expr(),
+            point_ptr_value_0.uint_unaligned().register_expr(),
+            vm_state.ts,
+        )?;
+
+        let point_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
+            cb,
+            point_ptr_value_1.uint_unaligned().register_expr(),
             vm_state.ts,
         )?;
 
@@ -128,8 +136,8 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             .map(|(i, (val_before, val_after))| {
                 WriteMEM::construct_circuit(
                     cb,
-                    // mem address := state_ptr_0 + i
-                    state_ptr.prev_value.as_ref().unwrap().value()
+                    // mem address := point_ptr_0 + i
+                    point_ptr_0.prev_value.as_ref().unwrap().value()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )
@@ -141,7 +149,6 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        let n_words = layout.output32_exprs.len();
         // Keep the second input point unchanged in memory.
         mem_rw.extend(
             layout.input32_exprs[1]
@@ -150,10 +157,10 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                 .map(|(i, val_before)| {
                     WriteMEM::construct_circuit(
                         cb,
-                        // mem address := state_ptr_1 + i
-                        state_ptr.prev_value.as_ref().unwrap().value()
+                        // mem address := point_ptr_1 + i
+                        point_ptr_1.prev_value.as_ref().unwrap().value()
                             + E::BaseField::from_canonical_u32(
-                                ByteAddr::from(((n_words + i) * WORD_SIZE) as u32).0,
+                                ByteAddr::from((i * WORD_SIZE) as u32).0,
                             )
                             .expr(),
                         val_before.clone(),
@@ -181,7 +188,8 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                 layout,
                 vm_state,
                 ecall_id,
-                state_ptr: (state_ptr, state_ptr_value),
+                point_ptr_0: (point_ptr_0, point_ptr_value_0),
+                point_ptr_1: (point_ptr_1, point_ptr_value_1),
                 mem_rw,
             },
             circuit,
@@ -273,17 +281,29 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                                 step.rs1().unwrap().previous_cycle,
                             ),
                         )?;
-                        // assign state_ptr
-                        config.state_ptr.1.assign_instance(
+                        // assign point_ptr_0
+                        config.point_ptr_0.1.assign_instance(
                             instance,
                             &mut lk_multiplicity,
                             ops.reg_ops[0].value.after,
                         )?;
-                        config.state_ptr.0.assign_op(
+                        config.point_ptr_0.0.assign_op(
                             instance,
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[0],
+                        )?;
+                        // assign point_ptr_1
+                        config.point_ptr_1.1.assign_instance(
+                            instance,
+                            &mut lk_multiplicity,
+                            ops.reg_ops[1].value.after,
+                        )?;
+                        config.point_ptr_1.0.assign_op(
+                            instance,
+                            &mut lk_multiplicity,
+                            step.cycle(),
+                            &ops.reg_ops[1],
                         )?;
                         for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
                             writer.assign_op(instance, &mut lk_multiplicity, step.cycle(), op)?;
