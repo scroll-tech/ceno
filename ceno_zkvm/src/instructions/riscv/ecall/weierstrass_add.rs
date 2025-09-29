@@ -174,7 +174,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         let (out_evals, mut chip) = layout.finalize(cb);
 
         let layer = Layer::from_circuit_builder(
-            &cb,
+            cb,
             "weierstrass_add".to_string(),
             layout.n_challenges,
             out_evals,

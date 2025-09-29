@@ -552,11 +552,34 @@ fn test_bn254_curve() -> Result<()> {
     let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
     assert_eq!(syscalls.len(), 3);
 
-    for witness in syscalls.iter() {
-        assert_eq!(witness.reg_ops.len(), 2);
-        assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
-        assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
-    }
+    // add
+    assert_eq!(syscalls[0].reg_ops.len(), 2);
+    assert_eq!(
+        syscalls[0].reg_ops[0].register_index(),
+        Platform::reg_arg0()
+    );
+    assert_eq!(
+        syscalls[0].reg_ops[1].register_index(),
+        Platform::reg_arg1()
+    );
+
+    // double
+    assert_eq!(syscalls[1].reg_ops.len(), 1);
+    assert_eq!(
+        syscalls[1].reg_ops[0].register_index(),
+        Platform::reg_arg0()
+    );
+
+    // add
+    assert_eq!(syscalls[2].reg_ops.len(), 2);
+    assert_eq!(
+        syscalls[2].reg_ops[0].register_index(),
+        Platform::reg_arg0()
+    );
+    assert_eq!(
+        syscalls[2].reg_ops[1].register_index(),
+        Platform::reg_arg1()
+    );
 
     let messages = read_all_messages_as_words(&state);
     let [a1, b, a2, c1, c2, one, c3]: [Vec<u32>; 7] = messages.try_into().unwrap();

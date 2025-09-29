@@ -791,7 +791,6 @@ pub fn run_weierstrass_add<
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
 
     use super::*;
     use crate::precompiles::weierstrass::test_utils::random_point_pairs;
@@ -806,21 +805,18 @@ mod tests {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
-        thread::Builder::new()
-            .stack_size(32 * 1024 * 1024)
-            .spawn(|| {
-                let points = random_point_pairs::<WP>(8);
+        let points = random_point_pairs::<WP>(8);
 
-                let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
-                    setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-                    points,
-                    true,
-                    true,
-                );
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
+            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+            points,
+            true,
+            true,
+        )
+        .inspect_err(|err| {
+            println!("{:?}", err);
+        })
+        .expect("weierstrass_add failed");
     }
 
     #[test]
@@ -830,14 +826,7 @@ mod tests {
 
     #[test]
     fn test_weierstrass_add_bls12381() {
-        thread::Builder::new()
-            .stack_size(32 * 1024 * 1024)
-            .spawn(|| {
-                test_weierstrass_add_helper::<Bls12381>();
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        test_weierstrass_add_helper::<Bls12381>();
     }
 
     #[test]
@@ -854,20 +843,17 @@ mod tests {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
-        thread::Builder::new()
-            .stack_size(32 * 1024 * 1024)
-            .spawn(|| {
-                let points = random_point_pairs::<WP>(5);
-                let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
-                    setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-                    points,
-                    true,
-                    true,
-                );
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        let points = random_point_pairs::<WP>(5);
+        let _ = run_weierstrass_add::<E, Pcs, SwCurve<WP>>(
+            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+            points,
+            true,
+            true,
+        )
+        .inspect_err(|err| {
+            println!("{:?}", err);
+        })
+        .expect("weierstrass_add_nonpow2 failed");
     }
 
     #[test]

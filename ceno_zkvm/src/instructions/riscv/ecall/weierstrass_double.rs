@@ -147,7 +147,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
         let (out_evals, mut chip) = layout.finalize(cb);
 
         let layer = Layer::from_circuit_builder(
-            &cb,
+            cb,
             "weierstrass_double".to_string(),
             layout.n_challenges,
             out_evals,
@@ -292,10 +292,10 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                     instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
                 );
                 p.map(|p| EllipticCurveDoubleInstance::<EC::BaseField> { p })
-                    .or_else(|_| {
-                        Err(ZKVMError::InvalidWitness(
+                    .map_err(|_| {
+                        ZKVMError::InvalidWitness(
                             "Failed to parse EllipticCurveDoubleInstance".into(),
-                        ))
+                        )
                     })
             })
             .try_collect()?;

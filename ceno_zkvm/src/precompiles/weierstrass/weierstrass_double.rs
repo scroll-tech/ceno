@@ -792,7 +792,6 @@ pub fn run_weierstrass_double<
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
 
     use super::*;
     use ff_ext::BabyBearExt4;
@@ -808,21 +807,18 @@ mod tests {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
-        thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
-            .spawn(|| {
-                let points = random_points::<WP>(8);
+        let points = random_points::<WP>(8);
 
-                let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
-                    setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-                    points,
-                    true,
-                    true,
-                );
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
+            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+            points,
+            true,
+            true,
+        )
+        .inspect_err(|err| {
+            println!("{:?}", err);
+        })
+        .expect("run_weierstrass_double failed");
     }
 
     #[test]
@@ -832,14 +828,7 @@ mod tests {
 
     #[test]
     fn test_weierstrass_double_bls12381() {
-        thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
-            .spawn(|| {
-                test_weierstrass_double_helper::<Bls12381>();
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        test_weierstrass_double_helper::<Bls12381>();
     }
 
     #[test]
@@ -856,20 +845,17 @@ mod tests {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
-        thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
-            .spawn(|| {
-                let points = random_points::<WP>(5);
-                let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
-                    setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-                    points,
-                    true,
-                    true,
-                );
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        let points = random_points::<WP>(5);
+        let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
+            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+            points,
+            true,
+            true,
+        )
+        .inspect_err(|err| {
+            println!("{:?}", err);
+        })
+        .expect("test_weierstrass_double_nonpow2_helper failed");
     }
 
     #[test]

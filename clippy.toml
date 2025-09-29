@@ -13,4 +13,9 @@ allowed-duplicate-crates = [
   "getrandom",
   "zerocopy",
   "zerocopy-derive",
+  "proc-macro-crate",
+  "toml_edit",
+  "toml_datetime",
+  "winnow",
+  "generic-array",
 ]
