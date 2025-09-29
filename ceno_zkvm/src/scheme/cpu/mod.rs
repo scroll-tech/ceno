@@ -474,8 +474,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             &records[offset..][..cs.lk_expressions.len()]
         };
 
-        // infer last layer witness for septic points' accumulation
-
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_last_layer");
         let mut r_set_last_layer = r_set_wit
