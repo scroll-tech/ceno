@@ -23,6 +23,8 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
+    selector::SelectorType,
+    utils::eq_eval_less_or_equal_than,
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -30,9 +32,10 @@ use multilinear_extensions::{
     Expression, Instance, WitnessId,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
-    virtual_poly::{build_eq_x_r_vec, eq_eval},
+    virtual_poly::{build_eq_x_r_vec},
     virtual_polys::VirtualPolynomialsBuilder,
 };
+use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
@@ -76,10 +79,16 @@ impl CpuEccProver {
         let out_rt = transcript.sample_and_append_vec(b"ecc", n);
         let num_threads = optimal_sumcheck_threads(out_rt.len());
 
+        let alpha_pows =
+            transcript.sample_and_append_challenge_pows(SEPTIC_EXTENSION_DEGREE * 3, b"ecc_alpha");
+
         let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
 
-        let mut eq: MultilinearExtension<'_, E> = build_eq_x_r_vec(&out_rt).into_mle();
-        let eq_expr = expr_builder.lift((&mut eq).to_either());
+        let sel = SelectorType::Prefix(E::BaseField::ZERO, 0.into());
+        let num_instances = (1 << n) - 1;
+        let mut sel_mle: MultilinearExtension<'_, E> = sel.compute(&out_rt, num_instances).unwrap();
+        let sel_expr = expr_builder.lift(sel_mle.to_either());
+
         let mut exprs = vec![];
 
         let filter_bj = |v: &[MultilinearExtension<'_, E>], j: usize| {
@@ -138,10 +147,12 @@ impl CpuEccProver {
                 .collect(),
         );
         // zerocheck: 0 = s[0,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1])
-        exprs.extend_from_slice(
+        exprs.extend(
             (s.clone() * (&x0 - &x1) - (&y0 - &y1))
                 .to_exprs()
-                .as_slice(),
+                .into_iter()
+                .zip(alpha_pows.iter().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
 
         // zerocheck: 0 = s[0,b]^2 - x[b,0] - x[b,1] - x[1,b]
@@ -149,12 +160,11 @@ impl CpuEccProver {
         // zerocheck: 0 = s[0,b] * (x[b,0] - x[1,b]) - y[b,0] - y[1,b]
         let (zerocheck_proof, state) = IOPProverState::prove(
             expr_builder
-                .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>() * eq_expr], &[]),
+                .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>() * sel_expr], &[]),
             transcript,
         );
 
         let rt = state.collect_raw_challenges();
-        // TODO: fix this assertion
         assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
         let evals = state.get_mle_flatten_final_evaluations();
 
@@ -163,7 +173,10 @@ impl CpuEccProver {
             let s = invs.iter().map(|x| x.as_view_slice(2, 0)).collect_vec();
             let x0 = filter_bj(&xs, 0);
             // check evaluations
-            assert_eq!(eq_eval(&out_rt, &rt), evals[0]);
+            assert_eq!(
+                eq_eval_less_or_equal_than(num_instances - 1, &out_rt, &rt),
+                evals[0]
+            );
             for i in 0..SEPTIC_EXTENSION_DEGREE {
                 assert_eq!(s[i].evaluate(&rt), evals[1 + i]);
                 assert_eq!(x0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE + 1 + i]);
