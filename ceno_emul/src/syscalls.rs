@@ -1,11 +1,9 @@
 use crate::{RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
 use anyhow::Result;
 
-pub mod bls12381;
 pub mod bn254;
 pub mod keccak_permute;
 pub mod secp256k1;
-pub mod secp256r1;
 pub mod sha256;
 
 // Using the same function codes as sp1:

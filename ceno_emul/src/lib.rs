@@ -37,10 +37,6 @@ pub use syscalls::{
         COORDINATE_WORDS as SECP256K1_COORDINATE_WORDS, SECP256K1_ARG_WORDS, Secp256k1AddSpec,
         Secp256k1DecompressSpec, Secp256k1DoubleSpec,
     },
-    secp256r1::{
-        COORDINATE_WORDS as SECP256R1_COORDINATE_WORDS, SECP256R1_ARG_WORDS, Secp256r1AddSpec,
-        Secp256r1DecompressSpec, Secp256r1DoubleSpec,
-    },
     sha256::{SHA_EXTEND_WORDS, Sha256ExtendSpec},
 };
 
