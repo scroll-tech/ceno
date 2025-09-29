@@ -383,7 +383,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .chain(proof.w_out_evals.iter().cloned())
                 .collect_vec(),
             proof.lk_out_evals.clone(),
-            vec![],
             tower_proofs,
             vec![num_var_with_rotation; num_batched],
             num_product_fanin,
@@ -516,7 +515,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .iter()
                     .map(|eval| eval.to_vec())
                     .collect_vec(),
-                vec![],
                 tower_proofs,
                 expected_rounds,
                 num_logup_fanin,
@@ -783,10 +781,8 @@ impl TowerVerify {
     }
 
     pub fn verify<E: ExtensionField>(
-        // TODO: unify prod/logup/ec_add
         prod_out_evals: Vec<Vec<E>>,
         logup_out_evals: Vec<Vec<E>>,
-        ecc_out_evals: Vec<SepticJacobianPoint<E::BaseField>>,
         tower_proofs: &TowerProofs<E>,
         num_variables: Vec<usize>,
         num_fanin: usize,
@@ -806,13 +802,10 @@ impl TowerVerify {
         assert!(logup_out_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
         }));
-        assert!(ecc_out_evals.len() == 0 || ecc_out_evals.len() == 2);
         assert_eq!(num_variables.len(), num_prod_spec + num_logup_spec);
 
-        let num_ecc = if ecc_out_evals.is_empty() { 0 } else { 1 };
-
         let alpha_pows = get_challenge_pows(
-            num_prod_spec + num_logup_spec * 2 + num_ecc * SEPTIC_JACOBIAN_NUM_MLES, /* logup occupy 2 sumcheck: numerator and denominator */
+            num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
@@ -849,11 +842,6 @@ impl TowerVerify {
                 )
             })
             .unzip::<_, _, Vec<_>, Vec<_>>();
-        let mut ecc_eval = if num_ecc == 1 {
-            Self::get_ecc_eval(&ecc_out_evals[0], &ecc_out_evals[1], &initial_rt)
-        } else {
-            vec![]
-        };
 
         // initial claim = \sum_j alpha^j * out_j[rt]
         let initial_claim = izip!(&prod_spec_point_n_eval, &alpha_pows)
@@ -864,10 +852,7 @@ impl TowerVerify {
                 &alpha_pows[num_prod_spec..]
             )
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
-            .sum::<E>()
-            + izip!(&ecc_eval, &alpha_pows[num_prod_spec + num_logup_spec * 2..])
-                .map(|(xi, alpha)| xi.eval * *alpha)
-                .sum::<E>();
+            .sum::<E>();
 
         let max_num_variables = num_variables.iter().max().unwrap();
 
@@ -929,34 +914,6 @@ impl TowerVerify {
                             }
                         })
                         .sum::<E>();
-
-                if num_ecc == 1 {
-                    // (x', y', z')[b] = jacobian_add((x, y, z)[0,b], (x, y, z)[1,b])
-                    let degree = SEPTIC_EXTENSION_DEGREE;
-                    let (x1, rest) = tower_proofs.ecc_evals[round].split_at(SEPTIC_EXTENSION_DEGREE);
-                    let (y1, rest) = rest.split_at(SEPTIC_EXTENSION_DEGREE);
-                    let (z1, rest) = rest.split_at(SEPTIC_EXTENSION_DEGREE);
-                    let (x2, rest) = rest.split_at(SEPTIC_EXTENSION_DEGREE);
-                    let (y2, rest) = rest.split_at(SEPTIC_EXTENSION_DEGREE);
-                    let (z2, rest) = rest.split_at(SEPTIC_EXTENSION_DEGREE);
-
-                    // p1 and p2 are not valid ecc points
-                    // we just want to use ecc addition formula as expression to get
-                    // the expected evaluation for ecc sumcheck
-                    let p1 = SepticJacobianPoint {
-                        x: x1.into(),
-                        y: y1.into(),
-                        z: z1.into(),
-                    };
-                    let p2 = SepticJacobianPoint {
-                        x: x2.into(),
-                        y: y2.into(),
-                        z: z2.into(),
-                    };
-
-                    let SepticJacobianPoint { x, y, z } = p1 + p2;
-                    expected_evaluation += izip!(x.0.iter().chain(y.0.iter()).chain(z.0.iter()), alpha_pows[num_prod_spec + num_logup_spec * 2..].iter()).map(|(&xi, &alpha)| eq * xi * alpha).sum::<E>();
-                }
 
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
                     return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));
@@ -1038,31 +995,8 @@ impl TowerVerify {
                     .sum::<E>();
 
                 // sum evaluation from different specs
-                let mut next_eval = next_prod_spec_evals + next_logup_spec_evals;
+                let next_eval = next_prod_spec_evals + next_logup_spec_evals;
 
-                if num_ecc == 1 {
-                    let next_round_expected_eval = if round < *max_num_variables - 1 {
-                        tower_proofs.ecc_evals[round][..SEPTIC_JACOBIAN_NUM_MLES]
-                        .iter()
-                        .zip(tower_proofs.ecc_evals[round][SEPTIC_JACOBIAN_NUM_MLES..].iter())
-                        .zip(next_alpha_pows[num_prod_spec + num_logup_spec * 2..].iter())
-                        .zip(ecc_eval.iter_mut())
-                        .map(|(((a, b), alpha), point_and_eval)| {
-                            let eval = izip!(vec![a, b].into_iter(), coeffs.iter()).map(|(a, b)| *a * *b).sum::<E>();
-
-                            point_and_eval.point = rt_prime.clone();
-                            point_and_eval.eval = eval;
-
-                            eval * *alpha
-                        })
-                        .sum()
-                    } else {
-                        E::ZERO
-                    };
-                    if next_round < *max_num_variables - 1 {
-                        next_eval += next_round_expected_eval;
-                    }
-                }
                 Ok((PointAndEval {
                     point: rt_prime,
                     eval: next_eval,

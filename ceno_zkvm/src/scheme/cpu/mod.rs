@@ -192,7 +192,6 @@ impl CpuTowerProver {
     pub fn create_proof<'a, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         prod_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         logup_specs: Vec<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
-        ecc_spec: Option<TowerProverSpec<'a, CpuBackend<E, PCS>>>,
         num_fanin: usize,
         transcript: &mut impl Transcript<E>,
     ) -> (Point<E>, TowerProofs<E>) {
@@ -200,7 +199,6 @@ impl CpuTowerProver {
         enum GroupedMLE<'a, E: ExtensionField> {
             Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
             Logup((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in logup_specs
-            EcAdd(Vec<MultilinearExtension<'a, E>>),         // 2 points, each point has 21 polys
         }
 
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
@@ -214,7 +212,6 @@ impl CpuTowerProver {
         let max_round_index = prod_specs
             .iter()
             .chain(logup_specs.iter())
-            .chain(ecc_spec.iter())
             .map(|m| m.witness.len())
             .max()
             .unwrap()
@@ -224,8 +221,7 @@ impl CpuTowerProver {
         let alpha_pows = get_challenge_pows(
             prod_specs_len +
                 // logup occupy 2 sumcheck: numerator and denominator
-                logup_specs_len * 2
-                + ecc_spec.as_ref().map_or(0, |_| SEPTIC_JACOBIAN_NUM_MLES),
+                logup_specs_len * 2,
             transcript,
         );
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log_num_fanin);
@@ -253,12 +249,6 @@ impl CpuTowerProver {
         // merge logup_specs
         for (i, spec) in logup_specs.into_iter().enumerate() {
             merge_spec_witness(&mut layer_witness, spec, i, GroupedMLE::Logup);
-        }
-
-        if let Some(ecc_spec) = ecc_spec {
-            merge_spec_witness(&mut layer_witness, ecc_spec, 0, |(_, v)| {
-                GroupedMLE::EcAdd(v)
-            });
         }
 
         // skip(1) for output layer
@@ -338,83 +328,6 @@ impl CpuTowerProver {
                                 * (alpha_numerator * (p1 * q2.clone() + p2 * q1.clone())
                                     + alpha_denominator * q1 * q2),
                         );
-                    }
-                    GroupedMLE::EcAdd(layer_polys) => {
-                        assert_eq!(layer_polys.len(), 2 * SEPTIC_JACOBIAN_NUM_MLES); // 2 points, each point has 21 polys
-
-                        let (x1, rest) = layer_polys.split_at_mut(SEPTIC_EXTENSION_DEGREE);
-                        let (y1, rest) = rest.split_at_mut(SEPTIC_EXTENSION_DEGREE);
-                        let (z1, rest) = rest.split_at_mut(SEPTIC_EXTENSION_DEGREE);
-                        let (x2, rest) = rest.split_at_mut(SEPTIC_EXTENSION_DEGREE);
-                        let (y2, z2) = rest.split_at_mut(SEPTIC_EXTENSION_DEGREE);
-
-                        let x1 = &SymbolicSepticExtension::new(
-                            x1.into_iter()
-                                .map(|x| expr_builder.lift(x.to_either()))
-                                .collect(),
-                        );
-                        let y1 = &SymbolicSepticExtension::new(
-                            y1.into_iter()
-                                .map(|y| expr_builder.lift(y.to_either()))
-                                .collect(),
-                        );
-                        let z1 = &SymbolicSepticExtension::new(
-                            z1.into_iter()
-                                .map(|z| expr_builder.lift(z.to_either()))
-                                .collect(),
-                        );
-                        let x2 = &SymbolicSepticExtension::new(
-                            x2.into_iter()
-                                .map(|x| expr_builder.lift(x.to_either()))
-                                .collect(),
-                        );
-                        let y2 = &SymbolicSepticExtension::new(
-                            y2.into_iter()
-                                .map(|y| expr_builder.lift(y.to_either()))
-                                .collect(),
-                        );
-                        let z2 = &SymbolicSepticExtension::new(
-                            z2.into_iter()
-                                .map(|z| expr_builder.lift(z.to_either()))
-                                .collect(),
-                        );
-
-                        let two: Expression<E> = 2.into();
-                        let four: Expression<E> = 4.into();
-                        let z1_squared = z1 * z1;
-                        println!("z1_squared: {:?}", z1_squared);
-                        let z1_cubed = &z1_squared * z1;
-                        let z2_squared = z2 * z2;
-                        let z2_cubed = &z2_squared * z2;
-
-                        // U1 = X1*Z2^2, U2 = X2*Z1^2
-                        let u1 = x1 * &z2_squared;
-                        let u2 = x2 * &z1_squared;
-
-                        // S1 = Y1*Z2^3, S2 = Y2*Z1^3
-                        let s1 = y1 * &z2_cubed;
-                        let s2 = y2 * &z1_cubed;
-
-                        // H = U2-U1, R = S2-S1
-                        let h = u2 - &u1;
-                        let h_squared = &h * &h;
-                        let h_cubed = &h_squared * &h;
-
-                        let i = h_squared * &four;
-                        let j = h_cubed * &four;
-                        let r = (&s2 - &s1) * &two;
-                        let v = &u1 * &i;
-
-                        // Check the formulas for X3, Y3, Z3
-                        // X3 = R^2 - J - 2*V
-                        let x3 = &r * &r - j.clone() - v.clone() * &two;
-                        // Y3 = R*(V - X3) - 2*S1*J
-                        let y3 = r * (&v - &x3) - s1 * j * &two;
-                        // Z3 = (Z1 + Z2)^2 - Z1Z1 - Z2Z2) * H
-                        let z3 = z1 * z2 * h * &two;
-                        // exprs.extend((x3 * &eq_expr).to_exprs());
-                        // exprs.extend((y3 * &eq_expr).to_exprs());
-                        // exprs.extend((z3 * &eq_expr).to_exprs());
                     }
                 }
             }
@@ -757,8 +670,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 
         // Then prove the tower relation
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
-        let (rt, proofs) =
-            CpuTowerProver::create_proof(prod_specs, logup_specs, None, 2, transcript);
+        let (rt, proofs) = CpuTowerProver::create_proof(prod_specs, logup_specs, 2, transcript);
 
         let lk_out_evals = out_evals.pop().unwrap();
         let w_out_evals = out_evals.pop().unwrap();
