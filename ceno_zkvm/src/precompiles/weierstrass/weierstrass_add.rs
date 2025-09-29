@@ -386,46 +386,25 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolWitnessGenerator<E>
         lk_multiplicity: &mut LkMultiplicity,
     ) {
         let num_wit_cols = size_of::<WeierstrassAddAssignWitCols<u8, EC::BaseField>>();
-        let chunk_size = 64;
-        let num_instances = phase1.instances.len();
-
-        let dummy_wit_row = vec![E::BaseField::ZERO; num_wit_cols];
-
         let [wits, structural_wits] = wits;
         wits.values
-            .par_chunks_mut(chunk_size * self.n_committed)
+            .par_chunks_mut(self.n_committed)
             .zip_eq(
                 structural_wits
                     .values
-                    .par_chunks_mut(chunk_size * self.n_structural_witin),
+                    .par_chunks_mut(self.n_structural_witin),
             )
-            .zip(phase1.instances.par_chunks(chunk_size))
-            .enumerate()
-            .for_each(|(i, ((wits, structural_wits), phase1_intances))| {
+            .zip(phase1.instances)
+            .for_each(|((row, eqs), phase1_instance)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
-                izip!(
-                    wits.chunks_mut(self.n_committed),
-                    structural_wits.chunks_mut(self.n_structural_witin),
-                    phase1_intances
-                )
-                .enumerate()
-                .for_each(|(j, (row, eqs, phase1_instance))| {
-                    let idx = i * chunk_size + j;
-                    if idx < num_instances {
-                        let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
-                            row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
-                                .borrow_mut();
-                        Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
-                        for x in eqs.iter_mut() {
-                            *x = E::BaseField::ONE;
-                        }
-                    } else {
-                        row[..num_wit_cols].copy_from_slice(&dummy_wit_row);
-                        for x in eqs.iter_mut() {
-                            *x = E::BaseField::ZERO;
-                        }
-                    }
-                });
+
+                let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> = row
+                    [self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
+                    .borrow_mut();
+                Self::populate_row(&phase1_instance, cols, &mut lk_multiplicity);
+                for x in eqs.iter_mut() {
+                    *x = E::BaseField::ONE;
+                }
             });
     }
 }
@@ -793,9 +772,11 @@ pub fn run_weierstrass_add<
 mod tests {
 
     use super::*;
+
     use crate::precompiles::weierstrass::test_utils::random_point_pairs;
     use ff_ext::BabyBearExt4;
     use mpcs::BasefoldDefault;
+    use serial_test::serial;
     use sp1_curves::weierstrass::{
         SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254, secp256k1::Secp256k1,
         secp256r1::Secp256r1,
@@ -814,7 +795,7 @@ mod tests {
             true,
         )
         .inspect_err(|err| {
-            println!("{:?}", err);
+            eprintln!("{:?}", err);
         })
         .expect("weierstrass_add failed");
     }
@@ -851,27 +832,31 @@ mod tests {
             true,
         )
         .inspect_err(|err| {
-            println!("{:?}", err);
+            eprintln!("{:?}", err);
         })
         .expect("weierstrass_add_nonpow2 failed");
     }
 
     #[test]
+    #[serial]
     fn test_weierstrass_add_nonpow2_bn254() {
         test_weierstrass_add_nonpow2_helper::<Bn254>();
     }
 
     #[test]
+    #[serial]
     fn test_weierstrass_add_nonpow2_bls12381() {
         test_weierstrass_add_nonpow2_helper::<Bls12381>();
     }
 
     #[test]
+    #[serial]
     fn test_weierstrass_add_nonpow2_secp256k1() {
         test_weierstrass_add_nonpow2_helper::<Secp256k1>();
     }
 
     #[test]
+    #[serial]
     fn test_weierstrass_add_nonpow2_secp256r1() {
         test_weierstrass_add_nonpow2_helper::<Secp256r1>();
     }
