@@ -57,6 +57,7 @@ fn build_elfs() {
     }
     rerun_all_but_target(Path::new("../examples"));
     rerun_all_but_target(Path::new("../ceno_rt"));
+    rerun_all_but_target(Path::new("../guest_libs"));
 }
 
 fn main() {
