@@ -244,12 +244,12 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         let num_instance_per_batch = steps.len().div_ceil(nthreads).max(1);
 
         let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
-            config.layout.phase1_witin_rmm_height(steps.len()),
+            steps.len(),
             num_witin,
             InstancePaddingStrategy::Default,
         );
         let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
-            config.layout.phase1_witin_rmm_height(steps.len()),
+            steps.len(),
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );

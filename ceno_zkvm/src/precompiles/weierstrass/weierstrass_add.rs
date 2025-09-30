@@ -556,48 +556,45 @@ pub fn run_weierstrass_add<
 
     let mut lk_multiplicity = LkMultiplicity::default();
     let mut phase1_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(instances.len()),
+        instances.len(),
         num_witin as usize,
         InstancePaddingStrategy::Default,
     );
     let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(instances.len()),
+        instances.len(),
         num_structual_witin as usize,
         InstancePaddingStrategy::Default,
     );
     let raw_witin_iter = phase1_witness.par_batch_iter_mut(num_instance_per_batch);
     raw_witin_iter
-        .zip(instances.par_chunks(num_instance_per_batch))
+        .zip_eq(instances.par_chunks(num_instance_per_batch))
         .for_each(|(instances, steps)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
                 .chunks_mut(num_witin as usize)
                 .zip_eq(steps)
-                .for_each(|(instances, _step)| {
-                    // assign full rotation with same witness
-                    for instance in instances.chunks_mut(num_witin as usize) {
-                        layout
-                            .vm_state
-                            .assign_instance(
+                .for_each(|(instance, _step)| {
+                    layout
+                        .vm_state
+                        .assign_instance(
+                            instance,
+                            &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
+                        )
+                        .expect("assign vm_state error");
+                    layout.mem_rw.iter().for_each(|mem_config| {
+                        mem_config
+                            .assign_op(
                                 instance,
-                                &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
+                                &mut lk_multiplicity,
+                                10,
+                                &MemOp {
+                                    previous_cycle: 0,
+                                    addr: ByteAddr::from(0).waddr(),
+                                    value: Default::default(),
+                                },
                             )
-                            .expect("assign vm_state error");
-                        layout.mem_rw.iter().for_each(|mem_config| {
-                            mem_config
-                                .assign_op(
-                                    instance,
-                                    &mut lk_multiplicity,
-                                    10,
-                                    &MemOp {
-                                        previous_cycle: 0,
-                                        addr: ByteAddr::from(0).waddr(),
-                                        value: Default::default(),
-                                    },
-                                )
-                                .expect("assign error");
-                        });
-                    }
+                            .expect("assign error");
+                    });
                 })
         });
 
