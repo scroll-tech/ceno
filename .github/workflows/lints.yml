@@ -3,7 +3,7 @@ name: Lints
 on:
   merge_group:
   pull_request:
-    types: [synchronize, opened, reopened, ready_for_review]
+    types: [ synchronize, opened, reopened, ready_for_review ]
   push:
     branches:
       - master
@@ -39,6 +39,9 @@ jobs:
             examples/target/
           key: lint-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: lint-${{ runner.os }}-cargo-
+
+      - name: Install m4
+        run: sudo apt-get install -y m4
 
       - name: Install cargo make
         run: |

@@ -12,6 +12,12 @@ pub const BN254_FP_ADD: u32 = 0x00_01_01_26;
 pub const BN254_FP_MUL: u32 = 0x00_01_01_28;
 pub const BN254_FP2_ADD: u32 = 0x00_01_01_29;
 pub const BN254_FP2_MUL: u32 = 0x00_01_01_2B;
+pub const BLS12381_DECOMPRESS: u32 = 0x00_00_01_1C;
+pub const BLS12381_ADD: u32 = 0x00_01_01_1E;
+pub const BLS12381_DOUBLE: u32 = 0x00_00_01_1F;
+pub const SECP256R1_ADD: u32 = 0x00_01_01_2C;
+pub const SECP256R1_DOUBLE: u32 = 0x00_00_01_2D;
+pub const SECP256R1_DECOMPRESS: u32 = 0x00_00_01_2E;
 
 pub const KECCAK_STATE_WORDS: usize = 25;
 

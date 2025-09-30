@@ -124,8 +124,8 @@ mod tests {
             powers.push(current);
         }
 
-        for (i, &val) in powers.iter().enumerate() {
-            println!("0b{:05b}, // {} = decimal {} ", val, i, val);
+        for &_val in powers.iter() {
+            // println!("0b{:05b}, // {} = decimal {} ", val, i, val);
         }
     }
 }

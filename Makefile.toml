@@ -10,12 +10,14 @@ args = [
   "--tests",
   "--examples",
   "--workspace",
+  "--",
+  "--nocapture",
 ]
 command = "cargo"
 env = { RUST_MIN_STACK = "33554432" }
 workspace = false
 
-[tasks.tests_v2]
+[tasks.tests_goldilock]
 args = [
   "test",
   # Run everything but 'benches'.
@@ -24,8 +26,11 @@ args = [
   "--tests",
   "--examples",
   "--workspace",
+  "--no-default-features",
   "--features",
-  "u16limb_circuit",
+  "goldilocks",
+  "--",
+  "--nocapture",
 ]
 command = "cargo"
 env = { RUST_MIN_STACK = "33554432" }
