@@ -62,7 +62,6 @@ tikv-jemallocator = { version = "0.6", optional = true }
 criterion.workspace = true
 pprof2.workspace = true
 proptest.workspace = true
-serial_test.workspace = true
 
 [build-dependencies]
 ceno-examples = { path = "../examples-builder" }

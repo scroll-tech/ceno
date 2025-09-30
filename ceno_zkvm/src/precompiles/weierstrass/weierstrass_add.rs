@@ -776,7 +776,6 @@ mod tests {
     use crate::precompiles::weierstrass::test_utils::random_point_pairs;
     use ff_ext::BabyBearExt4;
     use mpcs::BasefoldDefault;
-    use serial_test::serial;
     use sp1_curves::weierstrass::{
         SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254, secp256k1::Secp256k1,
         secp256r1::Secp256r1,
@@ -838,25 +837,21 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_weierstrass_add_nonpow2_bn254() {
         test_weierstrass_add_nonpow2_helper::<Bn254>();
     }
 
     #[test]
-    #[serial]
     fn test_weierstrass_add_nonpow2_bls12381() {
         test_weierstrass_add_nonpow2_helper::<Bls12381>();
     }
 
     #[test]
-    #[serial]
     fn test_weierstrass_add_nonpow2_secp256k1() {
         test_weierstrass_add_nonpow2_helper::<Secp256k1>();
     }
 
     #[test]
-    #[serial]
     fn test_weierstrass_add_nonpow2_secp256r1() {
         test_weierstrass_add_nonpow2_helper::<Secp256r1>();
     }
