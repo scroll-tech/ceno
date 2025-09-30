@@ -832,10 +832,6 @@ where
         // phase1.bits
     }
 
-    fn phase1_witin_rmm_height(&self, _num_instances: usize) -> usize {
-        0
-    }
-
     fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
         RowMajorMatrix::new_by_values(vec![], 1, InstancePaddingStrategy::Default)
     }

@@ -53,11 +53,6 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
 pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     type Trace;
 
-    /// return rmm height for phase 1 witness, which might include height for `multivariate rotation`
-    fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize {
-        num_instances.next_power_of_two()
-    }
-
     /// The fixed witness.
     fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField>;
 

@@ -1,5 +1,6 @@
 [package]
 categories.workspace = true
+description = "derive"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true

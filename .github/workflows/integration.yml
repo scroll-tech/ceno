@@ -48,6 +48,9 @@ jobs:
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: dtolnay/rust-toolchain@nightly
 
+      - name: Install m4
+        run: sudo apt-get install -y m4
+
       - name: Run fibonacci (debug)
         env:
           RUST_LOG: debug

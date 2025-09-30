@@ -39,10 +39,13 @@ jobs:
           key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: tests-${{ runner.os }}-cargo-
 
+      - name: Install m4
+        run: sudo apt-get install -y m4
+
       - name: Install cargo make
         run: |
           cargo make --version || cargo install cargo-make
       - name: run test
         run: cargo make tests
-      - name: run test + feature u16limb_circuit
-        run: cargo make tests_v2
+      - name: run test + goldilocks
+        run: cargo make tests_goldilock

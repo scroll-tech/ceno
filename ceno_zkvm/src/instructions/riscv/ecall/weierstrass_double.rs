@@ -147,7 +147,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
         let (out_evals, mut chip) = layout.finalize(cb);
 
         let layer = Layer::from_circuit_builder(
-            &cb,
+            cb,
             "weierstrass_double".to_string(),
             layout.n_challenges,
             out_evals,
@@ -216,12 +216,12 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
         let num_instance_per_batch = steps.len().div_ceil(nthreads).max(1);
 
         let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
-            config.layout.phase1_witin_rmm_height(steps.len()),
+            steps.len(),
             num_witin,
             InstancePaddingStrategy::Default,
         );
         let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
-            config.layout.phase1_witin_rmm_height(steps.len()),
+            steps.len(),
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
@@ -292,10 +292,10 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                     instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
                 );
                 p.map(|p| EllipticCurveDoubleInstance::<EC::BaseField> { p })
-                    .or_else(|_| {
-                        Err(ZKVMError::InvalidWitness(
+                    .map_err(|_| {
+                        ZKVMError::InvalidWitness(
                             "Failed to parse EllipticCurveDoubleInstance".into(),
-                        ))
+                        )
                     })
             })
             .try_collect()?;

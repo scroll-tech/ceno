@@ -49,7 +49,6 @@ use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::{IntoParallelRefIterator, ParallelSlice},
-    slice::ParallelSliceMut,
 };
 use sp1_curves::{
     AffinePoint, EllipticCurve,
@@ -437,37 +436,31 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
         wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         lk_multiplicity: &mut LkMultiplicity,
     ) {
+        let num_instances = wits[0].num_instances();
+        let nthreads = max_usable_threads();
+        let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
         let num_wit_cols = size_of::<WeierstrassDoubleAssignWitCols<u8, EC::BaseField>>();
-        let num_instances = phase1.instances.len();
-
-        let dummy_wit_row = vec![E::BaseField::ZERO; num_wit_cols];
 
         let [wits, structural_wits] = wits;
-        wits.values
-            .par_chunks_mut(self.n_committed)
-            .zip_eq(
-                structural_wits
-                    .values
-                    .par_chunks_mut(self.n_structural_witin),
-            )
-            .zip(phase1.instances.par_iter())
-            .enumerate()
-            .for_each(|(idx, ((row, eqs), phase1_instance))| {
+        let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
+        let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
+        raw_witin_iter
+            .zip_eq(raw_structural_wits_iter)
+            .zip_eq(phase1.instances.par_chunks(num_instance_per_batch))
+            .for_each(|((rows, eqs), phase1_instances)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
-                if idx < num_instances {
-                    let cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField> =
-                        row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
-                            .borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
-                    Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
-                    for x in eqs.iter_mut() {
-                        *x = E::BaseField::ONE;
-                    }
-                } else {
-                    row[..num_wit_cols].copy_from_slice(&dummy_wit_row);
-                    for x in eqs.iter_mut() {
-                        *x = E::BaseField::ZERO;
-                    }
-                }
+                rows.chunks_mut(self.n_committed)
+                    .zip_eq(eqs.chunks_mut(self.n_structural_witin))
+                    .zip_eq(phase1_instances)
+                    .for_each(|((row, eqs), phase1_intance)| {
+                        let cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField> =
+                            row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
+                                .borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
+                        Self::populate_row(phase1_intance, cols, &mut lk_multiplicity);
+                        for x in eqs.iter_mut() {
+                            *x = E::BaseField::ONE;
+                        }
+                    });
             });
     }
 }
@@ -592,12 +585,12 @@ pub fn run_weierstrass_double<
 
     let mut lk_multiplicity = LkMultiplicity::default();
     let mut phase1_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(instances.len()),
+        instances.len(),
         num_witin as usize,
         InstancePaddingStrategy::Default,
     );
     let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(instances.len()),
+        instances.len(),
         num_structual_witin as usize,
         InstancePaddingStrategy::Default,
     );
@@ -806,7 +799,6 @@ pub fn run_weierstrass_double<
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
 
     use super::*;
     use ff_ext::BabyBearExt4;
@@ -822,21 +814,18 @@ mod tests {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
-        thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
-            .spawn(|| {
-                let points = random_points::<WP>(8);
+        let points = random_points::<WP>(8);
 
-                let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
-                    setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-                    points,
-                    true,
-                    true,
-                );
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
+            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+            points,
+            true,
+            true,
+        )
+        .inspect_err(|err| {
+            eprintln!("{:?}", err);
+        })
+        .expect("run_weierstrass_double failed");
     }
 
     #[test]
@@ -846,14 +835,7 @@ mod tests {
 
     #[test]
     fn test_weierstrass_double_bls12381() {
-        thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
-            .spawn(|| {
-                test_weierstrass_double_helper::<Bls12381>();
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        test_weierstrass_double_helper::<Bls12381>();
     }
 
     #[test]
@@ -870,20 +852,17 @@ mod tests {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
-        thread::Builder::new()
-            .stack_size(32 * 1024 * 1024) // 64 MB
-            .spawn(|| {
-                let points = random_points::<WP>(5);
-                let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
-                    setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-                    points,
-                    true,
-                    true,
-                );
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+        let points = random_points::<WP>(5);
+        let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
+            setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
+            points,
+            true,
+            true,
+        )
+        .inspect_err(|err| {
+            eprintln!("{:?}", err);
+        })
+        .expect("test_weierstrass_double_nonpow2_helper failed");
     }
 
     #[test]

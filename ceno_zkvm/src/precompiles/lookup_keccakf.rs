@@ -240,6 +240,11 @@ impl<E: ExtensionField> KeccakLayout<E> {
             n_challenges: 0,
         }
     }
+
+    // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
+    pub fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize {
+        num_instances * ROUNDS.next_power_of_two()
+    }
 }
 
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
@@ -600,11 +605,6 @@ where
     E: ExtensionField,
 {
     type Trace = KeccakTrace;
-
-    // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
-    fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize {
-        num_instances * ROUNDS.next_power_of_two()
-    }
 
     fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
         // TODO remove this after recover RC
