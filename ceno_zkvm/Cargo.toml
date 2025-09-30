@@ -40,7 +40,6 @@ tracing.workspace = true
 tracing-forest.workspace = true
 tracing-subscriber.workspace = true
 
-
 bincode.workspace = true
 cfg-if.workspace = true
 clap.workspace = true

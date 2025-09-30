@@ -1,4 +1,4 @@
-// The crate weierstrass double circuit is modified from succinctlabs/sp1 under MIT license
+// The crate weierstrass add circuit is modified from succinctlabs/sp1 under MIT license
 
 // The MIT License (MIT)
 
@@ -22,7 +22,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-use std::{array, fmt::Debug, sync::Arc};
+use std::{array, fmt::Debug, marker::PhantomData, sync::Arc};
 
 use ceno_emul::{ByteAddr, MemOp, StepRecord};
 use core::{borrow::BorrowMut, mem::size_of};
@@ -42,34 +42,40 @@ use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     Expression, StructuralWitInType, ToExpr, WitIn,
+    macros::{entered_span, exit_span},
     util::{ceil_log2, max_usable_threads},
 };
-use num::BigUint;
+use num::{BigUint, One, Zero};
 use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::{IntoParallelRefIterator, ParallelSlice},
 };
 use sp1_curves::{
-    AffinePoint, EllipticCurve,
+    CurveType, EllipticCurve,
     params::{FieldParameters, Limbs, NumLimbs, NumWords},
-    weierstrass::WeierstrassParameters,
+    polynomial::Polynomial,
+    weierstrass::{
+        WeierstrassParameters,
+        secp256k1::{secp256k1_decompress, secp256k1_sqrt},
+        secp256r1::{secp256r1_decompress, secp256r1_sqrt},
+    },
 };
-use sumcheck::{
-    macros::{entered_span, exit_span},
-    util::optimal_sumcheck_threads,
-};
+use sumcheck::util::optimal_sumcheck_threads;
 use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     chip_handler::MemoryExpr,
     error::ZKVMError,
-    gadgets::{FieldOperation, field_op::FieldOpCols},
+    gadgets::{
+        FieldOperation, field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
+        field_sqrt::FieldSqrtCols, range::FieldLtCols,
+    },
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
         SelectorTypeLayout, utils::merge_u8_limbs_to_u16_limbs_pairs_and_extend,
-        weierstrass::EllipticCurveDoubleInstance,
+        weierstrass::EllipticCurveDecompressInstance,
     },
     scheme::utils::gkr_witness,
     structs::PointAndEval,
@@ -78,35 +84,35 @@ use crate::{
 
 #[derive(Clone, Debug, AlignedBorrow)]
 #[repr(C)]
-pub struct WeierstrassDoubleAssignWitCols<WitT, P: FieldParameters + NumLimbs> {
-    pub p_x: Limbs<WitT, P::Limbs>,
-    pub p_y: Limbs<WitT, P::Limbs>,
-    pub(crate) slope_denominator: FieldOpCols<WitT, P>,
-    pub(crate) slope_numerator: FieldOpCols<WitT, P>,
-    pub(crate) slope: FieldOpCols<WitT, P>,
-    pub(crate) p_x_squared: FieldOpCols<WitT, P>,
-    pub(crate) p_x_squared_times_3: FieldOpCols<WitT, P>,
-    pub(crate) slope_squared: FieldOpCols<WitT, P>,
-    pub(crate) p_x_plus_p_x: FieldOpCols<WitT, P>,
-    pub(crate) x3_ins: FieldOpCols<WitT, P>,
-    pub(crate) p_x_minus_x: FieldOpCols<WitT, P>,
-    pub(crate) y3_ins: FieldOpCols<WitT, P>,
-    pub(crate) slope_times_p_x_minus_x: FieldOpCols<WitT, P>,
+pub struct WeierstrassDecompressWitCols<WitT, P: FieldParameters + NumLimbs> {
+    pub sign_bit: WitT,
+    pub(crate) x: Limbs<WitT, P::Limbs>,
+    pub(crate) y: Limbs<WitT, P::Limbs>,
+    pub(crate) range_x: FieldLtCols<WitT, P>,
+    pub(crate) neg_y_range_check: FieldLtCols<WitT, P>,
+    pub(crate) x_2: FieldOpCols<WitT, P>,
+    pub(crate) x_3: FieldOpCols<WitT, P>,
+    pub(crate) ax_plus_b: FieldInnerProductCols<WitT, P>,
+    pub(crate) x_3_plus_b_plus_ax: FieldOpCols<WitT, P>,
+    pub(crate) y_sqrt_cols: FieldSqrtCols<WitT, P>,
+    pub(crate) neg_y: FieldOpCols<WitT, P>,
 }
 
-/// Weierstrass double is implemented by a single layer.
+/// Weierstrass decompress is implemented by a single layer.
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub struct WeierstrassDoubleAssignLayer<WitT, P: FieldParameters + NumWords> {
-    pub wits: WeierstrassDoubleAssignWitCols<WitT, P>,
+pub struct WeierstrassDecompressLayer<WitT, P: FieldParameters + NumWords> {
+    pub wits: WeierstrassDecompressWitCols<WitT, P>,
 }
 
 #[derive(Clone, Debug)]
-pub struct WeierstrassDoubleAssignLayout<E: ExtensionField, EC: EllipticCurve> {
-    pub layer_exprs: WeierstrassDoubleAssignLayer<WitIn, EC::BaseField>,
+pub struct WeierstrassDecompressLayout<E: ExtensionField, EC: EllipticCurve> {
+    pub layer_exprs: WeierstrassDecompressLayer<WitIn, EC::BaseField>,
     pub selector_type_layout: SelectorTypeLayout<E>,
-    pub input32_exprs: GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsCurvePoint>,
-    pub output32_exprs: GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsCurvePoint>,
+    pub input32_exprs: GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsFieldElement>,
+    pub old_output32_exprs:
+        GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsFieldElement>,
+    pub output32_exprs: GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsFieldElement>,
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
@@ -114,27 +120,25 @@ pub struct WeierstrassDoubleAssignLayout<E: ExtensionField, EC: EllipticCurve> {
 }
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
-    WeierstrassDoubleAssignLayout<E, EC>
+    WeierstrassDecompressLayout<E, EC>
 {
     fn new(cb: &mut CircuitBuilder<E>) -> Self {
-        let wits = WeierstrassDoubleAssignWitCols {
-            p_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_x"))),
-            p_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_y"))),
-            slope_denominator: FieldOpCols::create(cb, || "slope_denominator"),
-            slope_numerator: FieldOpCols::create(cb, || "slope_numerator"),
-            slope: FieldOpCols::create(cb, || "slope"),
-            p_x_squared: FieldOpCols::create(cb, || "p_x_squared"),
-            p_x_squared_times_3: FieldOpCols::create(cb, || "p_x_squared_times_3"),
-            slope_squared: FieldOpCols::create(cb, || "slope_squared"),
-            p_x_plus_p_x: FieldOpCols::create(cb, || "p_x_plus_p_x"),
-            x3_ins: FieldOpCols::create(cb, || "x3_ins"),
-            p_x_minus_x: FieldOpCols::create(cb, || "p_x_minus_x"),
-            y3_ins: FieldOpCols::create(cb, || "y3_ins"),
-            slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
+        let wits = WeierstrassDecompressWitCols {
+            sign_bit: cb.create_bit(|| "sign_bit").unwrap(),
+            x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "x"))),
+            y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "y"))),
+            range_x: FieldLtCols::create(cb, || "range_x"),
+            neg_y_range_check: FieldLtCols::create(cb, || "neg_y_range_check"),
+            x_2: FieldOpCols::create(cb, || "x_2"),
+            x_3: FieldOpCols::create(cb, || "x_3"),
+            ax_plus_b: FieldInnerProductCols::create(cb, || "ax_plus_b"),
+            x_3_plus_b_plus_ax: FieldOpCols::create(cb, || "x_3_plus_b_plus_ax"),
+            y_sqrt_cols: FieldSqrtCols::create(cb, || "y"),
+            neg_y: FieldOpCols::create(cb, || "neg_y"),
         };
 
         let eq = cb.create_structural_witin(
-            || "weierstrass_double_eq",
+            || "weierstrass_decompress_eq",
             StructuralWitInType::EqualDistanceSequence {
                 max_len: 0,
                 offset: 0,
@@ -151,110 +155,69 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
 
         let input32_exprs: GenericArray<
             MemoryExpr<E>,
-            <EC::BaseField as NumWords>::WordsCurvePoint,
+            <EC::BaseField as NumWords>::WordsFieldElement,
         > = GenericArray::generate(|_| array::from_fn(|_| Expression::WitIn(0)));
+        let old_output32_exprs: GenericArray<
+            MemoryExpr<E>,
+            <EC::BaseField as NumWords>::WordsFieldElement,
+        > = GenericArray::generate(|_| {
+            array::from_fn(|i| cb.create_witin(|| format!("old_output32_{}", i)).expr())
+        });
         let output32_exprs: GenericArray<
             MemoryExpr<E>,
-            <EC::BaseField as NumWords>::WordsCurvePoint,
+            <EC::BaseField as NumWords>::WordsFieldElement,
         > = GenericArray::generate(|_| array::from_fn(|_| Expression::WitIn(0)));
 
         Self {
-            layer_exprs: WeierstrassDoubleAssignLayer { wits },
+            layer_exprs: WeierstrassDecompressLayer { wits },
             selector_type_layout,
             input32_exprs,
+            old_output32_exprs,
             output32_exprs,
             n_fixed: 0,
             n_committed: 0,
-            n_challenges: 0,
             n_structural_witin: 0,
+            n_challenges: 0,
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
-        blu_events: &mut LkMultiplicity,
-        cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField>,
-        p_x: BigUint,
-        p_y: BigUint,
+        record: &mut LkMultiplicity,
+        cols: &mut WeierstrassDecompressWitCols<E::BaseField, EC::BaseField>,
+        x: &BigUint,
     ) {
-        // This populates necessary field operations to double a point on a Weierstrass curve.
-
+        // Y = sqrt(x^3 + ax + b)
+        cols.range_x.populate(record, x, &EC::BaseField::modulus());
+        let x_2 = cols.x_2.populate(record, x, x, FieldOperation::Mul);
+        let x_3 = cols.x_3.populate(record, &x_2, x, FieldOperation::Mul);
+        let b = EC::b_int();
         let a = EC::a_int();
-        let slope = {
-            // slope_numerator = a + (p.x * p.x) * 3.
-            let slope_numerator = {
-                let p_x_squared =
-                    cols.p_x_squared
-                        .populate(blu_events, &p_x, &p_x, FieldOperation::Mul);
-                let p_x_squared_times_3 = cols.p_x_squared_times_3.populate(
-                    blu_events,
-                    &p_x_squared,
-                    &BigUint::from(3u32),
-                    FieldOperation::Mul,
-                );
-                cols.slope_numerator.populate(
-                    blu_events,
-                    &a,
-                    &p_x_squared_times_3,
-                    FieldOperation::Add,
-                )
-            };
+        let param_vec = vec![a, b];
+        let x_vec = vec![x.clone(), BigUint::one()];
+        let ax_plus_b = cols.ax_plus_b.populate(record, &param_vec, &x_vec);
+        let x_3_plus_b_plus_ax =
+            cols.x_3_plus_b_plus_ax
+                .populate(record, &x_3, &ax_plus_b, FieldOperation::Add);
 
-            // slope_denominator = 2 * y.
-            let slope_denominator = cols.slope_denominator.populate(
-                blu_events,
-                &BigUint::from(2u32),
-                &p_y,
-                FieldOperation::Mul,
-            );
-
-            cols.slope.populate(
-                blu_events,
-                &slope_numerator,
-                &slope_denominator,
-                FieldOperation::Div,
-            )
+        let sqrt_fn = match EC::CURVE_TYPE {
+            CurveType::Secp256k1 => secp256k1_sqrt,
+            CurveType::Secp256r1 => secp256r1_sqrt,
+            _ => panic!("Unsupported curve"),
         };
 
-        // x = slope * slope - (p.x + p.x).
-        let x = {
-            let slope_squared =
-                cols.slope_squared
-                    .populate(blu_events, &slope, &slope, FieldOperation::Mul);
-            let p_x_plus_p_x =
-                cols.p_x_plus_p_x
-                    .populate(blu_events, &p_x, &p_x, FieldOperation::Add);
-            cols.x3_ins.populate(
-                blu_events,
-                &slope_squared,
-                &p_x_plus_p_x,
-                FieldOperation::Sub,
-            )
-        };
-
-        // y = slope * (p.x - x) - p.y.
-        {
-            let p_x_minus_x = cols
-                .p_x_minus_x
-                .populate(blu_events, &p_x, &x, FieldOperation::Sub);
-            let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
-                blu_events,
-                &slope,
-                &p_x_minus_x,
-                FieldOperation::Mul,
-            );
-            cols.y3_ins.populate(
-                blu_events,
-                &slope_times_p_x_minus_x,
-                &p_y,
-                FieldOperation::Sub,
-            );
-        }
+        let y = cols
+            .y_sqrt_cols
+            .populate(record, &x_3_plus_b_plus_ax, sqrt_fn);
+        let zero = BigUint::zero();
+        let neg_y = cols.neg_y.populate(record, &zero, &y, FieldOperation::Sub);
+        cols.neg_y_range_check
+            .populate(record, &neg_y, &EC::BaseField::modulus());
     }
 }
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuilder<E>
-    for WeierstrassDoubleAssignLayout<E, EC>
+    for WeierstrassDecompressLayout<E, EC>
 {
     type Params = ();
 
@@ -262,100 +225,94 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
         cb: &mut CircuitBuilder<E>,
         _params: Self::Params,
     ) -> Result<Self, CircuitBuilderError> {
-        let mut layout = WeierstrassDoubleAssignLayout::new(cb);
+        let mut layout = match EC::CURVE_TYPE {
+            CurveType::Secp256k1 | CurveType::Secp256r1 => WeierstrassDecompressLayout::new(cb),
+            _ => panic!("Unsupported curve"),
+        };
         let wits = &layout.layer_exprs.wits;
 
-        // `a` in the Weierstrass form: y^2 = x^3 + a * x + b.
-        let a = EC::BaseField::to_limbs_expr::<E>(&EC::a_int());
+        let x = &wits.x;
+        let max_num_limbs = EC::BaseField::to_limbs_expr(&EC::BaseField::modulus());
 
-        // slope = slope_numerator / slope_denominator.
-        let slope = {
-            // slope_numerator = a + (p.x * p.x) * 3.
-            {
-                wits.p_x_squared
-                    .eval(cb, &wits.p_x, &wits.p_x, FieldOperation::Mul)?;
+        wits.range_x.eval(cb, x, &max_num_limbs)?;
+        wits.x_2.eval(cb, x, x, FieldOperation::Mul)?;
+        wits.x_3
+            .eval(cb, &wits.x_2.result, x, FieldOperation::Mul)?;
 
-                wits.p_x_squared_times_3.eval(
-                    cb,
-                    &wits.p_x_squared.result,
-                    &EC::BaseField::to_limbs_expr::<E>(&BigUint::from(3u32)),
-                    FieldOperation::Mul,
-                )?;
+        let b_const = EC::BaseField::to_limbs_expr::<E>(&EC::b_int());
+        let a_const = EC::BaseField::to_limbs_expr::<E>(&EC::a_int());
+        let params = [a_const, b_const];
+        let p_x: Polynomial<Expression<E>> = x.clone().into();
+        let p_one: Polynomial<Expression<E>> =
+            EC::BaseField::to_limbs_expr::<E>(&BigUint::one()).into();
+        wits.ax_plus_b.eval(cb, &params, &[p_x, p_one])?;
+        wits.x_3_plus_b_plus_ax.eval(
+            cb,
+            &wits.x_3.result,
+            &wits.ax_plus_b.result,
+            FieldOperation::Add,
+        )?;
 
-                wits.slope_numerator.eval(
-                    cb,
-                    &a,
-                    &wits.p_x_squared_times_3.result,
-                    FieldOperation::Add,
-                )?;
-            };
+        wits.neg_y.eval(
+            cb,
+            &[Expression::<E>::ZERO].iter(),
+            &wits.y_sqrt_cols.multiplication.result,
+            FieldOperation::Sub,
+        )?;
+        // Range check the `neg_y.result` to be canonical.
+        let modulus_limbs = EC::BaseField::to_limbs_expr(&EC::BaseField::modulus());
+        wits.neg_y_range_check
+            .eval(cb, &wits.neg_y.result, &modulus_limbs)?;
 
-            // slope_denominator = 2 * y.
-            wits.slope_denominator.eval(
-                cb,
-                &EC::BaseField::to_limbs_expr::<E>(&BigUint::from(2u32)),
-                &wits.p_y,
-                FieldOperation::Mul,
+        // Constrain that `y` is a square root. Note that `y.multiplication.result` is constrained
+        // to be canonical here. Since `y_limbs` is constrained to be either
+        // `y.multiplication.result` or `neg_y.result`, `y_limbs` will be canonical.
+        wits.y_sqrt_cols
+            .eval(cb, &wits.x_3_plus_b_plus_ax.result, wits.y_sqrt_cols.lsb)?;
+
+        let y_limbs = &wits.y;
+
+        // When the sign rule is LeastSignificantBit, the sign_bit should match the parity
+        // of the result. The parity of the square root result is given by the wits.y_sqrt_cols.lsb
+        // value. Thus, if the sign_bit matches the wits.y_sqrt_cols.lsb value, then the result
+        // should be the square root of the y value. Otherwise, the result should be the
+        // negative square root of the y value.
+        let ne: Expression<E> = 1 - cb
+            .is_equal(wits.y_sqrt_cols.lsb.expr(), 1 - wits.sign_bit.expr())?
+            .0
+            .expr();
+        for (a, b) in izip!(
+            wits.y_sqrt_cols.multiplication.result.0.iter(),
+            y_limbs.0.iter()
+        ) {
+            cb.require_zero(
+                || "when lsb != 1 - sign_bit, multiplication == y_limbs",
+                ne.expr() * (a.expr() - b.expr()),
             )?;
+        }
 
-            wits.slope.eval(
-                cb,
-                &wits.slope_numerator.result,
-                &wits.slope_denominator.result,
-                FieldOperation::Div,
-            )?;
-
-            &wits.slope.result
-        };
-
-        // x = slope * slope - (p.x + p.x).
-        let x = {
-            wits.slope_squared
-                .eval(cb, slope, slope, FieldOperation::Mul)?;
-            wits.p_x_plus_p_x
-                .eval(cb, &wits.p_x, &wits.p_x, FieldOperation::Add)?;
-            wits.x3_ins.eval(
-                cb,
-                &wits.slope_squared.result,
-                &wits.p_x_plus_p_x.result,
-                FieldOperation::Sub,
-            )?;
-            &wits.x3_ins.result
-        };
-
-        // y = slope * (p.x - x) - p.y.
-        {
-            wits.p_x_minus_x
-                .eval(cb, &wits.p_x, x, FieldOperation::Sub)?;
-            wits.slope_times_p_x_minus_x.eval(
-                cb,
-                slope,
-                &wits.p_x_minus_x.result,
-                FieldOperation::Mul,
-            )?;
-            wits.y3_ins.eval(
-                cb,
-                &wits.slope_times_p_x_minus_x.result,
-                &wits.p_y,
-                FieldOperation::Sub,
+        let ne: Expression<E> = 1 - cb
+            .is_equal(wits.y_sqrt_cols.lsb.expr(), wits.sign_bit.expr())?
+            .0
+            .expr();
+        for (a, b) in izip!(wits.neg_y.result.0.iter(), y_limbs.0.iter()) {
+            cb.require_zero(
+                || "when lsb == sign_bit, neg_y == y_limbs",
+                ne.expr() * (a.expr() - b.expr()),
             )?;
         }
 
         // Constraint output32 from wits.x3_ins || wits.y3_ins by converting 8-bit limbs to 2x16-bit felts
         let mut output32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
-        for limbs in [&wits.x3_ins.result, &wits.y3_ins.result] {
-            merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(limbs, &mut output32);
-        }
+        merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(&wits.y, &mut output32);
         let output32 = output32.try_into().unwrap();
 
-        let mut p_input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
-        for limbs in [&wits.p_x, &wits.p_y] {
-            merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(limbs, &mut p_input32);
-        }
-        let p_input32 = p_input32.try_into().unwrap();
+        let mut input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
+        merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(&wits.x, &mut input32);
+        let input32 = input32.try_into().unwrap();
 
         // set input32/output32 expr
-        layout.input32_exprs = p_input32;
+        layout.input32_exprs = input32;
         layout.output32_exprs = output32;
 
         Ok(layout)
@@ -415,14 +372,15 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
 }
 
 #[derive(Clone, Default)]
-pub struct WeierstrassDoubleAssignTrace<P: NumWords> {
-    pub instances: Vec<EllipticCurveDoubleInstance<P>>,
+pub struct WeierstrassDecompressTrace<P: NumLimbs> {
+    pub instances: Vec<EllipticCurveDecompressInstance>,
+    _phantom: PhantomData<P>,
 }
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitnessGenerator<E>
-    for WeierstrassDoubleAssignLayout<E, EC>
+    for WeierstrassDecompressLayout<E, EC>
 {
-    type Trace = WeierstrassDoubleAssignTrace<EC::BaseField>;
+    type Trace = WeierstrassDecompressTrace<EC::BaseField>;
 
     fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
         RowMajorMatrix::new(0, 0, InstancePaddingStrategy::Default)
@@ -437,8 +395,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
         let num_instances = wits[0].num_instances();
         let nthreads = max_usable_threads();
         let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
-        let num_wit_cols = size_of::<WeierstrassDoubleAssignWitCols<u8, EC::BaseField>>();
-
+        let num_wit_cols = size_of::<WeierstrassDecompressWitCols<u8, EC::BaseField>>();
         let [wits, structural_wits] = wits;
         let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
         let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
@@ -450,11 +407,15 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
                 rows.chunks_mut(self.n_committed)
                     .zip_eq(eqs.chunks_mut(self.n_structural_witin))
                     .zip_eq(phase1_instances)
-                    .for_each(|((row, eqs), phase1_intance)| {
-                        let cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField> =
-                            row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
-                                .borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
-                        Self::populate_row(phase1_intance, cols, &mut lk_multiplicity);
+                    .for_each(|((row, eqs), phase1_instance)| {
+                        let cols: &mut WeierstrassDecompressWitCols<E::BaseField, EC::BaseField> =
+                            row[self.layer_exprs.wits.sign_bit.id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
+                                .borrow_mut();
+                        cols.sign_bit =
+                            E::BaseField::from_canonical_u32(phase1_instance.sign_bit as u32);
+
+                        Self::populate_field_ops(&mut lk_multiplicity, cols, &phase1_instance.x);
+
                         for x in eqs.iter_mut() {
                             *x = E::BaseField::ONE;
                         }
@@ -463,78 +424,88 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
     }
 }
 
-impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
-    WeierstrassDoubleAssignLayout<E, EC>
-{
-    pub fn populate_row(
-        event: &EllipticCurveDoubleInstance<EC::BaseField>,
-        cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField>,
-        new_byte_lookup_events: &mut LkMultiplicity,
-    ) {
-        // Decode affine points.
-        let p = &event.p;
-        let p = AffinePoint::<EC>::from_words_le(p);
-        let (p_x, p_y) = (p.x, p.y);
-
-        // Populate basic columns.
-        cols.p_x = EC::BaseField::to_limbs_field(&p_x);
-        cols.p_y = EC::BaseField::to_limbs_field(&p_y);
-
-        Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y);
-    }
-}
-
 /// this is for testing purpose
-pub struct TestWeierstrassDoubleLayout<E: ExtensionField, EC: EllipticCurve> {
-    layout: WeierstrassDoubleAssignLayout<E, EC>,
+pub struct TestWeierstrassDecompressLayout<E: ExtensionField, EC: EllipticCurve> {
+    layout: WeierstrassDecompressLayout<E, EC>,
     mem_rw: Vec<WriteMEM>,
     vm_state: StateInOut<E>,
-    _point_ptr_0: WitIn,
+    _field_ptr: WitIn,
 }
 
 #[allow(clippy::type_complexity)]
-pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>()
--> Result<(TestWeierstrassDoubleLayout<E, EC>, GKRCircuit<E>, u16, u16), ZKVMError> {
-    let mut cs = ConstraintSystem::new(|| "weierstrass_double");
+pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>() -> Result<
+    (
+        TestWeierstrassDecompressLayout<E, EC>,
+        GKRCircuit<E>,
+        u16,
+        u16,
+    ),
+    ZKVMError,
+> {
+    let mut cs = ConstraintSystem::new(|| "weierstrass_decompress");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
+
+    // Guarantee the witness occur at the beginning of the witness columns. This is for simple implementation.
+    let mut layout = WeierstrassDecompressLayout::build_layer_logic(&mut cb, ())?;
 
     // constrain vmstate
     let vm_state = StateInOut::construct_circuit(&mut cb, false)?;
 
-    let point_ptr_0 = cb.create_witin(|| "state_ptr_0");
-
-    let mut layout = WeierstrassDoubleAssignLayout::build_layer_logic(&mut cb, ())?;
+    let field_ptr = cb.create_witin(|| "field_ptr");
 
     // Write the result to the same address of the first input point.
-    let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
+    let num_limbs = <EC::BaseField as NumLimbs>::Limbs::U32;
+    let mut mem_rw = layout
+        .input32_exprs
+        .iter()
         .enumerate()
-        .map(|(i, (val_before, val_after))| {
+        .map(|(i, val)| {
             WriteMEM::construct_circuit(
                 &mut cb,
-                // mem address := state_ptr_0 + i
-                point_ptr_0.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
-                val_before.clone(),
-                val_after.clone(),
+                // mem address := field_ptr + i * 4
+                field_ptr.expr() + (i as u32) * 4,
+                val.clone(),
+                val.clone(),
                 vm_state.ts,
             )
         })
         .collect::<Result<Vec<WriteMEM>, _>>()?;
 
+    // Keep the second input point unchanged in memory.
+    mem_rw.extend(
+        izip!(
+            layout.old_output32_exprs.iter(),
+            layout.output32_exprs.iter()
+        )
+        .enumerate()
+        .map(|(i, (val_before, val_after))| {
+            WriteMEM::construct_circuit(
+                &mut cb,
+                // mem address := field_ptr + i * 4 + num_limbs
+                field_ptr.expr() + (i as u32) * 4 + num_limbs,
+                val_before.clone(),
+                val_after.clone(),
+                vm_state.ts,
+            )
+        })
+        .collect::<Result<Vec<WriteMEM>, _>>()?,
+    );
+
     let (out_evals, mut chip) = layout.finalize(&mut cb);
 
     let layer = Layer::from_circuit_builder(
         &cb,
-        "weierstrass_double".to_string(),
+        "weierstrass_decompress".to_string(),
         layout.n_challenges,
         out_evals,
     );
     chip.add_layer(layer);
 
     Ok((
-        TestWeierstrassDoubleLayout {
+        TestWeierstrassDecompressLayout {
             layout,
             vm_state,
-            _point_ptr_0: point_ptr_0,
+            _field_ptr: field_ptr,
             mem_rw,
         },
         chip.gkr_circuit(),
@@ -545,37 +516,28 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParam
 
 #[tracing::instrument(
     skip_all,
-    name = "run_weierstrass_double",
+    name = "run_weierstrass_decompress",
     level = "trace",
     fields(profiling_1)
 )]
-pub fn run_weierstrass_double<
+pub fn run_weierstrass_decompress<
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E> + 'static,
     EC: EllipticCurve + WeierstrassParameters,
 >(
     (layout, gkr_circuit, num_witin, num_structual_witin): (
-        TestWeierstrassDoubleLayout<E, EC>,
+        TestWeierstrassDecompressLayout<E, EC>,
         GKRCircuit<E>,
         u16,
         u16,
     ),
-    points: Vec<GenericArray<u32, <EC::BaseField as NumWords>::WordsCurvePoint>>,
-    verify: bool,
+    instances: Vec<EllipticCurveDecompressInstance>,
     test_outputs: bool,
+    verify: bool,
 ) -> Result<GKRProof<E>, BackendError> {
-    let num_instances = points.len();
+    let num_instances = instances.len();
     let log2_num_instance = ceil_log2(num_instances);
     let num_threads = optimal_sumcheck_threads(log2_num_instance);
-    let mut instances: Vec<EllipticCurveDoubleInstance<EC::BaseField>> =
-        Vec::with_capacity(num_instances);
-
-    let span = entered_span!("instances", profiling_2 = true);
-    for p in &points {
-        let instance = EllipticCurveDoubleInstance { p: p.clone() };
-        instances.push(instance);
-    }
-    exit_span!(span);
 
     let span = entered_span!("phase1_witness", profiling_2 = true);
     let nthreads = max_usable_threads();
@@ -600,9 +562,9 @@ pub fn run_weierstrass_double<
             instances
                 .chunks_mut(num_witin as usize)
                 .zip_eq(steps)
-                .for_each(|(instance_with_rotation, _step)| {
+                .for_each(|(instances, _step)| {
                     // assign full rotation with same witness
-                    for instance in instance_with_rotation.chunks_mut(num_witin as usize) {
+                    for instance in instances.chunks_mut(num_witin as usize) {
                         layout
                             .vm_state
                             .assign_instance(
@@ -629,7 +591,10 @@ pub fn run_weierstrass_double<
         });
 
     layout.layout.phase1_witness_group(
-        WeierstrassDoubleAssignTrace { instances },
+        WeierstrassDecompressTrace {
+            instances: instances.clone(),
+            _phantom: PhantomData,
+        },
         [&mut phase1_witness, &mut structural_witness],
         &mut lk_multiplicity,
     );
@@ -637,44 +602,29 @@ pub fn run_weierstrass_double<
     exit_span!(span);
 
     if test_outputs {
-        // test got output == expected output
-        // n_points x (result_x_words || result_y_words) in little endian
-        let expected_outputs = points
+        let decompress_fn = match EC::CURVE_TYPE {
+            CurveType::Secp256k1 => secp256k1_decompress::<EC>,
+            CurveType::Secp256r1 => secp256r1_decompress::<EC>,
+            _ => panic!("Unsupported curve"),
+        };
+
+        let expected_outputs = instances
             .iter()
-            .map(|a| {
-                let a = AffinePoint::<EC>::from_words_le(a);
-                let c = EC::ec_double(&a);
-                c.to_words_le()
-                    .into_iter()
-                    .flat_map(|word| {
-                        [
-                            word & 0xFF,
-                            (word >> 8) & 0xFF,
-                            (word >> 16) & 0xFF,
-                            (word >> 24) & 0xFF,
-                        ]
-                    })
-                    .collect_vec()
+            .map(|EllipticCurveDecompressInstance { x, sign_bit }| {
+                let computed_point = decompress_fn(&x.to_bytes_be(), *sign_bit as u32);
+                computed_point.y.to_bytes_le()
             })
             .collect_vec();
 
-        let x_output_index_start = layout.layout.layer_exprs.wits.x3_ins.result[0].id as usize;
-        let y_output_index_start = layout.layout.layer_exprs.wits.y3_ins.result[0].id as usize;
+        let y_output_index_start = layout.layout.layer_exprs.wits.y.0[0].id as usize;
         let got_outputs = phase1_witness
             .iter_rows()
             .take(num_instances)
             .map(|cols| {
-                [
-                    cols[x_output_index_start..][..<EC::BaseField as NumLimbs>::Limbs::USIZE]
-                        .iter()
-                        .map(|x| x.to_canonical_u64() as u32)
-                        .collect_vec(),
-                    cols[y_output_index_start..][..<EC::BaseField as NumLimbs>::Limbs::USIZE]
-                        .iter()
-                        .map(|y| y.to_canonical_u64() as u32)
-                        .collect_vec(),
-                ]
-                .concat()
+                cols[y_output_index_start..][..<EC::BaseField as NumLimbs>::Limbs::USIZE]
+                    .iter()
+                    .map(|y| y.to_canonical_u64() as u8)
+                    .collect_vec()
             })
             .collect_vec();
         assert_eq!(expected_outputs, got_outputs);
@@ -797,89 +747,59 @@ pub fn run_weierstrass_double<
 
 #[cfg(test)]
 mod tests {
+    use crate::precompiles::weierstrass::test_utils::random_decompress_instances;
 
     use super::*;
     use ff_ext::BabyBearExt4;
     use mpcs::BasefoldDefault;
     use sp1_curves::weierstrass::{
-        SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254, secp256k1::Secp256k1,
-        secp256r1::Secp256r1,
+        SwCurve, WeierstrassParameters, secp256k1::Secp256k1, secp256r1::Secp256r1,
     };
 
-    use crate::precompiles::weierstrass::test_utils::random_points;
-
-    fn test_weierstrass_double_helper<WP: WeierstrassParameters>() {
+    fn test_weierstrass_decompress_helper<WP: WeierstrassParameters>() {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
-        let points = random_points::<WP>(8);
+        let instances = random_decompress_instances::<SwCurve<WP>>(8);
 
-        let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
+        let _ = run_weierstrass_decompress::<E, Pcs, SwCurve<WP>>(
             setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-            points,
+            instances,
             true,
             true,
-        )
-        .inspect_err(|err| {
-            eprintln!("{:?}", err);
-        })
-        .expect("run_weierstrass_double failed");
+        );
     }
 
     #[test]
-    fn test_weierstrass_double_bn254() {
-        test_weierstrass_double_helper::<Bn254>();
+    fn test_weierstrass_decompress_secp256k1() {
+        test_weierstrass_decompress_helper::<Secp256k1>();
     }
 
     #[test]
-    fn test_weierstrass_double_bls12381() {
-        test_weierstrass_double_helper::<Bls12381>();
+    fn test_weierstrass_decompress_secp256r1() {
+        test_weierstrass_decompress_helper::<Secp256r1>();
     }
 
-    #[test]
-    fn test_weierstrass_double_secp256k1() {
-        test_weierstrass_double_helper::<Secp256k1>();
-    }
-
-    #[test]
-    fn test_weierstrass_double_secp256r1() {
-        test_weierstrass_double_helper::<Secp256r1>();
-    }
-
-    fn test_weierstrass_double_nonpow2_helper<WP: WeierstrassParameters>() {
+    fn test_weierstrass_decompress_nonpow2_helper<WP: WeierstrassParameters>() {
         type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
-        let points = random_points::<WP>(5);
-        let _ = run_weierstrass_double::<E, Pcs, SwCurve<WP>>(
+        let instances = random_decompress_instances::<SwCurve<WP>>(5);
+        let _ = run_weierstrass_decompress::<E, Pcs, SwCurve<WP>>(
             setup_gkr_circuit::<E, SwCurve<WP>>().expect("setup gkr circuit failed"),
-            points,
+            instances,
             true,
             true,
-        )
-        .inspect_err(|err| {
-            eprintln!("{:?}", err);
-        })
-        .expect("test_weierstrass_double_nonpow2_helper failed");
+        );
     }
 
     #[test]
-    fn test_weierstrass_double_nonpow2_bn254() {
-        test_weierstrass_double_nonpow2_helper::<Bn254>();
+    fn test_weierstrass_decompress_nonpow2_secp256k1() {
+        test_weierstrass_decompress_nonpow2_helper::<Secp256k1>();
     }
 
     #[test]
-    fn test_weierstrass_double_nonpow2_bls12381() {
-        test_weierstrass_double_nonpow2_helper::<Bls12381>();
-    }
-
-    #[test]
-    fn test_weierstrass_double_nonpow2_secp256k1() {
-        test_weierstrass_double_nonpow2_helper::<Secp256k1>();
-    }
-
-    #[test]
-    fn test_weierstrass_double_nonpow2_secp256r1() {
-        test_weierstrass_double_nonpow2_helper::<Secp256r1>();
+    fn test_weierstrass_decompress_nonpow2_secp256r1() {
+        test_weierstrass_decompress_nonpow2_helper::<Secp256r1>();
     }
 }
