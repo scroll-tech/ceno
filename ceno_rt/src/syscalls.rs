@@ -54,9 +54,11 @@ pub fn syscall_keccak_permute(state: &mut [u64; KECCAK_STATE_WORDS]) {
 /// - The caller must ensure that `p` and `q` are valid points on the `secp256k1` curve, and that `p` and `q` are not equal to each other.
 /// - The result is stored in the first point.
 #[allow(unused_variables)]
-pub fn syscall_secp256k1_add(p: *mut [u32; 16], q: *mut [u32; 16]) {
+pub fn syscall_secp256k1_add(p: &mut [u32; 16], q: &[u32; 16]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
+        let p = p.as_mut_ptr();
+        let q = q.as_ptr();
         asm!(
             "ecall",
             in("t0") SECP256K1_ADD,
@@ -79,9 +81,10 @@ pub fn syscall_secp256k1_add(p: *mut [u32; 16], q: *mut [u32; 16]) {
 ///   For example, the word `p[0]` contains the least significant `4` bytes of `X` and their significance is maintained w.r.t `p[0]`
 /// - The result is stored in p
 #[allow(unused_variables)]
-pub fn syscall_secp256k1_double(p: *mut [u32; 16]) {
+pub fn syscall_secp256k1_double(p: &mut [u32; 16]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
+        let p = p.as_mut_ptr();
         asm!(
             "ecall",
             in("t0") SECP256K1_DOUBLE,

@@ -906,7 +906,9 @@ version = "0.1.0"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "ceno_keccak",
  "ceno_rt",
+ "k256",
  "revm-precompile",
  "thiserror 2.0.12",
 ]
@@ -959,6 +961,7 @@ name = "ceno_rt"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.2.16",
+ "getrandom 0.3.2",
  "rkyv",
 ]
 
@@ -1776,8 +1779,10 @@ name = "examples"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "ceno_crypto",
  "ceno_keccak",
  "ceno_rt",
+ "getrandom 0.3.2",
  "rand 0.8.5",
  "rkyv",
  "substrate-bn",
