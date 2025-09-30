@@ -205,16 +205,13 @@ impl LkMultiplicity {
     /// assert slices of field elements within range
     #[inline]
     pub fn assert_byte_fields<F: SmallField>(&mut self, vs: &[F]) {
-        let mut index = 0;
-        while index + 1 < vs.len() {
-            self.assert_double_u8(
-                vs[index].to_canonical_u64(),
-                vs[index + 1].to_canonical_u64(),
-            );
-            index += 2;
-        }
-        if index < vs.len() {
-            self.assert_double_u8(vs[index].to_canonical_u64(), 0);
+        // process in pairs
+        for pair in vs.chunks(2) {
+            match pair {
+                [a, b] => self.assert_double_u8(a.to_canonical_u64(), b.to_canonical_u64()),
+                [a] => self.assert_double_u8(a.to_canonical_u64(), 0),
+                _ => {}
+            }
         }
     }
 

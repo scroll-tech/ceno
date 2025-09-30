@@ -884,21 +884,16 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         let name = name_fn().into();
-        let mut index = 0;
-        while index + 1 < exprs.len() {
-            self.assert_double_u8(
-                || format!("{}_{index:?}", name),
-                exprs[index].expr(),
-                exprs[index + 1].expr(),
-            )?;
-            index += 2;
-        }
-        if index < exprs.len() {
-            self.assert_double_u8(
-                || format!("{}_{index:?}", name),
-                exprs[index].expr(),
-                Expression::ZERO,
-            )?;
+        for (i, pair) in exprs.chunks(2).enumerate() {
+            match pair {
+                [a, b] => {
+                    self.assert_double_u8(|| format!("{}_{i:?}", name), a.expr(), b.expr())?
+                }
+                [a] => {
+                    self.assert_double_u8(|| format!("{}_{i:?}", name), a.expr(), Expression::ZERO)?
+                }
+                _ => {}
+            }
         }
         Ok(())
     }
