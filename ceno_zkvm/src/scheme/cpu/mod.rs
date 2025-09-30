@@ -54,8 +54,8 @@ pub type TowerRelationOutput<E> = (
     Vec<Vec<E>>,
 );
 
-// implement the IOP proposed in [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
-// to accumulate N=2^n EC points into one EC point using affine coordinates
+// accumulate N=2^n EC points into one EC point using affine coordinates
+// in one layer which borrows ideas from the [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
 pub struct CpuEccProver;
 
 impl CpuEccProver {
