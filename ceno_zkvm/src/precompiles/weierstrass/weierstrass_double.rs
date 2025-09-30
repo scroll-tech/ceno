@@ -133,10 +133,8 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
             slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
         };
 
-        // Although the eqs correspond to the same point, but the selectors of memory operations and lookups
-        // have different pad. So we just create two eqs to derive the correct n_structural_wit.
         let eq = cb.create_structural_witin(
-            || "weierstrass_eq",
+            || "weierstrass_double_eq",
             StructuralWitInType::EqualDistanceSequence {
                 max_len: 0,
                 offset: 0,

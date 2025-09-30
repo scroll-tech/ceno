@@ -23,6 +23,10 @@ pub use weierstrass::{
         WeierstrassAddAssignLayout, WeierstrassAddAssignTrace, run_weierstrass_add,
         setup_gkr_circuit as setup_weierstrass_add_circuit,
     },
+    weierstrass_decompress::{
+        WeierstrassDecompressTrace, run_weierstrass_decompress,
+        setup_gkr_circuit as setup_weierstrass_decompress_circuit,
+    },
     weierstrass_double::{
         WeierstrassDoubleAssignLayout, WeierstrassDoubleAssignTrace, run_weierstrass_double,
         setup_gkr_circuit as setup_weierstrass_double_circuit,
