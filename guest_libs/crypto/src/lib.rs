@@ -33,8 +33,8 @@ pub enum CenoCryptoError {
     #[error("Bn254 pair length error")]
     Bn254PairLength,
     /// Sepk256k1 ecrecover error
-    #[error("Secp256k1 signature error")]
-    Secp256k1Signature(#[from] k256::ecdsa::Error),
+    #[error("Secp256k1 ecrecover error")]
+    Secp256k1Ecrecover(#[from] k256::ecdsa::Error),
 }
 
 #[cfg(test)]
