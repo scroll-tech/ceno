@@ -2,6 +2,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     instructions::Instruction,
+    scheme::septic_curve::SepticPoint,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
 };
@@ -16,8 +17,24 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
-use sumcheck::structs::IOPProverMessage;
+use sumcheck::structs::{IOPProof, IOPProverMessage};
 use witness::RowMajorMatrix;
+
+/// proof that the sum of N=2^n EC points is equal to `sum`
+/// in one layer instead of GKR layered circuit approach
+/// note that this one layer IOP borrowed ideas from
+/// [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct EccQuarkProof<E: ExtensionField> {
+    pub zerocheck_proof: IOPProof<E>,
+    pub num_vars: usize,
+    pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1]
+    pub sum: SepticPoint<E::BaseField>,
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(

@@ -1,12 +1,11 @@
 use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
-use p3::field::Field;
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use gkr_iop::gkr::GKRClaims;
+use gkr_iop::{gkr::GKRClaims, utils::eq_eval_less_or_equal_than};
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -27,13 +26,13 @@ use witness::next_pow2_instance_padding;
 use crate::{
     error::ZKVMError,
     scheme::{
-        constants::{
-            NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE, SEPTIC_EXTENSION_DEGREE,
-            SEPTIC_JACOBIAN_NUM_MLES,
-        },
-        septic_curve::SepticJacobianPoint,
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE, SEPTIC_EXTENSION_DEGREE},
+        septic_curve::SepticExtension,
     },
-    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
+    structs::{
+        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
+        ZKVMVerifyingKey,
+    },
     utils::{
         eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
         eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
@@ -839,7 +838,7 @@ impl TowerVerify {
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
                 let eq = eq_eval(out_rt, &rt);
-                let mut expected_evaluation: E = (0..num_prod_spec)
+                let expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
@@ -967,5 +966,105 @@ impl TowerVerify {
             logup_spec_p_point_n_eval,
             logup_spec_q_point_n_eval,
         ))
+    }
+}
+
+pub struct EccVerifier;
+
+impl EccVerifier {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub fn verify_ecc_proof<E: ExtensionField>(
+        &self,
+        proof: &EccQuarkProof<E>,
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<(), ZKVMError> {
+        let out_rt = transcript.sample_and_append_vec(b"ecc", proof.num_vars);
+        let alpha_pows =
+            transcript.sample_and_append_challenge_pows(SEPTIC_EXTENSION_DEGREE * 3, b"ecc_alpha");
+
+        let sumcheck_claim = IOPVerifierState::verify(
+            E::ZERO,
+            &proof.zerocheck_proof,
+            &VPAuxInfo {
+                max_degree: 3,
+                max_num_variables: proof.num_vars,
+                phantom: PhantomData,
+            },
+            transcript,
+        );
+
+        let s0: SepticExtension<E> = proof.evals[1..][0..SEPTIC_EXTENSION_DEGREE]
+            .try_into()
+            .unwrap();
+        let x0: SepticExtension<E> = proof.evals[1..]
+            [SEPTIC_EXTENSION_DEGREE..2 * SEPTIC_EXTENSION_DEGREE]
+            .try_into()
+            .unwrap();
+        let y0: SepticExtension<E> = proof.evals[1..]
+            [2 * SEPTIC_EXTENSION_DEGREE..3 * SEPTIC_EXTENSION_DEGREE]
+            .try_into()
+            .unwrap();
+        let x1: SepticExtension<E> = proof.evals[1..]
+            [3 * SEPTIC_EXTENSION_DEGREE..4 * SEPTIC_EXTENSION_DEGREE]
+            .try_into()
+            .unwrap();
+        let y1: SepticExtension<E> = proof.evals[1..]
+            [4 * SEPTIC_EXTENSION_DEGREE..5 * SEPTIC_EXTENSION_DEGREE]
+            .try_into()
+            .unwrap();
+        let x3: SepticExtension<E> = proof.evals[1..]
+            [5 * SEPTIC_EXTENSION_DEGREE..6 * SEPTIC_EXTENSION_DEGREE]
+            .try_into()
+            .unwrap();
+        let y3: SepticExtension<E> = proof.evals[1..]
+            [6 * SEPTIC_EXTENSION_DEGREE..7 * SEPTIC_EXTENSION_DEGREE]
+            .try_into()
+            .unwrap();
+
+        let num_instances = (1 << proof.num_vars) - 1;
+        let rt = sumcheck_claim
+            .point
+            .iter()
+            .map(|c| c.elements.clone())
+            .collect_vec();
+
+        // zerocheck: 0 = s[0,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1])
+        // zerocheck: 0 = s[0,b]^2 - x[b,0] - x[b,1] - x[1,b]
+        // zerocheck: 0 = s[0,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b])
+        //
+        // note that they are not septic extension field elements,
+        // we just want to reuse the multiply/add/sub formulas
+        let v1: SepticExtension<E> = s0.clone() * (&x0 - &x1) - (&y0 - &y1);
+        let v2: SepticExtension<E> = s0.square() - &x0 - &x1 - &x3;
+        let v3: SepticExtension<E> = s0 * (&x0 - &x3) - (&y0 + &y3);
+
+        let v: E = vec![v1, v2, v3]
+            .into_iter()
+            .enumerate()
+            .flat_map(|(i, v)| {
+                let start = i * SEPTIC_EXTENSION_DEGREE;
+                let end = (i + 1) * SEPTIC_EXTENSION_DEGREE;
+                v.0.into_iter()
+                    .zip(alpha_pows[start..end].iter())
+                    .map(|(c, alpha)| c * *alpha)
+            })
+            .sum();
+
+        let sel = eq_eval_less_or_equal_than(num_instances - 1, &out_rt, &rt);
+        if sumcheck_claim.expected_evaluation != v * sel {
+            return Err(ZKVMError::VerifyError(
+                (format!(
+                    "ecc zerocheck failed: mismatched evaluation, expected {}, got {}",
+                    sumcheck_claim.expected_evaluation,
+                    v * sel
+                ))
+                .into(),
+            ));
+        }
+
+        Ok(())
     }
 }

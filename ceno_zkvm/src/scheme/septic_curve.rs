@@ -53,6 +53,15 @@ impl<F: Copy + Clone + Default> From<&[F]> for SepticExtension<F> {
     }
 }
 
+impl<F: Copy + Clone + Default> From<Vec<F>> for SepticExtension<F> {
+    fn from(v: Vec<F>) -> Self {
+        assert!(v.len() == 7);
+        let mut arr = [F::default(); 7];
+        arr.copy_from_slice(&v[0..7]);
+        Self(arr)
+    }
+}
+
 impl<F> Deref for SepticExtension<F> {
     type Target = [F];
 
@@ -732,6 +741,15 @@ pub struct SepticPoint<F> {
 }
 
 impl<F: Field> SepticPoint<F> {
+    pub fn from_affine(x: SepticExtension<F>, y: SepticExtension<F>) -> Self {
+        let is_infinity = if x.is_zero() && y.is_zero() {
+            true
+        } else {
+            false
+        };
+
+        Self { x, y, is_infinity }
+    }
     pub fn double(&self) -> Self {
         let a = F::from_canonical_u32(2);
         let three = F::from_canonical_u32(3);

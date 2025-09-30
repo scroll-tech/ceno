@@ -5,17 +5,15 @@ use crate::{
     circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::{
-        constants::{
-            NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE, SEPTIC_JACOBIAN_NUM_MLES,
-        },
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE},
         hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
-        septic_curve::{SepticExtension, SepticPoint, SymbolicSepticExtension},
+        septic_curve::{SepticPoint, SymbolicSepticExtension},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
             wit_infer_by_expr,
         },
     },
-    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
+    structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -24,7 +22,6 @@ use gkr_iop::{
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
     selector::SelectorType,
-    utils::eq_eval_less_or_equal_than,
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -32,19 +29,22 @@ use multilinear_extensions::{
     Expression, Instance, WitnessId,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
-    virtual_poly::{VPAuxInfo, build_eq_x_r_vec},
+    virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{collections::BTreeMap, marker::PhantomData, ops::Deref, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::{IOPProof, IOPProverMessage, IOPProverState, IOPVerifierState},
+    structs::{IOPProverMessage, IOPProverState},
     util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
+
+#[cfg(feature = "sanity-check")]
+use {crate::scheme::septic_curve::SepticExtension, gkr_iop::utils::eq_eval_less_or_equal_than};
 
 pub type TowerRelationOutput<E> = (
     Point<E>,
@@ -53,12 +53,6 @@ pub type TowerRelationOutput<E> = (
     Vec<Vec<E>>,
     Vec<Vec<E>>,
 );
-
-pub struct EccQuarkProof<E: ExtensionField> {
-    pub zerocheck_proof: IOPProof<E>,
-    pub num_vars: usize,
-    pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1]
-}
 
 // implement the IOP proposed in [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
 // to accumulate N=2^n EC points into one EC point using affine coordinates
@@ -74,6 +68,7 @@ impl CpuEccProver {
         mut xs: Vec<MultilinearExtension<'a, E>>,
         mut ys: Vec<MultilinearExtension<'a, E>>,
         invs: Vec<MultilinearExtension<'a, E>>,
+        sum: SepticPoint<E::BaseField>,
         transcript: &mut impl Transcript<E>,
     ) -> EccQuarkProof<E> {
         assert_eq!(xs.len(), SEPTIC_EXTENSION_DEGREE);
@@ -211,8 +206,6 @@ impl CpuEccProver {
 
         #[cfg(feature = "sanity-check")]
         {
-            use tracing_subscriber::filter;
-
             let s = invs.iter().map(|x| x.as_view_slice(2, 0)).collect_vec();
             let x0 = filter_bj(&xs, 0);
             let y0 = filter_bj(&ys, 0);
@@ -220,9 +213,18 @@ impl CpuEccProver {
             let y1 = filter_bj(&ys, 1);
             let x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
             let y3 = ys.iter().map(|y| y.as_view_slice(2, 1)).collect_vec();
+            let final_sum_x: SepticExtension<E::BaseField> = (x3.iter())
+                .map(|x| x.get_base_field_vec()[num_instances - 1]) // x[1,...,1,0]
+                .collect_vec()
+                .into();
+            let final_sum_y: SepticExtension<E::BaseField> = (y3.iter())
+                .map(|y| y.get_base_field_vec()[num_instances - 1]) // x[1,...,1,0]
+                .collect_vec()
+                .into();
+            let final_sum = SepticPoint::from_affine(final_sum_x, final_sum_y);
 
+            assert_eq!(final_sum, sum);
             // check evaluations
-
             assert_eq!(
                 eq_eval_less_or_equal_than(num_instances - 1, &out_rt, &rt),
                 evals[0]
@@ -258,104 +260,8 @@ impl CpuEccProver {
             zerocheck_proof,
             num_vars: n,
             evals,
+            sum,
         }
-    }
-}
-
-pub struct EccVerifier;
-
-impl EccVerifier {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    pub fn verify_ecc_proof<E: ExtensionField>(
-        &self,
-        proof: &EccQuarkProof<E>,
-        transcript: &mut impl Transcript<E>,
-    ) -> Result<(), ZKVMError> {
-        let out_rt = transcript.sample_and_append_vec(b"ecc", proof.num_vars);
-        let alpha_pows =
-            transcript.sample_and_append_challenge_pows(SEPTIC_EXTENSION_DEGREE * 3, b"ecc_alpha");
-
-        let sumcheck_claim = IOPVerifierState::verify(
-            E::ZERO,
-            &proof.zerocheck_proof,
-            &VPAuxInfo {
-                max_degree: 3,
-                max_num_variables: proof.num_vars,
-                phantom: PhantomData,
-            },
-            transcript,
-        );
-
-        let s0: SepticExtension<E> = proof.evals[1..][0..SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let x0: SepticExtension<E> = proof.evals[1..]
-            [SEPTIC_EXTENSION_DEGREE..2 * SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let y0: SepticExtension<E> = proof.evals[1..]
-            [2 * SEPTIC_EXTENSION_DEGREE..3 * SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let x1: SepticExtension<E> = proof.evals[1..]
-            [3 * SEPTIC_EXTENSION_DEGREE..4 * SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let y1: SepticExtension<E> = proof.evals[1..]
-            [4 * SEPTIC_EXTENSION_DEGREE..5 * SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let x3: SepticExtension<E> = proof.evals[1..]
-            [5 * SEPTIC_EXTENSION_DEGREE..6 * SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let y3: SepticExtension<E> = proof.evals[1..]
-            [6 * SEPTIC_EXTENSION_DEGREE..7 * SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-
-        let num_instances = (1 << proof.num_vars) - 1;
-        let rt = sumcheck_claim
-            .point
-            .iter()
-            .map(|c| c.elements.clone())
-            .collect_vec();
-
-        // zerocheck: 0 = s[0,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1])
-        // zerocheck: 0 = s[0,b]^2 - x[b,0] - x[b,1] - x[1,b]
-        // zerocheck: 0 = s[0,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b])
-        let v1: SepticExtension<E> = s0.clone() * (&x0 - &x1) - (&y0 - &y1);
-        let v2 = s0.square() - &x0 - &x1 - &x3;
-        let v3 = s0 * (&x0 - &x3) - (&y0 + &y3);
-
-        let v: E = vec![v1, v2, v3]
-            .into_iter()
-            .enumerate()
-            .flat_map(|(i, v)| {
-                let start = i * SEPTIC_EXTENSION_DEGREE;
-                let end = (i + 1) * SEPTIC_EXTENSION_DEGREE;
-                v.0.into_iter()
-                    .zip(alpha_pows[start..end].iter())
-                    .map(|(c, alpha)| c * *alpha)
-            })
-            .sum();
-
-        let sel = eq_eval_less_or_equal_than(num_instances - 1, &out_rt, &rt);
-        if sumcheck_claim.expected_evaluation != v * sel {
-            return Err(ZKVMError::VerifyError(
-                (format!(
-                    "ecc zerocheck failed: mismatched evaluation, expected {}, got {}",
-                    sumcheck_claim.expected_evaluation,
-                    v * sel
-                ))
-                .into(),
-            ));
-        }
-
-        Ok(())
     }
 }
 
@@ -1158,8 +1064,9 @@ mod tests {
 
     use crate::scheme::{
         constants::SEPTIC_EXTENSION_DEGREE,
-        cpu::{CpuEccProver, EccVerifier},
+        cpu::CpuEccProver,
         septic_curve::{SepticExtension, SepticPoint},
+        verifier::EccVerifier,
     };
 
     #[test]
@@ -1171,6 +1078,7 @@ mod tests {
         let n_points = 1 << log2_n;
         let mut rng = rand::thread_rng();
 
+        let final_sum;
         // generate 1 ecc add witness
         let ecc_spec: Vec<MultilinearExtension<'_, E>> = {
             // sample N = 2^n points
@@ -1202,6 +1110,8 @@ mod tests {
                         .collect_vec(),
                 );
             }
+            final_sum = points.last().cloned().unwrap();
+
             // padding to 2*N
             s.extend(repeat(SepticExtension::zero()).take(n_points + 1));
             points.push(SepticPoint::point_at_infinity());
@@ -1233,8 +1143,13 @@ mod tests {
 
         let mut transcript = BasicTranscript::new(b"test");
         let prover = CpuEccProver::new();
-        let quark_proof =
-            prover.create_ecc_proof(xs.to_vec(), ys.to_vec(), s.to_vec(), &mut transcript);
+        let quark_proof = prover.create_ecc_proof(
+            xs.to_vec(),
+            ys.to_vec(),
+            s.to_vec(),
+            final_sum,
+            &mut transcript,
+        );
 
         let mut transcript = BasicTranscript::new(b"test");
         let verifier = EccVerifier::new();
