@@ -201,7 +201,7 @@ impl CpuEccProver {
         let evals = state.get_mle_flatten_final_evaluations();
 
         assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
-        // 7 for x[b,0], x[b,1], y[b,0], y[b,1], x[1,b], y[1,b], s[0,b]
+        // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[0,rt]
         assert_eq!(evals.len(), 1 + SEPTIC_EXTENSION_DEGREE * 7);
 
         #[cfg(feature = "sanity-check")]
