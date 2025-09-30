@@ -25,7 +25,6 @@ use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::{IntoParallelRefIterator, ParallelSlice},
-    slice::ParallelSliceMut,
 };
 use sp1_curves::{
     AffinePoint, EllipticCurve,
@@ -413,26 +412,31 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
         wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         lk_multiplicity: &mut LkMultiplicity,
     ) {
+        let num_instances = wits[0].num_instances();
+        let nthreads = max_usable_threads();
+        let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
         let num_wit_cols = size_of::<WeierstrassDoubleAssignWitCols<u8, EC::BaseField>>();
 
         let [wits, structural_wits] = wits;
-        wits.values
-            .par_chunks_mut(self.n_committed)
-            .zip_eq(
-                structural_wits
-                    .values
-                    .par_chunks_mut(self.n_structural_witin),
-            )
-            .zip(phase1.instances)
-            .for_each(|((row, eqs), phase1_intance)| {
+        let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
+        let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
+        raw_witin_iter
+            .zip_eq(raw_structural_wits_iter)
+            .zip_eq(phase1.instances.par_chunks(num_instance_per_batch))
+            .for_each(|((rows, eqs), phase1_instances)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
-                let cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField> = row
-                    [self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
-                    .borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
-                Self::populate_row(&phase1_intance, cols, &mut lk_multiplicity);
-                for x in eqs.iter_mut() {
-                    *x = E::BaseField::ONE;
-                }
+                rows.chunks_mut(self.n_committed)
+                    .zip_eq(eqs.chunks_mut(self.n_structural_witin))
+                    .zip_eq(phase1_instances)
+                    .for_each(|((row, eqs), phase1_intance)| {
+                        let cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField> =
+                            row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
+                                .borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
+                        Self::populate_row(phase1_intance, cols, &mut lk_multiplicity);
+                        for x in eqs.iter_mut() {
+                            *x = E::BaseField::ONE;
+                        }
+                    });
             });
     }
 }
@@ -557,12 +561,12 @@ pub fn run_weierstrass_double<
 
     let mut lk_multiplicity = LkMultiplicity::default();
     let mut phase1_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(instances.len()),
+        instances.len(),
         num_witin as usize,
         InstancePaddingStrategy::Default,
     );
     let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(instances.len()),
+        instances.len(),
         num_structual_witin as usize,
         InstancePaddingStrategy::Default,
     );

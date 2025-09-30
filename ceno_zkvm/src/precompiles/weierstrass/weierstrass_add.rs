@@ -25,7 +25,6 @@ use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::{IntoParallelRefIterator, ParallelSlice},
-    slice::ParallelSliceMut,
 };
 use sp1_curves::{
     AffinePoint, EllipticCurve,
@@ -385,26 +384,30 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolWitnessGenerator<E>
         wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         lk_multiplicity: &mut LkMultiplicity,
     ) {
+        let num_instances = wits[0].num_instances();
+        let nthreads = max_usable_threads();
+        let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
         let num_wit_cols = size_of::<WeierstrassAddAssignWitCols<u8, EC::BaseField>>();
         let [wits, structural_wits] = wits;
-        wits.values
-            .par_chunks_mut(self.n_committed)
-            .zip_eq(
-                structural_wits
-                    .values
-                    .par_chunks_mut(self.n_structural_witin),
-            )
-            .zip(phase1.instances)
-            .for_each(|((row, eqs), phase1_instance)| {
+        let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
+        let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
+        raw_witin_iter
+            .zip_eq(raw_structural_wits_iter)
+            .zip_eq(phase1.instances.par_chunks(num_instance_per_batch))
+            .for_each(|((rows, eqs), phase1_instances)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
-
-                let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> = row
-                    [self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
-                    .borrow_mut();
-                Self::populate_row(&phase1_instance, cols, &mut lk_multiplicity);
-                for x in eqs.iter_mut() {
-                    *x = E::BaseField::ONE;
-                }
+                rows.chunks_mut(self.n_committed)
+                    .zip_eq(eqs.chunks_mut(self.n_structural_witin))
+                    .zip_eq(phase1_instances)
+                    .for_each(|((row, eqs), phase1_instance)| {
+                        let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
+                            row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
+                                .borrow_mut();
+                        Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
+                        for x in eqs.iter_mut() {
+                            *x = E::BaseField::ONE;
+                        }
+                    });
             });
     }
 }
