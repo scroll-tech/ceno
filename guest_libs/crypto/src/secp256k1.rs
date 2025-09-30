@@ -2,7 +2,7 @@ use crate::CenoCryptoError;
 use ceno_keccak::{Hasher, Keccak};
 use ceno_rt::syscalls::{syscall_secp256k1_add, syscall_secp256k1_double};
 use k256::{
-    AffinePoint, EncodedPoint, Scalar, Secp256k1, U256,
+    AffinePoint, EncodedPoint, FieldBytes, NonZeroScalar, Scalar, Secp256k1, U256,
     ecdsa::{Error, RecoveryId, Signature, hazmat::bits2field},
     elliptic_curve::{
         Curve, Field, FieldBytesEncoding, PrimeField,
@@ -36,7 +36,7 @@ pub fn secp256k1_ecrecover(
     let recid = RecoveryId::from_byte(recid).expect("recovery ID is valid");
 
     // recover key
-    let recovered_key = recover_from_prehash_unchecked(&msg[..], &signature, recid)?;
+    let recovered_key = recover_from_prehash(&msg[..], &signature, recid)?;
 
     let mut hasher = Keccak::v256();
     hasher.update(&recovered_key);
@@ -49,13 +49,14 @@ pub fn secp256k1_ecrecover(
 
 /// Copied from <https://github.com/RustCrypto/signatures/blob/89232d6a962a199fd8211a117db74408353e4383/ecdsa/src/recovery.rs#L278-L316>
 /// Modified to use ceno syscalls
-fn recover_from_prehash_unchecked(
+fn recover_from_prehash(
     prehash: &[u8],
     signature: &Signature,
     recovery_id: RecoveryId,
-) -> k256::ecdsa::signature::Result<UntaggedUncompressedPoint> {
+) -> Result<UntaggedUncompressedPoint, Error> {
     let (r, s) = signature.split_scalars();
-    let z = <Scalar as Reduce<U256>>::reduce_bytes(&bits2field::<Secp256k1>(prehash)?);
+    let prehash: FieldBytes = bits2field::<Secp256k1>(prehash)?;
+    let z = <Scalar as Reduce<U256>>::reduce_bytes(&prehash);
 
     let mut r_bytes = r.to_repr();
     if recovery_id.is_x_reduced() {
@@ -98,25 +99,63 @@ fn recover_from_prehash_unchecked(
     // Original:
     // ProjectivePoint::lincomb(&ProjectivePoint::GENERATOR, &u1, &r_point, &u2)
     // Equivalent to: G * u1 + R * u2
-    let pk_words = match (u1 == Scalar::ZERO, u2 == Scalar::ZERO) {
-        (true, true) => return Err(Error::new()),
-        (true, false) => secp256k1_mul(&r_point, u2),
-        (false, true) => secp256k1_mul(&AffinePoint::GENERATOR, u1),
-        (false, false) => {
-            let mut p1 = secp256k1_mul(&AffinePoint::GENERATOR, u1);
-            let p2 = secp256k1_mul(&r_point, u2);
-            syscall_secp256k1_add(&mut p1, &p2);
-            p1
-        }
-    };
+    let pk_words = lincomb(u1, &r_point, u2)?;
 
-    // FIXME: do we really need to verify the signature again here?
+    let bytes = words_to_untagged_bytes(pk_words);
+
     // Original:
     // let vk = VerifyingKey::from_affine(pk.to_affine())?;
     // // Ensure signature verifies with the recovered key
     // vk.verify_prehash(prehash, signature)?;
+    verify_prehash(&z, (&r, &s), &bytes)?;
 
-    Ok(words_to_untagged_bytes(pk_words))
+    Ok(bytes)
+}
+
+/// Copied from <https://github.com/RustCrypto/signatures/blob/89232d6a962a199fd8211a117db74408353e4383/ecdsa/src/hazmat.rs#L261-L293>
+fn verify_prehash(
+    z: &Scalar,
+    (r, s): (&NonZeroScalar, &NonZeroScalar),
+    bytes: &UntaggedUncompressedPoint,
+) -> Result<(), Error> {
+    let q = EncodedPoint::from_untagged_bytes(bytes.into());
+    let q = AffinePoint::from_encoded_point(&q)
+        .into_option()
+        .ok_or(Error::new())?;
+
+    let s_inv = *s.invert_vartime();
+    let u1 = z * &s_inv;
+    let u2 = **r * s_inv;
+
+    // Original:
+    // let x = ProjectivePoint::lincomb(&ProjectivePoint::GENERATOR, &u1, &q, &u2)
+    //     .to_affine()
+    //     .x();
+    // Equivalent to: G * u1 + q * u2
+    let p = lincomb(u1, &q, u2)?;
+    let p_bytes = words_to_untagged_bytes(p);
+    let x = FieldBytes::from_slice(&p_bytes[..32]);
+
+    if **r == <Scalar as Reduce<U256>>::reduce_bytes(&x) {
+        Ok(())
+    } else {
+        Err(Error::new())
+    }
+}
+
+#[inline]
+fn lincomb(u1: Scalar, p: &AffinePoint, u2: Scalar) -> Result<[u32; 16], Error> {
+    Ok(match (u1 == Scalar::ZERO, u2 == Scalar::ZERO) {
+        (false, false) => {
+            let mut p1 = secp256k1_mul(&AffinePoint::GENERATOR, u1);
+            let p2 = secp256k1_mul(&p, u2);
+            syscall_secp256k1_add(&mut p1, &p2);
+            p1
+        }
+        (true, false) => secp256k1_mul(&p, u2),
+        (false, true) => secp256k1_mul(&AffinePoint::GENERATOR, u1),
+        (true, true) => return Err(Error::new()),
+    })
 }
 
 fn secp256k1_mul(point: &AffinePoint, scalar: Scalar) -> [u32; 16] {
