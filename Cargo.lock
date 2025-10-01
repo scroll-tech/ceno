@@ -1825,7 +1825,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "once_cell",
  "p3",
@@ -2614,7 +2614,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "bincode",
  "clap",
@@ -2623,6 +2623,7 @@ dependencies = [
  "multilinear_extensions",
  "num-integer",
  "p3",
+ "p3-maybe-rayon",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rayon",
@@ -2638,12 +2639,13 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "either",
  "ff_ext",
  "itertools 0.13.0",
  "p3",
+ "p3-maybe-rayon",
  "rand 0.8.5",
  "rayon",
  "serde",
@@ -2959,7 +2961,7 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "p3-baby-bear",
  "p3-challenger",
@@ -3368,7 +3370,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "ff_ext",
  "p3",
@@ -4308,7 +4310,7 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -4414,7 +4416,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "either",
  "ff_ext",
@@ -4432,7 +4434,7 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "itertools 0.13.0",
  "p3",
@@ -4827,7 +4829,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -5099,7 +5101,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "bincode",
  "clap",
@@ -5108,6 +5110,7 @@ dependencies = [
  "itertools 0.14.0",
  "multilinear_extensions",
  "p3",
+ "p3-maybe-rayon",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rayon",
@@ -5386,7 +5389,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=updates-for-precompiles#0f8ab8141aadd78c69a0a67ab6bd49399563e6b9"
+source = "git+https://github.com/Sahilgill24/gkr-backend.git?branch=feat%2Fp3-maybe-rayon#a9c8a6d859fa648eae39ac83eb3fcf6c084b47e5"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",
