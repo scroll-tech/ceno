@@ -1,12 +1,14 @@
 use std::marker::PhantomData;
 
 use ceno_emul::{
-    ByteAddr, Change, Cycle, InsnKind, KECCAK_PERMUTE, Platform, StepRecord, WORD_SIZE, WriteOp,
+    BLS12381_DOUBLE, BN254_DOUBLE, ByteAddr, Change, Cycle, InsnKind, Platform, SECP256K1_DOUBLE,
+    SECP256R1_DOUBLE, StepRecord, WORD_SIZE, WriteOp,
 };
 use ff_ext::ExtensionField;
+use generic_array::{GenericArray, typenum::Unsigned};
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube, layer::Layer},
+    gkr::{GKRCircuit, layer::Layer},
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -16,6 +18,7 @@ use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
+use sp1_curves::{CurveType, EllipticCurve, params::NumWords, weierstrass::WeierstrassParameters};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
@@ -31,8 +34,7 @@ use crate::{
         },
     },
     precompiles::{
-        KECCAK_ROUNDS, KECCAK_ROUNDS_CEIL_LOG2, KeccakInstance, KeccakLayout, KeccakParams,
-        KeccakStateInstance, KeccakTrace, KeccakWitInstance,
+        EllipticCurveDoubleInstance, WeierstrassDoubleAssignLayout, WeierstrassDoubleAssignTrace,
     },
     structs::ProgramParams,
     tables::{InsnRecord, RMMCollections},
@@ -40,22 +42,27 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct EcallKeccakConfig<E: ExtensionField> {
-    pub layout: KeccakLayout<E>,
+pub struct EcallWeierstrassDoubleAssignConfig<
+    E: ExtensionField,
+    EC: EllipticCurve + WeierstrassParameters,
+> {
+    pub layout: WeierstrassDoubleAssignLayout<E, EC>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    point_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
-/// KeccakInstruction can handle any instruction and produce its side-effects.
-pub struct KeccakInstruction<E>(PhantomData<E>);
+/// WeierstrassDoubleAssignInstruction can handle any instruction and produce its side-effects.
+pub struct WeierstrassDoubleAssignInstruction<E, EC>(PhantomData<(E, EC)>);
 
-impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
-    type InstructionConfig = EcallKeccakConfig<E>;
+impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E>
+    for WeierstrassDoubleAssignInstruction<E, EC>
+{
+    type InstructionConfig = EcallWeierstrassDoubleAssignConfig<E, EC>;
 
     fn name() -> String {
-        "Ecall_Keccak".to_string()
+        "Ecall_WeierstrassDoubleAssign_".to_string() + format!("{:?}", EC::CURVE_TYPE).as_str()
     }
 
     fn construct_circuit(
@@ -72,21 +79,31 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         // constrain vmstate
         let vm_state = StateInOut::construct_circuit(cb, false)?;
 
+        let syscall_code = match EC::CURVE_TYPE {
+            CurveType::Secp256k1 => SECP256K1_DOUBLE,
+            CurveType::Secp256r1 => SECP256R1_DOUBLE,
+            CurveType::Bn254 => BN254_DOUBLE,
+            CurveType::Bls12381 => BLS12381_DOUBLE,
+            CurveType::Ed25519 => {
+                unreachable!("WeierstrassDoubleAssign is not supported for Ed25519")
+            }
+        };
+
         let ecall_id = OpFixedRS::<_, { Platform::reg_ecall() }, false>::construct_circuit(
             cb,
             UInt::from_const_unchecked(vec![
-                KECCAK_PERMUTE & LIMB_MASK,
-                (KECCAK_PERMUTE >> LIMB_BITS) & LIMB_MASK,
+                syscall_code & LIMB_MASK,
+                (syscall_code >> LIMB_BITS) & LIMB_MASK,
             ])
             .register_expr(),
             vm_state.ts,
         )?;
 
-        let state_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
+        let point_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
 
-        let state_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let point_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
             cb,
-            state_ptr_value.uint_unaligned().register_expr(),
+            point_ptr_value.uint_unaligned().register_expr(),
             vm_state.ts,
         )?;
 
@@ -102,18 +119,20 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             0.into(),
         ))?;
 
-        let mut layout = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(
-            cb,
-            KeccakParams {},
-        )?;
+        let mut layout =
+            <WeierstrassDoubleAssignLayout<E, EC> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(
+                cb,
+                (),
+            )?;
 
-        // memory rw, for we in-place update
+        // Write the result to the same address of the first input point.
         let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
             .enumerate()
             .map(|(i, (val_before, val_after))| {
                 WriteMEM::construct_circuit(
                     cb,
-                    state_ptr.prev_value.as_ref().unwrap().value()
+                    // mem address := point_ptr + i
+                    point_ptr.prev_value.as_ref().unwrap().value()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )
@@ -127,18 +146,22 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
         let (out_evals, mut chip) = layout.finalize(cb);
 
-        let layer =
-            Layer::from_circuit_builder(cb, "Rounds".to_string(), layout.n_challenges, out_evals);
+        let layer = Layer::from_circuit_builder(
+            cb,
+            "weierstrass_double".to_string(),
+            layout.n_challenges,
+            out_evals,
+        );
         chip.add_layer(layer);
 
         let circuit = chip.gkr_circuit();
 
         Ok((
-            EcallKeccakConfig {
+            EcallWeierstrassDoubleAssignConfig {
                 layout,
                 vm_state,
                 ecall_id,
-                state_ptr: (state_ptr, state_ptr_value),
+                point_ptr: (point_ptr, point_ptr_value),
                 mem_rw,
             },
             circuit,
@@ -169,6 +192,16 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         num_structural_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        let syscall_code = match EC::CURVE_TYPE {
+            CurveType::Secp256k1 => SECP256K1_DOUBLE,
+            CurveType::Secp256r1 => SECP256R1_DOUBLE,
+            CurveType::Bn254 => BN254_DOUBLE,
+            CurveType::Bls12381 => BLS12381_DOUBLE,
+            CurveType::Ed25519 => {
+                unreachable!("WeierstrassDoubleAssign is not supported for Ed25519")
+            }
+        };
+
         let mut lk_multiplicity = LkMultiplicity::default();
         if steps.is_empty() {
             return Ok((
@@ -183,19 +216,17 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         let num_instance_per_batch = steps.len().div_ceil(nthreads).max(1);
 
         let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
-            config.layout.phase1_witin_rmm_height(steps.len()),
+            steps.len(),
             num_witin,
             InstancePaddingStrategy::Default,
         );
         let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
-            config.layout.phase1_witin_rmm_height(steps.len()),
+            steps.len(),
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
 
-        // each instance are composed of KECCAK_ROUNDS.next_power_of_two()
-        let raw_witin_iter = raw_witin
-            .par_batch_iter_mut(num_instance_per_batch * KECCAK_ROUNDS.next_power_of_two());
+        let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
         // 1st pass: assign witness outside of gkr-iop scope
         raw_witin_iter
@@ -204,56 +235,41 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                 let mut lk_multiplicity = lk_multiplicity.clone();
 
                 instances
-                    .chunks_mut(num_witin * KECCAK_ROUNDS.next_power_of_two())
+                    .chunks_mut(num_witin)
                     .zip_eq(steps)
-                    .map(|(instance_with_rotation, step)| {
+                    .map(|(instance, step)| {
                         let ops = &step.syscall().expect("syscall step");
 
-                        let bh = BooleanHypercube::new(KECCAK_ROUNDS_CEIL_LOG2);
-                        let mut cyclic_group = bh.into_iter();
+                        // vm_state
+                        config.vm_state.assign_instance(instance, step)?;
 
-                        for _ in 0..KECCAK_ROUNDS {
-                            let round_index = cyclic_group.next().unwrap();
-                            let instance = &mut instance_with_rotation
-                                [round_index as usize * num_witin..][..num_witin];
-
-                            // vm_state
-                            config.vm_state.assign_instance(instance, step)?;
-
-                            config.ecall_id.assign_op(
-                                instance,
-                                &mut lk_multiplicity,
-                                step.cycle(),
-                                &WriteOp::new_register_op(
-                                    Platform::reg_ecall(),
-                                    Change::new(KECCAK_PERMUTE, KECCAK_PERMUTE),
-                                    step.rs1().unwrap().previous_cycle,
-                                ),
-                            )?;
-                            // assign state_ptr
-                            config.state_ptr.1.assign_instance(
-                                instance,
-                                &mut lk_multiplicity,
-                                ops.reg_ops[0].value.after,
-                            )?;
-                            config.state_ptr.0.assign_op(
-                                instance,
-                                &mut lk_multiplicity,
-                                step.cycle(),
-                                &ops.reg_ops[0],
-                            )?;
-                            // assign mem_rw
-                            for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
-                                writer.assign_op(
-                                    instance,
-                                    &mut lk_multiplicity,
-                                    step.cycle(),
-                                    op,
-                                )?;
-                            }
-                            // fetch
-                            lk_multiplicity.fetch(step.pc().before.0);
+                        config.ecall_id.assign_op(
+                            instance,
+                            &mut lk_multiplicity,
+                            step.cycle(),
+                            &WriteOp::new_register_op(
+                                Platform::reg_ecall(),
+                                Change::new(syscall_code, syscall_code),
+                                step.rs1().unwrap().previous_cycle,
+                            ),
+                        )?;
+                        // assign point_ptr_0
+                        config.point_ptr.1.assign_instance(
+                            instance,
+                            &mut lk_multiplicity,
+                            ops.reg_ops[0].value.after,
+                        )?;
+                        config.point_ptr.0.assign_op(
+                            instance,
+                            &mut lk_multiplicity,
+                            step.cycle(),
+                            &ops.reg_ops[0],
+                        )?;
+                        for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
+                            writer.assign_op(instance, &mut lk_multiplicity, step.cycle(), op)?;
                         }
+                        // fetch
+                        lk_multiplicity.fetch(step.pc().before.0);
                         Ok(())
                     })
                     .collect::<Vec<_>>()
@@ -261,31 +277,31 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .collect::<Result<(), ZKVMError>>()?;
 
         // second pass
-        let instances: Vec<KeccakInstance> = steps
+        let instances: Vec<EllipticCurveDoubleInstance<EC::BaseField>> = steps
             .iter()
-            .map(|step| -> KeccakInstance {
-                let (instance, prev_ts): (Vec<u32>, Vec<Cycle>) = step
+            .map(|step| {
+                let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
                     .syscall()
                     .unwrap()
                     .mem_ops
                     .iter()
                     .map(|op| (op.value.before, op.previous_cycle))
                     .unzip();
-                KeccakInstance {
-                    state: KeccakStateInstance {
-                        state_ptr_address: ByteAddr::from(step.rs1().unwrap().value),
-                        cur_ts: step.cycle(),
-                        read_ts: prev_ts.try_into().unwrap(),
-                    },
-                    witin: KeccakWitInstance {
-                        instance: instance.try_into().unwrap(),
-                    },
-                }
+
+                let p = GenericArray::try_from(
+                    instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
+                );
+                p.map(|p| EllipticCurveDoubleInstance::<EC::BaseField> { p })
+                    .map_err(|_| {
+                        ZKVMError::InvalidWitness(
+                            "Failed to parse EllipticCurveDoubleInstance".into(),
+                        )
+                    })
             })
-            .collect_vec();
+            .try_collect()?;
 
         config.layout.phase1_witness_group(
-            KeccakTrace { instances },
+            WeierstrassDoubleAssignTrace { instances },
             [&mut raw_witin, &mut raw_structural_witin],
             &mut lk_multiplicity,
         );

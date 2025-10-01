@@ -1,3 +1,4 @@
+use ff_ext::SmallField;
 use itertools::izip;
 use std::{
     cell::RefCell,
@@ -199,6 +200,19 @@ impl LkMultiplicity {
     #[inline(always)]
     pub fn assert_double_u8(&mut self, a: u64, b: u64) {
         self.increment(LookupTable::DoubleU8, (a << 8) + b);
+    }
+
+    /// assert slices of field elements within range
+    #[inline]
+    pub fn assert_byte_fields<F: SmallField>(&mut self, vs: &[F]) {
+        // process in pairs
+        for pair in vs.chunks(2) {
+            match pair {
+                [a, b] => self.assert_double_u8(a.to_canonical_u64(), b.to_canonical_u64()),
+                [a] => self.assert_double_u8(a.to_canonical_u64(), 0),
+                _ => {}
+            }
+        }
     }
 
     /// Track a lookup into a logic table (AndTable, etc).
