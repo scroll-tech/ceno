@@ -47,9 +47,10 @@ pub fn random_points<WP: WeierstrassParameters>(
         .collect()
 }
 
+#[allow(dead_code)]
 pub fn random_decompress_instances<WP: EllipticCurve + WeierstrassParameters>(
     num_instances: usize,
-) -> Vec<EllipticCurveDecompressInstance> {
+) -> Vec<EllipticCurveDecompressInstance<WP::BaseField>> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
     let base = SwCurve::<WP>::generator();
     (0..num_instances)
@@ -60,6 +61,7 @@ pub fn random_decompress_instances<WP: EllipticCurve + WeierstrassParameters>(
             EllipticCurveDecompressInstance {
                 sign_bit,
                 x: x_base.x,
+                old_y_words: GenericArray::default(),
             }
         })
         .collect()

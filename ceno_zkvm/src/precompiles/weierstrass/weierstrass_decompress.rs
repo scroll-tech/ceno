@@ -72,7 +72,10 @@ use crate::{
         FieldOperation, field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
         field_sqrt::FieldSqrtCols, range::FieldLtCols,
     },
-    instructions::riscv::insn_base::{StateInOut, WriteMEM},
+    instructions::riscv::{
+        constants::UINT_LIMBS,
+        insn_base::{StateInOut, WriteMEM},
+    },
     precompiles::{
         SelectorTypeLayout, utils::merge_u8_limbs_to_u16_limbs_pairs_and_extend,
         weierstrass::EllipticCurveDecompressInstance,
@@ -84,10 +87,11 @@ use crate::{
 
 #[derive(Clone, Debug, AlignedBorrow)]
 #[repr(C)]
-pub struct WeierstrassDecompressWitCols<WitT, P: FieldParameters + NumLimbs> {
+pub struct WeierstrassDecompressWitCols<WitT, P: FieldParameters + NumLimbs + NumWords> {
     pub sign_bit: WitT,
     pub(crate) x_limbs: Limbs<WitT, P::Limbs>,
     pub(crate) y_limbs: Limbs<WitT, P::Limbs>,
+    pub(crate) old_output32: GenericArray<[WitT; UINT_LIMBS], P::WordsFieldElement>,
     pub(crate) range_x: FieldLtCols<WitT, P>,
     pub(crate) neg_y_range_check: FieldLtCols<WitT, P>,
     pub(crate) x_2: FieldOpCols<WitT, P>,
@@ -132,6 +136,9 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
             sign_bit: cb.create_bit(|| "sign_bit").unwrap(),
             x_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "x"))),
             y_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "y"))),
+            old_output32: GenericArray::generate(|i| {
+                array::from_fn(|j| cb.create_witin(|| format!("old_output32_{}_{}", i, j)))
+            }),
             range_x: FieldLtCols::create(cb, || "range_x"),
             neg_y_range_check: FieldLtCols::create(cb, || "neg_y_range_check"),
             x_2: FieldOpCols::create(cb, || "x_2"),
@@ -190,11 +197,17 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
     fn populate(
         record: &mut LkMultiplicity,
         cols: &mut WeierstrassDecompressWitCols<E::BaseField, EC::BaseField>,
-        x: &BigUint,
-        sign_bit: &bool,
+        instance: &EllipticCurveDecompressInstance<EC::BaseField>,
     ) {
-        cols.sign_bit = E::BaseField::from_bool(*sign_bit);
+        cols.sign_bit = E::BaseField::from_bool(instance.sign_bit);
+        cols.old_output32 = GenericArray::generate(|i| {
+            [
+                E::BaseField::from_canonical_u32(instance.old_y_words[i] & ((1 << 16) - 1)),
+                E::BaseField::from_canonical_u32((instance.old_y_words[i] >> 16) & ((1 << 16) - 1)),
+            ]
+        });
 
+        let x = &instance.x;
         // Y = sqrt(x^3 + ax + b)
         cols.x_limbs = EC::BaseField::to_limbs_field(x);
         cols.range_x.populate(record, x, &EC::BaseField::modulus());
@@ -222,7 +235,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
         cols.neg_y_range_check
             .populate(record, &neg_y, &EC::BaseField::modulus());
 
-        if cols.pos_y.lsb.to_canonical_u64() == *sign_bit as u64 {
+        if cols.pos_y.lsb.to_canonical_u64() == instance.sign_bit as u64 {
             cols.y_limbs = EC::BaseField::to_limbs_field(&y);
         } else {
             cols.y_limbs = EC::BaseField::to_limbs_field(&neg_y);
@@ -306,15 +319,15 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
             )?;
         }
 
-        // Constraint output32 from wits.x3_ins || wits.y3_ins by converting 8-bit limbs to 2x16-bit felts
-        let mut output32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
+        let mut output32 =
+            Vec::with_capacity(<EC::BaseField as NumWords>::WordsFieldElement::USIZE);
         merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(
             &wits.y_limbs,
             &mut output32,
         );
         let output32 = output32.try_into().unwrap();
 
-        let mut input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
+        let mut input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsFieldElement::USIZE);
         merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(
             &wits.x_limbs,
             &mut input32,
@@ -324,6 +337,8 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
         // set input32/output32 expr
         layout.input32_exprs = input32;
         layout.output32_exprs = output32;
+        layout.old_output32_exprs =
+            GenericArray::generate(|i| array::from_fn(|j| wits.old_output32[i][j].expr()));
 
         Ok(layout)
     }
@@ -382,9 +397,9 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
 }
 
 #[derive(Clone, Default)]
-pub struct WeierstrassDecompressTrace<P: NumLimbs> {
-    pub instances: Vec<EllipticCurveDecompressInstance>,
-    _phantom: PhantomData<P>,
+pub struct WeierstrassDecompressTrace<P: NumLimbs + NumWords> {
+    pub instances: Vec<EllipticCurveDecompressInstance<P>>,
+    pub _phantom: PhantomData<P>,
 }
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitnessGenerator<E>
@@ -424,12 +439,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
                         let cols: &mut WeierstrassDecompressWitCols<E::BaseField, EC::BaseField> =
                             row[self.layer_exprs.wits.sign_bit.id as usize..][..num_main_wit_cols] // TODO: Find a better way to write it.
                                 .borrow_mut();
-                        Self::populate(
-                            &mut lk_multiplicity,
-                            cols,
-                            &phase1_instance.x,
-                            &phase1_instance.sign_bit,
-                        );
+                        Self::populate(&mut lk_multiplicity, cols, phase1_instance);
 
                         for x in eqs.iter_mut() {
                             *x = E::BaseField::ONE;
@@ -460,15 +470,13 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParam
     let mut cs = ConstraintSystem::new(|| "weierstrass_decompress");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
-    // Guarantee the witness occur at the beginning of the witness columns. This is for simple implementation.
-    let mut layout = WeierstrassDecompressLayout::build_layer_logic(&mut cb, ())?;
-
     // constrain vmstate
     let vm_state = StateInOut::construct_circuit(&mut cb, false)?;
 
     let field_ptr = cb.create_witin(|| "field_ptr");
 
-    // Write the result to the same address of the first input point.
+    let mut layout = WeierstrassDecompressLayout::build_layer_logic(&mut cb, ())?;
+
     let num_limbs = <EC::BaseField as NumLimbs>::Limbs::U32;
     let mut mem_rw = layout
         .input32_exprs
@@ -486,7 +494,6 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParam
         })
         .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-    // Keep the second input point unchanged in memory.
     mem_rw.extend(
         izip!(
             layout.old_output32_exprs.iter(),
@@ -546,7 +553,7 @@ pub fn run_weierstrass_decompress<
         u16,
         u16,
     ),
-    instances: Vec<EllipticCurveDecompressInstance>,
+    instances: Vec<EllipticCurveDecompressInstance<EC::BaseField>>,
     test_outputs: bool,
     verify: bool,
 ) -> Result<GKRProof<E>, BackendError> {
@@ -622,10 +629,16 @@ pub fn run_weierstrass_decompress<
 
         let expected_outputs = instances
             .iter()
-            .map(|EllipticCurveDecompressInstance { x, sign_bit }| {
-                let computed_point = decompress_fn(&x.to_bytes_be(), *sign_bit as u32);
-                EC::BaseField::to_limbs(&computed_point.y)
-            })
+            .map(
+                |EllipticCurveDecompressInstance {
+                     x,
+                     sign_bit,
+                     old_y_words: _,
+                 }| {
+                    let computed_point = decompress_fn(&x.to_bytes_be(), *sign_bit as u32);
+                    EC::BaseField::to_limbs(&computed_point.y)
+                },
+            )
             .collect_vec();
 
         let y_output_index_start = layout.layout.layer_exprs.wits.y_limbs.0[0].id as usize;

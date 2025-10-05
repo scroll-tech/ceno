@@ -25,9 +25,11 @@ pub struct EllipticCurveDoubleInstance<P: NumWords> {
 ///
 /// This event is emitted when an elliptic curve point decompression operation is performed.
 #[derive(Debug, Clone)]
-pub struct EllipticCurveDecompressInstance {
+pub struct EllipticCurveDecompressInstance<P: NumWords> {
     /// The sign bit of the point.
     pub sign_bit: bool,
     /// The x coordinate as a list of bytes.
     pub x: BigUint,
+    /// The old value of y.
+    pub old_y_words: GenericArray<u32, P::WordsFieldElement>,
 }

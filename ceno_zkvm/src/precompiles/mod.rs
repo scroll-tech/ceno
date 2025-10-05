@@ -17,14 +17,14 @@ pub use bitwise_keccakf::{
 use ff_ext::ExtensionField;
 use gkr_iop::selector::SelectorType;
 pub use weierstrass::{
-    EllipticCurveAddInstance, EllipticCurveDoubleInstance,
+    EllipticCurveAddInstance, EllipticCurveDecompressInstance, EllipticCurveDoubleInstance,
     test_utils::{random_point_pairs, random_points},
     weierstrass_add::{
         WeierstrassAddAssignLayout, WeierstrassAddAssignTrace, run_weierstrass_add,
         setup_gkr_circuit as setup_weierstrass_add_circuit,
     },
     weierstrass_decompress::{
-        WeierstrassDecompressTrace, run_weierstrass_decompress,
+        WeierstrassDecompressLayout, WeierstrassDecompressTrace, run_weierstrass_decompress,
         setup_gkr_circuit as setup_weierstrass_decompress_circuit,
     },
     weierstrass_double::{
