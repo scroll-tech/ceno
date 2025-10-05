@@ -452,11 +452,11 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
                 rows.chunks_mut(self.n_committed)
                     .zip_eq(eqs.chunks_mut(self.n_structural_witin))
                     .zip_eq(phase1_instances)
-                    .for_each(|((row, eqs), phase1_intance)| {
+                    .for_each(|((row, eqs), phase1_instance)| {
                         let cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField> =
                             row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
                                 .borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
-                        Self::populate_row(phase1_intance, cols, &mut lk_multiplicity);
+                        Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
                         for x in eqs.iter_mut() {
                             *x = E::BaseField::ONE;
                         }
@@ -596,37 +596,34 @@ pub fn run_weierstrass_double<
     );
     let raw_witin_iter = phase1_witness.par_batch_iter_mut(num_instance_per_batch);
     raw_witin_iter
-        .zip(instances.par_chunks(num_instance_per_batch))
+        .zip_eq(instances.par_chunks(num_instance_per_batch))
         .for_each(|(instances, steps)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
                 .chunks_mut(num_witin as usize)
                 .zip_eq(steps)
-                .for_each(|(instance_with_rotation, _step)| {
-                    // assign full rotation with same witness
-                    for instance in instance_with_rotation.chunks_mut(num_witin as usize) {
-                        layout
-                            .vm_state
-                            .assign_instance(
+                .for_each(|(instance, _step)| {
+                    layout
+                        .vm_state
+                        .assign_instance(
+                            instance,
+                            &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
+                        )
+                        .expect("assign vm_state error");
+                    layout.mem_rw.iter().for_each(|mem_config| {
+                        mem_config
+                            .assign_op(
                                 instance,
-                                &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
+                                &mut lk_multiplicity,
+                                10,
+                                &MemOp {
+                                    previous_cycle: 0,
+                                    addr: ByteAddr::from(0).waddr(),
+                                    value: Default::default(),
+                                },
                             )
-                            .expect("assign vm_state error");
-                        layout.mem_rw.iter().for_each(|mem_config| {
-                            mem_config
-                                .assign_op(
-                                    instance,
-                                    &mut lk_multiplicity,
-                                    10,
-                                    &MemOp {
-                                        previous_cycle: 0,
-                                        addr: ByteAddr::from(0).waddr(),
-                                        value: Default::default(),
-                                    },
-                                )
-                                .expect("assign error");
-                        });
-                    }
+                            .expect("assign error");
+                    });
                 })
         });
 
