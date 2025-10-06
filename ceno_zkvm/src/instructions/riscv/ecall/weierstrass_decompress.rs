@@ -134,7 +134,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             0.into(),
         ))?;
 
-        // Write the result to the same address of the first input point.
         let num_limbs = <EC::BaseField as NumLimbs>::Limbs::U32;
         assert_eq!(num_limbs, 32);
         let field_ptr_expr = field_ptr.prev_value.as_ref().unwrap().value();
@@ -154,12 +153,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        // Keep the second input point unchanged in memory.
-        println!("output32_exprs len: {}", layout.output32_exprs.len());
-        println!(
-            "old_output32_exprs len: {}",
-            layout.old_output32_exprs.len()
-        );
         mem_rw.extend(
             izip!(
                 layout.old_output32_exprs.iter(),
@@ -167,13 +160,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             )
             .enumerate()
             .map(|(i, (val_before, val_after))| {
-                println!(
-                    "OMG!!! i = {}, i * 4 + num_limbs: {}, val_before: {:?}, val_after: {:?}",
-                    i,
-                    (i as u32) * 4 + num_limbs,
-                    val_before,
-                    val_after
-                );
                 WriteMEM::construct_circuit(
                     cb,
                     // mem address := field_ptr + i * 4 + num_limbs
@@ -306,10 +292,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                             step.cycle(),
                             &ops.reg_ops[0],
                         )?;
-                        println!(
-                            "field_ptr: 0x{:08x}",
-                            ops.reg_ops[0].value.after
-                        );
                         // register read for sign_bit
                         config.sign_bit.assign_op(
                             instance,
@@ -318,10 +300,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                             &ops.reg_ops[1],
                         )?;
                         for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
-                            println!(
-                                "ptr: {:?}, got value_before: {:?}, value_after: {:?}, current_cycle: {:?}, previous_cycle: {:?}",
-                                op.addr, op.value.before, op.value.after, step.cycle() + 3, op.previous_cycle
-                            );
                             writer.assign_op(instance, &mut lk_multiplicity, step.cycle(), op)?;
                         }
 
@@ -363,7 +341,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
 
                 x_words
                     .map(|x_words: GenericArray<u32, _>| {
-                        let x = BigUint::from_bytes_le(
+                        let x = BigUint::from_bytes_be(
                             &x_words
                                 .iter()
                                 .flat_map(|n| n.to_le_bytes())

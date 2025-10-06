@@ -67,7 +67,7 @@ use crate::{
     gadgets::{FieldOperation, field_op::FieldOpCols},
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
-        SelectorTypeLayout, utils::merge_u8_limbs_to_u16_limbs_pairs_and_extend,
+        SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
         weierstrass::EllipticCurveAddInstance,
     },
     scheme::utils::gkr_witness,
@@ -310,19 +310,19 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E>
         // Constraint output32 from wits.x3_ins || wits.y3_ins by converting 8-bit limbs to 2x16-bit felts
         let mut output32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
         for limbs in [&wits.x3_ins.result, &wits.y3_ins.result] {
-            merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(limbs, &mut output32);
+            merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(&limbs.0, &mut output32);
         }
         let output32 = output32.try_into().unwrap();
 
         let mut p_input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
         for limbs in [&wits.p_x, &wits.p_y] {
-            merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(limbs, &mut p_input32);
+            merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(&limbs.0, &mut p_input32);
         }
         let p_input32 = p_input32.try_into().unwrap();
 
         let mut q_input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
         for limbs in [&wits.q_x, &wits.q_y] {
-            merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(limbs, &mut q_input32);
+            merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(&limbs.0, &mut q_input32);
         }
         let q_input32 = q_input32.try_into().unwrap();
 

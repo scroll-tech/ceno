@@ -77,7 +77,7 @@ use crate::{
         insn_base::{StateInOut, WriteMEM},
     },
     precompiles::{
-        SelectorTypeLayout, utils::merge_u8_limbs_to_u16_limbs_pairs_and_extend,
+        SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
         weierstrass::EllipticCurveDecompressInstance,
     },
     scheme::utils::gkr_witness,
@@ -321,15 +321,15 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
 
         let mut output32 =
             Vec::with_capacity(<EC::BaseField as NumWords>::WordsFieldElement::USIZE);
-        merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(
-            &wits.y_limbs,
+        merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(
+            &wits.y_limbs.0.iter().rev().cloned().collect::<Vec<_>>(),
             &mut output32,
         );
         let output32 = output32.try_into().unwrap();
 
         let mut input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsFieldElement::USIZE);
-        merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(
-            &wits.x_limbs,
+        merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(
+            &wits.x_limbs.0.iter().rev().cloned().collect::<Vec<_>>(),
             &mut input32,
         );
         let input32 = input32.try_into().unwrap();
