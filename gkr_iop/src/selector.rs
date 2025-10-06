@@ -1,6 +1,7 @@
-use rayon::iter::IndexedParallelIterator;
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator};
 
 use ff_ext::ExtensionField;
+use itertools::{Itertools, assert_equal};
 use multilinear_extensions::{
     Expression,
     mle::{IntoMLE, MultilinearExtension, Point},
@@ -28,10 +29,11 @@ pub enum SelectorType<E: ExtensionField> {
         indices: Vec<usize>,
         expression: Expression<E>,
     },
+    /// binary tree [`quark`] from paper
+    QuarkBinaryTreeLessThan(Expression<E>),
 }
 
 impl<E: ExtensionField> SelectorType<E> {
-    /// Compute true and false mle eq(1; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (eq() - sel(y; b[5..]))
     pub fn compute(
         &self,
         out_point: &Point<E>,
@@ -50,6 +52,7 @@ impl<E: ExtensionField> SelectorType<E> {
                 }
                 Some(sel.into_mle())
             }
+            /// Compute true and false mle eq(1; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (eq() - sel(y; b[5..]))
             SelectorType::OrderedSparse32 { indices, .. } => {
                 let mut sel = build_eq_x_r_vec(out_point);
                 sel.par_chunks_exact_mut(CYCLIC_POW2_5.len())
@@ -75,10 +78,49 @@ impl<E: ExtensionField> SelectorType<E> {
                     });
                 Some(sel.into_mle())
             }
+            SelectorType::QuarkBinaryTreeLessThan(_) => {
+                let mut sel: Vec<E> = build_eq_x_r_vec(out_point);
+                let n = sel.len();
+
+                let num_instances_sequence = (0..out_point.len())
+                    // clean up sig bits
+                    .scan(num_instances & !1, |acc, _| {
+                        if *acc > 0 {
+                            let cur = *acc;
+                            *acc /= 2;
+                            Some(cur)
+                        } else {
+                            Some(0)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                (0..out_point.len())
+                    .into_par_iter()
+                    .zip_eq(num_instances_sequence)
+                    .for_each(|(level, num_instance_in_level)| {
+                        let chunk_size = n / (1 << (level + 1)); // divide by 2^level
+
+                        // Compute sub-slice
+                        let start = chunk_size / 2; // Example offset logic
+                        let end = start + chunk_size.min(n - start);
+
+                        if start < n {
+                            let slice = &mut sel[start..end];
+                            // SAFETY: Each `level` writes to disjoint regions
+                            for x in slice
+                                .iter_mut()
+                                .take(num_instance_in_level.min(slice.len()))
+                            {
+                                *x = E::ZERO;
+                            }
+                        }
+                    });
+                Some(sel.into_mle())
+            }
         }
     }
 
-    /// Evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
     pub fn evaluate(
         &self,
         evals: &mut Vec<E>,
@@ -100,6 +142,7 @@ impl<E: ExtensionField> SelectorType<E> {
                     eq_eval_less_or_equal_than(num_instances - 1, out_point, in_point),
                 )
             }
+            /// Evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
             SelectorType::OrderedSparse32 {
                 indices,
                 expression,
@@ -113,6 +156,62 @@ impl<E: ExtensionField> SelectorType<E> {
                 let sel =
                     eq_eval_less_or_equal_than(num_instances - 1, &out_point[5..], &in_point[5..]);
                 (expression, eval * sel)
+            }
+            SelectorType::QuarkBinaryTreeLessThan(expr) => {
+                // num_instances count on leaf layer
+                // where nodes size is 2^(N) / 2
+                debug_assert!(num_instances <= (1 << (out_point.len() - 1)));
+                if out_point.is_empty() {
+                    panic!("empty out_point size")
+                }
+                assert_eq!(out_point.len(), in_point.len());
+                if out_point.len() == 1 {
+                    (
+                        expr,
+                        eq_eval_less_or_equal_than(num_instances - 1, &out_point, &in_point),
+                    )
+                } else {
+                    let mut num_instances_sequence = (0..out_point.len())
+                        // clean up sig bits
+                        .scan(num_instances & !1, |acc, _| {
+                            if *acc > 0 {
+                                let cur = *acc;
+                                *acc /= 2;
+                                Some(cur)
+                            } else {
+                                Some(0)
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    num_instances_sequence.reverse();
+                    // traverse tuple 2 per iteration
+                    let mut num_instances_sequence_iter =
+                        num_instances_sequence.iter().tuple_windows();
+
+                    let mut res = E::ZERO;
+                    for i in 1..out_point.len() {
+                        let (num_instances_rhs_half, num_instances_lhs) =
+                            num_instances_sequence_iter.by_ref().next().unwrap();
+                        let lhs_res = if *num_instances_lhs > 0 {
+                            (E::ONE - out_point[i])
+                                * (E::ONE - in_point[i])
+                                * eq_eval_less_or_equal_than(
+                                    *num_instances_lhs - 1,
+                                    &out_point[..i],
+                                    &in_point[..i],
+                                )
+                        } else {
+                            E::ZERO
+                        };
+                        let rhs_res = if *num_instances_rhs_half > 0 {
+                            (out_point[i] * in_point[i]) * res
+                        } else {
+                            E::ZERO
+                        };
+                        res = lhs_res + rhs_res;
+                    }
+                    (expr, res)
+                }
             }
         };
         let Expression::StructuralWitIn(wit_id, _) = expr else {

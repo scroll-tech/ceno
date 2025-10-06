@@ -1054,6 +1054,7 @@ impl EccVerifier {
             .sum();
 
         let sel = eq_eval_less_or_equal_than(num_instances - 1, &out_rt, &rt);
+        // let sel = eq_quark_form(num_instances - 1, &out_rt, &rt);
         if sumcheck_claim.expected_evaluation != v * sel {
             return Err(ZKVMError::VerifyError(
                 (format!(

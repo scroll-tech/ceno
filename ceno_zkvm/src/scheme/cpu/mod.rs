@@ -83,12 +83,12 @@ impl CpuEccProver {
 
         let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
 
-        let sel = SelectorType::Prefix(E::BaseField::ZERO, 0.into());
+        let sel_add = SelectorType::QuarkBinaryTreeLessThan(0.into());
         let num_instances = (1 << n) - 1;
-        let mut sel_mle: MultilinearExtension<'_, E> = sel.compute(&out_rt, num_instances).unwrap();
-        let sel_expr = expr_builder.lift(sel_mle.to_either());
-
-        let mut exprs = vec![];
+        let mut sel_add_mle: MultilinearExtension<'_, E> =
+            sel_add.compute(&out_rt, num_instances).unwrap();
+        let sel_add_expr = expr_builder.lift(sel_add_mle.to_either());
+        let mut exprs_add = vec![];
 
         let filter_bj = |v: &[MultilinearExtension<'_, E>], j: usize| {
             v.iter()
@@ -157,7 +157,7 @@ impl CpuEccProver {
         );
         // affine addition
         // zerocheck: 0 = s[0,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1]) with b != (1,...,1)
-        exprs.extend(
+        exprs_add.extend(
             (s.clone() * (&x0 - &x1) - (&y0 - &y1))
                 .to_exprs()
                 .into_iter()
@@ -166,7 +166,7 @@ impl CpuEccProver {
         );
 
         // zerocheck: 0 = s[0,b]^2 - x[b,0] - x[b,1] - x[1,b] with b != (1,...,1)
-        exprs.extend(
+        exprs_add.extend(
             ((&s * &s) - &x0 - &x1 - &x3)
                 .to_exprs()
                 .into_iter()
@@ -179,7 +179,7 @@ impl CpuEccProver {
         );
 
         // zerocheck: 0 = s[0,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b]) with b != (1,...,1)
-        exprs.extend(
+        exprs_add.extend(
             (s.clone() * (&x0 - &x3) - (&y0 + &y3))
                 .to_exprs()
                 .into_iter()
@@ -191,11 +191,10 @@ impl CpuEccProver {
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
 
-        let (zerocheck_proof, state) = IOPProverState::prove(
-            expr_builder
-                .to_virtual_polys(&[exprs.into_iter().sum::<Expression<E>>() * sel_expr], &[]),
-            transcript,
-        );
+        let exprs_add = exprs_add.into_iter().sum::<Expression<E>>() * sel_add_expr;
+
+        let (zerocheck_proof, state) =
+            IOPProverState::prove(expr_builder.to_virtual_polys(&[exprs_add], &[]), transcript);
 
         let rt = state.collect_raw_challenges();
         let evals = state.get_mle_flatten_final_evaluations();
@@ -1054,7 +1053,7 @@ mod tests {
     use std::iter::repeat;
 
     use ff_ext::BabyBearExt4;
-    use itertools::Itertools;
+    use itertools::{Itertools, assert_equal};
     use multilinear_extensions::{
         mle::{IntoMLE, MultilinearExtension},
         util::transpose,
@@ -1099,13 +1098,14 @@ mod tests {
                 }));
 
                 points.extend(
-                    points[points.len() - num_inputs..]
+                    inputs
                         .chunks_exact(2)
                         .map(|chunk| {
                             let p = chunk[0].clone();
                             let q = chunk[1].clone();
 
-                            p + q
+                            assert!(!p.is_infinity);
+                            if q.is_infinity { p.double() } else { p + q }
                         })
                         .collect_vec(),
                 );
