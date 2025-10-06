@@ -43,6 +43,7 @@ use sumcheck::{
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
 
+use gkr_iop::hal::MultilinearPolynomial;
 #[cfg(feature = "sanity-check")]
 use {crate::scheme::septic_curve::SepticExtension, gkr_iop::utils::eq_eval_less_or_equal_than};
 
@@ -65,6 +66,7 @@ impl CpuEccProver {
 
     pub fn create_ecc_proof<'a, E: ExtensionField>(
         &self,
+        num_instances: usize,
         mut xs: Vec<MultilinearExtension<'a, E>>,
         mut ys: Vec<MultilinearExtension<'a, E>>,
         invs: Vec<MultilinearExtension<'a, E>>,
@@ -84,7 +86,6 @@ impl CpuEccProver {
         let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
 
         let sel_add = SelectorType::QuarkBinaryTreeLessThan(0.into());
-        let num_instances = (1 << n) - 1;
         let mut sel_add_mle: MultilinearExtension<'_, E> =
             sel_add.compute(&out_rt, num_instances).unwrap();
         let sel_add_expr = expr_builder.lift(sel_add_mle.to_either());
@@ -205,6 +206,7 @@ impl CpuEccProver {
 
         #[cfg(feature = "sanity-check")]
         {
+            let last_evaluation_index = (1 << n) - 1;
             let s = invs.iter().map(|x| x.as_view_slice(2, 0)).collect_vec();
             let x0 = filter_bj(&xs, 0);
             let y0 = filter_bj(&ys, 0);
@@ -213,11 +215,11 @@ impl CpuEccProver {
             let x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
             let y3 = ys.iter().map(|y| y.as_view_slice(2, 1)).collect_vec();
             let final_sum_x: SepticExtension<E::BaseField> = (x3.iter())
-                .map(|x| x.get_base_field_vec()[num_instances - 1]) // x[1,...,1,0]
+                .map(|x| x.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
                 .collect_vec()
                 .into();
             let final_sum_y: SepticExtension<E::BaseField> = (y3.iter())
-                .map(|y| y.get_base_field_vec()[num_instances - 1]) // x[1,...,1,0]
+                .map(|y| y.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
                 .collect_vec()
                 .into();
             let final_sum = SepticPoint::from_affine(final_sum_x, final_sum_y);
@@ -225,7 +227,7 @@ impl CpuEccProver {
             assert_eq!(final_sum, sum);
             // check evaluations
             assert_eq!(
-                eq_eval_less_or_equal_than(num_instances - 1, &out_rt, &rt),
+                eq_eval_less_or_equal_than(last_evaluation_index - 1, &out_rt, &rt),
                 evals[0]
             );
             for i in 0..SEPTIC_EXTENSION_DEGREE {
@@ -1103,9 +1105,7 @@ mod tests {
                         .map(|chunk| {
                             let p = chunk[0].clone();
                             let q = chunk[1].clone();
-
-                            assert!(!p.is_infinity);
-                            if q.is_infinity { p.double() } else { p + q }
+                            p + q
                         })
                         .collect_vec(),
                 );
@@ -1144,6 +1144,7 @@ mod tests {
         let mut transcript = BasicTranscript::new(b"test");
         let prover = CpuEccProver::new();
         let quark_proof = prover.create_ecc_proof(
+            n_points,
             xs.to_vec(),
             ys.to_vec(),
             s.to_vec(),
