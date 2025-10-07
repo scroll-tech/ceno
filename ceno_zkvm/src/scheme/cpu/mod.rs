@@ -311,7 +311,7 @@ impl CpuEccProver {
         // TODO: prove the validity of s[0,rt], x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt]
         EccQuarkProof {
             zerocheck_proof,
-            num_vars: n,
+            num_instances,
             evals,
             sum,
         }
