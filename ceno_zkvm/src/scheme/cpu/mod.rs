@@ -83,10 +83,11 @@ impl CpuEccProver {
         let out_rt = transcript.sample_and_append_vec(b"ecc", n);
         let num_threads = optimal_sumcheck_threads(out_rt.len());
 
-        // 2: expression got add and double
-        // 3: each contribute 3 zero constrains
-        let alpha_pows = transcript
-            .sample_and_append_challenge_pows(SEPTIC_EXTENSION_DEGREE * 3 * 2, b"ecc_alpha");
+        // expression with add (3 zero constrains) and bypass (2 zero constrains)
+        let alpha_pows = transcript.sample_and_append_challenge_pows(
+            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2,
+            b"ecc_alpha",
+        );
         let mut alpha_pows_iter = alpha_pows.iter();
 
         let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
@@ -94,13 +95,13 @@ impl CpuEccProver {
         let sel_add = SelectorType::QuarkBinaryTreeLessThan(0.into());
         let mut sel_add_mle: MultilinearExtension<'_, E> =
             sel_add.compute(&out_rt, num_instances).unwrap();
-        // we construct sel_double witness here
+        // we construct sel_bypass witness here
         // verifier can derive it via `sel_double = 1 - sel_add - last_onehot`
-        let mut sel_double_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
+        let mut sel_bypass_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
         match sel_add_mle.evaluations() {
             FieldType::Ext(sel_add_mle) => sel_add_mle
                 .par_iter()
-                .zip_eq(sel_double_mle.par_iter_mut())
+                .zip_eq(sel_bypass_mle.par_iter_mut())
                 .for_each(|(sel_add, sel_double)| {
                     if *sel_add != E::ZERO {
                         *sel_double = E::ZERO;
@@ -108,13 +109,13 @@ impl CpuEccProver {
                 }),
             _ => unreachable!(),
         }
-        *sel_double_mle.last_mut().unwrap() = E::ZERO;
-        let mut sel_double_mle = sel_double_mle.into_mle();
+        *sel_bypass_mle.last_mut().unwrap() = E::ZERO;
+        let mut sel_bypass_mle = sel_bypass_mle.into_mle();
         let sel_add_expr = expr_builder.lift(sel_add_mle.to_either());
-        let sel_double_expr = expr_builder.lift(sel_double_mle.to_either());
+        let sel_bypass_expr = expr_builder.lift(sel_bypass_mle.to_either());
 
         let mut exprs_add = vec![];
-        let mut exprs_double = vec![];
+        let mut exprs_bypass = vec![];
 
         let filter_bj = |v: &[MultilinearExtension<'_, E>], j: usize| {
             v.iter()
@@ -211,30 +212,19 @@ impl CpuEccProver {
 
         let exprs_add = exprs_add.into_iter().sum::<Expression<E>>() * sel_add_expr;
 
-        // deal with double
-        // 0 = s[0,b] * (2*y[b,0]) - (3*x[b,0]^2 + a)
-        exprs_double.extend(
-            (s.clone() * (&y0.mul_scalar(Either::Left(E::BaseField::TWO)))
-                - ((&x0 * &x0.mul_scalar(Either::Left(E::BaseField::from_canonical_u32(3))))
-                    .add_scalar(Either::Left(E::BaseField::TWO))))
-            .to_exprs()
-            .into_iter()
-            .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
-            .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
-        );
-
-        // 0 = s[0,b]^2 - 2*x[b,0] - x[1,b]
-        exprs_double.extend(
-            ((&s * &s) - (&x0.mul_scalar(Either::Left(E::BaseField::TWO))) - &x3)
+        // deal with bypass
+        // 0 = (x[1,b] - x[b,0])
+        exprs_bypass.extend(
+            (&x3 - &x0)
                 .to_exprs()
                 .into_iter()
                 .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
 
-        // 0 = s * (x[b,0] - x[1,b]) - (y[b,0] + y[1, b])
-        exprs_double.extend(
-            (s.clone() * (&x0 - &x3) - (&y0 + &y3))
+        // 0 = (y[1,b] - y[b,0])
+        exprs_bypass.extend(
+            (&y3 - &y0)
                 .to_exprs()
                 .into_iter()
                 .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
@@ -242,10 +232,10 @@ impl CpuEccProver {
         );
         assert!(alpha_pows_iter.next().is_none());
 
-        let exprs_double = exprs_double.into_iter().sum::<Expression<E>>() * sel_double_expr;
+        let exprs_bypass = exprs_bypass.into_iter().sum::<Expression<E>>() * sel_bypass_expr;
 
         let (zerocheck_proof, state) = IOPProverState::prove(
-            expr_builder.to_virtual_polys(&[exprs_add + exprs_double], &[]),
+            expr_builder.to_virtual_polys(&[exprs_add + exprs_bypass], &[]),
             transcript,
         );
 
@@ -1104,7 +1094,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::iter::repeat;
+    use std::{iter, iter::repeat};
 
     use ff_ext::BabyBearExt4;
     use itertools::Itertools;
@@ -1112,7 +1102,7 @@ mod tests {
         mle::{IntoMLE, MultilinearExtension},
         util::transpose,
     };
-    use p3::babybear::BabyBear;
+    use p3::{babybear::BabyBear, field::FieldAlgebra};
     use transcript::BasicTranscript;
 
     use crate::scheme::{
@@ -1128,7 +1118,7 @@ mod tests {
         type F = BabyBear;
 
         let log2_n = 6;
-        let n_points = 1 << log2_n;
+        let n_points = 64;
         let mut rng = rand::thread_rng();
 
         let final_sum;
@@ -1138,7 +1128,10 @@ mod tests {
             let mut points = (0..n_points)
                 .map(|_| SepticPoint::<F>::random(&mut rng))
                 .collect_vec();
-            let mut s = Vec::with_capacity(n_points);
+            points.extend(
+                iter::repeat(SepticPoint::point_at_infinity()).take((1 << log2_n) - points.len()),
+            );
+            let mut s = Vec::with_capacity(1 << (log2_n + 1));
 
             for layer in (1..=log2_n).rev() {
                 let num_inputs = 1 << layer;
@@ -1147,8 +1140,11 @@ mod tests {
                 s.extend(inputs.chunks_exact(2).map(|chunk| {
                     let p = &chunk[0];
                     let q = &chunk[1];
-
-                    (&p.y - &q.y) * (&p.x - &q.x).inverse().unwrap()
+                    if q.is_infinity {
+                        SepticExtension::zero()
+                    } else {
+                        (&p.y - &q.y) * (&p.x - &q.x).inverse().unwrap()
+                    }
                 }));
 
                 points.extend(
@@ -1165,11 +1161,11 @@ mod tests {
             final_sum = points.last().cloned().unwrap();
 
             // padding to 2*N
-            s.extend(repeat(SepticExtension::zero()).take(n_points + 1));
+            s.extend(repeat(SepticExtension::zero()).take((1 << (log2_n + 1)) - s.len()));
             points.push(SepticPoint::point_at_infinity());
 
-            assert_eq!(s.len(), 2 * n_points);
-            assert_eq!(points.len(), 2 * n_points);
+            assert_eq!(s.len(), 1 << (log2_n + 1));
+            assert_eq!(points.len(), 1 << (log2_n + 1));
 
             // transform points to row major matrix
             let trace = points
