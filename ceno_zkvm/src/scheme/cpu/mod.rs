@@ -32,8 +32,11 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use p3::field::FieldAlgebra;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use p3::field::{Field, FieldAlgebra};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -80,16 +83,38 @@ impl CpuEccProver {
         let out_rt = transcript.sample_and_append_vec(b"ecc", n);
         let num_threads = optimal_sumcheck_threads(out_rt.len());
 
-        let alpha_pows =
-            transcript.sample_and_append_challenge_pows(SEPTIC_EXTENSION_DEGREE * 3, b"ecc_alpha");
+        // 2: expression got add and double
+        // 3: each contribute 3 zero constrains
+        let alpha_pows = transcript
+            .sample_and_append_challenge_pows(SEPTIC_EXTENSION_DEGREE * 3 * 2, b"ecc_alpha");
+        let mut alpha_pows_iter = alpha_pows.iter();
 
         let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
 
         let sel_add = SelectorType::QuarkBinaryTreeLessThan(0.into());
         let mut sel_add_mle: MultilinearExtension<'_, E> =
             sel_add.compute(&out_rt, num_instances).unwrap();
+        // we construct sel_double witness here
+        // verifier can derive it via `sel_double = 1 - sel_add - last_onehot`
+        let mut sel_double_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
+        match sel_add_mle.evaluations() {
+            FieldType::Ext(sel_add_mle) => sel_add_mle
+                .par_iter()
+                .zip_eq(sel_double_mle.par_iter_mut())
+                .for_each(|(sel_add, sel_double)| {
+                    if *sel_add != E::ZERO {
+                        *sel_double = E::ZERO;
+                    }
+                }),
+            _ => unreachable!(),
+        }
+        *sel_double_mle.last_mut().unwrap() = E::ZERO;
+        let mut sel_double_mle = sel_double_mle.into_mle();
         let sel_add_expr = expr_builder.lift(sel_add_mle.to_either());
+        let sel_double_expr = expr_builder.lift(sel_double_mle.to_either());
+
         let mut exprs_add = vec![];
+        let mut exprs_double = vec![];
 
         let filter_bj = |v: &[MultilinearExtension<'_, E>], j: usize| {
             v.iter()
@@ -162,7 +187,7 @@ impl CpuEccProver {
             (s.clone() * (&x0 - &x1) - (&y0 - &y1))
                 .to_exprs()
                 .into_iter()
-                .zip(alpha_pows.iter().take(SEPTIC_EXTENSION_DEGREE))
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
 
@@ -171,11 +196,7 @@ impl CpuEccProver {
             ((&s * &s) - &x0 - &x1 - &x3)
                 .to_exprs()
                 .into_iter()
-                .zip(
-                    alpha_pows[SEPTIC_EXTENSION_DEGREE..]
-                        .iter()
-                        .take(SEPTIC_EXTENSION_DEGREE),
-                )
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
 
@@ -184,25 +205,56 @@ impl CpuEccProver {
             (s.clone() * (&x0 - &x3) - (&y0 + &y3))
                 .to_exprs()
                 .into_iter()
-                .zip(
-                    alpha_pows[SEPTIC_EXTENSION_DEGREE * 2..]
-                        .iter()
-                        .take(SEPTIC_EXTENSION_DEGREE),
-                )
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
 
         let exprs_add = exprs_add.into_iter().sum::<Expression<E>>() * sel_add_expr;
 
-        let (zerocheck_proof, state) =
-            IOPProverState::prove(expr_builder.to_virtual_polys(&[exprs_add], &[]), transcript);
+        // deal with double
+        // 0 = s[0,b] * (2*y[b,0]) - (3*x[b,0]^2 + a)
+        exprs_double.extend(
+            (s.clone() * (&y0.mul_scalar(Either::Left(E::BaseField::TWO)))
+                - ((&x0 * &x0.mul_scalar(Either::Left(E::BaseField::from_canonical_u32(3))))
+                    .add_scalar(Either::Left(E::BaseField::TWO))))
+            .to_exprs()
+            .into_iter()
+            .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+            .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        // 0 = s[0,b]^2 - 2*x[b,0] - x[1,b]
+        exprs_double.extend(
+            ((&s * &s) - (&x0.mul_scalar(Either::Left(E::BaseField::TWO))) - &x3)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        // 0 = s * (x[b,0] - x[1,b]) - (y[b,0] + y[1, b])
+        exprs_double.extend(
+            (s.clone() * (&x0 - &x3) - (&y0 + &y3))
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+        assert!(alpha_pows_iter.next().is_none());
+
+        let exprs_double = exprs_double.into_iter().sum::<Expression<E>>() * sel_double_expr;
+
+        let (zerocheck_proof, state) = IOPProverState::prove(
+            expr_builder.to_virtual_polys(&[exprs_add + exprs_double], &[]),
+            transcript,
+        );
 
         let rt = state.collect_raw_challenges();
         let evals = state.get_mle_flatten_final_evaluations();
 
         assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
         // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[0,rt]
-        assert_eq!(evals.len(), 1 + SEPTIC_EXTENSION_DEGREE * 7);
+        assert_eq!(evals.len(), 2 + SEPTIC_EXTENSION_DEGREE * 7);
 
         #[cfg(feature = "sanity-check")]
         {
@@ -1055,7 +1107,7 @@ mod tests {
     use std::iter::repeat;
 
     use ff_ext::BabyBearExt4;
-    use itertools::{Itertools, assert_equal};
+    use itertools::Itertools;
     use multilinear_extensions::{
         mle::{IntoMLE, MultilinearExtension},
         util::transpose,

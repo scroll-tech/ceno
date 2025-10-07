@@ -5,7 +5,22 @@ use ff_ext::ExtensionField;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use gkr_iop::{gkr::GKRClaims, utils::eq_eval_less_or_equal_than};
+use crate::{
+    error::ZKVMError,
+    scheme::{
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE, SEPTIC_EXTENSION_DEGREE},
+        septic_curve::SepticExtension,
+    },
+    structs::{
+        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
+        ZKVMVerifyingKey,
+    },
+    utils::{
+        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
+        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
+    },
+};
+use gkr_iop::{gkr::GKRClaims, selector::SelectorType, utils::eq_eval_less_or_equal_than};
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -22,22 +37,6 @@ use sumcheck::{
 };
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
-
-use crate::{
-    error::ZKVMError,
-    scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE, SEPTIC_EXTENSION_DEGREE},
-        septic_curve::SepticExtension,
-    },
-    structs::{
-        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
-        ZKVMVerifyingKey,
-    },
-    utils::{
-        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
-        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
-    },
-};
 
 use super::{ZKVMChipProof, ZKVMProof};
 
@@ -996,31 +995,31 @@ impl EccVerifier {
             transcript,
         );
 
-        let s0: SepticExtension<E> = proof.evals[1..][0..SEPTIC_EXTENSION_DEGREE]
+        let s0: SepticExtension<E> = proof.evals[2..][0..][..SEPTIC_EXTENSION_DEGREE]
             .try_into()
             .unwrap();
-        let x0: SepticExtension<E> = proof.evals[1..]
-            [SEPTIC_EXTENSION_DEGREE..2 * SEPTIC_EXTENSION_DEGREE]
+        let x0: SepticExtension<E> = proof.evals[2..][SEPTIC_EXTENSION_DEGREE..]
+            [..SEPTIC_EXTENSION_DEGREE]
             .try_into()
             .unwrap();
-        let y0: SepticExtension<E> = proof.evals[1..]
-            [2 * SEPTIC_EXTENSION_DEGREE..3 * SEPTIC_EXTENSION_DEGREE]
+        let y0: SepticExtension<E> = proof.evals[2..][2 * SEPTIC_EXTENSION_DEGREE..]
+            [..SEPTIC_EXTENSION_DEGREE]
             .try_into()
             .unwrap();
-        let x1: SepticExtension<E> = proof.evals[1..]
-            [3 * SEPTIC_EXTENSION_DEGREE..4 * SEPTIC_EXTENSION_DEGREE]
+        let x1: SepticExtension<E> = proof.evals[2..][3 * SEPTIC_EXTENSION_DEGREE..]
+            [..SEPTIC_EXTENSION_DEGREE]
             .try_into()
             .unwrap();
-        let y1: SepticExtension<E> = proof.evals[1..]
-            [4 * SEPTIC_EXTENSION_DEGREE..5 * SEPTIC_EXTENSION_DEGREE]
+        let y1: SepticExtension<E> = proof.evals[2..][4 * SEPTIC_EXTENSION_DEGREE..]
+            [..SEPTIC_EXTENSION_DEGREE]
             .try_into()
             .unwrap();
-        let x3: SepticExtension<E> = proof.evals[1..]
-            [5 * SEPTIC_EXTENSION_DEGREE..6 * SEPTIC_EXTENSION_DEGREE]
+        let x3: SepticExtension<E> = proof.evals[2..][5 * SEPTIC_EXTENSION_DEGREE..]
+            [..SEPTIC_EXTENSION_DEGREE]
             .try_into()
             .unwrap();
-        let y3: SepticExtension<E> = proof.evals[1..]
-            [6 * SEPTIC_EXTENSION_DEGREE..7 * SEPTIC_EXTENSION_DEGREE]
+        let y3: SepticExtension<E> = proof.evals[2..][6 * SEPTIC_EXTENSION_DEGREE..]
+            [..SEPTIC_EXTENSION_DEGREE]
             .try_into()
             .unwrap();
 
@@ -1054,6 +1053,7 @@ impl EccVerifier {
             .sum();
 
         let sel = eq_eval_less_or_equal_than(num_instances - 1, &out_rt, &rt);
+        // let SelectorType::QuarkBinaryTreeLessThan(1.into());
         // let sel = eq_quark_form(num_instances - 1, &out_rt, &rt);
         if sumcheck_claim.expected_evaluation != v * sel {
             return Err(ZKVMError::VerifyError(

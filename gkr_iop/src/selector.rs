@@ -1,7 +1,7 @@
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator};
+use rayon::iter::IndexedParallelIterator;
 
 use ff_ext::ExtensionField;
-use itertools::{Itertools, assert_equal};
+use itertools::Itertools;
 use multilinear_extensions::{
     Expression,
     mle::{IntoMLE, MultilinearExtension, Point},
