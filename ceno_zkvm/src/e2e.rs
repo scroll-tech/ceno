@@ -16,7 +16,7 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, Platform, Program,
     StepRecord, Tracer, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
@@ -92,6 +92,31 @@ pub struct EmulationResult {
     pub all_records: Vec<StepRecord>,
     pub final_mem_state: FinalMemState,
     pub pi: PublicValues,
+    pub ram_bus: RAMBus,
+}
+
+pub struct RAMBus {
+    shard_id: usize,
+    num_shards: usize,
+    max_cycle: Cycle,
+    addr_future_accesses: HashMap<(WordAddr, Cycle), Cycle>,
+}
+
+impl RAMBus {
+    pub fn new(
+        shard_id: usize,
+        num_shards: usize,
+        max_cycle: Cycle,
+        addr_future_accesses: HashMap<(WordAddr, Cycle), Cycle>,
+    ) -> Self {
+        RAMBus {
+            shard_id,
+            num_shards,
+            max_cycle,
+            addr_future_accesses,
+        }
+    }
+    pub fn send(&mut self) {}
 }
 
 pub fn emulate_program(
@@ -270,10 +295,13 @@ pub fn emulate_program(
         ),
     );
 
+    let ram_bus = RAMBus::new(0, 1, end_cycle, vm.take_tracer().next_accesses());
+
     EmulationResult {
         pi,
         exit_code,
         all_records,
+        ram_bus,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,

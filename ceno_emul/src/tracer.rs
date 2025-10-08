@@ -306,6 +306,7 @@ pub struct Tracer {
     // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: HashMap<WordAddr, Cycle>,
+    next_accesses: HashMap<(WordAddr, Cycle), Cycle>,
 }
 
 impl Default for Tracer {
@@ -363,6 +364,7 @@ impl Tracer {
                 ..StepRecord::default()
             },
             latest_accesses: HashMap::new(),
+            next_accesses: HashMap::new(),
         }
     }
 
@@ -471,14 +473,22 @@ impl Tracer {
     /// - Record the current instruction as the origin of the latest access.
     /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
     pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
-        self.latest_accesses
+        let prev_cycle = self
+            .latest_accesses
             .insert(addr, self.record.cycle + subcycle)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        self.next_accesses.insert((addr, prev_cycle), subcycle);
+        prev_cycle
     }
 
     /// Return all the addresses that were accessed and the cycle when they were last accessed.
     pub fn final_accesses(&self) -> &HashMap<WordAddr, Cycle> {
         &self.latest_accesses
+    }
+
+    /// Return all the addresses that were accessed and the cycle when they were last accessed.
+    pub fn next_accesses(self) -> HashMap<(WordAddr, Cycle), Cycle> {
+        self.next_accesses
     }
 
     /// Return the cycle of the pending instruction (after the last completed step).
