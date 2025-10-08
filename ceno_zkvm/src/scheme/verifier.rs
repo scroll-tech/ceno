@@ -1074,6 +1074,8 @@ impl EccVerifier {
                 .into(),
             ));
         }
+
+        // derive `sel_bypass = eq - sel_add - sel_last_onehot`
         let expected_sel_bypass = eq_eval(&out_rt, &rt)
             - expected_sel_add
             - (out_rt.iter().copied().product::<E>() * rt.iter().copied().product::<E>());

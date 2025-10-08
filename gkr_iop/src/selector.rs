@@ -77,6 +77,7 @@ impl<E: ExtensionField> SelectorType<E> {
                     });
                 Some(sel.into_mle())
             }
+            // also see evaluate() function for more explanation
             SelectorType::QuarkBinaryTreeLessThan(_) => {
                 // num_instances: number of prefix one in leaf layer
                 let mut sel: Vec<E> = build_eq_x_r_vec(out_point);
@@ -186,6 +187,12 @@ impl<E: ExtensionField> SelectorType<E> {
                 }
                 assert_eq!(out_point.len(), in_point.len());
 
+                // we break down this special selector evaluation into recursive structure
+                // iterating through out_point and in_point, for each i
+                // next_eval = lhs * (1-out_point[i]) * (1 - in_point[i]) + prev_eval * out_point[i] * in_point[i]
+                // where the lhs is in consecutive prefix 1 follow by 0
+
+                // calculate prefix 1 length of each layer
                 let mut prefix_one_seq = (0..out_point.len())
                     .scan(
                         (num_instances / 2, num_instances.div_ceil(2)),
