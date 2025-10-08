@@ -96,15 +96,16 @@ impl CpuEccProver {
         let mut sel_add_mle: MultilinearExtension<'_, E> =
             sel_add.compute(&out_rt, num_instances).unwrap();
         // we construct sel_bypass witness here
-        // verifier can derive it via `sel_double = 1 - sel_add - last_onehot`
+        // verifier can derive it via `sel_bypass = 1 - sel_add - last_onehot`
         let mut sel_bypass_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
         match sel_add_mle.evaluations() {
             FieldType::Ext(sel_add_mle) => sel_add_mle
-                .par_iter()
-                .zip_eq(sel_bypass_mle.par_iter_mut())
-                .for_each(|(sel_add, sel_double)| {
+                .iter()
+                .zip_eq(sel_bypass_mle.iter_mut())
+                .enumerate()
+                .for_each(|(i, (sel_add, sel_bypass))| {
                     if *sel_add != E::ZERO {
-                        *sel_double = E::ZERO;
+                        *sel_bypass = E::ZERO;
                     }
                 }),
             _ => unreachable!(),
@@ -1117,8 +1118,8 @@ mod tests {
         type E = BabyBearExt4;
         type F = BabyBear;
 
-        let log2_n = 6;
-        let n_points = 64;
+        let log2_n = 3;
+        let n_points = 5;
         let mut rng = rand::thread_rng();
 
         let final_sum;
@@ -1205,6 +1206,7 @@ mod tests {
         assert!(
             verifier
                 .verify_ecc_proof(&quark_proof, &mut transcript)
+                .inspect_err(|err| println!("err {:?}", err))
                 .is_ok()
         );
     }

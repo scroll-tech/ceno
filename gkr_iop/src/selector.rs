@@ -85,15 +85,19 @@ impl<E: ExtensionField> SelectorType<E> {
 
                 let num_instances_sequence = (0..out_point.len())
                     // clean up sig bits
-                    .scan(num_instances / 2, |acc, _| {
-                        if *acc > 0 {
-                            let cur = *acc;
-                            *acc /= 2;
-                            Some(cur)
-                        } else {
-                            Some(0)
-                        }
-                    })
+                    .scan(
+                        (num_instances / 2, num_instances.div_ceil(2)),
+                        |(n_instance, raw_instance_ceiling), _| {
+                            if *n_instance > 0 {
+                                let cur = *n_instance;
+                                *n_instance = *raw_instance_ceiling / 2;
+                                *raw_instance_ceiling = raw_instance_ceiling.div_ceil(2);
+                                Some(cur)
+                            } else {
+                                Some(0)
+                            }
+                        },
+                    )
                     .collect::<Vec<_>>();
 
                 // split sel into different size of region, set tailing 0 of respective chunk size
@@ -184,10 +188,11 @@ impl<E: ExtensionField> SelectorType<E> {
                 assert_eq!(out_point.len(), in_point.len());
 
                 let mut prefix_one_seq = (0..out_point.len())
-                    .scan(num_instances / 2, |acc, _| {
-                        if *acc > 0 {
-                            let cur = *acc;
-                            *acc /= 2;
+                    .scan((num_instances / 2, num_instances.div_ceil(2)), |(n_instance, raw_instance_ceiling), _| {
+                        if *n_instance > 0 {
+                            let cur = *n_instance;
+                            *n_instance = *raw_instance_ceiling / 2;
+                            *raw_instance_ceiling = raw_instance_ceiling.div_ceil(2);
                             Some(cur)
                         } else {
                             Some(0)

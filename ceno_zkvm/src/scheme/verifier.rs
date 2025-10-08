@@ -21,7 +21,7 @@ use crate::{
     },
 };
 use gkr_iop::{gkr::GKRClaims, selector::SelectorType, utils::eq_eval_less_or_equal_than};
-use itertools::{Itertools, chain, interleave, izip};
+use itertools::{Itertools, assert_equal, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression, Instance, StructuralWitIn, StructuralWitInType,
@@ -983,8 +983,11 @@ impl EccVerifier {
     ) -> Result<(), ZKVMError> {
         let num_vars = next_pow2_instance_padding(proof.num_instances).ilog2() as usize;
         let out_rt = transcript.sample_and_append_vec(b"ecc", num_vars);
-        let alpha_pows =
-            transcript.sample_and_append_challenge_pows(SEPTIC_EXTENSION_DEGREE * 3, b"ecc_alpha");
+        let alpha_pows = transcript.sample_and_append_challenge_pows(
+            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2,
+            b"ecc_alpha",
+        );
+        let mut alpha_pows_iter = alpha_pows.iter();
 
         let sumcheck_claim = IOPVerifierState::verify(
             E::ZERO,
@@ -1034,6 +1037,8 @@ impl EccVerifier {
         // zerocheck: 0 = s[0,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1])
         // zerocheck: 0 = s[0,b]^2 - x[b,0] - x[b,1] - x[1,b]
         // zerocheck: 0 = s[0,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b])
+        // zerocheck: 0 = (x[1,b] - x[b,0])
+        // zerocheck: 0 = (y[1,b] - y[b,0])
         //
         // note that they are not septic extension field elements,
         // we just want to reuse the multiply/add/sub formulas
@@ -1041,17 +1046,15 @@ impl EccVerifier {
         let v2: SepticExtension<E> = s0.square() - &x0 - &x1 - &x3;
         let v3: SepticExtension<E> = s0 * (&x0 - &x3) - (&y0 + &y3);
 
-        let v: E = vec![v1, v2, v3]
-            .into_iter()
-            .enumerate()
-            .flat_map(|(i, v)| {
-                let start = i * SEPTIC_EXTENSION_DEGREE;
-                let end = (i + 1) * SEPTIC_EXTENSION_DEGREE;
-                v.0.into_iter()
-                    .zip(alpha_pows[start..end].iter())
-                    .map(|(c, alpha)| c * *alpha)
-            })
-            .sum();
+        let v4: SepticExtension<E> = (&x3 - &x0);
+        let v5: SepticExtension<E> = (&y3 - &y0);
+
+        let [v1, v2, v3, v4, v5] = [v1, v2, v3, v4, v5].map(|v| {
+            v.0.into_iter()
+                .zip(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(c, alpha)| c * *alpha)
+                .collect_vec()
+        });
 
         let sel_add_expr = SelectorType::<E>::QuarkBinaryTreeLessThan(Expression::StructuralWitIn(
             0,
@@ -1060,13 +1063,41 @@ impl EccVerifier {
         ));
         let mut sel_evals = vec![E::ZERO];
         sel_add_expr.evaluate(&mut sel_evals, &out_rt, &rt, proof.num_instances, 0);
-        let sel_add = sel_evals[0];
-        if sumcheck_claim.expected_evaluation != v * sel_add {
+        let expected_sel_add = sel_evals[0];
+
+        if proof.evals[0] != expected_sel_add {
+            return Err(ZKVMError::VerifyError(
+                (format!(
+                    "sel_add evaluation mismatch, expected {}, got {}",
+                    expected_sel_add, proof.evals[0]
+                ))
+                .into(),
+            ));
+        }
+        let expected_sel_bypass = eq_eval(&out_rt, &rt)
+            - expected_sel_add
+            - (out_rt.iter().copied().product::<E>() * rt.iter().copied().product::<E>());
+
+        if proof.evals[1] != expected_sel_bypass {
+            return Err(ZKVMError::VerifyError(
+                (format!(
+                    "sel_bypass evaluation mismatch, expected {}, got {}",
+                    expected_sel_bypass, proof.evals[1]
+                ))
+                .into(),
+            ));
+        }
+
+        let add_evaluations = vec![v1, v2, v3].into_iter().flatten().sum::<E>();
+        let bypass_evaluations = vec![v4, v5].into_iter().flatten().sum::<E>();
+        if sumcheck_claim.expected_evaluation
+            != add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass
+        {
             return Err(ZKVMError::VerifyError(
                 (format!(
                     "ecc zerocheck failed: mismatched evaluation, expected {}, got {}",
                     sumcheck_claim.expected_evaluation,
-                    v * sel_add
+                    add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass
                 ))
                 .into(),
             ));
