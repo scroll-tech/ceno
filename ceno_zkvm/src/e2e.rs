@@ -16,18 +16,22 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, Platform, Program,
-    StepRecord, Tracer, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, MemOp, Platform,
+    Program, StepRecord, Tracer, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
+use either::Either;
 use ff_ext::ExtensionField;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 use gkr_iop::hal::ProverBackend;
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel, util::arithmetic::div_ceil};
+use multilinear_extensions::util::max_usable_threads;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::Serialize;
 use std::{
+    borrow::Cow,
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
@@ -87,44 +91,78 @@ pub struct FullMemState<Record> {
 type InitMemState = FullMemState<MemInitRecord>;
 type FinalMemState = FullMemState<MemFinalRecord>;
 
-pub struct EmulationResult {
+pub struct EmulationResult<'a> {
     pub exit_code: Option<u32>,
     pub all_records: Vec<StepRecord>,
     pub final_mem_state: FinalMemState,
     pub pi: PublicValues,
-    pub ram_bus: RAMBus,
+    pub ram_bus: RAMBus<'a>,
 }
 
-pub struct RAMBus {
+pub struct RAMBus<'a> {
     shard_id: usize,
     num_shards: usize,
     max_cycle: Cycle,
-    addr_future_accesses: HashMap<(WordAddr, Cycle), Cycle>,
+    addr_future_accesses: Cow<'a, HashMap<(WordAddr, Cycle), Cycle>>,
+    thread_based_record_storage: Either<Vec<Vec<MemFinalRecord>>, &'a mut Vec<MemFinalRecord>>,
+    pub cur_shard_cycle_range: std::ops::Range<usize>,
 }
 
-impl RAMBus {
+impl<'a> RAMBus<'a> {
     pub fn new(
         shard_id: usize,
         num_shards: usize,
         max_cycle: Cycle,
         addr_future_accesses: HashMap<(WordAddr, Cycle), Cycle>,
     ) -> Self {
+        let max_threads = max_usable_threads();
+        let max_insts = (max_cycle.div_ceil(4));
+        let max_record_per_thread = max_insts.div_ceil(max_threads as u64);
+        // reserve larger max_record_per_thread even a shard just need smaller space
+        // TODO optimize mem usage
+        let thread_based_record_storage = (0..max_threads)
+            .into_par_iter()
+            .map(|_| Vec::with_capacity(max_record_per_thread as usize))
+            .collect::<Vec<_>>();
+        let expected_cycles_per_shard = max_cycle.div_ceil(num_shards as u64) as usize;
+        let cur_shard_cycle_range =
+            (shard_id * expected_cycles_per_shard..(shard_id + 1) * expected_cycles_per_shard);
         RAMBus {
             shard_id,
             num_shards,
             max_cycle,
-            addr_future_accesses,
+            addr_future_accesses: Cow::Owned(addr_future_accesses),
+            thread_based_record_storage: Either::Left(thread_based_record_storage),
+            cur_shard_cycle_range,
         }
     }
+
+    pub fn get_forked(&mut self) -> Vec<RAMBus> {
+        match &mut self.thread_based_record_storage {
+            Either::Left(thread_based_record_storage) => thread_based_record_storage
+                .iter_mut()
+                .map(|v| RAMBus {
+                    shard_id: self.shard_id,
+                    num_shards: self.num_shards,
+                    max_cycle: self.max_cycle,
+                    addr_future_accesses: Cow::Borrowed(self.addr_future_accesses.as_ref()),
+                    thread_based_record_storage: Either::Right(v),
+                    cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
+                })
+                .collect_vec(),
+            Either::Right(_) => panic!("invalid type"),
+        }
+    }
+
     pub fn send(&mut self) {}
 }
 
-pub fn emulate_program(
+pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
     init_mem_state: &InitMemState,
     platform: &Platform,
-) -> EmulationResult {
+) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
         io: io_init,
@@ -478,7 +516,7 @@ pub fn generate_fixed_traces<E: ExtensionField>(
 
 pub fn generate_witness<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
-    emul_result: EmulationResult,
+    mut emul_result: EmulationResult,
     program: &Program,
 ) -> ZKVMWitnesses<E> {
     let mut zkvm_witness = ZKVMWitnesses::default();
@@ -487,6 +525,7 @@ pub fn generate_witness<E: ExtensionField>(
         .config
         .assign_opcode_circuit(
             &system_config.zkvm_cs,
+            &mut emul_result.ram_bus,
             &mut zkvm_witness,
             emul_result.all_records,
         )

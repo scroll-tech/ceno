@@ -1,5 +1,5 @@
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams,
+    circuit_builder::CircuitBuilder, e2e::RAMBus, error::ZKVMError, structs::ProgramParams,
     tables::RMMCollections, witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
@@ -101,6 +101,7 @@ pub trait Instruction<E: ExtensionField> {
     ) -> Result<(), ZKVMError>;
 
     fn assign_instances(
+        ram_bus: &mut RAMBus,
         config: &Self::InstructionConfig,
         num_witin: usize,
         num_structural_witin: usize,
@@ -131,6 +132,7 @@ pub trait Instruction<E: ExtensionField> {
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
         let raw_structual_witin_iter =
             raw_structual_witin.par_batch_iter_mut(num_instance_per_batch);
+        let ram_bus_forks = ram_bus.get_forks();
 
         raw_witin_iter
             .zip_eq(raw_structual_witin_iter)
