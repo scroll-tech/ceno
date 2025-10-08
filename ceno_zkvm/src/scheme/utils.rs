@@ -2,7 +2,7 @@ use crate::{
     scheme::{
         constants::{MIN_PAR_SIZE, SEPTIC_JACOBIAN_NUM_MLES},
         hal::{MainSumcheckProver, ProofInput, ProverDevice},
-        septic_curve::{SepticExtension, SepticJacobianPoint, SepticPoint},
+        septic_curve::{SepticExtension, SepticJacobianPoint},
     },
     structs::ComposedConstrainSystem,
 };

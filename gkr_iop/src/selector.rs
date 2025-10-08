@@ -1,7 +1,6 @@
 use rayon::iter::IndexedParallelIterator;
 
 use ff_ext::ExtensionField;
-use itertools::Itertools;
 use multilinear_extensions::{
     Expression,
     mle::{IntoMLE, MultilinearExtension, Point},
@@ -188,16 +187,19 @@ impl<E: ExtensionField> SelectorType<E> {
                 assert_eq!(out_point.len(), in_point.len());
 
                 let mut prefix_one_seq = (0..out_point.len())
-                    .scan((num_instances / 2, num_instances.div_ceil(2)), |(n_instance, raw_instance_ceiling), _| {
-                        if *n_instance > 0 {
-                            let cur = *n_instance;
-                            *n_instance = *raw_instance_ceiling / 2;
-                            *raw_instance_ceiling = raw_instance_ceiling.div_ceil(2);
-                            Some(cur)
-                        } else {
-                            Some(0)
-                        }
-                    })
+                    .scan(
+                        (num_instances / 2, num_instances.div_ceil(2)),
+                        |(n_instance, raw_instance_ceiling), _| {
+                            if *n_instance > 0 {
+                                let cur = *n_instance;
+                                *n_instance = *raw_instance_ceiling / 2;
+                                *raw_instance_ceiling = raw_instance_ceiling.div_ceil(2);
+                                Some(cur)
+                            } else {
+                                Some(0)
+                            }
+                        },
+                    )
                     .collect::<Vec<_>>();
                 prefix_one_seq.reverse();
                 let mut prefix_one_seq_iter = prefix_one_seq.iter();

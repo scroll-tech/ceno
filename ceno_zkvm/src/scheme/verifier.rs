@@ -20,8 +20,8 @@ use crate::{
         eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
     },
 };
-use gkr_iop::{gkr::GKRClaims, selector::SelectorType, utils::eq_eval_less_or_equal_than};
-use itertools::{Itertools, assert_equal, chain, interleave, izip};
+use gkr_iop::{gkr::GKRClaims, selector::SelectorType};
+use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression, Instance, StructuralWitIn, StructuralWitInType,
@@ -1046,8 +1046,8 @@ impl EccVerifier {
         let v2: SepticExtension<E> = s0.square() - &x0 - &x1 - &x3;
         let v3: SepticExtension<E> = s0 * (&x0 - &x3) - (&y0 + &y3);
 
-        let v4: SepticExtension<E> = (&x3 - &x0);
-        let v5: SepticExtension<E> = (&y3 - &y0);
+        let v4: SepticExtension<E> = &x3 - &x0;
+        let v5: SepticExtension<E> = &y3 - &y0;
 
         let [v1, v2, v3, v4, v5] = [v1, v2, v3, v4, v5].map(|v| {
             v.0.into_iter()

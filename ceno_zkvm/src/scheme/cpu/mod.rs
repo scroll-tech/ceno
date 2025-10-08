@@ -32,7 +32,6 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use p3::field::{Field, FieldAlgebra};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,
@@ -46,7 +45,6 @@ use sumcheck::{
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
 
-use gkr_iop::hal::MultilinearPolynomial;
 #[cfg(feature = "sanity-check")]
 use {crate::scheme::septic_curve::SepticExtension, gkr_iop::utils::eq_eval_less_or_equal_than};
 
@@ -96,14 +94,13 @@ impl CpuEccProver {
         let mut sel_add_mle: MultilinearExtension<'_, E> =
             sel_add.compute(&out_rt, num_instances).unwrap();
         // we construct sel_bypass witness here
-        // verifier can derive it via `sel_bypass = 1 - sel_add - last_onehot`
+        // verifier can derive it via `sel_bypass = eq - sel_add - sel_last_onehot`
         let mut sel_bypass_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
         match sel_add_mle.evaluations() {
             FieldType::Ext(sel_add_mle) => sel_add_mle
-                .iter()
-                .zip_eq(sel_bypass_mle.iter_mut())
-                .enumerate()
-                .for_each(|(i, (sel_add, sel_bypass))| {
+                .par_iter()
+                .zip_eq(sel_bypass_mle.par_iter_mut())
+                .for_each(|(sel_add, sel_bypass)| {
                     if *sel_add != E::ZERO {
                         *sel_bypass = E::ZERO;
                     }
@@ -1095,31 +1092,35 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{iter, iter::repeat};
-
-    use ff_ext::BabyBearExt4;
-    use itertools::Itertools;
-    use multilinear_extensions::{
-        mle::{IntoMLE, MultilinearExtension},
-        util::transpose,
-    };
-    use p3::{babybear::BabyBear, field::FieldAlgebra};
-    use transcript::BasicTranscript;
-
     use crate::scheme::{
         constants::SEPTIC_EXTENSION_DEGREE,
         cpu::CpuEccProver,
         septic_curve::{SepticExtension, SepticPoint},
         verifier::EccVerifier,
     };
+    use ff_ext::BabyBearExt4;
+    use itertools::Itertools;
+    use multilinear_extensions::{
+        mle::{IntoMLE, MultilinearExtension},
+        util::transpose,
+    };
+    use p3::babybear::BabyBear;
+    use std::iter::repeat_n;
+    use transcript::BasicTranscript;
+    use witness::next_pow2_instance_padding;
 
     #[test]
     fn test_ecc_quark_prover() {
+        for n_points in 1..2 ^ 10 {
+            test_ecc_quark_prover_inner(n_points)
+        }
+    }
+
+    fn test_ecc_quark_prover_inner(n_points: usize) {
         type E = BabyBearExt4;
         type F = BabyBear;
 
-        let log2_n = 3;
-        let n_points = 5;
+        let log2_n = next_pow2_instance_padding(n_points).ilog2();
         let mut rng = rand::thread_rng();
 
         let final_sum;
@@ -1129,9 +1130,10 @@ mod tests {
             let mut points = (0..n_points)
                 .map(|_| SepticPoint::<F>::random(&mut rng))
                 .collect_vec();
-            points.extend(
-                iter::repeat(SepticPoint::point_at_infinity()).take((1 << log2_n) - points.len()),
-            );
+            points.extend(repeat_n(
+                SepticPoint::point_at_infinity(),
+                (1 << log2_n) - points.len(),
+            ));
             let mut s = Vec::with_capacity(1 << (log2_n + 1));
 
             for layer in (1..=log2_n).rev() {
@@ -1162,7 +1164,10 @@ mod tests {
             final_sum = points.last().cloned().unwrap();
 
             // padding to 2*N
-            s.extend(repeat(SepticExtension::zero()).take((1 << (log2_n + 1)) - s.len()));
+            s.extend(repeat_n(
+                SepticExtension::zero(),
+                (1 << (log2_n + 1)) - s.len(),
+            ));
             points.push(SepticPoint::point_at_infinity());
 
             assert_eq!(s.len(), 1 << (log2_n + 1));
