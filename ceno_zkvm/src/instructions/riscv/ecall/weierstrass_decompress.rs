@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
 use ceno_emul::{
-    BLS12381_ADD, BN254_ADD, ByteAddr, Change, Cycle, InsnKind, Platform, SECP256K1_ADD,
-    SECP256R1_ADD, StepRecord, WORD_SIZE, WriteOp,
+    Change, Cycle, InsnKind, Platform, SECP256K1_DECOMPRESS, SECP256R1_DECOMPRESS, StepRecord,
+    WriteOp,
 };
 use ff_ext::ExtensionField;
 use generic_array::{GenericArray, typenum::Unsigned};
@@ -12,13 +12,20 @@ use gkr_iop::{
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
-use multilinear_extensions::{ToExpr, util::max_usable_threads};
-use p3::{field::FieldAlgebra, matrix::Matrix};
+use multilinear_extensions::{Expression, ToExpr, util::max_usable_threads};
+use num::BigUint;
+use p3::matrix::Matrix;
 use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+    },
     slice::ParallelSlice,
 };
-use sp1_curves::{CurveType, EllipticCurve, params::NumWords};
+use sp1_curves::{
+    CurveType, EllipticCurve,
+    params::{NumLimbs, NumWords},
+    weierstrass::WeierstrassParameters,
+};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
@@ -34,7 +41,7 @@ use crate::{
         },
     },
     precompiles::{
-        EllipticCurveAddInstance, WeierstrassAddAssignLayout, WeierstrassAddAssignTrace,
+        EllipticCurveDecompressInstance, WeierstrassDecompressLayout, WeierstrassDecompressTrace,
     },
     structs::ProgramParams,
     tables::{InsnRecord, RMMCollections},
@@ -42,25 +49,25 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct EcallWeierstrassAddAssignConfig<E: ExtensionField, EC: EllipticCurve> {
-    pub layout: WeierstrassAddAssignLayout<E, EC>,
+pub struct EcallWeierstrassDecompressConfig<E: ExtensionField, EC: EllipticCurve> {
+    pub layout: WeierstrassDecompressLayout<E, EC>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    point_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    point_ptr_1: (OpFixedRS<E, { Platform::reg_arg1() }, true>, MemAddr<E>),
+    field_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    sign_bit: OpFixedRS<E, { Platform::reg_arg1() }, true>,
     mem_rw: Vec<WriteMEM>,
 }
 
-/// WeierstrassAddAssignInstruction can handle any instruction and produce its side-effects.
-pub struct WeierstrassAddAssignInstruction<E, EC>(PhantomData<(E, EC)>);
+/// WeierstrassDecompressInstruction can handle any instruction and produce its side-effects.
+pub struct WeierstrassDecompressInstruction<E, EC>(PhantomData<(E, EC)>);
 
-impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
-    for WeierstrassAddAssignInstruction<E, EC>
+impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E>
+    for WeierstrassDecompressInstruction<E, EC>
 {
-    type InstructionConfig = EcallWeierstrassAddAssignConfig<E, EC>;
+    type InstructionConfig = EcallWeierstrassDecompressConfig<E, EC>;
 
     fn name() -> String {
-        "Ecall_WeierstrassAddAssign_".to_string() + format!("{:?}", EC::CURVE_TYPE).as_str()
+        "Ecall_WeierstrassDecompress_".to_string() + format!("{:?}", EC::CURVE_TYPE).as_str()
     }
 
     fn construct_circuit(
@@ -75,15 +82,19 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         _param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
         // constrain vmstate
+        let mut layout =
+            <WeierstrassDecompressLayout<E, EC> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(
+                cb,
+                (),
+            )?;
+
         let vm_state = StateInOut::construct_circuit(cb, false)?;
 
         let syscall_code = match EC::CURVE_TYPE {
-            CurveType::Secp256k1 => SECP256K1_ADD,
-            CurveType::Secp256r1 => SECP256R1_ADD,
-            CurveType::Bn254 => BN254_ADD,
-            CurveType::Bls12381 => BLS12381_ADD,
-            CurveType::Ed25519 => {
-                unreachable!("WeierstrassAddAssign is not supported for Ed25519")
+            CurveType::Secp256k1 => SECP256K1_DECOMPRESS,
+            CurveType::Secp256r1 => SECP256R1_DECOMPRESS,
+            _ => {
+                unreachable!("WeierstrassDecompress is not supported for this curve")
             }
         };
 
@@ -97,18 +108,17 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             vm_state.ts,
         )?;
 
-        let point_ptr_value_0 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
-        let point_ptr_value_1 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
-
-        let point_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let field_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
+        let field_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
             cb,
-            point_ptr_value_0.uint_unaligned().register_expr(),
+            field_ptr_value.uint_unaligned().register_expr(),
             vm_state.ts,
         )?;
 
-        let point_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
+        let sign_bit_value = layout.layer_exprs.wits.sign_bit;
+        let sign_bit = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
             cb,
-            point_ptr_value_1.uint_unaligned().register_expr(),
+            [sign_bit_value.expr(), Expression::ZERO],
             vm_state.ts,
         )?;
 
@@ -124,58 +134,49 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             0.into(),
         ))?;
 
-        let mut layout =
-            <WeierstrassAddAssignLayout<E, EC> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(
-                cb,
-                (),
-            )?;
-
-        // Write the result to the same address of the first input point.
-        let mut mem_rw = izip!(&layout.input32_exprs[0], &layout.output32_exprs)
+        let num_limbs = <EC::BaseField as NumLimbs>::Limbs::U32;
+        assert_eq!(num_limbs, 32);
+        let field_ptr_expr = field_ptr.prev_value.as_ref().unwrap().value();
+        let mut mem_rw = layout
+            .input32_exprs
+            .iter()
             .enumerate()
-            .map(|(i, (val_before, val_after))| {
+            .map(|(i, val)| {
                 WriteMEM::construct_circuit(
                     cb,
-                    // mem address := point_ptr_0 + i
-                    point_ptr_0.prev_value.as_ref().unwrap().value()
-                        + E::BaseField::from_canonical_u32(
-                            ByteAddr::from((i * WORD_SIZE) as u32).0,
-                        )
-                        .expr(),
-                    val_before.clone(),
-                    val_after.clone(),
+                    // mem address := field_ptr + i * 4
+                    field_ptr_expr.expr() + (i as u32) * 4,
+                    val.clone(),
+                    val.clone(),
                     vm_state.ts,
                 )
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        // Keep the second input point unchanged in memory.
         mem_rw.extend(
-            layout.input32_exprs[1]
-                .iter()
-                .enumerate()
-                .map(|(i, val_before)| {
-                    WriteMEM::construct_circuit(
-                        cb,
-                        // mem address := point_ptr_1 + i
-                        point_ptr_1.prev_value.as_ref().unwrap().value()
-                            + E::BaseField::from_canonical_u32(
-                                ByteAddr::from((i * WORD_SIZE) as u32).0,
-                            )
-                            .expr(),
-                        val_before.clone(),
-                        val_before.clone(),
-                        vm_state.ts,
-                    )
-                })
-                .collect::<Result<Vec<WriteMEM>, _>>()?,
+            izip!(
+                layout.old_output32_exprs.iter(),
+                layout.output32_exprs.iter()
+            )
+            .enumerate()
+            .map(|(i, (val_before, val_after))| {
+                WriteMEM::construct_circuit(
+                    cb,
+                    // mem address := field_ptr + i * 4 + num_limbs
+                    field_ptr_expr.expr() + (i as u32) * 4 + num_limbs,
+                    val_before.clone(),
+                    val_after.clone(),
+                    vm_state.ts,
+                )
+            })
+            .collect::<Result<Vec<WriteMEM>, _>>()?,
         );
 
         let (out_evals, mut chip) = layout.finalize(cb);
 
         let layer = Layer::from_circuit_builder(
             cb,
-            "weierstrass_add".to_string(),
+            "weierstrass_decompress".to_string(),
             layout.n_challenges,
             out_evals,
         );
@@ -184,12 +185,12 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         let circuit = chip.gkr_circuit();
 
         Ok((
-            EcallWeierstrassAddAssignConfig {
+            EcallWeierstrassDecompressConfig {
                 layout,
                 vm_state,
                 ecall_id,
-                point_ptr_0: (point_ptr_0, point_ptr_value_0),
-                point_ptr_1: (point_ptr_1, point_ptr_value_1),
+                field_ptr: (field_ptr, field_ptr_value),
+                sign_bit,
                 mem_rw,
             },
             circuit,
@@ -221,12 +222,10 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         steps: Vec<StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let syscall_code = match EC::CURVE_TYPE {
-            CurveType::Secp256k1 => SECP256K1_ADD,
-            CurveType::Secp256r1 => SECP256R1_ADD,
-            CurveType::Bn254 => BN254_ADD,
-            CurveType::Bls12381 => BLS12381_ADD,
-            CurveType::Ed25519 => {
-                unreachable!("WeierstrassAddAssign is not supported for Ed25519")
+            CurveType::Secp256k1 => SECP256K1_DECOMPRESS,
+            CurveType::Secp256r1 => SECP256R1_DECOMPRESS,
+            _ => {
+                unreachable!("WeierstrassDecompress is not supported for this curve")
             }
         };
 
@@ -256,8 +255,9 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
 
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
 
+        let ec_field_num_words = <EC::BaseField as NumWords>::WordsFieldElement::USIZE;
         // 1st pass: assign witness outside of gkr-iop scope
-        raw_witin_iter
+        let sign_bit_and_y_words = raw_witin_iter
             .zip_eq(steps.par_chunks(num_instance_per_batch))
             .flat_map(|(instances, steps)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
@@ -270,7 +270,6 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
 
                         // vm_state
                         config.vm_state.assign_instance(instance, step)?;
-
                         config.ecall_id.assign_op(
                             instance,
                             &mut lk_multiplicity,
@@ -281,25 +280,20 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                                 step.rs1().unwrap().previous_cycle,
                             ),
                         )?;
-                        // assign point_ptr_0
-                        config.point_ptr_0.1.assign_instance(
+                        // assign field_ptr
+                        config.field_ptr.1.assign_instance(
                             instance,
                             &mut lk_multiplicity,
                             ops.reg_ops[0].value.after,
                         )?;
-                        config.point_ptr_0.0.assign_op(
+                        config.field_ptr.0.assign_op(
                             instance,
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[0],
                         )?;
-                        // assign point_ptr_1
-                        config.point_ptr_1.1.assign_instance(
-                            instance,
-                            &mut lk_multiplicity,
-                            ops.reg_ops[1].value.after,
-                        )?;
-                        config.point_ptr_1.0.assign_op(
+                        // register read for sign_bit
+                        config.sign_bit.assign_op(
                             instance,
                             &mut lk_multiplicity,
                             step.cycle(),
@@ -308,41 +302,70 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                         for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
                             writer.assign_op(instance, &mut lk_multiplicity, step.cycle(), op)?;
                         }
+
                         // fetch
                         lk_multiplicity.fetch(step.pc().before.0);
-                        Ok(())
+                        let old_output32: Vec<_> = ops
+                            .mem_ops
+                            .iter()
+                            .skip(ec_field_num_words)
+                            .map(|op| op.value.before)
+                            .collect();
+                        Ok((
+                            ops.reg_ops[1].value.before != 0,
+                            old_output32.try_into().unwrap(),
+                        ))
                     })
                     .collect::<Vec<_>>()
             })
-            .collect::<Result<(), ZKVMError>>()?;
+            .collect::<Result<Vec<_>, ZKVMError>>()?;
 
         // second pass
-        let instances: Vec<EllipticCurveAddInstance<EC::BaseField>> = steps
+        let instances = steps
             .par_iter()
-            .map(|step| {
+            .zip(sign_bit_and_y_words.into_par_iter())
+            .map(|(step, (sign_bit, old_output32))| {
                 let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
                     .syscall()
                     .unwrap()
                     .mem_ops
                     .iter()
+                    .take(ec_field_num_words)
                     .map(|op| (op.value.before, op.previous_cycle))
                     .unzip();
 
-                let p = GenericArray::try_from(
-                    instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
-                );
-                let q = GenericArray::try_from(
-                    instance[<EC::BaseField as NumWords>::WordsCurvePoint::USIZE..].to_vec(),
-                );
-                p.and_then(|p| q.map(|q| EllipticCurveAddInstance::<EC::BaseField> { p, q }))
+                let x_words =
+                    GenericArray::<_, <EC::BaseField as NumWords>::WordsFieldElement>::try_from(
+                        instance[0..<EC::BaseField as NumWords>::WordsFieldElement::USIZE].to_vec(),
+                    );
+
+                x_words
+                    .map(|x_words: GenericArray<u32, _>| {
+                        let x = BigUint::from_bytes_be(
+                            &x_words
+                                .iter()
+                                .flat_map(|n| n.to_le_bytes())
+                                .collect::<Vec<_>>(),
+                        );
+                        EllipticCurveDecompressInstance {
+                            x,
+                            sign_bit,
+                            old_y_words: old_output32,
+                        }
+                    })
                     .map_err(|_| {
-                        ZKVMError::InvalidWitness("Failed to parse EllipticCurveAddInstance".into())
+                        ZKVMError::InvalidWitness(
+                            "Failed to parse EllipticCurveDecompressInstance".into(),
+                        )
                     })
             })
             .collect::<Result<_, _>>()?;
 
         config.layout.phase1_witness_group(
-            WeierstrassAddAssignTrace { instances },
+            WeierstrassDecompressTrace {
+                instances,
+                _phantom: PhantomData,
+            },
             [&mut raw_witin, &mut raw_structural_witin],
             &mut lk_multiplicity,
         );

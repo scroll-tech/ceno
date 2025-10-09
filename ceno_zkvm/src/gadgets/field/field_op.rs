@@ -22,6 +22,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+use derive::AlignedBorrow;
 use ff_ext::{ExtensionField, SmallField};
 use generic_array::{GenericArray, sequence::GenericSequence, typenum::Unsigned};
 use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
@@ -55,7 +56,7 @@ use crate::{
 ///
 /// **Warning**: The constraints do not check for division by zero. The caller is responsible for
 /// ensuring that the division operation is valid.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct FieldOpCols<T, P: FieldParameters> {
     /// The result of `a op b`, where a, b are field elements
@@ -90,64 +91,6 @@ impl<P: FieldParameters> FieldOpCols<WitIn, P> {
 }
 
 impl<F: SmallField, P: FieldParameters> FieldOpCols<F, P> {
-    #[allow(clippy::too_many_arguments)]
-    /// Populate result and carry columns from the equation (a*b + c) % modulus
-    pub fn populate_mul_and_carry(
-        &mut self,
-        record: &mut LkMultiplicity,
-        a: &BigUint,
-        b: &BigUint,
-        c: &BigUint,
-        modulus: &BigUint,
-    ) -> (BigUint, BigUint) {
-        let p_a: Polynomial<F> = P::to_limbs_field::<F, _>(a).into();
-        let p_b: Polynomial<F> = P::to_limbs_field::<F, _>(b).into();
-        let p_c: Polynomial<F> = P::to_limbs_field::<F, _>(c).into();
-
-        let mul_add = a * b + c;
-        let result = &mul_add % modulus;
-        let carry = (mul_add - &result) / modulus;
-        debug_assert!(&result < modulus);
-        debug_assert!(&carry < modulus);
-        debug_assert_eq!(&carry * modulus, a * b + c - &result);
-
-        let p_modulus_limbs = modulus
-            .to_bytes_le()
-            .iter()
-            .map(|x| F::from_canonical_u8(*x))
-            .collect::<Vec<F>>();
-        let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
-        let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
-        let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
-
-        let p_op = &p_a * &p_b + &p_c;
-        let p_vanishing = &p_op - &p_result - &p_carry * &p_modulus;
-
-        let p_witness = compute_root_quotient_and_shift(
-            &p_vanishing,
-            P::WITNESS_OFFSET,
-            P::NB_BITS_PER_LIMB as u32,
-            P::NB_WITNESS_LIMBS,
-        );
-
-        let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
-
-        self.result = p_result.into();
-        self.carry = p_carry.into();
-
-        p_witness_low.resize(P::Witness::USIZE, F::ZERO);
-        p_witness_high.resize(P::Witness::USIZE, F::ZERO);
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
-
-        record.assert_byte_fields(&self.result.0);
-        record.assert_byte_fields(&self.carry.0);
-        record.assert_byte_fields(&self.witness_low.0);
-        record.assert_byte_fields(&self.witness_high.0);
-
-        (result, carry)
-    }
-
     pub fn populate_carry_and_witness(
         &mut self,
         a: &BigUint,
