@@ -136,7 +136,7 @@ fn verify_prehash(
     let p_bytes = words_to_untagged_bytes(p);
     let x = FieldBytes::from_slice(&p_bytes[..32]);
 
-    if **r == <Scalar as Reduce<U256>>::reduce_bytes(&x) {
+    if **r == <Scalar as Reduce<U256>>::reduce_bytes(x) {
         Ok(())
     } else {
         Err(Error::new())
@@ -148,11 +148,11 @@ fn lincomb(u1: Scalar, p: &AffinePoint, u2: Scalar) -> Result<[u32; 16], Error> 
     Ok(match (u1 == Scalar::ZERO, u2 == Scalar::ZERO) {
         (false, false) => {
             let mut p1 = secp256k1_mul(&AffinePoint::GENERATOR, u1);
-            let p2 = secp256k1_mul(&p, u2);
+            let p2 = secp256k1_mul(p, u2);
             syscall_secp256k1_add(&mut p1, &p2);
             p1
         }
-        (true, false) => secp256k1_mul(&p, u2),
+        (true, false) => secp256k1_mul(p, u2),
         (false, true) => secp256k1_mul(&AffinePoint::GENERATOR, u1),
         (true, true) => return Err(Error::new()),
     })
