@@ -2,6 +2,7 @@ mod bitwise_keccakf;
 mod lookup_keccakf;
 mod utils;
 mod weierstrass;
+mod uint256;
 
 pub use lookup_keccakf::{
     AND_LOOKUPS, KECCAK_INPUT32_SIZE, KECCAK_OUT_EVAL_SIZE, KeccakInstance, KeccakLayout,
