@@ -222,11 +222,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .unwrap_or(0);
 
         // Convert types for GPU function Call
-        let basic_tr: &mut BasicTranscript<GL64Ext> =
-            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GL64Ext>) };
-        let term_coefficients_gl64: Vec<GL64Ext> =
+        let basic_tr: &mut BasicTranscript<BB31Ext> =
+            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
+        let term_coefficients_gl64: Vec<BB31Ext> =
             unsafe { std::mem::transmute(term_coefficients) };
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
@@ -247,10 +247,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 
         // convert back to E: ExtensionField
         let proof_gpu_e =
-            unsafe { std::mem::transmute::<IOPProof<GL64Ext>, IOPProof<E>>(proof_gpu) };
-        let evals_gpu_e = unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(evals_gpu) };
+            unsafe { std::mem::transmute::<IOPProof<BB31Ext>, IOPProof<E>>(proof_gpu) };
+        let evals_gpu_e = unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(evals_gpu) };
         let row_challenges_e =
-            unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(row_challenges) };
+            unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(row_challenges) };
 
         exit_span!(span);
 
@@ -344,10 +344,10 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
         .unwrap_or(0);
 
     // Convert types for GPU function call
-    let basic_tr: &mut BasicTranscript<GL64Ext> =
-        unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GL64Ext>) };
-    let term_coefficients_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(term_coefficients) };
-    let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
+    let basic_tr: &mut BasicTranscript<BB31Ext> =
+        unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
+    let term_coefficients_gl64: Vec<BB31Ext> = unsafe { std::mem::transmute(term_coefficients) };
+    let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
         unsafe { std::mem::transmute(mle_gpu_ref) };
     let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
     // gpu prover
@@ -367,9 +367,9 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
     let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
 
-    let proof_gpu_e = unsafe { std::mem::transmute::<IOPProof<GL64Ext>, IOPProof<E>>(proof_gpu) };
-    let mut evals_gpu_e = unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(evals_gpu) };
-    let row_challenges_e = unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(row_challenges) };
+    let proof_gpu_e = unsafe { std::mem::transmute::<IOPProof<BB31Ext>, IOPProof<E>>(proof_gpu) };
+    let mut evals_gpu_e = unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(evals_gpu) };
+    let row_challenges_e = unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(row_challenges) };
     // skip selector/eq as verifier can derive itself
     evals_gpu_e.truncate(raw_rotation_exprs.len() * 2);
     exit_span!(span);

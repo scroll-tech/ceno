@@ -20,8 +20,8 @@ pub mod gpu_prover {
         common::buffer::BufferImpl,
         common::mle::{build_mle_as_ceno, ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu, rotation_selector_gpu},
         common::basefold::utils::convert_ceno_to_gpu_basefold_commitment,
-        gl64::{
-            CudaHalGL64, GpuFieldType, GpuPolynomial, GpuPolynomialExt,
+        bb31::{ 
+            CudaHalBB31, GpuFieldType, GpuPolynomial, GpuPolynomialExt,
             GpuMatrix, GpuDigestLayer,
         },
     };
@@ -29,27 +29,27 @@ pub mod gpu_prover {
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex, MutexGuard};
 
-    pub type GL64Base = p3::goldilocks::Goldilocks;
-    pub type GL64Ext = ff_ext::GoldilocksExt2;
+    pub type BB31Base = p3::babybear::BabyBear;
+    pub type BB31Ext = ff_ext::BabyBearExt4;
 
     pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> =
         Lazy::new(|| CudaDevice::new(0));
 
     #[allow(clippy::type_complexity)]
     pub static CUDA_HAL: Lazy<
-        Result<Arc<Mutex<CudaHalGL64>>, Box<dyn std::error::Error + Send + Sync>>,
+        Result<Arc<Mutex<CudaHalBB31>>, Box<dyn std::error::Error + Send + Sync>>,
     > = Lazy::new(|| {
         let device = CUDA_DEVICE
             .as_ref()
             .map_err(|e| format!("Device init failed: {:?}", e))?;
         device.bind_to_thread()?;
 
-        CudaHalGL64::new()
+        CudaHalBB31::new()
             .map(|hal| Arc::new(Mutex::new(hal)))
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     });
 
-    pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalGL64>, String> {
+    pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalBB31>, String> {
         let device = CUDA_DEVICE
             .as_ref()
             .map_err(|e| format!("Device not available: {:?}", e))?;
@@ -182,12 +182,12 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Create GPU version from CPU version of MultilinearExtension
-    pub fn from_ceno(cuda_hal: &CudaHalGL64, mle: &MultilinearExtension<'a, E>) -> Self {
+    pub fn from_ceno(cuda_hal: &CudaHalBB31, mle: &MultilinearExtension<'a, E>) -> Self {
         // check type of mle
         match mle.evaluations {
             FieldType::Base(_) => {
                 let mle_vec_ref = mle.get_base_field_vec();
-                let mle_vec_ref_gl64: &[GL64Base] = unsafe { std::mem::transmute(mle_vec_ref) };
+                let mle_vec_ref_gl64: &[BB31Base] = unsafe { std::mem::transmute(mle_vec_ref) };
                 let mle_gpu =
                     GpuPolynomial::from_ceno_vec(cuda_hal, mle_vec_ref_gl64, mle.num_vars())
                         .unwrap();
@@ -198,7 +198,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
             }
             FieldType::Ext(_) => {
                 let mle_vec_ref = mle.get_ext_field_vec();
-                let mle_vec_ref_gl64_ext: &[GL64Ext] = unsafe { std::mem::transmute(mle_vec_ref) };
+                let mle_vec_ref_gl64_ext: &[BB31Ext] = unsafe { std::mem::transmute(mle_vec_ref) };
                 let mle_gpu =
                     GpuPolynomialExt::from_ceno_vec(cuda_hal, mle_vec_ref_gl64_ext, mle.num_vars())
                         .unwrap();
@@ -329,7 +329,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         challenges: &[E],
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
+            != std::any::TypeId::of::<BB31Base>()
         {
             panic!("GPU backend only supports Goldilocks base field");
         }
@@ -371,7 +371,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     &pub_io_evals,
                     challenges,
                 );
-                let coeffs_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(coeffs) };
+                let coeffs_gl64: Vec<BB31Ext> = unsafe { std::mem::transmute(coeffs) };
                 (coeffs_gl64, indices, size_info)
             })
             .fold(
@@ -395,7 +395,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // process & transmute poly
         let all_witins_gpu = layer_wits.iter().map(|mle| mle.as_ref()).collect_vec();
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
 
