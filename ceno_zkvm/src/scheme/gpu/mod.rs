@@ -205,6 +205,14 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
     let chip_record_alpha = challenges[0];
 
+    // TODO: safety ?
+    let records = unsafe {
+        std::mem::transmute::<
+            &[ArcMultilinearExtensionGpu<'_, E>],
+            &[ArcMultilinearExtensionGpu<'static, E>]
+        >(records)
+    };
+
     // Parse records into different categories (same as build_tower_witness)
     let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
     let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
@@ -796,6 +804,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
                 let commitment_gl64: &BasefoldCommitmentWithWitnessGpu<
                     GL64Base,
                     BufferImpl<GL64Base>,
+                    GpuDigestLayer,
+                    GpuMatrix<'static>,
+                    GpuPolynomial<'static>,
                 > = unsafe { std::mem::transmute(*commitment) };
                 let point_eval_pairs_gl64: Vec<_> = point_eval_pairs
                     .iter()
@@ -857,7 +868,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         // 2. convert from BasefoldCommitmentWithWitness<E> to BasefoldCommitmentWithWitness<GL64Base>
         let cuda_hal = get_cuda_hal().unwrap();
         let pcs_data_basefold =
-            convert_ceno_to_gpu_basefold_commitment(&cuda_hal, basefold_commitment);
+            convert_ceno_to_gpu_basefold_commitment::<CudaHalGL64, GL64Ext, GL64Base, GpuDigestLayer, GpuMatrix, GpuPolynomial>(&cuda_hal, basefold_commitment);
         let pcs_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
             unsafe { std::mem::transmute_copy(&pcs_data_basefold) };
         std::mem::forget(pcs_data_basefold);

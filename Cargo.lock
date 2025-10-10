@@ -1308,7 +1308,7 @@ dependencies = [
 [[package]]
 name = "cuda_hal"
 version = "0.1.0"
-source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=feat%2Fcommon-sumcheck#5d31a109e41ebc6b3892353faccd91868f0d5b0e"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=feat%2Fcommon-module-2#bc255abafb6cd6ce3562bc971ca1250c80f22795"
 dependencies = [
  "anyhow",
  "cudarc",
