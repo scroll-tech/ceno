@@ -144,7 +144,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 unsafe { std::mem::transmute(vec_traces) };
 
             let span = entered_span!("[gpu] batch_commit", profiling_2 = true);
-            let pcs_data = cuda_hal.basefold.batch_commit(traces_gl64).unwrap();
+            let pcs_data = cuda_hal.basefold.batch_commit(&cuda_hal, traces_gl64).unwrap();
             exit_span!(span);
 
             let span = entered_span!("[gpu] get_pure_commitment", profiling_2 = true);
@@ -444,8 +444,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         let r_set_len = cs.r_expressions.len() + cs.r_table_expressions.len();
 
         // GPU optimization: Use build_tower_witness_gpu which handles buffer allocation internally
-        let mut _prod_buffers: Vec<ceno_gpu::gl64::buffer::BufferImpl<GL64Ext>> = Vec::new();
-        let mut _logup_buffers: Vec<ceno_gpu::gl64::buffer::BufferImpl<GL64Ext>> = Vec::new();
+        let mut _prod_buffers: Vec<BufferImpl<GL64Ext>> = Vec::new();
+        let mut _logup_buffers: Vec<BufferImpl<GL64Ext>> = Vec::new();
 
         // Call build_tower_witness_gpu which will allocate buffers and build GPU specs
         let span = entered_span!("build_tower_witness", profiling_2 = true);
