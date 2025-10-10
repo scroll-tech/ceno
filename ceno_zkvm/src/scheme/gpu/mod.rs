@@ -238,6 +238,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
+                &cuda_hal,
                 wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN,
@@ -252,6 +253,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
+                &cuda_hal,
                 wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN,
@@ -269,6 +271,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
+                &cuda_hal,
                 wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN_LOGUP,
@@ -287,6 +290,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
+                &cuda_hal,
                 wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN_LOGUP,
