@@ -18,10 +18,11 @@ pub mod gpu_prover {
     pub use ceno_gpu::{
         BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu, Buffer, CudaHal,
         common::buffer::BufferImpl,
+        common::mle::{build_mle_as_ceno, ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu, rotation_selector_gpu},
+        common::basefold::utils::convert_ceno_to_gpu_basefold_commitment,
         gl64::{
             CudaHalGL64, GpuFieldType, GpuPolynomial, GpuPolynomialExt,
-            build_mle_as_ceno, convert_ceno_to_gpu_basefold_commitment,
-            ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu, rotation_selector_gpu,
+            GpuMatrix, GpuDigestLayer,
         },
     };
     use cudarc::driver::{CudaDevice, DriverError};
@@ -268,7 +269,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
     type PcsData =
-        BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<'static, E::BaseField>>;
+        BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<'static, E::BaseField>, GpuDigestLayer, GpuMatrix<'static>, GpuPolynomial<'static>>;
     #[cfg(not(feature = "gpu"))]
     type PcsData = <PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
