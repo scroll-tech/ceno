@@ -5,6 +5,7 @@ use super::constants::PC_STEP_SIZE;
 use crate::{
     chip_handler::{RegisterExpr, general::InstFetch},
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
     tables::InsnRecord,
@@ -12,7 +13,6 @@ use crate::{
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-
 // Opcode: 1100011
 // Funct3:
 //   000  BEQ
@@ -89,12 +89,15 @@ impl<E: ExtensionField> BInstructionConfig<E> {
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         self.vm_state.assign_instance(instance, step)?;
-        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
-        self.rs2.assign_instance(instance, lk_multiplicity, step)?;
+        self.rs1
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
+        self.rs2
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         // Immediate
         set_val!(

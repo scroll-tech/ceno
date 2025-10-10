@@ -16,23 +16,25 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, MemOp, Platform,
-    Program, StepRecord, Tracer, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, Platform, Program,
+    StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
+    shards::Shards,
 };
 use clap::ValueEnum;
 use either::Either;
 use ff_ext::ExtensionField;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
-use gkr_iop::hal::ProverBackend;
+use gkr_iop::{RAMType, hal::ProverBackend};
 use itertools::{Itertools, MinMaxResult, chain};
-use mpcs::{PolynomialCommitmentScheme, SecurityLevel, util::arithmetic::div_ceil};
+use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::Serialize;
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    mem,
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
@@ -96,52 +98,89 @@ pub struct EmulationResult<'a> {
     pub all_records: Vec<StepRecord>,
     pub final_mem_state: FinalMemState,
     pub pi: PublicValues,
-    pub ram_bus: RAMBus<'a>,
+    pub shard_ctx: ShardContext<'a>,
 }
 
-pub struct RAMBus<'a> {
+pub enum RAMRecordType {
+    Read,
+    Write,
+}
+
+pub struct RAMRecord {
+    ram_type: RAMRecordType,
+    id: u64,
+    addr: WordAddr,
+    prev_cycle: Cycle,
+    cycle: Cycle,
+    prev_value: Option<Word>,
+    value: Word,
+}
+
+pub struct ShardContext<'a> {
     shard_id: usize,
     num_shards: usize,
     max_cycle: Cycle,
     addr_future_accesses: Cow<'a, HashMap<(WordAddr, Cycle), Cycle>>,
-    thread_based_record_storage: Either<Vec<Vec<MemFinalRecord>>, &'a mut Vec<MemFinalRecord>>,
+    thread_based_record_storage: Either<
+        Vec<[BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()]>,
+        &'a mut [BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()],
+    >,
     pub cur_shard_cycle_range: std::ops::Range<usize>,
 }
 
-impl<'a> RAMBus<'a> {
+impl<'a> Default for ShardContext<'a> {
+    fn default() -> Self {
+        let max_threads = max_usable_threads();
+        let thread_based_record_storage = (0..max_threads)
+            .into_par_iter()
+            .map(|_| std::array::from_fn(|_| BTreeMap::new()))
+            .collect::<Vec<_>>();
+        Self {
+            shard_id: 0,
+            num_shards: 1,
+            max_cycle: Cycle::default(),
+            addr_future_accesses: Cow::Owned(HashMap::new()),
+            thread_based_record_storage: Either::Left(thread_based_record_storage),
+            cur_shard_cycle_range: 0..usize::MAX,
+        }
+    }
+}
+
+impl<'a> ShardContext<'a> {
     pub fn new(
         shard_id: usize,
         num_shards: usize,
-        max_cycle: Cycle,
+        executed_instructions: usize,
         addr_future_accesses: HashMap<(WordAddr, Cycle), Cycle>,
     ) -> Self {
         let max_threads = max_usable_threads();
-        let max_insts = (max_cycle.div_ceil(4));
-        let max_record_per_thread = max_insts.div_ceil(max_threads as u64);
-        // reserve larger max_record_per_thread even a shard just need smaller space
-        // TODO optimize mem usage
+        // let max_record_per_thread = max_insts.div_ceil(max_threads as u64);
+        // TODO pre-reserve vector
         let thread_based_record_storage = (0..max_threads)
             .into_par_iter()
-            .map(|_| Vec::with_capacity(max_record_per_thread as usize))
+            .map(|_| std::array::from_fn(|_| BTreeMap::new()))
             .collect::<Vec<_>>();
-        let expected_cycles_per_shard = max_cycle.div_ceil(num_shards as u64) as usize;
-        let cur_shard_cycle_range =
-            (shard_id * expected_cycles_per_shard..(shard_id + 1) * expected_cycles_per_shard);
-        RAMBus {
+
+        let expected_inst_per_shard = executed_instructions.div_ceil(num_shards) as usize;
+        let max_cycle = (executed_instructions + 1) * 4; // cycle start from 4
+        let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * 4).max(4)
+            ..((shard_id + 1) * expected_inst_per_shard * 4).min(max_cycle);
+
+        ShardContext {
             shard_id,
             num_shards,
-            max_cycle,
+            max_cycle: max_cycle as Cycle,
             addr_future_accesses: Cow::Owned(addr_future_accesses),
             thread_based_record_storage: Either::Left(thread_based_record_storage),
             cur_shard_cycle_range,
         }
     }
 
-    pub fn get_forked(&mut self) -> Vec<RAMBus> {
+    pub fn get_forked(&mut self) -> Vec<ShardContext<'_>> {
         match &mut self.thread_based_record_storage {
             Either::Left(thread_based_record_storage) => thread_based_record_storage
                 .iter_mut()
-                .map(|v| RAMBus {
+                .map(|v| ShardContext {
                     shard_id: self.shard_id,
                     num_shards: self.num_shards,
                     max_cycle: self.max_cycle,
@@ -154,7 +193,64 @@ impl<'a> RAMBus<'a> {
         }
     }
 
-    pub fn send(&mut self) {}
+    #[inline(always)]
+    pub fn send(
+        &mut self,
+        ram_type: crate::structs::RAMType,
+        addr: WordAddr,
+        id: u64,
+        cycle: Cycle,
+        prev_cycle: Cycle,
+        value: Word,
+        prev_value: Option<Word>,
+    ) {
+        // check read from external mem bus
+        if prev_cycle < self.cur_shard_cycle_range.start as Cycle
+            && cycle >= self.cur_shard_cycle_range.start as Cycle
+        {
+            let ram_record = self
+                .thread_based_record_storage
+                .as_mut()
+                .right()
+                .expect("illegal type");
+            ram_record[ram_type as usize].insert(
+                addr,
+                RAMRecord {
+                    ram_type: RAMRecordType::Read,
+                    id,
+                    addr,
+                    prev_cycle,
+                    cycle,
+                    prev_value,
+                    value,
+                },
+            );
+        }
+        // check write to external mem bus
+        if let Some(future_touch_cycle) = self.addr_future_accesses.get(&(addr, cycle)) {
+            if *future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle
+                && cycle < self.cur_shard_cycle_range.end as Cycle
+            {
+                let ram_record = self
+                    .thread_based_record_storage
+                    .as_mut()
+                    .right()
+                    .expect("illegal type");
+                ram_record[ram_type as usize].insert(
+                    addr,
+                    RAMRecord {
+                        ram_type: RAMRecordType::Write,
+                        id,
+                        addr,
+                        prev_cycle,
+                        cycle,
+                        prev_value,
+                        value,
+                    },
+                );
+            }
+        }
+    }
 }
 
 pub fn emulate_program<'a>(
@@ -162,6 +258,7 @@ pub fn emulate_program<'a>(
     max_steps: usize,
     init_mem_state: &InitMemState,
     platform: &Platform,
+    shards: &Shards,
 ) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
@@ -333,13 +430,18 @@ pub fn emulate_program<'a>(
         ),
     );
 
-    let ram_bus = RAMBus::new(0, 1, end_cycle, vm.take_tracer().next_accesses());
+    let shard_ctx = ShardContext::new(
+        shards.shard_id,
+        shards.num_shards,
+        insts,
+        vm.take_tracer().next_accesses(),
+    );
 
     EmulationResult {
         pi,
         exit_code,
         all_records,
-        ram_bus,
+        shard_ctx,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,
@@ -525,14 +627,19 @@ pub fn generate_witness<E: ExtensionField>(
         .config
         .assign_opcode_circuit(
             &system_config.zkvm_cs,
-            &mut emul_result.ram_bus,
+            &mut emul_result.shard_ctx,
             &mut zkvm_witness,
             emul_result.all_records,
         )
         .unwrap();
     system_config
         .dummy_config
-        .assign_opcode_circuit(&system_config.zkvm_cs, &mut zkvm_witness, dummy_records)
+        .assign_opcode_circuit(
+            &system_config.zkvm_cs,
+            &mut emul_result.shard_ctx,
+            &mut zkvm_witness,
+            dummy_records,
+        )
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
 
@@ -589,6 +696,7 @@ pub type IntermediateState<E, PCS> = (Option<ZKVMProof<E, PCS>>, Option<ZKVMVeri
 pub struct E2EProgramCtx<E: ExtensionField> {
     pub program: Arc<Program>,
     pub platform: Platform,
+    pub shards: Shards,
     pub static_addrs: Vec<MemInitRecord>,
     pub pubio_len: usize,
     pub system_config: ConstraintSystemConfig<E>,
@@ -616,7 +724,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> E2ECheckpointResult<
 }
 
 /// Set up a program with the given platform
-pub fn setup_program<E: ExtensionField>(program: Program, platform: Platform) -> E2EProgramCtx<E> {
+pub fn setup_program<E: ExtensionField>(
+    program: Program,
+    platform: Platform,
+    shards: Shards,
+) -> E2EProgramCtx<E> {
     let static_addrs = init_static_addrs(&program);
     let pubio_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
@@ -641,6 +753,7 @@ pub fn setup_program<E: ExtensionField>(program: Program, platform: Platform) ->
     E2EProgramCtx {
         program: Arc::new(program),
         platform,
+        shards,
         static_addrs,
         pubio_len,
         system_config,
@@ -733,13 +846,14 @@ pub fn run_e2e_with_checkpoint<
     device: PD,
     program: Program,
     platform: Platform,
+    shards: Shards,
     hints: &[u32],
     public_io: &[u32],
     max_steps: usize,
     checkpoint: Checkpoint,
 ) -> E2ECheckpointResult<E, PCS> {
     let start = std::time::Instant::now();
-    let ctx = setup_program::<E>(program, platform);
+    let ctx = setup_program::<E>(program, platform, shards);
     tracing::debug!("setup_program done in {:?}", start.elapsed());
 
     // Keygen
@@ -777,6 +891,7 @@ pub fn run_e2e_with_checkpoint<
         max_steps,
         &init_full_mem,
         &ctx.platform,
+        &ctx.shards,
     );
     tracing::debug!("emulate done in {:?}", start.elapsed());
 
@@ -860,7 +975,13 @@ pub fn run_e2e_proof<
     is_mock_proving: bool,
 ) -> ZKVMProof<E, PCS> {
     // Emulate program
-    let emul_result = emulate_program(ctx.program.clone(), max_steps, init_full_mem, &ctx.platform);
+    let emul_result = emulate_program(
+        ctx.program.clone(),
+        max_steps,
+        init_full_mem,
+        &ctx.platform,
+        &ctx.shards,
+    );
 
     // clone pi before consuming
     let pi = emul_result.pi.clone();

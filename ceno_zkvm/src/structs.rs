@@ -1,6 +1,6 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    e2e::RAMBus,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::Instruction,
     state::StateCircuit,
@@ -311,7 +311,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
-        ram_bus: &mut RAMBus,
+        shard_ctx: &mut ShardContext,
         config: &OC::InstructionConfig,
         records: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
@@ -319,8 +319,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) = OC::assign_instances(
-            ram_bus,
             config,
+            shard_ctx,
             cs.zkvm_v1_css.num_witin as usize,
             cs.zkvm_v1_css.num_structural_witin as usize,
             records,

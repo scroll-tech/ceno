@@ -10,8 +10,10 @@ use crate::{
         RegisterChipOperations, RegisterExpr,
     },
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
+    structs::RAMType,
     uint::Value,
     witness::{LkMultiplicity, set_val},
 };
@@ -106,6 +108,7 @@ impl<E: ExtensionField> ReadRS1<E> {
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -120,6 +123,15 @@ impl<E: ExtensionField> ReadRS1<E> {
             op.previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RS1,
         )?;
+        shard_ctx.send(
+            RAMType::Register,
+            op.addr,
+            op.register_index() as u64,
+            step.cycle() + Tracer::SUBCYCLE_RS1,
+            op.previous_cycle,
+            op.value,
+            None,
+        );
 
         Ok(())
     }
@@ -160,6 +172,7 @@ impl<E: ExtensionField> ReadRS2<E> {
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
@@ -174,6 +187,16 @@ impl<E: ExtensionField> ReadRS2<E> {
             op.previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_RS2,
         )?;
+
+        shard_ctx.send(
+            RAMType::Register,
+            op.addr,
+            op.register_index() as u64,
+            step.cycle() + Tracer::SUBCYCLE_RS2,
+            op.previous_cycle,
+            op.value,
+            None,
+        );
 
         Ok(())
     }
@@ -216,16 +239,18 @@ impl<E: ExtensionField> WriteRD<E> {
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.rd().expect("rd op");
-        self.assign_op(instance, lk_multiplicity, step.cycle(), &op)
+        self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), &op)
     }
 
     pub fn assign_op(
         &self,
         instance: &mut [E::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,
@@ -246,6 +271,15 @@ impl<E: ExtensionField> WriteRD<E> {
             op.previous_cycle,
             cycle + Tracer::SUBCYCLE_RD,
         )?;
+        shard_ctx.send(
+            RAMType::Register,
+            op.addr,
+            op.register_index() as u64,
+            cycle + Tracer::SUBCYCLE_RD,
+            op.previous_cycle,
+            op.value.after,
+            Some(op.value.before),
+        );
 
         Ok(())
     }
@@ -284,23 +318,31 @@ impl<E: ExtensionField> ReadMEM<E> {
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
+        let op = step.memory_op().unwrap();
         // Memory state
-        set_val!(
-            instance,
-            self.prev_ts,
-            step.memory_op().unwrap().previous_cycle
-        );
+        set_val!(instance, self.prev_ts, op.previous_cycle);
 
         // Memory read
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.memory_op().unwrap().previous_cycle,
+            op.previous_cycle,
             step.cycle() + Tracer::SUBCYCLE_MEM,
         )?;
+
+        shard_ctx.send(
+            RAMType::Memory,
+            op.addr,
+            op.addr.baddr().0 as u64,
+            step.cycle() + Tracer::SUBCYCLE_MEM,
+            op.previous_cycle,
+            op.value.after,
+            None,
+        );
 
         Ok(())
     }
@@ -337,16 +379,18 @@ impl WriteMEM {
     pub fn assign_instance<E: ExtensionField>(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.memory_op().unwrap();
-        self.assign_op(instance, lk_multiplicity, step.cycle(), &op)
+        self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), &op)
     }
 
     pub fn assign_op<F: SmallField>(
         &self,
         instance: &mut [F],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,
@@ -359,6 +403,16 @@ impl WriteMEM {
             op.previous_cycle,
             cycle + Tracer::SUBCYCLE_MEM,
         )?;
+
+        shard_ctx.send(
+            RAMType::Memory,
+            op.addr,
+            op.addr.baddr().0 as u64,
+            cycle + Tracer::SUBCYCLE_MEM,
+            op.previous_cycle,
+            op.value.after,
+            Some(op.value.before),
+        );
 
         Ok(())
     }

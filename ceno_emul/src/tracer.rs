@@ -473,11 +473,9 @@ impl Tracer {
     /// - Record the current instruction as the origin of the latest access.
     /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
     pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
-        let prev_cycle = self
-            .latest_accesses
-            .insert(addr, self.record.cycle + subcycle)
-            .unwrap_or(0);
-        self.next_accesses.insert((addr, prev_cycle), subcycle);
+        let cur_cycle = self.record.cycle + subcycle;
+        let prev_cycle = self.latest_accesses.insert(addr, cur_cycle).unwrap_or(0);
+        self.next_accesses.insert((addr, prev_cycle), cur_cycle);
         prev_cycle
     }
 

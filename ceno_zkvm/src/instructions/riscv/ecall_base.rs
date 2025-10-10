@@ -7,8 +7,10 @@ use super::constants::UInt;
 use crate::{
     chip_handler::{RegisterChipOperations, RegisterExpr},
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
+    structs::RAMType,
     uint::Value,
     witness::LkMultiplicity,
 };
@@ -62,6 +64,7 @@ impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID
     pub fn assign_op(
         &self,
         instance: &mut [E::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,
@@ -76,17 +79,24 @@ impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID
             );
         }
 
+        let cycle = if RW {
+            cycle + Tracer::SUBCYCLE_RD
+        } else {
+            cycle + Tracer::SUBCYCLE_RS1
+        };
         // Register write
-        self.lt_cfg.assign_instance(
-            instance,
-            lk_multiplicity,
+        self.lt_cfg
+            .assign_instance(instance, lk_multiplicity, op.previous_cycle, cycle)?;
+
+        shard_ctx.send(
+            RAMType::Register,
+            op.addr,
+            REG_ID as u64,
+            cycle,
             op.previous_cycle,
-            if RW {
-                cycle + Tracer::SUBCYCLE_RD
-            } else {
-                cycle + Tracer::SUBCYCLE_RS1
-            },
-        )?;
+            op.value.after,
+            None,
+        );
 
         Ok(())
     }

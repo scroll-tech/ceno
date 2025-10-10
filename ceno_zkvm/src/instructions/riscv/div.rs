@@ -53,6 +53,7 @@ mod test {
     use crate::{
         Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
+        e2e::ShardContext,
         instructions::{
             Instruction,
             riscv::{
@@ -179,6 +180,7 @@ mod test {
         // values assignment
         let ([raw_witin, _], lkm) = Insn::assign_instances(
             &config,
+            &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
             vec![StepRecord::new_r_instruction(
