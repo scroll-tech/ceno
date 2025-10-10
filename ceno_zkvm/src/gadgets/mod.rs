@@ -1,5 +1,7 @@
 mod div;
 mod is_lt;
+mod poseidon2;
+mod poseidon2_constants;
 mod signed;
 mod signed_ext;
 mod signed_limbs;
