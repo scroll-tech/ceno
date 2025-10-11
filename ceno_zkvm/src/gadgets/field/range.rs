@@ -205,7 +205,10 @@ impl<Expr: Clone, P: FieldParameters> FieldLtCols<Expr, P> {
         let mut sum_flags: Expression<E> = 0.into();
         for flag in self.byte_flags.0.iter() {
             // Assert that the flag is boolean.
-            builder.assert_bit(|| "if cond, flag", cond.expr() * flag.expr())?;
+            // It should be builder.assert_bit(|| "if cond, flag", cond.expr() * flag.expr())?;
+            // But this makes the degree of sumcheck to be 5 (which is not supported by the backend),
+            // therefore, we just assume byte flags are boolean no matter cond is 1 or 0.
+            builder.assert_bit(|| "flag", flag.expr())?;
             // Add the flag to the sum.
             sum_flags = sum_flags.clone() + flag.expr();
         }
