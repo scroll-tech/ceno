@@ -58,7 +58,7 @@ impl IsZeroOperation<WitIn> {
         builder: &mut CircuitBuilder<E>,
         a: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
-        let one: Expression<E> = Expression::ZERO;
+        let one: Expression<E> = Expression::ONE;
 
         // 1. Input == 0 => is_zero = 1 regardless of the inverse.
         // 2. Input != 0
@@ -100,6 +100,7 @@ impl<F: SmallField> IsZeroOperation<F> {
         }
         let prod = self.inverse * a;
         debug_assert!(prod == F::ONE || prod == F::ZERO);
+        debug_assert_eq!(self.result, F::ONE - self.inverse * a);
         (a == F::ZERO) as u32
     }
 }
