@@ -916,7 +916,16 @@ dependencies = [
 name = "ceno_crypto_primitives"
 version = "0.1.0"
 dependencies = [
- "ceno_syscall",
+ "ceno_syscall 0.1.0",
+ "elliptic-curve",
+]
+
+[[package]]
+name = "ceno_crypto_primitives"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest#98f45d56f5c44455026c0a7049e1418044feb9dd"
+dependencies = [
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest)",
  "elliptic-curve",
 ]
 
@@ -925,7 +934,8 @@ name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ceno_rt 0.1.0",
+ "ceno_rt",
+ "ceno_syscall 0.1.0",
  "elf",
  "ff_ext",
  "itertools 0.13.0",
@@ -959,7 +969,7 @@ dependencies = [
 name = "ceno_keccak"
 version = "0.1.0"
 dependencies = [
- "ceno_rt 0.1.0",
+ "ceno_syscall 0.1.0",
  "tiny-keccak",
 ]
 
@@ -973,19 +983,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "ceno_rt"
+name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest#318275c5f052c906ea7a2f7a9e48af7f4bb7cf49"
-dependencies = [
- "elliptic-curve",
- "getrandom 0.2.16",
- "getrandom 0.3.2",
- "rkyv",
-]
 
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest#98f45d56f5c44455026c0a7049e1418044feb9dd"
 
 [[package]]
 name = "ceno_zkvm"
@@ -1817,7 +1821,8 @@ dependencies = [
  "alloy-primitives",
  "ceno_crypto",
  "ceno_keccak",
- "ceno_rt 0.1.0",
+ "ceno_rt",
+ "ceno_syscall 0.1.0",
  "getrandom 0.3.2",
  "rand 0.8.5",
  "rkyv",
@@ -2463,9 +2468,9 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#18cc237e254e2dccd94437eb99c3c8e6ac7373cd"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#2881a464bc20636189bd61ee79de4638e5c050fa"
 dependencies = [
- "ceno_rt 0.1.0 (git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest)",
+ "ceno_crypto_primitives 0.1.0 (git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest)",
  "cfg-if",
  "ecdsa 0.16.9 (git+https://github.com/sp1-patches/signatures.git?tag=patch-16.9-sp1-4.1.0)",
  "elliptic-curve",

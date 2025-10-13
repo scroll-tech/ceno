@@ -1,6 +1,6 @@
 // Test decompression of curve point. Assert result inside the guest
 extern crate ceno_rt;
-use ceno_rt::syscalls::syscall_secp256k1_decompress;
+use ceno_syscall::syscall_secp256k1_decompress;
 
 // Byte repr. of point P1 from https://docs.rs/secp/latest/secp/#arithmetic-1
 const COMPRESSED: [u8; 33] = [

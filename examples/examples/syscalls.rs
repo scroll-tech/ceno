@@ -1,6 +1,6 @@
 use std::array;
 
-use ceno_rt::syscalls::{
+use ceno_syscall::{
     syscall_keccak_permute, syscall_secp256k1_add, syscall_secp256k1_decompress,
     syscall_secp256k1_double, syscall_sha256_extend,
 };

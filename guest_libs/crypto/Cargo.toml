@@ -11,8 +11,7 @@ version = "0.1.0"
 
 [dependencies]
 ceno_keccak = { path = "../keccak" }
-ceno_rt = { path = "../../ceno_rt" }
-k256 = { version = "0.13", default-features = false, features = ["std", "ecdsa"] }
+k256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa"] }
 thiserror.workspace = true
 
 [dev-dependencies]

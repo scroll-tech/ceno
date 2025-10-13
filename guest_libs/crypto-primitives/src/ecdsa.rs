@@ -16,7 +16,7 @@
 use super::utils::AffinePoint as AffinePointTrait;
 
 use elliptic_curve::{
-    ff, generic_array::typenum::consts::U32, subtle::CtOption, CurveArithmetic, FieldBytes,
+    CurveArithmetic, FieldBytes, ff, generic_array::typenum::consts::U32, subtle::CtOption,
 };
 use std::{fmt::Debug, ops::Neg};
 
@@ -48,10 +48,10 @@ type FIELD_BYTES_SIZE = U32;
 pub trait ECDSACurve
 where
     Self: CurveArithmetic<
-        FieldBytesSize = FIELD_BYTES_SIZE,
-        AffinePoint = AffinePoint<Self>,
-        ProjectivePoint = ProjectivePoint<Self>,
-    >,
+            FieldBytesSize = FIELD_BYTES_SIZE,
+            AffinePoint = AffinePoint<Self>,
+            ProjectivePoint = ProjectivePoint<Self>,
+        >,
 {
     type FieldElement: Field<Self> + Neg<Output = Self::FieldElement>;
 
@@ -84,22 +84,17 @@ pub trait Field<C: ECDSACurve>: ff::PrimeField {
 pub type FieldElement<C> = <C as ECDSACurve>::FieldElement;
 
 /// Alias trait for the [`AffinePointTrait`] with 32 byte field elements.
-pub trait ECDSAPoint:
-AffinePointTrait<POINT_LIMBS> + Clone + Copy + Debug + Send + Sync
-{
+pub trait ECDSAPoint: AffinePointTrait<POINT_LIMBS> + Clone + Copy + Debug + Send + Sync {
     #[inline]
     fn from(x: &[u8], y: &[u8]) -> Self {
         <Self as AffinePointTrait<POINT_LIMBS>>::from(x, y)
     }
 }
 
-impl<P> ECDSAPoint for P where
-    P: AffinePointTrait<POINT_LIMBS> + Clone + Copy + Debug + Send + Sync
-{
-}
+impl<P> ECDSAPoint for P where P: AffinePointTrait<POINT_LIMBS> + Clone + Copy + Debug + Send + Sync {}
 
 pub mod ecdh {
-    pub use elliptic_curve::ecdh::{diffie_hellman, EphemeralSecret, SharedSecret};
+    pub use elliptic_curve::ecdh::{EphemeralSecret, SharedSecret, diffie_hellman};
 
     use super::{AffinePoint, ECDSACurve, Field};
 

@@ -118,7 +118,7 @@ pub fn halt(exit_code: u32) -> ! {
     );
 }
 
-#[cfg(all(feature = "guest", target_arch = "riscv32"))]
+#[cfg(target_arch = "riscv32")]
 global_asm!(
     "
 // The entry point for the program.

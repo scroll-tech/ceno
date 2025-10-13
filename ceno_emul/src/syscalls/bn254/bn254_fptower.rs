@@ -17,7 +17,7 @@ impl SyscallSpec for Bn254FpAddSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * BN254_FP_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::BN254_FP_ADD;
+    const CODE: u32 = ceno_syscall::BN254_FP_ADD;
 }
 
 pub struct Bn254Fp2AddSpec;
@@ -26,7 +26,7 @@ impl SyscallSpec for Bn254Fp2AddSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * BN254_FP2_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::BN254_FP2_ADD;
+    const CODE: u32 = ceno_syscall::BN254_FP2_ADD;
 }
 
 pub struct Bn254FpMulSpec;
@@ -35,7 +35,7 @@ impl SyscallSpec for Bn254FpMulSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * BN254_FP_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::BN254_FP_MUL;
+    const CODE: u32 = ceno_syscall::BN254_FP_MUL;
 }
 
 pub struct Bn254Fp2MulSpec;
@@ -44,7 +44,7 @@ impl SyscallSpec for Bn254Fp2MulSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * BN254_FP2_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::BN254_FP2_MUL;
+    const CODE: u32 = ceno_syscall::BN254_FP2_MUL;
 }
 
 fn bn254_fptower_binary_op<

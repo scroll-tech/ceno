@@ -9,17 +9,17 @@
 //! of projective arithmetic for performance.
 
 use super::{
-    ECDSACurve, ECDSAPoint, Field, FieldElement, AffinePointTrait, FIELD_BYTES_SIZE_USIZE,
+    AffinePointTrait, ECDSACurve, ECDSAPoint, FIELD_BYTES_SIZE_USIZE, Field, FieldElement,
 };
 
 use elliptic_curve::{
+    FieldBytes, PrimeField,
     ff::Field as _,
     group::GroupEncoding,
     point::{AffineCoordinates, DecompactPoint, DecompressPoint},
     sec1::{self, CompressedPoint, EncodedPoint, FromEncodedPoint, ToEncodedPoint},
     subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption},
     zeroize::DefaultIsZeroes,
-    FieldBytes, PrimeField,
 };
 use std::ops::Neg;
 
@@ -40,7 +40,9 @@ impl<C: ECDSACurve> AffinePoint<C> {
         let y_slice = y_slice.as_mut_slice();
         y_slice.reverse();
 
-        AffinePoint { inner: <C::SP1AffinePoint as ECDSAPoint>::from(x_slice, y_slice) }
+        AffinePoint {
+            inner: <C::SP1AffinePoint as ECDSAPoint>::from(x_slice, y_slice),
+        }
     }
 
     /// Get the x and y field elements of the point.
@@ -70,12 +72,16 @@ impl<C: ECDSACurve> AffinePoint<C> {
 
     /// Get the generator point.
     pub fn generator() -> Self {
-        AffinePoint { inner: C::SP1AffinePoint::GENERATOR }
+        AffinePoint {
+            inner: C::SP1AffinePoint::GENERATOR,
+        }
     }
 
     /// Get the identity point.
     pub fn identity() -> Self {
-        AffinePoint { inner: C::SP1AffinePoint::identity() }
+        AffinePoint {
+            inner: C::SP1AffinePoint::identity(),
+        }
     }
 
     /// Check if the point is the identity point.
@@ -177,11 +183,7 @@ impl<C: ECDSACurve> ConditionallySelectable for AffinePoint<C> {
         // Conditional select is a constant time if-else operation.
         //
         // In the SP1 vm, there are no attempts made to prevent side channel attacks.
-        if choice.into() {
-            *b
-        } else {
-            *a
-        }
+        if choice.into() { *b } else { *a }
     }
 }
 

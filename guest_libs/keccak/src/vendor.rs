@@ -1,6 +1,6 @@
 //! Private types and traits copied from the `tiny-keccak`.
 
-use ceno_rt::syscalls::KECCAK_STATE_WORDS;
+use ceno_syscall::KECCAK_STATE_WORDS;
 
 pub mod keccak;
 

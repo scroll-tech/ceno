@@ -119,7 +119,10 @@ pub enum MulAssignError {
 
 /// Converts a slice of words to a byte array in little endian.
 pub fn words_to_bytes_le(words: &[u32]) -> Vec<u8> {
-    words.iter().flat_map(|word| word.to_le_bytes().to_vec()).collect::<Vec<_>>()
+    words
+        .iter()
+        .flat_map(|word| word.to_le_bytes().to_vec())
+        .collect::<Vec<_>>()
 }
 
 /// Converts a byte array in little endian to a slice of words.

@@ -8,13 +8,13 @@
 //! Note: When performing curve operations, accelerated crates for SP1 use affine arithmetic instead
 //! of projective arithmetic for performance.
 
-use super::{AffinePoint, ECDSACurve, AffinePointTrait};
+use super::{AffinePoint, AffinePointTrait, ECDSACurve};
 
 use elliptic_curve::{
+    CurveArithmetic, FieldBytes,
     group::{cofactor::CofactorGroup, prime::PrimeGroup},
     ops::MulByGenerator,
     sec1::{CompressedPoint, ModulusSize},
-    CurveArithmetic, FieldBytes,
 };
 
 use elliptic_curve::{
@@ -44,7 +44,9 @@ pub struct ProjectivePoint<C: ECDSACurve> {
 
 impl<C: ECDSACurve> ProjectivePoint<C> {
     pub fn identity() -> Self {
-        ProjectivePoint { inner: AffinePoint::<C>::identity() }
+        ProjectivePoint {
+            inner: AffinePoint::<C>::identity(),
+        }
     }
 
     /// Convert the projective point to an affine point.
@@ -70,7 +72,9 @@ impl<C: ECDSACurve> ProjectivePoint<C> {
     }
 
     fn from_zkvm_point(p: C::SP1AffinePoint) -> Self {
-        Self { inner: AffinePoint { inner: p } }
+        Self {
+            inner: AffinePoint { inner: p },
+        }
     }
 }
 
@@ -114,7 +118,9 @@ impl<C: ECDSACurve> Group for ProjectivePoint<C> {
     }
 
     fn generator() -> Self {
-        Self { inner: AffinePoint::<C>::generator() }
+        Self {
+            inner: AffinePoint::<C>::generator(),
+        }
     }
 
     fn is_identity(&self) -> Choice {
@@ -162,7 +168,8 @@ impl<C: ECDSACurve, T: Borrow<C::Scalar>> Mul<T> for ProjectivePoint<C> {
 
 impl<C: ECDSACurve, T: Borrow<C::Scalar>> MulAssign<T> for ProjectivePoint<C> {
     fn mul_assign(&mut self, rhs: T) {
-        self.as_mut_zkvm_point().mul_assign(&be_bytes_to_le_words(rhs.borrow().to_repr()));
+        self.as_mut_zkvm_point()
+            .mul_assign(&be_bytes_to_le_words(rhs.borrow().to_repr()));
     }
 }
 
@@ -247,13 +254,15 @@ impl<C: ECDSACurve> AddAssign<&ProjectivePoint<C>> for ProjectivePoint<C> {
 
 impl<C: ECDSACurve> SubAssign<ProjectivePoint<C>> for ProjectivePoint<C> {
     fn sub_assign(&mut self, rhs: ProjectivePoint<C>) {
-        self.as_mut_zkvm_point().add_assign(rhs.neg().as_zkvm_point());
+        self.as_mut_zkvm_point()
+            .add_assign(rhs.neg().as_zkvm_point());
     }
 }
 
 impl<C: ECDSACurve> SubAssign<&ProjectivePoint<C>> for ProjectivePoint<C> {
     fn sub_assign(&mut self, rhs: &ProjectivePoint<C>) {
-        self.as_mut_zkvm_point().add_assign(rhs.neg().as_zkvm_point());
+        self.as_mut_zkvm_point()
+            .add_assign(rhs.neg().as_zkvm_point());
     }
 }
 
@@ -313,7 +322,8 @@ impl<C: ECDSACurve> SubAssign<AffinePoint<C>> for ProjectivePoint<C> {
     fn sub_assign(&mut self, rhs: AffinePoint<C>) {
         let projective = ProjectivePoint { inner: rhs }.neg();
 
-        self.as_mut_zkvm_point().add_assign(projective.as_zkvm_point());
+        self.as_mut_zkvm_point()
+            .add_assign(projective.as_zkvm_point());
     }
 }
 
@@ -321,7 +331,8 @@ impl<C: ECDSACurve> SubAssign<&AffinePoint<C>> for ProjectivePoint<C> {
     fn sub_assign(&mut self, rhs: &AffinePoint<C>) {
         let projective = ProjectivePoint { inner: *rhs }.neg();
 
-        self.as_mut_zkvm_point().add_assign(projective.as_zkvm_point());
+        self.as_mut_zkvm_point()
+            .add_assign(projective.as_zkvm_point());
     }
 }
 
@@ -329,7 +340,9 @@ impl<C: ECDSACurve> DefaultIsZeroes for ProjectivePoint<C> {}
 
 impl<C: ECDSACurve> ConditionallySelectable for ProjectivePoint<C> {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
-        Self { inner: AffinePoint::conditional_select(&a.inner, &b.inner, choice) }
+        Self {
+            inner: AffinePoint::conditional_select(&a.inner, &b.inner, choice),
+        }
     }
 }
 
@@ -404,7 +417,9 @@ fn be_bytes_to_le_words<T: AsMut<[u8]>>(mut bytes: T) -> [u32; 8] {
     let bytes = bytes.as_mut();
     bytes.reverse();
 
-    let mut iter = bytes.chunks(4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    let mut iter = bytes
+        .chunks(4)
+        .map(|b| u32::from_le_bytes(b.try_into().unwrap()));
     core::array::from_fn(|_| iter.next().unwrap())
 }
 

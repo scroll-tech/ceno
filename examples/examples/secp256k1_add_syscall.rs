@@ -1,6 +1,6 @@
 // Test addition of two curve points. Assert result inside the guest
 extern crate ceno_rt;
-use ceno_rt::syscalls::syscall_secp256k1_add;
+use ceno_syscall::syscall_secp256k1_add;
 
 // Byte repr. of points from https://docs.rs/secp/latest/secp/#arithmetic-1
 const P: [u8; 65] = [
