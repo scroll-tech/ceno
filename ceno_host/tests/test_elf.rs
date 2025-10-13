@@ -2,9 +2,9 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 
 use anyhow::Result;
 use ceno_emul::{
-    BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, COORDINATE_WORDS,
-    EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS, SHA_EXTEND_WORDS, StepRecord,
-    VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, EmuContext, InsnKind,
+    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, SHA_EXTEND_WORDS,
+    StepRecord, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
     host_utils::{read_all_messages, read_all_messages_as_words},
 };
 use ceno_host::CenoStdin;
@@ -411,9 +411,14 @@ fn test_secp256k1_decompress() -> Result<()> {
     // Writes should cover the Y coordinate, i.e latter half of the repr
     let expect = bytes_to_words(decompressed)[8..].to_vec();
 
-    assert_eq!(witness.mem_ops.len(), 2 * COORDINATE_WORDS);
+    assert_eq!(witness.mem_ops.len(), 2 * SECP256K1_COORDINATE_WORDS);
     // Reads on X
-    for (i, write_op) in witness.mem_ops.iter().take(COORDINATE_WORDS).enumerate() {
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .take(SECP256K1_COORDINATE_WORDS)
+        .enumerate()
+    {
         assert_eq!(write_op.addr, x_address + i);
         assert_eq!(write_op.value.after, write_op.value.before);
     }
@@ -422,8 +427,8 @@ fn test_secp256k1_decompress() -> Result<()> {
     for (i, write_op) in witness
         .mem_ops
         .iter()
-        .skip(COORDINATE_WORDS)
-        .take(COORDINATE_WORDS)
+        .skip(SECP256K1_COORDINATE_WORDS)
+        .take(SECP256K1_COORDINATE_WORDS)
         .enumerate()
     {
         assert_eq!(write_op.addr, y_address + i);
@@ -477,7 +482,7 @@ fn test_sha256_extend() -> Result<()> {
 
 #[test]
 fn test_sha256_full() -> Result<()> {
-    let public_io: &Vec<u32> = &vec![
+    let public_io: &[u32; 8] = &[
         30689455, 3643278932, 1489987339, 1626711444, 3610619649, 1925764735, 581441152, 321290698,
     ];
     let hints: &Vec<u32> = &vec![0u32; 10];
@@ -547,11 +552,34 @@ fn test_bn254_curve() -> Result<()> {
     let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
     assert_eq!(syscalls.len(), 3);
 
-    for witness in syscalls.iter() {
-        assert_eq!(witness.reg_ops.len(), 2);
-        assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
-        assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
-    }
+    // add
+    assert_eq!(syscalls[0].reg_ops.len(), 2);
+    assert_eq!(
+        syscalls[0].reg_ops[0].register_index(),
+        Platform::reg_arg0()
+    );
+    assert_eq!(
+        syscalls[0].reg_ops[1].register_index(),
+        Platform::reg_arg1()
+    );
+
+    // double
+    assert_eq!(syscalls[1].reg_ops.len(), 1);
+    assert_eq!(
+        syscalls[1].reg_ops[0].register_index(),
+        Platform::reg_arg0()
+    );
+
+    // add
+    assert_eq!(syscalls[2].reg_ops.len(), 2);
+    assert_eq!(
+        syscalls[2].reg_ops[0].register_index(),
+        Platform::reg_arg0()
+    );
+    assert_eq!(
+        syscalls[2].reg_ops[1].register_index(),
+        Platform::reg_arg1()
+    );
 
     let messages = read_all_messages_as_words(&state);
     let [a1, b, a2, c1, c2, one, c3]: [Vec<u32>; 7] = messages.try_into().unwrap();
@@ -619,6 +647,24 @@ fn test_keccak_no_syscall() -> Result<()> {
         let got = u32::from_str_radix(got, 16).expect("Invalid hex string");
         assert_eq!(&got, expect);
     }
+    Ok(())
+}
+
+#[test]
+fn test_keccak_guest() -> Result<()> {
+    let _ = ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::keccak_lib,
+        &CenoStdin::default(),
+        None,
+    );
+
+    let _ = ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::keccak_native,
+        &CenoStdin::default(),
+        None,
+    );
     Ok(())
 }
 

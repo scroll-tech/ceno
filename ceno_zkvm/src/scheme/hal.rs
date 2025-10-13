@@ -163,7 +163,7 @@ pub trait DeviceTransporter<PB: ProverBackend> {
     fn transport_proving_key(
         &self,
         proving_key: Arc<ZKVMProvingKey<PB::E, PB::Pcs>>,
-    ) -> DeviceProvingKey<PB>;
+    ) -> DeviceProvingKey<'_, PB>;
 
     fn transport_mles<'a>(
         &self,

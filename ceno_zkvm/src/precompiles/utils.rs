@@ -1,4 +1,5 @@
 use ff_ext::ExtensionField;
+use gkr_iop::circuit_builder::expansion_expr;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr};
 use p3::field::FieldAlgebra;
@@ -14,6 +15,25 @@ where
 {
     for (i, word) in iter.into_iter().enumerate() {
         dst[start_index + i] = E::BaseField::from_canonical_u64(word);
+    }
+}
+
+/// Merge a slice of u8 limbs into a slice of u32 represented by u16 limb pair.
+pub fn merge_u8_slice_to_u16_limbs_pairs_and_extend<E: ExtensionField>(
+    u8_slice: &[impl ToExpr<E, Output = Expression<E>> + Clone],
+    dst: &mut Vec<[Expression<E>; 2]>,
+) {
+    let len = u8_slice.len() / 4;
+    for i in 0..len {
+        // create an expression combining 4 elements of bytes into a 2x16-bit felt
+        let output8_slice = u8_slice[4 * i..4 * (i + 1)]
+            .iter()
+            .map(|e| (8, e.expr()))
+            .collect_vec();
+        dst.push([
+            expansion_expr::<E, 16>(&output8_slice[0..2]),
+            expansion_expr::<E, 16>(&output8_slice[2..4]),
+        ])
     }
 }
 
@@ -85,7 +105,7 @@ impl MaskRepresentation {
     pub fn to_bits(&self) -> Vec<u64> {
         self.rep
             .iter()
-            .flat_map(|mask| (0..mask.size).map(move |i| ((mask.value >> i) & 1)))
+            .flat_map(|mask| (0..mask.size).map(move |i| (mask.value >> i) & 1))
             .collect()
     }
 

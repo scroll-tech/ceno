@@ -15,5 +15,5 @@ fn main() {
         b = c;
     }
     // Constrain with public io
-    ceno_rt::commit::<Archived<u32>, _>(&b);
+    ceno_rt::commit(&b);
 }

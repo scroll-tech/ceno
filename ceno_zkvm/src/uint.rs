@@ -328,7 +328,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn from_u8_limbs(
         x: &UIntLimbs<M, 8, E>,
     ) -> Result<UIntLimbs<M, C, E>, CircuitBuilderError> {
-        assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
+        assert!(
+            C.is_multiple_of(8),
+            "we only support multiple of 8 limb sizes"
+        );
         assert!(x.carries.is_none());
         let k = C / 8;
         let shift_pows = {
@@ -358,7 +361,10 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
         circuit_builder: &mut CircuitBuilder<E>,
         x: UIntLimbs<M, C, E>,
     ) -> UIntLimbs<M, 8, E> {
-        assert!(C % 8 == 0, "we only support multiple of 8 limb sizes");
+        assert!(
+            C.is_multiple_of(8),
+            "we only support multiple of 8 limb sizes"
+        );
         assert!(x.carries.is_none());
         let k = C / 8;
         let shift_pows = {
@@ -626,7 +632,7 @@ pub struct ValueMul {
 }
 
 impl ValueMul {
-    pub fn as_hi_value<T: Into<u64> + From<u32> + Copy + Default>(&self) -> Value<T> {
+    pub fn as_hi_value<T: Into<u64> + From<u32> + Copy + Default>(&self) -> Value<'_, T> {
         Value::<T>::from_limb_slice_unchecked(self.as_hi_limb_slice())
     }
 
@@ -635,7 +641,7 @@ impl ValueMul {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Value<'a, T: Into<u64> + From<u32> + Copy + Default> {
     val: T,
     pub limbs: Cow<'a, [u16]>,

@@ -48,6 +48,9 @@ jobs:
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: dtolnay/rust-toolchain@nightly
 
+      - name: Install m4
+        run: sudo apt-get install -y m4
+
       - name: Run fibonacci (debug)
         env:
           RUST_LOG: debug
@@ -65,10 +68,47 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
+      - name: Run Guest Heap Alloc (debug)
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+          MOCK_PROVING: 1
+        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/debug/examples/ceno_rt_alloc
+
+      - name: Run Guest Heap Alloc (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
+
+      - name: Run Guest Heap Alloc (release + goldilocks)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
+
       - name: Run keccak_syscall (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+
+      - name: Run secp256k1_add_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_add_syscall
+
+      - name: Run secp256k1_double_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_double_syscall
+
+      - name: Run secp256k1_decompress_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_decompress_syscall
+
+      - name: Run bn254_curve_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_curve_syscalls
 
       - name: Install cargo make
         run: |

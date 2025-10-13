@@ -40,12 +40,16 @@ tracing.workspace = true
 tracing-forest.workspace = true
 tracing-subscriber.workspace = true
 
-
 bincode.workspace = true
+cfg-if.workspace = true
 clap.workspace = true
+derive = { path = "../derive" }
+generic-array.workspace = true
 generic_static = "0.2"
+num.workspace = true
 parse-size = "1.1"
 rand.workspace = true
+sp1-curves.workspace = true
 tempfile = "3.14"
 tiny-keccak.workspace = true
 
@@ -63,10 +67,11 @@ ceno-examples = { path = "../examples-builder" }
 glob = "0.3"
 
 [features]
-default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel"]
+bigint-rug = ["sp1-curves/bigint-rug"]
+default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel", "bigint-rug"]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
-goldilocks = ["forbid_overflow", "nightly-features"]
+goldilocks = ["forbid_overflow", "nightly-features", "parallel", "bigint-rug"]
 gpu = ["gkr_iop/gpu", "dep:ceno_gpu"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
@@ -114,3 +119,11 @@ name = "bitwise_keccakf"
 [[bench]]
 harness = false
 name = "lookup_keccakf"
+
+[[bench]]
+harness = false
+name = "weierstrass_add"
+
+[[bench]]
+harness = false
+name = "weierstrass_double"
