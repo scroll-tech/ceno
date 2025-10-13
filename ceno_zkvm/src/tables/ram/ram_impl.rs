@@ -1,15 +1,22 @@
-use std::{marker::PhantomData, sync::Arc};
-
 use ceno_emul::{Addr, Cycle, WORD_SIZE};
+use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use std::{marker::PhantomData, ops::Neg, sync::Arc};
+use witness::{
+    InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding, set_fixed_val, set_val,
+};
 
+use super::{
+    MemInitRecord,
+    ram_circuit::{DynVolatileRamTable, MemFinalRecord, NonVolatileTable},
+};
 use crate::{
     chip_handler::general::PublicIOQuery,
     circuit_builder::{CircuitBuilder, SetTableSpec},
+    e2e::RAMRecord,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     structs::ProgramParams,
 };
@@ -17,11 +24,8 @@ use ff_ext::FieldInto;
 use multilinear_extensions::{
     Expression, Fixed, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
 };
-
-use super::{
-    MemInitRecord,
-    ram_circuit::{DynVolatileRamTable, MemFinalRecord, NonVolatileTable},
-};
+use p3::field::FieldAlgebra;
+use rayon::prelude::{ParallelSlice, ParallelSliceMut};
 
 /// define a non-volatile memory with init value
 #[derive(Clone, Debug)]
@@ -437,6 +441,421 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
                 set_val!(structural_row, self.addr, rec.addr as u64);
             });
+
+        structural_witness.padding_by_strategy();
+        Ok([witness, structural_witness])
+    }
+}
+
+/// volatile with all init value as 0
+/// dynamic address as witin, relied on augment of knowledge to prove address form
+#[derive(Clone, Debug)]
+pub struct DynVolatileRamTableInitConfig<DVRAM: DynVolatileRamTable + Send + Sync + Clone> {
+    addr: StructuralWitIn,
+
+    phantom: PhantomData<DVRAM>,
+    params: ProgramParams,
+}
+
+impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitConfig<DVRAM> {
+    pub fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self, CircuitBuilderError> {
+        let max_len = DVRAM::max_len(params);
+        let addr = cb.create_structural_witin(
+            || "addr",
+            StructuralWitInType::EqualDistanceSequence {
+                max_len,
+                offset: DVRAM::offset_addr(params),
+                multi_factor: WORD_SIZE,
+                descending: DVRAM::DESCENDING,
+            },
+        );
+
+        assert!(DVRAM::ZERO_INIT);
+
+        let init_expr = vec![Expression::ZERO; DVRAM::V_LIMBS];
+
+        let init_table = [
+            vec![(DVRAM::RAM_TYPE as usize).into()],
+            vec![addr.expr()],
+            init_expr,
+            vec![Expression::ZERO], // Initial cycle.
+        ]
+        .concat();
+
+        cb.w_table_record(
+            || "init_table",
+            DVRAM::RAM_TYPE,
+            SetTableSpec {
+                len: None,
+                structural_witins: vec![addr],
+            },
+            init_table,
+        )?;
+
+        Ok(Self {
+            addr,
+            phantom: PhantomData,
+            params: params.clone(),
+        })
+    }
+
+    /// TODO consider taking RowMajorMatrix as argument to save allocations.
+    pub fn assign_instances<F: SmallField>(
+        &self,
+        num_witin: usize,
+        num_structural_witin: usize,
+        final_mem: &[MemFinalRecord],
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
+        assert!(DVRAM::max_len(&self.params).is_power_of_two());
+
+        let params = self.params.clone();
+        let addr_id = self.addr.id as u64;
+        let addr_padding_fn = move |row: u64, col: u64| {
+            assert_eq!(col, addr_id);
+            DVRAM::addr(&params, row as usize) as u64
+        };
+
+        let mut witness =
+            RowMajorMatrix::<F>::new(final_mem.len(), num_witin, InstancePaddingStrategy::Default);
+        let mut structural_witness = RowMajorMatrix::<F>::new(
+            final_mem.len(),
+            num_structural_witin,
+            InstancePaddingStrategy::Custom(Arc::new(addr_padding_fn)),
+        );
+
+        witness
+            .par_rows_mut()
+            .zip(structural_witness.par_rows_mut())
+            .zip(final_mem)
+            .enumerate()
+            .for_each(|(i, ((row, structural_row), rec))| {
+                assert_eq!(
+                    rec.addr,
+                    DVRAM::addr(&self.params, i),
+                    "rec.addr {:x} != expected {:x}",
+                    rec.addr,
+                    DVRAM::addr(&self.params, i),
+                );
+                set_val!(structural_row, self.addr, rec.addr as u64);
+            });
+
+        structural_witness.padding_by_strategy();
+        Ok([witness, structural_witness])
+    }
+}
+
+/// volatile with all init value as 0
+/// dynamic address as witin, relied on augment of knowledge to prove address form
+#[derive(Clone, Debug)]
+pub struct DynVolatileRamTableFinalConfig<DVRAM: DynVolatileRamTable + Send + Sync + Clone> {
+    // addr is subset and could be any form
+    // TODO check soundness issue
+    addr_subset: WitIn,
+
+    final_v: Vec<WitIn>,
+    final_cycle: WitIn,
+
+    phantom: PhantomData<DVRAM>,
+    params: ProgramParams,
+}
+
+impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableFinalConfig<DVRAM> {
+    pub fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self, CircuitBuilderError> {
+        let addr_subset = cb.create_witin(|| format!("addr_subset"));
+
+        let final_v = (0..DVRAM::V_LIMBS)
+            .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
+            .collect::<Vec<WitIn>>();
+        let final_cycle = cb.create_witin(|| "final_cycle");
+
+        let final_expr = final_v.iter().map(|v| v.expr()).collect_vec();
+        let final_table = [
+            // a v t
+            vec![(DVRAM::RAM_TYPE as usize).into()],
+            vec![addr_subset.expr()],
+            final_expr,
+            vec![final_cycle.expr()],
+        ]
+        .concat();
+        cb.r_table_record(
+            || "final_table",
+            DVRAM::RAM_TYPE,
+            SetTableSpec {
+                len: None,
+                structural_witins: vec![],
+            },
+            final_table,
+        )?;
+
+        Ok(Self {
+            addr_subset,
+            final_v,
+            final_cycle,
+            phantom: PhantomData,
+            params: params.clone(),
+        })
+    }
+
+    /// TODO consider taking RowMajorMatrix as argument to save allocations.
+    pub fn assign_instances<F: SmallField>(
+        &self,
+        num_witin: usize,
+        num_structural_witin: usize,
+        final_mem: &[MemFinalRecord],
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        assert_eq!(num_structural_witin, 0);
+        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
+        assert!(DVRAM::max_len(&self.params).is_power_of_two());
+
+        let mut witness =
+            RowMajorMatrix::<F>::new(final_mem.len(), num_witin, InstancePaddingStrategy::Default);
+
+        witness
+            .par_rows_mut()
+            .zip(final_mem)
+            .enumerate()
+            .for_each(|(i, (row, rec))| {
+                assert_eq!(
+                    rec.addr,
+                    DVRAM::addr(&self.params, i),
+                    "rec.addr {:x} != expected {:x}",
+                    rec.addr,
+                    DVRAM::addr(&self.params, i),
+                );
+
+                if self.final_v.len() == 1 {
+                    // Assign value directly.
+                    set_val!(row, self.final_v[0], rec.value as u64);
+                } else {
+                    // Assign value limbs.
+                    self.final_v.iter().enumerate().for_each(|(l, limb)| {
+                        let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                        set_val!(row, limb, val as u64);
+                    });
+                }
+                set_val!(row, self.final_cycle, rec.cycle);
+
+                set_val!(row, self.addr_subset, rec.addr as u64);
+            });
+
+        Ok([witness, RowMajorMatrix::empty()])
+    }
+}
+
+/// volatile with all init value as 0
+/// dynamic address as witin, relied on augment of knowledge to prove address form
+#[derive(Clone, Debug)]
+pub struct DynVolatileRAMBusConfig<DVRAM: DynVolatileRamTable + Send + Sync + Clone> {
+    addr_subset: WitIn,
+
+    sel_read: StructuralWitIn,
+    sel_write: StructuralWitIn,
+    local_write_v: Vec<WitIn>,
+    local_read_v: Vec<WitIn>,
+    local_read_cycle: WitIn,
+
+    phantom: PhantomData<DVRAM>,
+    params: ProgramParams,
+}
+
+impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRAMBusConfig<DVRAM> {
+    pub fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self, CircuitBuilderError> {
+        let one = Expression::Constant(Either::Left(E::BaseField::ONE));
+        let mem_bus_with_read = cb.query_mem_bus_with_read()?;
+        let mem_bus_with_write = cb.query_mem_bus_with_write()?;
+        let addr_subset = cb.create_witin(|| "addr_subset");
+        // TODO add new selector to support sel_rw
+        let sel_read = cb.create_structural_witin(
+            || "sel_read",
+            StructuralWitInType::EqualDistanceSequence {
+                max_len: 0,
+                offset: DVRAM::offset_addr(params),
+                multi_factor: WORD_SIZE,
+                descending: DVRAM::DESCENDING,
+            },
+        );
+        let sel_write = cb.create_structural_witin(
+            || "sel_write",
+            StructuralWitInType::EqualDistanceSequence {
+                max_len: 0,
+                offset: DVRAM::offset_addr(params),
+                multi_factor: WORD_SIZE,
+                descending: DVRAM::DESCENDING,
+            },
+        );
+
+        // local write
+        let local_write_v = (0..DVRAM::V_LIMBS)
+            .map(|i| cb.create_witin(|| format!("local_write_v_limb_{i}")))
+            .collect::<Vec<WitIn>>();
+        let local_write_v_expr = local_write_v.iter().map(|v| v.expr()).collect_vec();
+
+        // local read
+        let local_read_v = (0..DVRAM::V_LIMBS)
+            .map(|i| cb.create_witin(|| format!("local_read_v_limb_{i}")))
+            .collect::<Vec<WitIn>>();
+        let local_read_v_expr: Vec<Expression<E>> =
+            local_read_v.iter().map(|v| v.expr()).collect_vec();
+        let local_read_cycle = cb.create_witin(|| "local_read_cycle");
+
+        // TODO global write
+        // TODO global read
+
+        // constraints
+        // read from global, write to local
+        // W_{local} = mem_bus_with_read * (sel_read * local_write_record + (1 - sel_read) * ONE) + (1 - mem_bus_with_read) * ONE
+        let local_raw_write_record = [
+            vec![(DVRAM::RAM_TYPE as usize).into()],
+            vec![addr_subset.expr()],
+            local_write_v_expr.clone(),
+            vec![Expression::ZERO], // mem bus local init cycle always 0.
+        ]
+        .concat();
+        let local_write_record = cb.rlc_chip_record(local_raw_write_record.clone());
+        let local_write = mem_bus_with_read.expr()
+            * (sel_read.expr() * local_write_record + (one.clone() - sel_read.expr()).expr())
+            + (one.clone() - mem_bus_with_read.expr());
+        cb.w_table_rlc_record(
+            || "local_write_record",
+            DVRAM::RAM_TYPE,
+            SetTableSpec {
+                len: None,
+                structural_witins: vec![sel_read],
+            },
+            local_raw_write_record,
+            local_write,
+        )?;
+        // TODO R_{global} = mem_bus_with_read * (sel_read * global_read + (1-sel_read) * EC_INFINITY) + (1 - mem_bus_with_read) * EC_INFINITY
+
+        // write to global, read from local
+        // R_{local} = mem_bus_with_write * (sel_write * local_read_record + (1 - sel_write) * ONE) + (1 - mem_bus_with_write) * ONE
+        let local_raw_read_record = [
+            vec![(DVRAM::RAM_TYPE as usize).into()],
+            vec![addr_subset.expr()],
+            local_read_v_expr.clone(),
+            vec![local_read_cycle.expr()],
+        ]
+        .concat();
+        let local_read_record = cb.rlc_chip_record(local_raw_read_record.clone());
+        let local_read: Expression<E> = mem_bus_with_write.expr()
+            * (sel_write.expr() * local_read_record + (one.clone() - sel_write.expr()))
+            + (one.clone() - mem_bus_with_write.expr());
+        cb.r_table_rlc_record(
+            || "local_read_record",
+            DVRAM::RAM_TYPE,
+            SetTableSpec {
+                len: None,
+                structural_witins: vec![sel_write],
+            },
+            local_raw_read_record,
+            local_read,
+        )?;
+        // TODO W_{local} = mem_bus_with_write * (sel_write * global_write + (1 - sel_write) * EC_INFINITY) + (1 - mem_bus_with_write) * EC_INFINITY
+
+        Ok(Self {
+            addr_subset,
+            sel_write,
+            sel_read,
+            local_write_v,
+            local_read_v,
+            local_read_cycle,
+            phantom: PhantomData,
+            params: params.clone(),
+        })
+    }
+
+    /// TODO consider taking RowMajorMatrix as argument to save allocations.
+    pub fn assign_instances<F: SmallField>(
+        &self,
+        num_witin: usize,
+        num_structural_witin: usize,
+        global_read_mem: &[RAMRecord],
+        global_write_mem: &[RAMRecord],
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        assert!(global_read_mem.len() <= DVRAM::max_len(&self.params));
+        assert!(DVRAM::max_len(&self.params).is_power_of_two());
+        let witness_length = {
+            let max_len = global_read_mem.len().max(global_write_mem.len());
+            // first half write, second half read
+            next_pow2_instance_padding(max_len) * 2
+        };
+
+        let mut witness =
+            RowMajorMatrix::<F>::new(witness_length, num_witin, InstancePaddingStrategy::Default);
+        let witness_mid = witness.values.len() / 2;
+        let mut structural_witness = RowMajorMatrix::<F>::new(
+            witness_length,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
+        let (witness_write, witness_read) = witness.values.split_at_mut(witness_mid);
+        let structural_witness_mid = structural_witness.values.len() / 2;
+        let (structural_witness_write, structural_witness_read) = structural_witness
+            .values
+            .split_at_mut(structural_witness_mid);
+
+        rayon::join(
+            // global write, local read
+            || {
+                witness_write
+                    .par_chunks_mut(num_witin)
+                    .zip(structural_witness_write.par_chunks_mut(num_structural_witin))
+                    .zip(global_write_mem)
+                    .enumerate()
+                    .for_each(|(i, ((row, structural_row), rec))| {
+                        if self.local_read_v.len() == 1 {
+                            // Assign value directly.
+                            set_val!(row, self.local_read_v[0], rec.value as u64);
+                        } else {
+                            // Assign value limbs.
+                            self.local_read_v.iter().enumerate().for_each(|(l, limb)| {
+                                let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                                set_val!(row, limb, val as u64);
+                            });
+                        }
+                        set_val!(row, self.local_read_cycle, rec.cycle);
+
+                        set_val!(row, self.addr_subset, rec.addr.baddr().0 as u64);
+                        set_val!(structural_row, self.sel_write, 1u64);
+
+                        // TODO assign W_{global}
+                    });
+            },
+            // global read, local write
+            || {
+                witness_read
+                    .par_chunks_mut(num_witin)
+                    .zip(structural_witness_read.par_chunks_mut(num_structural_witin))
+                    .zip(global_read_mem)
+                    .enumerate()
+                    .for_each(|(i, ((row, structural_row), rec))| {
+                        if self.local_write_v.len() == 1 {
+                            // Assign value directly.
+                            set_val!(row, self.local_write_v[0], rec.value as u64);
+                        } else {
+                            // Assign value limbs.
+                            self.local_write_v.iter().enumerate().for_each(|(l, limb)| {
+                                let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                                set_val!(row, limb, val as u64);
+                            });
+                        }
+                        set_val!(row, self.addr_subset, rec.addr.baddr().0 as u64);
+                        set_val!(structural_row, self.sel_read, 1u64);
+
+                        // TODO assign R_{global}
+                    });
+            },
+        );
 
         structural_witness.padding_by_strategy();
         Ok([witness, structural_witness])

@@ -101,19 +101,13 @@ pub struct EmulationResult<'a> {
     pub shard_ctx: ShardContext<'a>,
 }
 
-pub enum RAMRecordType {
-    Read,
-    Write,
-}
-
 pub struct RAMRecord {
-    ram_type: RAMRecordType,
-    id: u64,
-    addr: WordAddr,
-    prev_cycle: Cycle,
-    cycle: Cycle,
-    prev_value: Option<Word>,
-    value: Word,
+    pub id: u64,
+    pub addr: WordAddr,
+    pub prev_cycle: Cycle,
+    pub cycle: Cycle,
+    pub prev_value: Option<Word>,
+    pub value: Word,
 }
 
 pub struct ShardContext<'a> {
@@ -121,7 +115,11 @@ pub struct ShardContext<'a> {
     num_shards: usize,
     max_cycle: Cycle,
     addr_future_accesses: Cow<'a, HashMap<(WordAddr, Cycle), Cycle>>,
-    thread_based_record_storage: Either<
+    read_thread_based_record_storage: Either<
+        Vec<[BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()]>,
+        &'a mut [BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()],
+    >,
+    write_thread_based_record_storage: Either<
         Vec<[BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()]>,
         &'a mut [BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()],
     >,
@@ -131,16 +129,23 @@ pub struct ShardContext<'a> {
 impl<'a> Default for ShardContext<'a> {
     fn default() -> Self {
         let max_threads = max_usable_threads();
-        let thread_based_record_storage = (0..max_threads)
-            .into_par_iter()
-            .map(|_| std::array::from_fn(|_| BTreeMap::new()))
-            .collect::<Vec<_>>();
         Self {
             shard_id: 0,
             num_shards: 1,
             max_cycle: Cycle::default(),
             addr_future_accesses: Cow::Owned(HashMap::new()),
-            thread_based_record_storage: Either::Left(thread_based_record_storage),
+            read_thread_based_record_storage: Either::Left(
+                (0..max_threads)
+                    .into_par_iter()
+                    .map(|_| std::array::from_fn(|_| BTreeMap::new()))
+                    .collect::<Vec<_>>(),
+            ),
+            write_thread_based_record_storage: Either::Left(
+                (0..max_threads)
+                    .into_par_iter()
+                    .map(|_| std::array::from_fn(|_| BTreeMap::new()))
+                    .collect::<Vec<_>>(),
+            ),
             cur_shard_cycle_range: 0..usize::MAX,
         }
     }
@@ -155,12 +160,6 @@ impl<'a> ShardContext<'a> {
     ) -> Self {
         let max_threads = max_usable_threads();
         // let max_record_per_thread = max_insts.div_ceil(max_threads as u64);
-        // TODO pre-reserve vector
-        let thread_based_record_storage = (0..max_threads)
-            .into_par_iter()
-            .map(|_| std::array::from_fn(|_| BTreeMap::new()))
-            .collect::<Vec<_>>();
-
         let expected_inst_per_shard = executed_instructions.div_ceil(num_shards) as usize;
         let max_cycle = (executed_instructions + 1) * 4; // cycle start from 4
         let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * 4).max(4)
@@ -171,25 +170,46 @@ impl<'a> ShardContext<'a> {
             num_shards,
             max_cycle: max_cycle as Cycle,
             addr_future_accesses: Cow::Owned(addr_future_accesses),
-            thread_based_record_storage: Either::Left(thread_based_record_storage),
+            // TODO with_capacity optimisation
+            read_thread_based_record_storage: Either::Left(
+                (0..max_threads)
+                    .into_par_iter()
+                    .map(|_| std::array::from_fn(|_| BTreeMap::new()))
+                    .collect::<Vec<_>>(),
+            ),
+            // TODO with_capacity optimisation
+            write_thread_based_record_storage: Either::Left(
+                (0..max_threads)
+                    .into_par_iter()
+                    .map(|_| std::array::from_fn(|_| BTreeMap::new()))
+                    .collect::<Vec<_>>(),
+            ),
             cur_shard_cycle_range,
         }
     }
 
     pub fn get_forked(&mut self) -> Vec<ShardContext<'_>> {
-        match &mut self.thread_based_record_storage {
-            Either::Left(thread_based_record_storage) => thread_based_record_storage
+        match (
+            &mut self.read_thread_based_record_storage,
+            &mut self.write_thread_based_record_storage,
+        ) {
+            (
+                Either::Left(read_thread_based_record_storage),
+                Either::Left(write_thread_based_record_storage),
+            ) => read_thread_based_record_storage
                 .iter_mut()
-                .map(|v| ShardContext {
+                .zip(write_thread_based_record_storage.iter_mut())
+                .map(|(read, write)| ShardContext {
                     shard_id: self.shard_id,
                     num_shards: self.num_shards,
                     max_cycle: self.max_cycle,
                     addr_future_accesses: Cow::Borrowed(self.addr_future_accesses.as_ref()),
-                    thread_based_record_storage: Either::Right(v),
+                    read_thread_based_record_storage: Either::Right(read),
+                    write_thread_based_record_storage: Either::Right(write),
                     cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
                 })
                 .collect_vec(),
-            Either::Right(_) => panic!("invalid type"),
+            _ => panic!("invalid type"),
         }
     }
 
@@ -206,17 +226,16 @@ impl<'a> ShardContext<'a> {
     ) {
         // check read from external mem bus
         if prev_cycle < self.cur_shard_cycle_range.start as Cycle
-            && cycle >= self.cur_shard_cycle_range.start as Cycle
+            && self.cur_shard_cycle_range.contains(&(cycle as usize))
         {
             let ram_record = self
-                .thread_based_record_storage
+                .read_thread_based_record_storage
                 .as_mut()
                 .right()
                 .expect("illegal type");
             ram_record[ram_type as usize].insert(
                 addr,
                 RAMRecord {
-                    ram_type: RAMRecordType::Read,
                     id,
                     addr,
                     prev_cycle,
@@ -229,17 +248,16 @@ impl<'a> ShardContext<'a> {
         // check write to external mem bus
         if let Some(future_touch_cycle) = self.addr_future_accesses.get(&(addr, cycle)) {
             if *future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle
-                && cycle < self.cur_shard_cycle_range.end as Cycle
+                && self.cur_shard_cycle_range.contains(&(cycle as usize))
             {
                 let ram_record = self
-                    .thread_based_record_storage
+                    .write_thread_based_record_storage
                     .as_mut()
                     .right()
                     .expect("illegal type");
                 ram_record[ram_type as usize].insert(
                     addr,
                     RAMRecord {
-                        ram_type: RAMRecordType::Write,
                         id,
                         addr,
                         prev_cycle,

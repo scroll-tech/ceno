@@ -69,9 +69,12 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         self.vm_state.assign_instance(instance, step)?;
-        self.rs1.assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
-        self.rs2.assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
-        self.rd.assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
+        self.rs1
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
+        self.rs2
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
+        self.rd
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);

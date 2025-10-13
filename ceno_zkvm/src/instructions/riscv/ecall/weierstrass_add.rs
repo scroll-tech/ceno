@@ -314,7 +314,13 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                             &ops.reg_ops[1],
                         )?;
                         for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
-                            writer.assign_op(instance, &mut shard_ctx, &mut lk_multiplicity, step.cycle(), op)?;
+                            writer.assign_op(
+                                instance,
+                                &mut shard_ctx,
+                                &mut lk_multiplicity,
+                                step.cycle(),
+                                op,
+                            )?;
                         }
                         // fetch
                         lk_multiplicity.fetch(step.pc().before.0);
