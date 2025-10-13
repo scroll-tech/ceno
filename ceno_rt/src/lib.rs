@@ -9,7 +9,7 @@ use std::{
     ptr::null,
 };
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(all(feature = "allocator", target_arch = "riscv32"))]
 mod allocator;
 
 mod mmio;

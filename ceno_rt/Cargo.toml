@@ -14,3 +14,7 @@ getrandom = { version = "0.2.15", features = ["custom"], default-features = fals
 getrandom_v3 = { package = "getrandom", version = "0.3", default-features = false }
 rkyv.workspace = true
 elliptic-curve = { version = "0.13.8", features = ["hazmat", "sec1", "ecdh"] }
+
+[features]
+default = ["allocator"]
+allocator = []
