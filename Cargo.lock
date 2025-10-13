@@ -2468,7 +2468,7 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#2881a464bc20636189bd61ee79de4638e5c050fa"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#8fde0eef0eeabbafa043262b0ea58adde6bd8d2b"
 dependencies = [
  "ceno_crypto_primitives 0.1.0 (git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest)",
  "cfg-if",
