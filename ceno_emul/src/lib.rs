@@ -38,6 +38,7 @@ pub use syscalls::{
         Secp256k1DecompressSpec, Secp256k1DoubleSpec,
     },
     sha256::{SHA_EXTEND_WORDS, Sha256ExtendSpec},
+    uint256::UINT256_WORDS_FIELD_ELEMENT,
 };
 
 pub mod utils;
