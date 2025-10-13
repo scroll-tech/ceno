@@ -334,6 +334,9 @@ pub fn emulate_program<'a>(
         Tracer::SUBCYCLES_PER_INSN,
         vm.get_pc().into(),
         end_cycle,
+        shards.shard_id as u32,
+        !shards.is_first_shard(), // first shard disable global read
+        !shards.is_last_shard(),  // last shard disable global write
         io_init.iter().map(|rec| rec.value).collect_vec(),
     );
 

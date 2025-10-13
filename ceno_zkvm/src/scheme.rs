@@ -72,6 +72,9 @@ pub struct PublicValues {
     init_cycle: u64,
     end_pc: u32,
     end_cycle: u64,
+    shard_id: u32,
+    mem_bus_with_read: bool,
+    mem_bus_with_write: bool,
     public_io: Vec<u32>,
 }
 
@@ -82,6 +85,9 @@ impl PublicValues {
         init_cycle: u64,
         end_pc: u32,
         end_cycle: u64,
+        shard_id: u32,
+        mem_bus_with_read: bool,
+        mem_bus_with_write: bool,
         public_io: Vec<u32>,
     ) -> Self {
         Self {
@@ -90,6 +96,9 @@ impl PublicValues {
             init_cycle,
             end_pc,
             end_cycle,
+            shard_id,
+            mem_bus_with_read,
+            mem_bus_with_write,
             public_io,
         }
     }
@@ -103,6 +112,9 @@ impl PublicValues {
             vec![E::BaseField::from_canonical_u64(self.init_cycle)],
             vec![E::BaseField::from_canonical_u32(self.end_pc)],
             vec![E::BaseField::from_canonical_u64(self.end_cycle)],
+            vec![E::BaseField::from_canonical_u32(self.shard_id)],
+            vec![E::BaseField::from_bool(self.mem_bus_with_read)],
+            vec![E::BaseField::from_bool(self.mem_bus_with_write)],
         ]
         .into_iter()
         .chain(
