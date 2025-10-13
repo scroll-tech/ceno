@@ -894,14 +894,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ceno-crypto-primitives"
-version = "0.1.0"
-dependencies = [
- "ceno_syscall",
- "elliptic-curve",
-]
-
-[[package]]
 name = "ceno-examples"
 version = "0.1.0"
 dependencies = [
@@ -918,6 +910,14 @@ dependencies = [
  "k256 0.13.4 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
  "revm-precompile",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "ceno_crypto_primitives"
+version = "0.1.0"
+dependencies = [
+ "ceno_syscall",
+ "elliptic-curve",
 ]
 
 [[package]]
