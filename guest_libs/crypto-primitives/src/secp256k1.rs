@@ -1,9 +1,10 @@
 //! Copied from <https://github.com/succinctlabs/sp1/blob/ebb517c1a3f3e3b95ee34bf211fb46a73cf108fe/crates/zkvm/lib/src/secp256k1.rs>
 
 use crate::{
-    syscalls::{syscall_secp256k1_add, syscall_secp256k1_double},
-    crypto::utils::{AffinePoint, WeierstrassAffinePoint, WeierstrassPoint},
+
+    utils::{AffinePoint, WeierstrassAffinePoint, WeierstrassPoint},
 };
+use ceno_syscall::{syscall_secp256k1_add, syscall_secp256k1_double};
 
 /// The number of limbs in [Secp256k1Point].
 pub const N: usize = 16;

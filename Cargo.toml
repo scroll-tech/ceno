@@ -4,6 +4,7 @@ members = [
   "ceno_emul",
   "ceno_host",
   "ceno_rt",
+  "ceno_syscall",
   "ceno_zkvm",
   "derive",
   "examples-builder",

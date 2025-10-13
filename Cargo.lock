@@ -61,7 +61,7 @@ dependencies = [
  "c-kzg",
  "derive_more 2.0.1",
  "either",
- "k256",
+ "k256 0.13.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "once_cell",
  "secp256k1 0.30.0",
  "serde",
@@ -143,7 +143,7 @@ dependencies = [
  "hashbrown 0.16.0",
  "indexmap 2.9.0",
  "itoa",
- "k256",
+ "k256 0.13.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "keccak-asm",
  "paste",
  "proptest",
@@ -894,6 +894,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ceno-crypto-primitives"
+version = "0.1.0"
+dependencies = [
+ "ceno_syscall",
+ "elliptic-curve",
+]
+
+[[package]]
 name = "ceno-examples"
 version = "0.1.0"
 dependencies = [
@@ -907,8 +915,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "ceno_keccak",
- "ceno_rt",
- "k256",
+ "k256 0.13.4 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
  "revm-precompile",
  "thiserror 2.0.12",
 ]
@@ -918,7 +925,7 @@ name = "ceno_emul"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ceno_rt",
+ "ceno_rt 0.1.0",
  "elf",
  "ff_ext",
  "itertools 0.13.0",
@@ -952,7 +959,7 @@ dependencies = [
 name = "ceno_keccak"
 version = "0.1.0"
 dependencies = [
- "ceno_rt",
+ "ceno_rt 0.1.0",
  "tiny-keccak",
 ]
 
@@ -964,6 +971,21 @@ dependencies = [
  "getrandom 0.3.2",
  "rkyv",
 ]
+
+[[package]]
+name = "ceno_rt"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest#318275c5f052c906ea7a2f7a9e48af7f4bb7cf49"
+dependencies = [
+ "elliptic-curve",
+ "getrandom 0.2.16",
+ "getrandom 0.3.2",
+ "rkyv",
+]
+
+[[package]]
+name = "ceno_syscall"
+version = "0.1.0"
 
 [[package]]
 name = "ceno_zkvm"
@@ -1680,7 +1702,20 @@ dependencies = [
  "der",
  "digest 0.10.7",
  "elliptic-curve",
- "rfc6979",
+ "rfc6979 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "signature",
+ "spki",
+]
+
+[[package]]
+name = "ecdsa"
+version = "0.16.9"
+source = "git+https://github.com/sp1-patches/signatures.git?tag=patch-16.9-sp1-4.1.0#1880299a48fe7ef249edaa616fd411239fb5daf1"
+dependencies = [
+ "der",
+ "digest 0.10.7",
+ "elliptic-curve",
+ "rfc6979 0.4.0 (git+https://github.com/sp1-patches/signatures.git?tag=patch-16.9-sp1-4.1.0)",
  "signature",
  "spki",
 ]
@@ -1724,6 +1759,7 @@ dependencies = [
  "ff",
  "generic-array 0.14.7",
  "group",
+ "hkdf",
  "pem-rfc7468",
  "pkcs8",
  "rand_core 0.6.4",
@@ -1781,7 +1817,7 @@ dependencies = [
  "alloy-primitives",
  "ceno_crypto",
  "ceno_keccak",
- "ceno_rt",
+ "ceno_rt 0.1.0",
  "getrandom 0.3.2",
  "rand 0.8.5",
  "rkyv",
@@ -2092,6 +2128,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5313b072ce3c597065a808dbf612c4c8e8590bdbf8b579508bf7a762c5eae6cd"
 dependencies = [
  "arrayvec",
+]
+
+[[package]]
+name = "hkdf"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
+dependencies = [
+ "hmac",
 ]
 
 [[package]]
@@ -2408,11 +2453,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b"
 dependencies = [
  "cfg-if",
- "ecdsa",
+ "ecdsa 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "elliptic-curve",
  "once_cell",
  "sha2 0.10.9",
  "signature",
+]
+
+[[package]]
+name = "k256"
+version = "0.13.4"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#18cc237e254e2dccd94437eb99c3c8e6ac7373cd"
+dependencies = [
+ "ceno_rt 0.1.0 (git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest)",
+ "cfg-if",
+ "ecdsa 0.16.9 (git+https://github.com/sp1-patches/signatures.git?tag=patch-16.9-sp1-4.1.0)",
+ "elliptic-curve",
+ "hex",
+ "once_cell",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -2955,7 +3014,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
 dependencies = [
- "ecdsa",
+ "ecdsa 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "elliptic-curve",
  "primeorder",
  "sha2 0.10.9",
@@ -3770,7 +3829,7 @@ dependencies = [
  "blst",
  "c-kzg",
  "cfg-if",
- "k256",
+ "k256 0.13.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "libsecp256k1",
  "p256",
  "revm-primitives",
@@ -3797,6 +3856,15 @@ name = "rfc6979"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
+dependencies = [
+ "hmac",
+ "subtle",
+]
+
+[[package]]
+name = "rfc6979"
+version = "0.4.0"
+source = "git+https://github.com/sp1-patches/signatures.git?tag=patch-16.9-sp1-4.1.0#1880299a48fe7ef249edaa616fd411239fb5daf1"
 dependencies = [
  "hmac",
  "subtle",
@@ -4321,7 +4389,7 @@ dependencies = [
  "ff_ext",
  "generic-array 1.2.0",
  "itertools 0.13.0",
- "k256",
+ "k256 0.13.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "multilinear_extensions",
  "num",
  "p256",

@@ -33,9 +33,9 @@ pub fn syscall_keccak_permute(state: &mut [u64; KECCAK_STATE_WORDS]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
-            "ecall",
-            in("t0") KECCAK_PERMUTE,
-            in("a0") state as *mut [u64; 25],
+        "ecall",
+        in("t0") KECCAK_PERMUTE,
+        in("a0") state as *mut [u64; 25],
         );
     }
     #[cfg(not(target_os = "zkvm"))]
@@ -60,10 +60,10 @@ pub fn syscall_secp256k1_add(p: &mut [u32; 16], q: &[u32; 16]) {
         let p = p.as_mut_ptr();
         let q = q.as_ptr();
         asm!(
-            "ecall",
-            in("t0") SECP256K1_ADD,
-            in("a0") p,
-            in("a1") q
+        "ecall",
+        in("t0") SECP256K1_ADD,
+        in("a0") p,
+        in("a1") q
         );
     }
 
@@ -86,10 +86,10 @@ pub fn syscall_secp256k1_double(p: &mut [u32; 16]) {
     unsafe {
         let p = p.as_mut_ptr();
         asm!(
-            "ecall",
-            in("t0") SECP256K1_DOUBLE,
-            in("a0") p,
-            in("a1") 0
+        "ecall",
+        in("t0") SECP256K1_DOUBLE,
+        in("a0") p,
+        in("a1") 0
         );
     }
 
@@ -114,10 +114,10 @@ pub fn syscall_secp256k1_decompress(point: &mut [u8; 64], is_odd: bool) {
         let p = point.as_mut_ptr();
         unsafe {
             asm!(
-                "ecall",
-                in("t0") SECP256K1_DECOMPRESS,
-                in("a0") p,
-                in("a1") is_odd as u8
+            "ecall",
+            in("t0") SECP256K1_DECOMPRESS,
+            in("a0") p,
+            in("a1") is_odd as u8
             );
         }
     }
@@ -138,10 +138,10 @@ pub fn syscall_sha256_extend(w: *mut [u32; 64]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
-            "ecall",
-            in("t0") SHA_EXTEND,
-            in("a0") w,
-            in("a1") 0
+        "ecall",
+        in("t0") SHA_EXTEND,
+        in("a0") w,
+        in("a1") 0
         );
     }
 
@@ -163,10 +163,10 @@ pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
-            "ecall",
-            in("t0") BN254_ADD,
-            in("a0") p,
-            in("a1") q,
+        "ecall",
+        in("t0") BN254_ADD,
+        in("a0") p,
+        in("a1") q,
         );
     }
 
@@ -188,10 +188,10 @@ pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
-            "ecall",
-            in("t0") BN254_DOUBLE,
-            in("a0") p,
-            in("a1") 0,
+        "ecall",
+        in("t0") BN254_DOUBLE,
+        in("a0") p,
+        in("a1") 0,
         );
     }
 
@@ -208,10 +208,10 @@ pub extern "C" fn syscall_bn254_fp_addmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
-            "ecall",
-            in("t0") BN254_FP_ADD,
-            in("a0") x,
-            in("a1") y,
+        "ecall",
+        in("t0") BN254_FP_ADD,
+        in("a0") x,
+        in("a1") y,
         );
     }
 
@@ -228,10 +228,10 @@ pub extern "C" fn syscall_bn254_fp_mulmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
-            "ecall",
-            in("t0") BN254_FP_MUL,
-            in("a0") x,
-            in("a1") y,
+        "ecall",
+        in("t0") BN254_FP_MUL,
+        in("a0") x,
+        in("a1") y,
         );
     }
 
@@ -248,10 +248,10 @@ pub extern "C" fn syscall_bn254_fp2_addmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
-            "ecall",
-            in("t0") BN254_FP2_ADD,
-            in("a0") x,
-            in("a1") y,
+        "ecall",
+        in("t0") BN254_FP2_ADD,
+        in("a0") x,
+        in("a1") y,
         );
     }
 
@@ -268,10 +268,10 @@ pub extern "C" fn syscall_bn254_fp2_mulmod(x: *mut u32, y: *const u32) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
-            "ecall",
-            in("t0") BN254_FP2_MUL,
-            in("a0") x,
-            in("a1") y,
+        "ecall",
+        in("t0") BN254_FP2_MUL,
+        in("a0") x,
+        in("a1") y,
         );
     }
 

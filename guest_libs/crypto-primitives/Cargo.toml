@@ -1,0 +1,13 @@
+[package]
+name = "ceno-crypto-primitives"
+categories.workspace = true
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+ceno_syscall = { path = "../../ceno_syscall" }
+elliptic-curve = { version = "0.13.8", features = ["hazmat", "sec1", "ecdh"] }

@@ -9,7 +9,7 @@ use std::{
     ptr::null,
 };
 
-#[cfg(all(feature = "allocator", target_arch = "riscv32"))]
+#[cfg(target_arch = "riscv32")]
 mod allocator;
 
 mod mmio;
@@ -21,10 +21,6 @@ pub use io::info_out;
 
 mod params;
 pub use params::*;
-
-pub mod syscalls;
-
-pub mod crypto;
 
 #[unsafe(no_mangle)]
 #[linkage = "weak"]
@@ -122,7 +118,7 @@ pub fn halt(exit_code: u32) -> ! {
     );
 }
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(all(feature = "guest", target_arch = "riscv32"))]
 global_asm!(
     "
 // The entry point for the program.
