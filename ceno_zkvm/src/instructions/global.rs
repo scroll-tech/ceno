@@ -5,9 +5,7 @@ use crate::{
     gadgets::{Poseidon2Config, RoundConstants},
 };
 use ff_ext::ExtensionField;
-use gkr_iop::{
-    circuit_builder::CircuitBuilder, error::CircuitBuilderError,
-};
+use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
 use multilinear_extensions::{ToExpr, WitIn};
 use p3::field::FieldAlgebra;
 

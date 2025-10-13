@@ -12,7 +12,7 @@ use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use num_bigint::BigUint;
 use p3::{
-    babybear::{BabyBearInternalLayerParameters},
+    babybear::BabyBearInternalLayerParameters,
     field::{Field, FieldAlgebra},
     monty_31::InternalLayerBaseParameters,
     poseidon2::{MDSMat4, mds_light_permutation},
