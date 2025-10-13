@@ -555,6 +555,7 @@ pub struct DynVolatileRamTableFinalConfig<DVRAM: DynVolatileRamTable + Send + Sy
     // addr is subset and could be any form
     // TODO check soundness issue
     addr_subset: WitIn,
+    sel: StructuralWitIn,
 
     final_v: Vec<WitIn>,
     final_cycle: WitIn,
@@ -568,15 +569,26 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableFinalC
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
-        let addr_subset = cb.create_witin(|| format!("addr_subset"));
+        let addr_subset = cb.create_witin(|| "addr_subset");
+
+        let sel = cb.create_structural_witin(
+            || "sel",
+            StructuralWitInType::EqualDistanceSequence {
+                max_len: 0,
+                offset: DVRAM::offset_addr(params),
+                multi_factor: WORD_SIZE,
+                descending: DVRAM::DESCENDING,
+            },
+        );
 
         let final_v = (0..DVRAM::V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
             .collect::<Vec<WitIn>>();
         let final_cycle = cb.create_witin(|| "final_cycle");
 
+        // R_{local} = sel * rlc_final_table + (1 - sel) * ONE
         let final_expr = final_v.iter().map(|v| v.expr()).collect_vec();
-        let final_table = [
+        let raw_final_table = [
             // a v t
             vec![(DVRAM::RAM_TYPE as usize).into()],
             vec![addr_subset.expr()],
@@ -584,18 +596,22 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableFinalC
             vec![final_cycle.expr()],
         ]
         .concat();
-        cb.r_table_record(
+        let final_table_expr = sel.expr() * cb.rlc_chip_record(raw_final_table.clone())
+            + (Expression::Constant(Either::Left(E::BaseField::ONE)) - sel.expr());
+        cb.r_table_rlc_record(
             || "final_table",
             DVRAM::RAM_TYPE,
             SetTableSpec {
                 len: None,
-                structural_witins: vec![],
+                structural_witins: vec![sel],
             },
-            final_table,
+            raw_final_table,
+            final_table_expr,
         )?;
 
         Ok(Self {
             addr_subset,
+            sel,
             final_v,
             final_cycle,
             phantom: PhantomData,
@@ -610,26 +626,24 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableFinalC
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert_eq!(num_structural_witin, 0);
+        assert_eq!(num_structural_witin, 1);
         assert!(final_mem.len() <= DVRAM::max_len(&self.params));
         assert!(DVRAM::max_len(&self.params).is_power_of_two());
 
         let mut witness =
             RowMajorMatrix::<F>::new(final_mem.len(), num_witin, InstancePaddingStrategy::Default);
+        let mut structural_witness = RowMajorMatrix::<F>::new(
+            final_mem.len(),
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
 
         witness
             .par_rows_mut()
+            .zip(structural_witness.par_rows_mut())
             .zip(final_mem)
             .enumerate()
-            .for_each(|(i, (row, rec))| {
-                assert_eq!(
-                    rec.addr,
-                    DVRAM::addr(&self.params, i),
-                    "rec.addr {:x} != expected {:x}",
-                    rec.addr,
-                    DVRAM::addr(&self.params, i),
-                );
-
+            .for_each(|(i, ((row, structural_row), rec))| {
                 if self.final_v.len() == 1 {
                     // Assign value directly.
                     set_val!(row, self.final_v[0], rec.value as u64);
@@ -643,9 +657,10 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableFinalC
                 set_val!(row, self.final_cycle, rec.cycle);
 
                 set_val!(row, self.addr_subset, rec.addr as u64);
+                set_val!(row, self.sel, 1u64);
             });
 
-        Ok([witness, RowMajorMatrix::empty()])
+        Ok([witness, structural_witness])
     }
 }
 
