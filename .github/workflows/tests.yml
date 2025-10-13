@@ -24,7 +24,7 @@ jobs:
         with:
           targets: riscv32im-unknown-none-elf
           # TODO: figure out way to keep this in sync with rust-toolchain.toml automatically
-          toolchain: nightly-2025-03-25
+          toolchain: nightly-2025-08-18
       - name: Cargo cache
         uses: actions/cache@v4
         with:
@@ -39,10 +39,13 @@ jobs:
           key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: tests-${{ runner.os }}-cargo-
 
+      - name: Install m4
+        run: sudo apt-get install -y m4
+
       - name: Install cargo make
         run: |
           cargo make --version || cargo install cargo-make
       - name: run test
         run: cargo make tests
-      - name: run test + feature u16limb_circuit
-        run: cargo make tests_v2
+      - name: run test + goldilocks
+        run: cargo make tests_goldilock

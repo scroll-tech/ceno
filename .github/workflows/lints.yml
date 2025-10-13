@@ -3,7 +3,7 @@ name: Lints
 on:
   merge_group:
   pull_request:
-    types: [synchronize, opened, reopened, ready_for_review]
+    types: [ synchronize, opened, reopened, ready_for_review ]
   push:
     branches:
       - master
@@ -25,7 +25,7 @@ jobs:
           components: rustfmt, clippy
           targets: riscv32im-unknown-none-elf
           # TODO: figure out way to keep this in sync with rust-toolchain.toml automatically
-          toolchain: nightly-2025-03-25
+          toolchain: nightly-2025-08-18
       - name: Cargo cache
         uses: actions/cache@v4
         with:
@@ -39,6 +39,9 @@ jobs:
             examples/target/
           key: lint-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: lint-${{ runner.os }}-cargo-
+
+      - name: Install m4
+        run: sudo apt-get install -y m4
 
       - name: Install cargo make
         run: |

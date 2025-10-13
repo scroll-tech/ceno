@@ -156,6 +156,19 @@ impl MemPadder {
         padded_len: usize,
         values: &[Word],
     ) -> Vec<MemInitRecord> {
+        assert!(
+            values.len() <= padded_len,
+            "values.len() {} exceeds padded_len {}",
+            values.len(),
+            padded_len
+        );
+        let address_capacity = address_range.iter_addresses().len();
+        assert!(
+            padded_len <= address_capacity,
+            "padded_len {} exceeds address_range capacity {}",
+            padded_len,
+            address_capacity
+        );
         let mut records = Self::new_mem_records_uninit(address_range, padded_len);
         for (record, &value) in zip(&mut records, values) {
             record.value = value;
@@ -169,6 +182,12 @@ impl MemPadder {
     ///
     /// See `new_mem_records` for more details.
     pub fn init_mem_records(records: &mut Vec<MemInitRecord>, values: &[Word]) {
+        assert!(
+            values.len() <= records.len(),
+            "values.len() {} exceeds records.len() {}",
+            values.len(),
+            records.len()
+        );
         for (record, &value) in zip(records, values) {
             record.value = value;
         }

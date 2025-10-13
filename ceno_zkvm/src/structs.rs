@@ -215,7 +215,11 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             cs.zkvm_v1_css.w_expressions.len(),
             cs.zkvm_v1_css.lk_expressions.len(),
         );
-        assert!(self.circuit_css.insert(OC::name(), cs).is_none());
+        assert!(
+            self.circuit_css.insert(OC::name(), cs).is_none(),
+            "opcode circuit {} already registered",
+            OC::name()
+        );
         config
     }
 
