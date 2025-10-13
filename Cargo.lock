@@ -872,7 +872,7 @@ dependencies = [
  "ceno_zkvm",
  "clap",
  "console",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "get_dir",
  "gkr_iop",
  "mpcs",
@@ -951,9 +951,9 @@ dependencies = [
  "anyhow",
  "ceno_rt",
  "elf",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "itertools 0.13.0",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "multilinear_extensions",
  "num-derive",
  "num-traits",
  "rrs-succinct",
@@ -1011,7 +1011,7 @@ dependencies = [
  "cudarc",
  "derive",
  "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "generic-array 1.2.0",
  "generic_static",
  "gkr_iop",
@@ -1019,12 +1019,12 @@ dependencies = [
  "itertools 0.13.0",
  "lazy_static",
  "mpcs",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "multilinear_extensions",
  "ndarray",
  "num",
  "num-bigint",
  "once_cell",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "p3",
  "parse-size",
  "pprof2",
  "prettytable-rs",
@@ -1352,11 +1352,11 @@ name = "cuda_hal"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "itertools 0.13.0",
  "mpcs",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "multilinear_extensions",
+ "p3",
  "rand 0.8.5",
  "rayon",
  "sumcheck",
@@ -1882,18 +1882,7 @@ version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
 dependencies = [
  "once_cell",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
- "rand_core 0.6.4",
- "serde",
-]
-
-[[package]]
-name = "ff_ext"
-version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
-dependencies = [
- "once_cell",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9)",
+ "p3",
  "rand_core 0.6.4",
  "serde",
 ]
@@ -2042,12 +2031,12 @@ dependencies = [
  "cuda_hal",
  "cudarc",
  "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "itertools 0.13.0",
  "mpcs",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "multilinear_extensions",
  "once_cell",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "p3",
  "rand 0.8.5",
  "rayon",
  "serde",
@@ -2738,11 +2727,11 @@ source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10
 dependencies = [
  "bincode",
  "clap",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "itertools 0.13.0",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "multilinear_extensions",
  "num-integer",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "p3",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rayon",
@@ -2761,24 +2750,9 @@ version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
 dependencies = [
  "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "itertools 0.13.0",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
- "rand 0.8.5",
- "rayon",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "multilinear_extensions"
-version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
-dependencies = [
- "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9)",
- "itertools 0.13.0",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9)",
+ "p3",
  "rand 0.8.5",
  "rayon",
  "serde",
@@ -3112,28 +3086,6 @@ dependencies = [
  "p3-poseidon",
  "p3-poseidon2",
  "p3-poseidon2-air",
- "p3-symmetric",
- "p3-util",
-]
-
-[[package]]
-name = "p3"
-version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
-dependencies = [
- "p3-baby-bear",
- "p3-challenger",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-fri",
- "p3-goldilocks",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-mds",
- "p3-merkle-tree",
- "p3-poseidon",
- "p3-poseidon2",
  "p3-symmetric",
  "p3-util",
 ]
@@ -3594,8 +3546,8 @@ name = "poseidon"
 version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
 dependencies = [
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
+ "p3",
  "serde",
 ]
 
@@ -4532,16 +4484,16 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
 dependencies = [
  "cfg-if",
  "dashu",
  "elliptic-curve",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9)",
+ "ff_ext",
  "generic-array 1.2.0",
  "itertools 0.13.0",
  "k256",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9)",
+ "multilinear_extensions",
  "num",
  "p256",
  "p3-field",
@@ -4641,10 +4593,10 @@ version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
 dependencies = [
  "either",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "itertools 0.13.0",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "multilinear_extensions",
+ "p3",
  "rayon",
  "serde",
  "sumcheck_macro",
@@ -4659,7 +4611,7 @@ version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
 dependencies = [
  "itertools 0.13.0",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "p3",
  "proc-macro2",
  "quote",
  "rand 0.8.5",
@@ -5053,9 +5005,9 @@ name = "transcript"
 version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
 dependencies = [
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "itertools 0.13.0",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "p3",
  "poseidon",
 ]
 
@@ -5328,10 +5280,10 @@ dependencies = [
  "bincode",
  "clap",
  "derive_more 1.0.0",
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
  "itertools 0.14.0",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "multilinear_extensions",
+ "p3",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rayon",
@@ -5612,9 +5564,9 @@ name = "witness"
 version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
 dependencies = [
- "ff_ext 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
- "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
- "p3 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10)",
+ "ff_ext",
+ "multilinear_extensions",
+ "p3",
  "rand 0.8.5",
  "rayon",
  "tracing",
