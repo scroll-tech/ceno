@@ -16,7 +16,7 @@ use p3::{
     field::{Field, FieldAlgebra},
     monty_31::InternalLayerBaseParameters,
     poseidon2::{MDSMat4, mds_light_permutation},
-    poseidon2_air::{FullRound, PartialRound, Poseidon2Cols, SBox, num_cols},
+    poseidon2_air::{FullRound, PartialRound, Poseidon2Cols, SBox, generate_trace_rows, num_cols},
 };
 
 use crate::circuit_builder::CircuitBuilder;
@@ -78,6 +78,10 @@ impl<
             }
             (7, 1) => {
                 let committed_x3: Expression<E> = sbox.0[0].clone();
+                // TODO: avoid x^3 as x may have ~STATE_WIDTH terms after the linear layer
+                //       we can allocate one more column to store x^2 (which has ~STATE_WIDTH^2 terms)
+                //       then x^3 = x * x^2
+                //       but this will increase the number of columns (by FULL_ROUNDS * STATE_WIDTH + PARTIAL_ROUNDS)
                 cb.require_zero(|| "x3 = x.cube()", committed_x3.clone() - x.cube())?;
                 committed_x3.square() * x.clone()
             }
@@ -170,7 +174,6 @@ impl<
         let cols = from_fn(|| Some(cb.create_witin(|| "poseidon2 col")))
             .take(num_cols)
             .collect::<Vec<_>>();
-        println!("{num_cols}");
         let mut col_exprs = cols
             .iter()
             .map(|c| c.expr())
@@ -230,16 +233,32 @@ impl<
         }
     }
 
-    pub fn assign_instance(&self, instance: &mut [E]) {
+    pub fn inputs(&self) -> Vec<Expression<E>> {
+        let col_exprs = self.cols.iter().map(|c| c.expr()).collect::<Vec<_>>();
+
         let poseidon2_cols: &Poseidon2Cols<
-            WitIn,
+            Expression<E>,
             STATE_WIDTH,
             SBOX_DEGREE,
             SBOX_REGISTERS,
             HALF_FULL_ROUNDS,
             PARTIAL_ROUNDS,
-        > = self.cols.as_slice().borrow();
+        > = col_exprs.as_slice().borrow();
+
+        poseidon2_cols.inputs.to_vec()
     }
+
+    // pub fn assign_instance(&self, input: &[E; STATE_WIDTH]) {
+    //     generate_trace_rows(inputs, constants)
+    //     let poseidon2_cols: &Poseidon2Cols<
+    //         WitIn,
+    //         STATE_WIDTH,
+    //         SBOX_DEGREE,
+    //         SBOX_REGISTERS,
+    //         HALF_FULL_ROUNDS,
+    //         PARTIAL_ROUNDS,
+    //     > = self.cols.as_slice().borrow();
+    // }
 }
 
 #[cfg(test)]

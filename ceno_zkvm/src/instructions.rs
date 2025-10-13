@@ -19,6 +19,7 @@ use rayon::{
 };
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
+pub mod global;
 pub mod riscv;
 
 pub trait Instruction<E: ExtensionField> {
