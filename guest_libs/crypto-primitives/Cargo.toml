@@ -1,5 +1,6 @@
 [package]
 name = "ceno_crypto_primitives"
+description = "Cryptographic primitives for Ceno zkVM guest"
 categories.workspace = true
 edition.workspace = true
 keywords.workspace = true
