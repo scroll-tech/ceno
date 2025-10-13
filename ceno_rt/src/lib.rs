@@ -24,6 +24,8 @@ pub use params::*;
 
 pub mod syscalls;
 
+pub mod crypto;
+
 #[unsafe(no_mangle)]
 #[linkage = "weak"]
 pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
