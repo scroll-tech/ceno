@@ -4,7 +4,7 @@ use anyhow::Result;
 use ceno_emul::{
     BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, EmuContext, InsnKind,
     Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, SHA_EXTEND_WORDS,
-    StepRecord, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    StepRecord, UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
     host_utils::{read_all_messages, read_all_messages_as_words},
 };
 use ceno_host::CenoStdin;
@@ -623,6 +623,61 @@ fn test_bn254_precompile() -> Result<()> {
     let program_elf = ceno_examples::bn254_precompile;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
     let _ = run(&mut state)?;
+    Ok(())
+}
+
+fn test_uint256_mul() -> Result<()> {
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 1);
+
+    let witness = syscalls[0];
+    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+    assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+
+    let a_address = witness.reg_ops[0].value.after;
+    assert_eq!(a_address, witness.reg_ops[0].value.before);
+    let a_address: WordAddr = a_address.into();
+
+    let b_address = witness.reg_ops[1].value.after;
+    assert_eq!(b_address, witness.reg_ops[1].value.before);
+    let b_address: WordAddr = b_address.into();
+
+    const A_MUL_B: [u8; 65] = [
+        4, 188, 11, 115, 232, 35, 63, 79, 186, 163, 11, 207, 165, 64, 247, 109, 81, 125, 56, 83,
+        131, 221, 140, 154, 19, 186, 109, 173, 9, 127, 142, 169, 219, 108, 17, 216, 218, 125, 37,
+        30, 87, 86, 194, 151, 20, 122, 64, 118, 123, 210, 29, 60, 209, 138, 131, 11, 247, 157, 212,
+        209, 123, 162, 111, 197, 70,
+    ];
+    let expect = bytes_to_words(A_MUL_B);
+
+    assert_eq!(witness.mem_ops.len(), 3 * UINT256_WORDS_FIELD_ELEMENT);
+    // Expect first half to consist of read/writes on P
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .take(UINT256_WORDS_FIELD_ELEMENT)
+        .enumerate()
+    {
+        assert_eq!(write_op.addr, a_address + i);
+        assert_eq!(write_op.value.after, expect[i]);
+    }
+
+    // Expect second half to consist of reads on Q
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .skip(UINT256_WORDS_FIELD_ELEMENT)
+        .take(UINT256_WORDS_FIELD_ELEMENT * UINT256_WORDS_FIELD_ELEMENT)
+        .enumerate()
+    {
+        assert_eq!(write_op.addr, b_address + i);
+        assert_eq!(write_op.value.after, write_op.value.before);
+    }
 
     Ok(())
 }

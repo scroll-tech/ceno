@@ -1,8 +1,8 @@
 mod bitwise_keccakf;
 mod lookup_keccakf;
+mod uint256;
 mod utils;
 mod weierstrass;
-mod uint256;
 
 pub use lookup_keccakf::{
     AND_LOOKUPS, KECCAK_INPUT32_SIZE, KECCAK_OUT_EVAL_SIZE, KeccakInstance, KeccakLayout,
@@ -17,6 +17,10 @@ pub use bitwise_keccakf::{
 };
 use ff_ext::ExtensionField;
 use gkr_iop::selector::SelectorType;
+pub use uint256::{
+    Uint256MulInstance, Uint256MulLayout, Uint256MulTrace, run_uint256_mul,
+    setup_gkr_circuit as setup_uint256_mul_circuit,
+};
 pub use weierstrass::{
     EllipticCurveAddInstance, EllipticCurveDecompressInstance, EllipticCurveDoubleInstance,
     test_utils::{random_point_pairs, random_points},

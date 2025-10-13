@@ -956,16 +956,19 @@ dependencies = [
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
+ "num",
  "num-derive",
  "num-traits",
  "rrs-succinct",
  "secp",
  "serde",
+ "sp1-curves",
  "strum",
  "strum_macros",
  "substrate-bn 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tiny-keccak",
  "tracing",
+ "typenum",
 ]
 
 [[package]]

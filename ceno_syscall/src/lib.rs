@@ -18,6 +18,7 @@ pub const BLS12381_DOUBLE: u32 = 0x00_00_01_1F;
 pub const SECP256R1_ADD: u32 = 0x00_01_01_2C;
 pub const SECP256R1_DOUBLE: u32 = 0x00_00_01_2D;
 pub const SECP256R1_DECOMPRESS: u32 = 0x00_00_01_2E;
+pub const UINT256_MUL: u32 = 0x00_01_01_1D;
 
 pub const KECCAK_STATE_WORDS: usize = 25;
 
