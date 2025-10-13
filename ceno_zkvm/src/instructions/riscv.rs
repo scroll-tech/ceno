@@ -44,7 +44,7 @@ mod test;
 #[cfg(test)]
 mod test_utils;
 
-pub trait RIVInstruction {
+pub trait RIVInstruction: Default {
     const INST_KIND: InsnKind;
 }
 

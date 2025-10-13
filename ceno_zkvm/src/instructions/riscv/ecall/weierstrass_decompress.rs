@@ -59,6 +59,7 @@ pub struct EcallWeierstrassDecompressConfig<E: ExtensionField, EC: EllipticCurve
 }
 
 /// WeierstrassDecompressInstruction can handle any instruction and produce its side-effects.
+#[derive(Default)]
 pub struct WeierstrassDecompressInstruction<E, EC>(PhantomData<(E, EC)>);
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E>
@@ -71,6 +72,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
     }
 
     fn construct_circuit(
+        &self,
         _circuit_builder: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -78,6 +80,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
     }
 
     fn build_gkr_iop_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {

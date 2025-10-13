@@ -33,6 +33,7 @@ pub struct JalrConfig<E: ExtensionField> {
     pub rd_high: WitIn,
 }
 
+#[derive(Default)]
 pub struct JalrInstruction<E>(PhantomData<E>);
 
 /// JALR instruction circuit
@@ -47,6 +48,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<JalrConfig<E>, ZKVMError> {

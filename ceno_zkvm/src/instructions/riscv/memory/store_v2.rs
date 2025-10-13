@@ -35,6 +35,7 @@ pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
     next_memory_value: Option<MemWordUtil<E, N_ZEROS>>,
 }
 
+#[derive(Default)]
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
@@ -47,6 +48,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

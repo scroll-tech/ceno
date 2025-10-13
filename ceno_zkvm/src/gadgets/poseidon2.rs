@@ -12,7 +12,7 @@ use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use num_bigint::BigUint;
 use p3::{
-    babybear::{BabyBear, BabyBearInternalLayerParameters},
+    babybear::{BabyBearInternalLayerParameters},
     field::{Field, FieldAlgebra},
     monty_31::InternalLayerBaseParameters,
     poseidon2::{MDSMat4, mds_light_permutation},
@@ -246,6 +246,10 @@ impl<
         > = col_exprs.as_slice().borrow();
 
         poseidon2_cols.inputs.to_vec()
+    }
+
+    pub fn output(&self) -> Vec<Expression<E>> {
+        todo!()
     }
 
     // pub fn assign_instance(&self, input: &[E; STATE_WIDTH]) {

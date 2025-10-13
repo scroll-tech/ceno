@@ -7,7 +7,9 @@ use ceno_emul::InsnKind;
 
 use super::RIVInstruction;
 
+#[derive(Default)]
 pub struct SltOp;
+
 impl RIVInstruction for SltOp {
     const INST_KIND: InsnKind = InsnKind::SLT;
 }
@@ -16,7 +18,9 @@ pub type SltInstruction<E> = slt_circuit_v2::SetLessThanInstruction<E, SltOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type SltInstruction<E> = slt_circuit::SetLessThanInstruction<E, SltOp>;
 
+#[derive(Default)]
 pub struct SltuOp;
+
 impl RIVInstruction for SltuOp {
     const INST_KIND: InsnKind = InsnKind::SLTU;
 }
@@ -55,14 +59,12 @@ mod test {
     ) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
+        let inst = SetLessThanInstruction::<E, I>::default();
         let config = cb
             .namespace(
                 || format!("{}/{name}", I::INST_KIND),
                 |cb| {
-                    let config = SetLessThanInstruction::<_, I>::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    );
+                    let config = inst.construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )

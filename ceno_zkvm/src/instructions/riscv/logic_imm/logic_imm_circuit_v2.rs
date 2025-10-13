@@ -26,6 +26,7 @@ use ceno_emul::{InsnKind, StepRecord};
 use multilinear_extensions::ToExpr;
 
 /// The Instruction circuit for a given LogicOp.
+#[derive(Default)]
 pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
@@ -36,6 +37,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     }
 
     fn construct_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

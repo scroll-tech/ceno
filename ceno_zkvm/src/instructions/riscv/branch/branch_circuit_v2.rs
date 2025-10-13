@@ -15,6 +15,7 @@ use ff_ext::ExtensionField;
 use multilinear_extensions::Expression;
 use std::marker::PhantomData;
 
+#[derive(Default)]
 pub struct BranchCircuit<E, I>(PhantomData<(E, I)>);
 
 pub struct BranchConfig<E: ExtensionField> {
@@ -34,6 +35,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

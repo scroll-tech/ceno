@@ -271,6 +271,7 @@ pub struct ShiftRTypeConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
 }
 
+#[derive(Default)]
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
@@ -281,6 +282,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
@@ -366,7 +368,8 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     imm: WitIn,
 }
 
-pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
+#[derive(Default)]
+pub struct ShiftImmInstruction<E, I: Default>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
@@ -376,6 +379,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {

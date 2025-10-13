@@ -26,6 +26,7 @@ pub struct HaltConfig {
     lt_x10_cfg: AssertLtConfig,
 }
 
+#[derive(Default)]
 pub struct HaltInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
@@ -36,6 +37,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
     }
 
     fn construct_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

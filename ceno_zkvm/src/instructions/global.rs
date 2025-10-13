@@ -1,7 +1,14 @@
-use crate::gadgets::{Poseidon2BabyBearConfig, horizen_round_consts};
-use ff_ext::{BabyBearExt4, ExtensionField};
-use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
-use multilinear_extensions::{Expression, ToExpr, WitIn};
+use std::iter::repeat;
+
+use crate::{
+    chip_handler::general::PublicIOQuery,
+    gadgets::{Poseidon2Config, RoundConstants},
+};
+use ff_ext::ExtensionField;
+use gkr_iop::{
+    circuit_builder::CircuitBuilder, error::CircuitBuilderError,
+};
+use multilinear_extensions::{ToExpr, WitIn};
 use p3::field::FieldAlgebra;
 
 use crate::{
@@ -9,10 +16,12 @@ use crate::{
     scheme::constants::SEPTIC_EXTENSION_DEGREE,
 };
 
-// opcode circuit + mem init/final table + mem local chip: consistency RAMType::Register / Memory
-
-// mem local <-> global
-// precompile <-> global
+// opcode circuit + mem init/final table + global chip:
+// have read/write consistency for RAMType::Register
+// and RAMType::Memory
+//
+// global chip: read from and write into a global set shared
+//      among multiple shards
 pub struct GlobalConfig<E: ExtensionField> {
     addr: WitIn,
     ram_type: WitIn,
@@ -22,15 +31,19 @@ pub struct GlobalConfig<E: ExtensionField> {
     is_write: WitIn,
     x: Vec<WitIn>,
     y: Vec<WitIn>,
-    poseidon2: Poseidon2BabyBearConfig,
+    poseidon2: Poseidon2Config<E, 16, 7, 1, 4, 13>,
 }
 
 impl<E: ExtensionField> GlobalConfig<E> {
-    pub fn config(cb: &mut CircuitBuilder<E>) -> Result<Self, CircuitBuilderError> {
-        let x = (0..SEPTIC_EXTENSION_DEGREE)
+    // TODO: make `WIDTH`, `HALF_FULL_ROUNDS`, `PARTIAL_ROUNDS` generic parameters
+    pub fn configure(
+        cb: &mut CircuitBuilder<E>,
+        rc: RoundConstants<E::BaseField, 16, 4, 13>,
+    ) -> Result<Self, CircuitBuilderError> {
+        let x: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
             .map(|i| cb.create_witin(|| format!("x{}", i)))
             .collect();
-        let y = (0..SEPTIC_EXTENSION_DEGREE)
+        let y: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
             .map(|i| cb.create_witin(|| format!("y{}", i)))
             .collect();
         let addr = cb.create_witin(|| "addr");
@@ -40,9 +53,8 @@ impl<E: ExtensionField> GlobalConfig<E> {
         let clk = cb.create_witin(|| "clk");
         let is_write = cb.create_witin(|| "is_write");
 
-        let rc = horizen_round_consts();
-        let cb: &mut CircuitBuilder<'_, BabyBearExt4> = unsafe { std::mem::transmute(cb) };
-        let hasher = Poseidon2BabyBearConfig::construct(cb, rc);
+        // TODO: support other field
+        let hasher = Poseidon2Config::construct(cb, rc);
 
         let mut input = vec![];
         input.push(addr.expr());
@@ -51,15 +63,24 @@ impl<E: ExtensionField> GlobalConfig<E> {
         input.extend(value.memory_expr());
         input.push(shard.expr());
         input.push(clk.expr());
+        input.extend(repeat(E::BaseField::ZERO.expr()).take(16 - 6));
 
+        // enforces final_sum = \sum_i (x_i, y_i) using ecc quark protocol
+        let final_sum = cb.query_global_rw_sum()?;
+        cb.ec_sum(
+            x.iter().map(|xi| xi.expr()).collect::<Vec<_>>(),
+            y.iter().map(|yi| yi.expr()).collect::<Vec<_>>(),
+            final_sum.into_iter().map(|x| x.expr()).collect::<Vec<_>>(),
+        );
+
+        // enforces x = poseidon2([addr, ram_type, value[0], value[1], shard, clk, 0])
         for (input_expr, hasher_input) in input.into_iter().zip(hasher.inputs().into_iter()) {
             // TODO: replace with cb.require_equal()
-            cb.require_zero(|| "poseidon2 input", input_expr - hasher_input);
+            cb.require_zero(|| "poseidon2 input", input_expr - hasher_input)?;
         }
-
-        // TODO: enforce x = poseidon2([addr, ram_type, value[0], value[1], shard, clk])
-        // TODO: enforce \sum_i (xi, yi) = ecc_sum
-        // TODO: output ecc_sum as public values
+        for (xi, hasher_output) in x.iter().zip(hasher.output().into_iter()) {
+            cb.require_zero(|| "poseidon2 output", xi.expr() - hasher_output)?;
+        }
 
         // TODO: enforce is_write is boolean
         // TODO: enforce y < p/2 if is_write = 1
@@ -79,11 +100,13 @@ impl<E: ExtensionField> GlobalConfig<E> {
     }
 }
 
-// This chip is used to manage read/write into a global set 
+// This chip is used to manage read/write into a global set
 // shared among multiple shards
-pub struct GlobalChip {}
+pub struct GlobalChip<E: ExtensionField> {
+    rc: RoundConstants<E::BaseField, 16, 4, 13>,
+}
 
-impl<E: ExtensionField> Instruction<E> for GlobalChip {
+impl<E: ExtensionField> Instruction<E> for GlobalChip<E> {
     type InstructionConfig = GlobalConfig<E>;
 
     fn name() -> String {
@@ -91,19 +114,20 @@ impl<E: ExtensionField> Instruction<E> for GlobalChip {
     }
 
     fn construct_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _param: &crate::structs::ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
-        let config = GlobalConfig::config(cb)?;
+        let config = GlobalConfig::configure(cb, self.rc.clone())?;
 
         Ok(config)
     }
 
     fn assign_instance(
-        config: &Self::InstructionConfig,
-        instance: &mut [<E as ExtensionField>::BaseField],
-        lk_multiplicity: &mut crate::witness::LkMultiplicity,
-        step: &ceno_emul::StepRecord,
+        _config: &Self::InstructionConfig,
+        _instance: &mut [<E as ExtensionField>::BaseField],
+        _lk_multiplicity: &mut crate::witness::LkMultiplicity,
+        _step: &ceno_emul::StepRecord,
     ) -> Result<(), crate::error::ZKVMError> {
         todo!()
     }

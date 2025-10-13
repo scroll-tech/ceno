@@ -28,6 +28,7 @@ pub struct JalrConfig<E: ExtensionField> {
     pub rd_written: UInt<E>,
 }
 
+#[derive(Default)]
 pub struct JalrInstruction<E>(PhantomData<E>);
 
 /// JALR instruction circuit

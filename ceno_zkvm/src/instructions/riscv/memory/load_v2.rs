@@ -37,7 +37,8 @@ pub struct LoadConfig<E: ExtensionField> {
     signed_extend_config: Option<SignedExtendConfig<E>>,
 }
 
-pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
+#[derive(Default)]
+pub struct LoadInstruction<E, I: Default>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
     type InstructionConfig = LoadConfig<E>;
@@ -47,6 +48,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
