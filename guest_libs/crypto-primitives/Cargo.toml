@@ -1,10 +1,10 @@
 [package]
-name = "ceno_crypto_primitives"
-description = "Cryptographic primitives for Ceno zkVM guest"
 categories.workspace = true
+description = "Cryptographic primitives for Ceno zkVM guest"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
+name = "ceno_crypto_primitives"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true

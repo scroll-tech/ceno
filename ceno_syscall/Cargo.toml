@@ -1,10 +1,10 @@
 [package]
-name = "ceno_syscall"
-description = "Ceno zkVM Syscall Interface"
 categories.workspace = true
+description = "Ceno zkVM Syscall Interface"
 edition.workspace = true
 keywords.workspace = true
 license.workspace = true
+name = "ceno_syscall"
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
