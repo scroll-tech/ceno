@@ -292,18 +292,19 @@ where
 mod tests {
     use std::collections::VecDeque;
 
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::{BabyBearExt4, GoldilocksExt2};
     use itertools::izip;
     use p3::{
         commit::{ExtensionMmcs, Mmcs},
         goldilocks::Goldilocks,
     };
 
-    use rand::rngs::OsRng;
+    use rand::{rngs::OsRng, thread_rng};
     use transcript::BasicTranscript;
 
     use crate::{
-        basefold::commit_phase::basefold_fri_round, util::merkle_tree::poseidon2_merkle_tree,
+        basefold::commit_phase::basefold_fri_round,
+        util::{merkle_tree::poseidon2_merkle_tree, test::rand_vec},
     };
 
     use super::*;
@@ -368,5 +369,29 @@ mod tests {
             &mmcs_ext.get_matrices(&prove_data[0])[0].values,
             &codeword_from_folded_rmm.values
         );
+    }
+
+    #[test]
+    fn test_lde_batch() {
+        type E = BabyBearExt4;
+        let mut rng = thread_rng();
+        let dft: Radix2DitParallel<<E as ExtensionField>::BaseField> = Default::default();
+
+        let width = 10;
+        let added_bits = vec![1, 2, 3];
+        for log2_n in 1..22 {
+            let matrix = DenseMatrix::new(rand_vec(width * (1 << log2_n), &mut rng), width);
+            for added_bit in added_bits.iter() {
+                let dur = std::time::Instant::now();
+                dft.lde_batch(matrix.clone(), *added_bit);
+                println!(
+                    "lde(matrix {}x{}, {}) took {:?}",
+                    width,
+                    1 << log2_n,
+                    added_bit,
+                    dur.elapsed()
+                );
+            }
+        }
     }
 }

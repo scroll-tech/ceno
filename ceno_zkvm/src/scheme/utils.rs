@@ -286,7 +286,7 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
 #[cfg(test)]
 mod tests {
 
-    use ff_ext::{FieldInto, GoldilocksExt2};
+    use ff_ext::{BabyBearExt4, FieldInto, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
         commutative_op_mle_pair,
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_infer_tower_witness() {
-        type E = GoldilocksExt2;
+        type E = BabyBearExt4;
         let num_product_fanin = 2;
         let last_layer: Vec<MultilinearExtension<E>> = vec![
             vec![E::ONE, E::from_canonical_u64(2u64)].into_mle(),
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn test_infer_tower_logup_witness() {
-        type E = GoldilocksExt2;
+        type E = BabyBearExt4;
         let num_vars = 2;
         let q: Vec<MultilinearExtension<E>> = vec![
             vec![1, 2, 3, 4]

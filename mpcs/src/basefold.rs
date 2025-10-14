@@ -483,17 +483,19 @@ where
 #[cfg(test)]
 mod test {
     use crate::util::codeword_fold_with_challenge;
-    use ff_ext::{BabyBearExt4, FromUniformBytes, GoldilocksExt2};
+    use ff_ext::{BabyBearExt4, ExtensionField, FromUniformBytes, GoldilocksExt2, PoseidonField};
     use itertools::Itertools;
     use p3::{
         babybear::BabyBear,
+        commit::Mmcs,
         field::{Field, FieldAlgebra, TwoAdicField},
         matrix::{Matrix, bitrev::BitReversableMatrix, dense::RowMajorMatrix},
     };
 
     use crate::{
-        basefold::Basefold,
+        basefold::{Basefold, poseidon2_merkle_tree},
         test_util::{run_batch_commit_open_verify, run_commit_open_verify},
+        util::test::rand_vec,
     };
 
     use super::BasefoldRSParams;
@@ -549,5 +551,27 @@ mod test {
             m.bit_reverse_rows().to_row_major_matrix().values,
             vec![0b000, 0b100, 0b010, 0b110, 0b001, 0b101, 0b011, 0b111]
         );
+    }
+
+    #[test]
+    fn test_poseidon2_mmcs() {
+        type E = BabyBearExt4;
+
+        let mut rng = rand::thread_rng();
+        let base_mmcs: <<E as ExtensionField>::BaseField as PoseidonField>::MMCS =
+            poseidon2_merkle_tree::<E>();
+
+        // commit to two matrices whose layouts are (2^10, 4) and (2^14, 10)
+        let matrices = vec![(1 << 10, 4), (1 << 14, 10)]
+            .into_iter()
+            .map(|(rows, cols)| {
+                RowMajorMatrix::<<E as ExtensionField>::BaseField>::new(
+                    rand_vec(rows * cols, &mut rng),
+                    cols,
+                )
+            })
+            .collect_vec();
+
+        base_mmcs.commit(matrices);
     }
 }
