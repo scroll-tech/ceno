@@ -3,7 +3,9 @@ use std::iter::repeat;
 use crate::{
     chip_handler::general::PublicIOQuery,
     gadgets::{Poseidon2Config, RoundConstants},
+    witness::LkMultiplicity,
 };
+use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
 use multilinear_extensions::{ToExpr, WitIn};
@@ -123,10 +125,16 @@ impl<E: ExtensionField> Instruction<E> for GlobalChip<E> {
 
     fn assign_instance(
         _config: &Self::InstructionConfig,
-        _instance: &mut [<E as ExtensionField>::BaseField],
-        _lk_multiplicity: &mut crate::witness::LkMultiplicity,
-        _step: &ceno_emul::StepRecord,
+        _instance: &mut [E::BaseField],
+        _lk_multiplicity: &mut LkMultiplicity,
+        _step: &StepRecord,
     ) -> Result<(), crate::error::ZKVMError> {
+        // assign (x, y)
+
+        // assign [addr, ram_type, value, shard, clk, is_write]
+
+        // assign poseidon2 hasher
+
         todo!()
     }
 }
@@ -136,5 +144,13 @@ mod tests {
     #[test]
     fn test_global_chip() {
         // Test the GlobalChip functionality here
+
+        // init global chip with horizen_rc_consts
+
+        // create a bunch of random memory read/write records
+
+        // assign witness
+
+        // create chip proof for global chip
     }
 }
