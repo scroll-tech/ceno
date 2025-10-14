@@ -10,7 +10,7 @@ pub use tiny_keccak::{self, Hasher};
 mod vendor;
 pub use vendor::keccak::Keccak;
 
-pub use ceno_rt::syscalls::syscall_keccak_permute as keccakf;
+pub use ceno_syscall::syscall_keccak_permute as keccakf;
 
 mod keccakf {
     use crate::{

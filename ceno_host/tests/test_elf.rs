@@ -439,6 +439,18 @@ fn test_secp256k1_decompress() -> Result<()> {
 }
 
 #[test]
+fn test_secp256k1_ecrecover() -> Result<()> {
+    let _ = ceno_host::run(
+        CENO_PLATFORM,
+        ceno_examples::secp256k1_ecrecover,
+        &CenoStdin::default(),
+        None,
+    );
+
+    Ok(())
+}
+
+#[test]
 fn test_sha256_extend() -> Result<()> {
     let program_elf = ceno_examples::sha_extend_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;

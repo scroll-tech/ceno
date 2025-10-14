@@ -15,7 +15,7 @@ impl SyscallSpec for KeccakSpec {
 
     const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = KECCAK_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::KECCAK_PERMUTE;
+    const CODE: u32 = ceno_syscall::KECCAK_PERMUTE;
     const HAS_LOOKUPS: bool = true;
 }
 

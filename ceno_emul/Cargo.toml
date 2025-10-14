@@ -12,6 +12,7 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 ceno_rt = { path = "../ceno_rt" }
+ceno_syscall = { path = "../ceno_syscall" }
 elf = "0.7"
 ff_ext.workspace = true
 itertools.workspace = true

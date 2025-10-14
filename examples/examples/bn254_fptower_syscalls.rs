@@ -1,5 +1,5 @@
 extern crate ceno_rt;
-use ceno_rt::syscalls::{
+use ceno_syscall::{
     syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp2_addmod,
     syscall_bn254_fp2_mulmod,
 };

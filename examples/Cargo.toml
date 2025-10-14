@@ -11,8 +11,11 @@ version = "0.1.0"
 
 [dependencies]
 alloy-primitives = { version = "1.3", features = ["native-keccak"] }
+ceno_crypto = { path = "../guest_libs/crypto" }
 ceno_keccak = { path = "../guest_libs/keccak" }
 ceno_rt = { path = "../ceno_rt" }
+ceno_syscall = { path = "../ceno_syscall" }
+getrandom = { version = "0.3" }
 rand.workspace = true
 tiny-keccak.workspace = true
 

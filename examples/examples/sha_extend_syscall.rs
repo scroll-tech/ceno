@@ -2,7 +2,7 @@
 extern crate ceno_rt;
 use std::array;
 
-use ceno_rt::syscalls::syscall_sha256_extend;
+use ceno_syscall::syscall_sha256_extend;
 
 fn main() {
     let mut words: [u32; 64] = array::from_fn(|i| i as u32);
