@@ -249,7 +249,22 @@ impl<
     }
 
     pub fn output(&self) -> Vec<Expression<E>> {
-        todo!()
+        let col_exprs = self.cols.iter().map(|c| c.expr()).collect::<Vec<_>>();
+
+        let poseidon2_cols: &Poseidon2Cols<
+            Expression<E>,
+            STATE_WIDTH,
+            SBOX_DEGREE,
+            SBOX_REGISTERS,
+            HALF_FULL_ROUNDS,
+            PARTIAL_ROUNDS,
+        > = col_exprs.as_slice().borrow();
+
+        poseidon2_cols
+            .ending_full_rounds
+            .last()
+            .map(|r| r.post.to_vec())
+            .unwrap()
     }
 
     // pub fn assign_instance(&self, input: &[E; STATE_WIDTH]) {
