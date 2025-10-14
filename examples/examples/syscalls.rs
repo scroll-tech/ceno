@@ -1,3 +1,5 @@
+extern crate ceno_rt;
+
 use std::array;
 
 use ceno_syscall::{
