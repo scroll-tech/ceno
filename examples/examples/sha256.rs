@@ -1,6 +1,6 @@
 extern crate ceno_rt;
 
-use ceno_rt::syscalls::syscall_sha256_extend;
+use ceno_syscall::syscall_sha256_extend;
 use rkyv::vec::ArchivedVec;
 
 // SHA-256 constants

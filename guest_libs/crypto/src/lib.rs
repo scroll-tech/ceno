@@ -34,7 +34,7 @@ pub enum CenoCryptoError {
     Bn254PairLength,
     /// Sepk256k1 ecrecover error
     #[error("Secp256k1 ecrecover error")]
-    Secp256k1EcRecover,
+    Secp256k1Ecrecover(#[from] k256::ecdsa::Error),
 }
 
 #[cfg(test)]

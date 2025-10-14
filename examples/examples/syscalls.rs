@@ -1,6 +1,8 @@
+extern crate ceno_rt;
+
 use std::array;
 
-use ceno_rt::syscalls::{
+use ceno_syscall::{
     syscall_keccak_permute, syscall_secp256k1_add, syscall_secp256k1_decompress,
     syscall_secp256k1_double, syscall_sha256_extend,
 };
@@ -51,9 +53,9 @@ pub fn test_syscalls() {
         ];
         {
             let mut p = bytes_to_words(P);
-            let mut q = bytes_to_words(Q);
+            let q = bytes_to_words(Q);
             let p_plus_q = bytes_to_words(P_PLUS_Q);
-            syscall_secp256k1_add(&mut p, &mut q);
+            syscall_secp256k1_add(&mut p, &q);
 
             assert!(p == p_plus_q);
         }

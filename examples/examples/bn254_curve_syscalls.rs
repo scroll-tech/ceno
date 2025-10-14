@@ -1,6 +1,6 @@
 // Test addition of two curve points. Assert result inside the guest
 extern crate ceno_rt;
-use ceno_rt::syscalls::{syscall_bn254_add, syscall_bn254_double};
+use ceno_syscall::{syscall_bn254_add, syscall_bn254_double};
 
 use substrate_bn::{AffineG1, Fr, G1, Group};
 fn bytes_to_words(bytes: [u8; 64]) -> [u32; 16] {

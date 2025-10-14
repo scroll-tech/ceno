@@ -13,7 +13,7 @@ impl SyscallSpec for Bn254AddSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * BN254_POINT_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::BN254_ADD;
+    const CODE: u32 = ceno_syscall::BN254_ADD;
 }
 
 pub struct Bn254DoubleSpec;
@@ -22,7 +22,7 @@ impl SyscallSpec for Bn254DoubleSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = BN254_POINT_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::BN254_DOUBLE;
+    const CODE: u32 = ceno_syscall::BN254_DOUBLE;
 }
 
 pub fn bn254_add(vm: &VMState) -> SyscallEffects {
