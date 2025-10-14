@@ -9,12 +9,28 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
     /// Creates a new [`AffinePoint`] that corresponds to the identity point.
     fn identity() -> Self;
 
+    /// Gets a reference to the inner [`WeierstrassPoint`].
+    fn inner(&self) -> &WeierstrassPoint<N>;
+
+    /// Gets a mut reference to the inner [`WeierstrassPoint`].
+    fn inner_mut(&mut self) -> &mut WeierstrassPoint<N>;
+
     /// Returns a reference to the limbs.
-    fn limbs_ref(&self) -> &[u32; N];
+    fn limbs_ref(&self) -> &[u32; N] {
+        match self.inner() {
+            WeierstrassPoint::Infinity => panic!("Infinity point has no limbs"),
+            WeierstrassPoint::Affine(limbs) => limbs,
+        }
+    }
 
     /// Returns a mutable reference to the limbs. If the point is the infinity point, this will
     /// panic.
-    fn limbs_mut(&mut self) -> &mut [u32; N];
+    fn limbs_mut(&mut self) -> &mut [u32; N] {
+        match self.inner_mut() {
+            WeierstrassPoint::Infinity => panic!("Infinity point has no limbs"),
+            WeierstrassPoint::Affine(limbs) => limbs,
+        }
+    }
 
     fn is_identity(&self) -> bool;
 
