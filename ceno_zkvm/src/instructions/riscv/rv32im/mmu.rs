@@ -9,10 +9,15 @@ use crate::{
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         HeapCircuit, HintsCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit,
-        PubIOTable, RegTable, RegTableCircuit, StackCircuit, StaticMemCircuit, StaticMemTable,
-        TableCircuit,
+        PubIOTable, RegTable, RegTableCircuit, RegTableInitCircuit, StackCircuit, StaticMemCircuit,
+        StaticMemTable, TableCircuit,
     },
 };
+
+pub struct RegConfigs<E: ExtensionField> {
+    pub reg_init_config: <RegTableInitCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub reg_mem_bus: <RegTableInitCircuit<E> as TableCircuit<E>>::TableConfig,
+}
 
 pub struct MmuConfig<E: ExtensionField> {
     /// Initialization of registers.

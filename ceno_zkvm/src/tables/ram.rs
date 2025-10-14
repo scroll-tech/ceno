@@ -8,6 +8,7 @@ use crate::{
 
 mod ram_circuit;
 mod ram_impl;
+use crate::tables::ram::ram_circuit::NonVolatileInitRamCircuit;
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
 #[derive(Clone)]
@@ -108,7 +109,8 @@ impl NonVolatileTable for RegTable {
     }
 }
 
-pub type RegTableCircuit<E> = NonVolatileRamCircuit<E, RegTable>;
+// pub type RegTableCircuit<E> = NonVolatileRamCircuit<E, RegTable>;
+pub type RegTableInitCircuit<E> = NonVolatileInitRamCircuit<E, RegTable>;
 
 #[derive(Clone)]
 pub struct StaticMemTable;

@@ -19,6 +19,7 @@ use crate::{
     e2e::RAMRecord,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     structs::ProgramParams,
+    tables::ram::ram_circuit::DynVolatileRamTableConfigTrait,
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{
@@ -186,6 +187,105 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
     }
 }
 
+/// define a non-volatile memory with init value
+#[derive(Clone, Debug)]
+pub struct NonVolatileInitTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
+    init_v: Vec<Fixed>,
+    addr: Fixed,
+
+    phantom: PhantomData<NVRAM>,
+    params: ProgramParams,
+}
+
+impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileInitTableConfig<NVRAM> {
+    pub fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self, CircuitBuilderError> {
+        let init_v = (0..NVRAM::V_LIMBS)
+            .map(|i| cb.create_fixed(|| format!("init_v_limb_{i}")))
+            .collect_vec();
+        let addr = cb.create_fixed(|| "addr");
+
+        let init_table = [
+            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![Expression::Fixed(addr)],
+            init_v.iter().map(|v| v.expr()).collect_vec(),
+            vec![Expression::ZERO], // Initial cycle.
+        ]
+        .concat();
+
+        cb.w_table_record(
+            || "init_table",
+            NVRAM::RAM_TYPE,
+            SetTableSpec {
+                len: Some(NVRAM::len(params)),
+                structural_witins: vec![],
+            },
+            init_table,
+        )?;
+
+        Ok(Self {
+            init_v,
+            addr,
+            phantom: PhantomData,
+            params: params.clone(),
+        })
+    }
+
+    pub fn gen_init_state<F: SmallField>(
+        &self,
+        num_fixed: usize,
+        init_mem: &[MemInitRecord],
+    ) -> RowMajorMatrix<F> {
+        assert!(
+            NVRAM::len(&self.params).is_power_of_two(),
+            "{} len {} must be a power of 2",
+            NVRAM::name(),
+            NVRAM::len(&self.params)
+        );
+
+        let mut init_table = RowMajorMatrix::<F>::new(
+            NVRAM::len(&self.params),
+            num_fixed,
+            InstancePaddingStrategy::Default,
+        );
+        assert_eq!(init_table.num_padding_instances(), 0);
+
+        init_table
+            .par_rows_mut()
+            .zip_eq(init_mem)
+            .for_each(|(row, rec)| {
+                if self.init_v.len() == 1 {
+                    // Assign value directly.
+                    set_fixed_val!(row, self.init_v[0], (rec.value as u64).into_f());
+                } else {
+                    // Assign value limbs.
+                    self.init_v.iter().enumerate().for_each(|(l, limb)| {
+                        let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                        set_fixed_val!(row, limb, (val as u64).into_f());
+                    });
+                }
+                set_fixed_val!(row, self.addr, (rec.addr as u64).into_f());
+            });
+
+        init_table
+    }
+
+    /// TODO consider taking RowMajorMatrix as argument to save allocations.
+    pub fn assign_instances<F: SmallField>(
+        &self,
+        num_witin: usize,
+        num_structural_witin: usize,
+        _final_mem: &[MemFinalRecord],
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        assert_eq!(num_structural_witin, 0);
+        assert!(_final_mem.is_empty());
+
+        Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()])
+    }
+}
+
 /// define public io
 /// init value set by instance
 #[derive(Clone, Debug)]
@@ -315,8 +415,11 @@ pub struct DynVolatileRamTableConfig<DVRAM: DynVolatileRamTable + Send + Sync + 
     params: ProgramParams,
 }
 
-impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig<DVRAM> {
-    pub fn construct_circuit<E: ExtensionField>(
+impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfigTrait<DVRAM>
+    for DynVolatileRamTableConfig<DVRAM>
+{
+    type Output = DynVolatileRamTableConfig<DVRAM>;
+    fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
@@ -389,7 +492,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     }
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
-    pub fn assign_instances<F: SmallField>(
+    fn assign_instances<F: SmallField>(
         &self,
         num_witin: usize,
         num_structural_witin: usize,
@@ -457,8 +560,10 @@ pub struct DynVolatileRamTableInitConfig<DVRAM: DynVolatileRamTable + Send + Syn
     params: ProgramParams,
 }
 
-impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitConfig<DVRAM> {
-    pub fn construct_circuit<E: ExtensionField>(
+impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfigTrait<DVRAM>
+    for DynVolatileRamTableInitConfig<DVRAM>
+{
+    fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
@@ -503,7 +608,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
     }
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
-    pub fn assign_instances<F: SmallField>(
+    fn assign_instances<F: SmallField>(
         &self,
         num_witin: usize,
         num_structural_witin: usize,
@@ -564,8 +669,10 @@ pub struct DynVolatileRamTableFinalConfig<DVRAM: DynVolatileRamTable + Send + Sy
     params: ProgramParams,
 }
 
-impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableFinalConfig<DVRAM> {
-    pub fn construct_circuit<E: ExtensionField>(
+impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfigTrait<DVRAM>
+    for DynVolatileRamTableFinalConfig<DVRAM>
+{
+    fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
@@ -620,7 +727,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableFinalC
     }
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
-    pub fn assign_instances<F: SmallField>(
+    fn assign_instances<F: SmallField>(
         &self,
         num_witin: usize,
         num_structural_witin: usize,
