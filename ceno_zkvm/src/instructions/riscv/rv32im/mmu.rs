@@ -16,6 +16,7 @@ use crate::{
 
 pub struct RegConfigs<E: ExtensionField> {
     pub reg_init_config: <RegTableInitCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub reg_final_config: <RegTableFinalCircuit<E> as TableCircuit<E>>::TableConfig,
     pub reg_mem_bus: <RegTableInitCircuit<E> as TableCircuit<E>>::TableConfig,
 }
 

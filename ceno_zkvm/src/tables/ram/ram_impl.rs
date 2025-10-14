@@ -28,6 +28,28 @@ use multilinear_extensions::{
 use p3::field::FieldAlgebra;
 use rayon::prelude::{ParallelSlice, ParallelSliceMut};
 
+pub trait NonVolatileTableConfigTrait<NVRAM>: Sized + Send + Sync {
+    type Config: Sized + Send + Sync;
+
+    fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self::Config, CircuitBuilderError>;
+
+    fn gen_init_state<F: SmallField>(
+        config: &Self::Config,
+        num_fixed: usize,
+        init_mem: &[MemInitRecord],
+    ) -> RowMajorMatrix<F>;
+
+    fn assign_instances<F: SmallField>(
+        config: &Self::Config,
+        num_witin: usize,
+        num_structural_witin: usize,
+        final_mem: &[MemFinalRecord],
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError>;
+}
+
 /// define a non-volatile memory with init value
 #[derive(Clone, Debug)]
 pub struct NonVolatileTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
@@ -41,8 +63,11 @@ pub struct NonVolatileTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone>
     params: ProgramParams,
 }
 
-impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM> {
-    pub fn construct_circuit<E: ExtensionField>(
+impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<NVRAM>
+    for NonVolatileTableConfig<NVRAM>
+{
+    type Config = NonVolatileTableConfig<NVRAM>;
+    fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
@@ -111,20 +136,20 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
         })
     }
 
-    pub fn gen_init_state<F: SmallField>(
-        &self,
+    fn gen_init_state<F: SmallField>(
+        config: &Self::Config,
         num_fixed: usize,
         init_mem: &[MemInitRecord],
     ) -> RowMajorMatrix<F> {
         assert!(
-            NVRAM::len(&self.params).is_power_of_two(),
+            NVRAM::len(&config.params).is_power_of_two(),
             "{} len {} must be a power of 2",
             NVRAM::name(),
-            NVRAM::len(&self.params)
+            NVRAM::len(&config.params)
         );
 
         let mut init_table = RowMajorMatrix::<F>::new(
-            NVRAM::len(&self.params),
+            NVRAM::len(&config.params),
             num_fixed,
             InstancePaddingStrategy::Default,
         );
@@ -134,32 +159,32 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             .par_rows_mut()
             .zip_eq(init_mem)
             .for_each(|(row, rec)| {
-                if self.init_v.len() == 1 {
+                if config.init_v.len() == 1 {
                     // Assign value directly.
-                    set_fixed_val!(row, self.init_v[0], (rec.value as u64).into_f());
+                    set_fixed_val!(row, config.init_v[0], (rec.value as u64).into_f());
                 } else {
                     // Assign value limbs.
-                    self.init_v.iter().enumerate().for_each(|(l, limb)| {
+                    config.init_v.iter().enumerate().for_each(|(l, limb)| {
                         let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
                         set_fixed_val!(row, limb, (val as u64).into_f());
                     });
                 }
-                set_fixed_val!(row, self.addr, (rec.addr as u64).into_f());
+                set_fixed_val!(row, config.addr, (rec.addr as u64).into_f());
             });
 
         init_table
     }
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
-    pub fn assign_instances<F: SmallField>(
-        &self,
+    fn assign_instances<F: SmallField>(
+        config: &Self::Config,
         num_witin: usize,
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert_eq!(num_structural_witin, 0);
         let mut final_table = RowMajorMatrix::<F>::new(
-            NVRAM::len(&self.params),
+            NVRAM::len(&config.params),
             num_witin,
             InstancePaddingStrategy::Default,
         );
@@ -168,7 +193,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
             .par_rows_mut()
             .zip_eq(final_mem)
             .for_each(|(row, rec)| {
-                if let Some(final_v) = &self.final_v {
+                if let Some(final_v) = &config.final_v {
                     if final_v.len() == 1 {
                         // Assign value directly.
                         set_val!(row, final_v[0], rec.value as u64);
@@ -180,7 +205,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfig<NVRAM
                         });
                     }
                 }
-                set_val!(row, self.final_cycle, rec.cycle);
+                set_val!(row, config.final_cycle, rec.cycle);
             });
 
         Ok([final_table, RowMajorMatrix::empty()])
@@ -197,11 +222,16 @@ pub struct NonVolatileInitTableConfig<NVRAM: NonVolatileTable + Send + Sync + Cl
     params: ProgramParams,
 }
 
-impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileInitTableConfig<NVRAM> {
-    pub fn construct_circuit<E: ExtensionField>(
+impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<NVRAM>
+    for NonVolatileInitTableConfig<NVRAM>
+{
+    type Config = NonVolatileInitTableConfig<NVRAM>;
+
+    fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
+        assert!(NVRAM::WRITABLE);
         let init_v = (0..NVRAM::V_LIMBS)
             .map(|i| cb.create_fixed(|| format!("init_v_limb_{i}")))
             .collect_vec();
@@ -233,20 +263,20 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileInitTableConfig<N
         })
     }
 
-    pub fn gen_init_state<F: SmallField>(
-        &self,
+    fn gen_init_state<F: SmallField>(
+        config: &Self::Config,
         num_fixed: usize,
         init_mem: &[MemInitRecord],
     ) -> RowMajorMatrix<F> {
         assert!(
-            NVRAM::len(&self.params).is_power_of_two(),
+            NVRAM::len(&config.params).is_power_of_two(),
             "{} len {} must be a power of 2",
             NVRAM::name(),
-            NVRAM::len(&self.params)
+            NVRAM::len(&config.params)
         );
 
         let mut init_table = RowMajorMatrix::<F>::new(
-            NVRAM::len(&self.params),
+            NVRAM::len(&config.params),
             num_fixed,
             InstancePaddingStrategy::Default,
         );
@@ -256,26 +286,26 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileInitTableConfig<N
             .par_rows_mut()
             .zip_eq(init_mem)
             .for_each(|(row, rec)| {
-                if self.init_v.len() == 1 {
+                if config.init_v.len() == 1 {
                     // Assign value directly.
-                    set_fixed_val!(row, self.init_v[0], (rec.value as u64).into_f());
+                    set_fixed_val!(row, config.init_v[0], (rec.value as u64).into_f());
                 } else {
                     // Assign value limbs.
-                    self.init_v.iter().enumerate().for_each(|(l, limb)| {
+                    config.init_v.iter().enumerate().for_each(|(l, limb)| {
                         let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
                         set_fixed_val!(row, limb, (val as u64).into_f());
                     });
                 }
-                set_fixed_val!(row, self.addr, (rec.addr as u64).into_f());
+                set_fixed_val!(row, config.addr, (rec.addr as u64).into_f());
             });
 
         init_table
     }
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
-    pub fn assign_instances<F: SmallField>(
-        &self,
-        num_witin: usize,
+    fn assign_instances<F: SmallField>(
+        _config: &Self::Config,
+        _num_witin: usize,
         num_structural_witin: usize,
         _final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
@@ -283,6 +313,106 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileInitTableConfig<N
         assert!(_final_mem.is_empty());
 
         Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()])
+    }
+}
+
+/// define a non-volatile memory with init value
+#[derive(Clone, Debug)]
+pub struct NonVolatileFinalTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
+    addr: WitIn,
+
+    final_v: Vec<WitIn>,
+    final_cycle: WitIn,
+
+    phantom: PhantomData<NVRAM>,
+    params: ProgramParams,
+}
+
+impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<NVRAM>
+    for NonVolatileFinalTableConfig<NVRAM>
+{
+    type Config = NonVolatileFinalTableConfig<NVRAM>;
+    fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self, CircuitBuilderError> {
+        assert!(NVRAM::WRITABLE);
+        let addr = cb.create_witin(|| "addr");
+
+        let final_cycle = cb.create_witin(|| "final_cycle");
+        let final_v = (0..NVRAM::V_LIMBS)
+            .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
+            .collect::<Vec<WitIn>>();
+
+        let final_table = [
+            // a v t
+            vec![(NVRAM::RAM_TYPE as usize).into()],
+            vec![addr.expr()],
+            final_v.iter().map(|v| v.expr()).collect_vec(),
+            vec![final_cycle.expr()],
+        ]
+        .concat();
+
+        cb.r_table_record(
+            || "final_table",
+            NVRAM::RAM_TYPE,
+            SetTableSpec {
+                len: Some(NVRAM::len(params)),
+                structural_witins: vec![],
+            },
+            final_table,
+        )?;
+
+        Ok(Self {
+            final_v,
+            addr,
+            final_cycle,
+            phantom: PhantomData,
+            params: params.clone(),
+        })
+    }
+
+    fn gen_init_state<F: SmallField>(
+        config: &Self::Config,
+        num_fixed: usize,
+        init_mem: &[MemInitRecord],
+    ) -> RowMajorMatrix<F> {
+        RowMajorMatrix::empty()
+    }
+
+    /// TODO consider taking RowMajorMatrix as argument to save allocations.
+    fn assign_instances<F: SmallField>(
+        config: &Self::Config,
+        num_witin: usize,
+        num_structural_witin: usize,
+        final_mem: &[MemFinalRecord],
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        assert_eq!(num_structural_witin, 0);
+        let mut final_table = RowMajorMatrix::<F>::new(
+            NVRAM::len(&config.params),
+            num_witin,
+            InstancePaddingStrategy::Default,
+        );
+
+        final_table
+            .par_rows_mut()
+            .zip_eq(final_mem)
+            .for_each(|(row, rec)| {
+                if config.final_v.len() == 1 {
+                    // Assign value directly.
+                    set_val!(row, config.final_v[0], rec.value as u64);
+                } else {
+                    // Assign value limbs.
+                    config.final_v.iter().enumerate().for_each(|(l, limb)| {
+                        let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                        set_val!(row, limb, val as u64);
+                    });
+                }
+                set_val!(row, config.addr, rec.addr as u64);
+                set_val!(row, config.final_cycle, rec.cycle);
+            });
+
+        Ok([final_table, RowMajorMatrix::empty()])
     }
 }
 
@@ -418,7 +548,7 @@ pub struct DynVolatileRamTableConfig<DVRAM: DynVolatileRamTable + Send + Sync + 
 impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfigTrait<DVRAM>
     for DynVolatileRamTableConfig<DVRAM>
 {
-    type Output = DynVolatileRamTableConfig<DVRAM>;
+    type Config = DynVolatileRamTableConfig<DVRAM>;
     fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
@@ -493,16 +623,16 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     fn assign_instances<F: SmallField>(
-        &self,
+        config: &Self::Config,
         num_witin: usize,
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
-        assert!(DVRAM::max_len(&self.params).is_power_of_two());
+        assert!(final_mem.len() <= DVRAM::max_len(&config.params));
+        assert!(DVRAM::max_len(&config.params).is_power_of_two());
 
-        let params = self.params.clone();
-        let addr_id = self.addr.id as u64;
+        let params = config.params.clone();
+        let addr_id = config.addr.id as u64;
         let addr_padding_fn = move |row: u64, col: u64| {
             assert_eq!(col, addr_id);
             DVRAM::addr(&params, row as usize) as u64
@@ -524,25 +654,25 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .for_each(|(i, ((row, structural_row), rec))| {
                 assert_eq!(
                     rec.addr,
-                    DVRAM::addr(&self.params, i),
+                    DVRAM::addr(&config.params, i),
                     "rec.addr {:x} != expected {:x}",
                     rec.addr,
-                    DVRAM::addr(&self.params, i),
+                    DVRAM::addr(&config.params, i),
                 );
 
-                if self.final_v.len() == 1 {
+                if config.final_v.len() == 1 {
                     // Assign value directly.
-                    set_val!(row, self.final_v[0], rec.value as u64);
+                    set_val!(row, config.final_v[0], rec.value as u64);
                 } else {
                     // Assign value limbs.
-                    self.final_v.iter().enumerate().for_each(|(l, limb)| {
+                    config.final_v.iter().enumerate().for_each(|(l, limb)| {
                         let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
                         set_val!(row, limb, val as u64);
                     });
                 }
-                set_val!(row, self.final_cycle, rec.cycle);
+                set_val!(row, config.final_cycle, rec.cycle);
 
-                set_val!(structural_row, self.addr, rec.addr as u64);
+                set_val!(structural_row, config.addr, rec.addr as u64);
             });
 
         structural_witness.padding_by_strategy();
@@ -563,6 +693,8 @@ pub struct DynVolatileRamTableInitConfig<DVRAM: DynVolatileRamTable + Send + Syn
 impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfigTrait<DVRAM>
     for DynVolatileRamTableInitConfig<DVRAM>
 {
+    type Config = DynVolatileRamTableInitConfig<DVRAM>;
+
     fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
@@ -609,16 +741,16 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     fn assign_instances<F: SmallField>(
-        &self,
+        config: &Self::Config,
         num_witin: usize,
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
-        assert!(DVRAM::max_len(&self.params).is_power_of_two());
+        assert!(final_mem.len() <= DVRAM::max_len(&config.params));
+        assert!(DVRAM::max_len(&config.params).is_power_of_two());
 
-        let params = self.params.clone();
-        let addr_id = self.addr.id as u64;
+        let params = config.params.clone();
+        let addr_id = config.addr.id as u64;
         let addr_padding_fn = move |row: u64, col: u64| {
             assert_eq!(col, addr_id);
             DVRAM::addr(&params, row as usize) as u64
@@ -640,12 +772,12 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .for_each(|(i, ((row, structural_row), rec))| {
                 assert_eq!(
                     rec.addr,
-                    DVRAM::addr(&self.params, i),
+                    DVRAM::addr(&config.params, i),
                     "rec.addr {:x} != expected {:x}",
                     rec.addr,
-                    DVRAM::addr(&self.params, i),
+                    DVRAM::addr(&config.params, i),
                 );
-                set_val!(structural_row, self.addr, rec.addr as u64);
+                set_val!(structural_row, config.addr, rec.addr as u64);
             });
 
         structural_witness.padding_by_strategy();
@@ -672,6 +804,7 @@ pub struct DynVolatileRamTableFinalConfig<DVRAM: DynVolatileRamTable + Send + Sy
 impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfigTrait<DVRAM>
     for DynVolatileRamTableFinalConfig<DVRAM>
 {
+    type Config = DynVolatileRamTableFinalConfig<DVRAM>;
     fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
@@ -728,14 +861,14 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     fn assign_instances<F: SmallField>(
-        &self,
+        config: &Self::Config,
         num_witin: usize,
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert_eq!(num_structural_witin, 1);
-        assert!(final_mem.len() <= DVRAM::max_len(&self.params));
-        assert!(DVRAM::max_len(&self.params).is_power_of_two());
+        assert!(final_mem.len() <= DVRAM::max_len(&config.params));
+        assert!(DVRAM::max_len(&config.params).is_power_of_two());
 
         let mut witness =
             RowMajorMatrix::<F>::new(final_mem.len(), num_witin, InstancePaddingStrategy::Default);
@@ -751,20 +884,20 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .zip(final_mem)
             .enumerate()
             .for_each(|(i, ((row, structural_row), rec))| {
-                if self.final_v.len() == 1 {
+                if config.final_v.len() == 1 {
                     // Assign value directly.
-                    set_val!(row, self.final_v[0], rec.value as u64);
+                    set_val!(row, config.final_v[0], rec.value as u64);
                 } else {
                     // Assign value limbs.
-                    self.final_v.iter().enumerate().for_each(|(l, limb)| {
+                    config.final_v.iter().enumerate().for_each(|(l, limb)| {
                         let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
                         set_val!(row, limb, val as u64);
                     });
                 }
-                set_val!(row, self.final_cycle, rec.cycle);
+                set_val!(row, config.final_cycle, rec.cycle);
 
-                set_val!(row, self.addr_subset, rec.addr as u64);
-                set_val!(row, self.sel, 1u64);
+                set_val!(row, config.addr_subset, rec.addr as u64);
+                set_val!(row, config.sel, 1u64);
             });
 
         Ok([witness, structural_witness])
