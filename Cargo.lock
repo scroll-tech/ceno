@@ -1308,7 +1308,7 @@ dependencies = [
 [[package]]
 name = "cuda_hal"
 version = "0.1.0"
-source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=feat%2Fbb31-hal-v2#9319bc242a93e27ba1d0fe3e3a00987ce169cfef"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#38be158bbcd4a1121bccba10dfc61369d36a6fe0"
 dependencies = [
  "anyhow",
  "cudarc",
@@ -1323,7 +1323,7 @@ dependencies = [
  "sppark",
  "sppark_plug",
  "sumcheck",
- "thiserror 2.0.12",
+ "thiserror 1.0.69",
  "tracing",
  "transcript",
  "witness",
@@ -2101,6 +2101,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
 dependencies = [
  "digest 0.10.7",
+]
+
+[[package]]
+name = "home"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "589533453244b0995c858700322199b2becb13b627df2851f64a2775d024abcf"
+dependencies = [
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3968,7 +3977,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3980,7 +3989,7 @@ dependencies = [
  "bitflags",
  "errno",
  "libc",
- "linux-raw-sys",
+ "linux-raw-sys 0.9.4",
  "windows-sys 0.59.0",
 ]
 
@@ -4368,6 +4377,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "sppark"
+version = "0.1.11"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#38be158bbcd4a1121bccba10dfc61369d36a6fe0"
+dependencies = [
+ "cc",
+ "which",
+]
+
+[[package]]
+name = "sppark_plug"
+version = "0.1.0"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=dev%2Fintegrate-into-ceno-as-dep#38be158bbcd4a1121bccba10dfc61369d36a6fe0"
+dependencies = [
+ "cc",
+ "ff_ext",
+ "itertools 0.13.0",
+ "p3",
+ "sppark",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4537,7 +4567,7 @@ dependencies = [
  "fastrand",
  "getrandom 0.3.2",
  "once_cell",
- "rustix",
+ "rustix 1.0.7",
  "windows-sys 0.59.0",
 ]
 

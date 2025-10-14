@@ -72,7 +72,7 @@ tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uint = "0.8"
 
-ceno_gpu = { git = "ssh://git@github.com/scroll-tech/ceno-gpu.git", package = "cuda_hal", branch = "feat/bb31-hal-v2", default-features = false, features = ["bb31"] }
+ceno_gpu = { git = "ssh://git@github.com/scroll-tech/ceno-gpu.git", package = "cuda_hal", branch = "dev/integrate-into-ceno-as-dep", default-features = false, features = ["bb31"] }
 
 [profile.dev]
 lto = "thin"
@@ -87,8 +87,8 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 
-#[patch."ssh://git@github.com/scroll-tech/ceno-gpu.git"]
-#ceno_gpu = { path = "../ceno-gpu/cuda_hal", package = "cuda_hal" }
+# [patch."ssh://git@github.com/scroll-tech/ceno-gpu.git"]
+# ceno_gpu = { path = "../ceno-gpu/cuda_hal", package = "cuda_hal" }
 
 #[patch."https://github.com/scroll-tech/gkr-backend"]
 #ff_ext = { path = "../gkr-backend/crates/ff_ext", package = "ff_ext" }
