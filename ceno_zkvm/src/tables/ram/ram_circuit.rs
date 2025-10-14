@@ -1,7 +1,11 @@
 use std::{collections::HashMap, marker::PhantomData};
 
+use super::ram_impl::{
+    LocalRAMTableFinalConfig, NonVolatileTableConfigTrait, PubIOTableConfig, RAMBusConfig,
+};
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::{RAMRecord, ShardContext},
     error::ZKVMError,
     structs::{ProgramParams, RAMType},
     tables::{RMMCollections, TableCircuit},
@@ -11,11 +15,6 @@ use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
-use super::ram_impl::{
-    DynVolatileRamTableConfig, NonVolatileInitTableConfig, NonVolatileTableConfig,
-    NonVolatileTableConfigTrait, PubIOTableConfig,
-};
-
 #[derive(Clone, Debug)]
 pub struct MemInitRecord {
     pub addr: Addr,
@@ -24,6 +23,7 @@ pub struct MemInitRecord {
 
 #[derive(Clone, Debug)]
 pub struct MemFinalRecord {
+    pub ram_type: RAMType,
     pub addr: Addr,
     pub cycle: Cycle,
     pub value: Word,
@@ -266,5 +266,107 @@ impl<
                 final_v,
             )?,
         )
+    }
+}
+
+/// This circuit is generalized version to handle all mmio records
+pub struct LocalFinalRamCircuit<'a, const V_LIMBS: usize, E>(PhantomData<(&'a (), E)>);
+
+impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
+    for LocalFinalRamCircuit<'a, V_LIMBS, E>
+{
+    type TableConfig = LocalRAMTableFinalConfig<V_LIMBS>;
+    type FixedInput = ();
+    type WitnessInput = (
+        &'a ShardContext<'a>,
+        &'a [(InstancePaddingStrategy, &'a [MemFinalRecord])],
+    );
+
+    fn name() -> String {
+        "LocalRAMTableFinal".to_string()
+    }
+
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self::TableConfig, ZKVMError> {
+        Ok(cb.namespace(
+            || Self::name(),
+            |cb| Self::TableConfig::construct_circuit(cb, params),
+        )?)
+    }
+
+    fn generate_fixed_traces(
+        _config: &Self::TableConfig,
+        _num_fixed: usize,
+        _init_v: &Self::FixedInput,
+    ) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
+    }
+
+    fn assign_instances(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        num_structural_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        (shard_ctx, final_mem): &Self::WitnessInput,
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        // assume returned table is well-formed include padding
+        Ok(Self::TableConfig::assign_instances(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            final_mem,
+        )?)
+    }
+}
+
+/// This circuit is generalized version to handle all mmio records
+pub struct RamBusCircuit<const V_LIMBS: usize, E>(PhantomData<E>);
+
+impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for RamBusCircuit<V_LIMBS, E> {
+    type TableConfig = RAMBusConfig<V_LIMBS>;
+    type FixedInput = ();
+    type WitnessInput = (&'static [RAMRecord], &'static [RAMRecord]);
+
+    fn name() -> String {
+        "RamBusCircuit".to_string()
+    }
+
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self::TableConfig, ZKVMError> {
+        Ok(cb.namespace(
+            || Self::name(),
+            |cb| Self::TableConfig::construct_circuit(cb, params),
+        )?)
+    }
+
+    fn generate_fixed_traces(
+        _config: &Self::TableConfig,
+        _num_fixed: usize,
+        _init_v: &Self::FixedInput,
+    ) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
+    }
+
+    fn assign_instances(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        num_structural_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        final_v: &Self::WitnessInput,
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        let (global_read_mem, global_write_mem) = *final_v;
+        // assume returned table is well-formed include padding
+        Ok(Self::TableConfig::assign_instances(
+            config,
+            num_witin,
+            num_structural_witin,
+            global_read_mem,
+            global_write_mem,
+        )?)
     }
 }

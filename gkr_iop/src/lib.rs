@@ -84,6 +84,7 @@ pub enum RAMType {
     GlobalState = 0,
     Register,
     Memory,
+    Undefined,
 }
 
 impl_expr_from_unsigned!(RAMType);

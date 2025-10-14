@@ -214,6 +214,21 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
+    pub fn is_first_shard(&self) -> bool {
+        self.shard_id == 0
+    }
+
+    #[inline(always)]
+    pub fn is_last_shard(&self) -> bool {
+        self.shard_id == self.num_shards - 1
+    }
+
+    #[inline(always)]
+    pub fn is_current_shard_cycle(&self, cycle: Cycle) -> bool {
+        self.cur_shard_cycle_range.contains(&(cycle as usize))
+    }
+
+    #[inline(always)]
     pub fn send(
         &mut self,
         ram_type: crate::structs::RAMType,
@@ -226,7 +241,7 @@ impl<'a> ShardContext<'a> {
     ) {
         // check read from external mem bus
         if prev_cycle < self.cur_shard_cycle_range.start as Cycle
-            && self.cur_shard_cycle_range.contains(&(cycle as usize))
+            && self.is_current_shard_cycle(cycle)
         {
             let ram_record = self
                 .read_thread_based_record_storage
@@ -248,7 +263,7 @@ impl<'a> ShardContext<'a> {
         // check write to external mem bus
         if let Some(future_touch_cycle) = self.addr_future_accesses.get(&(addr, cycle)) {
             if *future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle
-                && self.cur_shard_cycle_range.contains(&(cycle as usize))
+                && self.is_current_shard_cycle(cycle)
             {
                 let ram_record = self
                     .write_thread_based_record_storage
@@ -348,6 +363,7 @@ pub fn emulate_program<'a>(
             if index < VMState::REG_COUNT {
                 let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
+                    ram_type: RAMType::Memory,
                     addr: rec.addr,
                     value: vm.peek_register(index),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
@@ -355,6 +371,7 @@ pub fn emulate_program<'a>(
             } else {
                 // The table is padded beyond the number of registers.
                 MemFinalRecord {
+                    ram_type: RAMType::Memory,
                     addr: rec.addr,
                     value: 0,
                     cycle: 0,
@@ -369,6 +386,7 @@ pub fn emulate_program<'a>(
         .map(|rec| {
             let vma: WordAddr = rec.addr.into();
             MemFinalRecord {
+                ram_type: RAMType::Memory,
                 addr: rec.addr,
                 value: vm.peek_memory(vma),
                 cycle: *final_access.get(&vma).unwrap_or(&0),
@@ -380,6 +398,7 @@ pub fn emulate_program<'a>(
     let io_final = io_init
         .iter()
         .map(|rec| MemFinalRecord {
+            ram_type: RAMType::Memory,
             addr: rec.addr,
             value: rec.value,
             cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
@@ -390,6 +409,7 @@ pub fn emulate_program<'a>(
     let hints_final = hints_init
         .iter()
         .map(|rec| MemFinalRecord {
+            ram_type: RAMType::Memory,
             addr: rec.addr,
             value: rec.value,
             cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
@@ -407,6 +427,7 @@ pub fn emulate_program<'a>(
             .map(|vma| {
                 let byte_addr = vma.baddr();
                 MemFinalRecord {
+                    ram_type: RAMType::Memory,
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
@@ -430,6 +451,7 @@ pub fn emulate_program<'a>(
             .map(|vma| {
                 let byte_addr = vma.baddr();
                 MemFinalRecord {
+                    ram_type: RAMType::Memory,
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
@@ -578,17 +600,17 @@ pub fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
     program_addrs
 }
 
-pub struct ConstraintSystemConfig<E: ExtensionField> {
+pub struct ConstraintSystemConfig<'a, E: ExtensionField> {
     pub zkvm_cs: ZKVMConstraintSystem<E>,
     pub config: Rv32imConfig<E>,
-    pub mmu_config: MmuConfig<E>,
+    pub mmu_config: MmuConfig<'a, E>,
     pub dummy_config: DummyExtraConfig<E>,
     pub prog_config: ProgramTableConfig,
 }
 
-pub fn construct_configs<E: ExtensionField>(
+pub fn construct_configs<'a, E: ExtensionField>(
     program_params: ProgramParams,
-) -> ConstraintSystemConfig<E> {
+) -> ConstraintSystemConfig<'a, E> {
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
@@ -673,6 +695,7 @@ pub fn generate_witness<E: ExtensionField>(
         .mmu_config
         .assign_table_circuit(
             &system_config.zkvm_cs,
+            &emul_result.shard_ctx,
             &mut zkvm_witness,
             &emul_result.final_mem_state.reg,
             &emul_result.final_mem_state.mem,
@@ -714,13 +737,13 @@ pub enum Checkpoint {
 pub type IntermediateState<E, PCS> = (Option<ZKVMProof<E, PCS>>, Option<ZKVMVerifyingKey<E, PCS>>);
 
 /// Context construct from a program and given platform
-pub struct E2EProgramCtx<E: ExtensionField> {
+pub struct E2EProgramCtx<'a, E: ExtensionField> {
     pub program: Arc<Program>,
     pub platform: Platform,
     pub shards: Shards,
     pub static_addrs: Vec<MemInitRecord>,
     pub pubio_len: usize,
-    pub system_config: ConstraintSystemConfig<E>,
+    pub system_config: ConstraintSystemConfig<'a, E>,
     pub reg_init: Vec<MemInitRecord>,
     pub io_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
@@ -745,11 +768,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> E2ECheckpointResult<
 }
 
 /// Set up a program with the given platform
-pub fn setup_program<E: ExtensionField>(
+pub fn setup_program<'a, E: ExtensionField>(
     program: Program,
     platform: Platform,
     shards: Shards,
-) -> E2EProgramCtx<E> {
+) -> E2EProgramCtx<'a, E> {
     let static_addrs = init_static_addrs(&program);
     let pubio_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
@@ -784,7 +807,7 @@ pub fn setup_program<E: ExtensionField>(
     }
 }
 
-impl<E: ExtensionField> E2EProgramCtx<E> {
+impl<E: ExtensionField> E2EProgramCtx<'_, E> {
     pub fn keygen<PCS: PolynomialCommitmentScheme<E> + 'static>(
         &self,
         max_num_variables: usize,

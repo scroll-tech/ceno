@@ -8,9 +8,11 @@ use crate::{
 
 mod ram_circuit;
 mod ram_impl;
-use crate::tables::ram::ram_impl::{
-    DynVolatileRamTableConfig, DynVolatileRamTableFinalConfig, DynVolatileRamTableInitConfig,
-    NonVolatileFinalTableConfig, NonVolatileInitTableConfig,
+use crate::tables::ram::{
+    ram_circuit::{LocalFinalRamCircuit, RamBusCircuit},
+    ram_impl::{
+        DynVolatileRamTableConfig, DynVolatileRamTableInitConfig, NonVolatileInitTableConfig,
+    },
 };
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
@@ -38,8 +40,6 @@ impl DynVolatileRamTable for HeapTable {
 
 pub type HeapInitCircuit<E> =
     DynVolatileRamCircuit<E, HeapTable, DynVolatileRamTableInitConfig<HeapTable>>;
-pub type HeapFinalCircuit<E> =
-    DynVolatileRamCircuit<E, HeapTable, DynVolatileRamTableFinalConfig<HeapTable>>;
 
 #[derive(Clone)]
 pub struct StackTable;
@@ -75,8 +75,6 @@ impl DynVolatileRamTable for StackTable {
 
 pub type StackInitCircuit<E> =
     DynVolatileRamCircuit<E, StackTable, DynVolatileRamTableInitConfig<StackTable>>;
-pub type StackFinalCircuit<E> =
-    DynVolatileRamCircuit<E, StackTable, DynVolatileRamTableFinalConfig<StackTable>>;
 
 #[derive(Clone)]
 pub struct HintsTable;
@@ -121,8 +119,6 @@ impl NonVolatileTable for RegTable {
 
 pub type RegTableInitCircuit<E> =
     NonVolatileRamCircuit<E, RegTable, NonVolatileInitTableConfig<RegTable>>;
-pub type RegTableFinalCircuit<E> =
-    NonVolatileRamCircuit<E, RegTable, NonVolatileFinalTableConfig<RegTable>>;
 
 #[derive(Clone)]
 pub struct StaticMemTable;
@@ -143,8 +139,6 @@ impl NonVolatileTable for StaticMemTable {
 
 pub type StaticMemInitCircuit<E> =
     NonVolatileRamCircuit<E, StaticMemTable, NonVolatileInitTableConfig<StaticMemTable>>;
-pub type StaticMemFinalCircuit<E> =
-    NonVolatileRamCircuit<E, StaticMemTable, NonVolatileFinalTableConfig<StaticMemTable>>;
 
 #[derive(Clone)]
 pub struct PubIOTable;
@@ -164,3 +158,5 @@ impl NonVolatileTable for PubIOTable {
 }
 
 pub type PubIOCircuit<E> = PubIORamCircuit<E, PubIOTable>;
+pub type LocalFinalCircuit<'a, E> = LocalFinalRamCircuit<'a, UINT_LIMBS, E>;
+pub type RBCircuit<E> = RamBusCircuit<UINT_LIMBS, E>;
