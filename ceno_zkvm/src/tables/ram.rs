@@ -15,7 +15,7 @@ pub struct HeapTable;
 
 impl DynVolatileRamTable for HeapTable {
     const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = 1; // See `MemoryExpr`.
+    const V_LIMBS: usize = UINT_LIMBS;
     const ZERO_INIT: bool = true;
     const DESCENDING: bool = false;
 

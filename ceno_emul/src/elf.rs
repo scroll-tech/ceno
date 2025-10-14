@@ -97,7 +97,7 @@ impl Program {
             .e_entry
             .try_into()
             .map_err(|err| anyhow!("e_entry was larger than 32 bits. {err}"))?;
-        if entry >= max_mem || entry % WORD_SIZE as u32 != 0 {
+        if entry >= max_mem || !entry.is_multiple_of(WORD_SIZE as u32) {
             bail!("Invalid entrypoint");
         }
         let segments = elf.segments().ok_or(anyhow!("Missing segment table"))?;
@@ -136,7 +136,7 @@ impl Program {
                     return Err(anyhow!("only support one executable segment"));
                 }
             }
-            if vaddr % WORD_SIZE as u32 != 0 {
+            if !vaddr.is_multiple_of(WORD_SIZE as u32) {
                 bail!("vaddr {vaddr:08x} is unaligned");
             }
             tracing::debug!(
@@ -270,10 +270,11 @@ fn collect_addr_symbols_mapping<'data>(
 
     if let Some((symtab, strtab)) = elf.symbol_table()? {
         for symbol in symtab.iter() {
-            if let Ok(name) = strtab.get(symbol.st_name as usize) {
-                if !name.is_empty() && symbol.st_value != 0 {
-                    symbols.insert(symbol.st_value, name.to_string());
-                }
+            if let Ok(name) = strtab.get(symbol.st_name as usize)
+                && !name.is_empty()
+                && symbol.st_value != 0
+            {
+                symbols.insert(symbol.st_value, name.to_string());
             }
         }
     }
@@ -286,5 +287,5 @@ fn find_max_symbol_in_range(
     start: u64,
     end: u64,
 ) -> Option<(&u64, &String)> {
-    symbols.range(start..end).max_by_key(|(&addr, _)| addr)
+    symbols.range(start..end).max_by_key(|&(addr, _)| addr)
 }
