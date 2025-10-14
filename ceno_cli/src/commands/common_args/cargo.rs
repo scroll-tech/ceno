@@ -137,7 +137,7 @@ pub struct ManifestOptions {
 impl CargoOptions {
     /// Set the global options based on the command line arguments.
     pub fn set_global(&self) {
-        crate::utils::QUITE
+        crate::utils::QUIET
             .set(self.quiet)
             .expect("failed to set quiet flag, this is a bug");
         if let Some(color) = self.color.as_ref() {

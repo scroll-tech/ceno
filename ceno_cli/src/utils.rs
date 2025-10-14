@@ -14,7 +14,7 @@ use std::{
 use tempfile::TempDir;
 
 /// Controls whether we should print the progress of the command.
-pub static QUITE: OnceLock<bool> = OnceLock::new();
+pub static QUIET: OnceLock<bool> = OnceLock::new();
 
 /// The rustc target triple name for ceno.
 pub const RUSTC_TARGET: &str = "riscv32im-ceno-zkvm-elf";
@@ -119,7 +119,7 @@ pub fn release_target_json() -> io::Result<(TempDir, PathBuf)> {
 
 /// Print the entire command line to stderr.
 pub fn print_cmdline(command: &Command) {
-    if *QUITE.get_or_init(|| false) {
+    if *QUIET.get_or_init(|| false) {
         return;
     }
     eprint!("{:>12} ", style("Running").green().bold());
@@ -149,7 +149,7 @@ pub fn print_error(e: anyhow::Error) {
 
 /// Print cargo style message to stderr
 pub fn print_cargo_message(status: &str, msg: fmt::Arguments) {
-    if *QUITE.get_or_init(|| false) {
+    if *QUIET.get_or_init(|| false) {
         return;
     }
     eprint!("{:>12} ", style(status).green().bold());

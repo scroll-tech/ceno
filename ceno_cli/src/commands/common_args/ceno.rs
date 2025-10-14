@@ -96,7 +96,7 @@ impl CenoOptions {
             util::SubscriberInitExt,
         };
 
-        if *QUITE.get_or_init(|| false) {
+        if *QUIET.get_or_init(|| false) {
             return;
         }
 
