@@ -552,6 +552,10 @@ fn test_bn254_fptower_syscalls() -> Result<()> {
         check_reads(&witness.mem_ops[BN254_FP2_WORDS..], b);
     }
 
+    let program_elf = ceno_examples::bn254_patched_fp;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let _ = run(&mut state)?;
+
     Ok(())
 }
 
@@ -610,6 +614,15 @@ fn test_bn254_curve() -> Result<()> {
         check_writes(&syscalls[2].mem_ops[..BN254_POINT_WORDS], &c2, &c3);
         check_reads(&syscalls[2].mem_ops[BN254_POINT_WORDS..], &one);
     }
+
+    Ok(())
+}
+
+#[test]
+fn test_bn254_precompile() -> Result<()> {
+    let program_elf = ceno_examples::bn254_precompile;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let _ = run(&mut state)?;
 
     Ok(())
 }
