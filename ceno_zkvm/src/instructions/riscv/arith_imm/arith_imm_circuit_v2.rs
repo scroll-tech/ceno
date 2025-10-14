@@ -17,6 +17,7 @@ use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 use witness::set_val;
 
+#[derive(Default)]
 pub struct AddiInstruction<E>(PhantomData<E>);
 
 pub struct InstructionConfig<E: ExtensionField> {
@@ -37,6 +38,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

@@ -26,6 +26,7 @@ pub struct JalConfig<E: ExtensionField> {
     pub rd_written: UInt8<E>,
 }
 
+#[derive(Default)]
 pub struct JalInstruction<E>(PhantomData<E>);
 
 /// JAL instruction circuit
@@ -47,6 +48,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<JalConfig<E>, ZKVMError> {

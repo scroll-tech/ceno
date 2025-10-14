@@ -11,7 +11,9 @@ use crate::{
 
 use super::types::{BN254_FP_WORDS, BN254_FP2_WORDS};
 
+#[derive(Default)]
 pub struct Bn254FpAddSpec;
+
 impl SyscallSpec for Bn254FpAddSpec {
     const NAME: &'static str = "BN254_FP_ADD";
 
@@ -20,6 +22,7 @@ impl SyscallSpec for Bn254FpAddSpec {
     const CODE: u32 = ceno_rt::syscalls::BN254_FP_ADD;
 }
 
+#[derive(Default)]
 pub struct Bn254Fp2AddSpec;
 impl SyscallSpec for Bn254Fp2AddSpec {
     const NAME: &'static str = "BN254_FP2_ADD";
@@ -29,6 +32,7 @@ impl SyscallSpec for Bn254Fp2AddSpec {
     const CODE: u32 = ceno_rt::syscalls::BN254_FP2_ADD;
 }
 
+#[derive(Default)]
 pub struct Bn254FpMulSpec;
 impl SyscallSpec for Bn254FpMulSpec {
     const NAME: &'static str = "BN254_FP_MUL";
@@ -38,6 +42,7 @@ impl SyscallSpec for Bn254FpMulSpec {
     const CODE: u32 = ceno_rt::syscalls::BN254_FP_MUL;
 }
 
+#[derive(Default)]
 pub struct Bn254Fp2MulSpec;
 impl SyscallSpec for Bn254Fp2MulSpec {
     const NAME: &'static str = "BN254_FP2_MUL";

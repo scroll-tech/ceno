@@ -24,21 +24,27 @@ use gkr_iop::tables::ops::{AndTable, OrTable, XorTable};
 use ceno_emul::InsnKind;
 use gkr_iop::tables::OpsTable;
 
+#[derive(Default)]
 pub struct AndiOp;
+
 impl LogicOp for AndiOp {
     const INST_KIND: InsnKind = InsnKind::ANDI;
     type OpsTable = AndTable;
 }
 pub type AndiInstruction<E> = LogicInstruction<E, AndiOp>;
 
+#[derive(Default)]
 pub struct OriOp;
+
 impl LogicOp for OriOp {
     const INST_KIND: InsnKind = InsnKind::ORI;
     type OpsTable = OrTable;
 }
 pub type OriInstruction<E> = LogicInstruction<E, OriOp>;
 
+#[derive(Default)]
 pub struct XoriOp;
+
 impl LogicOp for XoriOp {
     const INST_KIND: InsnKind = InsnKind::XORI;
     type OpsTable = XorTable;

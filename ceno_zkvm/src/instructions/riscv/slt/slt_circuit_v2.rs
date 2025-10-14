@@ -14,6 +14,7 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::marker::PhantomData;
 
+#[derive(Default)]
 pub struct SetLessThanInstruction<E, I>(PhantomData<(E, I)>);
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
@@ -35,6 +36,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
     }
 
     fn construct_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

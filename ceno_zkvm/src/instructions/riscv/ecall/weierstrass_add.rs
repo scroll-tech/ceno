@@ -52,6 +52,7 @@ pub struct EcallWeierstrassAddAssignConfig<E: ExtensionField, EC: EllipticCurve>
 }
 
 /// WeierstrassAddAssignInstruction can handle any instruction and produce its side-effects.
+#[derive(Default)]
 pub struct WeierstrassAddAssignInstruction<E, EC>(PhantomData<(E, EC)>);
 
 impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
@@ -64,6 +65,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
     }
 
     fn construct_circuit(
+        &self,
         _circuit_builder: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -71,6 +73,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
     }
 
     fn build_gkr_iop_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {

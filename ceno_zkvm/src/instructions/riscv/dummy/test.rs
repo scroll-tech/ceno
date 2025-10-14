@@ -19,11 +19,12 @@ type BeqDummy<E> = DummyInstruction<E, BeqOp>;
 fn test_dummy_ecall() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
+    let inst = EcallDummy::default();
     let config = cb
         .namespace(
             || "ecall_dummy",
             |cb| {
-                let config = EcallDummy::construct_circuit(cb, &ProgramParams::default());
+                let config = inst.construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -49,11 +50,12 @@ fn test_dummy_keccak() {
 
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
+    let inst = KeccakDummy::default();
     let config = cb
         .namespace(
             || "keccak_dummy",
             |cb| {
-                let config = KeccakDummy::construct_circuit(cb, &ProgramParams::default());
+                let config = inst.construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -76,11 +78,12 @@ fn test_dummy_keccak() {
 fn test_dummy_r() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
+    let inst = AddDummy::default();
     let config = cb
         .namespace(
             || "add_dummy",
             |cb| {
-                let config = AddDummy::construct_circuit(cb, &ProgramParams::default());
+                let config = inst.construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -111,11 +114,12 @@ fn test_dummy_r() {
 fn test_dummy_b() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
+    let inst = BeqDummy::default();
     let config = cb
         .namespace(
             || "beq_dummy",
             |cb| {
-                let config = BeqDummy::construct_circuit(cb, &ProgramParams::default());
+                let config = inst.construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )

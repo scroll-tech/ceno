@@ -11,19 +11,25 @@ use crate::instructions::riscv::shift::shift_circuit::ShiftLogicalInstruction;
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::shift::shift_circuit_v2::ShiftLogicalInstruction;
 
+#[derive(Default)]
 pub struct SllOp;
+
 impl RIVInstruction for SllOp {
     const INST_KIND: InsnKind = InsnKind::SLL;
 }
 pub type SllInstruction<E> = ShiftLogicalInstruction<E, SllOp>;
 
+#[derive(Default)]
 pub struct SrlOp;
+
 impl RIVInstruction for SrlOp {
     const INST_KIND: InsnKind = InsnKind::SRL;
 }
 pub type SrlInstruction<E> = ShiftLogicalInstruction<E, SrlOp>;
 
+#[derive(Default)]
 pub struct SraOp;
+
 impl RIVInstruction for SraOp {
     const INST_KIND: InsnKind = InsnKind::SRA;
 }
@@ -122,6 +128,7 @@ mod tests {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
+        let inst = ShiftLogicalInstruction::<E, I>::default();
         let shift = rs2_read & 0b11111;
         let (prefix, insn_code, rd_written) = match I::INST_KIND {
             InsnKind::SLL => (
@@ -145,12 +152,7 @@ mod tests {
         let config = cb
             .namespace(
                 || format!("{prefix}_({name})"),
-                |cb| {
-                    Ok(ShiftLogicalInstruction::<E, I>::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    ))
-                },
+                |cb| Ok(inst.construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();

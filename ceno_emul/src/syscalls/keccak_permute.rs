@@ -8,6 +8,7 @@ use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 const KECCAK_CELLS: usize = 25; // u64 cells
 pub const KECCAK_WORDS: usize = KECCAK_CELLS * 2; // u32 words
 
+#[derive(Default)]
 pub struct KeccakSpec;
 
 impl SyscallSpec for KeccakSpec {

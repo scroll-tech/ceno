@@ -18,15 +18,20 @@ pub struct ArithConfig<E: ExtensionField> {
     rd_written: UInt<E>,
 }
 
-pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
+#[derive(Default)]
+pub struct ArithInstruction<E, I: Default>(PhantomData<(E, I)>);
 
+#[derive(Default)]
 pub struct AddOp;
+
 impl RIVInstruction for AddOp {
     const INST_KIND: InsnKind = InsnKind::ADD;
 }
 pub type AddInstruction<E> = ArithInstruction<E, AddOp>;
 
+#[derive(Default)]
 pub struct SubOp;
+
 impl RIVInstruction for SubOp {
     const INST_KIND: InsnKind = InsnKind::SUB;
 }
@@ -40,6 +45,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -163,15 +169,11 @@ mod test {
     fn verify<I: RIVInstruction>(name: &'static str, rs1: u32, rs2: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
+        let inst = ArithInstruction::<GoldilocksExt2, I>::default();
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| {
-                    Ok(ArithInstruction::<GoldilocksExt2, I>::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    ))
-                },
+                |cb| Ok(inst.construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();

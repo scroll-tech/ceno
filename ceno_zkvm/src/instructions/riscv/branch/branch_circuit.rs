@@ -22,7 +22,8 @@ use crate::{
 use multilinear_extensions::Expression;
 pub use p3::field::FieldAlgebra;
 
-pub struct BranchCircuit<E, I>(PhantomData<(E, I)>);
+#[derive(Default)]
+pub struct BranchCircuit<E, I: Default>(PhantomData<(E, I)>);
 
 pub struct BranchConfig<E: ExtensionField> {
     pub b_insn: BInstructionConfig<E>,
@@ -41,6 +42,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
     type InstructionConfig = BranchConfig<E>;
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<BranchConfig<E>, ZKVMError> {

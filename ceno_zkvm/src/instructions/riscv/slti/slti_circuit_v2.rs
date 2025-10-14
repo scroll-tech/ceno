@@ -36,7 +36,8 @@ pub struct SetLessThanImmConfig<E: ExtensionField> {
     uint_lt_config: UIntLimbsLTConfig<E>,
 }
 
-pub struct SetLessThanImmInstruction<E, I>(PhantomData<(E, I)>);
+#[derive(Default)]
+pub struct SetLessThanImmInstruction<E, I: Default>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInstruction<E, I> {
     type InstructionConfig = SetLessThanImmConfig<E>;
@@ -46,6 +47,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
     }
 
     fn construct_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

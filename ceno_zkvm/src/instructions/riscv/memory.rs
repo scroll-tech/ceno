@@ -24,6 +24,7 @@ pub use crate::instructions::riscv::memory::store_v2::StoreInstruction;
 
 use ceno_emul::InsnKind;
 
+#[derive(Default)]
 pub struct LwOp;
 
 impl RIVInstruction for LwOp {
@@ -32,43 +33,57 @@ impl RIVInstruction for LwOp {
 
 pub type LwInstruction<E> = LoadInstruction<E, LwOp>;
 
+#[derive(Default)]
 pub struct LhOp;
+
 impl RIVInstruction for LhOp {
     const INST_KIND: InsnKind = InsnKind::LH;
 }
 pub type LhInstruction<E> = LoadInstruction<E, LhOp>;
 
+#[derive(Default)]
 pub struct LhuOp;
+
 impl RIVInstruction for LhuOp {
     const INST_KIND: InsnKind = InsnKind::LHU;
 }
 pub type LhuInstruction<E> = LoadInstruction<E, LhuOp>;
 
+#[derive(Default)]
 pub struct LbOp;
+
 impl RIVInstruction for LbOp {
     const INST_KIND: InsnKind = InsnKind::LB;
 }
 pub type LbInstruction<E> = LoadInstruction<E, LbOp>;
 
+#[derive(Default)]
 pub struct LbuOp;
+
 impl RIVInstruction for LbuOp {
     const INST_KIND: InsnKind = InsnKind::LBU;
 }
 pub type LbuInstruction<E> = LoadInstruction<E, LbuOp>;
 
+#[derive(Default)]
 pub struct SWOp;
+
 impl RIVInstruction for SWOp {
     const INST_KIND: InsnKind = InsnKind::SW;
 }
 pub type SwInstruction<E> = StoreInstruction<E, SWOp, 2>;
 
+#[derive(Default)]
 pub struct SHOp;
+
 impl RIVInstruction for SHOp {
     const INST_KIND: InsnKind = InsnKind::SH;
 }
 pub type ShInstruction<E> = StoreInstruction<E, SHOp, 1>;
 
+#[derive(Default)]
 pub struct SBOp;
+
 impl RIVInstruction for SBOp {
     const INST_KIND: InsnKind = InsnKind::SB;
 }
