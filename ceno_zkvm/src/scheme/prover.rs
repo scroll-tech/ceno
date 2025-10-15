@@ -323,6 +323,7 @@ impl<
         transcript: &mut impl Transcript<E>,
         challenges: &[E; 2],
     ) -> Result<CreateTableProof<E>, ZKVMError> {
+        println!("create_proof {name}");
         let cs = circuit_pk.get_cs();
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);

@@ -554,6 +554,7 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
         let final_cycle = cb.create_witin(|| "final_cycle");
 
         // R_{local} = sel * rlc_final_table + (1 - sel) * ONE
+        // => R_{local} - ONE = sel * (rlc_final_table - ONE)
         let final_expr = final_v.iter().map(|v| v.expr()).collect_vec();
         let raw_final_table = [
             // a v t
@@ -563,8 +564,9 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
             vec![final_cycle.expr()],
         ]
         .concat();
-        let final_table_expr = sel.expr() * cb.rlc_chip_record(raw_final_table.clone())
-            + (Expression::Constant(Either::Left(E::BaseField::ONE)) - sel.expr());
+        let final_table_expr = sel.expr()
+            * (cb.rlc_chip_record(raw_final_table.clone())
+                - Expression::Constant(Either::Left(E::BaseField::ONE)));
         cb.r_table_rlc_record(
             || "final_table",
             // XXX we mixed all ram type here to save column allocation
