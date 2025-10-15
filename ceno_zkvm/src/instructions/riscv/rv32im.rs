@@ -416,7 +416,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut secp256k1_double_records = Vec::new();
         steps
             .into_iter()
-            .filter_map(|mut step| {
+            .filter_map(|step| {
                 if shard_ctx.is_current_shard_cycle(step.cycle()) {
                     Some(step)
                 } else {

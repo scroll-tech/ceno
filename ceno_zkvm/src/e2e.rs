@@ -34,7 +34,6 @@ use serde::Serialize;
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    mem,
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
@@ -102,6 +101,7 @@ pub struct EmulationResult<'a> {
 }
 
 pub struct RAMRecord {
+    pub ram_type: RAMType,
     pub id: u64,
     pub addr: WordAddr,
     pub prev_cycle: Cycle,
@@ -115,14 +115,10 @@ pub struct ShardContext<'a> {
     max_num_shards: usize,
     max_cycle: Cycle,
     addr_future_accesses: Cow<'a, HashMap<(WordAddr, Cycle), Cycle>>,
-    read_thread_based_record_storage: Either<
-        Vec<[BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()]>,
-        &'a mut [BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()],
-    >,
-    write_thread_based_record_storage: Either<
-        Vec<[BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()]>,
-        &'a mut [BTreeMap<WordAddr, RAMRecord>; mem::variant_count::<RAMType>()],
-    >,
+    read_thread_based_record_storage:
+        Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
+    write_thread_based_record_storage:
+        Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     pub cur_shard_cycle_range: std::ops::Range<usize>,
 }
 
@@ -137,13 +133,13 @@ impl<'a> Default for ShardContext<'a> {
             read_thread_based_record_storage: Either::Left(
                 (0..max_threads)
                     .into_par_iter()
-                    .map(|_| std::array::from_fn(|_| BTreeMap::new()))
+                    .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
             write_thread_based_record_storage: Either::Left(
                 (0..max_threads)
                     .into_par_iter()
-                    .map(|_| std::array::from_fn(|_| BTreeMap::new()))
+                    .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
             cur_shard_cycle_range: 0..usize::MAX,
@@ -181,14 +177,14 @@ impl<'a> ShardContext<'a> {
             read_thread_based_record_storage: Either::Left(
                 (0..max_threads)
                     .into_par_iter()
-                    .map(|_| std::array::from_fn(|_| BTreeMap::new()))
+                    .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
             // TODO with_capacity optimisation
             write_thread_based_record_storage: Either::Left(
                 (0..max_threads)
                     .into_par_iter()
-                    .map(|_| std::array::from_fn(|_| BTreeMap::new()))
+                    .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
             cur_shard_cycle_range,
@@ -217,6 +213,20 @@ impl<'a> ShardContext<'a> {
                 })
                 .collect_vec(),
             _ => panic!("invalid type"),
+        }
+    }
+
+    pub fn read_records(&self) -> &[BTreeMap<WordAddr, RAMRecord>] {
+        match &self.read_thread_based_record_storage {
+            Either::Left(m) => m,
+            Either::Right(_) => panic!("undefined behaviour"),
+        }
+    }
+
+    pub fn write_records(&self) -> &[BTreeMap<WordAddr, RAMRecord>] {
+        match &self.write_thread_based_record_storage {
+            Either::Left(m) => m,
+            Either::Right(_) => panic!("undefined behaviour"),
         }
     }
 
@@ -269,9 +279,10 @@ impl<'a> ShardContext<'a> {
                 .as_mut()
                 .right()
                 .expect("illegal type");
-            ram_record[ram_type as usize].insert(
+            ram_record.insert(
                 addr,
                 RAMRecord {
+                    ram_type,
                     id,
                     addr,
                     prev_cycle,
@@ -291,9 +302,10 @@ impl<'a> ShardContext<'a> {
                     .as_mut()
                     .right()
                     .expect("illegal type");
-                ram_record[ram_type as usize].insert(
+                ram_record.insert(
                     addr,
                     RAMRecord {
+                        ram_type,
                         id,
                         addr,
                         prev_cycle,

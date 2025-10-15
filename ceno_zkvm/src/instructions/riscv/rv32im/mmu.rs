@@ -31,7 +31,7 @@ pub struct MmuConfig<'a, E: ExtensionField> {
     /// finalized circuit for all MMIO
     pub local_final_circuit: <LocalFinalCircuit<'a, E> as TableCircuit<E>>::TableConfig,
     /// ram bus to deal with cross shard read/write
-    pub ram_bus_circuit: <RBCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub ram_bus_circuit: <RBCircuit<'a, E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
@@ -160,7 +160,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             &(shard_ctx, all_records.as_slice()),
         )?;
 
-        witness.assign_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, todo!())?;
+        witness.assign_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, shard_ctx)?;
 
         Ok(())
     }

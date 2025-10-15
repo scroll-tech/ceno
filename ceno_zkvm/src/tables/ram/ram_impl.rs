@@ -18,7 +18,7 @@ use super::{
 use crate::{
     chip_handler::general::PublicIOQuery,
     circuit_builder::{CircuitBuilder, SetTableSpec},
-    e2e::{RAMRecord, ShardContext},
+    e2e::ShardContext,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
     structs::ProgramParams,
     tables::ram::ram_circuit::DynVolatileRamTableConfigTrait,
@@ -29,7 +29,6 @@ use multilinear_extensions::{
     Expression, Fixed, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
 };
 use p3::field::FieldAlgebra;
-use rayon::prelude::{ParallelSlice, ParallelSliceMut};
 
 pub trait NonVolatileTableConfigTrait<NVRAM>: Sized + Send + Sync {
     type Config: Sized + Send + Sync;
@@ -481,7 +480,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     fn assign_instances<F: SmallField>(
         config: &Self::Config,
-        num_witin: usize,
+        _num_witin: usize,
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
@@ -663,14 +662,10 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
             .zip_eq(structural_witness_mut_slices.par_iter_mut())
             .zip_eq(final_mem.par_iter())
             .zip_eq(padding_info.par_iter())
-            .enumerate()
             .for_each(
                 |(
-                    i,
-                    (
-                        ((witness, structural_witness), (padding_strategy, final_mem)),
-                        (pad_size, pad_start_index),
-                    ),
+                    ((witness, structural_witness), (padding_strategy, final_mem)),
+                    (pad_size, pad_start_index),
                 )| {
                     witness
                         .chunks_mut(num_witin)
@@ -680,8 +675,7 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
                                 .iter()
                                 .filter(|record| shard_ctx.is_current_shard_cycle(record.cycle)),
                         )
-                        .enumerate()
-                        .for_each(|(i, ((row, structural_row), rec))| {
+                        .for_each(|((row, structural_row), rec)| {
                             if self.final_v.len() == 1 {
                                 // Assign value directly.
                                 set_val!(row, self.final_v[0], rec.value as u64);
@@ -695,7 +689,7 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
                             set_val!(row, self.final_cycle, rec.cycle);
 
                             set_val!(row, self.addr_subset, rec.addr as u64);
-                            set_val!(row, self.sel, 1u64);
+                            set_val!(structural_row, self.sel, 1u64);
                         });
 
                     if *pad_size > 0 && shard_ctx.is_first_shard() {
@@ -716,7 +710,7 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
                                             self.addr_subset,
                                             pad_func(pad_index as u64, self.addr_subset.id as u64)
                                         );
-                                        set_val!(row, self.sel, 1u64);
+                                        set_val!(structural_row, self.sel, 1u64);
                                     });
                             }
                             _ => unimplemented!(),
@@ -799,6 +793,7 @@ impl<const V_LIMBS: usize> RAMBusConfig<V_LIMBS> {
         let local_write_record = cb.rlc_chip_record(local_raw_write_record.clone());
         let local_write =
             sel_read.expr() * local_write_record + (one.clone() - sel_read.expr()).expr();
+        // local write, global read
         cb.w_table_rlc_record(
             || "local_write_record",
             RAMType::Undefined,
@@ -824,6 +819,7 @@ impl<const V_LIMBS: usize> RAMBusConfig<V_LIMBS> {
         let local_read: Expression<E> =
             sel_write.expr() * local_read_record + (one.clone() - sel_write.expr());
 
+        // local read, global write
         cb.r_table_rlc_record(
             || "local_read_record",
             RAMType::Undefined,
@@ -849,81 +845,159 @@ impl<const V_LIMBS: usize> RAMBusConfig<V_LIMBS> {
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     pub fn assign_instances<F: SmallField>(
         &self,
+        shard_ctx: &ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        global_read_mem: &[RAMRecord],
-        global_write_mem: &[RAMRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        let (global_read_records, global_write_records) =
+            (shard_ctx.read_records(), shard_ctx.write_records());
+        assert_eq!(global_read_records.len(), global_write_records.len());
+
         let witness_length = {
-            let max_len = global_read_mem.len().max(global_write_mem.len());
+            let raw_write_len: usize = global_write_records.iter().map(|m| m.len()).sum();
+            let raw_read_len: usize = global_read_records.iter().map(|m| m.len()).sum();
+            let max_len = raw_read_len.max(raw_write_len);
             // first half write, second half read
             next_pow2_instance_padding(max_len) * 2
         };
-
         let mut witness =
             RowMajorMatrix::<F>::new(witness_length, num_witin, InstancePaddingStrategy::Default);
-        let witness_mid = witness.values.len() / 2;
         let mut structural_witness = RowMajorMatrix::<F>::new(
             witness_length,
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
+        let witness_mid = witness.values.len() / 2;
         let (witness_write, witness_read) = witness.values.split_at_mut(witness_mid);
         let structural_witness_mid = structural_witness.values.len() / 2;
         let (structural_witness_write, structural_witness_read) = structural_witness
             .values
             .split_at_mut(structural_witness_mid);
 
+        let mut witness_write_mut_slices = Vec::with_capacity(global_write_records.len());
+        let mut witness_read_mut_slices = Vec::with_capacity(global_read_records.len());
+        let mut structural_witness_write_mut_slices =
+            Vec::with_capacity(global_write_records.len());
+        let mut structural_witness_read_mut_slices = Vec::with_capacity(global_read_records.len());
+        let mut witness_write_value_rest = witness_write;
+        let mut witness_read_value_rest = witness_read;
+        let mut structural_witness_write_value_rest = structural_witness_write;
+        let mut structural_witness_read_value_rest = structural_witness_read;
+
+        for (global_read_record, global_write_record) in
+            global_read_records.iter().zip_eq(global_write_records)
+        {
+            let witness_write_length = global_write_record.len() * num_witin;
+            let witness_read_length = global_read_record.len() * num_witin;
+            let structural_witness_write_length = global_write_record.len() * num_structural_witin;
+            let structural_witness_read_length = global_read_record.len() * num_structural_witin;
+            assert!(
+                witness_write_length <= witness_write_value_rest.len(),
+                "chunk size exceeds remaining data"
+            );
+            assert!(
+                witness_read_length <= witness_read_value_rest.len(),
+                "chunk size exceeds remaining data"
+            );
+            assert!(
+                structural_witness_write_length <= structural_witness_write_value_rest.len(),
+                "chunk size exceeds remaining data"
+            );
+            assert!(
+                structural_witness_read_length <= structural_witness_read_value_rest.len(),
+                "chunk size exceeds remaining data"
+            );
+            let (witness_write, witness_write_r) =
+                witness_write_value_rest.split_at_mut(witness_write_length);
+            witness_write_mut_slices.push(witness_write);
+            witness_write_value_rest = witness_write_r;
+
+            let (witness_read, witness_read_r) =
+                witness_read_value_rest.split_at_mut(witness_read_length);
+            witness_read_mut_slices.push(witness_read);
+            witness_read_value_rest = witness_read_r;
+
+            let (structural_witness_write, structural_witness_write_r) =
+                structural_witness_write_value_rest.split_at_mut(structural_witness_write_length);
+            structural_witness_write_mut_slices.push(structural_witness_write);
+            structural_witness_write_value_rest = structural_witness_write_r;
+
+            let (structural_witness_read, structural_witness_read_r) =
+                structural_witness_read_value_rest.split_at_mut(structural_witness_read_length);
+            structural_witness_read_mut_slices.push(structural_witness_read);
+            structural_witness_read_value_rest = structural_witness_read_r;
+        }
+
         rayon::join(
             // global write, local read
             || {
-                witness_write
-                    .par_chunks_mut(num_witin)
-                    .zip(structural_witness_write.par_chunks_mut(num_structural_witin))
-                    .zip(global_write_mem)
-                    .enumerate()
-                    .for_each(|(i, ((row, structural_row), rec))| {
-                        if self.local_read_v.len() == 1 {
-                            // Assign value directly.
-                            set_val!(row, self.local_read_v[0], rec.value as u64);
-                        } else {
-                            // Assign value limbs.
-                            self.local_read_v.iter().enumerate().for_each(|(l, limb)| {
-                                let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
-                                set_val!(row, limb, val as u64);
-                            });
-                        }
-                        set_val!(row, self.local_read_cycle, rec.cycle);
+                witness_write_mut_slices
+                    .par_iter_mut()
+                    .zip_eq(structural_witness_write_mut_slices.par_iter_mut())
+                    .zip_eq(global_write_records.par_iter())
+                    .for_each(
+                        |((witness_write, structural_witness_write), global_write_mem)| {
+                            witness_write
+                                .chunks_mut(num_witin)
+                                .zip_eq(structural_witness_write.chunks_mut(num_structural_witin))
+                                .zip_eq(global_write_mem.values())
+                                .for_each(|((row, structural_row), rec)| {
+                                    if self.local_read_v.len() == 1 {
+                                        // Assign value directly.
+                                        set_val!(row, self.local_read_v[0], rec.value as u64);
+                                    } else {
+                                        // Assign value limbs.
+                                        self.local_read_v.iter().enumerate().for_each(
+                                            |(l, limb)| {
+                                                let val =
+                                                    (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                                                set_val!(row, limb, val as u64);
+                                            },
+                                        );
+                                    }
+                                    set_val!(row, self.local_read_cycle, rec.cycle);
 
-                        set_val!(row, self.addr_subset, rec.addr.baddr().0 as u64);
-                        set_val!(structural_row, self.sel_write, 1u64);
+                                    set_val!(row, self.addr_subset, rec.addr.baddr().0 as u64);
+                                    set_val!(structural_row, self.sel_write, 1u64);
 
-                        // TODO assign W_{global}
-                    });
+                                    // TODO assign W_{global}
+                                });
+                        },
+                    );
             },
             // global read, local write
             || {
-                witness_read
-                    .par_chunks_mut(num_witin)
-                    .zip(structural_witness_read.par_chunks_mut(num_structural_witin))
-                    .zip(global_read_mem)
-                    .enumerate()
-                    .for_each(|(i, ((row, structural_row), rec))| {
-                        if self.local_write_v.len() == 1 {
-                            // Assign value directly.
-                            set_val!(row, self.local_write_v[0], rec.value as u64);
-                        } else {
-                            // Assign value limbs.
-                            self.local_write_v.iter().enumerate().for_each(|(l, limb)| {
-                                let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
-                                set_val!(row, limb, val as u64);
-                            });
-                        }
-                        set_val!(row, self.addr_subset, rec.addr.baddr().0 as u64);
-                        set_val!(structural_row, self.sel_read, 1u64);
+                witness_read_mut_slices
+                    .par_iter_mut()
+                    .zip_eq(structural_witness_read_mut_slices.par_iter_mut())
+                    .zip_eq(global_read_records.par_iter())
+                    .for_each(
+                        |((witness_read, structural_witness_read), global_read_mem)| {
+                            witness_read
+                                .chunks_mut(num_witin)
+                                .zip_eq(structural_witness_read.chunks_mut(num_structural_witin))
+                                .zip_eq(global_read_mem.values())
+                                .for_each(|((row, structural_row), rec)| {
+                                    if self.local_write_v.len() == 1 {
+                                        // Assign value directly.
+                                        set_val!(row, self.local_write_v[0], rec.value as u64);
+                                    } else {
+                                        // Assign value limbs.
+                                        self.local_write_v.iter().enumerate().for_each(
+                                            |(l, limb)| {
+                                                let val =
+                                                    (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                                                set_val!(row, limb, val as u64);
+                                            },
+                                        );
+                                    }
+                                    set_val!(row, self.addr_subset, rec.addr.baddr().0 as u64);
+                                    set_val!(structural_row, self.sel_read, 1u64);
 
-                        // TODO assign R_{global}
-                    });
+                                    // TODO assign R_{global}
+                                });
+                        },
+                    );
             },
         );
 

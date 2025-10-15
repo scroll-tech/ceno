@@ -5,7 +5,7 @@ use super::ram_impl::{
 };
 use crate::{
     circuit_builder::CircuitBuilder,
-    e2e::{RAMRecord, ShardContext},
+    e2e::ShardContext,
     error::ZKVMError,
     structs::{ProgramParams, RAMType},
     tables::{RMMCollections, TableCircuit},
@@ -323,12 +323,14 @@ impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
 }
 
 /// This circuit is generalized version to handle all mmio records
-pub struct RamBusCircuit<const V_LIMBS: usize, E>(PhantomData<E>);
+pub struct RamBusCircuit<'a, const V_LIMBS: usize, E>(PhantomData<(&'a (), E)>);
 
-impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for RamBusCircuit<V_LIMBS, E> {
+impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
+    for RamBusCircuit<'a, V_LIMBS, E>
+{
     type TableConfig = RAMBusConfig<V_LIMBS>;
     type FixedInput = ();
-    type WitnessInput = (&'static [RAMRecord], &'static [RAMRecord]);
+    type WitnessInput = ShardContext<'a>;
 
     fn name() -> String {
         "RamBusCircuit".to_string()
@@ -357,16 +359,14 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for RamBusCircuit<
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        final_v: &Self::WitnessInput,
+        shard_ctx: &Self::WitnessInput,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
-        let (global_read_mem, global_write_mem) = *final_v;
         // assume returned table is well-formed include padding
         Ok(Self::TableConfig::assign_instances(
             config,
+            shard_ctx,
             num_witin,
             num_structural_witin,
-            global_read_mem,
-            global_write_mem,
         )?)
     }
 }
