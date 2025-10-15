@@ -2,10 +2,9 @@
 
 **WORKING IN PROGRESS**
 
-TODOs:
-- [ ] secp256k1
-- [ ] bn254
-- [ ] sha256
+- [x] secp256k1
+- [x] bn254
+- [x] sha256
 - [ ] secp256r1
 
 ## Usage

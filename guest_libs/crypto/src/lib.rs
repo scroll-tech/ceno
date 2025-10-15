@@ -9,8 +9,6 @@ pub mod bn254;
 pub mod secp256k1;
 /// secp256r1
 pub mod secp256r1;
-/// SHA-256 implementation.
-pub mod sha256;
 
 mod macros;
 
