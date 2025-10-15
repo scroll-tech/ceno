@@ -28,10 +28,11 @@ pub enum SelectorType<E: ExtensionField> {
         indices: Vec<usize>,
         expression: Expression<E>,
     },
+    /// binary tree [`quark`] from paper
+    QuarkBinaryTreeLessThan(Expression<E>),
 }
 
 impl<E: ExtensionField> SelectorType<E> {
-    /// Compute true and false mle eq(1; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (eq() - sel(y; b[5..]))
     pub fn compute(
         &self,
         out_point: &Point<E>,
@@ -50,6 +51,7 @@ impl<E: ExtensionField> SelectorType<E> {
                 }
                 Some(sel.into_mle())
             }
+            // compute true and false mle eq(1; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (eq() - sel(y; b[5..]))
             SelectorType::OrderedSparse32 { indices, .. } => {
                 let mut sel = build_eq_x_r_vec(out_point);
                 sel.par_chunks_exact_mut(CYCLIC_POW2_5.len())
@@ -75,10 +77,68 @@ impl<E: ExtensionField> SelectorType<E> {
                     });
                 Some(sel.into_mle())
             }
+            // also see evaluate() function for more explanation
+            SelectorType::QuarkBinaryTreeLessThan(_) => {
+                // num_instances: number of prefix one in leaf layer
+                let mut sel: Vec<E> = build_eq_x_r_vec(out_point);
+                let n = sel.len();
+
+                let num_instances_sequence = (0..out_point.len())
+                    // clean up sig bits
+                    .scan(
+                        (num_instances / 2, num_instances.div_ceil(2)),
+                        |(n_instance, raw_instance_ceiling), _| {
+                            if *n_instance > 0 {
+                                let cur = *n_instance;
+                                *n_instance = *raw_instance_ceiling / 2;
+                                *raw_instance_ceiling = raw_instance_ceiling.div_ceil(2);
+                                Some(cur)
+                            } else {
+                                Some(0)
+                            }
+                        },
+                    )
+                    .collect::<Vec<_>>();
+
+                // split sel into different size of region, set tailing 0 of respective chunk size
+                // 1st round: take v = sel[0..sel.len()/2], zero out v[num_instances_sequence[0]..]
+                // 2nd round: take v = sel[sel.len()/2 .. sel.len()/4], zero out v[num_instances_sequence[1]..]
+                // ...
+                // each round: progressively smaller chunk
+                // example: round 0 uses first half, round 1 uses next quarter, etc.
+                // compute cumulative start indices:
+                // e.g. chunk = n/2, then start = 0, chunk, chunk + chunk/2, chunk + chunk/2 + chunk/4, ...
+                // compute disjoint start indices and lengths
+                let chunks: Vec<(usize, usize)> = {
+                    let mut result = Vec::new();
+                    let mut start = 0;
+                    let mut chunk_len = n / 2;
+                    while chunk_len > 0 {
+                        result.push((start, chunk_len));
+                        start += chunk_len;
+                        chunk_len /= 2;
+                    }
+                    result
+                };
+
+                for (i, (start, len)) in chunks.into_iter().enumerate() {
+                    let slice = &mut sel[start..start + len];
+
+                    // determine from which index to zero
+                    let zero_start = num_instances_sequence.get(i).copied().unwrap_or(0).min(len);
+
+                    for x in &mut slice[zero_start..] {
+                        *x = E::ZERO;
+                    }
+                }
+
+                // zero out last bh evaluations
+                *sel.last_mut().unwrap() = E::ZERO;
+                Some(sel.into_mle())
+            }
         }
     }
 
-    /// Evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
     pub fn evaluate(
         &self,
         evals: &mut Vec<E>,
@@ -100,6 +160,7 @@ impl<E: ExtensionField> SelectorType<E> {
                     eq_eval_less_or_equal_than(num_instances - 1, out_point, in_point),
                 )
             }
+            // evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
             SelectorType::OrderedSparse32 {
                 indices,
                 expression,
@@ -113,6 +174,70 @@ impl<E: ExtensionField> SelectorType<E> {
                 let sel =
                     eq_eval_less_or_equal_than(num_instances - 1, &out_point[5..], &in_point[5..]);
                 (expression, eval * sel)
+            }
+            SelectorType::QuarkBinaryTreeLessThan(expr) => {
+                // num_instances count on leaf layer
+                // where nodes size is 2^(N) / 2
+                // out_point.len() is also log(2^(N)) - 1
+                // so num_instances and 1 << out_point.len() are on same scaling
+                assert!(num_instances > 0);
+                assert!(num_instances <= (1 << out_point.len()));
+                if out_point.is_empty() {
+                    panic!("empty out_point size")
+                }
+                assert_eq!(out_point.len(), in_point.len());
+
+                // we break down this special selector evaluation into recursive structure
+                // iterating through out_point and in_point, for each i
+                // next_eval = lhs * (1-out_point[i]) * (1 - in_point[i]) + prev_eval * out_point[i] * in_point[i]
+                // where the lhs is in consecutive prefix 1 follow by 0
+
+                // calculate prefix 1 length of each layer
+                let mut prefix_one_seq = (0..out_point.len())
+                    .scan(
+                        (num_instances / 2, num_instances.div_ceil(2)),
+                        |(n_instance, raw_instance_ceiling), _| {
+                            if *n_instance > 0 {
+                                let cur = *n_instance;
+                                *n_instance = *raw_instance_ceiling / 2;
+                                *raw_instance_ceiling = raw_instance_ceiling.div_ceil(2);
+                                Some(cur)
+                            } else {
+                                Some(0)
+                            }
+                        },
+                    )
+                    .collect::<Vec<_>>();
+                prefix_one_seq.reverse();
+                let mut prefix_one_seq_iter = prefix_one_seq.iter();
+
+                let mut res = if let Some(first) = prefix_one_seq_iter.by_ref().next() {
+                    if *first > 0 {
+                        assert_eq!(*first, 1);
+                        (E::ONE - out_point[0]) * (E::ONE - in_point[0])
+                    } else {
+                        E::ZERO
+                    }
+                } else {
+                    unreachable!()
+                };
+                for i in 1..out_point.len() {
+                    let num_prefix_one_lhs = prefix_one_seq_iter.by_ref().next().unwrap();
+                    let lhs_res = if *num_prefix_one_lhs > 0 {
+                        (E::ONE - out_point[i])
+                            * (E::ONE - in_point[i])
+                            * eq_eval_less_or_equal_than(
+                                *num_prefix_one_lhs - 1,
+                                &out_point[..i],
+                                &in_point[..i],
+                            )
+                    } else {
+                        E::ZERO
+                    };
+                    let rhs_res = (out_point[i] * in_point[i]) * res;
+                    res = lhs_res + rhs_res;
+                }
+                (expr, res)
             }
         };
         let Expression::StructuralWitIn(wit_id, _) = expr else {
