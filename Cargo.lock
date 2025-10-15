@@ -921,6 +921,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "ceno_keccak",
+ "ceno_sha2",
  "k256 0.13.4 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
  "revm-precompile 27.0.0",
  "substrate-bn 0.6.0 (git+https://github.com/scroll-tech/bn?branch=ceno)",
@@ -995,6 +996,14 @@ dependencies = [
  "getrandom 0.2.16",
  "getrandom 0.3.2",
  "rkyv",
+]
+
+[[package]]
+name = "ceno_sha2"
+version = "0.1.0"
+dependencies = [
+ "ceno_syscall 0.1.0",
+ "digest 0.10.7",
 ]
 
 [[package]]
@@ -1843,6 +1852,7 @@ dependencies = [
  "ceno_crypto",
  "ceno_keccak",
  "ceno_rt",
+ "ceno_sha2",
  "ceno_syscall 0.1.0",
  "getrandom 0.3.2",
  "rand 0.8.5",
