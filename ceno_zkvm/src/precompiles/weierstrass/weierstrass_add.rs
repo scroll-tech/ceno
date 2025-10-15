@@ -609,6 +609,7 @@ pub fn run_weierstrass_add<
                         .vm_state
                         .assign_instance(
                             instance,
+                            &shard_ctx,
                             &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
                         )
                         .expect("assign vm_state error");

@@ -274,7 +274,9 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                         let ops = &step.syscall().expect("syscall step");
 
                         // vm_state
-                        config.vm_state.assign_instance(instance, step)?;
+                        config
+                            .vm_state
+                            .assign_instance(instance, &shard_ctx, step)?;
 
                         config.ecall_id.assign_op(
                             instance,

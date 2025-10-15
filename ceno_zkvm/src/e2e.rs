@@ -112,7 +112,7 @@ pub struct RAMRecord {
 
 pub struct ShardContext<'a> {
     shard_id: usize,
-    num_shards: usize,
+    max_num_shards: usize,
     max_cycle: Cycle,
     addr_future_accesses: Cow<'a, HashMap<(WordAddr, Cycle), Cycle>>,
     read_thread_based_record_storage: Either<
@@ -131,7 +131,7 @@ impl<'a> Default for ShardContext<'a> {
         let max_threads = max_usable_threads();
         Self {
             shard_id: 0,
-            num_shards: 1,
+            max_num_shards: 1,
             max_cycle: Cycle::default(),
             addr_future_accesses: Cow::Owned(HashMap::new()),
             read_thread_based_record_storage: Either::Left(
@@ -154,20 +154,27 @@ impl<'a> Default for ShardContext<'a> {
 impl<'a> ShardContext<'a> {
     pub fn new(
         shard_id: usize,
-        num_shards: usize,
+        max_num_shards: usize,
         executed_instructions: usize,
         addr_future_accesses: HashMap<(WordAddr, Cycle), Cycle>,
     ) -> Self {
+        // current strategy: at least each shard deal with one instruction
+        let max_num_shards = max_num_shards.min(executed_instructions);
+        assert!(
+            shard_id < max_num_shards,
+            "implement mechanism to skip current shard proof"
+        );
+
         let max_threads = max_usable_threads();
         // let max_record_per_thread = max_insts.div_ceil(max_threads as u64);
-        let expected_inst_per_shard = executed_instructions.div_ceil(num_shards) as usize;
+        let expected_inst_per_shard = executed_instructions.div_ceil(max_num_shards) as usize;
         let max_cycle = (executed_instructions + 1) * 4; // cycle start from 4
-        let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * 4).max(4)
-            ..((shard_id + 1) * expected_inst_per_shard * 4).min(max_cycle);
+        let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * 4 + 4)
+            ..((shard_id + 1) * expected_inst_per_shard * 4 + 4).min(max_cycle);
 
         ShardContext {
             shard_id,
-            num_shards,
+            max_num_shards,
             max_cycle: max_cycle as Cycle,
             addr_future_accesses: Cow::Owned(addr_future_accesses),
             // TODO with_capacity optimisation
@@ -201,7 +208,7 @@ impl<'a> ShardContext<'a> {
                 .zip(write_thread_based_record_storage.iter_mut())
                 .map(|(read, write)| ShardContext {
                     shard_id: self.shard_id,
-                    num_shards: self.num_shards,
+                    max_num_shards: self.max_num_shards,
                     max_cycle: self.max_cycle,
                     addr_future_accesses: Cow::Borrowed(self.addr_future_accesses.as_ref()),
                     read_thread_based_record_storage: Either::Right(read),
@@ -220,12 +227,26 @@ impl<'a> ShardContext<'a> {
 
     #[inline(always)]
     pub fn is_last_shard(&self) -> bool {
-        self.shard_id == self.num_shards - 1
+        self.shard_id == self.max_num_shards - 1
     }
 
     #[inline(always)]
     pub fn is_current_shard_cycle(&self, cycle: Cycle) -> bool {
         self.cur_shard_cycle_range.contains(&(cycle as usize))
+    }
+
+    #[inline(always)]
+    pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
+        let mut ts = prev_cycle.saturating_sub(self.cur_shard_cycle_range.start as Cycle);
+        if ts < 4 {
+            ts = 0
+        }
+        ts
+    }
+
+    pub fn current_shard_offset_cycle(&self) -> Cycle {
+        // `-4` as cycle of each local shard start from 4
+        (self.cur_shard_cycle_range.start as Cycle) - 4
     }
 
     #[inline(always)]
@@ -475,7 +496,7 @@ pub fn emulate_program<'a>(
 
     let shard_ctx = ShardContext::new(
         shards.shard_id,
-        shards.num_shards,
+        shards.max_num_shards,
         insts,
         vm.take_tracer().next_accesses(),
     );

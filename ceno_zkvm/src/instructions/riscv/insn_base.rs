@@ -60,14 +60,17 @@ impl<E: ExtensionField> StateInOut<E> {
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &ShardContext,
         // lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+
         set_val!(instance, self.pc, step.pc().before.0 as u64);
         if let Some(n_pc) = self.next_pc {
             set_val!(instance, n_pc, step.pc().after.0 as u64);
         }
-        set_val!(instance, self.ts, step.cycle());
+        set_val!(instance, self.ts, step.cycle() - current_shard_offset_cycle);
 
         Ok(())
     }
@@ -113,15 +116,18 @@ impl<E: ExtensionField> ReadRS1<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.rs1().expect("rs1 op");
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let shard_cycle = step.cycle() - current_shard_offset_cycle;
         set_val!(instance, self.id, op.register_index() as u64);
-        set_val!(instance, self.prev_ts, op.previous_cycle);
+        set_val!(instance, self.prev_ts, shard_prev_cycle);
 
         // Register read
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            op.previous_cycle,
-            step.cycle() + Tracer::SUBCYCLE_RS1,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_RS1,
         )?;
         shard_ctx.send(
             RAMType::Register,
@@ -177,15 +183,18 @@ impl<E: ExtensionField> ReadRS2<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.rs2().expect("rs2 op");
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let shard_cycle = step.cycle() - current_shard_offset_cycle;
         set_val!(instance, self.id, op.register_index() as u64);
-        set_val!(instance, self.prev_ts, op.previous_cycle);
+        set_val!(instance, self.prev_ts, shard_prev_cycle);
 
         // Register read
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            op.previous_cycle,
-            step.cycle() + Tracer::SUBCYCLE_RS2,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_RS2,
         )?;
 
         shard_ctx.send(
@@ -255,8 +264,11 @@ impl<E: ExtensionField> WriteRD<E> {
         cycle: Cycle,
         op: &WriteOp,
     ) -> Result<(), ZKVMError> {
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let shard_cycle = cycle - current_shard_offset_cycle;
         set_val!(instance, self.id, op.register_index() as u64);
-        set_val!(instance, self.prev_ts, op.previous_cycle);
+        set_val!(instance, self.prev_ts, shard_prev_cycle);
 
         // Register state
         self.prev_value.assign_limbs(
@@ -268,8 +280,8 @@ impl<E: ExtensionField> WriteRD<E> {
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            op.previous_cycle,
-            cycle + Tracer::SUBCYCLE_RD,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_RD,
         )?;
         shard_ctx.send(
             RAMType::Register,
@@ -323,15 +335,18 @@ impl<E: ExtensionField> ReadMEM<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.memory_op().unwrap();
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let shard_cycle = step.cycle() - current_shard_offset_cycle;
         // Memory state
-        set_val!(instance, self.prev_ts, op.previous_cycle);
+        set_val!(instance, self.prev_ts, shard_prev_cycle);
 
         // Memory read
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            op.previous_cycle,
-            step.cycle() + Tracer::SUBCYCLE_MEM,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_MEM,
         )?;
 
         shard_ctx.send(
@@ -395,13 +410,16 @@ impl WriteMEM {
         cycle: Cycle,
         op: &WriteOp,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.prev_ts, op.previous_cycle);
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let shard_cycle = cycle - current_shard_offset_cycle;
+        set_val!(instance, self.prev_ts, shard_prev_cycle);
 
         self.lt_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            op.previous_cycle,
-            cycle + Tracer::SUBCYCLE_MEM,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_MEM,
         )?;
 
         shard_ctx.send(

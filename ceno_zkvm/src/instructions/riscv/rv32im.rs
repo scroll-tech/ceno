@@ -414,35 +414,44 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut bn254_double_records = Vec::new();
         let mut secp256k1_add_records = Vec::new();
         let mut secp256k1_double_records = Vec::new();
-        steps.into_iter().for_each(|record| {
-            let insn_kind = record.insn.kind;
-            match insn_kind {
-                // ecall / halt
-                InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
-                    halt_records.push(record);
+        steps
+            .into_iter()
+            .filter_map(|mut step| {
+                if shard_ctx.is_current_shard_cycle(step.cycle()) {
+                    Some(step)
+                } else {
+                    None
                 }
-                InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => {
-                    keccak_records.push(record);
+            })
+            .for_each(|record| {
+                let insn_kind = record.insn.kind;
+                match insn_kind {
+                    // ecall / halt
+                    InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
+                        halt_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => {
+                        keccak_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == Bn254AddSpec::CODE => {
+                        bn254_add_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == Bn254DoubleSpec::CODE => {
+                        bn254_double_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1AddSpec::CODE => {
+                        secp256k1_add_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DoubleSpec::CODE => {
+                        secp256k1_double_records.push(record);
+                    }
+                    // other type of ecalls are handled by dummy ecall instruction
+                    _ => {
+                        // it's safe to unwrap as all_records are initialized with Vec::new()
+                        all_records.get_mut(&insn_kind).unwrap().push(record);
+                    }
                 }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254AddSpec::CODE => {
-                    bn254_add_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254DoubleSpec::CODE => {
-                    bn254_double_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1AddSpec::CODE => {
-                    secp256k1_add_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DoubleSpec::CODE => {
-                    secp256k1_double_records.push(record);
-                }
-                // other type of ecalls are handled by dummy ecall instruction
-                _ => {
-                    // it's safe to unwrap as all_records are initialized with Vec::new()
-                    all_records.get_mut(&insn_kind).unwrap().push(record);
-                }
-            }
-        });
+            });
 
         for (insn_kind, (_, records)) in
             izip!(InsnKind::iter(), &all_records).sorted_by_key(|(_, (_, a))| Reverse(a.len()))

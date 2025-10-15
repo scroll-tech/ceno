@@ -78,7 +78,7 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        self.vm_state.assign_instance(instance, step)?;
+        self.vm_state.assign_instance(instance, shard_ctx, step)?;
         self.rs1
             .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
         self.rs2

@@ -223,7 +223,9 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                                 [round_index as usize * num_witin..][..num_witin];
 
                             // vm_state
-                            config.vm_state.assign_instance(instance, step)?;
+                            config
+                                .vm_state
+                                .assign_instance(instance, &shard_ctx, step)?;
 
                             config.ecall_id.assign_op(
                                 instance,

@@ -115,7 +115,7 @@ struct Args {
 
     // number of total shards
     #[arg(long, default_value = "1")]
-    num_shards: u32,
+    max_num_shards: u32,
 }
 
 fn main() {
@@ -248,7 +248,7 @@ fn main() {
         .unwrap_or_default();
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
-    let shards = Shards::new(args.shard_id as usize, args.num_shards as usize);
+    let shards = Shards::new(args.shard_id as usize, args.max_num_shards as usize);
 
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {

@@ -248,7 +248,7 @@ impl<E: ExtensionField> DummyConfig<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         // State in and out
-        self.vm_state.assign_instance(instance, step)?;
+        self.vm_state.assign_instance(instance, shard_ctx, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
