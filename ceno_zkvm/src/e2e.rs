@@ -142,7 +142,7 @@ impl<'a> Default for ShardContext<'a> {
                     .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
-            cur_shard_cycle_range: 0..usize::MAX,
+            cur_shard_cycle_range: Tracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
         }
     }
 }
@@ -161,12 +161,15 @@ impl<'a> ShardContext<'a> {
             "implement mechanism to skip current shard proof"
         );
 
+        let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN as usize;
         let max_threads = max_usable_threads();
         // let max_record_per_thread = max_insts.div_ceil(max_threads as u64);
         let expected_inst_per_shard = executed_instructions.div_ceil(max_num_shards) as usize;
-        let max_cycle = (executed_instructions + 1) * 4; // cycle start from 4
-        let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * 4 + 4)
-            ..((shard_id + 1) * expected_inst_per_shard * 4 + 4).min(max_cycle);
+        let max_cycle = (executed_instructions + 1) * subcycle_per_insn; // cycle start from subcycle_per_insn
+        let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * subcycle_per_insn
+            + subcycle_per_insn)
+            ..((shard_id + 1) * expected_inst_per_shard * subcycle_per_insn + subcycle_per_insn)
+                .min(max_cycle);
 
         ShardContext {
             shard_id,
@@ -248,15 +251,15 @@ impl<'a> ShardContext<'a> {
     #[inline(always)]
     pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
         let mut ts = prev_cycle.saturating_sub(self.cur_shard_cycle_range.start as Cycle);
-        if ts < 4 {
+        if ts < Tracer::SUBCYCLES_PER_INSN {
             ts = 0
         }
         ts
     }
 
     pub fn current_shard_offset_cycle(&self) -> Cycle {
-        // `-4` as cycle of each local shard start from 4
-        (self.cur_shard_cycle_range.start as Cycle) - 4
+        // cycle of each local shard start from Tracer::SUBCYCLES_PER_INSN
+        (self.cur_shard_cycle_range.start as Cycle) - Tracer::SUBCYCLES_PER_INSN
     }
 
     #[inline(always)]
@@ -383,8 +386,6 @@ pub fn emulate_program<'a>(
         vm.get_pc().into(),
         end_cycle,
         shards.shard_id as u32,
-        !shards.is_first_shard(), // first shard disable global read
-        !shards.is_last_shard(),  // last shard disable global write
         io_init.iter().map(|rec| rec.value).collect_vec(),
     );
 

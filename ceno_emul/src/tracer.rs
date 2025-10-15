@@ -25,7 +25,7 @@ use crate::{
 /// - Any pair of `rs1 / rs2 / rd` **may be the same**. Then, one op will point to the other op in the same instruction but a different subcycle. The circuits may follow the operations **without special handling** of repeated registers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StepRecord {
-    pub cycle: Cycle,
+    cycle: Cycle,
     pc: Change<ByteAddr>,
     pub insn: Instruction,
 
