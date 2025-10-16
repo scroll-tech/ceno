@@ -1,17 +1,15 @@
-//! Copied from <https://github.com/succinctlabs/sp1/blob/ebb517c1a3f3e3b95ee34bf211fb46a73cf108fe/crates/zkvm/lib/src/secp256k1.rs>
-
 use crate::utils::{AffinePoint, WeierstrassAffinePoint, WeierstrassPoint};
-use ceno_syscall::{syscall_secp256k1_add, syscall_secp256k1_double};
+use ceno_syscall::{syscall_bn254_add, syscall_bn254_double};
 
-/// The number of limbs in [Secp256k1Point].
+/// The number of limbs in [Bn254AffinePoint].
 pub const N: usize = 16;
 
-/// An affine point on the Secp256k1 curve.
-#[derive(Copy, Clone, Debug)]
+/// A point on the Bn254 curve.
+#[derive(Copy, Clone)]
 #[repr(align(4))]
-pub struct Secp256k1Point(pub WeierstrassPoint<N>);
+pub struct Bn254Point(pub WeierstrassPoint<N>);
 
-impl WeierstrassAffinePoint<N> for Secp256k1Point {
+impl WeierstrassAffinePoint<N> for Bn254Point {
     fn infinity() -> Self {
         Self(WeierstrassPoint::Infinity)
     }
@@ -21,12 +19,9 @@ impl WeierstrassAffinePoint<N> for Secp256k1Point {
     }
 }
 
-impl AffinePoint<N> for Secp256k1Point {
-    /// The values are taken from https://en.bitcoin.it/wiki/Secp256k1.
+impl AffinePoint<N> for Bn254Point {
     const GENERATOR: Self = Self(WeierstrassPoint::Affine([
-        385357720, 1509065051, 768485593, 43777243, 3464956679, 1436574357, 4191992748, 2042521214,
-        4212184248, 2621952143, 2793755673, 4246189128, 235997352, 1571093500, 648266853,
-        1211816567,
+        1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0,
     ]));
 
     fn new(limbs: [u32; N]) -> Self {
@@ -52,7 +47,7 @@ impl AffinePoint<N> for Secp256k1Point {
     fn add_assign(&mut self, other: &Self) {
         let a = self.limbs_mut();
         let b = other.limbs_ref();
-        syscall_secp256k1_add(a, b);
+        syscall_bn254_add(a, b);
     }
 
     fn complete_add_assign(&mut self, other: &Self) {
@@ -60,9 +55,7 @@ impl AffinePoint<N> for Secp256k1Point {
     }
 
     fn double(&mut self) {
-        match &mut self.0 {
-            WeierstrassPoint::Infinity => (),
-            WeierstrassPoint::Affine(limbs) => syscall_secp256k1_double(limbs),
-        }
+        let a = self.limbs_mut();
+        syscall_bn254_double(a);
     }
 }

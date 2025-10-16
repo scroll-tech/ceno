@@ -128,21 +128,19 @@ pub fn syscall_secp256k1_decompress(point: &mut [u8; 64], is_odd: bool) {
 
 /// Based on: https://github.com/succinctlabs/sp1/blob/2aed8fea16a67a5b2983ffc471b2942c2f2512c8/crates/zkvm/entrypoint/src/syscalls/sha_extend.rs#L12
 /// Executes the SHA256 extend operation on the given word array.
-///
-/// ### Safety
-///
-/// The caller must ensure that `w` is valid pointer to data that is aligned along a four byte
-/// boundary.
 #[allow(unused_variables)]
-pub fn syscall_sha256_extend(w: *mut [u32; 64]) {
+pub fn syscall_sha256_extend(w: &mut [u32; 64]) {
     #[cfg(target_os = "zkvm")]
-    unsafe {
-        asm!(
-        "ecall",
-        in("t0") SHA_EXTEND,
-        in("a0") w,
-        in("a1") 0
-        );
+    {
+        let w = w.as_mut_ptr();
+        unsafe {
+            asm!(
+            "ecall",
+            in("t0") SHA_EXTEND,
+            in("a0") w,
+            in("a1") 0
+            );
+        }
     }
 
     #[cfg(not(target_os = "zkvm"))]
@@ -159,15 +157,19 @@ pub fn syscall_sha256_extend(w: *mut [u32; 64]) {
 /// byte boundary.
 #[allow(unused_variables)]
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
+pub extern "C" fn syscall_bn254_add(p: &mut [u32; 16], q: &[u32; 16]) {
     #[cfg(target_os = "zkvm")]
-    unsafe {
-        asm!(
-        "ecall",
-        in("t0") BN254_ADD,
-        in("a0") p,
-        in("a1") q,
-        );
+    {
+        let p = p.as_mut_ptr();
+        let q = q.as_ptr();
+        unsafe {
+            asm!(
+            "ecall",
+            in("t0") BN254_ADD,
+            in("a0") p,
+            in("a1") q,
+            );
+        }
     }
 
     #[cfg(not(target_os = "zkvm"))]
@@ -184,15 +186,18 @@ pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
 /// boundary.
 #[allow(unused_variables)]
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
+pub extern "C" fn syscall_bn254_double(p: &mut [u32; 16]) {
     #[cfg(target_os = "zkvm")]
-    unsafe {
-        asm!(
-        "ecall",
-        in("t0") BN254_DOUBLE,
-        in("a0") p,
-        in("a1") 0,
-        );
+    {
+        let p = p.as_mut_ptr();
+        unsafe {
+            asm!(
+            "ecall",
+            in("t0") BN254_DOUBLE,
+            in("a0") p,
+            in("a1") 0,
+            );
+        }
     }
 
     #[cfg(not(target_os = "zkvm"))]
@@ -204,15 +209,19 @@ pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
 /// The result is written over the first input.
 #[allow(unused_variables)]
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_bn254_fp_addmod(x: *mut u32, y: *const u32) {
+pub extern "C" fn syscall_bn254_fp_addmod(x: &mut [u32; 8], y: &[u32; 8]) {
     #[cfg(target_os = "zkvm")]
-    unsafe {
-        asm!(
-        "ecall",
-        in("t0") BN254_FP_ADD,
-        in("a0") x,
-        in("a1") y,
-        );
+    {
+        let x = x.as_mut_ptr();
+        let y = y.as_ptr();
+        unsafe {
+            asm!(
+            "ecall",
+            in("t0") BN254_FP_ADD,
+            in("a0") x,
+            in("a1") y,
+            );
+        }
     }
 
     #[cfg(not(target_os = "zkvm"))]
@@ -224,15 +233,19 @@ pub extern "C" fn syscall_bn254_fp_addmod(x: *mut u32, y: *const u32) {
 /// The result is written over the first input.
 #[allow(unused_variables)]
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_bn254_fp_mulmod(x: *mut u32, y: *const u32) {
+pub extern "C" fn syscall_bn254_fp_mulmod(x: &mut [u32; 8], y: &[u32; 8]) {
     #[cfg(target_os = "zkvm")]
-    unsafe {
-        asm!(
-        "ecall",
-        in("t0") BN254_FP_MUL,
-        in("a0") x,
-        in("a1") y,
-        );
+    {
+        let x = x.as_mut_ptr();
+        let y = y.as_ptr();
+        unsafe {
+            asm!(
+            "ecall",
+            in("t0") BN254_FP_MUL,
+            in("a0") x,
+            in("a1") y,
+            );
+        }
     }
 
     #[cfg(not(target_os = "zkvm"))]
@@ -244,15 +257,19 @@ pub extern "C" fn syscall_bn254_fp_mulmod(x: *mut u32, y: *const u32) {
 /// The result is written over the first input.
 #[allow(unused_variables)]
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_bn254_fp2_addmod(x: *mut u32, y: *const u32) {
+pub extern "C" fn syscall_bn254_fp2_addmod(x: &mut [u32; 16], y: &[u32; 16]) {
     #[cfg(target_os = "zkvm")]
-    unsafe {
-        asm!(
-        "ecall",
-        in("t0") BN254_FP2_ADD,
-        in("a0") x,
-        in("a1") y,
-        );
+    {
+        let x = x.as_mut_ptr();
+        let y = y.as_ptr();
+        unsafe {
+            asm!(
+            "ecall",
+            in("t0") BN254_FP2_ADD,
+            in("a0") x,
+            in("a1") y,
+            );
+        }
     }
 
     #[cfg(not(target_os = "zkvm"))]
@@ -264,15 +281,19 @@ pub extern "C" fn syscall_bn254_fp2_addmod(x: *mut u32, y: *const u32) {
 /// The result is written over the first input.
 #[allow(unused_variables)]
 #[unsafe(no_mangle)]
-pub extern "C" fn syscall_bn254_fp2_mulmod(x: *mut u32, y: *const u32) {
+pub extern "C" fn syscall_bn254_fp2_mulmod(x: &mut [u32; 16], y: &[u32; 16]) {
     #[cfg(target_os = "zkvm")]
-    unsafe {
-        asm!(
-        "ecall",
-        in("t0") BN254_FP2_MUL,
-        in("a0") x,
-        in("a1") y,
-        );
+    {
+        let x = x.as_mut_ptr();
+        let y = y.as_ptr();
+        unsafe {
+            asm!(
+            "ecall",
+            in("t0") BN254_FP2_MUL,
+            in("a0") x,
+            in("a1") y,
+            );
+        }
     }
 
     #[cfg(not(target_os = "zkvm"))]

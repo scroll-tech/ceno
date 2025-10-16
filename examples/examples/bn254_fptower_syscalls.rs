@@ -39,7 +39,7 @@ fn main() {
 
         log_state(&a_words);
         log_state(&b_words);
-        syscall_bn254_fp_addmod(&mut a_words[0], &b_words[0]);
+        syscall_bn254_fp_addmod(&mut a_words, &b_words);
         let sum_words = fq_to_words(a + b);
         assert_eq!(a_words, sum_words);
         log_state(&a_words);
@@ -48,7 +48,7 @@ fn main() {
 
         log_state(&a_words);
         log_state(&b_words);
-        syscall_bn254_fp_mulmod(&mut a_words[0], &b_words[0]);
+        syscall_bn254_fp_mulmod(&mut a_words, &b_words);
         let prod_words = fq_to_words(a * b);
         assert_eq!(a_words, prod_words);
         log_state(&a_words);
@@ -67,7 +67,7 @@ fn main() {
 
         log_state(&a_words);
         log_state(&b_words);
-        syscall_bn254_fp2_addmod(&mut a_words[0], &b_words[0]);
+        syscall_bn254_fp2_addmod(&mut a_words, &b_words);
         let sum_words = fq2_to_words(a + b);
         assert_eq!(a_words, sum_words);
         log_state(&a_words);
@@ -76,7 +76,7 @@ fn main() {
 
         log_state(&a_words);
         log_state(&b_words);
-        syscall_bn254_fp2_mulmod(&mut a_words[0], &b_words[0]);
+        syscall_bn254_fp2_mulmod(&mut a_words, &b_words);
         let prod_words = fq2_to_words(a * b);
         assert_eq!(a_words, prod_words);
         log_state(&a_words);
