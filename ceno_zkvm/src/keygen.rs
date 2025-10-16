@@ -26,8 +26,11 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
                     .remove(&c_name)
                     .flatten()
                     .ok_or(ZKVMError::FixedTraceNotFound(c_name.clone().into()))?;
+                vm_pk
+                    .circuit_index_fixed_num_instances
+                    .insert(circuit_index, fixed_trace_rmm.num_instances());
                 fixed_traces.insert(circuit_index, fixed_trace_rmm);
-            };
+            }
 
             let circuit_pk = cs.key_gen();
             assert!(vm_pk.circuit_pks.insert(c_name, circuit_pk).is_none());

@@ -854,10 +854,14 @@ impl<const V_LIMBS: usize> RAMBusConfig<V_LIMBS> {
         let (global_read_records, global_write_records) =
             (shard_ctx.read_records(), shard_ctx.write_records());
         assert_eq!(global_read_records.len(), global_write_records.len());
+        let raw_write_len: usize = global_write_records.iter().map(|m| m.len()).sum();
+        let raw_read_len: usize = global_read_records.iter().map(|m| m.len()).sum();
+        if raw_read_len + raw_write_len == 0 {
+            return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
+        }
+        // TODO refactor to deal with only read/write
 
         let witness_length = {
-            let raw_write_len: usize = global_write_records.iter().map(|m| m.len()).sum();
-            let raw_read_len: usize = global_read_records.iter().map(|m| m.len()).sum();
             let max_len = raw_read_len.max(raw_write_len);
             // first half write, second half read
             next_pow2_instance_padding(max_len) * 2

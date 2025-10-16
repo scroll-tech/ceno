@@ -114,6 +114,7 @@ pub struct ShardContext<'a> {
     shard_id: usize,
     max_num_shards: usize,
     max_cycle: Cycle,
+    // TODO this map is super huge
     addr_future_accesses: Cow<'a, HashMap<(WordAddr, Cycle), Cycle>>,
     read_thread_based_record_storage:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
@@ -274,8 +275,10 @@ impl<'a> ShardContext<'a> {
         prev_value: Option<Word>,
     ) {
         // check read from external mem bus
+        // exclude first shard
         if prev_cycle < self.cur_shard_cycle_range.start as Cycle
             && self.is_current_shard_cycle(cycle)
+            && !self.is_first_shard()
         {
             let ram_record = self
                 .read_thread_based_record_storage
@@ -295,6 +298,7 @@ impl<'a> ShardContext<'a> {
                 },
             );
         }
+
         // check write to external mem bus
         if let Some(future_touch_cycle) = self.addr_future_accesses.get(&(addr, cycle)) {
             if *future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle

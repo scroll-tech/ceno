@@ -109,8 +109,17 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.num_witin.into()
     }
 
+    pub fn num_structural_witin(&self) -> usize {
+        self.zkvm_v1_css.num_structural_witin.into()
+    }
+
     pub fn num_fixed(&self) -> usize {
         self.zkvm_v1_css.num_fixed
+    }
+
+    /// static circuit means there is only fixed column
+    pub fn is_static_circuit(&self) -> bool {
+        (self.num_witin() + self.num_structural_witin()) == 0 && self.num_fixed() > 0
     }
 
     pub fn num_reads(&self) -> usize {
@@ -407,6 +416,7 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
     pub fixed_commit_wd: Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    pub circuit_index_fixed_num_instances: BTreeMap<usize, usize>,
 
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
@@ -421,6 +431,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             circuit_pks: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
+            circuit_index_fixed_num_instances: BTreeMap::new(),
             fixed_commit_wd: None,
             fixed_commit: None,
         }

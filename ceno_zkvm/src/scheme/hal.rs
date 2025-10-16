@@ -147,9 +147,7 @@ pub trait OpeningProver<PB: ProverBackend> {
         witness_data: PB::PcsData,
         fixed_data: Option<Arc<PB::PcsData>>,
         points: Vec<Point<PB::E>>,
-        evals: Vec<Vec<PB::E>>,
-        circuit_num_polys: &[(usize, usize)],
-        num_instances: &[(usize, usize)],
+        evals: Vec<Vec<Vec<PB::E>>>,
         transcript: &mut (impl Transcript<PB::E> + 'static),
     ) -> <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Proof;
 }
