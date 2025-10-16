@@ -9,6 +9,8 @@ pub mod bn254;
 pub mod secp256k1;
 /// secp256r1
 pub mod secp256r1;
+/// sha2 hashing
+pub use ceno_sha2;
 
 mod macros;
 

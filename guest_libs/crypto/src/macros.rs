@@ -94,7 +94,7 @@ macro_rules! ceno_crypto {
         impl __rp::Crypto for $n {
             #[inline]
             fn sha256(&self, input: &[u8]) -> [u8; 32] {
-                use ceno_sha2::{Digest, Sha256};
+                use $crate::ceno_sha2::{Digest, Sha256};
                 let output = Sha256::digest(input);
                 output.into()
             }
