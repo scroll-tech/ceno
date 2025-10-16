@@ -939,9 +939,9 @@ dependencies = [
 [[package]]
 name = "ceno_crypto_primitives"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest#f0876e88bf734f045780eafd36d7def8d7982c9a"
+source = "git+https://github.com/scroll-tech/ceno#4a9dff21fd408e93c21edb6e874a09b0171b0c8b"
 dependencies = [
- "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest)",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno)",
  "elliptic-curve",
 ]
 
@@ -1013,12 +1013,7 @@ version = "0.1.0"
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?branch=feat%2Fbn254-guest#40623166ec3188ad1045b6d329f55568ca749b7e"
-
-[[package]]
-name = "ceno_syscall"
-version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest#f0876e88bf734f045780eafd36d7def8d7982c9a"
+source = "git+https://github.com/scroll-tech/ceno#4a9dff21fd408e93c21edb6e874a09b0171b0c8b"
 
 [[package]]
 name = "ceno_zkvm"
@@ -2501,9 +2496,9 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#8fde0eef0eeabbafa043262b0ea58adde6bd8d2b"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#bfb5430d750ad19102f3d27caaff8bed720d564c"
 dependencies = [
- "ceno_crypto_primitives 0.1.0 (git+https://github.com/scroll-tech/ceno?branch=feat%2Fsecp256k1-guest)",
+ "ceno_crypto_primitives 0.1.0 (git+https://github.com/scroll-tech/ceno)",
  "cfg-if",
  "ecdsa 0.16.9 (git+https://github.com/sp1-patches/signatures.git?tag=patch-16.9-sp1-4.1.0)",
  "elliptic-curve",
@@ -4551,11 +4546,11 @@ dependencies = [
 [[package]]
 name = "substrate-bn"
 version = "0.6.0"
-source = "git+https://github.com/scroll-tech/bn?branch=ceno#2411369a3bf4760872f4090c277ea8ef5b9f1196"
+source = "git+https://github.com/scroll-tech/bn?branch=ceno#58d807ae392d26ad94811a40e0b46e6e2d9a67ab"
 dependencies = [
  "bytemuck",
  "byteorder",
- "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno?branch=feat%2Fbn254-guest)",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno)",
  "cfg-if",
  "crunchy",
  "lazy_static",
