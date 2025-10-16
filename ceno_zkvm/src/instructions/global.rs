@@ -42,8 +42,6 @@ pub struct GlobalConfig<E: ExtensionField, P> {
     // s.t. local offline memory checking can cancel out
     // this serves as propagating local write to global.
     is_global_write: WitIn,
-    r_record: WitIn,
-    w_record: WitIn,
     x: Vec<WitIn>,
     y: Vec<WitIn>,
     perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
@@ -71,8 +69,6 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         let local_clk = cb.create_witin(|| "local_clk");
         let nonce = cb.create_witin(|| "nonce");
         let is_global_write = cb.create_witin(|| "is_global_write");
-        let r_record = cb.create_witin(|| "r_record");
-        let w_record = cb.create_witin(|| "w_record");
 
         let is_ram_reg: Expression<E> = is_ram_register.expr();
         let reg: Expression<E> = RAMType::Register.into();
@@ -104,27 +100,10 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         // otherwise, we insert a padding value 1 to avoid affecting local memory checking
 
         cb.assert_bit(|| "is_global_write must be boolean", is_global_write.expr())?;
-        // r_record = select(is_global_write, rlc, 1)
-        cb.condition_require_equal(
-            || "r_record = select(is_global_write, rlc, 1)",
-            is_global_write.expr(),
-            r_record.expr(),
-            rlc.clone(),
-            E::BaseField::ONE.expr(),
-        )?;
 
         // if we are reading from global set, then this record should be
         // considered as a initial local write to that address.
         // otherwise, we insert a padding value 1 as if we are not writing anything
-
-        // w_record = select(is_global_write, 1, rlc)
-        cb.condition_require_equal(
-            || "w_record = select(is_global_write, 1, rlc)",
-            is_global_write.expr(),
-            w_record.expr(),
-            E::BaseField::ONE.expr(),
-            rlc,
-        )?;
 
         // local read/write consistency
         cb.condition_require_zero(
@@ -134,16 +113,16 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         )?;
         // TODO: enforce shard = shard_id in the public values
 
-        cb.read_record(
-            || "r_record",
-            gkr_iop::RAMType::Register, // TODO fixme
-            vec![r_record.expr()],
-        )?;
-        cb.write_record(
-            || "w_record",
-            gkr_iop::RAMType::Register, // TODO fixme
-            vec![w_record.expr()],
-        )?;
+        // cb.read_record(
+        //     || "r_record",
+        //     gkr_iop::RAMType::Register, // TODO fixme
+        //     vec![r_record.expr()],
+        // )?;
+        // cb.write_record(
+        //     || "w_record",
+        //     gkr_iop::RAMType::Register, // TODO fixme
+        //     vec![w_record.expr()],
+        // )?;
 
         // enforces final_sum = \sum_i (x_i, y_i) using ecc quark protocol
         let final_sum = cb.query_global_rw_sum()?;
@@ -180,8 +159,6 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
             local_clk,
             nonce,
             is_global_write,
-            r_record,
-            w_record,
             perm_config,
             perm,
         })
