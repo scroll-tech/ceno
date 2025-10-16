@@ -774,9 +774,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
 
     fn transport_mles<'a>(
         &self,
-        mles: Vec<MultilinearExtension<'a, E>>,
+        mles: &[MultilinearExtension<'a, E>],
     ) -> Vec<ArcMultilinearExtension<'a, E>> {
-        mles.into_iter().map(|mle| mle.into()).collect_vec()
+        mles.into_iter().map(|mle| mle.clone().into()).collect_vec()
     }
 }
 

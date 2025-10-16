@@ -893,7 +893,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
 
     fn transport_mles<'a>(
         &self,
-        mles: Vec<MultilinearExtension<'a, E>>,
+        mles: &[MultilinearExtension<'a, E>],
     ) -> Vec<ArcMultilinearExtensionGpu<'a, E>> {
         let cuda_hal = get_cuda_hal().unwrap();
         mles.iter()
