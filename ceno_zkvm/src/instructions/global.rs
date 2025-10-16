@@ -1,17 +1,24 @@
 use std::iter::repeat;
 
 use crate::{
+    Value,
     chip_handler::general::PublicIOQuery,
     gadgets::{Poseidon2Config, RoundConstants},
+    scheme::septic_curve::{SepticExtension, SepticPoint},
     structs::RAMType,
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, FieldInto, POSEIDON2_BABYBEAR_WIDTH, SmallField};
 use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::FieldAlgebra;
+use p3::{
+    field::{Field, FieldAlgebra},
+    symmetric::Permutation,
+};
+use std::ops::Deref;
+use witness::set_val;
 
 use crate::{
     instructions::{Instruction, riscv::constants::UInt},
@@ -23,7 +30,7 @@ use crate::{
 //
 // global chip: read from and write into a global set shared
 //      among multiple shards
-pub struct GlobalConfig<E: ExtensionField> {
+pub struct GlobalConfig<E: ExtensionField, P> {
     addr: WitIn,
     is_ram_register: WitIn,
     value: UInt<E>,
@@ -39,14 +46,16 @@ pub struct GlobalConfig<E: ExtensionField> {
     w_record: WitIn,
     x: Vec<WitIn>,
     y: Vec<WitIn>,
-    poseidon2: Poseidon2Config<E, 16, 7, 1, 4, 13>,
+    perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
+    perm: P,
 }
 
-impl<E: ExtensionField> GlobalConfig<E> {
+impl<E: ExtensionField, P> GlobalConfig<E, P> {
     // TODO: make `WIDTH`, `HALF_FULL_ROUNDS`, `PARTIAL_ROUNDS` generic parameters
     pub fn configure(
         cb: &mut CircuitBuilder<E>,
         rc: RoundConstants<E::BaseField, 16, 4, 13>,
+        perm: P,
     ) -> Result<Self, CircuitBuilderError> {
         let x: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
             .map(|i| cb.create_witin(|| format!("x{}", i)))
@@ -69,7 +78,7 @@ impl<E: ExtensionField> GlobalConfig<E> {
         let reg: Expression<E> = RAMType::Register.into();
         let mem: Expression<E> = RAMType::Memory.into();
         let ram_type: Expression<E> = is_ram_reg.clone() * reg + (1 - is_ram_reg) * mem;
-        let hasher = Poseidon2Config::construct(cb, rc);
+        let perm_config = Poseidon2Config::construct(cb, rc);
 
         let mut input = vec![];
         input.push(addr.expr());
@@ -145,10 +154,11 @@ impl<E: ExtensionField> GlobalConfig<E> {
         );
 
         // enforces x = poseidon2([addr, ram_type, value[0], value[1], shard, global_clk, nonce, 0, ..., 0])
-        for (input_expr, hasher_input) in input.into_iter().zip_eq(hasher.inputs().into_iter()) {
+        for (input_expr, hasher_input) in input.into_iter().zip_eq(perm_config.inputs().into_iter())
+        {
             cb.require_equal(|| "poseidon2 input", input_expr, hasher_input)?;
         }
-        for (xi, hasher_output) in x.iter().zip(hasher.output().into_iter()) {
+        for (xi, hasher_output) in x.iter().zip(perm_config.output().into_iter()) {
             cb.require_equal(|| "x = poseidon2's output", xi.expr(), hasher_output)?;
         }
 
@@ -172,19 +182,125 @@ impl<E: ExtensionField> GlobalConfig<E> {
             is_global_write,
             r_record,
             w_record,
-            poseidon2: hasher,
+            perm_config,
+            perm,
         })
+    }
+}
+
+#[derive(Default)]
+pub struct GlobalRecord {
+    pub addr: u32,
+    pub ram_type: RAMType,
+    pub value: u32,
+    pub shard: u64,
+    pub local_clk: u64,
+    pub global_clk: u64,
+    pub is_write: bool,
+}
+
+impl GlobalRecord {
+    pub fn to_ec_point<
+        E: ExtensionField,
+        P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>,
+    >(
+        &self,
+        hasher: &P,
+    ) -> (u32, SepticPoint<E::BaseField>) {
+        let mut nonce = 0;
+        let mut input = [
+            E::BaseField::from_canonical_u32(self.addr),
+            E::BaseField::from_canonical_u32(self.ram_type as u32),
+            E::BaseField::from_canonical_u32(self.value & 0xFFFF), // lower 16 bits
+            E::BaseField::from_canonical_u32((self.value >> 16) & 0xFFFF), // higher 16 bits
+            E::BaseField::from_canonical_u64(self.shard),
+            E::BaseField::from_canonical_u64(self.global_clk),
+            E::BaseField::from_canonical_u32(nonce),
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+        ];
+
+        let prime = E::BaseField::order().to_u64_digits()[0];
+        loop {
+            let x: SepticExtension<E::BaseField> =
+                hasher.permute(input)[0..SEPTIC_EXTENSION_DEGREE].into();
+            if let Some(p) = SepticPoint::from_x(x) {
+                let y6 = (p.y.0)[SEPTIC_EXTENSION_DEGREE - 1].to_canonical_u64();
+                let is_y_in_2nd_half = y6 >= (prime / 2);
+
+                // we negate y if needed
+                let negate = match (self.is_write, is_y_in_2nd_half) {
+                    (true, false) => true, // write, y in [0, p/2)
+                    (false, true) => true, // read, y in [p/2, p)
+                    _ => false,
+                };
+
+                if negate {
+                    return (nonce, -p);
+                } else {
+                    return (nonce, p);
+                }
+            } else {
+                // try again with different nonce
+                nonce += 1;
+                input[6] = E::BaseField::from_canonical_u32(nonce);
+            }
+        }
+    }
+}
+
+impl From<StepRecord> for GlobalRecord {
+    fn from(step: StepRecord) -> Self {
+        let mut record = GlobalRecord::default();
+        match step.memory_op() {
+            None => {
+                record.ram_type = RAMType::Register;
+            }
+            Some(_) => {
+                record.ram_type = RAMType::Memory;
+            }
+        };
+        if let Some(op) = step.rs1() {
+            // read from previous shard
+            record.addr = op.addr.into();
+            record.value = op.value;
+            record.global_clk = 0; // FIXME
+            record.shard = 0; // FIXME
+            record.local_clk = 0;
+            record.is_write = false;
+        } else {
+            // propagate local write to global for future shards
+            let op = step.rd().unwrap();
+            record.addr = op.addr.into();
+            record.value = op.value.after;
+            record.shard = 0; // FIXME
+            record.global_clk = step.cycle();
+            record.local_clk = step.cycle();
+            record.is_write = true;
+        }
+
+        record
     }
 }
 
 // This chip is used to manage read/write into a global set
 // shared among multiple shards
-pub struct GlobalChip<E: ExtensionField> {
-    rc: RoundConstants<E::BaseField, 16, 4, 13>,
+pub struct GlobalChip<E: ExtensionField, P> {
+    rc: RoundConstants<E::BaseField, POSEIDON2_BABYBEAR_WIDTH, 4, 13>,
+    perm: P,
 }
 
-impl<E: ExtensionField> Instruction<E> for GlobalChip<E> {
-    type InstructionConfig = GlobalConfig<E>;
+impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]> + Send>
+    Instruction<E> for GlobalChip<E, P>
+{
+    type InstructionConfig = GlobalConfig<E, P>;
 
     fn name() -> String {
         "Global".to_string()
@@ -195,39 +311,83 @@ impl<E: ExtensionField> Instruction<E> for GlobalChip<E> {
         cb: &mut CircuitBuilder<E>,
         _param: &crate::structs::ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
-        let config = GlobalConfig::configure(cb, self.rc.clone())?;
+        let config = GlobalConfig::configure(cb, self.rc.clone(), self.perm.clone())?;
 
         Ok(config)
     }
 
     fn assign_instance(
-        _config: &Self::InstructionConfig,
-        _instance: &mut [E::BaseField],
+        config: &Self::InstructionConfig,
+        instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
     ) -> Result<(), crate::error::ZKVMError> {
-        // assign (x, y)
+        let record: GlobalRecord = _step.clone().into();
 
-        // assign [addr, ram_type, value, shard, clk, is_write]
+        // assign basic fields
+        let is_ram_register = match record.ram_type {
+            RAMType::Register => 1,
+            RAMType::Memory => 0,
+            RAMType::GlobalState => unreachable!(),
+        };
+        set_val!(instance, config.addr, record.addr as u64);
+        set_val!(instance, config.is_ram_register, is_ram_register as u64);
+        config
+            .value
+            .assign_limbs(instance, Value::new_unchecked(record.value).as_u16_limbs());
+        set_val!(instance, config.shard, record.shard);
+        set_val!(instance, config.global_clk, record.global_clk);
+        set_val!(instance, config.local_clk, record.local_clk);
+        set_val!(instance, config.is_global_write, record.is_write as u64);
 
-        // assign poseidon2 hasher
+        // assign (x, y) and nonce
+        let (nonce, point) = record.to_ec_point::<E, P>(&config.perm);
+        set_val!(instance, config.nonce, nonce as u64);
+        config
+            .x
+            .iter()
+            .chain(config.y.iter())
+            .zip_eq((point.x.deref()).iter().chain((point.y.deref()).iter()))
+            .for_each(|(witin, fe)| {
+                set_val!(instance, *witin, fe.to_canonical_u64());
+            });
 
-        todo!()
+        // TODO: assign poseidon2 hasher
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use ff_ext::{BabyBearExt4, PoseidonField};
+    use mpcs::{BasefoldDefault, SecurityLevel};
+    use p3::babybear::BabyBear;
+
+    use crate::{
+        gadgets::horizen_round_consts,
+        instructions::global::GlobalChip,
+        scheme::{create_backend, create_prover},
+    };
+
+    type E = BabyBearExt4;
+    type F = BabyBear;
+    type PERM = <F as PoseidonField>::P;
+    type PCS = BasefoldDefault<E>;
+
     #[test]
     fn test_global_chip() {
-        // Test the GlobalChip functionality here
-
         // init global chip with horizen_rc_consts
+        let rc = horizen_round_consts();
+        let perm = <F as PoseidonField>::get_default_perm();
+        let global_chip = GlobalChip::<E, PERM> { rc, perm };
 
         // create a bunch of random memory read/write records
 
         // assign witness
 
         // create chip proof for global chip
+        let backend = create_backend::<E, PCS>(20, SecurityLevel::Conjecture100bits);
+        let prover = create_prover(backend);
     }
 }
