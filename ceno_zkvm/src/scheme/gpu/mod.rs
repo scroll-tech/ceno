@@ -509,6 +509,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
+    #[allow(clippy::type_complexity)]
+    #[tracing::instrument(skip_all, name = "table_witness", fields(profiling_2), level = "trace")]
     fn table_witness<'a>(
         &self,
         input: &ProofInput<'a, GpuBackend<E, PCS>>,
@@ -529,6 +531,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
 
+        let span = entered_span!("preprocess", profiling_2 = true);
         let layer_witin = input
             .witness
             .iter()
@@ -540,7 +543,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         let num_vars = input.witness[0].num_vars();
 
         // main constraint: lookup denominator and numerator record witness inference
-        let record_span = entered_span!("record");
         let (num_non_zero_expr, term_coefficients, mle_indices_per_term, _) = cs
             .r_table_expressions
             .iter()
@@ -581,7 +583,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                     (num_non_zero_expr, coeff_acc, indices_acc, size_acc)
                 },
             );
+        exit_span!(span);
 
+        let span = entered_span!("witness_infer", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(layer_witin) };
@@ -607,6 +611,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 &mut next_witness_buf,
             )
             .unwrap();
+        exit_span!(span);
 
         let next_mles = next_witness_buf
             .into_iter()
@@ -617,7 +622,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             })
             .collect_vec();
 
-        exit_span!(record_span);
         next_mles
     }
 

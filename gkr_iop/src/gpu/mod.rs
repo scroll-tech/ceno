@@ -4,7 +4,10 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
-use multilinear_extensions::mle::{FieldType, MultilinearExtension, Point};
+use multilinear_extensions::{
+    macros::{entered_span, exit_span},
+    mle::{FieldType, MultilinearExtension, Point},
+};
 use p3::field::TwoAdicField;
 use std::{rc::Rc, sync::Arc};
 use witness::RowMajorMatrix;
@@ -322,12 +325,14 @@ where
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     ProtocolWitnessGeneratorProver<GpuBackend<E, PCS>> for GpuProver<GpuBackend<E, PCS>>
 {
+    #[tracing::instrument(skip_all, name = "layer_witness", fields(profiling_2), level = "trace")]
     fn layer_witness<'a>(
         layer: &Layer<E>,
         layer_wits: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
         pub_io_evals: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
         challenges: &[E],
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        let span = entered_span!("preprocess", profiling_2 = true);
         if std::any::TypeId::of::<E::BaseField>()
             != std::any::TypeId::of::<BB31Base>()
         {
@@ -392,7 +397,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .as_ref()
             .unwrap()
             .0;
+        exit_span!(span);
 
+        let span = entered_span!("witness_infer", profiling_2 = true);
         // process & transmute poly
         let all_witins_gpu = layer_wits.iter().map(|mle| mle.as_ref()).collect_vec();
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
@@ -420,6 +427,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 &mut next_witness_buf,
             )
             .unwrap();
+        exit_span!(span);
 
         // recover it back and interleaving with default gpu
         let mut next_iter = next_witness_buf.into_iter();
