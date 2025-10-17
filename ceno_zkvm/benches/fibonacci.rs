@@ -13,7 +13,7 @@ use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 
-use ceno_zkvm::scheme::verifier::ZKVMVerifier;
+use ceno_zkvm::{e2e::ShardContext, scheme::verifier::ZKVMVerifier};
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 

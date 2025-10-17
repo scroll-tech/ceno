@@ -1,14 +1,26 @@
-use std::marker::PhantomData;
-
+use either::Either;
 use ff_ext::ExtensionField;
+use std::marker::PhantomData;
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use gkr_iop::gkr::GKRClaims;
+use super::{ZKVMChipProof, ZKVMProof};
+use crate::{
+    error::ZKVMError,
+    scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
+    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
+    utils::{
+        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
+        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
+    },
+};
+use gkr_iop::{gkr::GKRClaims, selector::SelectorType, utils::eq_eval_less_or_equal_than};
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
+    Expression,
+    Expression::WitIn,
     Instance, StructuralWitIn, StructuralWitInType,
     mle::IntoMLE,
     util::ceil_log2,
@@ -21,19 +33,7 @@ use sumcheck::{
     util::get_challenge_pows,
 };
 use transcript::{ForkableTranscript, Transcript};
-use witness::next_pow2_instance_padding;
-
-use crate::{
-    error::ZKVMError,
-    scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
-    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{
-        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
-        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
-    },
-};
-
-use super::{ZKVMChipProof, ZKVMProof};
+use witness::{InstancePaddingStrategy::Default, next_pow2_instance_padding};
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vk: ZKVMVerifyingKey<E, PCS>,
@@ -162,6 +162,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut witin_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
         let mut fixed_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
         for (index, proof) in &vm_proof.chip_proofs {
+            assert!(proof.num_instances > 0);
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
@@ -437,43 +438,43 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = circuit_vk.get_cs();
-        debug_assert!(
-            cs.r_table_expressions
-                .iter()
-                .zip_eq(cs.w_table_expressions.iter())
-                .all(|(r, w)| r.table_spec.len == w.table_spec.len)
-        );
-
+        let with_rw = !cs.r_table_expressions.is_empty() && !cs.w_table_expressions.is_empty();
+        if with_rw {
+            debug_assert!(
+                cs.r_table_expressions
+                    .iter()
+                    .zip_eq(cs.w_table_expressions.iter())
+                    .all(|(r, w)| r.table_spec.len == w.table_spec.len)
+            );
+        }
         let log2_num_instances = next_pow2_instance_padding(proof.num_instances).ilog2() as usize;
-
-        // in table proof, we always skip same point sumcheck for now
-        // as tower sumcheck batch product argument/logup in same length
-        let is_skip_same_point_sumcheck = true;
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
         // NOTE: for all structural witness within same constrain system should got same hints num variable via `log2_num_instances`
-        let expected_rounds = cs
-            // only iterate r set, as read/write set round should match
-            .r_table_expressions
-            .iter()
-            .flat_map(|r| {
+        let expected_rounds = interleave(&cs.r_table_expressions, &cs.w_table_expressions)
+            .map(|set_table_expr| {
                 // iterate through structural witins and collect max round.
-                let num_vars = r.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
-                    r.table_spec
-                        .structural_witins
-                        .iter()
-                        .map(|StructuralWitIn { witin_type, .. }| {
-                            let hint_num_vars = log2_num_instances;
-                            assert!((1 << hint_num_vars) <= witin_type.max_len());
-                            hint_num_vars
-                        })
-                        .max()
-                        .unwrap()
-                });
+                let num_vars = set_table_expr
+                    .table_spec
+                    .len
+                    .map(ceil_log2)
+                    .unwrap_or_else(|| {
+                        set_table_expr
+                            .table_spec
+                            .structural_witins
+                            .iter()
+                            .map(|StructuralWitIn { witin_type, .. }| {
+                                let hint_num_vars = log2_num_instances;
+                                assert!((1 << hint_num_vars) <= witin_type.max_len());
+                                hint_num_vars
+                            })
+                            .max()
+                            .unwrap()
+                    });
                 assert_eq!(num_vars, log2_num_instances);
-                [num_vars, num_vars] // format: [read_round, write_round]
+                num_vars
             })
             .chain(cs.lk_table_expressions.iter().map(|l| {
                 // iterate through structural witins and collect max round.
@@ -497,11 +498,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let expected_max_rounds = expected_rounds.iter().cloned().max().unwrap();
         let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
             TowerVerify::verify(
-                proof
-                    .r_out_evals
-                    .iter()
-                    .zip(proof.w_out_evals.iter())
-                    .flat_map(|(r_evals, w_evals)| [r_evals.to_vec(), w_evals.to_vec()])
+                interleave(&proof.r_out_evals, &proof.w_out_evals)
+                    .map(|eval| eval.to_vec())
                     .collect_vec(),
                 proof
                     .lk_out_evals
@@ -530,13 +528,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             cs.r_table_expressions.len() + cs.w_table_expressions.len(),
             "[prod_record] mismatch length"
         );
-        let num_rw_records = cs.r_table_expressions.len() + cs.w_table_expressions.len();
 
-        // evaluate the evaluation of structural mles at input_opening_point by verifier
-        let structural_evals = cs
-            .r_table_expressions
-            .iter()
-            .map(|r| &r.table_spec)
+        let input_opening_point = if next_pow2_instance_padding(proof.num_instances)
+            == proof.num_instances
+        {
+            // evaluate the evaluation of structural mles at input_opening_point by verifier
+            let structural_evals = if with_rw {
+                // only iterate r set, as read/write set round should match
+                Either::Left(cs.r_table_expressions.iter())
+            } else {
+                Either::Right(cs.r_table_expressions.iter().chain(&cs.w_table_expressions))
+            }
+            .map(|set_table_expr| &set_table_expr.table_spec)
             .chain(cs.lk_table_expressions.iter().map(|r| &r.table_spec))
             .flat_map(|table_spec| {
                 table_spec
@@ -571,32 +574,30 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             })
             .collect_vec();
 
-        // verify records (degree = 1) statement, thus no sumcheck
-        let expected_evals = interleave(
-            &cs.r_table_expressions, // r
-            &cs.w_table_expressions, // w
-        )
-        .map(|rw| &rw.expr)
-        .chain(
-            cs.lk_table_expressions
-                .iter()
-                .flat_map(|lk| vec![&lk.multiplicity, &lk.values]), // p, q
-        )
-        .map(|expr| {
-            eval_by_expr_with_instance(
-                &proof.fixed_in_evals,
-                &proof.wits_in_evals,
-                &structural_evals,
-                pi,
-                challenges,
-                expr,
+            // verify records (degree = 1) statement, thus no sumcheck
+            let expected_evals = interleave(
+                &cs.r_table_expressions, // r
+                &cs.w_table_expressions, // w
             )
-            .right()
-            .unwrap()
-        })
-        .collect_vec();
-
-        let input_opening_point = if is_skip_same_point_sumcheck {
+            .map(|rw| &rw.expr)
+            .chain(
+                cs.lk_table_expressions
+                    .iter()
+                    .flat_map(|lk| vec![&lk.multiplicity, &lk.values]), // p, q
+            )
+            .map(|expr| {
+                eval_by_expr_with_instance(
+                    &proof.fixed_in_evals,
+                    &proof.wits_in_evals,
+                    &structural_evals,
+                    pi,
+                    challenges,
+                    expr,
+                )
+                .right()
+                .unwrap()
+            })
+            .collect_vec();
             for (expected_eval, eval) in expected_evals.iter().zip(
                 prod_point_and_eval
                     .into_iter()
@@ -619,29 +620,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
             rt_tower
         } else {
+            assert_eq!(cs.lk_table_expressions.len(), 0);
             assert!(proof.main_sumcheck_proofs.is_some());
+            assert_eq!(cs.num_structural_witin, 1);
+            assert_eq!(prod_point_and_eval.len(), 1);
 
             // verify opening same point layer sumcheck
             let alpha_pow = get_challenge_pows(
-                cs.r_table_expressions.len()
-                    + cs.w_table_expressions.len()
-                    + cs.lk_table_expressions.len() * 2, // 2 for lk numerator and denominator
+                cs.r_table_expressions.len() + cs.w_table_expressions.len(),
                 transcript,
             );
 
-            //  \sum_i alpha_{i} * (out_r_eval{i})
-            //  + \sum_i alpha_{i} * (out_w_eval{i})
-            //  + \sum_i alpha_{i} * (out_lk_n{i})
-            //  + \sum_i alpha_{i} * (out_lk_d{i})
+            //  \sum_i alpha_{i} * (out_r_eval{i} - ONE)
+            //  + \sum_i alpha_{i} * (out_w_eval{i} - ONE)
             let claim_sum = prod_point_and_eval
                 .iter()
                 .zip(alpha_pow.iter())
-                .map(|(point_and_eval, alpha)| *alpha * point_and_eval.eval)
-                .sum::<E>()
-                + interleave(&logup_p_point_and_eval, &logup_q_point_and_eval)
-                    .zip_eq(alpha_pow.iter().skip(num_rw_records))
-                    .map(|(point_n_eval, alpha)| *alpha * point_n_eval.eval)
-                    .sum::<E>();
+                .map(|(point_and_eval, alpha)| *alpha * (point_and_eval.eval - E::ONE))
+                .sum::<E>();
             let sel_subclaim = IOPVerifierState::verify(
                 claim_sum,
                 &IOPProof {
@@ -654,44 +650,37 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 },
                 transcript,
             );
-            let (input_opening_point, expected_evaluation) = (
+            let (input_opening_point, sumcheck_eval) = (
                 sel_subclaim.point.iter().map(|c| c.elements).collect_vec(),
                 sel_subclaim.expected_evaluation,
             );
+            let structural_evals = vec![eq_eval_less_or_equal_than(
+                proof.num_instances - 1,
+                &prod_point_and_eval[0].point,
+                &input_opening_point,
+            )];
 
-            let computed_evals = [
-                // r, w
-                prod_point_and_eval
-                    .into_iter()
-                    .zip_eq(&expected_evals[0..num_rw_records])
-                    .zip(alpha_pow.iter())
-                    .map(|((point_and_eval, in_eval), alpha)| {
-                        let eq = eq_eval(
-                            &point_and_eval.point,
-                            &input_opening_point[0..point_and_eval.point.len()],
-                        );
-                        // TODO times multiplication factor
-                        *alpha * eq * *in_eval
-                    })
-                    .sum::<E>(),
-                interleave(logup_p_point_and_eval, logup_q_point_and_eval)
-                    .zip_eq(&expected_evals[num_rw_records..])
-                    .zip_eq(alpha_pow.iter().skip(num_rw_records))
-                    .map(|((point_and_eval, in_eval), alpha)| {
-                        let eq = eq_eval(
-                            &point_and_eval.point,
-                            &input_opening_point[0..point_and_eval.point.len()],
-                        );
-                        // TODO times multiplication factor
-                        *alpha * eq * *in_eval
-                    })
-                    .sum::<E>(),
-            ]
-            .iter()
-            .copied()
+            let expected_evals = interleave(
+                &cs.r_table_expressions, // r
+                &cs.w_table_expressions, // w
+            )
+            .map(|rw| &rw.expr)
+            .zip(alpha_pow.iter())
+            .map(|(expr, alpha)| {
+                *alpha
+                    * eval_by_expr_with_instance(
+                        &proof.fixed_in_evals,
+                        &proof.wits_in_evals,
+                        &structural_evals,
+                        pi,
+                        challenges,
+                        expr,
+                    )
+                    .right()
+                    .unwrap()
+            })
             .sum::<E>();
-
-            if computed_evals != expected_evaluation {
+            if expected_evals != sumcheck_eval {
                 return Err(ZKVMError::VerifyError(
                     "sel evaluation verify failed".into(),
                 ));
@@ -749,9 +738,9 @@ impl TowerVerify {
 
         let log2_num_fanin = ceil_log2(num_fanin);
         // sanity check
-        assert!(num_prod_spec == tower_proofs.prod_spec_size());
+        assert_eq!(num_prod_spec, tower_proofs.prod_spec_size());
         assert!(prod_out_evals.iter().all(|evals| evals.len() == num_fanin));
-        assert!(num_logup_spec == tower_proofs.logup_spec_size());
+        assert_eq!(num_logup_spec, tower_proofs.logup_spec_size());
         assert!(logup_out_evals.iter().all(|evals| {
             evals.len() == 4 // [p1, p2, q1, q2]
         }));

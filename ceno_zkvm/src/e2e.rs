@@ -37,6 +37,7 @@ use std::{
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
+use witness::next_pow2_instance_padding;
 
 /// The polynomial commitment scheme kind
 #[derive(
@@ -815,7 +816,7 @@ pub fn setup_program<'a, E: ExtensionField>(
     let pubio_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
         platform: platform.clone(),
-        program_size: program.instructions.len(),
+        program_size: next_pow2_instance_padding(program.instructions.len()),
         static_memory_len: static_addrs.len(),
         pubio_len,
     };

@@ -236,7 +236,7 @@ impl<
                 );
                 let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
                 let public_input = self.device.transport_mles(pi.clone());
-                let mut input = ProofInput {
+                let input = ProofInput {
                     witness: witness_mle,
                     fixed,
                     structural_witness,
@@ -262,7 +262,7 @@ impl<
                     chip_proofs.insert(index, opcode_proof);
                 } else {
                     // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
-                    input.num_instances = 1 << input.log2_num_instances();
+                    // input.num_instances = 1 << input.log2_num_instances();
                     let (mut table_proof, pi_in_evals, input_opening_point) = self
                         .create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
                     if cs.num_witin() > 0 || cs.num_fixed() > 0 {
@@ -276,7 +276,7 @@ impl<
                         assert!(table_proof.fixed_in_evals.is_empty());
                     }
                     // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
-                    table_proof.num_instances = num_instances;
+                    // table_proof.num_instances = num_instances;
                     chip_proofs.insert(index, table_proof);
                     for (idx, eval) in pi_in_evals {
                         pi_evals[idx] = eval;

@@ -182,6 +182,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<ProgramTableConfig, ZKVMError> {
+        assert!(params.program_size.is_power_of_two());
         #[cfg(not(feature = "u16limb_circuit"))]
         let record = InsnRecord([
             cb.create_fixed(|| "pc"),
@@ -214,7 +215,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         cb.lk_table_record(
             || "prog table",
             SetTableSpec {
-                len: Some(params.program_size.next_power_of_two()),
+                len: Some(params.program_size),
                 structural_witins: vec![],
             },
             ROMType::Instruction,

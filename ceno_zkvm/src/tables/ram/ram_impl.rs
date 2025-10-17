@@ -484,38 +484,48 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        if final_mem.is_empty() {
+            return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
+        }
         assert!(final_mem.len() <= DVRAM::max_len(&config.params));
         assert!(DVRAM::max_len(&config.params).is_power_of_two());
 
         let params = config.params.clone();
-        let addr_id = config.addr.id as u64;
-        let addr_padding_fn = move |row: u64, col: u64| {
-            assert_eq!(col, addr_id);
-            DVRAM::addr(&params, row as usize) as u64
-        };
+        let num_instances_padded = next_pow2_instance_padding(final_mem.len());
+        // let addr_id = config.addr.id as u64;
+        // let addr_padding_fn = move |row: u64, col: u64| {
+        //     assert_eq!(col, addr_id);
+        //     DVRAM::addr(&params, row as usize) as u64
+        // };
 
         let mut structural_witness = RowMajorMatrix::<F>::new(
-            final_mem.len(),
+            num_instances_padded,
             num_structural_witin,
-            InstancePaddingStrategy::Custom(Arc::new(addr_padding_fn)),
+            InstancePaddingStrategy::Default,
         );
 
         structural_witness
             .par_rows_mut()
-            .zip(final_mem)
             .enumerate()
-            .for_each(|(i, (structural_row, rec))| {
-                assert_eq!(
-                    rec.addr,
-                    DVRAM::addr(&config.params, i),
-                    "rec.addr {:x} != expected {:x}",
-                    rec.addr,
-                    DVRAM::addr(&config.params, i),
+            .for_each(|(i, structural_row)| {
+                if cfg!(debug_assertions) {
+                    if let Some(addr) = final_mem.get(i).map(|rec| rec.addr) {
+                        debug_assert_eq!(
+                            addr,
+                            DVRAM::addr(&config.params, i),
+                            "rec.addr {:x} != expected {:x}",
+                            addr,
+                            DVRAM::addr(&config.params, i),
+                        );
+                    }
+                }
+                set_val!(
+                    structural_row,
+                    config.addr,
+                    DVRAM::addr(&config.params, i) as u64
                 );
-                set_val!(structural_row, config.addr, rec.addr as u64);
             });
 
-        structural_witness.padding_by_strategy();
         Ok([RowMajorMatrix::empty(), structural_witness])
     }
 }
@@ -541,7 +551,7 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
         let sel = cb.create_structural_witin(
             || "sel",
             StructuralWitInType::EqualDistanceSequence {
-                max_len: 0,
+                max_len: u32::MAX as usize,
                 offset: 0,
                 multi_factor: WORD_SIZE,
                 descending: false,

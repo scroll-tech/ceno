@@ -42,6 +42,7 @@ use std::{
 };
 use strum::IntoEnumIterator;
 use tiny_keccak::{Hasher, Keccak};
+use witness::next_pow2_instance_padding;
 
 const MAX_CONSTRAINT_DEGREE: usize = 3;
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -828,7 +829,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let params = ProgramParams {
             platform: CENO_PLATFORM,
-            program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
+            program_size: max(
+                next_pow2_instance_padding(program.instructions.len()),
+                MOCK_PROGRAM_SIZE,
+            ),
             ..ProgramParams::default()
         };
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -1487,7 +1491,6 @@ fn filter_mle_by_selector_mle<E: ExtensionField>(
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::{
         ROMType,
