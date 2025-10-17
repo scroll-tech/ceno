@@ -12,16 +12,16 @@ compile_error!(
 );
 
 // Minimal stub exports to satisfy basic compilation when gpu feature is disabled
-pub mod gl64 {
-    pub struct CudaHalGL64;
+pub mod bb31 {
+    pub struct CudaHalBB31;
 
-    impl CudaHalGL64 {
+    impl CudaHalBB31 {
         pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
             Err("GPU placeholder: real implementation required".into())
         }
     }
 
-    pub fn convert_ceno_to_gpu_basefold_commitment<T>(_hal: &CudaHalGL64, _commitment: &T) -> T {
+    pub fn convert_ceno_to_gpu_basefold_commitment<T>(_hal: &CudaHalBB31, _commitment: &T) -> T {
         panic!("GPU placeholder: real implementation required")
     }
 
