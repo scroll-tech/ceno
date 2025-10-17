@@ -743,8 +743,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         cs.num_structural_witin as WitnessId,
                         cs.num_fixed as WitnessId,
                     );
-                    let main_sumcheck_challenges = chain!(
-                        challenges.iter().copied(),
+                    let main_sumcheck_challenges = chain!(challenges.iter().copied()
                         get_challenge_pows(
                             cs.w_table_expressions.len() + cs.r_table_expressions.len(),
                             transcript,

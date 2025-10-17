@@ -563,8 +563,10 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
             .collect::<Vec<WitIn>>();
         let final_cycle = cb.create_witin(|| "final_cycle");
 
-        // R_{local} = sel * rlc_final_table + (1 - sel) * ONE
+        // R_{local} = sel * rlc_final_table + (ONE - sel) * ONE
         // => R_{local} - ONE = sel * (rlc_final_table - ONE)
+        // so we put `sel * (rlc_final_table - ONE)` in expression
+        // and `R_{local} - ONE` can be derived from verifier
         let final_expr = final_v.iter().map(|v| v.expr()).collect_vec();
         let raw_final_table = [
             // a v t

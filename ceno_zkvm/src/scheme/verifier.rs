@@ -620,6 +620,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
             rt_tower
         } else {
+            // TODO LocalFinalTable goes here, merge flow into gkr_iop
             assert_eq!(cs.lk_table_expressions.len(), 0);
             assert!(proof.main_sumcheck_proofs.is_some());
             assert_eq!(cs.num_structural_witin, 1);
@@ -635,7 +636,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             //  + \sum_i alpha_{i} * (out_w_eval{i} - ONE)
             let claim_sum = prod_point_and_eval
                 .iter()
-                .zip(alpha_pow.iter())
+                .zip_eq(alpha_pow.iter())
                 .map(|(point_and_eval, alpha)| *alpha * (point_and_eval.eval - E::ONE))
                 .sum::<E>();
             let sel_subclaim = IOPVerifierState::verify(
