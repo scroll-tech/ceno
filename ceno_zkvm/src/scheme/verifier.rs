@@ -8,7 +8,7 @@ use ff_ext::{Instrumented, PoseidonField};
 use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
-    scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE},
+    scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP},
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{
         eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
@@ -530,8 +530,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             "[prod_record] mismatch length"
         );
 
-        let ram_bus_circuit = false;
-        let input_opening_point = if !ram_bus_circuit {
+        // TODO differentiate `ram_bus` via cs
+        let is_shard_ram_bus_circuit = false;
+
+        let input_opening_point = if !is_shard_ram_bus_circuit {
             // evaluate the evaluation of structural mles at input_opening_point by verifier
             let structural_evals = if with_rw {
                 // only iterate r set, as read/write set round should match

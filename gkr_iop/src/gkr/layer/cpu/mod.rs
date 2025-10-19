@@ -168,6 +168,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             )
         )
         .collect_vec();
+
         // zero check eq || rotation eq
         let mut eqs = layer
             .out_sel_and_eval_exprs

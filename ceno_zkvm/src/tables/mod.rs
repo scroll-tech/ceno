@@ -1,13 +1,14 @@
 use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams};
 use ff_ext::ExtensionField;
-use std::collections::HashMap;
+use gkr_iop::{
+    chip::Chip,
+    gkr::{GKRCircuit, layer::Layer},
+    selector::SelectorType,
+};
 use itertools::Itertools;
 use multilinear_extensions::{StructuralWitInType, ToExpr};
+use std::collections::HashMap;
 use witness::RowMajorMatrix;
-use gkr_iop::chip::Chip;
-use gkr_iop::gkr::GKRCircuit;
-use gkr_iop::gkr::layer::Layer;
-use gkr_iop::selector::SelectorType;
 
 mod range;
 pub use range::*;
