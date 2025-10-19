@@ -1,7 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use super::ram_impl::{
-    LocalRAMTableFinalConfig, NonVolatileTableConfigTrait, PubIOTableConfig, RAMBusConfig,
+    LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableConfig, RAMBusConfig,
 };
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -12,7 +12,15 @@ use crate::{
 };
 use ceno_emul::{Addr, Cycle, GetAddr, WORD_SIZE, Word};
 use ff_ext::{ExtensionField, SmallField};
-use gkr_iop::error::CircuitBuilderError;
+use gkr_iop::{
+    chip::Chip,
+    error::CircuitBuilderError,
+    gkr::{GKRCircuit, layer::Layer},
+    selector::SelectorType,
+};
+use itertools::Itertools;
+use multilinear_extensions::{StructuralWitInType, ToExpr};
+use p3::field::FieldAlgebra;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 #[derive(Clone, Debug)]
@@ -275,7 +283,7 @@ pub struct LocalFinalRamCircuit<'a, const V_LIMBS: usize, E>(PhantomData<(&'a ()
 impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
     for LocalFinalRamCircuit<'a, V_LIMBS, E>
 {
-    type TableConfig = LocalRAMTableFinalConfig<V_LIMBS>;
+    type TableConfig = LocalFinalRAMTableConfig<V_LIMBS>;
     type FixedInput = ();
     type WitnessInput = (
         &'a ShardContext<'a>,
@@ -294,6 +302,49 @@ impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
             || Self::name(),
             |cb| Self::TableConfig::construct_circuit(cb, params),
         )?)
+    }
+
+    fn build_gkr_iop_circuit(
+        cb: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
+    ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
+        let config = Self::construct_circuit(cb, param)?;
+        let r_table_len = cb.cs.r_table_expressions.len();
+
+        let selector = cb.create_structural_witin(
+            || "selector",
+            StructuralWitInType::EqualDistanceSequence {
+                // TODO determin proper size of max length
+                max_len: u32::MAX as usize,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        );
+        let selector_type = SelectorType::Prefix(E::BaseField::ZERO, selector.expr());
+
+        // all shared the same selector
+        let (out_evals, mut chip) = (
+            [
+                // r_record
+                (0..r_table_len).collect_vec(),
+                // w_record
+                vec![],
+                // lk_record
+                vec![],
+                // zero_record
+                vec![],
+            ],
+            Chip::new_from_cb(cb, 0),
+        );
+
+        // register selector to legacy constrain system
+        cb.cs.r_selector = Some(selector_type.clone());
+
+        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        chip.add_layer(layer);
+
+        Ok((config, Some(chip.gkr_circuit())))
     }
 
     fn generate_fixed_traces(

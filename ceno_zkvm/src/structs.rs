@@ -135,9 +135,7 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     }
 
     pub fn is_opcode_circuit(&self) -> bool {
-        self.zkvm_v1_css.lk_table_expressions.is_empty()
-            && self.zkvm_v1_css.r_table_expressions.is_empty()
-            && self.zkvm_v1_css.w_table_expressions.is_empty()
+        self.gkr_circuit.is_some()
     }
 
     /// return number of lookup operation
@@ -219,18 +217,13 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let config = TC::construct_circuit(&mut circuit_builder, &self.params).unwrap();
-        assert!(
-            self.circuit_css
-                .insert(
-                    TC::name(),
-                    ComposedConstrainSystem {
-                        zkvm_v1_css: cs,
-                        gkr_circuit: None
-                    }
-                )
-                .is_none()
-        );
+        let (config, gkr_iop_circuit) =
+            TC::build_gkr_iop_circuit(&mut circuit_builder, &self.params).unwrap();
+        let cs = ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit: gkr_iop_circuit,
+        };
+        assert!(self.circuit_css.insert(TC::name(), cs).is_none());
         config
     }
 

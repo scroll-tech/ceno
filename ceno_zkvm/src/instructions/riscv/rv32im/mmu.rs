@@ -46,7 +46,9 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         let hints_config = cs.register_table_circuit::<HintsCircuit<E>>();
         let stack_init_config = cs.register_table_circuit::<StackInitCircuit<E>>();
         let heap_init_config = cs.register_table_circuit::<HeapInitCircuit<E>>();
+        println!("register LocalFinalCircuit");
         let local_final_circuit = cs.register_table_circuit::<LocalFinalCircuit<E>>();
+        println!("end register LocalFinalCircuit");
         let ram_bus_circuit = cs.register_table_circuit::<RBCircuit<E>>();
 
         Self {

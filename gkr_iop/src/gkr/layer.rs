@@ -345,112 +345,116 @@ impl<E: ExtensionField> Layer<E> {
         let mut expr_names = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
         let mut expressions = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
 
-        // process r_record
-        let evals =
-            Self::dedup_last_selector_evals(cb.cs.r_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, ((ram_expr, name), ram_eval)) in (cb
-            .cs
-            .r_expressions
-            .iter()
-            .chain(cb.cs.r_table_expressions.iter().map(|t| &t.expr)))
-        .zip_eq(
-            cb.cs
-                .r_expressions_namespace_map
+        if let Some(r_selector) = cb.cs.r_selector.as_ref() {
+            // process r_record
+            let evals = Self::dedup_last_selector_evals(r_selector, &mut expr_evals);
+            for (idx, ((ram_expr, name), ram_eval)) in (cb
+                .cs
+                .r_expressions
                 .iter()
-                .chain(&cb.cs.r_table_expressions_namespace_map),
-        )
-        .zip_eq(&r_record_evals)
-        .enumerate()
-        {
-            expressions.push(ram_expr - E::BaseField::ONE.expr());
-            evals.push(EvalExpression::<E>::Linear(
-                // evaluation = claim * one - one (padding)
-                *ram_eval,
-                E::BaseField::ONE.expr().into(),
-                E::BaseField::ONE.neg().expr().into(),
-            ));
-            expr_names.push(format!("{}/{idx}", name));
+                .chain(cb.cs.r_table_expressions.iter().map(|t| &t.expr)))
+            .zip_eq(
+                cb.cs
+                    .r_expressions_namespace_map
+                    .iter()
+                    .chain(&cb.cs.r_table_expressions_namespace_map),
+            )
+            .zip_eq(&r_record_evals)
+            .enumerate()
+            {
+                expressions.push(ram_expr - E::BaseField::ONE.expr());
+                evals.push(EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - one (padding)
+                    *ram_eval,
+                    E::BaseField::ONE.expr().into(),
+                    E::BaseField::ONE.neg().expr().into(),
+                ));
+                expr_names.push(format!("{}/{idx}", name));
+            }
         }
 
-        // process w_record
-        let evals =
-            Self::dedup_last_selector_evals(cb.cs.w_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, ((ram_expr, name), ram_eval)) in (cb
-            .cs
-            .w_expressions
-            .iter()
-            .chain(cb.cs.w_table_expressions.iter().map(|t| &t.expr)))
-        .zip_eq(
-            cb.cs
-                .w_expressions_namespace_map
+        if let Some(w_selector) = cb.cs.w_selector.as_ref() {
+            // process w_record
+            let evals = Self::dedup_last_selector_evals(w_selector, &mut expr_evals);
+            for (idx, ((ram_expr, name), ram_eval)) in (cb
+                .cs
+                .w_expressions
                 .iter()
-                .chain(&cb.cs.w_table_expressions_namespace_map),
-        )
-        .zip_eq(&w_record_evals)
-        .enumerate()
-        {
-            expressions.push(ram_expr - E::BaseField::ONE.expr());
-            evals.push(EvalExpression::<E>::Linear(
-                // evaluation = claim * one - one (padding)
-                *ram_eval,
-                E::BaseField::ONE.expr().into(),
-                E::BaseField::ONE.neg().expr().into(),
-            ));
-            expr_names.push(format!("{}/{idx}", name));
+                .chain(cb.cs.w_table_expressions.iter().map(|t| &t.expr)))
+            .zip_eq(
+                cb.cs
+                    .w_expressions_namespace_map
+                    .iter()
+                    .chain(&cb.cs.w_table_expressions_namespace_map),
+            )
+            .zip_eq(&w_record_evals)
+            .enumerate()
+            {
+                expressions.push(ram_expr - E::BaseField::ONE.expr());
+                evals.push(EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - one (padding)
+                    *ram_eval,
+                    E::BaseField::ONE.expr().into(),
+                    E::BaseField::ONE.neg().expr().into(),
+                ));
+                expr_names.push(format!("{}/{idx}", name));
+            }
         }
 
-        // process lookup records
-        let evals =
-            Self::dedup_last_selector_evals(cb.cs.lk_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, ((lookup, name), lookup_eval)) in (cb
-            .cs
-            .lk_expressions
-            .iter()
-            .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.multiplicity))
-            .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.values)))
-        .zip_eq(if cb.cs.lk_table_expressions.is_empty() {
-            Either::Left(cb.cs.lk_expressions_namespace_map.iter())
-        } else {
-            // repeat expressions_namespace_map twice to deal with lk p, q
-            Either::Right(
-                cb.cs
-                    .lk_expressions_namespace_map
-                    .iter()
-                    .chain(&cb.cs.lk_expressions_namespace_map),
-            )
-        })
-        .zip_eq(&lookup_evals)
-        .enumerate()
-        {
-            expressions.push(lookup - cb.cs.chip_record_alpha.clone());
-            evals.push(EvalExpression::<E>::Linear(
-                // evaluation = claim * one - alpha (padding)
-                *lookup_eval,
-                E::BaseField::ONE.expr().into(),
-                cb.cs.chip_record_alpha.clone().neg().into(),
-            ));
-            expr_names.push(format!("{}/{idx}", name));
+        if let Some(lk_selector) = cb.cs.lk_selector.as_ref() {
+            // process lookup records
+            let evals = Self::dedup_last_selector_evals(lk_selector, &mut expr_evals);
+            for (idx, ((lookup, name), lookup_eval)) in (cb
+                .cs
+                .lk_expressions
+                .iter()
+                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.multiplicity))
+                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.values)))
+            .zip_eq(if cb.cs.lk_table_expressions.is_empty() {
+                Either::Left(cb.cs.lk_expressions_namespace_map.iter())
+            } else {
+                // repeat expressions_namespace_map twice to deal with lk p, q
+                Either::Right(
+                    cb.cs
+                        .lk_expressions_namespace_map
+                        .iter()
+                        .chain(&cb.cs.lk_expressions_namespace_map),
+                )
+            })
+            .zip_eq(&lookup_evals)
+            .enumerate()
+            {
+                expressions.push(lookup - cb.cs.chip_record_alpha.clone());
+                evals.push(EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - alpha (padding)
+                    *lookup_eval,
+                    E::BaseField::ONE.expr().into(),
+                    cb.cs.chip_record_alpha.clone().neg().into(),
+                ));
+                expr_names.push(format!("{}/{idx}", name));
+            }
         }
 
-        // process zero_record
-        let evals =
-            Self::dedup_last_selector_evals(cb.cs.zero_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, (zero_expr, name)) in izip!(
-            0..,
-            chain!(
-                cb.cs
-                    .assert_zero_expressions
-                    .iter()
-                    .zip_eq(&cb.cs.assert_zero_expressions_namespace_map),
-                cb.cs
-                    .assert_zero_sumcheck_expressions
-                    .iter()
-                    .zip_eq(&cb.cs.assert_zero_sumcheck_expressions_namespace_map)
-            )
-        ) {
-            expressions.push(zero_expr.clone());
-            evals.push(EvalExpression::Zero);
-            expr_names.push(format!("{}/{idx}", name));
+        if let Some(zero_selector) = cb.cs.zero_selector.as_ref() {
+            // process zero_record
+            let evals = Self::dedup_last_selector_evals(zero_selector, &mut expr_evals);
+            for (idx, (zero_expr, name)) in izip!(
+                0..,
+                chain!(
+                    cb.cs
+                        .assert_zero_expressions
+                        .iter()
+                        .zip_eq(&cb.cs.assert_zero_expressions_namespace_map),
+                    cb.cs
+                        .assert_zero_sumcheck_expressions
+                        .iter()
+                        .zip_eq(&cb.cs.assert_zero_sumcheck_expressions_namespace_map)
+                )
+            ) {
+                expressions.push(zero_expr.clone());
+                evals.push(EvalExpression::Zero);
+                expr_names.push(format!("{}/{idx}", name));
+            }
         }
 
         // Sort expressions, expr_names, and evals according to eval.0 and classify evals.

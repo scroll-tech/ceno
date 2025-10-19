@@ -532,15 +532,15 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
 /// This table is generalized version to handle all mmio records
 #[derive(Clone, Debug)]
-pub struct LocalRAMTableFinalConfig<const V_LIMBS: usize> {
+pub struct LocalFinalRAMTableConfig<const V_LIMBS: usize> {
     addr_subset: WitIn,
-    sel: StructuralWitIn,
+    ram_type: WitIn,
 
     final_v: Vec<WitIn>,
     final_cycle: WitIn,
 }
 
-impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
+impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
@@ -548,25 +548,11 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
         let addr_subset = cb.create_witin(|| "addr_subset");
         let ram_type = cb.create_witin(|| "ram_type");
 
-        let sel = cb.create_structural_witin(
-            || "sel",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len: u32::MAX as usize,
-                offset: 0,
-                multi_factor: WORD_SIZE,
-                descending: false,
-            },
-        );
-
         let final_v = (0..V_LIMBS)
             .map(|i| cb.create_witin(|| format!("final_v_limb_{i}")))
             .collect::<Vec<WitIn>>();
         let final_cycle = cb.create_witin(|| "final_cycle");
 
-        // R_{local} = sel * rlc_final_table + (ONE - sel) * ONE
-        // => R_{local} - ONE = sel * (rlc_final_table - ONE)
-        // so we put `sel * (rlc_final_table - ONE)` in expression
-        // and `R_{local} - ONE` can be derived from verifier
         let final_expr = final_v.iter().map(|v| v.expr()).collect_vec();
         let raw_final_table = [
             // a v t
@@ -576,24 +562,20 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
             vec![final_cycle.expr()],
         ]
         .concat();
-        let final_table_expr = sel.expr()
-            * (cb.rlc_chip_record(raw_final_table.clone())
-                - Expression::Constant(Either::Left(E::BaseField::ONE)));
-        cb.r_table_rlc_record(
+        cb.r_table_record(
             || "final_table",
             // XXX we mixed all ram type here to save column allocation
             RAMType::Undefined,
             SetTableSpec {
                 len: None,
-                structural_witins: vec![sel],
+                structural_witins: vec![],
             },
             raw_final_table,
-            final_table_expr,
         )?;
 
         Ok(Self {
             addr_subset,
-            sel,
+            ram_type,
             final_v,
             final_cycle,
         })
@@ -607,7 +589,9 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
         num_structural_witin: usize,
         final_mem: &[(InstancePaddingStrategy, &[MemFinalRecord])],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert_eq!(num_structural_witin, 1);
+        assert!(num_structural_witin == 0 || num_structural_witin == 1);
+        let num_structural_witin = num_structural_witin.max(1);
+        let selector_witin = WitIn { id: 0 };
 
         // collect each raw mem belong to this shard, BEFORE padding length
         let current_shard_mems_len: Vec<usize> = final_mem
@@ -702,8 +686,9 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
                             }
                             set_val!(row, self.final_cycle, rec.cycle);
 
+                            set_val!(row, self.ram_type, rec.ram_type as u64);
                             set_val!(row, self.addr_subset, rec.addr as u64);
-                            set_val!(structural_row, self.sel, 1u64);
+                            set_val!(structural_row, selector_witin, 1u64);
                         });
 
                     if *pad_size > 0 && shard_ctx.is_first_shard() {
@@ -724,7 +709,7 @@ impl<const V_LIMBS: usize> LocalRAMTableFinalConfig<V_LIMBS> {
                                             self.addr_subset,
                                             pad_func(pad_index as u64, self.addr_subset.id as u64)
                                         );
-                                        set_val!(structural_row, self.sel, 1u64);
+                                        set_val!(structural_row, selector_witin, 1u64);
                                     });
                             }
                             _ => unimplemented!(),

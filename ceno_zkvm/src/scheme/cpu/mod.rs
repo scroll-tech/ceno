@@ -681,98 +681,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 Some(gkr_proof),
             ))
         } else {
-            let (wits_in_evals, fixed_in_evals, main_sumcheck_proof, rt) =
-                if next_pow2_instance_padding(num_instances) == num_instances {
-                    let span = entered_span!("fixed::evals + witin::evals");
-                    let mut evals = input
-                        .witness
-                        .par_iter()
-                        .chain(input.fixed.par_iter())
-                        .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
-                        .collect::<Vec<_>>();
-                    let fixed_in_evals = evals.split_off(input.witness.len());
-                    let wits_in_evals = evals;
-                    exit_span!(span);
-                    (wits_in_evals, fixed_in_evals, None, rt_tower)
-                } else {
-                    assert!(cs.r_table_expressions.len() <= 1);
-                    assert!(cs.w_table_expressions.len() <= 1);
-
-                    let sel_type = SelectorType::Prefix(E::BaseField::ZERO, 0.into());
-                    let mut sel_mle = sel_type.compute(&rt_tower, num_instances).unwrap();
-
-                    // `wit` := witin ++ fixed
-                    // we concat eq in between `wit` := witin ++ eqs ++ fixed
-                    let all_witins = input
-                        .witness
-                        .iter()
-                        .map(|mle| Either::Left(mle.as_ref()))
-                        .chain(vec![Either::Right(&mut sel_mle)])
-                        .chain(input.fixed.iter().map(|mle| Either::Left(mle.as_ref())))
-                        .collect_vec();
-                    assert_eq!(
-                        all_witins.len() as WitnessId,
-                        cs.num_witin + cs.num_structural_witin + cs.num_fixed as WitnessId,
-                        "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {}",
-                        all_witins.len(),
-                        cs.num_witin,
-                        cs.num_structural_witin,
-                        cs.num_fixed,
-                    );
-                    let builder = VirtualPolynomialsBuilder::new_with_mles(
-                        num_threads,
-                        rt_tower.len(),
-                        all_witins,
-                    );
-
-                    let alpha_pows_expr = (2..)
-                        .take(cs.r_table_expressions.len() + cs.w_table_expressions.len())
-                        .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
-                        .collect_vec();
-                    let zero_check_expr: Expression<E> = cs
-                        .r_table_expressions
-                        .iter()
-                        .take(1)
-                        .chain(cs.w_table_expressions.iter().take(1))
-                        .zip_eq(&alpha_pows_expr)
-                        .map(|(expr, alpha)| alpha * expr.expr.expr())
-                        .sum();
-                    let zero_check_monomial = monomialize_expr_to_wit_terms(
-                        &zero_check_expr,
-                        cs.num_witin as WitnessId,
-                        cs.num_structural_witin as WitnessId,
-                        cs.num_fixed as WitnessId,
-                    );
-                    let main_sumcheck_challenges = chain!(
-                        challenges.iter().copied(),
-                        get_challenge_pows(
-                            cs.w_table_expressions.len() + cs.r_table_expressions.len(),
-                            transcript,
-                        )
-                    )
-                    .collect_vec();
-
-                    let span = entered_span!("IOPProverState::prove", profiling_4 = true);
-                    let (proof, prover_state) = IOPProverState::prove(
-                        builder.to_virtual_polys_with_monomial_terms(
-                            &zero_check_monomial,
-                            &[],
-                            &main_sumcheck_challenges,
-                        ),
-                        transcript,
-                    );
-                    exit_span!(span);
-                    let rt = prover_state
-                        .challenges
-                        .iter()
-                        .map(|c| c.elements)
-                        .collect_vec();
-                    let mut wits_in_evals = prover_state.get_mle_flatten_final_evaluations();
-                    let mut rest = wits_in_evals.split_off(cs.num_witin as usize);
-                    let rest = rest.split_off(cs.num_structural_witin as usize);
-                    let fixed_in_evals = rest;
-                    (wits_in_evals, fixed_in_evals, Some(proof.proofs), rt)
-                };
+            let (wits_in_evals, fixed_in_evals, main_sumcheck_proof, rt) = {
+                let span = entered_span!("fixed::evals + witin::evals");
+                let mut evals = input
+                    .witness
+                    .par_iter()
+                    .chain(input.fixed.par_iter())
+                    .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
+                    .collect::<Vec<_>>();
+                let fixed_in_evals = evals.split_off(input.witness.len());
+                let wits_in_evals = evals;
+                exit_span!(span);
+                (wits_in_evals, fixed_in_evals, None, rt_tower)
+            };
 
             Ok((
                 rt,

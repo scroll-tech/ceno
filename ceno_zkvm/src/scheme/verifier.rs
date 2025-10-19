@@ -164,6 +164,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         for (index, proof) in &vm_proof.chip_proofs {
             assert!(proof.num_instances > 0);
             let circuit_name = &self.vk.circuit_index_to_name[index];
+            println!("verify circuit_name {circuit_name}");
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
             // check chip proof is well-formed
@@ -356,9 +357,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         } = &composed_cs;
         let num_instances = proof.num_instances;
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
-            cs.r_expressions.len(),
-            cs.w_expressions.len(),
-            cs.lk_expressions.len(),
+            cs.r_expressions.len() + cs.r_table_expressions.len(),
+            cs.w_expressions.len() + cs.w_table_expressions.len(),
+            cs.lk_expressions.len() + cs.lk_table_expressions.len() * 2,
         );
         let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
 
@@ -529,9 +530,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             "[prod_record] mismatch length"
         );
 
-        let input_opening_point = if next_pow2_instance_padding(proof.num_instances)
-            == proof.num_instances
-        {
+        let ram_bus_circuit = false;
+        let input_opening_point = if !ram_bus_circuit {
             // evaluate the evaluation of structural mles at input_opening_point by verifier
             let structural_evals = if with_rw {
                 // only iterate r set, as read/write set round should match
@@ -620,73 +620,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
             rt_tower
         } else {
-            // TODO LocalFinalTable goes here, merge flow into gkr_iop
-            assert_eq!(cs.lk_table_expressions.len(), 0);
-            assert!(proof.main_sumcheck_proofs.is_some());
-            assert_eq!(cs.num_structural_witin, 1);
-            assert_eq!(prod_point_and_eval.len(), 1);
-
-            // verify opening same point layer sumcheck
-            let alpha_pow = get_challenge_pows(
-                cs.r_table_expressions.len() + cs.w_table_expressions.len(),
-                transcript,
-            );
-
-            //  \sum_i alpha_{i} * (out_r_eval{i} - ONE)
-            //  + \sum_i alpha_{i} * (out_w_eval{i} - ONE)
-            let claim_sum = prod_point_and_eval
-                .iter()
-                .zip_eq(alpha_pow.iter())
-                .map(|(point_and_eval, alpha)| *alpha * (point_and_eval.eval - E::ONE))
-                .sum::<E>();
-            let sel_subclaim = IOPVerifierState::verify(
-                claim_sum,
-                &IOPProof {
-                    proofs: proof.main_sumcheck_proofs.clone().unwrap(),
-                },
-                &VPAuxInfo {
-                    max_degree: SEL_DEGREE,
-                    max_num_variables: expected_max_rounds,
-                    phantom: PhantomData,
-                },
-                transcript,
-            );
-            let (input_opening_point, sumcheck_eval) = (
-                sel_subclaim.point.iter().map(|c| c.elements).collect_vec(),
-                sel_subclaim.expected_evaluation,
-            );
-            let structural_evals = vec![eq_eval_less_or_equal_than(
-                proof.num_instances - 1,
-                &prod_point_and_eval[0].point,
-                &input_opening_point,
-            )];
-
-            let expected_evals = interleave(
-                &cs.r_table_expressions, // r
-                &cs.w_table_expressions, // w
-            )
-            .map(|rw| &rw.expr)
-            .zip(alpha_pow.iter())
-            .map(|(expr, alpha)| {
-                *alpha
-                    * eval_by_expr_with_instance(
-                        &proof.fixed_in_evals,
-                        &proof.wits_in_evals,
-                        &structural_evals,
-                        pi,
-                        challenges,
-                        expr,
-                    )
-                    .right()
-                    .unwrap()
-            })
-            .sum::<E>();
-            if expected_evals != sumcheck_eval {
-                return Err(ZKVMError::VerifyError(
-                    "sel evaluation verify failed".into(),
-                ));
-            }
-            input_opening_point
+            unimplemented!("shard ram bus circuit go here");
         };
 
         // assume public io is tiny vector, so we evaluate it directly without PCS
