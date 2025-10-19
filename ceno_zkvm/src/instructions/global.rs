@@ -632,7 +632,7 @@ mod tests {
             num_instances: (n_reads + n_writes) as usize,
         };
         let challenges = [E::ONE, E::ONE];
-        let (proof, pi_evals, point) = zkvm_prover
+        let (proof, _, point) = zkvm_prover
             .create_chip_proof(
                 "global chip",
                 &pk,
@@ -644,7 +644,10 @@ mod tests {
 
         let mut transcript = BasicTranscript::new(b"global chip test");
         let verifier = ZKVMVerifier::new(zkvm_vk);
-        let pi_evals = pi_evals.into_iter().map(|(k, v)| v).collect_vec();
+        let pi_evals = public_input_mles
+            .iter()
+            .map(|mle| mle.evaluate(&point[..mle.num_vars()]))
+            .collect_vec();
         let opening_point = verifier
             .verify_opcode_proof(
                 "global",
