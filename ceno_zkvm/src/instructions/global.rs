@@ -474,6 +474,10 @@ mod tests {
     use itertools::Itertools;
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
     use p3::{babybear::BabyBear, field::FieldAlgebra};
+    use tracing_forest::{ForestLayer, util::LevelFilter};
+    use tracing_subscriber::{
+        EnvFilter, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
+    };
     use transcript::BasicTranscript;
 
     use crate::{
@@ -485,9 +489,9 @@ mod tests {
         },
         scheme::{
             PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
-            septic_curve::SepticPoint,
+            septic_curve::SepticPoint, verifier::ZKVMVerifier,
         },
-        structs::{ComposedConstrainSystem, ProgramParams, RAMType, ZKVMProvingKey},
+        structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
     };
     use multilinear_extensions::mle::IntoMLE;
     use p3::field::PrimeField32;
@@ -499,6 +503,22 @@ mod tests {
 
     #[test]
     fn test_global_chip() {
+        // default filter
+        let default_filter = EnvFilter::builder()
+            .with_default_directive(LevelFilter::DEBUG.into())
+            .from_env_lossy();
+        let fmt_layer = fmt::layer()
+            .compact()
+            .with_thread_ids(false)
+            .with_thread_names(false)
+            .without_time();
+
+        Registry::default()
+            .with(ForestLayer::default())
+            .with(fmt_layer)
+            .with(default_filter)
+            .init();
+
         // init global chip with horizen_rc_consts
         let rc = horizen_round_consts();
         let perm = <F as PoseidonField>::get_default_perm();
@@ -595,22 +615,24 @@ mod tests {
 
         // let pk = prover.create_chip_proof();
         let mut zkvm_pk = ZKVMProvingKey::new(pp, vp);
+        let zkvm_vk = zkvm_pk.get_vk_slow();
         let zkvm_prover = ZKVMProver::new(zkvm_pk, pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 
+        let public_input_mles = public_value
+            .to_vec::<E>()
+            .into_iter()
+            .map(|v| Arc::new(v.into_mle()))
+            .collect_vec();
         let proof_input = ProofInput {
             witness: witness[0].to_mles().into_iter().map(Arc::new).collect(),
             structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
             fixed: vec![],
-            public_input: public_value
-                .to_vec::<E>()
-                .into_iter()
-                .map(|v| Arc::new(v.into_mle()))
-                .collect_vec(),
+            public_input: public_input_mles.clone(),
             num_instances: (n_reads + n_writes) as usize,
         };
         let challenges = [E::ONE, E::ONE];
-        let proof = zkvm_prover
+        let (proof, pi_evals, point) = zkvm_prover
             .create_chip_proof(
                 "global chip",
                 &pk,
@@ -619,5 +641,21 @@ mod tests {
                 &challenges,
             )
             .unwrap();
+
+        let mut transcript = BasicTranscript::new(b"global chip test");
+        let verifier = ZKVMVerifier::new(zkvm_vk);
+        let pi_evals = pi_evals.into_iter().map(|(k, v)| v).collect_vec();
+        let opening_point = verifier
+            .verify_opcode_proof(
+                "global",
+                &pk.vk,
+                &proof,
+                &pi_evals,
+                &mut transcript,
+                2,
+                &PointAndEval::default(),
+                &challenges,
+            )
+            .expect("verify global chip proof");
     }
 }
