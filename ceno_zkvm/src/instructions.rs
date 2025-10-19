@@ -24,6 +24,7 @@ pub mod riscv;
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
+    type Record: Sync;
 
     fn padding_strategy() -> InstancePaddingStrategy {
         InstancePaddingStrategy::Default
@@ -103,14 +104,14 @@ pub trait Instruction<E: ExtensionField> {
         config: &Self::InstructionConfig,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
+        step: &Self::Record,
     ) -> Result<(), ZKVMError>;
 
     fn assign_instances(
         config: &Self::InstructionConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<StepRecord>,
+        steps: Vec<Self::Record>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector

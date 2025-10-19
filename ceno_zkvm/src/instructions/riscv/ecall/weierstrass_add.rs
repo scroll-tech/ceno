@@ -59,6 +59,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
     for WeierstrassAddAssignInstruction<E, EC>
 {
     type InstructionConfig = EcallWeierstrassAddAssignConfig<E, EC>;
+    type Record = StepRecord;
 
     fn name() -> String {
         "Ecall_WeierstrassAddAssign_".to_string() + format!("{:?}", EC::CURVE_TYPE).as_str()

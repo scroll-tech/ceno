@@ -17,7 +17,7 @@ use crate::{
     utils::split_to_u8,
     witness::LkMultiplicity,
 };
-use ceno_emul::InsnKind;
+use ceno_emul::{InsnKind, StepRecord};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
 use witness::set_val;
@@ -34,6 +34,7 @@ pub struct LuiInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     type InstructionConfig = LuiConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", InsnKind::LUI)

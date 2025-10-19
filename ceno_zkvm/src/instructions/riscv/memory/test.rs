@@ -21,6 +21,7 @@ use ff_ext::BabyBearExt4;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::circuit_builder::DebugIndex;
 use std::hash::Hash;
+use tracing::span::Record;
 
 fn sb(prev: Word, rs2: Word, shift: u32) -> Word {
     let shift = (shift * 8) as usize;
@@ -78,7 +79,7 @@ fn load(mem_value: Word, insn: InsnKind, shift: u32) -> Word {
 fn impl_opcode_store<
     E: ExtensionField + Hash,
     I: RIVInstruction,
-    Inst: Instruction<E> + Default,
+    Inst: Instruction<E, Record = StepRecord> + Default,
 >(
     imm: i32,
 ) {
@@ -144,7 +145,11 @@ fn impl_opcode_store<
     MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
-fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E> + Default>(
+fn impl_opcode_load<
+    E: ExtensionField + Hash,
+    I: RIVInstruction,
+    Inst: Instruction<E, Record = StepRecord> + Default,
+>(
     imm: i32,
 ) {
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");

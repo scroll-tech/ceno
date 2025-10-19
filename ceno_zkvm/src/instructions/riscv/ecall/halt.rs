@@ -31,6 +31,7 @@ pub struct HaltInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
     type InstructionConfig = HaltConfig;
+    type Record = StepRecord;
 
     fn name() -> String {
         "ECALL_HALT".into()

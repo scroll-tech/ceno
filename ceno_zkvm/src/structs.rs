@@ -328,7 +328,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.lk_mlts.get(name)
     }
 
-    pub fn assign_opcode_circuit<OC: Instruction<E>>(
+    pub fn assign_opcode_circuit<OC: Instruction<E, Record = StepRecord>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: &OC::InstructionConfig,

@@ -166,7 +166,10 @@ mod test {
         const INSN_KIND: InsnKind = InsnKind::REMU;
     }
 
-    fn verify<E: ExtensionField, Insn: Instruction<E> + TestInstance<E> + Default>(
+    fn verify<
+        E: ExtensionField,
+        Insn: Instruction<E, Record = StepRecord> + TestInstance<E> + Default,
+    >(
         name: &str,
         dividend: <Insn as TestInstance<E>>::NumType,
         divisor: <Insn as TestInstance<E>>::NumType,
@@ -229,7 +232,10 @@ mod test {
     }
 
     // shortcut to verify given pair produces correct output
-    fn verify_positive<E: ExtensionField, Insn: Instruction<E> + TestInstance<E> + Default>(
+    fn verify_positive<
+        E: ExtensionField,
+        Insn: Instruction<E, Record = StepRecord> + TestInstance<E> + Default,
+    >(
         name: &str,
         dividend: <Insn as TestInstance<E>>::NumType,
         divisor: <Insn as TestInstance<E>>::NumType,

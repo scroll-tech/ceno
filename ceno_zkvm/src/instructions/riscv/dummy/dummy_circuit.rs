@@ -25,6 +25,7 @@ pub struct DummyInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E, I> {
     type InstructionConfig = DummyConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}_DUMMY", I::INST_KIND)

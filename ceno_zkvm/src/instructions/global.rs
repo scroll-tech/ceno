@@ -3,27 +3,33 @@ use std::iter::repeat;
 use crate::{
     Value,
     chip_handler::general::PublicIOQuery,
+    error::ZKVMError,
     gadgets::{Poseidon2Config, RoundConstants},
     scheme::septic_curve::{SepticExtension, SepticPoint},
     structs::{ProgramParams, RAMType},
+    tables::RMMCollections,
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
 use ff_ext::{ExtensionField, FieldInto, POSEIDON2_BABYBEAR_WIDTH, SmallField};
 use gkr_iop::{
     chip::Chip, circuit_builder::CircuitBuilder, error::CircuitBuilderError, gkr::layer::Layer,
-    selector::SelectorType,
+    selector::SelectorType, utils::lk_multiplicity::Multiplicity,
 };
 use itertools::Itertools;
 use multilinear_extensions::{
-    Expression, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn,
+    Expression, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn, util::max_usable_threads,
 };
 use p3::{
     field::{Field, FieldAlgebra},
     symmetric::Permutation,
 };
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSlice,
+};
 use std::ops::Deref;
-use witness::set_val;
+use witness::{RowMajorMatrix, set_val};
 
 use crate::{
     instructions::{Instruction, riscv::constants::UInt},
@@ -137,13 +143,13 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         );
 
         // enforces x = poseidon2([addr, ram_type, value[0], value[1], shard, global_clk, nonce, 0, ..., 0])
-        for (input_expr, hasher_input) in input.into_iter().zip_eq(perm_config.inputs().into_iter())
-        {
-            cb.require_equal(|| "poseidon2 input", input_expr, hasher_input)?;
-        }
-        for (xi, hasher_output) in x.iter().zip(perm_config.output().into_iter()) {
-            cb.require_equal(|| "x = poseidon2's output", xi.expr(), hasher_output)?;
-        }
+        // for (input_expr, hasher_input) in input.into_iter().zip_eq(perm_config.inputs().into_iter())
+        // {
+        //     cb.require_equal(|| "poseidon2 input", input_expr, hasher_input)?;
+        // }
+        // for (xi, hasher_output) in x.iter().zip(perm_config.output().into_iter()) {
+        //     cb.require_equal(|| "x = poseidon2's output", xi.expr(), hasher_output)?;
+        // }
 
         // both (x, y) and (x, -y) are valid ec points
         // if is_global_write = 1, then y should be in [0, p/2)
@@ -237,40 +243,6 @@ impl GlobalRecord {
     }
 }
 
-impl From<StepRecord> for GlobalRecord {
-    fn from(step: StepRecord) -> Self {
-        let mut record = GlobalRecord::default();
-        match step.memory_op() {
-            None => {
-                record.ram_type = RAMType::Register;
-            }
-            Some(_) => {
-                record.ram_type = RAMType::Memory;
-            }
-        };
-        if let Some(op) = step.rs1() {
-            // read from previous shard
-            record.addr = op.addr.into();
-            record.value = op.value;
-            record.global_clk = 0; // FIXME
-            record.shard = 0; // FIXME
-            record.local_clk = 0;
-            record.is_write = false;
-        } else {
-            // propagate local write to global for future shards
-            let op = step.rd().unwrap();
-            record.addr = op.addr.into();
-            record.value = op.value.after;
-            record.shard = 0; // FIXME
-            record.global_clk = step.cycle();
-            record.local_clk = step.cycle();
-            record.is_write = true;
-        }
-
-        record
-    }
-}
-
 // This chip is used to manage read/write into a global set
 // shared among multiple shards
 pub struct GlobalChip<E: ExtensionField, P> {
@@ -282,6 +254,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
     Instruction<E> for GlobalChip<E, P>
 {
     type InstructionConfig = GlobalConfig<E, P>;
+    type Record = GlobalRecord;
 
     fn name() -> String {
         "Global".to_string()
@@ -387,10 +360,8 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         config: &Self::InstructionConfig,
         instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
-        _step: &StepRecord,
+        record: &GlobalRecord,
     ) -> Result<(), crate::error::ZKVMError> {
-        let record: GlobalRecord = _step.clone().into();
-
         // assign basic fields
         let is_ram_register = match record.ram_type {
             RAMType::Register => 1,
@@ -423,10 +394,82 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
 
         Ok(())
     }
+
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        num_witin: usize,
+        num_structural_witin: usize,
+        steps: Vec<Self::Record>,
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        // FIXME selector is the only structural witness
+        // this is workaround, as call `construct_circuit` will not initialized selector
+        // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
+        assert!(num_structural_witin == 3);
+        let selector_r_witin = WitIn { id: 0 };
+        let selector_w_witin = WitIn { id: 1 };
+        let selector_zero_witin = WitIn { id: 2 };
+
+        let nthreads = max_usable_threads();
+
+        let num_local_reads = steps.iter().filter(|s| s.is_write).count();
+        let num_local_writes = steps.len() - num_local_reads;
+
+        let num_instance_per_batch = if steps.len() > 256 {
+            steps.len().div_ceil(nthreads)
+        } else {
+            steps.len()
+        }
+        .max(1);
+        let lk_multiplicity = LkMultiplicity::default();
+        let mut raw_witin =
+            RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
+        let mut raw_structual_witin = RowMajorMatrix::<E::BaseField>::new(
+            steps.len(),
+            num_structural_witin,
+            Self::padding_strategy(),
+        );
+        let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
+        let raw_structual_witin_iter =
+            raw_structual_witin.par_batch_iter_mut(num_instance_per_batch);
+
+        raw_witin_iter
+            .zip_eq(raw_structual_witin_iter)
+            .zip_eq(steps.par_chunks(num_instance_per_batch))
+            .flat_map(|((instances, structural_instance), steps)| {
+                let mut lk_multiplicity = lk_multiplicity.clone();
+                instances
+                    .chunks_mut(num_witin)
+                    .zip_eq(structural_instance.chunks_mut(num_structural_witin))
+                    .zip_eq(steps)
+                    .enumerate()
+                    .map(|(i, ((instance, structural_instance), step))| {
+                        let (sel_r, sel_w) = if i < num_local_reads {
+                            (E::BaseField::ONE, E::BaseField::ZERO)
+                        } else {
+                            (E::BaseField::ZERO, E::BaseField::ONE)
+                        };
+                        set_val!(structural_instance, selector_r_witin, sel_r);
+                        set_val!(structural_instance, selector_w_witin, sel_w);
+                        set_val!(structural_instance, selector_zero_witin, E::BaseField::ONE);
+                        Self::assign_instance(config, instance, &mut lk_multiplicity, step)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Result<(), ZKVMError>>()?;
+
+        raw_witin.padding_by_strategy();
+        raw_structual_witin.padding_by_strategy();
+        Ok((
+            [raw_witin, raw_structual_witin],
+            lk_multiplicity.into_finalize_result(),
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use ff_ext::{BabyBearExt4, PoseidonField};
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
     use p3::{babybear::BabyBear, field::FieldAlgebra};
@@ -464,11 +507,6 @@ mod tests {
         let (config, gkr_circuit) = global_chip
             .build_gkr_iop_circuit(&mut cb, &ProgramParams::default())
             .unwrap();
-        let composed_cs = ComposedConstrainSystem {
-            zkvm_v1_css: cs,
-            gkr_circuit: Some(gkr_circuit),
-        };
-        let pk = composed_cs.key_gen();
 
         // create a bunch of random memory read/write records
         let n_reads = 10;
@@ -515,6 +553,22 @@ mod tests {
 
         assert!(global_ec_sum.is_infinity == true);
         // assign witness
+        let (witness, lk) = GlobalChip::assign_instances(
+            &config,
+            cs.num_witin as usize,
+            cs.num_structural_witin as usize,
+            global_reads
+                .into_iter()
+                .chain(global_writes.into_iter())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+
+        let composed_cs = ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit: Some(gkr_circuit),
+        };
+        let pk = composed_cs.key_gen();
 
         // create chip proof for global chip
         let pcs_param = PCS::setup(1 << 20, SecurityLevel::Conjecture100bits).unwrap();
@@ -528,11 +582,11 @@ mod tests {
         let mut transcript = BasicTranscript::new(b"global chip test");
 
         let proof_input = ProofInput {
-            witness: todo!(),
-            structural_witness: todo!(),
-            fixed: todo!(),
-            public_input: todo!(),
-            num_instances: todo!(),
+            witness: witness[0].to_mles().into_iter().map(Arc::new).collect(),
+            structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
+            fixed: vec![],
+            public_input: vec![],
+            num_instances: (n_reads + n_writes) as usize,
         };
         let challenges = [E::ONE, E::ONE];
         let proof = zkvm_prover

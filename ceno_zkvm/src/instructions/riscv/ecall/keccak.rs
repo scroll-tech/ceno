@@ -54,6 +54,7 @@ pub struct KeccakInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
     type InstructionConfig = EcallKeccakConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         "Ecall_Keccak".to_string()
