@@ -157,6 +157,7 @@ pub fn emulate_program(
         vm.get_pc().into(),
         end_cycle,
         io_init.iter().map(|rec| rec.value).collect_vec(),
+        vec![0; 14], // point_at_infinity
     );
 
     // Find the final register values and cycles.

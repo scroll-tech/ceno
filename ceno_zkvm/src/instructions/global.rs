@@ -471,6 +471,7 @@ mod tests {
     use std::sync::Arc;
 
     use ff_ext::{BabyBearExt4, PoseidonField};
+    use itertools::Itertools;
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
     use p3::{babybear::BabyBear, field::FieldAlgebra};
     use transcript::BasicTranscript;
@@ -483,11 +484,13 @@ mod tests {
             global::{GlobalChip, GlobalRecord},
         },
         scheme::{
-            create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
+            PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
             septic_curve::SepticPoint,
         },
         structs::{ComposedConstrainSystem, ProgramParams, RAMType, ZKVMProvingKey},
     };
+    use multilinear_extensions::mle::IntoMLE;
+    use p3::field::PrimeField32;
 
     type E = BabyBearExt4;
     type F = BabyBear;
@@ -551,6 +554,20 @@ mod tests {
             .map(|record| record.to_ec_point::<E, PERM>(&global_chip.perm).1)
             .sum();
 
+        let public_value = PublicValues::new(
+            0,
+            0,
+            0,
+            0,
+            0,
+            vec![0], // dummy
+            global_ec_sum
+                .x
+                .iter()
+                .chain(global_ec_sum.y.iter())
+                .map(|fe| fe.as_canonical_u32())
+                .collect_vec(),
+        );
         assert!(global_ec_sum.is_infinity == true);
         // assign witness
         let (witness, lk) = GlobalChip::assign_instances(
@@ -585,7 +602,11 @@ mod tests {
             witness: witness[0].to_mles().into_iter().map(Arc::new).collect(),
             structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
             fixed: vec![],
-            public_input: vec![],
+            public_input: public_value
+                .to_vec::<E>()
+                .into_iter()
+                .map(|v| Arc::new(v.into_mle()))
+                .collect_vec(),
             num_instances: (n_reads + n_writes) as usize,
         };
         let challenges = [E::ONE, E::ONE];
