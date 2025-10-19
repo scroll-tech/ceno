@@ -1,24 +1,23 @@
 use std::marker::PhantomData;
 
 use ceno_emul::{
-    BLS12381_ADD, BN254_ADD, ByteAddr, Change, Cycle, InsnKind, Platform, SECP256K1_ADD,
-    SECP256R1_ADD, StepRecord, WORD_SIZE, WriteOp,
+    ByteAddr, Change, Cycle, InsnKind, Platform, StepRecord, UINT256_MUL, WORD_SIZE, WriteOp,
 };
 use ff_ext::ExtensionField;
-use generic_array::{GenericArray, typenum::Unsigned};
+use generic_array::typenum::Unsigned;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     gkr::{GKRCircuit, layer::Layer},
     utils::lk_multiplicity::Multiplicity,
 };
-use itertools::{Itertools, izip};
+use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
 use p3::{field::FieldAlgebra, matrix::Matrix};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-use sp1_curves::{CurveType, EllipticCurve, params::NumWords};
+use sp1_curves::{params::NumWords, uint256::U256Field, utils::biguint_from_words};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
@@ -33,7 +32,7 @@ use crate::{
             insn_base::{MemAddr, StateInOut, WriteMEM},
         },
     },
-    precompiles::{EllipticCurveAddInstance, Uint256MulLayout},
+    precompiles::{Uint256MulInstance, Uint256MulLayout, Uint256MulTrace},
     structs::ProgramParams,
     tables::{InsnRecord, RMMCollections},
     witness::LkMultiplicity,
@@ -44,21 +43,19 @@ pub struct EcallUint256MulConfig<E: ExtensionField> {
     pub layout: Uint256MulLayout<E>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    field_ptr_x: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    field_ptr_y: (OpFixedRS<E, { Platform::reg_arg1() }, true>, MemAddr<E>),
+    word_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    word_ptr_1: (OpFixedRS<E, { Platform::reg_arg1() }, true>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
-/// WeierstrassAddAssignInstruction can handle any instruction and produce its side-effects.
-pub struct WeierstrassAddAssignInstruction<E, EC>(PhantomData<(E, EC)>);
+/// Uint256MulInstruction can handle any instruction and produce its side-effects.
+pub struct Uint256MulInstruction<E>(PhantomData<E>);
 
-impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
-    for WeierstrassAddAssignInstruction<E, EC>
-{
-    type InstructionConfig = EcallWeierstrassAddAssignConfig<E, EC>;
+impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
+    type InstructionConfig = EcallUint256MulConfig<E>;
 
     fn name() -> String {
-        "Ecall_WeierstrassAddAssign_".to_string() + format!("{:?}", EC::CURVE_TYPE).as_str()
+        "Ecall_Uint256Mul".to_string()
     }
 
     fn construct_circuit(
@@ -75,15 +72,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         // constrain vmstate
         let vm_state = StateInOut::construct_circuit(cb, false)?;
 
-        let syscall_code = match EC::CURVE_TYPE {
-            CurveType::Secp256k1 => SECP256K1_ADD,
-            CurveType::Secp256r1 => SECP256R1_ADD,
-            CurveType::Bn254 => BN254_ADD,
-            CurveType::Bls12381 => BLS12381_ADD,
-            CurveType::Ed25519 => {
-                unreachable!("WeierstrassAddAssign is not supported for Ed25519")
-            }
-        };
+        let syscall_code = UINT256_MUL;
 
         let ecall_id = OpFixedRS::<_, { Platform::reg_ecall() }, false>::construct_circuit(
             cb,
@@ -95,18 +84,18 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             vm_state.ts,
         )?;
 
-        let point_ptr_value_0 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
-        let point_ptr_value_1 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
+        let word_ptr_value_0 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
+        let word_ptr_value_1 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
 
-        let point_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let word_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
             cb,
-            point_ptr_value_0.uint_unaligned().register_expr(),
+            word_ptr_value_0.uint_unaligned().register_expr(),
             vm_state.ts,
         )?;
 
-        let point_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
+        let word_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
             cb,
-            point_ptr_value_1.uint_unaligned().register_expr(),
+            word_ptr_value_1.uint_unaligned().register_expr(),
             vm_state.ts,
         )?;
 
@@ -123,10 +112,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         ))?;
 
         let mut layout =
-            <WeierstrassAddAssignLayout<E, EC> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(
-                cb,
-                (),
-            )?;
+            <Uint256MulLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(cb, ())?;
 
         // Write the result to the same address of the first input point.
         let mut mem_rw = izip!(&layout.input32_exprs[0], &layout.output32_exprs)
@@ -134,8 +120,8 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             .map(|(i, (val_before, val_after))| {
                 WriteMEM::construct_circuit(
                     cb,
-                    // mem address := point_ptr_0 + i
-                    point_ptr_0.prev_value.as_ref().unwrap().value()
+                    // mem address := word_ptr_0 + i
+                    word_ptr_0.prev_value.as_ref().unwrap().value()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )
@@ -149,31 +135,33 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
 
         // Keep the second input point unchanged in memory.
         mem_rw.extend(
-            layout.input32_exprs[1]
-                .iter()
-                .enumerate()
-                .map(|(i, val_before)| {
-                    WriteMEM::construct_circuit(
-                        cb,
-                        // mem address := point_ptr_1 + i
-                        point_ptr_1.prev_value.as_ref().unwrap().value()
-                            + E::BaseField::from_canonical_u32(
-                                ByteAddr::from((i * WORD_SIZE) as u32).0,
-                            )
-                            .expr(),
-                        val_before.clone(),
-                        val_before.clone(),
-                        vm_state.ts,
-                    )
-                })
-                .collect::<Result<Vec<WriteMEM>, _>>()?,
+            chain![
+                layout.input32_exprs[1].iter(),
+                layout.input32_exprs[2].iter()
+            ]
+            .enumerate()
+            .map(|(i, val_before)| {
+                WriteMEM::construct_circuit(
+                    cb,
+                    // mem address := word_ptr_1 + i
+                    word_ptr_1.prev_value.as_ref().unwrap().value()
+                        + E::BaseField::from_canonical_u32(
+                            ByteAddr::from((i * WORD_SIZE) as u32).0,
+                        )
+                        .expr(),
+                    val_before.clone(),
+                    val_before.clone(),
+                    vm_state.ts,
+                )
+            })
+            .collect::<Result<Vec<WriteMEM>, _>>()?,
         );
 
         let (out_evals, mut chip) = layout.finalize(cb);
 
         let layer = Layer::from_circuit_builder(
             cb,
-            "weierstrass_add".to_string(),
+            "uint256_mul".to_string(),
             layout.n_challenges,
             out_evals,
         );
@@ -182,12 +170,12 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         let circuit = chip.gkr_circuit();
 
         Ok((
-            EcallWeierstrassAddAssignConfig {
+            EcallUint256MulConfig {
                 layout,
                 vm_state,
                 ecall_id,
-                point_ptr_0: (point_ptr_0, point_ptr_value_0),
-                point_ptr_1: (point_ptr_1, point_ptr_value_1),
+                word_ptr_0: (word_ptr_0, word_ptr_value_0),
+                word_ptr_1: (word_ptr_1, word_ptr_value_1),
                 mem_rw,
             },
             circuit,
@@ -218,15 +206,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         num_structural_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
-        let syscall_code = match EC::CURVE_TYPE {
-            CurveType::Secp256k1 => SECP256K1_ADD,
-            CurveType::Secp256r1 => SECP256R1_ADD,
-            CurveType::Bn254 => BN254_ADD,
-            CurveType::Bls12381 => BLS12381_ADD,
-            CurveType::Ed25519 => {
-                unreachable!("WeierstrassAddAssign is not supported for Ed25519")
-            }
-        };
+        let syscall_code = UINT256_MUL;
 
         let mut lk_multiplicity = LkMultiplicity::default();
         if steps.is_empty() {
@@ -279,25 +259,25 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                                 step.rs1().unwrap().previous_cycle,
                             ),
                         )?;
-                        // assign point_ptr_0
-                        config.point_ptr_0.1.assign_instance(
+                        // assign word_ptr_0
+                        config.word_ptr_0.1.assign_instance(
                             instance,
                             &mut lk_multiplicity,
                             ops.reg_ops[0].value.after,
                         )?;
-                        config.point_ptr_0.0.assign_op(
+                        config.word_ptr_0.0.assign_op(
                             instance,
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[0],
                         )?;
-                        // assign point_ptr_1
-                        config.point_ptr_1.1.assign_instance(
+                        // assign word_ptr_1
+                        config.word_ptr_1.1.assign_instance(
                             instance,
                             &mut lk_multiplicity,
                             ops.reg_ops[1].value.after,
                         )?;
-                        config.point_ptr_1.0.assign_op(
+                        config.word_ptr_1.0.assign_op(
                             instance,
                             &mut lk_multiplicity,
                             step.cycle(),
@@ -315,7 +295,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             .collect::<Result<(), ZKVMError>>()?;
 
         // second pass
-        let instances: Vec<EllipticCurveAddInstance<EC::BaseField>> = steps
+        let instances: Vec<Uint256MulInstance> = steps
             .par_iter()
             .map(|step| {
                 let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
@@ -326,21 +306,21 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                     .map(|op| (op.value.before, op.previous_cycle))
                     .unzip();
 
-                let p = GenericArray::try_from(
-                    instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
+                let x = biguint_from_words(
+                    &instance[0..<U256Field as NumWords>::WordsFieldElement::USIZE],
                 );
-                let q = GenericArray::try_from(
-                    instance[<EC::BaseField as NumWords>::WordsCurvePoint::USIZE..].to_vec(),
+                let y = biguint_from_words(
+                    &instance[<U256Field as NumWords>::WordsFieldElement::USIZE..],
                 );
-                p.and_then(|p| q.map(|q| EllipticCurveAddInstance::<EC::BaseField> { p, q }))
-                    .map_err(|_| {
-                        ZKVMError::InvalidWitness("Failed to parse EllipticCurveAddInstance".into())
-                    })
+                let modulus = biguint_from_words(
+                    &instance[2 * <U256Field as NumWords>::WordsFieldElement::USIZE..],
+                );
+                Uint256MulInstance { x, y, modulus }
             })
-            .collect::<Result<_, _>>()?;
+            .collect();
 
         config.layout.phase1_witness_group(
-            WeierstrassAddAssignTrace { instances },
+            Uint256MulTrace { instances },
             [&mut raw_witin, &mut raw_structural_witin],
             &mut lk_multiplicity,
         );

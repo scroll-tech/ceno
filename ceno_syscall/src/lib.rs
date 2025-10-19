@@ -300,3 +300,27 @@ pub extern "C" fn syscall_bn254_fp2_mulmod(x: &mut [u32; 16], y: &[u32; 16]) {
     #[cfg(not(target_os = "zkvm"))]
     unreachable!()
 }
+
+/// Uint256 multiplication operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[unsafe(no_mangle)]
+pub extern "C" fn syscall_uint256_mul(x: &mut [u32; 8], y_and_modulus: &[u32; 16]) {
+    #[cfg(target_os = "zkvm")]
+    {
+        let x = x.as_mut_ptr();
+        let y = y_and_modulus.as_ptr();
+        unsafe {
+            asm!(
+            "ecall",
+            in("t0") UINT256_MUL,
+            in("a0") x,
+            in("a1") y,
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}

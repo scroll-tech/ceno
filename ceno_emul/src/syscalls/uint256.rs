@@ -1,33 +1,34 @@
 use crate::{
-    Change, EmuContext, Platform, SyscallSpec, VMState, Word, WriteOp,
+    Change, EmuContext, Platform, SyscallSpec, VMState, WriteOp,
     syscalls::{SyscallEffects, SyscallWitness},
     utils::MemoryView,
 };
 
-use super::UINT256_MUL;
 use itertools::Itertools;
 use num::{BigUint, One, Zero};
-use sp1_curves::{params::NumWords, uint256::U256Field};
+use sp1_curves::{
+    params::NumWords,
+    uint256::U256Field,
+    utils::{biguint_from_words, biguint_to_words},
+};
 use typenum::marker_traits::Unsigned;
 
 type WordsFieldElement = <U256Field as NumWords>::WordsFieldElement;
 pub const UINT256_WORDS_FIELD_ELEMENT: usize = WordsFieldElement::USIZE;
-const WORD_SIZE: usize = 4;
 
-pub(crate) struct Uint256MulSpec;
+pub struct Uint256MulSpec;
 
 impl SyscallSpec for Uint256MulSpec {
     const NAME: &'static str = "UINT256_MUL";
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 3 * UINT256_WORDS_FIELD_ELEMENT; // x, y, modulus
-    const CODE: u32 = ceno_rt::syscalls::UINT256_MUL;
+    const CODE: u32 = ceno_syscall::UINT256_MUL;
 }
 
 pub fn uint256_mul(vm: &VMState) -> SyscallEffects {
     let x_ptr = vm.peek_register(Platform::reg_arg0());
     let y_ptr = vm.peek_register(Platform::reg_arg1());
-    let mod_ptr = y_ptr + UINT256_WORDS_FIELD_ELEMENT as u32 * WORD_SIZE as u32;
 
     // Read the argument pointers
     let reg_ops = vec![
@@ -44,19 +45,13 @@ pub fn uint256_mul(vm: &VMState) -> SyscallEffects {
     ];
 
     // Memory segments of x, y, and modulus
-    let [mut x_view, y_view, mod_view] =
-        [x_ptr, y_ptr, mod_ptr].map(|start| MemoryView::<UINT256_WORDS_FIELD_ELEMENT>::new(vm, start));
+    let mut x_view = MemoryView::<UINT256_WORDS_FIELD_ELEMENT>::new(vm, x_ptr);
+    let y_and_modulus_view = MemoryView::<{ UINT256_WORDS_FIELD_ELEMENT * 2 }>::new(vm, y_ptr);
 
-    // Read x and y from words via wrapper type
-    let [x, y, modulus] = [&x_view, &y_view, &mod_view].map(|view| {
-        BigUint::from_bytes_le(
-            &view
-                .words()
-                .into_iter()
-                .flat_map(|w| w.to_le_bytes())
-                .collect_vec(),
-        )
-    });
+    // Read x, y, and modulus from words via wrapper type
+    let x = biguint_from_words(&x_view.words());
+    let y = biguint_from_words(&y_and_modulus_view.words()[..UINT256_WORDS_FIELD_ELEMENT]);
+    let modulus = biguint_from_words(&y_and_modulus_view.words()[UINT256_WORDS_FIELD_ELEMENT..]);
 
     // Perform the multiplication and take the result modulo the modulus.
     let result: BigUint = if modulus.is_zero() {
@@ -65,23 +60,17 @@ pub fn uint256_mul(vm: &VMState) -> SyscallEffects {
     } else {
         (x * y) % modulus
     };
-    let mut result_bytes = result.to_bytes_le();
-    result_bytes.resize(32, 0u8); // Pad the result to 32 bytes.
 
     // Convert the result to little endian u32 words.
-    let result: [u32; 8] = {
-        let mut iter = result_bytes
-            .chunks_exact(4)
-            .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()));
-        core::array::from_fn(|_| iter.next().unwrap())
-    };
-    x_view.write(result);
+    let result_words = biguint_to_words(&result, UINT256_WORDS_FIELD_ELEMENT)
+        .try_into()
+        .unwrap();
+    x_view.write(result_words);
 
     let mem_ops = x_view
         .mem_ops()
         .into_iter()
-        .chain(y_view.mem_ops())
-        .chain(mod_view.mem_ops())
+        .chain(y_and_modulus_view.mem_ops())
         .collect_vec();
 
     SyscallEffects {

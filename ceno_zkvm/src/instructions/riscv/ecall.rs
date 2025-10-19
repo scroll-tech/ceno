@@ -1,15 +1,15 @@
 mod halt;
 mod keccak;
+mod uint256;
 mod weierstrass_add;
 mod weierstrass_decompress;
 mod weierstrass_double;
-mod uint256;
 
 pub use keccak::KeccakInstruction;
+pub use uint256::Uint256MulInstruction;
 pub use weierstrass_add::WeierstrassAddAssignInstruction;
 pub use weierstrass_decompress::WeierstrassDecompressInstruction;
 pub use weierstrass_double::WeierstrassDoubleAssignInstruction;
-pub use uint256::U256MulInstruction;
 
 use ceno_emul::InsnKind;
 pub use halt::HaltInstruction;
