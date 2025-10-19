@@ -1,3 +1,4 @@
+use either::Either;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
@@ -319,9 +320,9 @@ impl<E: ExtensionField> Layer<E> {
         n_challenges: usize,
         out_evals: OutEvalGroups,
     ) -> Layer<E> {
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
+        let w_len = cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len();
+        let r_len = cb.cs.r_expressions.len() + cb.cs.r_table_expressions.len();
+        let lk_len = cb.cs.lk_expressions.len() + cb.cs.lk_table_expressions.len() * 2; // logup lk table include p, q
         let zero_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
@@ -331,9 +332,12 @@ impl<E: ExtensionField> Layer<E> {
         assert_eq!(lookup_evals.len(), lk_len);
         assert_eq!(zero_evals.len(), zero_len);
 
-        let non_zero_expr_len = cb.cs.w_expressions_namespace_map.len()
-            + cb.cs.r_expressions_namespace_map.len()
-            + cb.cs.lk_expressions.len();
+        let non_zero_expr_len = cb.cs.w_expressions.len()
+            + cb.cs.w_table_expressions.len()
+            + cb.cs.r_expressions.len()
+            + cb.cs.r_table_expressions.len()
+            + cb.cs.lk_expressions.len()
+            + cb.cs.lk_table_expressions.len() * 2;
         let zero_expr_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
@@ -344,13 +348,19 @@ impl<E: ExtensionField> Layer<E> {
         // process r_record
         let evals =
             Self::dedup_last_selector_evals(cb.cs.r_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, ((ram_expr, name), ram_eval)) in cb
+        for (idx, ((ram_expr, name), ram_eval)) in (cb
             .cs
             .r_expressions
             .iter()
-            .zip_eq(&cb.cs.r_expressions_namespace_map)
-            .zip_eq(&r_record_evals)
-            .enumerate()
+            .chain(cb.cs.r_table_expressions.iter().map(|t| &t.expr)))
+        .zip_eq(
+            cb.cs
+                .r_expressions_namespace_map
+                .iter()
+                .chain(&cb.cs.r_table_expressions_namespace_map),
+        )
+        .zip_eq(&r_record_evals)
+        .enumerate()
         {
             expressions.push(ram_expr - E::BaseField::ONE.expr());
             evals.push(EvalExpression::<E>::Linear(
@@ -365,13 +375,19 @@ impl<E: ExtensionField> Layer<E> {
         // process w_record
         let evals =
             Self::dedup_last_selector_evals(cb.cs.w_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, ((ram_expr, name), ram_eval)) in cb
+        for (idx, ((ram_expr, name), ram_eval)) in (cb
             .cs
             .w_expressions
             .iter()
-            .zip_eq(&cb.cs.w_expressions_namespace_map)
-            .zip_eq(&w_record_evals)
-            .enumerate()
+            .chain(cb.cs.w_table_expressions.iter().map(|t| &t.expr)))
+        .zip_eq(
+            cb.cs
+                .w_expressions_namespace_map
+                .iter()
+                .chain(&cb.cs.w_table_expressions_namespace_map),
+        )
+        .zip_eq(&w_record_evals)
+        .enumerate()
         {
             expressions.push(ram_expr - E::BaseField::ONE.expr());
             evals.push(EvalExpression::<E>::Linear(
@@ -386,13 +402,25 @@ impl<E: ExtensionField> Layer<E> {
         // process lookup records
         let evals =
             Self::dedup_last_selector_evals(cb.cs.lk_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, ((lookup, name), lookup_eval)) in cb
+        for (idx, ((lookup, name), lookup_eval)) in (cb
             .cs
             .lk_expressions
             .iter()
-            .zip_eq(&cb.cs.lk_expressions_namespace_map)
-            .zip_eq(&lookup_evals)
-            .enumerate()
+            .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.multiplicity))
+            .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.values)))
+        .zip_eq(if cb.cs.lk_table_expressions.is_empty() {
+            Either::Left(cb.cs.lk_expressions_namespace_map.iter())
+        } else {
+            // repeat expressions_namespace_map twice to deal with lk p, q
+            Either::Right(
+                cb.cs
+                    .lk_expressions_namespace_map
+                    .iter()
+                    .chain(&cb.cs.lk_expressions_namespace_map),
+            )
+        })
+        .zip_eq(&lookup_evals)
+        .enumerate()
         {
             expressions.push(lookup - cb.cs.chip_record_alpha.clone());
             evals.push(EvalExpression::<E>::Linear(
