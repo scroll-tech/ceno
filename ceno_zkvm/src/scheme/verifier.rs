@@ -157,8 +157,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
         let point_eval = PointAndEval::default();
-        let mut rt_points = Vec::with_capacity(vm_proof.chip_proofs.len());
-        let mut evaluations = Vec::with_capacity(vm_proof.chip_proofs.len());
         let mut witin_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
         let mut fixed_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
         for (index, proof) in &vm_proof.chip_proofs {
@@ -256,22 +254,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     &challenges,
                 )?
             };
-            rt_points.push((*index, input_opening_point.clone()));
-            evaluations.push((
-                *index,
-                [proof.wits_in_evals.clone(), proof.fixed_in_evals.clone()].concat(),
-            ));
-            witin_openings.push((
-                input_opening_point.len(),
-                (input_opening_point.clone(), proof.wits_in_evals.clone()),
-            ));
-            if !proof.fixed_in_evals.is_empty() {
+            if circuit_vk.get_cs().num_witin() > 0 {
+                witin_openings.push((
+                    input_opening_point.len(),
+                    (input_opening_point.clone(), proof.wits_in_evals.clone()),
+                ));
+            }
+            if circuit_vk.get_cs().num_fixed() > 0 {
                 fixed_openings.push((
                     input_opening_point.len(),
                     (input_opening_point.clone(), proof.fixed_in_evals.clone()),
                 ));
             }
-
             prod_w *= proof.w_out_evals.iter().flatten().copied().product::<E>();
             prod_r *= proof.r_out_evals.iter().flatten().copied().product::<E>();
             tracing::debug!("verified proof for circuit {}", circuit_name);

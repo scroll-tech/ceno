@@ -593,14 +593,15 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
         let num_structural_witin = num_structural_witin.max(1);
         let selector_witin = WitIn { id: 0 };
 
+        let is_current_shard_mem_record = |record: &&MemFinalRecord| -> bool {
+            (shard_ctx.is_first_shard() && record.cycle == 0)
+                || shard_ctx.is_current_shard_cycle(record.cycle)
+        };
+
         // collect each raw mem belong to this shard, BEFORE padding length
         let current_shard_mems_len: Vec<usize> = final_mem
             .par_iter()
-            .map(|(_, mem)| {
-                mem.par_iter()
-                    .filter(|record| shard_ctx.is_current_shard_cycle(record.cycle))
-                    .count()
-            })
+            .map(|(_, mem)| mem.par_iter().filter(is_current_shard_mem_record).count())
             .collect();
 
         // deal with non-pow2 padding for first shard
@@ -608,17 +609,24 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
         let padding_info = if shard_ctx.is_first_shard() {
             final_mem
                 .iter()
-                .map(|(_, mem)| (next_pow2_instance_padding(mem.len()) - mem.len(), mem.len()))
+                .map(|(_, mem)| {
+                    assert!(!mem.is_empty());
+                    (
+                        next_pow2_instance_padding(mem.len()) - mem.len(),
+                        mem.len(),
+                        mem[0].ram_type,
+                    )
+                })
                 .collect_vec()
         } else {
-            vec![(0, 0); final_mem.len()]
+            vec![(0, 0, RAMType::Undefined); final_mem.len()]
         };
 
         // calculate mem length
         let mem_lens = current_shard_mems_len
             .iter()
             .zip_eq(&padding_info)
-            .map(|(raw_len, (pad_len, _))| raw_len + pad_len)
+            .map(|(raw_len, (pad_len, _, _))| raw_len + pad_len)
             .collect_vec();
         let total_records = mem_lens.iter().sum();
 
@@ -663,17 +671,13 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
             .for_each(
                 |(
                     ((witness, structural_witness), (padding_strategy, final_mem)),
-                    (pad_size, pad_start_index),
+                    (pad_size, pad_start_index, ram_type),
                 )| {
-                    witness
+                    let mem_record_count = witness
                         .chunks_mut(num_witin)
                         .zip_eq(structural_witness.chunks_mut(num_structural_witin))
-                        .zip(
-                            final_mem
-                                .iter()
-                                .filter(|record| shard_ctx.is_current_shard_cycle(record.cycle)),
-                        )
-                        .for_each(|((row, structural_row), rec)| {
+                        .zip(final_mem.iter().filter(is_current_shard_mem_record))
+                        .map(|((row, structural_row), rec)| {
                             if self.final_v.len() == 1 {
                                 // Assign value directly.
                                 set_val!(row, self.final_v[0], rec.value as u64);
@@ -689,26 +693,33 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
                             set_val!(row, self.ram_type, rec.ram_type as u64);
                             set_val!(row, self.addr_subset, rec.addr as u64);
                             set_val!(structural_row, selector_witin, 1u64);
-                        });
+                            ()
+                        })
+                        .count();
 
                     if *pad_size > 0 && shard_ctx.is_first_shard() {
                         match padding_strategy {
                             InstancePaddingStrategy::Custom(pad_func) => {
-                                witness[pad_size * num_witin..]
+                                witness[mem_record_count * num_witin..]
                                     .chunks_mut(num_witin)
                                     .zip_eq(
-                                        structural_witness[pad_size * num_structural_witin..]
+                                        structural_witness
+                                            [mem_record_count * num_structural_witin..]
                                             .chunks_mut(num_structural_witin),
                                     )
-                                    .zip(std::iter::successors(Some(*pad_start_index), |n| {
-                                        Some(*n + 1)
-                                    }))
+                                    .zip_eq(
+                                        std::iter::successors(Some(*pad_start_index), |n| {
+                                            Some(*n + 1)
+                                        })
+                                        .take(*pad_size),
+                                    )
                                     .for_each(|((row, structural_row), pad_index)| {
                                         set_val!(
                                             row,
                                             self.addr_subset,
                                             pad_func(pad_index as u64, self.addr_subset.id as u64)
                                         );
+                                        set_val!(row, self.ram_type, *ram_type as u64);
                                         set_val!(structural_row, selector_witin, 1u64);
                                     });
                             }

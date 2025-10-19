@@ -20,6 +20,7 @@ use multilinear_extensions::{
     monomial::Term,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
+    wit_infer_by_monomial_expr,
 };
 use rayon::{
     iter::{
@@ -27,6 +28,7 @@ use rayon::{
     },
     slice::ParallelSlice,
 };
+use std::sync::Arc;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverState},
@@ -222,15 +224,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             layer.n_structural_witin,
             layer.n_fixed,
         );
+
         let builder =
             VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins);
 
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
         let (proof, prover_state) = IOPProverState::prove(
             builder.to_virtual_polys_with_monomial_terms(
-                &layer
+                layer
                     .main_sumcheck_expression_monomial_terms
-                    .clone()
+                    .as_ref()
                     .unwrap(),
                 pub_io_evals,
                 &main_sumcheck_challenges,

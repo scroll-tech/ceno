@@ -402,7 +402,7 @@ pub fn emulate_program<'a>(
             if index < VMState::REG_COUNT {
                 let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
-                    ram_type: RAMType::Memory,
+                    ram_type: RAMType::Register,
                     addr: rec.addr,
                     value: vm.peek_register(index),
                     cycle: *final_access.get(&vma).unwrap_or(&0),
@@ -410,7 +410,7 @@ pub fn emulate_program<'a>(
             } else {
                 // The table is padded beyond the number of registers.
                 MemFinalRecord {
-                    ram_type: RAMType::Memory,
+                    ram_type: RAMType::Register,
                     addr: rec.addr,
                     value: 0,
                     cycle: 0,
