@@ -24,15 +24,15 @@ use crate::circuit_builder::CircuitBuilder;
 // copied from poseidon2-air/src/constants.rs
 // as the original one cannot be accessed here
 #[derive(Debug, Clone)]
-pub(crate) struct RoundConstants<
+pub struct RoundConstants<
     F: Field,
     const WIDTH: usize,
     const HALF_FULL_ROUNDS: usize,
     const PARTIAL_ROUNDS: usize,
 > {
-    pub(crate) beginning_full_round_constants: [[F; WIDTH]; HALF_FULL_ROUNDS],
-    pub(crate) partial_round_constants: [F; PARTIAL_ROUNDS],
-    pub(crate) ending_full_round_constants: [[F; WIDTH]; HALF_FULL_ROUNDS],
+    pub beginning_full_round_constants: [[F; WIDTH]; HALF_FULL_ROUNDS],
+    pub partial_round_constants: [F; PARTIAL_ROUNDS],
+    pub ending_full_round_constants: [[F; WIDTH]; HALF_FULL_ROUNDS],
 }
 
 pub type Poseidon2BabyBearConfig = Poseidon2Config<BabyBearExt4, 16, 7, 1, 4, 13>;

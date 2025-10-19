@@ -378,6 +378,8 @@ impl<
                 tower_proof,
                 fixed_in_evals,
                 wits_in_evals,
+                num_read_instances: input.num_instances,
+                num_write_instances: input.num_instances,
                 num_instances: input.num_instances,
             },
             pi_in_evals,

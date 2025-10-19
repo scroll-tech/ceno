@@ -450,7 +450,10 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
         let expr = match sel_type {
             SelectorType::None => zero_check_expr,
             SelectorType::Whole(sel)
-            | SelectorType::Prefix(_, sel)
+            | SelectorType::Prefix {
+                offset: _,
+                expression: sel,
+            }
             | SelectorType::OrderedSparse32 {
                 expression: sel, ..
             } => match_expr(sel) * zero_check_expr,

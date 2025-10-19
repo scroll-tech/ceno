@@ -140,11 +140,15 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
                 descending: false,
             },
         );
+        let sel = SelectorType::Prefix {
+            offset: 0,
+            expression: eq.expr(),
+        };
         let selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_mem_write: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_lookup: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_zero: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
+            sel_mem_read: sel.clone(),
+            sel_mem_write: sel.clone(),
+            sel_lookup: sel.clone(),
+            sel_zero: sel.clone(),
         };
 
         // Default expression, will be updated in build_layer_logic

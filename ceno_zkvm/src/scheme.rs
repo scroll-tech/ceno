@@ -60,7 +60,10 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 
     pub tower_proof: TowerProofs<E>,
 
+    pub num_read_instances: usize,
+    pub num_write_instances: usize,
     pub num_instances: usize,
+
     pub fixed_in_evals: Vec<E>,
     pub wits_in_evals: Vec<E>,
 }

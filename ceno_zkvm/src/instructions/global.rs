@@ -5,14 +5,19 @@ use crate::{
     chip_handler::general::PublicIOQuery,
     gadgets::{Poseidon2Config, RoundConstants},
     scheme::septic_curve::{SepticExtension, SepticPoint},
-    structs::RAMType,
+    structs::{ProgramParams, RAMType},
     witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
 use ff_ext::{ExtensionField, FieldInto, POSEIDON2_BABYBEAR_WIDTH, SmallField};
-use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
+use gkr_iop::{
+    chip::Chip, circuit_builder::CircuitBuilder, error::CircuitBuilderError, gkr::layer::Layer,
+    selector::SelectorType,
+};
 use itertools::Itertools;
-use multilinear_extensions::{Expression, ToExpr, WitIn};
+use multilinear_extensions::{
+    Expression, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn,
+};
 use p3::{
     field::{Field, FieldAlgebra},
     symmetric::Permutation,
@@ -44,7 +49,7 @@ pub struct GlobalConfig<E: ExtensionField, P> {
     is_global_write: WitIn,
     x: Vec<WitIn>,
     y: Vec<WitIn>,
-    perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
+    // perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
     perm: P,
 }
 
@@ -74,7 +79,7 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         let reg: Expression<E> = RAMType::Register.into();
         let mem: Expression<E> = RAMType::Memory.into();
         let ram_type: Expression<E> = is_ram_reg.clone() * reg + (1 - is_ram_reg) * mem;
-        let perm_config = Poseidon2Config::construct(cb, rc);
+        // let perm_config = Poseidon2Config::construct(cb, rc);
 
         let mut input = vec![];
         input.push(addr.expr());
@@ -93,7 +98,6 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         record.extend(value.memory_expr());
         record.push(shard.expr());
         record.push(local_clk.expr());
-        let rlc = cb.rlc_chip_record(record);
 
         // if is_global_write = 1, then it means we are propagating a local write to global
         // so we need to insert a local read record to cancel out this local write
@@ -113,16 +117,16 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         )?;
         // TODO: enforce shard = shard_id in the public values
 
-        // cb.read_record(
-        //     || "r_record",
-        //     gkr_iop::RAMType::Register, // TODO fixme
-        //     vec![r_record.expr()],
-        // )?;
-        // cb.write_record(
-        //     || "w_record",
-        //     gkr_iop::RAMType::Register, // TODO fixme
-        //     vec![w_record.expr()],
-        // )?;
+        cb.read_record(
+            || "r_record",
+            gkr_iop::RAMType::Register, // TODO fixme
+            record.clone(),
+        )?;
+        cb.write_record(
+            || "w_record",
+            gkr_iop::RAMType::Register, // TODO fixme
+            record.clone(),
+        )?;
 
         // enforces final_sum = \sum_i (x_i, y_i) using ecc quark protocol
         let final_sum = cb.query_global_rw_sum()?;
@@ -159,7 +163,7 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
             local_clk,
             nonce,
             is_global_write,
-            perm_config,
+            // perm_config,
             perm,
         })
     }
@@ -286,11 +290,97 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
     fn construct_circuit(
         &self,
         cb: &mut CircuitBuilder<E>,
-        _param: &crate::structs::ProgramParams,
+        _param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
         let config = GlobalConfig::configure(cb, self.rc.clone(), self.perm.clone())?;
 
         Ok(config)
+    }
+
+    fn build_gkr_iop_circuit(
+        &self,
+        cb: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
+    ) -> Result<(Self::InstructionConfig, gkr_iop::gkr::GKRCircuit<E>), crate::error::ZKVMError>
+    {
+        let config = self.construct_circuit(cb, param)?;
+
+        let w_len = cb.cs.w_expressions.len();
+        let r_len = cb.cs.r_expressions.len();
+        let lk_len = cb.cs.lk_expressions.len();
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
+        // create three selectors: selector_r, selector_w, selector_zero
+        let selector_r = cb.create_structural_witin(
+            || "selector_r",
+            // this is just a placeholder, the actural type is SelectorType::Prefix()
+            EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        );
+        let selector_w = cb.create_structural_witin(
+            || "selector_w",
+            EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        );
+        let selector_zero = cb.create_structural_witin(
+            || "selector_zero",
+            EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        );
+        let selector_r = SelectorType::Prefix {
+            offset: 0,
+            expression: selector_r.expr(),
+        };
+        // note that the actual offset should be set by prover
+        // depending on the number of local read instances
+        let selector_w = SelectorType::Prefix {
+            offset: 0,
+            expression: selector_w.expr(),
+        };
+        // TODO: when selector_r = 1 => selector_zero = 1
+        //      when selector_w = 1 => selector_zero = 1
+        let selector_zero = SelectorType::Prefix {
+            offset: 0,
+            expression: selector_zero.expr(),
+        };
+
+        cb.cs.r_selector = Some(selector_r);
+        cb.cs.w_selector = Some(selector_w);
+        cb.cs.zero_selector = Some(selector_zero.clone());
+        cb.cs.lk_selector = Some(selector_zero);
+
+        // all shared the same selector
+        let (out_evals, mut chip) = (
+            [
+                // r_record
+                (0..r_len).collect_vec(),
+                // w_record
+                (r_len..r_len + w_len).collect_vec(),
+                // lk_record
+                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
+                // zero_record
+                (0..zero_len).collect_vec(),
+            ],
+            Chip::new_from_cb(cb, 0),
+        );
+
+        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
+        chip.add_layer(layer);
+
+        Ok((config, chip.gkr_circuit()))
     }
 
     fn assign_instance(
@@ -338,13 +428,22 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
 #[cfg(test)]
 mod tests {
     use ff_ext::{BabyBearExt4, PoseidonField};
-    use mpcs::{BasefoldDefault, SecurityLevel};
-    use p3::babybear::BabyBear;
+    use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
+    use p3::{babybear::BabyBear, field::FieldAlgebra};
+    use transcript::BasicTranscript;
 
     use crate::{
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
         gadgets::horizen_round_consts,
-        instructions::global::GlobalChip,
-        scheme::{create_backend, create_prover},
+        instructions::{
+            Instruction,
+            global::{GlobalChip, GlobalRecord},
+        },
+        scheme::{
+            create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
+            septic_curve::SepticPoint,
+        },
+        structs::{ComposedConstrainSystem, ProgramParams, RAMType, ZKVMProvingKey},
     };
 
     type E = BabyBearExt4;
@@ -359,12 +458,91 @@ mod tests {
         let perm = <F as PoseidonField>::get_default_perm();
         let global_chip = GlobalChip::<E, PERM> { rc, perm };
 
-        // create a bunch of random memory read/write records
+        let mut cs = ConstraintSystem::new(|| "global chip test");
+        let mut cb = CircuitBuilder::new(&mut cs);
 
+        let (config, gkr_circuit) = global_chip
+            .build_gkr_iop_circuit(&mut cb, &ProgramParams::default())
+            .unwrap();
+        let composed_cs = ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit: Some(gkr_circuit),
+        };
+        let pk = composed_cs.key_gen();
+
+        // create a bunch of random memory read/write records
+        let n_reads = 10;
+        let n_writes = 10;
+        let global_reads = (0..n_reads)
+            .map(|i| {
+                let addr = i * 8;
+                let value = (i + 1) * 8;
+
+                GlobalRecord {
+                    addr: addr as u32,
+                    ram_type: RAMType::Memory,
+                    value: value as u32,
+                    shard: 1,
+                    local_clk: 0,
+                    global_clk: i,
+                    is_write: false,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let global_writes = (0..n_writes)
+            .map(|i| {
+                let addr = i * 8;
+                let value = (i + 1) * 8;
+
+                GlobalRecord {
+                    addr: addr as u32,
+                    ram_type: RAMType::Memory,
+                    value: value as u32,
+                    shard: 1,
+                    local_clk: i,
+                    global_clk: i,
+                    is_write: true,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let global_ec_sum: SepticPoint<F> = global_reads
+            .iter()
+            .chain(global_writes.iter())
+            .map(|record| record.to_ec_point::<E, PERM>(&global_chip.perm).1)
+            .sum();
+
+        assert!(global_ec_sum.is_infinity == true);
         // assign witness
 
         // create chip proof for global chip
+        let pcs_param = PCS::setup(1 << 20, SecurityLevel::Conjecture100bits).unwrap();
+        let (pp, vp) = PCS::trim(pcs_param, 1 << 20).unwrap();
         let backend = create_backend::<E, PCS>(20, SecurityLevel::Conjecture100bits);
-        let prover = create_prover(backend);
+        let pd = create_prover(backend);
+
+        // let pk = prover.create_chip_proof();
+        let mut zkvm_pk = ZKVMProvingKey::new(pp, vp);
+        let zkvm_prover = ZKVMProver::new(zkvm_pk, pd);
+        let mut transcript = BasicTranscript::new(b"global chip test");
+
+        let proof_input = ProofInput {
+            witness: todo!(),
+            structural_witness: todo!(),
+            fixed: todo!(),
+            public_input: todo!(),
+            num_instances: todo!(),
+        };
+        let challenges = [E::ONE, E::ONE];
+        let proof = zkvm_prover
+            .create_chip_proof(
+                "global chip",
+                &pk,
+                proof_input,
+                &mut transcript,
+                &challenges,
+            )
+            .unwrap();
     }
 }

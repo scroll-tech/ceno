@@ -83,7 +83,10 @@ impl CpuEccProver {
 
         let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
 
-        let sel = SelectorType::Prefix(E::BaseField::ZERO, 0.into());
+        let sel = SelectorType::Prefix {
+            offset: 0,
+            expression: 0.into(),
+        };
         let num_instances = (1 << n) - 1;
         let mut sel_mle: MultilinearExtension<'_, E> = sel.compute(&out_rt, num_instances).unwrap();
         let sel_expr = expr_builder.lift(sel_mle.to_either());
