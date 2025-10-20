@@ -1151,7 +1151,7 @@ Hints:
                             .into()
                         };
 
-                    for ((w_rlc_expr, annotation), _) in (cs
+                    for ((w_rlc_expr, annotation), (ram_type_expr, _)) in (cs
                         .w_expressions
                         .iter()
                         .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
@@ -1161,8 +1161,19 @@ Hints:
                             .chain(cs.w_table_expressions_namespace_map.iter()),
                     )
                     .zip_eq(cs.w_ram_types.iter())
-                    .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
+                        let ram_type_mle = wit_infer_by_expr(
+                            ram_type_expr,
+                            cs.num_witin,
+                            cs.num_structural_witin,
+                            cs.num_fixed as WitnessId,
+                            fixed,
+                            witness,
+                            structural_witness,
+                            &pi_mles,
+                            &challenges,
+                        );
+                        let ram_type_vec = ram_type_mle.get_ext_field_vec();
                         let write_rlc_records = wit_infer_by_expr(
                             w_rlc_expr,
                             cs.num_witin,
@@ -1174,13 +1185,32 @@ Hints:
                             &pi_mles,
                             &challenges,
                         );
+                        let w_selector_vec = w_selector.get_base_field_vec();
                         let write_rlc_records =
-                            filter_mle_by_selector_mle(write_rlc_records, w_selector.clone());
+                            filter_mle_by_predicate(write_rlc_records, |i, _v| {
+                                ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
+                                    && w_selector_vec[i] == E::BaseField::ONE
+                            });
+                        if write_rlc_records.is_empty() {
+                            continue;
+                        }
 
                         let mut records = vec![];
+                        let mut writes_within_expr_dedup = HashSet::new();
                         for (row, record_rlc) in enumerate(write_rlc_records) {
                             // TODO: report error
-                            assert_eq!(writes.insert(record_rlc), true);
+                            assert_eq!(
+                                writes_within_expr_dedup.insert(record_rlc),
+                                true,
+                                "within expression write duplicated on RAMType {:?}",
+                                $ram_type
+                            );
+                            assert_eq!(
+                                writes.insert(record_rlc),
+                                true,
+                                "crossing-chip write duplicated on RAMType {:?}",
+                                $ram_type
+                            );
                             records.push((record_rlc, row));
                         }
                         writes_grp_by_annotations
@@ -1216,7 +1246,7 @@ Hints:
                             )
                             .into()
                         };
-                    for ((r_rlc_expr, annotation), (_, r_exprs)) in (cs
+                    for ((r_rlc_expr, annotation), (ram_type_expr, r_exprs)) in (cs
                         .r_expressions
                         .iter()
                         .chain(cs.r_table_expressions.iter().map(|expr| &expr.expr)))
@@ -1226,8 +1256,19 @@ Hints:
                             .chain(cs.r_table_expressions_namespace_map.iter()),
                     )
                     .zip_eq(cs.r_ram_types.iter())
-                    .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
+                        let ram_type_mle = wit_infer_by_expr(
+                            ram_type_expr,
+                            cs.num_witin,
+                            cs.num_structural_witin,
+                            cs.num_fixed as WitnessId,
+                            fixed,
+                            witness,
+                            structural_witness,
+                            &pi_mles,
+                            &challenges,
+                        );
+                        let ram_type_vec = ram_type_mle.get_ext_field_vec();
                         let read_records = wit_infer_by_expr(
                             r_rlc_expr,
                             cs.num_witin,
@@ -1239,8 +1280,14 @@ Hints:
                             &pi_mles,
                             &challenges,
                         );
-                        let read_records =
-                            filter_mle_by_selector_mle(read_records, r_selector.clone());
+                        let r_selector_vec = r_selector.get_base_field_vec();
+                        let read_records = filter_mle_by_predicate(read_records, |i, _v| {
+                            ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
+                                && r_selector_vec[i] == E::BaseField::ONE
+                        });
+                        if read_records.is_empty() {
+                            continue;
+                        }
 
                         if $ram_type == RAMType::GlobalState {
                             // r_exprs = [GlobalState, pc, timestamp]
@@ -1273,9 +1320,21 @@ Hints:
                         };
 
                         let mut records = vec![];
+                        let mut reads_within_expr_dedup = HashSet::new();
                         for (row, record) in enumerate(read_records) {
                             // TODO: return error
-                            assert_eq!(reads.insert(record), true);
+                            assert_eq!(
+                                reads_within_expr_dedup.insert(record),
+                                true,
+                                "within expression read duplicated on RAMType {:?}",
+                                $ram_type
+                            );
+                            assert_eq!(
+                                reads.insert(record),
+                                true,
+                                "crossing-chip read duplicated on RAMType {:?}",
+                                $ram_type
+                            );
                             records.push((record, row));
                         }
                         reads_grp_by_annotations
@@ -1469,6 +1528,19 @@ fn print_errors<E: ExtensionField, K: LkMultiplicityKey>(
     if panic_on_error {
         panic!("(Unexpected) Constraints not satisfied");
     }
+}
+
+fn filter_mle_by_predicate<E, F>(target_mle: ArcMultilinearExtension<E>, mut predicate: F) -> Vec<E>
+where
+    E: ExtensionField,
+    F: FnMut(usize, &E) -> bool,
+{
+    target_mle
+        .get_ext_field_vec()
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| if predicate(i, v) { Some(*v) } else { None })
+        .collect_vec()
 }
 
 fn filter_mle_by_selector_mle<E: ExtensionField>(
