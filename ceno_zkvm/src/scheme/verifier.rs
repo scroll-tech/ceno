@@ -162,7 +162,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         for (index, proof) in &vm_proof.chip_proofs {
             assert!(proof.num_instances > 0);
             let circuit_name = &self.vk.circuit_index_to_name[index];
-            println!("verify circuit_name {circuit_name}");
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
             // check chip proof is well-formed

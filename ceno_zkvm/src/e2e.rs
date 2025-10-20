@@ -252,7 +252,7 @@ impl<'a> ShardContext<'a> {
 
     #[inline(always)]
     pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
-        let mut ts = prev_cycle.saturating_sub(self.cur_shard_cycle_range.start as Cycle);
+        let mut ts = prev_cycle - self.current_shard_offset_cycle();
         if ts < Tracer::SUBCYCLES_PER_INSN {
             ts = 0
         }

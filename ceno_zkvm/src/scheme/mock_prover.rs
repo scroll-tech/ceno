@@ -982,14 +982,11 @@ Hints:
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
         // Process all circuits.
-        for (
-            circuit_name,
-            ComposedConstrainSystem {
+        for (circuit_name, composed_cs) in &cs.circuit_css {
+            let ComposedConstrainSystem {
                 zkvm_v1_css: cs,
                 gkr_circuit,
-            },
-        ) in &cs.circuit_css
-        {
+            } = &composed_cs;
             let is_opcode = gkr_circuit.is_some();
             let [witness, structural_witness] = witnesses
                 .get_opcode_witness(circuit_name)
@@ -997,11 +994,13 @@ Hints:
                 .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
             let num_rows = witness.num_instances();
 
-            if witness.num_instances() == 0 {
+            if witness.num_instances() + structural_witness.num_instances() == 0
+                && (!composed_cs.is_static_circuit())
+            {
                 wit_mles.insert(circuit_name.clone(), vec![]);
                 structural_wit_mles.insert(circuit_name.clone(), vec![]);
                 fixed_mles.insert(circuit_name.clone(), vec![]);
-                num_instances.insert(circuit_name.clone(), num_rows);
+                num_instances.insert(circuit_name.clone(), 0);
                 continue;
             }
             let mut witness = witness
@@ -1202,14 +1201,16 @@ Hints:
                             assert_eq!(
                                 writes_within_expr_dedup.insert(record_rlc),
                                 true,
-                                "within expression write duplicated on RAMType {:?}",
-                                $ram_type
+                                "within expression write duplicated on RAMType {:?} annotation {:?}",
+                                $ram_type,
+                                annotation
                             );
                             assert_eq!(
                                 writes.insert(record_rlc),
                                 true,
-                                "crossing-chip write duplicated on RAMType {:?}",
-                                $ram_type
+                                "crossing-chip write duplicated on RAMType {:?} annotation {:?}",
+                                $ram_type,
+                                annotation
                             );
                             records.push((record_rlc, row));
                         }
@@ -1227,6 +1228,7 @@ Hints:
                     },
                 ) in &cs.circuit_css
                 {
+                    println!("process read {circuit_name}");
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
@@ -1326,14 +1328,16 @@ Hints:
                             assert_eq!(
                                 reads_within_expr_dedup.insert(record),
                                 true,
-                                "within expression read duplicated on RAMType {:?}",
-                                $ram_type
+                                "within expression read duplicated on RAMType {:?} annotation {:?}",
+                                $ram_type,
+                                annotation,
                             );
                             assert_eq!(
                                 reads.insert(record),
                                 true,
-                                "crossing-chip read duplicated on RAMType {:?}",
-                                $ram_type
+                                "crossing-chip read duplicated on RAMType {:?} annotation {:?}",
+                                $ram_type,
+                                annotation,
                             );
                             records.push((record, row));
                         }

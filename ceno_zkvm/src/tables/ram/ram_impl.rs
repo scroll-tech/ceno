@@ -574,15 +574,17 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
             vec![final_cycle.expr()],
         ]
         .concat();
-        cb.r_table_record(
+        let rlc_record = cb.rlc_chip_record(raw_final_table.clone());
+        cb.r_table_rlc_record(
             || "final_table",
             // XXX we mixed all ram type here to save column allocation
-            RAMType::Undefined,
+            ram_type.expr(),
             SetTableSpec {
                 len: None,
                 structural_witins: vec![],
             },
             raw_final_table,
+            rlc_record,
         )?;
 
         Ok(Self {
@@ -838,7 +840,7 @@ impl<const V_LIMBS: usize> RAMBusConfig<V_LIMBS> {
         // local write, global read
         cb.w_table_rlc_record(
             || "local_write_record",
-            RAMType::Undefined,
+            ram_type.expr(),
             SetTableSpec {
                 len: None,
                 structural_witins: vec![sel_read],
@@ -864,7 +866,7 @@ impl<const V_LIMBS: usize> RAMBusConfig<V_LIMBS> {
         // local read, global write
         cb.r_table_rlc_record(
             || "local_read_record",
-            RAMType::Undefined,
+            ram_type.expr(),
             SetTableSpec {
                 len: None,
                 structural_witins: vec![sel_write],

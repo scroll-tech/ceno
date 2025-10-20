@@ -210,7 +210,6 @@ impl<
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
             (vec![], vec![]),
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
-                println!("prove circuit_name {circuit_name}");
                 let num_instances = circuit_name_num_instances_mapping
                     .get(&circuit_name)
                     .copied()
