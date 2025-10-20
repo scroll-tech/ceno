@@ -6,7 +6,7 @@ use itertools::Itertools;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 use witness::{
     InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding, set_fixed_val, set_val,
 };
@@ -366,54 +366,62 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_structural_witin: usize,
         final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert!(final_mem.len() <= DVRAM::max_len(&config.params));
+        if final_mem.is_empty() {
+            return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
+        }
+
+        let num_instances_padded = next_pow2_instance_padding(final_mem.len());
+        assert!(num_instances_padded <= DVRAM::max_len(&config.params));
         assert!(DVRAM::max_len(&config.params).is_power_of_two());
 
-        let params = config.params.clone();
-        let addr_id = config.addr.id as u64;
-        let addr_padding_fn = move |row: u64, col: u64| {
-            assert_eq!(col, addr_id);
-            DVRAM::addr(&params, row as usize) as u64
-        };
-
-        let mut witness =
-            RowMajorMatrix::<F>::new(final_mem.len(), num_witin, InstancePaddingStrategy::Default);
+        let mut witness = RowMajorMatrix::<F>::new(
+            num_instances_padded,
+            num_witin,
+            InstancePaddingStrategy::Default,
+        );
         let mut structural_witness = RowMajorMatrix::<F>::new(
-            final_mem.len(),
+            num_instances_padded,
             num_structural_witin,
-            InstancePaddingStrategy::Custom(Arc::new(addr_padding_fn)),
+            InstancePaddingStrategy::Default,
         );
 
         witness
             .par_rows_mut()
-            .zip(structural_witness.par_rows_mut())
-            .zip(final_mem)
+            .zip_eq(structural_witness.par_rows_mut())
             .enumerate()
-            .for_each(|(i, ((row, structural_row), rec))| {
-                assert_eq!(
-                    rec.addr,
-                    DVRAM::addr(&config.params, i),
-                    "rec.addr {:x} != expected {:x}",
-                    rec.addr,
-                    DVRAM::addr(&config.params, i),
-                );
-
-                if config.final_v.len() == 1 {
-                    // Assign value directly.
-                    set_val!(row, config.final_v[0], rec.value as u64);
-                } else {
-                    // Assign value limbs.
-                    config.final_v.iter().enumerate().for_each(|(l, limb)| {
-                        let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
-                        set_val!(row, limb, val as u64);
-                    });
+            .for_each(|(i, (row, structural_row))| {
+                if cfg!(debug_assertions)
+                    && let Some(addr) = final_mem.get(i).map(|rec| rec.addr)
+                {
+                    debug_assert_eq!(
+                        addr,
+                        DVRAM::addr(&config.params, i),
+                        "rec.addr {:x} != expected {:x}",
+                        addr,
+                        DVRAM::addr(&config.params, i),
+                    );
                 }
-                set_val!(row, config.final_cycle, rec.cycle);
 
-                set_val!(structural_row, config.addr, rec.addr as u64);
+                if let Some(rec) = final_mem.get(i) {
+                    if config.final_v.len() == 1 {
+                        // Assign value directly.
+                        set_val!(row, config.final_v[0], rec.value as u64);
+                    } else {
+                        // Assign value limbs.
+                        config.final_v.iter().enumerate().for_each(|(l, limb)| {
+                            let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                            set_val!(row, limb, val as u64);
+                        });
+                    }
+                    set_val!(row, config.final_cycle, rec.cycle);
+                }
+                set_val!(
+                    structural_row,
+                    config.addr,
+                    DVRAM::addr(&config.params, i) as u64
+                );
             });
 
-        structural_witness.padding_by_strategy();
         Ok([witness, structural_witness])
     }
 }
@@ -487,10 +495,10 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         if final_mem.is_empty() {
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
-        assert!(final_mem.len() <= DVRAM::max_len(&config.params));
-        assert!(DVRAM::max_len(&config.params).is_power_of_two());
 
         let num_instances_padded = next_pow2_instance_padding(final_mem.len());
+        assert!(num_instances_padded <= DVRAM::max_len(&config.params));
+        assert!(DVRAM::max_len(&config.params).is_power_of_two());
 
         let mut structural_witness = RowMajorMatrix::<F>::new(
             num_instances_padded,
