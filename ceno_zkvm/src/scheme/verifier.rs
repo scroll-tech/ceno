@@ -15,12 +15,10 @@ use crate::{
         eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
     },
 };
-use gkr_iop::{gkr::GKRClaims, selector::SelectorType, utils::eq_eval_less_or_equal_than};
+use gkr_iop::gkr::GKRClaims;
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Expression,
-    Expression::WitIn,
     Instance, StructuralWitIn, StructuralWitInType,
     mle::IntoMLE,
     util::ceil_log2,
@@ -33,7 +31,7 @@ use sumcheck::{
     util::get_challenge_pows,
 };
 use transcript::{ForkableTranscript, Transcript};
-use witness::{InstancePaddingStrategy::Default, next_pow2_instance_padding};
+use witness::next_pow2_instance_padding;
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vk: ZKVMVerifyingKey<E, PCS>,
@@ -489,7 +487,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }))
             .collect_vec();
 
-        let expected_max_rounds = expected_rounds.iter().cloned().max().unwrap();
         let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
             TowerVerify::verify(
                 interleave(&proof.r_out_evals, &proof.w_out_evals)

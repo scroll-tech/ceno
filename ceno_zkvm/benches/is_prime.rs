@@ -8,6 +8,7 @@ use ceno_zkvm::{
     scheme::{create_backend, create_prover},
 };
 mod alloc;
+use ceno_emul::shards::Shards;
 use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
@@ -62,6 +63,7 @@ fn is_prime_1(c: &mut Criterion) {
                             create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),
+                            Shards::default(),
                             &hints,
                             &[],
                             max_steps,

@@ -12,7 +12,6 @@ use crate::{
 use ceno_emul::{Addr, Cycle, IterAddresses, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
-use multilinear_extensions::mle::IntoInstanceIterMut;
 use std::{collections::HashSet, iter::zip, ops::Range, sync::Arc};
 use witness::InstancePaddingStrategy;
 

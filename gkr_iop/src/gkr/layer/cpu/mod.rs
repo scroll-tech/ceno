@@ -20,7 +20,6 @@ use multilinear_extensions::{
     monomial::Term,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
-    wit_infer_by_monomial_expr,
 };
 use rayon::{
     iter::{
@@ -28,7 +27,6 @@ use rayon::{
     },
     slice::ParallelSlice,
 };
-use std::sync::Arc;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverState},

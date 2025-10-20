@@ -165,8 +165,7 @@ impl<'a> ShardContext<'a> {
 
         let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN as usize;
         let max_threads = max_usable_threads();
-        // let max_record_per_thread = max_insts.div_ceil(max_threads as u64);
-        let expected_inst_per_shard = executed_instructions.div_ceil(max_num_shards) as usize;
+        let expected_inst_per_shard = executed_instructions.div_ceil(max_num_shards);
         let max_cycle = (executed_instructions + 1) * subcycle_per_insn; // cycle start from subcycle_per_insn
         let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * subcycle_per_insn
             + subcycle_per_insn)
@@ -265,6 +264,7 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
     pub fn send(
         &mut self,
         ram_type: crate::structs::RAMType,
@@ -301,28 +301,27 @@ impl<'a> ShardContext<'a> {
         }
 
         // check write to external mem bus
-        if let Some(future_touch_cycle) = self.addr_future_accesses.get(&(addr, cycle)) {
-            if *future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle
-                && self.is_current_shard_cycle(cycle)
-            {
-                let ram_record = self
-                    .write_thread_based_record_storage
-                    .as_mut()
-                    .right()
-                    .expect("illegal type");
-                ram_record.insert(
+        if let Some(future_touch_cycle) = self.addr_future_accesses.get(&(addr, cycle))
+            && *future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle
+            && self.is_current_shard_cycle(cycle)
+        {
+            let ram_record = self
+                .write_thread_based_record_storage
+                .as_mut()
+                .right()
+                .expect("illegal type");
+            ram_record.insert(
+                addr,
+                RAMRecord {
+                    ram_type,
+                    id,
                     addr,
-                    RAMRecord {
-                        ram_type,
-                        id,
-                        addr,
-                        prev_cycle,
-                        cycle,
-                        prev_value,
-                        value,
-                    },
-                );
-            }
+                    prev_cycle,
+                    cycle,
+                    prev_value,
+                    value,
+                },
+            );
         }
     }
 }

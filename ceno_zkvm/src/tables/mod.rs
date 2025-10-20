@@ -1,12 +1,6 @@
 use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams};
 use ff_ext::ExtensionField;
-use gkr_iop::{
-    chip::Chip,
-    gkr::{GKRCircuit, layer::Layer},
-    selector::SelectorType,
-};
-use itertools::Itertools;
-use multilinear_extensions::{StructuralWitInType, ToExpr};
+use gkr_iop::gkr::GKRCircuit;
 use std::collections::HashMap;
 use witness::RowMajorMatrix;
 

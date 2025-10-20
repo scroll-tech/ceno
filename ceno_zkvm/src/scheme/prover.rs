@@ -263,8 +263,13 @@ impl<
                 } else {
                     // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
                     // input.num_instances = 1 << input.log2_num_instances();
-                    let (mut table_proof, pi_in_evals, input_opening_point) = self
-                        .create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
+                    let (table_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
+                        circuit_name,
+                        pk,
+                        input,
+                        &mut transcript,
+                        &challenges,
+                    )?;
                     if cs.num_witin() > 0 || cs.num_fixed() > 0 {
                         points.push(input_opening_point);
                         evaluations.push(vec![

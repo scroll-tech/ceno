@@ -13,6 +13,7 @@ use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 use mpcs::BasefoldDefault;
 use rand::{RngCore, SeedableRng};
+use ceno_emul::shards::Shards;
 
 criterion_group! {
     name = quadratic_sorting;
@@ -63,6 +64,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                             create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),
+                            Shards::default(),
                             &hints,
                             &[],
                             max_steps,

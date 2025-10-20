@@ -496,13 +496,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         assert!(final_mem.len() <= DVRAM::max_len(&config.params));
         assert!(DVRAM::max_len(&config.params).is_power_of_two());
 
-        let params = config.params.clone();
         let num_instances_padded = next_pow2_instance_padding(final_mem.len());
-        // let addr_id = config.addr.id as u64;
-        // let addr_padding_fn = move |row: u64, col: u64| {
-        //     assert_eq!(col, addr_id);
-        //     DVRAM::addr(&params, row as usize) as u64
-        // };
 
         let mut structural_witness = RowMajorMatrix::<F>::new(
             num_instances_padded,
@@ -520,16 +514,16 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             .par_rows_mut()
             .enumerate()
             .for_each(|(i, structural_row)| {
-                if cfg!(debug_assertions) {
-                    if let Some(addr) = final_mem.get(i).map(|rec| rec.addr) {
-                        debug_assert_eq!(
-                            addr,
-                            DVRAM::addr(&config.params, i),
-                            "rec.addr {:x} != expected {:x}",
-                            addr,
-                            DVRAM::addr(&config.params, i),
-                        );
-                    }
+                if cfg!(debug_assertions)
+                    && let Some(addr) = final_mem.get(i).map(|rec| rec.addr)
+                {
+                    debug_assert_eq!(
+                        addr,
+                        DVRAM::addr(&config.params, i),
+                        "rec.addr {:x} != expected {:x}",
+                        addr,
+                        DVRAM::addr(&config.params, i),
+                    );
                 }
                 set_val!(
                     structural_row,
@@ -727,7 +721,6 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
                             set_val!(row, self.ram_type, rec.ram_type as u64);
                             set_val!(row, self.addr_subset, rec.addr as u64);
                             set_val!(structural_row, selector_witin, 1u64);
-                            ()
                         })
                         .count();
 

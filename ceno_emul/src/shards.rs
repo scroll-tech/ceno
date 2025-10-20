@@ -20,3 +20,12 @@ impl Shards {
         self.shard_id == self.max_num_shards - 1
     }
 }
+
+impl Default for Shards {
+    fn default() -> Self {
+        Self {
+            shard_id: 0,
+            max_num_shards: 1,
+        }
+    }
+}

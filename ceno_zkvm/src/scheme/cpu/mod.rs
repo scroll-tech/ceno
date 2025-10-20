@@ -20,19 +20,16 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
-    selector::SelectorType,
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    ChallengeId, Expression, Instance, ToExpr, WitnessId,
+    Expression, Instance, WitnessId,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
-    monomialize_expr_to_wit_terms,
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{

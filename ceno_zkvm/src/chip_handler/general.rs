@@ -22,6 +22,7 @@ pub trait PublicIOQuery {
     fn query_end_pc(&mut self) -> Result<Instance, CircuitBuilderError>;
     fn query_end_cycle(&mut self) -> Result<Instance, CircuitBuilderError>;
     fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError>;
+    #[allow(dead_code)]
     fn query_shard_id(&mut self) -> Result<Instance, CircuitBuilderError>;
 }
 
