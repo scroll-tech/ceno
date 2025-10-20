@@ -22,8 +22,6 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
-pub mod syscalls;
-
 #[unsafe(no_mangle)]
 #[linkage = "weak"]
 pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {
@@ -85,6 +83,23 @@ pub fn my_get_random(buf: &mut [u8]) -> Result<(), Error> {
     Ok(())
 }
 register_custom_getrandom!(my_get_random);
+
+/// Custom getrandom implementation for getrandom v0.3
+///
+/// see also: <https://docs.rs/getrandom/0.3.3/getrandom/#custom-backend>
+///
+/// # Safety
+/// - `dest` must be valid for writes of `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn __getrandom_v03_custom(
+    dest: *mut u8,
+    len: usize,
+) -> Result<(), getrandom_v3::Error> {
+    unsafe {
+        sys_rand(dest, len);
+    }
+    Ok(())
+}
 
 pub fn halt(exit_code: u32) -> ! {
     #[cfg(target_arch = "riscv32")]

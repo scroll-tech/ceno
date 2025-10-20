@@ -21,7 +21,7 @@ use crate::{
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
                 KeccakInstruction, WeierstrassAddAssignInstruction,
-                WeierstrassDoubleAssignInstruction,
+                WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
@@ -132,6 +132,8 @@ pub struct Rv32imConfig<E: ExtensionField> {
         <WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>> as Instruction<E>>::InstructionConfig,
     pub secp256k1_double_config:
         <WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>> as Instruction<E>>::InstructionConfig,
+    pub secp256k1_decompress_config:
+        <WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>> as Instruction<E>>::InstructionConfig,
 
     // Tables.
     pub dynamic_range_config: <DynamicRangeTableCircuit<E, 18> as TableCircuit<E>>::TableConfig,
@@ -215,6 +217,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             cs.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>>();
         let secp256k1_double_config = cs
             .register_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>>();
+        let secp256k1_decompress_config =
+            cs.register_opcode_circuit::<WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>>();
 
         // tables
         let dynamic_range_config =
@@ -287,6 +291,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             bn254_double_config,
             secp256k1_add_config,
             secp256k1_double_config,
+            secp256k1_decompress_config,
             // tables
             dynamic_range_config,
             double_u8_range_config,
@@ -378,6 +383,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             cs,
             &self.secp256k1_double_config,
         );
+        fixed.register_opcode_circuit::<WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>>(
+            cs,
+            &self.secp256k1_decompress_config,
+        );
 
         // table
         fixed.register_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>(
@@ -414,6 +423,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut bn254_double_records = Vec::new();
         let mut secp256k1_add_records = Vec::new();
         let mut secp256k1_double_records = Vec::new();
+        let mut secp256k1_decompress_records = Vec::new();
         steps
             .into_iter()
             .filter_map(|step| {
@@ -444,6 +454,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     }
                     InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DoubleSpec::CODE => {
                         secp256k1_double_records.push(record);
+                    }
+                    InsnKind::ECALL
+                        if record.rs1().unwrap().value == Secp256k1DecompressSpec::CODE =>
+                    {
+                        secp256k1_decompress_records.push(record);
                     }
                     // other type of ecalls are handled by dummy ecall instruction
                     _ => {
@@ -560,6 +575,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 &self.secp256k1_double_config,
                 secp256k1_double_records,
             )?;
+        witness.assign_opcode_circuit::<WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>>(
+            cs,
+            shard_ctx,
+            &self.secp256k1_decompress_config,
+            secp256k1_decompress_records,
+        )?;
 
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),

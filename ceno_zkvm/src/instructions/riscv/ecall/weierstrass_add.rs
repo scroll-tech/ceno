@@ -15,7 +15,7 @@ use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
 use p3::{field::FieldAlgebra, matrix::Matrix};
 use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
 };
 use sp1_curves::{CurveType, EllipticCurve, params::NumWords};
@@ -334,7 +334,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
 
         // second pass
         let instances: Vec<EllipticCurveAddInstance<EC::BaseField>> = steps
-            .iter()
+            .par_iter()
             .map(|step| {
                 let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
                     .syscall()
@@ -355,7 +355,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                         ZKVMError::InvalidWitness("Failed to parse EllipticCurveAddInstance".into())
                     })
             })
-            .try_collect()?;
+            .collect::<Result<_, _>>()?;
 
         config.layout.phase1_witness_group(
             WeierstrassAddAssignTrace { instances },

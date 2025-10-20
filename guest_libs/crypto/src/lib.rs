@@ -9,8 +9,6 @@ pub mod bn254;
 pub mod secp256k1;
 /// secp256r1
 pub mod secp256r1;
-/// SHA-256 implementation.
-pub mod sha256;
 
 mod macros;
 
@@ -34,7 +32,7 @@ pub enum CenoCryptoError {
     Bn254PairLength,
     /// Sepk256k1 ecrecover error
     #[error("Secp256k1 ecrecover error")]
-    Secp256k1EcRecover,
+    Secp256k1Ecrecover(#[from] k256::ecdsa::Error),
 }
 
 #[cfg(test)]

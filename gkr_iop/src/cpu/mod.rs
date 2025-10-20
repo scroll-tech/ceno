@@ -62,6 +62,10 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtension<'a
     fn evaluations_len(&self) -> usize {
         self.evaluations.len()
     }
+
+    fn bh_signature(&self) -> E {
+        self.bh_signature()
+    }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for CpuBackend<E, PCS> {

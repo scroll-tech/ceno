@@ -11,7 +11,7 @@ impl SyscallSpec for Sha256ExtendSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = SHA_EXTEND_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::SHA_EXTEND;
+    const CODE: u32 = ceno_syscall::SHA_EXTEND;
 }
 
 /// Wrapper type for the sha_extend argument that implements conversions

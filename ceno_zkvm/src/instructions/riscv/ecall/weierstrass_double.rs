@@ -15,7 +15,7 @@ use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
 use p3::{field::FieldAlgebra, matrix::Matrix};
 use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
 };
 use sp1_curves::{CurveType, EllipticCurve, params::NumWords, weierstrass::WeierstrassParameters};
@@ -293,7 +293,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
 
         // second pass
         let instances: Vec<EllipticCurveDoubleInstance<EC::BaseField>> = steps
-            .iter()
+            .par_iter()
             .map(|step| {
                 let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
                     .syscall()
@@ -313,7 +313,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                         )
                     })
             })
-            .try_collect()?;
+            .collect::<Result<_, _>>()?;
 
         config.layout.phase1_witness_group(
             WeierstrassDoubleAssignTrace { instances },

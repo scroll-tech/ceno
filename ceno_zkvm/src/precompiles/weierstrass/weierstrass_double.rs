@@ -69,7 +69,7 @@ use crate::{
     gadgets::{FieldOperation, field_op::FieldOpCols},
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
-        SelectorTypeLayout, utils::merge_u8_limbs_to_u16_limbs_pairs_and_extend,
+        SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
         weierstrass::EllipticCurveDoubleInstance,
     },
     scheme::utils::gkr_witness,
@@ -134,10 +134,8 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
             slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
         };
 
-        // Although the eqs correspond to the same point, but the selectors of memory operations and lookups
-        // have different pad. So we just create two eqs to derive the correct n_structural_wit.
         let eq = cb.create_structural_witin(
-            || "weierstrass_eq",
+            || "weierstrass_double_eq",
             StructuralWitInType::EqualDistanceSequence {
                 max_len: 0,
                 offset: 0,
@@ -347,13 +345,13 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
         // Constraint output32 from wits.x3_ins || wits.y3_ins by converting 8-bit limbs to 2x16-bit felts
         let mut output32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
         for limbs in [&wits.x3_ins.result, &wits.y3_ins.result] {
-            merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(limbs, &mut output32);
+            merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(&limbs.0, &mut output32);
         }
         let output32 = output32.try_into().unwrap();
 
         let mut p_input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
         for limbs in [&wits.p_x, &wits.p_y] {
-            merge_u8_limbs_to_u16_limbs_pairs_and_extend::<E, EC::BaseField>(limbs, &mut p_input32);
+            merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(&limbs.0, &mut p_input32);
         }
         let p_input32 = p_input32.try_into().unwrap();
 
@@ -453,11 +451,11 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
                 rows.chunks_mut(self.n_committed)
                     .zip_eq(eqs.chunks_mut(self.n_structural_witin))
                     .zip_eq(phase1_instances)
-                    .for_each(|((row, eqs), phase1_intance)| {
+                    .for_each(|((row, eqs), phase1_instance)| {
                         let cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField> =
                             row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
                                 .borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
-                        Self::populate_row(phase1_intance, cols, &mut lk_multiplicity);
+                        Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
                         for x in eqs.iter_mut() {
                             *x = E::BaseField::ONE;
                         }
@@ -606,33 +604,30 @@ pub fn run_weierstrass_double<
             instances
                 .chunks_mut(num_witin as usize)
                 .zip_eq(steps)
-                .for_each(|(instance_with_rotation, _step)| {
-                    // assign full rotation with same witness
-                    for instance in instance_with_rotation.chunks_mut(num_witin as usize) {
-                        layout
-                            .vm_state
-                            .assign_instance(
+                .for_each(|(instance, _step)| {
+                    layout
+                        .vm_state
+                        .assign_instance(
+                            instance,
+                            &shard_ctx,
+                            &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
+                        )
+                        .expect("assign vm_state error");
+                    layout.mem_rw.iter().for_each(|mem_config| {
+                        mem_config
+                            .assign_op(
                                 instance,
-                                &shard_ctx,
-                                &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
+                                &mut shard_ctx,
+                                &mut lk_multiplicity,
+                                10,
+                                &MemOp {
+                                    previous_cycle: 0,
+                                    addr: ByteAddr::from(0).waddr(),
+                                    value: Default::default(),
+                                },
                             )
-                            .expect("assign vm_state error");
-                        layout.mem_rw.iter().for_each(|mem_config| {
-                            mem_config
-                                .assign_op(
-                                    instance,
-                                    &mut shard_ctx,
-                                    &mut lk_multiplicity,
-                                    10,
-                                    &MemOp {
-                                        previous_cycle: 0,
-                                        addr: ByteAddr::from(0).waddr(),
-                                        value: Default::default(),
-                                    },
-                                )
-                                .expect("assign error");
-                        });
-                    }
+                            .expect("assign error");
+                    });
                 })
         });
 

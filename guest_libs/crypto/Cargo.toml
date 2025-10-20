@@ -10,7 +10,10 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [dependencies]
-ceno_rt = { path = "../../ceno_rt" }
+bn = { package = "substrate-bn", git = "https://github.com/scroll-tech/bn", branch = "ceno" }
+ceno_keccak = { path = "../keccak" }
+ceno_sha2 = { path = "../sha2" }
+k256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa"] }
 thiserror.workspace = true
 
 [dev-dependencies]
