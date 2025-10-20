@@ -115,6 +115,12 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<
             NVRAM::len(&config.params)
         );
 
+        println!(
+            "Init: NVRAM::RAM_TYPE {:?}, raw len {}",
+            NVRAM::RAM_TYPE,
+            init_mem.len(),
+        );
+
         let mut init_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&config.params),
             num_fixed,
@@ -503,6 +509,12 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
+        println!(
+            "Init: DVRAM::RAM_TYPE {:?}, raw len {}, padded {}",
+            DVRAM::RAM_TYPE,
+            final_mem.len(),
+            num_instances_padded - final_mem.len()
+        );
 
         structural_witness
             .par_rows_mut()
@@ -604,6 +616,16 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
             .map(|(_, mem)| mem.par_iter().filter(is_current_shard_mem_record).count())
             .collect();
 
+        current_shard_mems_len
+            .iter()
+            .zip(final_mem.iter())
+            .for_each(|(raw_len, (_, mem))| {
+                println!(
+                    "Final: DVRAM::RAM_TYPE {:?}, raw len {}",
+                    mem[0].ram_type, raw_len
+                )
+            });
+
         // deal with non-pow2 padding for first shard
         // format Vec<(pad_len, pad_start_index)>
         let padding_info = if shard_ctx.is_first_shard() {
@@ -621,6 +643,16 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
         } else {
             vec![(0, 0, RAMType::Undefined); final_mem.len()]
         };
+
+        padding_info
+            .iter()
+            .zip(final_mem.iter())
+            .for_each(|((pad_size, ..), (_, mem))| {
+                println!(
+                    "Final: DVRAM::RAM_TYPE {:?}, pad_size {}",
+                    mem[0].ram_type, pad_size
+                )
+            });
 
         // calculate mem length
         let mem_lens = current_shard_mems_len
