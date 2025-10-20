@@ -13,7 +13,6 @@ use ceno_zkvm::{
 use clap::Args;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
 
-use ceno_emul::shards::Shards;
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };

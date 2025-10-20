@@ -1,10 +1,10 @@
-use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word, shards::Shards};
+use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 #[cfg(all(feature = "jemalloc", unix, not(test)))]
 use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
-        Checkpoint, FieldType, PcsKind, Preset, run_e2e_with_checkpoint, setup_platform,
+        Checkpoint, FieldType, PcsKind, Preset, Shards, run_e2e_with_checkpoint, setup_platform,
         setup_platform_debug, verify,
     },
     scheme::{

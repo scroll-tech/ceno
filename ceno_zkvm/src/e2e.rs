@@ -18,7 +18,6 @@ use crate::{
 use ceno_emul::{
     Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, Platform, Program,
     StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
-    shards::Shards,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -111,9 +110,41 @@ pub struct RAMRecord {
     pub value: Word,
 }
 
+#[derive(Clone, Debug)]
+pub struct Shards {
+    pub shard_id: usize,
+    pub max_num_shards: usize,
+}
+
+impl Shards {
+    pub fn new(shard_id: usize, max_num_shards: usize) -> Self {
+        assert!(shard_id < max_num_shards);
+        Self {
+            shard_id,
+            max_num_shards,
+        }
+    }
+
+    pub fn is_first_shard(&self) -> bool {
+        self.shard_id == 0
+    }
+
+    pub fn is_last_shard(&self) -> bool {
+        self.shard_id == self.max_num_shards - 1
+    }
+}
+
+impl Default for Shards {
+    fn default() -> Self {
+        Self {
+            shard_id: 0,
+            max_num_shards: 1,
+        }
+    }
+}
+
 pub struct ShardContext<'a> {
-    shard_id: usize,
-    max_num_shards: usize,
+    shards: Shards,
     max_cycle: Cycle,
     // TODO optimize this map as it's super huge
     addr_future_accesses: Cow<'a, HashMap<(WordAddr, Cycle), Cycle>>,
@@ -128,8 +159,7 @@ impl<'a> Default for ShardContext<'a> {
     fn default() -> Self {
         let max_threads = max_usable_threads();
         Self {
-            shard_id: 0,
-            max_num_shards: 1,
+            shards: Shards::default(),
             max_cycle: Cycle::default(),
             addr_future_accesses: Cow::Owned(HashMap::new()),
             read_thread_based_record_storage: Either::Left(
@@ -151,15 +181,14 @@ impl<'a> Default for ShardContext<'a> {
 
 impl<'a> ShardContext<'a> {
     pub fn new(
-        shard_id: usize,
-        max_num_shards: usize,
+        shards: Shards,
         executed_instructions: usize,
         addr_future_accesses: HashMap<(WordAddr, Cycle), Cycle>,
     ) -> Self {
         // current strategy: at least each shard deal with one instruction
-        let max_num_shards = max_num_shards.min(executed_instructions);
+        let max_num_shards = shards.max_num_shards.min(executed_instructions);
         assert!(
-            shard_id < max_num_shards,
+            shards.shard_id < max_num_shards,
             "implement mechanism to skip current shard proof"
         );
 
@@ -167,14 +196,14 @@ impl<'a> ShardContext<'a> {
         let max_threads = max_usable_threads();
         let expected_inst_per_shard = executed_instructions.div_ceil(max_num_shards);
         let max_cycle = (executed_instructions + 1) * subcycle_per_insn; // cycle start from subcycle_per_insn
-        let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * subcycle_per_insn
+        let cur_shard_cycle_range = (shards.shard_id * expected_inst_per_shard * subcycle_per_insn
             + subcycle_per_insn)
-            ..((shard_id + 1) * expected_inst_per_shard * subcycle_per_insn + subcycle_per_insn)
+            ..((shards.shard_id + 1) * expected_inst_per_shard * subcycle_per_insn
+                + subcycle_per_insn)
                 .min(max_cycle);
 
         ShardContext {
-            shard_id,
-            max_num_shards,
+            shards,
             max_cycle: max_cycle as Cycle,
             addr_future_accesses: Cow::Owned(addr_future_accesses),
             // TODO with_capacity optimisation
@@ -207,8 +236,7 @@ impl<'a> ShardContext<'a> {
                 .iter_mut()
                 .zip(write_thread_based_record_storage.iter_mut())
                 .map(|(read, write)| ShardContext {
-                    shard_id: self.shard_id,
-                    max_num_shards: self.max_num_shards,
+                    shards: self.shards.clone(),
                     max_cycle: self.max_cycle,
                     addr_future_accesses: Cow::Borrowed(self.addr_future_accesses.as_ref()),
                     read_thread_based_record_storage: Either::Right(read),
@@ -236,12 +264,12 @@ impl<'a> ShardContext<'a> {
 
     #[inline(always)]
     pub fn is_first_shard(&self) -> bool {
-        self.shard_id == 0
+        self.shards.shard_id == 0
     }
 
     #[inline(always)]
     pub fn is_last_shard(&self) -> bool {
-        self.shard_id == self.max_num_shards - 1
+        self.shards.shard_id == self.shards.max_num_shards - 1
     }
 
     #[inline(always)]
@@ -511,12 +539,7 @@ pub fn emulate_program<'a>(
         ),
     );
 
-    let shard_ctx = ShardContext::new(
-        shards.shard_id,
-        shards.max_num_shards,
-        insts,
-        vm.take_tracer().next_accesses(),
-    );
+    let shard_ctx = ShardContext::new(shards.clone(), insts, vm.take_tracer().next_accesses());
 
     EmulationResult {
         pi,

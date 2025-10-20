@@ -9,7 +9,7 @@ use std::{fs, path::PathBuf, time::Duration};
 mod alloc;
 use criterion::*;
 
-use ceno_emul::shards::Shards;
+use ceno_zkvm::e2e::Shards;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 use mpcs::BasefoldDefault;
