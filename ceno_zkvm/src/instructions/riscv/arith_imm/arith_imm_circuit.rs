@@ -1,6 +1,7 @@
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -58,6 +59,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -77,7 +79,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
         config
             .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         Ok(())
     }

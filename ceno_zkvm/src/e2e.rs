@@ -115,7 +115,7 @@ pub struct ShardContext<'a> {
     shard_id: usize,
     max_num_shards: usize,
     max_cycle: Cycle,
-    // TODO this map is super huge
+    // TODO optimize this map as it's super huge
     addr_future_accesses: Cow<'a, HashMap<(WordAddr, Cycle), Cycle>>,
     read_thread_based_record_storage:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
