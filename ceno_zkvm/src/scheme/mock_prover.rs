@@ -1247,7 +1247,6 @@ Hints:
                     },
                 ) in &cs.circuit_css
                 {
-                    println!("process read {circuit_name}");
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
