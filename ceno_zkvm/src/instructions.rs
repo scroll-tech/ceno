@@ -60,10 +60,7 @@ pub trait Instruction<E: ExtensionField> {
                 descending: false,
             },
         );
-        let selector_type = SelectorType::Prefix {
-            offset: 0,
-            expression: selector.expr(),
-        };
+        let selector_type = SelectorType::Prefix(selector.expr());
 
         // all shared the same selector
         let (out_evals, mut chip) = (

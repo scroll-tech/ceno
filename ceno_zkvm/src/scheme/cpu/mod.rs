@@ -21,7 +21,7 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -83,12 +83,14 @@ impl CpuEccProver {
 
         let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
 
-        let sel = SelectorType::Prefix {
-            offset: 0,
-            expression: 0.into(),
-        };
+        let sel = SelectorType::Prefix(0.into());
         let num_instances = (1 << n) - 1;
-        let mut sel_mle: MultilinearExtension<'_, E> = sel.compute(&out_rt, num_instances).unwrap();
+        let sel_ctx = SelectorContext {
+            offset: 0,
+            num_instances,
+            num_vars: n,
+        };
+        let mut sel_mle: MultilinearExtension<'_, E> = sel.compute(&out_rt, &sel_ctx).unwrap();
         let sel_expr = expr_builder.lift(sel_mle.to_either());
 
         let mut exprs = vec![];
@@ -859,6 +861,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         }
                     })
                     .collect_vec();
+            let selector_ctxs = if cs.ec_final_sum.is_empty() {
+                // it's not global chip
+                vec![
+                    SelectorContext {
+                        offset: 0,
+                        num_instances,
+                        num_vars: num_var_with_rotation,
+                    };
+                    gkr_circuit
+                        .layers
+                        .first()
+                        .map(|layer| layer.out_sel_and_eval_exprs.len())
+                        .unwrap_or(0)
+                ]
+            } else {
+                // it's global chip
+                vec![
+                    SelectorContext {
+                        offset: 0,
+                        num_instances: input.num_read_instances,
+                        num_vars: num_var_with_rotation,
+                    },
+                    SelectorContext {
+                        offset: input.num_read_instances,
+                        num_instances: input.num_write_instances,
+                        num_vars: num_var_with_rotation,
+                    },
+                    SelectorContext {
+                        offset: 0,
+                        num_instances: input.num_instances,
+                        num_vars: num_var_with_rotation,
+                    },
+                ]
+            };
             let GKRProverOutput {
                 gkr_proof,
                 opening_evaluations,
@@ -877,7 +913,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 &pub_io_evals,
                 challenges,
                 transcript,
-                num_instances,
+                &selector_ctxs,
             )?;
             Ok((
                 opening_evaluations[0].point.clone(),

@@ -125,12 +125,12 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
 
         cb.read_record(
             || "r_record",
-            gkr_iop::RAMType::Register, // TODO fixme
+            gkr_iop::RAMType::Memory, // TODO fixme
             record.clone(),
         )?;
         cb.write_record(
             || "w_record",
-            gkr_iop::RAMType::Register, // TODO fixme
+            gkr_iop::RAMType::Memory, // TODO fixme
             record.clone(),
         )?;
 
@@ -313,22 +313,13 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
                 descending: false,
             },
         );
-        let selector_r = SelectorType::Prefix {
-            offset: 0,
-            expression: selector_r.expr(),
-        };
+        let selector_r = SelectorType::Prefix(selector_r.expr());
         // note that the actual offset should be set by prover
         // depending on the number of local read instances
-        let selector_w = SelectorType::Prefix {
-            offset: 0,
-            expression: selector_w.expr(),
-        };
+        let selector_w = SelectorType::Prefix(selector_w.expr());
         // TODO: when selector_r = 1 => selector_zero = 1
         //      when selector_w = 1 => selector_zero = 1
-        let selector_zero = SelectorType::Prefix {
-            offset: 0,
-            expression: selector_zero.expr(),
-        };
+        let selector_zero = SelectorType::Prefix(selector_zero.expr());
 
         cb.cs.r_selector = Some(selector_r);
         cb.cs.w_selector = Some(selector_w);
@@ -411,8 +402,8 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
 
         let nthreads = max_usable_threads();
 
+        // local read => global write
         let num_local_reads = steps.iter().filter(|s| s.is_write).count();
-        let num_local_writes = steps.len() - num_local_reads;
 
         let num_instance_per_batch = if steps.len() > 256 {
             steps.len().div_ceil(nthreads)
@@ -470,10 +461,11 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
 mod tests {
     use std::sync::Arc;
 
-    use ff_ext::{BabyBearExt4, PoseidonField};
+    use ff_ext::{BabyBearExt4, FromUniformBytes, PoseidonField};
     use itertools::Itertools;
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
     use p3::{babybear::BabyBear, field::FieldAlgebra};
+    use rand::thread_rng;
     use tracing_forest::{ForestLayer, util::LevelFilter};
     use tracing_subscriber::{
         EnvFilter, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
@@ -507,15 +499,15 @@ mod tests {
         let default_filter = EnvFilter::builder()
             .with_default_directive(LevelFilter::DEBUG.into())
             .from_env_lossy();
-        let fmt_layer = fmt::layer()
-            .compact()
-            .with_thread_ids(false)
-            .with_thread_names(false)
-            .without_time();
+        // let fmt_layer = fmt::layer()
+        //     .compact()
+        //     .with_thread_ids(false)
+        //     .with_thread_names(false)
+        //     .without_time();
 
         Registry::default()
             .with(ForestLayer::default())
-            .with(fmt_layer)
+            // .with(fmt_layer)
             .with(default_filter)
             .init();
 
@@ -532,8 +524,8 @@ mod tests {
             .unwrap();
 
         // create a bunch of random memory read/write records
-        let n_reads = 10;
-        let n_writes = 10;
+        let n_reads = 16;
+        let n_writes = 16;
         let global_reads = (0..n_reads)
             .map(|i| {
                 let addr = i * 8;
@@ -544,7 +536,7 @@ mod tests {
                     ram_type: RAMType::Memory,
                     value: value as u32,
                     shard: 1,
-                    local_clk: 0,
+                    local_clk: i,
                     global_clk: i,
                     is_write: false,
                 }
@@ -594,9 +586,9 @@ mod tests {
             &config,
             cs.num_witin as usize,
             cs.num_structural_witin as usize,
-            global_reads
+            global_writes // local reads
                 .into_iter()
-                .chain(global_writes.into_iter())
+                .chain(global_reads.into_iter()) // local writes
                 .collect::<Vec<_>>(),
         )
         .unwrap();
@@ -629,10 +621,13 @@ mod tests {
             structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
             fixed: vec![],
             public_input: public_input_mles.clone(),
+            num_read_instances: n_writes as usize,
+            num_write_instances: n_reads as usize,
             num_instances: (n_reads + n_writes) as usize,
         };
-        let challenges = [E::ONE, E::ONE];
-        let (proof, _, point) = zkvm_prover
+        let mut rng = thread_rng();
+        let challenges = [E::random(&mut rng), E::random(&mut rng)];
+        let (proof, _pi_evals, point) = zkvm_prover
             .create_chip_proof(
                 "global chip",
                 &pk,
@@ -648,6 +643,13 @@ mod tests {
             .iter()
             .map(|mle| mle.evaluate(&point[..mle.num_vars()]))
             .collect_vec();
+        pi_evals
+            .iter()
+            .skip(8)
+            .zip(_pi_evals.values())
+            .for_each(|(a, b)| {
+                assert_eq!(*a, *b);
+            });
         let opening_point = verifier
             .verify_opcode_proof(
                 "global",

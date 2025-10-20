@@ -14,7 +14,7 @@ use gkr_iop::{
         layer::Layer,
         mock::MockProver,
     },
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
     utils::lk_multiplicity::LkMultiplicity,
 };
 use itertools::{Itertools, iproduct, izip, zip_eq};
@@ -1222,6 +1222,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
+    let selector_ctxs = vec![SelectorContext::new(0, num_instances, log2_num_instance_rounds); 3];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -1231,7 +1232,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             &[],
             &challenges,
             &mut prover_transcript,
-            num_instances,
+            &selector_ctxs,
         )
         .expect("Failed to prove phase");
     exit_span!(span);
@@ -1260,7 +1261,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                     &[],
                     &challenges,
                     &mut verifier_transcript,
-                    num_instances,
+                    &selector_ctxs,
                 )
                 .expect("GKR verify failed");
 

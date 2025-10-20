@@ -5,7 +5,7 @@ use ff_ext::ExtensionField;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use gkr_iop::{gkr::GKRClaims, utils::eq_eval_less_or_equal_than};
+use gkr_iop::{gkr::GKRClaims, selector::SelectorContext, utils::eq_eval_less_or_equal_than};
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -415,6 +415,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         debug_assert_eq!(logup_q_evals.len(), lk_counts_per_instance);
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
+        let selector_ctxs = if cs.ec_final_sum.is_empty() {
+            // it's not global chip
+            vec![
+                SelectorContext::new(0, num_instances, num_var_with_rotation);
+                gkr_circuit
+                    .layers
+                    .first()
+                    .map(|layer| layer.out_sel_and_eval_exprs.len())
+                    .unwrap_or(0)
+            ]
+        } else {
+            // it's global chip
+            vec![
+                SelectorContext {
+                    offset: 0,
+                    num_instances: proof.num_read_instances,
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: proof.num_read_instances,
+                    num_instances: proof.num_write_instances,
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: 0,
+                    num_instances: proof.num_instances,
+                    num_vars: num_var_with_rotation,
+                },
+            ]
+        };
         let GKRClaims(opening_evaluations) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
@@ -422,7 +452,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             pi,
             challenges,
             transcript,
-            num_instances,
+            &selector_ctxs,
         )?;
         Ok(opening_evaluations[0].point.clone())
     }

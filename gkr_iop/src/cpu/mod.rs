@@ -4,7 +4,7 @@ use crate::{
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
 use ff_ext::ExtensionField;
-use itertools::izip;
+use itertools::{Itertools, izip};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
     mle::{ArcMultilinearExtension, MultilinearExtension, Point},

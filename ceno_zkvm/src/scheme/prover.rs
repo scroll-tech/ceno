@@ -234,6 +234,8 @@ impl<
                     fixed,
                     structural_witness,
                     public_input,
+                    num_read_instances: num_instances, // TODO: fixme
+                    num_write_instances: num_instances, // TODO: fixme
                     num_instances,
                 };
 
@@ -343,6 +345,8 @@ impl<
             rt_tower.len(), // num var length should equal to max_num_instance
             num_var_with_rotation,
         );
+
+        // override cs.gkr_circuit.layers
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records

@@ -198,6 +198,8 @@ fn test_rw_lk_expression_combination() {
             witness: wits_in,
             structural_witness: structural_in,
             public_input: vec![],
+            num_read_instances: num_instances,
+            num_write_instances: num_instances,
             num_instances,
         };
         let (proof, _, _) = prover
