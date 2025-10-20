@@ -26,13 +26,14 @@ use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, WitnessId, fmt,
     mle::{ArcMultilinearExtension, IntoMLEs, MultilinearExtension},
+    util::ceil_log2,
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
 use p3::field::{Field, FieldAlgebra};
 use rand::thread_rng;
 use std::{
     cmp::max,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     fs::File,
     hash::Hash,
@@ -978,6 +979,16 @@ Hints:
         let mut fixed_mles = HashMap::new();
         let mut num_instances = HashMap::new();
 
+        let circuit_index_fixed_num_instances: BTreeMap<String, usize> = fixed_trace
+            .circuit_fixed_traces
+            .iter()
+            .map(|(circuit_name, rmm)| {
+                (
+                    circuit_name.clone(),
+                    rmm.as_ref().map(|rmm| rmm.num_instances()).unwrap_or(0),
+                )
+            })
+            .collect();
         let mut lkm_tables = LkMultiplicityRaw::<E>::default();
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
@@ -992,11 +1003,20 @@ Hints:
                 .get_opcode_witness(circuit_name)
                 .or_else(|| witnesses.get_table_witness(circuit_name))
                 .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
-            let num_rows = witness.num_instances();
+            let num_rows = if witness.num_instances() > 0 {
+                witness.num_instances()
+            } else if structural_witness.num_instances() > 0 {
+                structural_witness.num_instances()
+            } else if composed_cs.is_static_circuit() {
+                circuit_index_fixed_num_instances
+                    .get(circuit_name)
+                    .copied()
+                    .unwrap_or(0)
+            } else {
+                0
+            };
 
-            if witness.num_instances() + structural_witness.num_instances() == 0
-                && (!composed_cs.is_static_circuit())
-            {
+            if num_rows == 0 {
                 wit_mles.insert(circuit_name.clone(), vec![]);
                 structural_wit_mles.insert(circuit_name.clone(), vec![]);
                 fixed_mles.insert(circuit_name.clone(), vec![]);
@@ -1136,15 +1156,14 @@ Hints:
                     if *num_rows == 0 {
                         continue;
                     }
-
                     let w_selector: ArcMultilinearExtension<_> =
                         if let Some(w_selector) = &cs.w_selector {
                             structural_witness[w_selector.selector_expr().id()].clone()
                         } else {
                             let mut selector = vec![E::BaseField::ONE; *num_rows];
-                            selector.resize(witness[0].evaluations().len(), E::BaseField::ZERO);
+                            selector.resize(next_pow2_instance_padding(*num_rows), E::BaseField::ZERO);
                             MultilinearExtension::from_evaluation_vec_smart(
-                                witness[0].num_vars(),
+                                ceil_log2(next_pow2_instance_padding(*num_rows)),
                                 selector,
                             )
                             .into()
@@ -1241,9 +1260,9 @@ Hints:
                             structural_witness[r_selector.selector_expr().id()].clone()
                         } else {
                             let mut selector = vec![E::BaseField::ONE; *num_rows];
-                            selector.resize(witness[0].evaluations().len(), E::BaseField::ZERO);
+                            selector.resize(next_pow2_instance_padding(*num_rows), E::BaseField::ZERO);
                             MultilinearExtension::from_evaluation_vec_smart(
-                                witness[0].num_vars(),
+                                ceil_log2(next_pow2_instance_padding(*num_rows)),
                                 selector,
                             )
                             .into()

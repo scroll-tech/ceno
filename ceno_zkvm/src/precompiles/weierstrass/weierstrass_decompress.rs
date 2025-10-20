@@ -582,7 +582,7 @@ pub fn run_weierstrass_decompress<
     let shard_ctx_vec = shard_ctx.get_forked();
     raw_witin_iter
         .zip_eq(instances.par_chunks(num_instance_per_batch))
-        .zip_eq(shard_ctx_vec)
+        .zip(shard_ctx_vec)
         .for_each(|((instances, steps), mut shard_ctx)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
