@@ -1903,7 +1903,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "once_cell",
  "p3",
@@ -2715,7 +2715,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "bincode",
  "clap",
@@ -2739,7 +2739,7 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "either",
  "ff_ext",
@@ -3060,8 +3060,9 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
+ "p3-air",
  "p3-baby-bear",
  "p3-challenger",
  "p3-commit",
@@ -3073,10 +3074,21 @@ dependencies = [
  "p3-maybe-rayon",
  "p3-mds",
  "p3-merkle-tree",
+ "p3-monty-31",
  "p3-poseidon",
  "p3-poseidon2",
+ "p3-poseidon2-air",
  "p3-symmetric",
  "p3-util",
+]
+
+[[package]]
+name = "p3-air"
+version = "0.1.0"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=539bbc84085efb609f4f62cb03cf49588388abdb#539bbc84085efb609f4f62cb03cf49588388abdb"
+dependencies = [
+ "p3-field",
+ "p3-matrix",
 ]
 
 [[package]]
@@ -3295,6 +3307,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-poseidon2-air"
+version = "0.1.0"
+source = "git+https://github.com/Plonky3/Plonky3.git?rev=539bbc84085efb609f4f62cb03cf49588388abdb#539bbc84085efb609f4f62cb03cf49588388abdb"
+dependencies = [
+ "p3-air",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-poseidon2",
+ "p3-util",
+ "rand 0.8.5",
+ "tikv-jemallocator",
+ "tracing",
+]
+
+[[package]]
 name = "p3-symmetric"
 version = "0.1.0"
 source = "git+https://github.com/Plonky3/Plonky3.git?rev=539bbc84085efb609f4f62cb03cf49588388abdb#539bbc84085efb609f4f62cb03cf49588388abdb"
@@ -3469,7 +3497,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "ff_ext",
  "p3",
@@ -4450,7 +4478,7 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -4572,7 +4600,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "either",
  "ff_ext",
@@ -4590,7 +4618,7 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "itertools 0.13.0",
  "p3",
@@ -4985,7 +5013,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -5257,7 +5285,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "bincode",
  "clap",
@@ -5544,7 +5572,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.9#44e4aa4456b084481a9aef1b7ee5f829221d5a0d"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.11#6ee7e8d7b8df3f6df492d4e47f9ad689068cd181"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",
