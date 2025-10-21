@@ -858,7 +858,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
                 <GpuBackend<E, PCS> as ProverBackend>::Pcs,
             >,
         >,
-    ) -> DeviceProvingKey<GpuBackend<E, PCS>> {
+    ) -> DeviceProvingKey<'_, GpuBackend<E, PCS>> {
         let pcs_data_original = pk.fixed_commit_wd.clone().unwrap();
 
         // assert pcs match

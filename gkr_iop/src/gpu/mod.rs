@@ -155,7 +155,7 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu
 
 impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     /// Get reference to internal GPU polynomial
-    pub fn inner(&self) -> &GpuFieldType {
+    pub fn inner(&self) -> &GpuFieldType<'_> {
         &self.mle
     }
 
@@ -240,7 +240,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// get inner poly reference with base field claim
-    pub fn as_ceno_gpu_base(&self) -> &GpuPolynomial {
+    pub fn as_ceno_gpu_base(&self) -> &GpuPolynomial<'_> {
         match &self.mle {
             GpuFieldType::Base(poly) => poly,
             GpuFieldType::Ext(_) => panic!("poly in ext field"),
@@ -249,7 +249,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// get inner poly reference with ext field claim
-    pub fn as_ceno_gpu_ext(&self) -> &GpuPolynomialExt {
+    pub fn as_ceno_gpu_ext(&self) -> &GpuPolynomialExt<'_> {
         match &self.mle {
             GpuFieldType::Base(_) => panic!("poly in base field"),
             GpuFieldType::Ext(poly) => poly,
