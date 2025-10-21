@@ -32,15 +32,15 @@ pub mod gpu_prover {
             },
         },
     };
-    use cudarc::driver::{CudaDevice, DriverError};
+    use cudarc::driver::{CudaContext, DriverError};
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex, MutexGuard};
 
     pub type BB31Base = p3::babybear::BabyBear;
     pub type BB31Ext = ff_ext::BabyBearExt4;
 
-    pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> =
-        Lazy::new(|| CudaDevice::new(0));
+    pub static CUDA_DEVICE: Lazy<Result<Arc<CudaContext>, DriverError>> =
+        Lazy::new(|| CudaContext::new(0));
 
     #[allow(clippy::type_complexity)]
     pub static CUDA_HAL: Lazy<
