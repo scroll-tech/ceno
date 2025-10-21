@@ -16,8 +16,9 @@ use crate::{
     tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, Platform, Program,
-    StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, NextCycleAccess,
+    Platform, Program, StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr,
+    host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -147,7 +148,7 @@ pub struct ShardContext<'a> {
     shards: Shards,
     max_cycle: Cycle,
     // TODO optimize this map as it's super huge
-    addr_future_accesses: Cow<'a, HashMap<(WordAddr, Cycle), Cycle>>,
+    addr_future_accesses: Cow<'a, NextCycleAccess>,
     read_thread_based_record_storage:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     write_thread_based_record_storage:
@@ -161,7 +162,7 @@ impl<'a> Default for ShardContext<'a> {
         Self {
             shards: Shards::default(),
             max_cycle: Cycle::default(),
-            addr_future_accesses: Cow::Owned(HashMap::new()),
+            addr_future_accesses: Cow::Owned(Default::default()),
             read_thread_based_record_storage: Either::Left(
                 (0..max_threads)
                     .into_par_iter()
@@ -183,7 +184,7 @@ impl<'a> ShardContext<'a> {
     pub fn new(
         shards: Shards,
         executed_instructions: usize,
-        addr_future_accesses: HashMap<(WordAddr, Cycle), Cycle>,
+        addr_future_accesses: NextCycleAccess,
     ) -> Self {
         // current strategy: at least each shard deal with one instruction
         let max_num_shards = shards.max_num_shards.min(executed_instructions);
@@ -329,8 +330,21 @@ impl<'a> ShardContext<'a> {
         }
 
         // check write to external mem bus
-        if let Some(future_touch_cycle) = self.addr_future_accesses.get(&(addr, cycle))
-            && *future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle
+        if let Some(future_touch_cycle) =
+            self.addr_future_accesses
+                .get(cycle as usize)
+                .and_then(|res| {
+                    if res.len() == 1 {
+                        Some(res[0].1)
+                    } else if res.len() > 1 {
+                        res.iter()
+                            .find(|(m_addr, _)| *m_addr == addr)
+                            .map(|(_, cycle)| *cycle)
+                    } else {
+                        None
+                    }
+                })
+            && future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle
             && self.is_current_shard_cycle(cycle)
         {
             let ram_record = self
