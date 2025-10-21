@@ -383,8 +383,8 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
     let (left_point, right_point) = bh.get_rotation_points(&row_challenges_e);
     let evals = evals_gpu_e
-        .par_chunks_exact(2)
-        .zip_eq(raw_rotation_exprs.par_iter())
+        .chunks_exact(2)
+        .zip_eq(raw_rotation_exprs.iter())
         .flat_map(|(evals, (rotated_expr, _))| {
             let [rotated_eval, target_eval] = evals else {
                 unreachable!()

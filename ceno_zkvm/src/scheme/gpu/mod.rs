@@ -725,8 +725,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             // as tower sumcheck batch product argument/logup in same length
             let mut evals = input
                 .witness
-                .par_iter()
-                .chain(input.fixed.par_iter())
+                .iter()
+                .chain(input.fixed.iter())
                 .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
                 .collect::<Vec<_>>();
             let fixed_in_evals = evals.split_off(input.witness.len());
