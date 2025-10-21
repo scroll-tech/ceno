@@ -1,9 +1,7 @@
 #![allow(clippy::unusual_byte_groupings)]
 use anyhow::Result;
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use rustc_hash::FxHashMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use ceno_emul::{
     CENO_PLATFORM, Cycle, EmuContext, InsnKind, Instruction, Platform, Program, StepRecord, Tracer,
@@ -111,8 +109,8 @@ fn expected_ops_fibonacci_20() -> Vec<InsnKind> {
 }
 
 /// Reconstruct the last access of each register.
-fn expected_final_accesses_fibonacci_20() -> HashMap<WordAddr, Cycle> {
-    let mut accesses = HashMap::new();
+fn expected_final_accesses_fibonacci_20() -> FxHashMap<WordAddr, Cycle> {
+    let mut accesses = FxHashMap::default();
     let x = |i| WordAddr::from(Platform::register_vma(i));
     const C: Cycle = Tracer::SUBCYCLES_PER_INSN;
 

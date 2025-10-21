@@ -958,9 +958,12 @@ dependencies = [
  "multilinear_extensions",
  "num-derive",
  "num-traits",
+ "rayon",
  "rrs-succinct",
+ "rustc-hash",
  "secp",
  "serde",
+ "smallvec",
  "strum",
  "strum_macros",
  "substrate-bn 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1049,6 +1052,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "rayon",
+ "rustc-hash",
  "serde",
  "serde_json",
  "sp1-curves",
@@ -4432,6 +4436,9 @@ name = "smallvec"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "snowbridge-amcl"
