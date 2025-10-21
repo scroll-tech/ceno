@@ -19,6 +19,7 @@ use multilinear_extensions::{Expression, ToExpr as _, WitIn};
 use p3::field::{Field, FieldAlgebra};
 use witness::set_val;
 
+use crate::e2e::ShardContext;
 use itertools::Itertools;
 use std::{array, marker::PhantomData};
 
@@ -223,6 +224,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -241,7 +243,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         // R-type instruction
         config
             .r_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         let (rd_high, rd_low, carry, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
             I::INST_KIND,

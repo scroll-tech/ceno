@@ -4,6 +4,7 @@ use ff_ext::ExtensionField;
 use crate::{
     chip_handler::{RegisterExpr, general::InstFetch},
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut, WriteRD},
     tables::InsnRecord,
@@ -63,13 +64,17 @@ impl<E: ExtensionField> RInstructionConfig<E> {
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        self.vm_state.assign_instance(instance, step)?;
-        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
-        self.rs2.assign_instance(instance, lk_multiplicity, step)?;
-        self.rd.assign_instance(instance, lk_multiplicity, step)?;
+        self.vm_state.assign_instance(instance, shard_ctx, step)?;
+        self.rs1
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
+        self.rs2
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
+        self.rd
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);

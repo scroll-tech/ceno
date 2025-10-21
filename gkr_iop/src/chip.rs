@@ -40,11 +40,17 @@ impl<E: ExtensionField> Chip<E> {
             n_evaluations: cb.cs.w_expressions.len()
                 + cb.cs.r_expressions.len()
                 + cb.cs.lk_expressions.len()
+                + cb.cs.w_table_expressions.len()
+                + cb.cs.r_table_expressions.len()
+                + cb.cs.lk_table_expressions.len() * 2
                 + cb.cs.num_fixed
                 + cb.cs.num_witin as usize,
             final_out_evals: (0..cb.cs.w_expressions.len()
                 + cb.cs.r_expressions.len()
-                + cb.cs.lk_expressions.len())
+                + cb.cs.lk_expressions.len()
+                + cb.cs.w_table_expressions.len()
+                + cb.cs.r_table_expressions.len()
+                + cb.cs.lk_table_expressions.len() * 2)
                 .collect_vec(),
             layers: vec![],
         }

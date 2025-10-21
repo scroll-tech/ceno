@@ -567,7 +567,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
             .chain(cs.lk_expressions.par_iter())
             .map(|expr| {
-                assert_eq!(expr.degree(), 1);
                 wit_infer_by_expr(
                     expr,
                     cs.num_witin,
@@ -679,26 +678,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 Some(gkr_proof),
             ))
         } else {
-            let span = entered_span!("fixed::evals + witin::evals");
-            // In table proof, we always skip same point sumcheck for now
-            // as tower sumcheck batch product argument/logup in same length
-            let mut evals = input
-                .witness
-                .par_iter()
-                .chain(input.fixed.par_iter())
-                .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
-                .collect::<Vec<_>>();
-            let fixed_in_evals = evals.split_off(input.witness.len());
-            let wits_in_evals = evals;
-            exit_span!(span);
+            let (wits_in_evals, fixed_in_evals, main_sumcheck_proof, rt) = {
+                let span = entered_span!("fixed::evals + witin::evals");
+                let mut evals = input
+                    .witness
+                    .par_iter()
+                    .chain(input.fixed.par_iter())
+                    .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
+                    .collect::<Vec<_>>();
+                let fixed_in_evals = evals.split_off(input.witness.len());
+                let wits_in_evals = evals;
+                exit_span!(span);
+                (wits_in_evals, fixed_in_evals, None, rt_tower)
+            };
 
             Ok((
-                rt_tower,
+                rt,
                 MainSumcheckEvals {
                     wits_in_evals,
                     fixed_in_evals,
                 },
-                None,
+                main_sumcheck_proof,
                 None,
             ))
         }
@@ -713,38 +713,38 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
         witness_data: PCS::CommitmentWithWitness,
         fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
         points: Vec<Point<E>>,
-        mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
-        circuit_num_polys: &[(usize, usize)],
-        num_instances: &[(usize, usize)],
+        mut evals: Vec<Vec<Vec<E>>>, // where each inner vec![wit_evals, fixed_evals]
         transcript: &mut impl Transcript<E>,
     ) -> PCS::Proof {
         let mut rounds = vec![];
-        rounds.push((
-            &witness_data,
-            points
-                .iter()
-                .zip_eq(evals.iter_mut())
-                .zip_eq(num_instances.iter())
-                .map(|((point, evals), (chip_idx, _))| {
-                    let (num_witin, _) = circuit_num_polys[*chip_idx];
-                    (point.clone(), evals.drain(..num_witin).collect_vec())
+        rounds.push((&witness_data, {
+            evals
+                .iter_mut()
+                .zip(&points)
+                .filter_map(|(evals, point)| {
+                    let witin_evals = evals.remove(0);
+                    if !witin_evals.is_empty() {
+                        Some((point.clone(), witin_evals))
+                    } else {
+                        None
+                    }
                 })
-                .collect_vec(),
-        ));
+                .collect_vec()
+        }));
         if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
-            rounds.push((
-                fixed_data,
-                points
-                    .iter()
-                    .zip_eq(evals.iter_mut())
-                    .zip_eq(num_instances.iter())
-                    .filter(|(_, (chip_idx, _))| {
-                        let (_, num_fixed) = circuit_num_polys[*chip_idx];
-                        num_fixed > 0
+            rounds.push((fixed_data, {
+                evals
+                    .iter_mut()
+                    .zip(points)
+                    .filter_map(|(evals, point)| {
+                        if !evals.is_empty() && !evals[0].is_empty() {
+                            Some((point.clone(), evals.remove(0)))
+                        } else {
+                            None
+                        }
                     })
-                    .map(|((point, evals), _)| (point.clone(), evals.to_vec()))
-                    .collect_vec(),
-            ));
+                    .collect_vec()
+            }));
         }
         PCS::batch_open(&self.backend.pp, rounds, transcript).unwrap()
     }

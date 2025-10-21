@@ -26,13 +26,14 @@ use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, WitnessId, fmt,
     mle::{ArcMultilinearExtension, IntoMLEs, MultilinearExtension},
+    util::ceil_log2,
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
 use p3::field::{Field, FieldAlgebra};
 use rand::thread_rng;
 use std::{
     cmp::max,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
     fs::File,
     hash::Hash,
@@ -42,6 +43,7 @@ use std::{
 };
 use strum::IntoEnumIterator;
 use tiny_keccak::{Hasher, Keccak};
+use witness::next_pow2_instance_padding;
 
 const MAX_CONSTRAINT_DEGREE: usize = 3;
 const MOCK_PROGRAM_SIZE: usize = 32;
@@ -828,7 +830,10 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let params = ProgramParams {
             platform: CENO_PLATFORM,
-            program_size: max(program.instructions.len(), MOCK_PROGRAM_SIZE),
+            program_size: max(
+                next_pow2_instance_padding(program.instructions.len()),
+                MOCK_PROGRAM_SIZE,
+            ),
             ..ProgramParams::default()
         };
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -974,30 +979,48 @@ Hints:
         let mut fixed_mles = HashMap::new();
         let mut num_instances = HashMap::new();
 
+        let circuit_index_fixed_num_instances: BTreeMap<String, usize> = fixed_trace
+            .circuit_fixed_traces
+            .iter()
+            .map(|(circuit_name, rmm)| {
+                (
+                    circuit_name.clone(),
+                    rmm.as_ref().map(|rmm| rmm.num_instances()).unwrap_or(0),
+                )
+            })
+            .collect();
         let mut lkm_tables = LkMultiplicityRaw::<E>::default();
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
         // Process all circuits.
-        for (
-            circuit_name,
-            ComposedConstrainSystem {
+        for (circuit_name, composed_cs) in &cs.circuit_css {
+            let ComposedConstrainSystem {
                 zkvm_v1_css: cs,
                 gkr_circuit,
-            },
-        ) in &cs.circuit_css
-        {
+            } = &composed_cs;
             let is_opcode = gkr_circuit.is_some();
             let [witness, structural_witness] = witnesses
                 .get_opcode_witness(circuit_name)
                 .or_else(|| witnesses.get_table_witness(circuit_name))
                 .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
-            let num_rows = witness.num_instances();
+            let num_rows = if witness.num_instances() > 0 {
+                witness.num_instances()
+            } else if structural_witness.num_instances() > 0 {
+                structural_witness.num_instances()
+            } else if composed_cs.is_static_circuit() {
+                circuit_index_fixed_num_instances
+                    .get(circuit_name)
+                    .copied()
+                    .unwrap_or(0)
+            } else {
+                0
+            };
 
-            if witness.num_instances() == 0 {
+            if num_rows == 0 {
                 wit_mles.insert(circuit_name.clone(), vec![]);
                 structural_wit_mles.insert(circuit_name.clone(), vec![]);
                 fixed_mles.insert(circuit_name.clone(), vec![]);
-                num_instances.insert(circuit_name.clone(), num_rows);
+                num_instances.insert(circuit_name.clone(), 0);
                 continue;
             }
             let mut witness = witness
@@ -1133,21 +1156,20 @@ Hints:
                     if *num_rows == 0 {
                         continue;
                     }
-
                     let w_selector: ArcMultilinearExtension<_> =
                         if let Some(w_selector) = &cs.w_selector {
                             structural_witness[w_selector.selector_expr().id()].clone()
                         } else {
                             let mut selector = vec![E::BaseField::ONE; *num_rows];
-                            selector.resize(witness[0].evaluations().len(), E::BaseField::ZERO);
+                            selector.resize(next_pow2_instance_padding(*num_rows), E::BaseField::ZERO);
                             MultilinearExtension::from_evaluation_vec_smart(
-                                witness[0].num_vars(),
+                                ceil_log2(next_pow2_instance_padding(*num_rows)),
                                 selector,
                             )
                             .into()
                         };
 
-                    for ((w_rlc_expr, annotation), _) in (cs
+                    for ((w_rlc_expr, annotation), (ram_type_expr, _)) in (cs
                         .w_expressions
                         .iter()
                         .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
@@ -1157,8 +1179,19 @@ Hints:
                             .chain(cs.w_table_expressions_namespace_map.iter()),
                     )
                     .zip_eq(cs.w_ram_types.iter())
-                    .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
+                        let ram_type_mle = wit_infer_by_expr(
+                            ram_type_expr,
+                            cs.num_witin,
+                            cs.num_structural_witin,
+                            cs.num_fixed as WitnessId,
+                            fixed,
+                            witness,
+                            structural_witness,
+                            &pi_mles,
+                            &challenges,
+                        );
+                        let ram_type_vec = ram_type_mle.get_ext_field_vec();
                         let write_rlc_records = wit_infer_by_expr(
                             w_rlc_expr,
                             cs.num_witin,
@@ -1170,13 +1203,34 @@ Hints:
                             &pi_mles,
                             &challenges,
                         );
+                        let w_selector_vec = w_selector.get_base_field_vec();
                         let write_rlc_records =
-                            filter_mle_by_selector_mle(write_rlc_records, w_selector.clone());
+                            filter_mle_by_predicate(write_rlc_records, |i, _v| {
+                                ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
+                                    && w_selector_vec[i] == E::BaseField::ONE
+                            });
+                        if write_rlc_records.is_empty() {
+                            continue;
+                        }
 
                         let mut records = vec![];
+                        let mut writes_within_expr_dedup = HashSet::new();
                         for (row, record_rlc) in enumerate(write_rlc_records) {
                             // TODO: report error
-                            assert_eq!(writes.insert(record_rlc), true);
+                            assert_eq!(
+                                writes_within_expr_dedup.insert(record_rlc),
+                                true,
+                                "within expression write duplicated on RAMType {:?} annotation {:?}",
+                                $ram_type,
+                                annotation
+                            );
+                            assert_eq!(
+                                writes.insert(record_rlc),
+                                true,
+                                "crossing-chip write duplicated on RAMType {:?} annotation {:?}",
+                                $ram_type,
+                                annotation
+                            );
                             records.push((record_rlc, row));
                         }
                         writes_grp_by_annotations
@@ -1205,14 +1259,14 @@ Hints:
                             structural_witness[r_selector.selector_expr().id()].clone()
                         } else {
                             let mut selector = vec![E::BaseField::ONE; *num_rows];
-                            selector.resize(witness[0].evaluations().len(), E::BaseField::ZERO);
+                            selector.resize(next_pow2_instance_padding(*num_rows), E::BaseField::ZERO);
                             MultilinearExtension::from_evaluation_vec_smart(
-                                witness[0].num_vars(),
+                                ceil_log2(next_pow2_instance_padding(*num_rows)),
                                 selector,
                             )
                             .into()
                         };
-                    for ((r_rlc_expr, annotation), (_, r_exprs)) in (cs
+                    for ((r_rlc_expr, annotation), (ram_type_expr, r_exprs)) in (cs
                         .r_expressions
                         .iter()
                         .chain(cs.r_table_expressions.iter().map(|expr| &expr.expr)))
@@ -1222,8 +1276,19 @@ Hints:
                             .chain(cs.r_table_expressions_namespace_map.iter()),
                     )
                     .zip_eq(cs.r_ram_types.iter())
-                    .filter(|((_, _), (ram_type, _))| *ram_type == $ram_type)
                     {
+                        let ram_type_mle = wit_infer_by_expr(
+                            ram_type_expr,
+                            cs.num_witin,
+                            cs.num_structural_witin,
+                            cs.num_fixed as WitnessId,
+                            fixed,
+                            witness,
+                            structural_witness,
+                            &pi_mles,
+                            &challenges,
+                        );
+                        let ram_type_vec = ram_type_mle.get_ext_field_vec();
                         let read_records = wit_infer_by_expr(
                             r_rlc_expr,
                             cs.num_witin,
@@ -1235,8 +1300,14 @@ Hints:
                             &pi_mles,
                             &challenges,
                         );
-                        let read_records =
-                            filter_mle_by_selector_mle(read_records, r_selector.clone());
+                        let r_selector_vec = r_selector.get_base_field_vec();
+                        let read_records = filter_mle_by_predicate(read_records, |i, _v| {
+                            ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
+                                && r_selector_vec[i] == E::BaseField::ONE
+                        });
+                        if read_records.is_empty() {
+                            continue;
+                        }
 
                         if $ram_type == RAMType::GlobalState {
                             // r_exprs = [GlobalState, pc, timestamp]
@@ -1269,9 +1340,23 @@ Hints:
                         };
 
                         let mut records = vec![];
+                        let mut reads_within_expr_dedup = HashSet::new();
                         for (row, record) in enumerate(read_records) {
                             // TODO: return error
-                            assert_eq!(reads.insert(record), true);
+                            assert_eq!(
+                                reads_within_expr_dedup.insert(record),
+                                true,
+                                "within expression read duplicated on RAMType {:?} annotation {:?}",
+                                $ram_type,
+                                annotation,
+                            );
+                            assert_eq!(
+                                reads.insert(record),
+                                true,
+                                "crossing-chip read duplicated on RAMType {:?} annotation {:?}",
+                                $ram_type,
+                                annotation,
+                            );
                             records.push((record, row));
                         }
                         reads_grp_by_annotations
@@ -1467,6 +1552,19 @@ fn print_errors<E: ExtensionField, K: LkMultiplicityKey>(
     }
 }
 
+fn filter_mle_by_predicate<E, F>(target_mle: ArcMultilinearExtension<E>, mut predicate: F) -> Vec<E>
+where
+    E: ExtensionField,
+    F: FnMut(usize, &E) -> bool,
+{
+    target_mle
+        .get_ext_field_vec()
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| if predicate(i, v) { Some(*v) } else { None })
+        .collect_vec()
+}
+
 fn filter_mle_by_selector_mle<E: ExtensionField>(
     target_mle: ArcMultilinearExtension<E>,
     selector: ArcMultilinearExtension<E>,
@@ -1487,7 +1585,6 @@ fn filter_mle_by_selector_mle<E: ExtensionField>(
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::{
         ROMType,

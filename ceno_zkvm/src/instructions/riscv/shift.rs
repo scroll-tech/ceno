@@ -45,6 +45,7 @@ mod tests {
     use crate::utils::split_to_u8;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
+        e2e::ShardContext,
         instructions::{Instruction, riscv::RIVInstruction},
         scheme::mock_prover::{MOCK_PC_START, MockProver},
         structs::ProgramParams,
@@ -173,6 +174,7 @@ mod tests {
 
         let (raw_witin, lkm) = ShiftLogicalInstruction::<E, I>::assign_instances(
             &config,
+            &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
             vec![StepRecord::new_r_instruction(

@@ -8,6 +8,7 @@ use super::{super::insn_base::WriteMEM, dummy_circuit::DummyConfig};
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -84,6 +85,7 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -93,14 +95,14 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
         // Assign instruction.
         config
             .dummy_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         set_val!(instance, config.start_addr, u64::from(ops.mem_ops[0].addr));
 
         // Assign registers.
         for ((value, writer), op) in config.reg_writes.iter().zip_eq(&ops.reg_ops) {
             value.assign_value(instance, Value::new_unchecked(op.value.after));
-            writer.assign_op(instance, lk_multiplicity, step.cycle(), op)?;
+            writer.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
         }
 
         // Assign memory.
@@ -112,7 +114,7 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
                 .after
                 .assign_value(instance, Value::new(op.value.after, lk_multiplicity));
             set_val!(instance, addr, u64::from(op.addr));
-            writer.assign_op(instance, lk_multiplicity, step.cycle(), op)?;
+            writer.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
         }
 
         Ok(())

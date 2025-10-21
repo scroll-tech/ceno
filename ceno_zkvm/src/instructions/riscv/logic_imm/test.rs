@@ -4,6 +4,7 @@ use gkr_iop::circuit_builder::DebugIndex;
 
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     instructions::{
         Instruction,
         riscv::{
@@ -70,6 +71,7 @@ fn verify<I: LogicOp>(name: &'static str, rs1_read: u32, imm: u32, expected_rd_w
     let insn_code = encode_rv32u(I::INST_KIND, 2, 0, 4, imm);
     let (raw_witin, lkm) = LogicInstruction::<GoldilocksExt2, I>::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_i_instruction(

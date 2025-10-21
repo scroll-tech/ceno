@@ -345,12 +345,16 @@ pub fn build_main_witness<
         }
 
         if let Some(gkr_circuit) = gkr_circuit {
-            // opcode must have at least one read/write/lookup
+            // circuit must have at least one read/write/lookup
             assert!(
-                cs.lk_expressions.is_empty()
-                    || !cs.r_expressions.is_empty()
-                    || !cs.w_expressions.is_empty(),
-                "assert opcode circuit"
+                cs.r_expressions.len()
+                    + cs.w_expressions.len()
+                    + cs.lk_expressions.len()
+                    + cs.r_table_expressions.len()
+                    + cs.w_table_expressions.len()
+                    + cs.lk_table_expressions.len()
+                    > 0,
+                "assert circuit"
             );
 
             let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
@@ -365,7 +369,7 @@ pub fn build_main_witness<
         } else {
             (
                 <PD as MainSumcheckProver<PB>>::table_witness(device, input, cs, challenges),
-                false,
+                input.num_instances > 1 && input.num_instances.is_power_of_two(),
             )
         }
     };
