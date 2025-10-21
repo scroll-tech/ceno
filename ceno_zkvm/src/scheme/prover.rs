@@ -86,11 +86,6 @@ impl<
         let mut chip_proofs: BTreeMap<usize, ZKVMChipProof<E>> = BTreeMap::new();
 
         let span = entered_span!("commit_to_pi", profiling_1 = true);
-        println!("commit_to_pi: raw_pi.len() = {}", raw_pi.len());
-        println!("commit_to_pi: raw_pi.iter().flatten().count() = {}", raw_pi.iter().flatten().count());
-        for (idx, v_pi) in raw_pi.iter().enumerate() {
-            println!("commit_to_pi: raw_pi[{}].len() = {}", idx, v_pi.len());
-        }
         // including raw public input to transcript
         for v in raw_pi.iter().flatten() {
             transcript.append_field_element(v);
@@ -232,14 +227,13 @@ impl<
                     .map(|mle| mle.into())
                     .collect_vec();
 
-                let structural_witness_span = entered_span!("structural_witness", profiling_2 = true);
+                let structural_witness_span =
+                    entered_span!("structural_witness", profiling_2 = true);
                 let structural_mles = structural_wits
                     .remove(circuit_name)
                     .map(|(sw, _)| sw)
                     .unwrap_or(vec![]);
-                let structural_witness = self.device.transport_mles(
-                    &structural_mles,
-                );
+                let structural_witness = self.device.transport_mles(&structural_mles);
                 exit_span!(structural_witness_span);
 
                 let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();

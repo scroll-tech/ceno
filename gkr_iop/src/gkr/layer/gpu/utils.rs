@@ -66,9 +66,7 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
     num_instances: usize,
     selector: &SelectorType<E>,
 ) -> MultilinearExtensionGpu<'static, E> {
-    if std::any::TypeId::of::<E::BaseField>()
-        != std::any::TypeId::of::<BB31Base>()
-    {
+    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
         panic!("GPU backend only supports Goldilocks base field");
     }
 
@@ -89,21 +87,33 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         };
         let indices_u32 = indices.iter().map(|x| *x as u32).collect_vec();
-        ordered_sparse32_selector_gpu::<CudaHalBB31, BB31Ext, BB31Base>(&hal.inner, &mut eq_buf.buf, &indices_u32, num_instances)
-            .unwrap();
+        ordered_sparse32_selector_gpu::<CudaHalBB31, BB31Ext, BB31Base>(
+            &hal.inner,
+            &mut eq_buf.buf,
+            &indices_u32,
+            num_instances,
+        )
+        .unwrap();
         eq_buf
     } else {
         let point_gl64: &Point<BB31Ext> = unsafe { std::mem::transmute(point) };
         let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len).unwrap();
         let gpu_points = hal.alloc_ext_elems_from_host(point_gl64).unwrap();
-        build_mle_as_ceno::<CudaHalBB31, BB31Ext, BB31Base>(&hal.inner, &gpu_points, &mut gpu_output, num_instances).unwrap();
+        build_mle_as_ceno::<CudaHalBB31, BB31Ext, BB31Base>(
+            &hal.inner,
+            &gpu_points,
+            &mut gpu_output,
+            num_instances,
+        )
+        .unwrap();
         GpuPolynomialExt::new(gpu_output, point.len())
     };
     let mle_gl64 = MultilinearExtensionGpu::from_ceno_gpu_ext(eq_mle);
     unsafe {
-        std::mem::transmute::<MultilinearExtensionGpu<'static, BB31Ext>, MultilinearExtensionGpu<'static, E>>(
-            mle_gl64,
-        )
+        std::mem::transmute::<
+            MultilinearExtensionGpu<'static, BB31Ext>,
+            MultilinearExtensionGpu<'static, E>,
+        >(mle_gl64)
     }
 }
 
@@ -111,9 +121,7 @@ pub fn build_eq_x_r_gpu<E: ExtensionField>(
     hal: &CudaHalBB31,
     point: &Point<E>,
 ) -> MultilinearExtensionGpu<'static, E> {
-    if std::any::TypeId::of::<E::BaseField>()
-        != std::any::TypeId::of::<BB31Base>()
-    {
+    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
         panic!("GPU backend only supports Goldilocks base field");
     }
 
@@ -123,14 +131,21 @@ pub fn build_eq_x_r_gpu<E: ExtensionField>(
     let eq_mle = {
         let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len).unwrap();
         let gpu_points = hal.alloc_ext_elems_from_host(point_gl64).unwrap();
-        build_mle_as_ceno::<CudaHalBB31, BB31Ext, BB31Base>(&hal.inner, &gpu_points, &mut gpu_output, eq_len).unwrap();
+        build_mle_as_ceno::<CudaHalBB31, BB31Ext, BB31Base>(
+            &hal.inner,
+            &gpu_points,
+            &mut gpu_output,
+            eq_len,
+        )
+        .unwrap();
         GpuPolynomialExt::new(gpu_output, point.len())
     };
     let mle_gl64 = MultilinearExtensionGpu::from_ceno_gpu_ext(eq_mle);
     unsafe {
-        std::mem::transmute::<MultilinearExtensionGpu<'static, BB31Ext>, MultilinearExtensionGpu<'static, E>>(
-            mle_gl64,
-        )
+        std::mem::transmute::<
+            MultilinearExtensionGpu<'static, BB31Ext>,
+            MultilinearExtensionGpu<'static, E>,
+        >(mle_gl64)
     }
 }
 
@@ -158,13 +173,12 @@ pub fn build_rotation_mles_gpu<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     _ => panic!("unimplemented input mle"),
                 };
                 let mut output_buf = cuda_hal.alloc_elems_on_device(input_buf.len()).unwrap();
-                
+
                 // Safety: GPU buffers are actually 'static lifetime. We only read from input_buf
                 // during the GPU kernel execution, which completes synchronously before returning.
-                let input_buf_static: &BufferImpl<'static, BB31Base> = unsafe {
-                    std::mem::transmute(input_buf)
-                };
-                
+                let input_buf_static: &BufferImpl<'static, BB31Base> =
+                    unsafe { std::mem::transmute(input_buf) };
+
                 rotation_next_base_mle_gpu::<CudaHalBB31, BB31Ext, BB31Base>(
                     &cuda_hal.inner,
                     &mut output_buf,
@@ -227,8 +241,9 @@ pub fn build_rotation_selector_gpu<E: ExtensionField, PCS: PolynomialCommitmentS
         total_len.ilog2() as usize,
     ));
     unsafe {
-        std::mem::transmute::<MultilinearExtensionGpu<'static, BB31Ext>, MultilinearExtensionGpu<'static, E>>(
-            output_mle,
-        )
+        std::mem::transmute::<
+            MultilinearExtensionGpu<'static, BB31Ext>,
+            MultilinearExtensionGpu<'static, E>,
+        >(output_mle)
     }
 }

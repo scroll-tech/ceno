@@ -20,12 +20,16 @@ use std::marker::PhantomData;
 pub mod gpu_prover {
     pub use ceno_gpu::{
         BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu, Buffer, CudaHal,
-        common::buffer::BufferImpl,
-        common::mle::{build_mle_as_ceno, ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu, rotation_selector_gpu},
-        common::basefold::utils::convert_ceno_to_gpu_basefold_commitment,
-        bb31::{ 
-            CudaHalBB31, GpuFieldType, GpuPolynomial, GpuPolynomialExt,
-            GpuMatrix, GpuDigestLayer,
+        bb31::{
+            CudaHalBB31, GpuDigestLayer, GpuFieldType, GpuMatrix, GpuPolynomial, GpuPolynomialExt,
+        },
+        common::{
+            basefold::utils::convert_ceno_to_gpu_basefold_commitment,
+            buffer::BufferImpl,
+            mle::{
+                build_mle_as_ceno, ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu,
+                rotation_selector_gpu,
+            },
         },
     };
     use cudarc::driver::{CudaDevice, DriverError};
@@ -291,8 +295,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
     type MultilinearPoly<'a> = MultilinearExtensionGpu<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
-    type PcsData =
-        BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<'static, E::BaseField>, GpuDigestLayer, GpuMatrix<'static>, GpuPolynomial<'static>>;
+    type PcsData = BasefoldCommitmentWithWitnessGpu<
+        E::BaseField,
+        BufferImpl<'static, E::BaseField>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    >;
     #[cfg(not(feature = "gpu"))]
     type PcsData = <PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
@@ -333,9 +342,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         challenges: &[E],
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let span = entered_span!("preprocess", profiling_2 = true);
-        if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<BB31Base>()
-        {
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 

@@ -16,7 +16,6 @@ use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 pub use multilinear_extensions::wit_infer_by_expr;
 use multilinear_extensions::{
-    macros::{entered_span, exit_span},
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
@@ -297,7 +296,12 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     wit_layers
 }
 
-#[tracing::instrument(skip_all, name = "build_main_witness", fields(profiling_2), level = "trace")]
+#[tracing::instrument(
+    skip_all,
+    name = "build_main_witness",
+    fields(profiling_2),
+    level = "trace"
+)]
 pub fn build_main_witness<
     'a,
     E: ExtensionField,

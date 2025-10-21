@@ -63,7 +63,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Gp
         let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
         let res = <CpuProver<CpuBackend<E, PCS>> as LinearLayerProver<CpuBackend<E, PCS>>>::prove(
             layer, cpu_wit, out_point, transcript,
-        ); 
+        );
         exit_span!(span);
         res
     }

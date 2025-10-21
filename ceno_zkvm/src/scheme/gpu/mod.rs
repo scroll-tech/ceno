@@ -109,9 +109,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         <GpuBackend<E, PCS> as ProverBackend>::PcsData,
         PCS::Commitment,
     ) {
-        if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<BB31Base>()
-        {
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 
@@ -144,7 +142,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 unsafe { std::mem::transmute(vec_traces) };
 
             let span = entered_span!("[gpu] batch_commit", profiling_2 = true);
-            let pcs_data = cuda_hal.basefold.batch_commit(&cuda_hal, traces_gl64).unwrap();
+            let pcs_data = cuda_hal
+                .basefold
+                .batch_commit(&cuda_hal, traces_gl64)
+                .unwrap();
             exit_span!(span);
 
             let span = entered_span!("[gpu] get_pure_commitment", profiling_2 = true);
@@ -209,7 +210,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     let records = unsafe {
         std::mem::transmute::<
             &[ArcMultilinearExtensionGpu<'_, E>],
-            &[ArcMultilinearExtensionGpu<'static, E>]
+            &[ArcMultilinearExtensionGpu<'static, E>],
         >(records)
     };
 
@@ -443,9 +444,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         'a: 'b,
         'b: 'c,
     {
-        if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<BB31Base>()
-        {
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 
@@ -760,9 +759,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         num_instances: &[(usize, usize)],
         transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
-        if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<BB31Base>()
-        {
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 
@@ -865,9 +862,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         let pcs_data_original = pk.fixed_commit_wd.clone().unwrap();
 
         // assert pcs match
-        let is_pcs_match =
-            std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
-                == std::mem::size_of::<PCS::CommitmentWithWitness>();
+        let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
+            == std::mem::size_of::<PCS::CommitmentWithWitness>();
         assert!(is_pcs_match, "pcs mismatch");
 
         // 1. transmute from PCS::CommitmentWithWitness to BasefoldCommitmentWithWitness<E>
@@ -875,8 +871,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
             unsafe { std::mem::transmute_copy(&pcs_data_original.as_ref()) };
         // 2. convert from BasefoldCommitmentWithWitness<E> to BasefoldCommitmentWithWitness<BB31Base>
         let cuda_hal = get_cuda_hal().unwrap();
-        let pcs_data_basefold =
-            convert_ceno_to_gpu_basefold_commitment::<CudaHalBB31, BB31Ext, BB31Base, GpuDigestLayer, GpuMatrix, GpuPolynomial>(&cuda_hal, basefold_commitment);
+        let pcs_data_basefold = convert_ceno_to_gpu_basefold_commitment::<
+            CudaHalBB31,
+            BB31Ext,
+            BB31Base,
+            GpuDigestLayer,
+            GpuMatrix,
+            GpuPolynomial,
+        >(&cuda_hal, basefold_commitment);
         let pcs_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
             unsafe { std::mem::transmute_copy(&pcs_data_basefold) };
         std::mem::forget(pcs_data_basefold);
