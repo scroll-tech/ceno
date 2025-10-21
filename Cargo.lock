@@ -1879,7 +1879,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "once_cell",
  "p3",
@@ -2723,7 +2723,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "bincode",
  "clap",
@@ -2747,7 +2747,7 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "either",
  "ff_ext",
@@ -3068,7 +3068,7 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "p3-air",
  "p3-baby-bear",
@@ -3544,7 +3544,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "ff_ext",
  "p3",
@@ -4484,7 +4484,7 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -4590,7 +4590,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "either",
  "ff_ext",
@@ -4608,7 +4608,7 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "itertools 0.13.0",
  "p3",
@@ -5003,7 +5003,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -5275,7 +5275,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "bincode",
  "clap",
@@ -5562,7 +5562,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?rev=v1.0.0-alpha.10#a1050f9249e1756c07219201d04883adbb674cdf"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",
