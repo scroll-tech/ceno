@@ -196,7 +196,7 @@ impl<E: ExtensionField> SelectorType<E> {
                 let end = start + ctx.num_instances;
 
                 assert_eq!(in_point.len(), out_point.len());
-                assert!(end <= (1 << out_point.len()));
+                assert!(end <= (1 << out_point.len()), "start: {}, num_instances: {}, num_vars: {}", start, ctx.num_instances, ctx.num_vars);
 
                 let eq_end = eq_eval_less_or_equal_than(end - 1, out_point, in_point);
                 let sel = if start > 0 {

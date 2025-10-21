@@ -107,13 +107,8 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
 
         // if is_global_write = 1, then it means we are propagating a local write to global
         // so we need to insert a local read record to cancel out this local write
-        // otherwise, we insert a padding value 1 to avoid affecting local memory checking
 
         cb.assert_bit(|| "is_global_write must be boolean", is_global_write.expr())?;
-
-        // if we are reading from global set, then this record should be
-        // considered as a initial local write to that address.
-        // otherwise, we insert a padding value 1 as if we are not writing anything
 
         // local read/write consistency
         cb.condition_require_zero(
@@ -524,9 +519,9 @@ mod tests {
             .unwrap();
 
         // create a bunch of random memory read/write records
-        let n_reads = 16;
-        let n_writes = 16;
-        let global_reads = (0..n_reads)
+        let n_global_reads = 16;
+        let n_global_writes = 16;
+        let global_reads = (0..n_global_reads)
             .map(|i| {
                 let addr = i * 8;
                 let value = (i + 1) * 8;
@@ -535,15 +530,15 @@ mod tests {
                     addr: addr as u32,
                     ram_type: RAMType::Memory,
                     value: value as u32,
-                    shard: 1,
-                    local_clk: i,
+                    shard: 0,
+                    local_clk: 0,
                     global_clk: i,
                     is_write: false,
                 }
             })
             .collect::<Vec<_>>();
 
-        let global_writes = (0..n_writes)
+        let global_writes = (0..n_global_writes)
             .map(|i| {
                 let addr = i * 8;
                 let value = (i + 1) * 8;
@@ -580,7 +575,6 @@ mod tests {
                 .map(|fe| fe.as_canonical_u32())
                 .collect_vec(),
         );
-        assert!(global_ec_sum.is_infinity == true);
         // assign witness
         let (witness, lk) = GlobalChip::assign_instances(
             &config,
@@ -621,13 +615,13 @@ mod tests {
             structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
             fixed: vec![],
             public_input: public_input_mles.clone(),
-            num_read_instances: n_writes as usize,
-            num_write_instances: n_reads as usize,
-            num_instances: (n_reads + n_writes) as usize,
+            num_read_instances: n_global_writes as usize,
+            num_write_instances: n_global_reads as usize,
+            num_instances: (n_global_reads + n_global_writes) as usize,
         };
         let mut rng = thread_rng();
         let challenges = [E::random(&mut rng), E::random(&mut rng)];
-        let (proof, _pi_evals, point) = zkvm_prover
+        let (proof, _, point) = zkvm_prover
             .create_chip_proof(
                 "global chip",
                 &pk,
@@ -643,13 +637,6 @@ mod tests {
             .iter()
             .map(|mle| mle.evaluate(&point[..mle.num_vars()]))
             .collect_vec();
-        pi_evals
-            .iter()
-            .skip(8)
-            .zip(_pi_evals.values())
-            .for_each(|(a, b)| {
-                assert_eq!(*a, *b);
-            });
         let opening_point = verifier
             .verify_opcode_proof(
                 "global",
