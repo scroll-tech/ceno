@@ -12,11 +12,11 @@ use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use num_bigint::BigUint;
 use p3::{
-    babybear::BabyBearInternalLayerParameters,
-    field::{Field, FieldAlgebra},
+    babybear::{BabyBear, BabyBearInternalLayerParameters},
+    field::{Field, FieldAlgebra, PrimeField},
     monty_31::InternalLayerBaseParameters,
-    poseidon2::{MDSMat4, mds_light_permutation},
-    poseidon2_air::{FullRound, PartialRound, Poseidon2Cols, SBox, generate_trace_rows, num_cols},
+    poseidon2::{GenericPoseidon2LinearLayers, MDSMat4, mds_light_permutation},
+    poseidon2_air::{FullRound, PartialRound, Poseidon2Cols, SBox, num_cols},
 };
 
 use crate::circuit_builder::CircuitBuilder;
@@ -46,6 +46,35 @@ pub struct Poseidon2Config<
 > {
     cols: Vec<WitIn>,
     constants: RoundConstants<E::BaseField, STATE_WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Poseidon2LinearLayers;
+
+impl<F: Field, const WIDTH: usize> GenericPoseidon2LinearLayers<F, WIDTH>
+    for Poseidon2LinearLayers
+{
+    fn internal_linear_layer(state: &mut [F; WIDTH]) {
+        // this only works when F is BabyBear field for now
+        let babybear_prime = BigUint::from(0x7800_0001u32);
+        if F::order() == babybear_prime {
+            let diag_m1_matrix = &<BabyBearInternalLayerParameters as InternalLayerBaseParameters<
+            _,
+            16,
+        >>::INTERNAL_DIAG_MONTY;
+            let diag_m1_matrix: &[F; WIDTH] = unsafe { transmute(diag_m1_matrix) };
+            let sum = state.iter().cloned().sum::<F>();
+            for (input, diag_m1) in state.iter_mut().zip(diag_m1_matrix) {
+                *input = sum.clone() + F::from_f(*diag_m1) * input.clone();
+            }
+        } else {
+            panic!("Unsupported field");
+        }
+    }
+
+    fn external_linear_layer(state: &mut [F; WIDTH]) {
+        mds_light_permutation(state, &MDSMat4);
+    }
 }
 
 impl<
@@ -267,17 +296,178 @@ impl<
             .unwrap()
     }
 
-    // pub fn assign_instance(&self, input: &[E; STATE_WIDTH]) {
-    //     generate_trace_rows(inputs, constants)
-    //     let poseidon2_cols: &Poseidon2Cols<
-    //         WitIn,
-    //         STATE_WIDTH,
-    //         SBOX_DEGREE,
-    //         SBOX_REGISTERS,
-    //         HALF_FULL_ROUNDS,
-    //         PARTIAL_ROUNDS,
-    //     > = self.cols.as_slice().borrow();
-    // }
+    pub fn assign_instance(
+        &self,
+        instance: &mut [E::BaseField],
+        state: [E::BaseField; STATE_WIDTH],
+    ) {
+        let poseidon2_cols: &mut Poseidon2Cols<
+            E::BaseField,
+            STATE_WIDTH,
+            SBOX_DEGREE,
+            SBOX_REGISTERS,
+            HALF_FULL_ROUNDS,
+            PARTIAL_ROUNDS,
+        > = instance.borrow_mut();
+
+        generate_trace_rows_for_perm::<
+            E::BaseField,
+            Poseidon2LinearLayers,
+            STATE_WIDTH,
+            SBOX_DEGREE,
+            SBOX_REGISTERS,
+            HALF_FULL_ROUNDS,
+            PARTIAL_ROUNDS,
+        >(poseidon2_cols, state, &self.constants);
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// The following routines are taken from poseidon2-air/src/generation.rs
+//////////////////////////////////////////////////////////////////////////
+
+fn generate_trace_rows_for_perm<
+    F: PrimeField,
+    LinearLayers: GenericPoseidon2LinearLayers<F, WIDTH>,
+    const WIDTH: usize,
+    const SBOX_DEGREE: u64,
+    const SBOX_REGISTERS: usize,
+    const HALF_FULL_ROUNDS: usize,
+    const PARTIAL_ROUNDS: usize,
+>(
+    perm: &mut Poseidon2Cols<
+        F,
+        WIDTH,
+        SBOX_DEGREE,
+        SBOX_REGISTERS,
+        HALF_FULL_ROUNDS,
+        PARTIAL_ROUNDS,
+    >,
+    mut state: [F; WIDTH],
+    constants: &RoundConstants<F, WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>,
+) {
+    perm.export = F::ONE;
+    perm.inputs
+        .iter_mut()
+        .zip(state.iter())
+        .for_each(|(input, &x)| {
+            *input = x;
+        });
+
+    LinearLayers::external_linear_layer(&mut state);
+
+    for (full_round, constants) in perm
+        .beginning_full_rounds
+        .iter_mut()
+        .zip(&constants.beginning_full_round_constants)
+    {
+        generate_full_round::<F, LinearLayers, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>(
+            &mut state, full_round, constants,
+        );
+    }
+
+    for (partial_round, constant) in perm
+        .partial_rounds
+        .iter_mut()
+        .zip(&constants.partial_round_constants)
+    {
+        generate_partial_round::<F, LinearLayers, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>(
+            &mut state,
+            partial_round,
+            *constant,
+        );
+    }
+
+    for (full_round, constants) in perm
+        .ending_full_rounds
+        .iter_mut()
+        .zip(&constants.ending_full_round_constants)
+    {
+        generate_full_round::<F, LinearLayers, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>(
+            &mut state, full_round, constants,
+        );
+    }
+}
+
+#[inline]
+fn generate_full_round<
+    F: PrimeField,
+    LinearLayers: GenericPoseidon2LinearLayers<F, WIDTH>,
+    const WIDTH: usize,
+    const SBOX_DEGREE: u64,
+    const SBOX_REGISTERS: usize,
+>(
+    state: &mut [F; WIDTH],
+    full_round: &mut FullRound<F, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
+    round_constants: &[F; WIDTH],
+) {
+    for (state_i, const_i) in state.iter_mut().zip(round_constants) {
+        *state_i += *const_i;
+    }
+    for (state_i, sbox_i) in state.iter_mut().zip(full_round.sbox.iter_mut()) {
+        generate_sbox(sbox_i, state_i);
+    }
+    LinearLayers::external_linear_layer(state);
+    full_round
+        .post
+        .iter_mut()
+        .zip(*state)
+        .for_each(|(post, x)| {
+            *post = x;
+        });
+}
+
+#[inline]
+fn generate_partial_round<
+    F: PrimeField,
+    LinearLayers: GenericPoseidon2LinearLayers<F, WIDTH>,
+    const WIDTH: usize,
+    const SBOX_DEGREE: u64,
+    const SBOX_REGISTERS: usize,
+>(
+    state: &mut [F; WIDTH],
+    partial_round: &mut PartialRound<F, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
+    round_constant: F,
+) {
+    state[0] += round_constant;
+    generate_sbox(&mut partial_round.sbox, &mut state[0]);
+    partial_round.post_sbox = state[0];
+    LinearLayers::internal_linear_layer(state);
+}
+
+#[inline]
+fn generate_sbox<F: PrimeField, const DEGREE: u64, const REGISTERS: usize>(
+    sbox: &mut SBox<F, DEGREE, REGISTERS>,
+    x: &mut F,
+) {
+    *x = match (DEGREE, REGISTERS) {
+        (3, 0) => x.cube(),
+        (5, 0) => x.exp_const_u64::<5>(),
+        (7, 0) => x.exp_const_u64::<7>(),
+        (5, 1) => {
+            let x2 = x.square();
+            let x3 = x2 * *x;
+            sbox.0[0] = x3;
+            x3 * x2
+        }
+        (7, 1) => {
+            let x3 = x.cube();
+            sbox.0[0] = x3;
+            x3 * x3 * *x
+        }
+        (11, 2) => {
+            let x2 = x.square();
+            let x3 = x2 * *x;
+            let x9 = x3.cube();
+            sbox.0[0] = x3;
+            sbox.0[1] = x9;
+            x9 * x2
+        }
+        _ => panic!(
+            "Unexpected (DEGREE, REGISTERS) of ({}, {})",
+            DEGREE, REGISTERS
+        ),
+    }
 }
 
 #[cfg(test)]

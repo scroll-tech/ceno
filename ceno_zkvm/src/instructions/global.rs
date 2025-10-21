@@ -5,12 +5,12 @@ use crate::{
     chip_handler::general::PublicIOQuery,
     error::ZKVMError,
     gadgets::{Poseidon2Config, RoundConstants},
+    instructions::riscv::constants::UINT_LIMBS,
     scheme::septic_curve::{SepticExtension, SepticPoint},
     structs::{ProgramParams, RAMType},
     tables::RMMCollections,
     witness::LkMultiplicity,
 };
-use ceno_emul::StepRecord;
 use ff_ext::{ExtensionField, FieldInto, POSEIDON2_BABYBEAR_WIDTH, SmallField};
 use gkr_iop::{
     chip::Chip, circuit_builder::CircuitBuilder, error::CircuitBuilderError, gkr::layer::Layer,
@@ -55,7 +55,7 @@ pub struct GlobalConfig<E: ExtensionField, P> {
     is_global_write: WitIn,
     x: Vec<WitIn>,
     y: Vec<WitIn>,
-    // perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
+    perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
     perm: P,
 }
 
@@ -85,7 +85,7 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         let reg: Expression<E> = RAMType::Register.into();
         let mem: Expression<E> = RAMType::Memory.into();
         let ram_type: Expression<E> = is_ram_reg.clone() * reg + (1 - is_ram_reg) * mem;
-        // let perm_config = Poseidon2Config::construct(cb, rc);
+        let perm_config = Poseidon2Config::construct(cb, rc);
 
         let mut input = vec![];
         input.push(addr.expr());
@@ -138,13 +138,13 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         );
 
         // enforces x = poseidon2([addr, ram_type, value[0], value[1], shard, global_clk, nonce, 0, ..., 0])
-        // for (input_expr, hasher_input) in input.into_iter().zip_eq(perm_config.inputs().into_iter())
-        // {
-        //     cb.require_equal(|| "poseidon2 input", input_expr, hasher_input)?;
-        // }
-        // for (xi, hasher_output) in x.iter().zip(perm_config.output().into_iter()) {
-        //     cb.require_equal(|| "x = poseidon2's output", xi.expr(), hasher_output)?;
-        // }
+        for (input_expr, hasher_input) in input.into_iter().zip_eq(perm_config.inputs().into_iter())
+        {
+            cb.require_equal(|| "poseidon2 input", input_expr, hasher_input)?;
+        }
+        for (xi, hasher_output) in x.iter().zip(perm_config.output().into_iter()) {
+            cb.require_equal(|| "x = poseidon2's output", xi.expr(), hasher_output)?;
+        }
 
         // both (x, y) and (x, -y) are valid ec points
         // if is_global_write = 1, then y should be in [0, p/2)
@@ -164,7 +164,7 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
             local_clk,
             nonce,
             is_global_write,
-            // perm_config,
+            perm_config,
             perm,
         })
     }
@@ -356,9 +356,8 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         };
         set_val!(instance, config.addr, record.addr as u64);
         set_val!(instance, config.is_ram_register, is_ram_register as u64);
-        config
-            .value
-            .assign_limbs(instance, Value::new_unchecked(record.value).as_u16_limbs());
+        let value = Value::new_unchecked(record.value);
+        config.value.assign_limbs(instance, value.as_u16_limbs());
         set_val!(instance, config.shard, record.shard);
         set_val!(instance, config.global_clk, record.global_clk);
         set_val!(instance, config.local_clk, record.local_clk);
@@ -376,7 +375,23 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
                 set_val!(instance, *witin, fe.to_canonical_u64());
             });
 
-        // TODO: assign poseidon2 hasher
+        let ram_type = E::BaseField::from_canonical_u32(record.ram_type as u32);
+        let mut input = [E::BaseField::ZERO; 16];
+
+        let k = UINT_LIMBS;
+        input[0] = E::BaseField::from_canonical_u32(record.addr);
+        input[1] = ram_type;
+        input[2..(k + 2)]
+            .iter_mut()
+            .zip(value.as_u16_limbs().iter())
+            .for_each(|(i, v)| *i = E::BaseField::from_canonical_u16(*v));
+        input[2 + k] = E::BaseField::from_canonical_u64(record.shard);
+        input[2 + k + 1] = E::BaseField::from_canonical_u64(record.global_clk);
+        input[2 + k + 2] = E::BaseField::from_canonical_u32(nonce);
+
+        config
+            .perm_config
+            .assign_instance(&mut instance[21 + UINT_LIMBS..], input);
 
         Ok(())
     }
