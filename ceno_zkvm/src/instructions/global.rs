@@ -22,14 +22,17 @@ use multilinear_extensions::{
 };
 use p3::{
     field::{Field, FieldAlgebra},
+    matrix::dense::RowMajorMatrix,
     symmetric::Permutation,
+    util::log2_ceil_usize,
 };
 use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
+    prelude::ParallelSliceMut,
     slice::ParallelSlice,
 };
 use std::ops::Deref;
-use witness::{RowMajorMatrix, set_val};
+use witness::{InstancePaddingStrategy, next_pow2_instance_padding, set_val};
 
 use crate::{
     instructions::{Instruction, riscv::constants::UInt},
@@ -55,6 +58,7 @@ pub struct GlobalConfig<E: ExtensionField, P> {
     is_global_write: WitIn,
     x: Vec<WitIn>,
     y: Vec<WitIn>,
+    slope: Vec<WitIn>,
     perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
     perm: P,
 }
@@ -71,6 +75,9 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
             .collect();
         let y: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
             .map(|i| cb.create_witin(|| format!("y{}", i)))
+            .collect();
+        let slope: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
+            .map(|i| cb.create_witin(|| format!("slope{}", i)))
             .collect();
         let addr = cb.create_witin(|| "addr");
         let is_ram_register = cb.create_witin(|| "is_ram_register");
@@ -134,6 +141,7 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         cb.ec_sum(
             x.iter().map(|xi| xi.expr()).collect::<Vec<_>>(),
             y.iter().map(|yi| yi.expr()).collect::<Vec<_>>(),
+            slope.iter().map(|si| si.expr()).collect::<Vec<_>>(),
             final_sum.into_iter().map(|x| x.expr()).collect::<Vec<_>>(),
         );
 
@@ -156,6 +164,7 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         Ok(GlobalConfig {
             x,
             y,
+            slope,
             addr,
             is_ram_register,
             value,
@@ -422,16 +431,34 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         }
         .max(1);
         let lk_multiplicity = LkMultiplicity::default();
-        let mut raw_witin =
-            RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
-        let mut raw_structual_witin = RowMajorMatrix::<E::BaseField>::new(
-            steps.len(),
-            num_structural_witin,
-            Self::padding_strategy(),
-        );
-        let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
-        let raw_structual_witin_iter =
-            raw_structual_witin.par_batch_iter_mut(num_instance_per_batch);
+        // *2 because we need to store the internal nodes of binary tree for ec point summation
+        let num_rows_padded = next_pow2_instance_padding(steps.len()) * 2;
+
+        let mut raw_witin = {
+            let matrix_size = num_rows_padded * num_witin;
+            let mut value = Vec::with_capacity(matrix_size);
+            value.par_extend(
+                (0..matrix_size)
+                    .into_par_iter()
+                    .map(|_| E::BaseField::default()),
+            );
+            RowMajorMatrix::new(value, num_witin)
+        };
+        let mut raw_structual_witin = {
+            let matrix_size = num_rows_padded * num_structural_witin;
+            let mut value = Vec::with_capacity(matrix_size);
+            value.par_extend(
+                (0..matrix_size)
+                    .into_par_iter()
+                    .map(|_| E::BaseField::default()),
+            );
+            RowMajorMatrix::new(value, num_structural_witin)
+        };
+        let raw_witin_iter = raw_witin.values[0..steps.len() * num_witin]
+            .par_chunks_mut(num_instance_per_batch * num_witin);
+        let raw_structual_witin_iter = raw_structual_witin.values
+            [0..steps.len() * num_structural_witin]
+            .par_chunks_mut(num_instance_per_batch * num_structural_witin);
 
         raw_witin_iter
             .zip_eq(raw_structual_witin_iter)
@@ -458,8 +485,27 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
             })
             .collect::<Result<(), ZKVMError>>()?;
 
-        raw_witin.padding_by_strategy();
-        raw_structual_witin.padding_by_strategy();
+        // assign internal nodes in the binary tree for ec point summation
+        let half_witin_matrix_size = num_rows_padded / 2 * num_witin;
+        let raw_witin_iter = raw_witin.values
+            [half_witin_matrix_size..(2 * half_witin_matrix_size - 1)]
+            .par_chunks_mut(num_witin)
+            .for_each(|instance| {
+                for i in 0..SEPTIC_EXTENSION_DEGREE {
+                    set_val!(instance, config.x[i], E::BaseField::default());
+                    set_val!(instance, config.y[i], E::BaseField::default());
+                    set_val!(instance, config.slope[i], E::BaseField::default());
+                }
+            });
+
+        let raw_witin = witness::RowMajorMatrix::new_by_inner_matrix(
+            raw_witin,
+            InstancePaddingStrategy::Default,
+        );
+        let raw_structual_witin = witness::RowMajorMatrix::new_by_inner_matrix(
+            raw_structual_witin,
+            InstancePaddingStrategy::Default,
+        );
         Ok((
             [raw_witin, raw_structual_witin],
             lk_multiplicity.into_finalize_result(),
