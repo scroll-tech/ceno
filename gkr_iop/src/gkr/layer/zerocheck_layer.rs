@@ -128,8 +128,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 monomialize_expr_to_wit_terms(
                     &expr,
                     self.n_witin as WitnessId,
-                    self.n_structural_witin as WitnessId,
                     self.n_fixed as WitnessId,
+                    self.n_instance,
                 )
             })
             .collect::<Vec<_>>();
@@ -150,8 +150,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 monomialize_expr_to_wit_terms(
                     expr,
                     self.n_witin as WitnessId,
-                    self.n_structural_witin as WitnessId,
                     self.n_fixed as WitnessId,
+                    self.n_instance,
                 )
             });
 
@@ -161,8 +161,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 monomialize_expr_to_wit_terms(
                     expr,
                     self.n_witin as WitnessId,
-                    self.n_structural_witin as WitnessId,
                     self.n_fixed as WitnessId,
+                    self.n_instance,
                 )
             });
         exit_span!(span);

@@ -199,26 +199,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .collect::<Vec<_>>();
         exit_span!(span);
 
-        // `wit` := witin ++ fixed
+        // `wit` := witin ++ fixed ++ pubio
         // we concat eq in between `wit` := witin ++ eqs ++ fixed
         let all_witins = wit
             .iter()
-            .take(layer.n_witin)
+            .take(layer.n_witin + layer.n_fixed + layer.n_instance)
             .map(|mle| Either::Left(mle.as_ref()))
             .chain(
                 // some non-selector structural witin
                 wit.iter()
-                    .skip(layer.n_witin)
+                    .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
                     .take(layer.n_structural_witin - layer.out_sel_and_eval_exprs.len())
                     .map(|mle| Either::Left(mle.as_ref())),
             )
             .chain(eqs.iter_mut().map(Either::Right))
-            .chain(
-                // fixed and pubio, start after `n_witin and n_structural_witin`
-                wit.iter()
-                    .skip(layer.n_witin + layer.n_structural_witin)
-                    .map(|mle| Either::Left(mle.as_ref())),
-            )
             .collect_vec();
         assert_eq!(
             all_witins.len(),

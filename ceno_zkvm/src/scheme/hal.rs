@@ -1,11 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc};
-
 use crate::{
     circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::cpu::TowerRelationOutput,
     structs::{ComposedConstrainSystem, ZKVMProvingKey},
 };
+use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     gkr::GKRProof,
@@ -13,6 +12,7 @@ use gkr_iop::{
 };
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
+use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
@@ -37,6 +37,7 @@ pub struct ProofInput<'a, PB: ProverBackend> {
     pub structural_witness: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub fixed: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub public_input: Vec<Arc<PB::MultilinearPoly<'a>>>,
+    pub pub_io_evals: Vec<Either<<PB::E as ExtensionField>::BaseField, PB::E>>,
     pub num_instances: usize,
 }
 
@@ -109,13 +110,6 @@ pub struct MainSumcheckEvals<E: ExtensionField> {
 }
 
 pub trait MainSumcheckProver<PB: ProverBackend> {
-    fn table_witness<'a>(
-        &self,
-        input: &ProofInput<'a, PB>,
-        cs: &ConstraintSystem<PB::E>,
-        challenges: &[PB::E],
-    ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
-
     // this prover aims to achieve two goals:
     // 1. the validity of last layer in the tower tree is reduced to
     //    the validity of read/write/logup records through sumchecks;

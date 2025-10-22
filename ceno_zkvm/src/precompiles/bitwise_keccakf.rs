@@ -918,6 +918,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
         &[],
         &[],
         &[],
+        &[],
     );
     exit_span!(span);
 

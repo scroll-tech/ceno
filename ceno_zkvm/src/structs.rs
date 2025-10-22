@@ -130,7 +130,7 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.w_expressions.len() + self.zkvm_v1_css.w_table_expressions.len()
     }
 
-    pub fn instance_openings(&self) -> &HashMap<Instance, String> {
+    pub fn instance_openings(&self) -> &[Instance] {
         &self.zkvm_v1_css.instance_openings
     }
 

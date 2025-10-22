@@ -283,7 +283,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
                 set_val!(structural_row, selector_witin, 1u64);
             });
 
-        Ok([final_table, RowMajorMatrix::empty()])
+        Ok([final_table, structural_witness])
     }
 }
 

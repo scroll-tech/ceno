@@ -44,6 +44,7 @@ pub struct GKRCircuitOutput<'a, PB: ProverBackend>(pub LayerWitness<'a, PB>);
 pub struct GKRProverOutput<E: ExtensionField, Evaluation> {
     pub gkr_proof: GKRProof<E>,
     pub opening_evaluations: Vec<Evaluation>,
+    pub rt: Vec<Point<E>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -84,7 +85,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         running_evals.resize(self.n_evaluations, PointAndEval::default());
         let mut challenges = challenges.to_vec();
         let span = entered_span!("layer_proof", profiling_2 = true);
-        let sumcheck_proofs = izip!(&self.layers, circuit_wit.layers)
+        let (sumcheck_proofs, rt): (Vec<_>, Vec<_>) = izip!(&self.layers, circuit_wit.layers)
             .enumerate()
             .map(|(i, (layer, layer_wit))| {
                 tracing::debug!("prove layer {i} layer with layer name {}", layer.name);
@@ -102,7 +103,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                 exit_span!(span);
                 res
             })
-            .collect_vec();
+            .unzip();
         exit_span!(span);
 
         let opening_evaluations = self.opening_evaluations(&running_evals);
@@ -110,6 +111,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         Ok(GKRProverOutput {
             gkr_proof: GKRProof(sumcheck_proofs),
             opening_evaluations,
+            rt,
         })
     }
 

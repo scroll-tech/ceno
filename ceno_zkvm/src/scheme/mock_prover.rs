@@ -39,6 +39,7 @@ use std::{
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
+    ops::Index,
     sync::OnceLock,
 };
 use strum::IntoEnumIterator;
@@ -579,6 +580,14 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let mut shared_lkm = LkMultiplicityRaw::<E>::default();
         let mut errors = vec![];
 
+        let pub_io_evals = pi.iter().map(|v| v.index(0)).collect_vec();
+
+        let pi_mles = cs
+            .instance_openings
+            .iter()
+            .map(|instance| pi[instance.0].clone())
+            .collect_vec();
+
         // Assert zero expressions
         for (expr, name) in cs
             .assert_zero_expressions
@@ -618,12 +627,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let left_evaluated = wit_infer_by_expr(
                     left,
                     cs.num_witin,
-                    cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
+                    cs.instance_openings.len(),
                     fixed,
                     wits_in,
                     structural_witin,
-                    pi,
+                    &pi_mles,
+                    &pub_io_evals,
                     &challenge,
                 );
                 let left_evaluated =
@@ -632,12 +642,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let right_evaluated = wit_infer_by_expr(
                     &right,
                     cs.num_witin,
-                    cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
+                    cs.instance_openings.len(),
                     fixed,
                     wits_in,
                     structural_witin,
-                    pi,
+                    &pi_mles,
+                    &pub_io_evals,
                     &challenge,
                 );
                 let right_evaluated =
@@ -663,12 +674,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let expr_evaluated = wit_infer_by_expr(
                     expr,
                     cs.num_witin,
-                    cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
+                    cs.instance_openings.len(),
                     fixed,
                     wits_in,
                     structural_witin,
-                    pi,
+                    &pi_mles,
+                    &pub_io_evals,
                     &challenge,
                 );
                 let expr_evaluated =
@@ -705,12 +717,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             let expr_evaluated = wit_infer_by_expr(
                 expr,
                 cs.num_witin,
-                cs.num_structural_witin,
                 cs.num_fixed as WitnessId,
+                cs.instance_openings.len(),
                 fixed,
                 wits_in,
                 structural_witin,
-                pi,
+                &pi_mles,
+                &pub_io_evals,
                 &challenge,
             );
             let expr_evaluated = filter_mle_by_selector_mle(expr_evaluated, lk_selector.clone());
@@ -750,12 +763,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         let arg_eval = wit_infer_by_expr(
                             arg_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             wits_in,
                             structural_witin,
-                            pi,
+                            &pi_mles,
+                            &pub_io_evals,
                             &challenge,
                         );
                         if arg_expr.is_constant() && arg_eval.evaluations.len() == 1 {
@@ -952,13 +966,12 @@ Hints:
     ) where
         E: LkMultiplicityKey,
     {
-        let instance = pi
+        let pub_io_evals = pi
             .to_vec::<E>()
-            .concat()
             .into_iter()
-            .map(|i| E::from(i))
+            .map(|v| Either::Right(E::from(*v.index(0))))
             .collect_vec();
-        let pi_mles = pi
+        let pi_mles: Vec<ArcMultilinearExtension<E>> = pi
             .to_vec::<E>()
             .into_mles()
             .into_iter()
@@ -998,6 +1011,11 @@ Hints:
                 zkvm_v1_css: cs,
                 gkr_circuit,
             } = &composed_cs;
+            let pi_mles = cs
+                .instance_openings
+                .iter()
+                .map(|instance| pi_mles[instance.0].clone())
+                .collect_vec();
             let is_opcode = gkr_circuit.is_some();
             let [witness, structural_witness] = witnesses
                 .get_opcode_witness(circuit_name)
@@ -1079,12 +1097,13 @@ Hints:
                     let lk_table = wit_infer_by_expr(
                         &expr.values,
                         cs.num_witin,
-                        cs.num_structural_witin,
                         cs.num_fixed as WitnessId,
+                        cs.instance_openings.len(),
                         &fixed,
                         &witness,
                         &structural_witness,
                         &pi_mles,
+                        &pub_io_evals,
                         &challenges,
                     )
                     .get_ext_field_vec()
@@ -1093,12 +1112,13 @@ Hints:
                     let multiplicity = wit_infer_by_expr(
                         &expr.multiplicity,
                         cs.num_witin,
-                        cs.num_structural_witin,
                         cs.num_fixed as WitnessId,
+                        cs.instance_openings.len(),
                         &fixed,
                         &witness,
                         &structural_witness,
                         &pi_mles,
+                        &pub_io_evals,
                         &challenges,
                     )
                     .get_ext_field_vec()
@@ -1183,24 +1203,26 @@ Hints:
                         let ram_type_mle = wit_infer_by_expr(
                             ram_type_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             witness,
                             structural_witness,
                             &pi_mles,
+                            &pub_io_evals,
                             &challenges,
                         );
                         let ram_type_vec = ram_type_mle.get_ext_field_vec();
                         let write_rlc_records = wit_infer_by_expr(
                             w_rlc_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             witness,
                             structural_witness,
                             &pi_mles,
+                            &pub_io_evals,
                             &challenges,
                         );
                         let w_selector_vec = w_selector.get_base_field_vec();
@@ -1280,24 +1302,26 @@ Hints:
                         let ram_type_mle = wit_infer_by_expr(
                             ram_type_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             witness,
                             structural_witness,
                             &pi_mles,
+                            &pub_io_evals,
                             &challenges,
                         );
                         let ram_type_vec = ram_type_mle.get_ext_field_vec();
                         let read_records = wit_infer_by_expr(
                             r_rlc_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             witness,
                             structural_witness,
                             &pi_mles,
+                            &pub_io_evals,
                             &challenges,
                         );
                         let r_selector_vec = r_selector.get_base_field_vec();
@@ -1319,12 +1343,13 @@ Hints:
                                     let v = wit_infer_by_expr(
                                         expr,
                                         cs.num_witin,
-                                        cs.num_structural_witin,
                                         cs.num_fixed as WitnessId,
+                                        cs.instance_openings.len(),
                                         fixed,
                                         witness,
                                         structural_witness,
                                         &pi_mles,
+                                        &pub_io_evals,
                                         &challenges,
                                     );
                                     filter_mle_by_selector_mle(v, r_selector.clone())
@@ -1459,14 +1484,34 @@ Hints:
         let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
         gs_rs.insert(
-            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_final)
-                .right()
-                .unwrap(),
+            eval_by_expr_with_instance(
+                &[],
+                &[],
+                &[],
+                &pub_io_evals
+                    .iter()
+                    .map(|v| v.right().clone().unwrap())
+                    .collect_vec(),
+                &challenges,
+                &gs_final,
+            )
+            .right()
+            .unwrap(),
         );
         gs_ws.insert(
-            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_init)
-                .right()
-                .unwrap(),
+            eval_by_expr_with_instance(
+                &[],
+                &[],
+                &[],
+                &pub_io_evals
+                    .iter()
+                    .map(|v| v.right().clone().unwrap())
+                    .collect_vec(),
+                &challenges,
+                &gs_init,
+            )
+            .right()
+            .unwrap(),
         );
 
         // gs stores { (pc, timestamp) }

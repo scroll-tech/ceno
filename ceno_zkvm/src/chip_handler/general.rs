@@ -41,8 +41,7 @@ impl<'a, E: ExtensionField> PublicIOQuery for CircuitBuilder<'a, E> {
     fn query_exit_code(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError> {
         Ok([
             self.cs.query_instance(EXIT_CODE_IDX)?,
-            self.cs
-                .query_instance(EXIT_CODE_IDX + 1)?,
+            self.cs.query_instance(EXIT_CODE_IDX + 1)?,
         ])
     }
 
@@ -68,10 +67,8 @@ impl<'a, E: ExtensionField> PublicIOQuery for CircuitBuilder<'a, E> {
 
     fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError> {
         Ok([
-            self.cs
-                .query_instance_for_openings(|| "public_io_low", PUBLIC_IO_IDX)?,
-            self.cs
-                .query_instance_for_openings(|| "public_io_high", PUBLIC_IO_IDX + 1)?,
+            self.cs.query_instance_for_openings(PUBLIC_IO_IDX)?,
+            self.cs.query_instance_for_openings(PUBLIC_IO_IDX + 1)?,
         ])
     }
 }

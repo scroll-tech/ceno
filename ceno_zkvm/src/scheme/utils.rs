@@ -344,34 +344,38 @@ pub fn build_main_witness<
             );
         }
 
-        if let Some(gkr_circuit) = gkr_circuit {
-            // circuit must have at least one read/write/lookup
-            assert!(
-                cs.r_expressions.len()
-                    + cs.w_expressions.len()
-                    + cs.lk_expressions.len()
-                    + cs.r_table_expressions.len()
-                    + cs.w_table_expressions.len()
-                    + cs.lk_table_expressions.len()
-                    > 0,
-                "assert circuit"
-            );
+        let Some(gkr_circuit) = gkr_circuit else {
+            panic!("empty gkr-iop")
+        };
 
-            let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
-                gkr_circuit,
-                &input.witness,
-                &input.structural_witness,
-                &input.fixed,
-                &input.public_input,
-                challenges,
-            );
-            (gkr_circuit_out.0.0, true)
-        } else {
-            (
-                <PD as MainSumcheckProver<PB>>::table_witness(device, input, cs, challenges),
-                input.num_instances > 1 && input.num_instances.is_power_of_two(),
-            )
-        }
+        // circuit must have at least one read/write/lookup
+        assert!(
+            cs.r_expressions.len()
+                + cs.w_expressions.len()
+                + cs.lk_expressions.len()
+                + cs.r_table_expressions.len()
+                + cs.w_table_expressions.len()
+                + cs.lk_table_expressions.len()
+                > 0,
+            "assert circuit"
+        );
+
+        let pub_io_mles = cs
+            .instance_openings
+            .iter()
+            .map(|instance| input.public_input[instance.0].clone())
+            .collect_vec();
+
+        let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
+            gkr_circuit,
+            &input.witness,
+            &input.structural_witness,
+            &input.fixed,
+            &pub_io_mles,
+            &input.pub_io_evals,
+            challenges,
+        );
+        (gkr_circuit_out.0.0, true)
     };
     (mles, is_padded)
 }
@@ -387,7 +391,8 @@ pub fn gkr_witness<
     phase1_witness_group: &[Arc<PB::MultilinearPoly<'b>>],
     structural_witness: &[Arc<PB::MultilinearPoly<'b>>],
     fixed: &[Arc<PB::MultilinearPoly<'b>>],
-    pub_io: &[Arc<PB::MultilinearPoly<'b>>],
+    pub_io_mles: &[Arc<PB::MultilinearPoly<'b>>],
+    pub_io_evals: &[Either<E::BaseField, E>],
     challenges: &[E],
 ) -> (GKRCircuitWitness<'b, PB>, GKRCircuitOutput<'b, PB>) {
     // layer order from output to input
@@ -401,7 +406,7 @@ pub fn gkr_witness<
         first_layer
             .in_eval_expr
             .iter()
-            .take(phase1_witness_group.len())
+            .take(first_layer.n_witin)
             .enumerate()
             .for_each(|(index, witin)| {
                 witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
@@ -410,20 +415,32 @@ pub fn gkr_witness<
         first_layer
             .in_eval_expr
             .iter()
-            .skip(phase1_witness_group.len())
+            .skip(first_layer.n_witin)
+            .take(first_layer.n_fixed)
             .enumerate()
             .for_each(|(index, witin)| {
                 witness_mle_flatten[*witin] = Some(fixed[index].clone());
             });
 
-        assert_eq!(
-            first_layer.in_eval_expr.len(),
-            first_layer.n_witin + first_layer.n_fixed,
-            "TODO process fixed (and probably short) mle"
+        println!(
+            "pub_io len {}, first_layer.n_instance {}",
+            pub_io_mles.len(),
+            first_layer.n_instance
         );
+
+        first_layer
+            .in_eval_expr
+            .iter()
+            .skip(first_layer.n_witin + first_layer.n_fixed)
+            .take(first_layer.n_instance)
+            .enumerate()
+            .for_each(|(index, witin)| {
+                witness_mle_flatten[*witin] = Some(pub_io_mles[index].clone());
+            });
+
         // XXX currently fixed poly not support in layers > 1
         // TODO process fixed (and probably short) mle
-        //         
+        //
         // first_layer
         //     .in_eval_expr
         //     .par_iter()
@@ -470,7 +487,6 @@ pub fn gkr_witness<
             } else {
                 Either::Right(iter::empty())
             })
-            .chain(fixed.iter().cloned())
             .collect_vec();
 
         // infer current layer output
@@ -478,7 +494,7 @@ pub fn gkr_witness<
             <PD as ProtocolWitnessGeneratorProver<PB>>::layer_witness(
                 layer,
                 &current_layer_wits,
-                pub_io,
+                pub_io_evals,
                 challenges,
             );
         layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));

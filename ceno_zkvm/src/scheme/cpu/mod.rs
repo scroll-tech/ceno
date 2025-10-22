@@ -543,48 +543,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
     for CpuProver<CpuBackend<E, PCS>>
 {
     #[allow(clippy::type_complexity)]
-    #[tracing::instrument(skip_all, name = "table_witness", fields(profiling_3), level = "trace")]
-    fn table_witness<'a>(
-        &self,
-        input: &ProofInput<'a, CpuBackend<<CpuBackend<E, PCS> as ProverBackend>::E, PCS>>,
-        cs: &ConstraintSystem<<CpuBackend<E, PCS> as ProverBackend>::E>,
-        challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
-    ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
-        // main constraint: lookup denominator and numerator record witness inference
-        let record_span = entered_span!("record");
-        let records: Vec<ArcMultilinearExtension<'_, E>> = cs
-            .r_table_expressions
-            .par_iter()
-            .map(|r| &r.expr)
-            .chain(cs.r_expressions.par_iter())
-            .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
-            .chain(cs.w_expressions.par_iter())
-            .chain(
-                cs.lk_table_expressions
-                    .par_iter()
-                    .map(|lk| &lk.multiplicity),
-            )
-            .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
-            .chain(cs.lk_expressions.par_iter())
-            .map(|expr| {
-                wit_infer_by_expr(
-                    expr,
-                    cs.num_witin,
-                    cs.num_structural_witin,
-                    cs.num_fixed as WitnessId,
-                    &input.fixed,
-                    &input.witness,
-                    &input.structural_witness,
-                    &input.public_input,
-                    challenges,
-                )
-            })
-            .collect();
-        exit_span!(record_span);
-        records
-    }
-
-    #[allow(clippy::type_complexity)]
     #[tracing::instrument(
         skip_all,
         name = "prove_main_constraints",
@@ -619,42 +577,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         if let Some(gkr_circuit) = gkr_circuit {
-            // let pub_io_evals = // get public io evaluations
-            //     cs.instance_openings
-            //         .keys()
-            //         .sorted()
-            //         .map(|Instance(inst_id)| {
-            //             let mle = &input.public_input[*inst_id];
-            //             assert_eq!(
-            //                 mle.evaluations.len(),
-            //                 1,
-            //                 "doesnt support instance with evaluation length > 1"
-            //             );
-            //             match mle.evaluations() {
-            //                 FieldType::Base(smart_slice) => E::from(smart_slice[0]),
-            //                 FieldType::Ext(smart_slice) => smart_slice[0],
-            //                 _ => unreachable!(),
-            //             }
-            //         })
-            //         .collect_vec();
-            let pub_io_evals = // get public io evaluations
-                input.public_input
-                    .iter().map(|mle| {
-                        match mle.evaluations() {
-                            FieldType::Base(smart_slice) => E::from(smart_slice[0]),
-                            FieldType::Ext(smart_slice) => smart_slice[0],
-                            _ => unreachable!(),
-                        }
-                    })
-                    .collect_vec();
-            let filtered_pub_io_mle = cs
+            let pub_io_mles = cs
                 .instance_openings
                 .iter()
-                .map(|(id, _)| input.public_input[id.0].clone())
+                .map(|instance| input.public_input[instance.0].clone())
                 .collect_vec();
             let GKRProverOutput {
                 gkr_proof,
                 opening_evaluations,
+                mut rt,
             } = gkr_circuit.prove::<CpuBackend<E, PCS>, CpuProver<_>>(
                 num_threads,
                 num_var_with_rotation,
@@ -664,7 +595,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                             &input.witness,
                             &input.structural_witness,
                             &input.fixed,
-                            &filtered_pub_io_mle,
+                            &pub_io_mles,
                         )
                         .cloned()
                         .collect_vec(),
@@ -672,13 +603,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 },
                 // eval value doesnt matter as it wont be used by prover
                 &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
-                &pub_io_evals,
+                &input
+                    .pub_io_evals
+                    .iter()
+                    .map(|v| v.map_either(E::from, |v| v).into_inner())
+                    .collect_vec(),
                 challenges,
                 transcript,
                 num_instances,
             )?;
+            assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
             Ok((
-                opening_evaluations[0].point.clone(),
+                rt.remove(0),
                 MainSumcheckEvals {
                     wits_in_evals: opening_evaluations
                         .iter()
@@ -688,7 +624,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         .collect_vec(),
                     fixed_in_evals: opening_evaluations
                         .iter()
-                        .skip((cs.num_witin + cs.num_structural_witin) as usize)
+                        .skip(cs.num_witin as usize)
                         .take(cs.num_fixed)
                         .map(|Evaluation { value, .. }| value)
                         .copied()

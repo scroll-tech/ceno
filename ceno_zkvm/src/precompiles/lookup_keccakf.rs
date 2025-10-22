@@ -1155,6 +1155,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         &structural_witness,
         &fixed,
         &[],
+        &[],
         &challenges,
     );
     exit_span!(span);

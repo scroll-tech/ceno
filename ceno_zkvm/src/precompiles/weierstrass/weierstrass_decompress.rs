@@ -692,6 +692,7 @@ pub fn run_weierstrass_decompress<
         &structural_witness,
         &fixed,
         &[],
+        &[],
         &challenges,
     );
     exit_span!(span);

@@ -188,7 +188,7 @@ impl<E: ExtensionField> Layer<E> {
         challenges: &mut Vec<E>,
         transcript: &mut T,
         num_instances: usize,
-    ) -> LayerProof<E> {
+    ) -> (LayerProof<E>, Point<E>) {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
@@ -223,7 +223,7 @@ impl<E: ExtensionField> Layer<E> {
 
         self.update_claims(claims, &sumcheck_layer_proof.main.evals, &point);
 
-        sumcheck_layer_proof
+        (sumcheck_layer_proof, point)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -468,7 +468,7 @@ impl<E: ExtensionField> Layer<E> {
         } = &cb.cs;
 
         let in_eval_expr = (non_zero_expr_len..)
-            .take(cb.cs.num_witin as usize + cb.cs.num_fixed)
+            .take(cb.cs.num_witin as usize + cb.cs.num_fixed + cb.cs.instance_openings.len())
             .collect_vec();
         if rotations.is_empty() {
             Layer::new(

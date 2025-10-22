@@ -714,6 +714,7 @@ pub fn run_weierstrass_double<
         &structural_witness,
         &fixed,
         &[],
+        &[],
         &challenges,
     );
     exit_span!(span);

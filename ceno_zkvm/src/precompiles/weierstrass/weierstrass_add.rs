@@ -712,6 +712,7 @@ pub fn run_weierstrass_add<
         &structural_witness,
         &fixed,
         &[],
+        &[],
         &challenges,
     );
     exit_span!(span);
