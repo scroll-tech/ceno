@@ -302,7 +302,7 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
     )
     .collect_vec();
     exit_span!(span);
-    // TODO FIXME: we pick a random point from output point, does it sound?
+    // TODO: we pick a random point from output point, does it sound?
     let builder = VirtualPolynomialsBuilder::new_with_mles(
         num_threads,
         max_num_variables,

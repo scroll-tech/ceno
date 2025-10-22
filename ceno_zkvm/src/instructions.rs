@@ -106,7 +106,7 @@ pub trait Instruction<E: ExtensionField> {
         num_structural_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
-        // FIXME selector is the only structural witness
+        // TODO: selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
         assert!(num_structural_witin == 0 || num_structural_witin == 1);

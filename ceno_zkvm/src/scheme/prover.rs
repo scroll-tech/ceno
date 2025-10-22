@@ -263,7 +263,7 @@ impl<
                     evaluations.push(opcode_proof.wits_in_evals.clone());
                     chip_proofs.insert(index, opcode_proof);
                 } else {
-                    // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
+                    // TODO: PROGRAM table circuit is not guaranteed to have 2^n instances
                     input.num_instances = 1 << input.log2_num_instances();
                     let (mut table_proof, pi_in_evals, input_opening_point) = self
                         .create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
@@ -275,7 +275,7 @@ impl<
                         ]
                         .concat(),
                     );
-                    // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
+                    // TODO: PROGRAM table circuit is not guaranteed to have 2^n instances
                     table_proof.num_instances = num_instances;
                     chip_proofs.insert(index, table_proof);
                     for (idx, eval) in pi_in_evals {
