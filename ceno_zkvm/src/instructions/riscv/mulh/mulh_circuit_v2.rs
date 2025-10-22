@@ -22,7 +22,8 @@ use witness::set_val;
 use itertools::Itertools;
 use std::{array, marker::PhantomData};
 
-pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
+#[derive(Default)]
+pub struct MulhInstructionBase<E, I: Default>(PhantomData<(E, I)>);
 
 pub struct MulhConfig<E: ExtensionField> {
     rs1_read: UInt<E>,
@@ -37,12 +38,14 @@ pub struct MulhConfig<E: ExtensionField> {
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBase<E, I> {
     type InstructionConfig = MulhConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<MulhConfig<E>, ZKVMError> {

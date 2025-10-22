@@ -16,7 +16,7 @@ use crate::{
     utils::split_to_u8,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind, PC_STEP_SIZE};
+use ceno_emul::{InsnKind, PC_STEP_SIZE, StepRecord};
 use gkr_iop::tables::{LookupTable, ops::XorTable};
 use multilinear_extensions::{Expression, ToExpr};
 use p3::field::FieldAlgebra;
@@ -26,6 +26,7 @@ pub struct JalConfig<E: ExtensionField> {
     pub rd_written: UInt8<E>,
 }
 
+#[derive(Default)]
 pub struct JalInstruction<E>(PhantomData<E>);
 
 /// JAL instruction circuit
@@ -41,12 +42,14 @@ pub struct JalInstruction<E>(PhantomData<E>);
 ///   of native WitIn values for address space arithmetic.
 impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     type InstructionConfig = JalConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", InsnKind::JAL)
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<JalConfig<E>, ZKVMError> {

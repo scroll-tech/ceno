@@ -12,13 +12,17 @@ use crate::instructions::riscv::slti::slti_circuit::SetLessThanImmInstruction;
 
 use super::RIVInstruction;
 
+#[derive(Default)]
 pub struct SltiOp;
+
 impl RIVInstruction for SltiOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLTI;
 }
 pub type SltiInstruction<E> = SetLessThanImmInstruction<E, SltiOp>;
 
+#[derive(Default)]
 pub struct SltiuOp;
+
 impl RIVInstruction for SltiuOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLTIU;
 }
@@ -169,16 +173,12 @@ mod test {
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);
+        let inst = SetLessThanImmInstruction::<E, I>::default();
 
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| {
-                    Ok(SetLessThanImmInstruction::<E, I>::construct_circuit(
-                        cb,
-                        &ProgramParams::default(),
-                    ))
-                },
+                |cb| Ok(inst.construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();

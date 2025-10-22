@@ -51,11 +51,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                     let next_carry = carries.get(i);
 
                     let mut limb_expr = a.clone() + b.clone();
-                    if carry.is_some() {
-                        limb_expr = limb_expr.clone() + carry.unwrap().expr();
+                    if let Some(carry) = carry {
+                        limb_expr = limb_expr.clone() + carry.expr();
                     }
-                    if next_carry.is_some() {
-                        limb_expr = limb_expr.clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+                    if let Some(next_carry) = next_carry {
+                        limb_expr = limb_expr.clone() - next_carry.expr() * Self::POW_OF_C;
                     }
 
                     circuit_builder
@@ -197,11 +197,11 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             let carry = if i > 0 { c_carries.get(i - 1) } else { None };
             let next_carry = c_carries.get(i);
             result_c[i] = result_c[i].clone() - c_limb.expr();
-            if carry.is_some() {
-                result_c[i] = result_c[i].clone() + carry.unwrap().expr();
+            if let Some(carry) = carry {
+                result_c[i] = result_c[i].clone() + carry.expr();
             }
-            if next_carry.is_some() {
-                result_c[i] = result_c[i].clone() - next_carry.unwrap().expr() * Self::POW_OF_C;
+            if let Some(next_carry) = next_carry {
+                result_c[i] = result_c[i].clone() - next_carry.expr() * Self::POW_OF_C;
             }
             circuit_builder.require_zero(|| format!("mul_zero_{i}"), result_c[i].clone())?;
             Ok::<(), CircuitBuilderError>(())
@@ -447,14 +447,14 @@ mod tests {
             let mut cb = CircuitBuilder::<E>::new(&mut cs);
             let challenges = vec![E::ONE; witness_values.len()];
             let uint_a = UIntLimbs::<M, C, E>::new(|| "uint_a", &mut cb).unwrap();
-            let uint_c = if const_b.is_none() {
-                let uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
-                uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
-            } else {
-                let const_b = E::BaseField::from_canonical_u64(const_b.unwrap()).expr();
+            let uint_c = if let Some(const_b) = const_b {
+                let const_b = E::BaseField::from_canonical_u64(const_b).expr();
                 uint_a
                     .add_const(|| "uint_c", &mut cb, const_b, overflow)
                     .unwrap()
+            } else {
+                let uint_b = UIntLimbs::<M, C, E>::new(|| "uint_b", &mut cb).unwrap();
+                uint_a.add(|| "uint_c", &mut cb, &uint_b, overflow).unwrap()
             };
 
             let pow_of_c: u64 = 2_usize.pow(UIntLimbs::<M, C, E>::MAX_LIMB_BIT_WIDTH as u32) as u64;
@@ -462,16 +462,15 @@ mod tests {
 
             let a = &witness_values[0..single_wit_size];
             let mut const_b_pre_allocated = vec![0u64; single_wit_size];
-            let b = if const_b.is_none() {
-                &witness_values[single_wit_size..2 * single_wit_size]
-            } else {
-                let b = const_b.unwrap();
+            let b = if let Some(b) = const_b {
                 let limb_bit_mask: u64 = (1 << C) - 1;
                 const_b_pre_allocated
                     .iter_mut()
                     .enumerate()
                     .for_each(|(i, limb)| *limb = (b >> (C * i)) & limb_bit_mask);
                 &const_b_pre_allocated
+            } else {
+                &witness_values[single_wit_size..2 * single_wit_size]
             };
 
             // the num of witness is 3, a, b and c_carries if it's a `add`
@@ -495,8 +494,10 @@ mod tests {
                     if i != 0 {
                         result[i] += carries[i - 1];
                     }
-                    if !overflow && carry.is_some() {
-                        result[i] -= carry.unwrap() * pow_of_c;
+                    if let Some(carry) = carry
+                        && !overflow
+                    {
+                        result[i] -= carry * pow_of_c;
                     }
                 });
 

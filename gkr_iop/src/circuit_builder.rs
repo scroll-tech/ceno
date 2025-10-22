@@ -103,6 +103,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub instance_name_map: HashMap<Instance, String>,
 
+    pub ec_point_exprs: Vec<Expression<E>>,
+    pub ec_final_sum: Vec<Expression<E>>,
+
     pub r_selector: Option<SelectorType<E>>,
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
@@ -167,6 +170,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
             instance_name_map: HashMap::new(),
+            ec_final_sum: vec![],
+            ec_point_exprs: vec![],
             r_selector: None,
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
@@ -405,6 +410,23 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         Ok(())
     }
 
+    pub fn ec_sum(
+        &mut self,
+        xs: Vec<Expression<E>>,
+        ys: Vec<Expression<E>>,
+        final_sum: Vec<Expression<E>>,
+    ) {
+        assert_eq!(xs.len(), 7);
+        assert_eq!(ys.len(), 7);
+        assert_eq!(final_sum.len(), 7 * 2);
+
+        assert_eq!(self.ec_point_exprs.len(), 0);
+        self.ec_point_exprs.extend(xs.into_iter());
+        self.ec_point_exprs.extend(ys.into_iter());
+
+        self.ec_final_sum = final_sum;
+    }
+
     pub fn require_zero<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         name_fn: N,
@@ -622,6 +644,15 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
         self.cs.rlc_chip_record(records)
+    }
+
+    pub fn ec_sum(
+        &mut self,
+        xs: Vec<Expression<E>>,
+        ys: Vec<Expression<E>>,
+        final_sum: Vec<Expression<E>>,
+    ) {
+        self.cs.ec_sum(xs, ys, final_sum);
     }
 
     pub fn create_bit<NR, N>(&mut self, name_fn: N) -> Result<WitIn, CircuitBuilderError>
@@ -872,6 +903,30 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             || "assert_double_u8",
             |cb| cb.lk_record(name_fn, LookupTable::DoubleU8, vec![a_expr, b_expr]),
         )
+    }
+
+    pub fn assert_bytes<NR, N>(
+        &mut self,
+        name_fn: N,
+        exprs: &[impl ToExpr<E, Output = Expression<E>> + Clone],
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        let name = name_fn().into();
+        for (i, pair) in exprs.chunks(2).enumerate() {
+            match pair {
+                [a, b] => {
+                    self.assert_double_u8(|| format!("{}_{i:?}", name), a.expr(), b.expr())?
+                }
+                [a] => {
+                    self.assert_double_u8(|| format!("{}_{i:?}", name), a.expr(), Expression::ZERO)?
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     pub fn assert_bit<NR, N>(

@@ -79,7 +79,7 @@ impl<
         &mut self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
-        mut transcript: (impl Transcript<E> + 'static),
+        mut transcript: impl Transcript<E> + 'static,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let raw_pi = pi.to_vec::<E>();
         let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
@@ -234,6 +234,8 @@ impl<
                     fixed,
                     structural_witness,
                     public_input,
+                    num_read_instances: num_instances, // TODO: fixme
+                    num_write_instances: num_instances, // TODO: fixme
                     num_instances,
                 };
 
@@ -344,6 +346,8 @@ impl<
             num_var_with_rotation,
         );
 
+        // override cs.gkr_circuit.layers
+
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) = self
@@ -378,6 +382,8 @@ impl<
                 tower_proof,
                 fixed_in_evals,
                 wits_in_evals,
+                num_read_instances: input.num_read_instances,
+                num_write_instances: input.num_write_instances,
                 num_instances: input.num_instances,
             },
             pi_in_evals,

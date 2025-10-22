@@ -5,7 +5,26 @@ use ff_ext::ExtensionField;
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use gkr_iop::{gkr::GKRClaims, selector::SelectorType};
+use crate::{
+    error::ZKVMError,
+    scheme::{
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE, SEPTIC_EXTENSION_DEGREE},
+        septic_curve::SepticExtension,
+    },
+    structs::{
+        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
+        ZKVMVerifyingKey,
+    },
+    utils::{
+        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
+        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
+    },
+};
+use gkr_iop::{
+    gkr::GKRClaims,
+    selector::{SelectorContext, SelectorType},
+    utils::eq_eval_less_or_equal_than,
+};
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
@@ -23,22 +42,6 @@ use sumcheck::{
 };
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
-
-use crate::{
-    error::ZKVMError,
-    scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEL_DEGREE, SEPTIC_EXTENSION_DEGREE},
-        septic_curve::SepticExtension,
-    },
-    structs::{
-        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
-        ZKVMVerifyingKey,
-    },
-    utils::{
-        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
-        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
-    },
-};
 
 use super::{ZKVMChipProof, ZKVMProof};
 
@@ -416,6 +419,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         debug_assert_eq!(logup_q_evals.len(), lk_counts_per_instance);
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
+        let selector_ctxs = if cs.ec_final_sum.is_empty() {
+            // it's not global chip
+            vec![
+                SelectorContext::new(0, num_instances, num_var_with_rotation);
+                gkr_circuit
+                    .layers
+                    .first()
+                    .map(|layer| layer.out_sel_and_eval_exprs.len())
+                    .unwrap_or(0)
+            ]
+        } else {
+            // it's global chip
+            vec![
+                SelectorContext {
+                    offset: 0,
+                    num_instances: proof.num_read_instances,
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: proof.num_read_instances,
+                    num_instances: proof.num_write_instances,
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: 0,
+                    num_instances: proof.num_instances,
+                    num_vars: num_var_with_rotation,
+                },
+            ]
+        };
         let GKRClaims(opening_evaluations) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
@@ -423,7 +456,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             pi,
             challenges,
             transcript,
-            num_instances,
+            &selector_ctxs,
         )?;
         Ok(opening_evaluations[0].point.clone())
     }
@@ -1063,7 +1096,17 @@ impl EccVerifier {
             StackedConstantSequence { max_value: 0 },
         ));
         let mut sel_evals = vec![E::ZERO];
-        sel_add_expr.evaluate(&mut sel_evals, &out_rt, &rt, proof.num_instances, 0);
+        sel_add_expr.evaluate(
+            &mut sel_evals,
+            &out_rt,
+            &rt,
+            &SelectorContext {
+                offset: 0,
+                num_instances: proof.num_instances,
+                num_vars,
+            },
+            0,
+        );
         let expected_sel_add = sel_evals[0];
 
         if proof.evals[0] != expected_sel_add {

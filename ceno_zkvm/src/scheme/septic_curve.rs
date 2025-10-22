@@ -763,6 +763,25 @@ pub struct SepticPoint<F> {
 }
 
 impl<F: Field> SepticPoint<F> {
+    // if there exists y such that (x, y) is on the curve, return one of them
+    pub fn from_x(x: SepticExtension<F>) -> Option<Self> {
+        let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
+        let a: F = F::from_canonical_u32(2);
+
+        let y2 = x.square() * &x + (&x * a) + &b;
+        if y2.is_square() {
+            let y = y2.sqrt().unwrap();
+
+            Some(Self {
+                x,
+                y,
+                is_infinity: false,
+            })
+        } else {
+            None
+        }
+    }
+
     pub fn from_affine(x: SepticExtension<F>, y: SepticExtension<F>) -> Self {
         let is_infinity = if x.is_zero() && y.is_zero() {
             true
@@ -889,15 +908,8 @@ impl<F: Field + FromUniformBytes> SepticPoint<F> {
 
         loop {
             let x = SepticExtension::random(&mut rng);
-            let y2 = x.square() * &x + (&x * a) + &b;
-            if y2.is_square() {
-                let y = y2.sqrt().unwrap();
-
-                return Self {
-                    x,
-                    y,
-                    is_infinity: false,
-                };
+            if let Some(point) = Self::from_x(x) {
+                return point;
             }
         }
     }

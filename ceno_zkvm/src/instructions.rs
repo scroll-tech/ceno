@@ -19,10 +19,12 @@ use rayon::{
 };
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
+pub mod global;
 pub mod riscv;
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
+    type Record: Sync;
 
     fn padding_strategy() -> InstancePaddingStrategy {
         InstancePaddingStrategy::Default
@@ -32,15 +34,17 @@ pub trait Instruction<E: ExtensionField> {
 
     /// construct circuit and manipulate circuit builder, then return the respective config
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError>;
 
     fn build_gkr_iop_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
-        let config = Self::construct_circuit(cb, param)?;
+        let config = self.construct_circuit(cb, param)?;
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();
         let lk_len = cb.cs.lk_expressions.len();
@@ -56,7 +60,7 @@ pub trait Instruction<E: ExtensionField> {
                 descending: false,
             },
         );
-        let selector_type = SelectorType::Prefix(E::BaseField::ZERO, selector.expr());
+        let selector_type = SelectorType::Prefix(selector.expr());
 
         // all shared the same selector
         let (out_evals, mut chip) = (
@@ -79,7 +83,7 @@ pub trait Instruction<E: ExtensionField> {
         cb.cs.lk_selector = Some(selector_type.clone());
         cb.cs.zero_selector = Some(selector_type.clone());
 
-        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
         chip.add_layer(layer);
 
         Ok((config, chip.gkr_circuit()))
@@ -97,14 +101,14 @@ pub trait Instruction<E: ExtensionField> {
         config: &Self::InstructionConfig,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
+        step: &Self::Record,
     ) -> Result<(), ZKVMError>;
 
     fn assign_instances(
         config: &Self::InstructionConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<StepRecord>,
+        steps: Vec<Self::Record>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector

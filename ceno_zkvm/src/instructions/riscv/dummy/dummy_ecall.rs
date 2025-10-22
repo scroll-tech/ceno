@@ -24,15 +24,18 @@ use witness::set_val;
 /// including multiple memory operations.
 ///
 /// Unsafe: The content is not constrained.
+#[derive(Default)]
 pub struct LargeEcallDummy<E, S>(PhantomData<(E, S)>);
 
 impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S> {
     type InstructionConfig = LargeEcallConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         S::NAME.to_owned()
     }
     fn construct_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

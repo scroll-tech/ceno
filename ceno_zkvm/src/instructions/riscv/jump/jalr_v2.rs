@@ -19,7 +19,7 @@ use crate::{
     utils::imm_sign_extend,
     witness::{LkMultiplicity, set_val},
 };
-use ceno_emul::{InsnKind, PC_STEP_SIZE};
+use ceno_emul::{InsnKind, PC_STEP_SIZE, StepRecord};
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
@@ -33,6 +33,7 @@ pub struct JalrConfig<E: ExtensionField> {
     pub rd_high: WitIn,
 }
 
+#[derive(Default)]
 pub struct JalrInstruction<E>(PhantomData<E>);
 
 /// JALR instruction circuit
@@ -41,12 +42,14 @@ pub struct JalrInstruction<E>(PhantomData<E>);
 ///   the program table
 impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     type InstructionConfig = JalrConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", InsnKind::JALR)
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<JalrConfig<E>, ZKVMError> {

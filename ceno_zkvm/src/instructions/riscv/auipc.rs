@@ -17,7 +17,7 @@ use crate::{
     utils::split_to_u8,
     witness::LkMultiplicity,
 };
-use ceno_emul::InsnKind;
+use ceno_emul::{InsnKind, StepRecord};
 use gkr_iop::tables::{LookupTable, ops::XorTable};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
@@ -32,16 +32,19 @@ pub struct AuipcConfig<E: ExtensionField> {
     pub rd_written: UInt8<E>,
 }
 
+#[derive(Default)]
 pub struct AuipcInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     type InstructionConfig = AuipcConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", InsnKind::AUIPC)
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<AuipcConfig<E>, ZKVMError> {
@@ -224,12 +227,12 @@ mod tests {
     fn test_opcode_auipc<E: ExtensionField>(rd: u32, imm: i32) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
+        let inst = AuipcInstruction::default();
         let config = cb
             .namespace(
                 || "auipc",
                 |cb| {
-                    let config =
-                        AuipcInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
+                    let config = inst.construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )

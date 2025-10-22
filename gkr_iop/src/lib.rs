@@ -1,5 +1,4 @@
 #![feature(variant_count)]
-#![feature(strict_overflow_ops)]
 use crate::{
     chip::Chip, circuit_builder::CircuitBuilder, error::CircuitBuilderError,
     utils::lk_multiplicity::LkMultiplicity,
@@ -54,9 +53,6 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
 pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     type Trace;
 
-    /// return rmm height for phase 1 witness, which might include height for `multivariate rotation`
-    fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize;
-
     /// The fixed witness.
     fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField>;
 
@@ -81,9 +77,10 @@ pub struct ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(usize)]
 pub enum RAMType {
+    #[default]
     GlobalState,
     Register,
     Memory,

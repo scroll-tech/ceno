@@ -21,7 +21,7 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -91,8 +91,13 @@ impl CpuEccProver {
         let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
 
         let sel_add = SelectorType::QuarkBinaryTreeLessThan(0.into());
+        let sel_add_ctx = SelectorContext {
+            offset: 0,
+            num_instances,
+            num_vars: n,
+        };
         let mut sel_add_mle: MultilinearExtension<'_, E> =
-            sel_add.compute(&out_rt, num_instances).unwrap();
+            sel_add.compute(&out_rt, &sel_add_ctx).unwrap();
         // we construct sel_bypass witness here
         // verifier can derive it via `sel_bypass = eq - sel_add - sel_last_onehot`
         let mut sel_bypass_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
@@ -897,6 +902,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         }
                     })
                     .collect_vec();
+            let selector_ctxs = if cs.ec_final_sum.is_empty() {
+                // it's not global chip
+                vec![
+                    SelectorContext {
+                        offset: 0,
+                        num_instances,
+                        num_vars: num_var_with_rotation,
+                    };
+                    gkr_circuit
+                        .layers
+                        .first()
+                        .map(|layer| layer.out_sel_and_eval_exprs.len())
+                        .unwrap_or(0)
+                ]
+            } else {
+                // it's global chip
+                vec![
+                    SelectorContext {
+                        offset: 0,
+                        num_instances: input.num_read_instances,
+                        num_vars: num_var_with_rotation,
+                    },
+                    SelectorContext {
+                        offset: input.num_read_instances,
+                        num_instances: input.num_write_instances,
+                        num_vars: num_var_with_rotation,
+                    },
+                    SelectorContext {
+                        offset: 0,
+                        num_instances: input.num_instances,
+                        num_vars: num_var_with_rotation,
+                    },
+                ]
+            };
             let GKRProverOutput {
                 gkr_proof,
                 opening_evaluations,
@@ -915,7 +954,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 &pub_io_evals,
                 challenges,
                 transcript,
-                num_instances,
+                &selector_ctxs,
             )?;
             Ok((
                 opening_evaluations[0].point.clone(),
@@ -1020,7 +1059,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
                 <CpuBackend<E, PCS> as ProverBackend>::Pcs,
             >,
         >,
-    ) -> DeviceProvingKey<CpuBackend<E, PCS>> {
+    ) -> DeviceProvingKey<'_, CpuBackend<E, PCS>> {
         let pcs_data = pk.fixed_commit_wd.clone().unwrap();
         let fixed_mles =
             PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());

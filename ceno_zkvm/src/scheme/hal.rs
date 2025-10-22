@@ -37,6 +37,8 @@ pub struct ProofInput<'a, PB: ProverBackend> {
     pub structural_witness: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub fixed: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub public_input: Vec<Arc<PB::MultilinearPoly<'a>>>,
+    pub num_read_instances: usize,
+    pub num_write_instances: usize,
     pub num_instances: usize,
 }
 
@@ -47,6 +49,7 @@ impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
     }
 }
 
+#[derive(Clone)]
 pub struct TowerProverSpec<'a, PB: ProverBackend> {
     pub witness: Vec<Vec<PB::MultilinearPoly<'a>>>,
 }
@@ -163,7 +166,7 @@ pub trait DeviceTransporter<PB: ProverBackend> {
     fn transport_proving_key(
         &self,
         proving_key: Arc<ZKVMProvingKey<PB::E, PB::Pcs>>,
-    ) -> DeviceProvingKey<PB>;
+    ) -> DeviceProvingKey<'_, PB>;
 
     fn transport_mles<'a>(
         &self,

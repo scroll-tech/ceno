@@ -157,6 +157,7 @@ pub fn emulate_program(
         vm.get_pc().into(),
         end_cycle,
         io_init.iter().map(|rec| rec.value).collect_vec(),
+        vec![0; 14], // point_at_infinity
     );
 
     // Find the final register values and cycles.
@@ -349,13 +350,17 @@ fn setup_platform_inner(
         heap.start..heap_end as u32
     };
 
+    assert!(
+        pub_io_size.is_power_of_two(),
+        "pub io size {pub_io_size} must be a power of two"
+    );
     let platform = Platform {
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
         prog_data,
         stack,
         heap,
-        public_io: preset.public_io.start..preset.public_io.start + pub_io_size.next_power_of_two(),
+        public_io: preset.public_io.start..preset.public_io.start + pub_io_size,
         ..preset
     };
     assert!(
@@ -841,7 +846,7 @@ fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState,
         .tracer()
         .final_accesses()
         .iter()
-        .filter(|(_, &cycle)| (cycle != 0))
+        .filter(|&(_, cycle)| *cycle != 0)
         .map(|(&addr, _)| addr.baddr())
         .filter(|addr| vm.platform().can_read(addr.0))
         .collect_vec();

@@ -60,7 +60,10 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 
     pub tower_proof: TowerProofs<E>,
 
+    pub num_read_instances: usize,
+    pub num_write_instances: usize,
     pub num_instances: usize,
+
     pub fixed_in_evals: Vec<E>,
     pub wits_in_evals: Vec<E>,
 }
@@ -74,6 +77,7 @@ pub struct PublicValues {
     end_pc: u32,
     end_cycle: u64,
     public_io: Vec<u32>,
+    global_sum: Vec<u32>,
 }
 
 impl PublicValues {
@@ -84,6 +88,7 @@ impl PublicValues {
         end_pc: u32,
         end_cycle: u64,
         public_io: Vec<u32>,
+        global_sum: Vec<u32>,
     ) -> Self {
         Self {
             exit_code,
@@ -92,6 +97,7 @@ impl PublicValues {
             end_pc,
             end_cycle,
             public_io,
+            global_sum,
         }
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
@@ -119,6 +125,12 @@ impl PublicValues {
                         })
                         .collect_vec()
                 })
+                .collect_vec(),
+        )
+        .chain(
+            self.global_sum
+                .iter()
+                .map(|value| vec![E::BaseField::from_canonical_u32(*value)])
                 .collect_vec(),
         )
         .collect::<Vec<_>>()

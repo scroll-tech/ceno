@@ -49,16 +49,19 @@ pub struct EcallKeccakConfig<E: ExtensionField> {
 }
 
 /// KeccakInstruction can handle any instruction and produce its side-effects.
+#[derive(Default)]
 pub struct KeccakInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
     type InstructionConfig = EcallKeccakConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         "Ecall_Keccak".to_string()
     }
 
     fn construct_circuit(
+        &self,
         _circuit_builder: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -66,6 +69,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
     }
 
     fn build_gkr_iop_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
@@ -128,7 +132,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         let (out_evals, mut chip) = layout.finalize(cb);
 
         let layer =
-            Layer::from_circuit_builder(cb, "Rounds".to_string(), layout.n_challenges(), out_evals);
+            Layer::from_circuit_builder(cb, "Rounds".to_string(), layout.n_challenges, out_evals);
         chip.add_layer(layer);
 
         let circuit = chip.gkr_circuit();

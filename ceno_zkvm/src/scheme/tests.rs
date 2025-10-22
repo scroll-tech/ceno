@@ -55,18 +55,22 @@ use transcript::{BasicTranscript, Transcript};
 struct TestConfig {
     pub(crate) reg_id: WitIn,
 }
+
+#[derive(Default)]
 struct TestCircuit<E: ExtensionField, const RW: usize, const L: usize> {
     phantom: PhantomData<E>,
 }
 
 impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for TestCircuit<E, RW, L> {
     type InstructionConfig = TestConfig;
+    type Record = StepRecord;
 
     fn name() -> String {
         "TEST".into()
     }
 
     fn construct_circuit(
+        &self,
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -194,6 +198,8 @@ fn test_rw_lk_expression_combination() {
             witness: wits_in,
             structural_witness: structural_in,
             public_input: vec![],
+            num_read_instances: num_instances,
+            num_write_instances: num_instances,
             num_instances,
         };
         let (proof, _, _) = prover
@@ -356,7 +362,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0], vec![0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)

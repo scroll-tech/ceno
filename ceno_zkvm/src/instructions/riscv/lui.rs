@@ -17,7 +17,7 @@ use crate::{
     utils::split_to_u8,
     witness::LkMultiplicity,
 };
-use ceno_emul::InsnKind;
+use ceno_emul::{InsnKind, StepRecord};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
 use witness::set_val;
@@ -29,16 +29,19 @@ pub struct LuiConfig<E: ExtensionField> {
     pub rd_written: [WitIn; UINT_BYTE_LIMBS - 1],
 }
 
+#[derive(Default)]
 pub struct LuiInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     type InstructionConfig = LuiConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", InsnKind::LUI)
     }
 
     fn construct_circuit(
+        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<LuiConfig<E>, ZKVMError> {
@@ -138,12 +141,12 @@ mod tests {
     fn test_opcode_lui<E: ExtensionField>(rd: u32, imm: i32) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
+        let inst = LuiInstruction::default();
         let config = cb
             .namespace(
                 || "lui",
                 |cb| {
-                    let config =
-                        LuiInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
+                    let config = inst.construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )

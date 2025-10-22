@@ -4,6 +4,7 @@ use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
 pub const SHA_EXTEND_WORDS: usize = 64; // u64 cells
 
+#[derive(Default)]
 pub struct Sha256ExtendSpec;
 
 impl SyscallSpec for Sha256ExtendSpec {

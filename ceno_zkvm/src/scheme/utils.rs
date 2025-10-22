@@ -21,7 +21,6 @@ use multilinear_extensions::{
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
-use p3::matrix::{Matrix, dense::RowMajorMatrix};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
