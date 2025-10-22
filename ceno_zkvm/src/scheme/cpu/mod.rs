@@ -619,17 +619,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         if let Some(gkr_circuit) = gkr_circuit {
+            // let pub_io_evals = // get public io evaluations
+            //     cs.instance_openings
+            //         .keys()
+            //         .sorted()
+            //         .map(|Instance(inst_id)| {
+            //             let mle = &input.public_input[*inst_id];
+            //             assert_eq!(
+            //                 mle.evaluations.len(),
+            //                 1,
+            //                 "doesnt support instance with evaluation length > 1"
+            //             );
+            //             match mle.evaluations() {
+            //                 FieldType::Base(smart_slice) => E::from(smart_slice[0]),
+            //                 FieldType::Ext(smart_slice) => smart_slice[0],
+            //                 _ => unreachable!(),
+            //             }
+            //         })
+            //         .collect_vec();
             let pub_io_evals = // get public io evaluations
-                cs.instance_name_map
-                    .keys()
-                    .sorted()
-                    .map(|Instance(inst_id)| {
-                        let mle = &input.public_input[*inst_id];
-                        assert_eq!(
-                            mle.evaluations.len(),
-                            1,
-                            "doesnt support instance with evaluation length > 1"
-                        );
+                input.public_input
+                    .iter().map(|mle| {
                         match mle.evaluations() {
                             FieldType::Base(smart_slice) => E::from(smart_slice[0]),
                             FieldType::Ext(smart_slice) => smart_slice[0],
@@ -637,6 +647,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         }
                     })
                     .collect_vec();
+            let filtered_pub_io_mle = cs
+                .instance_openings
+                .iter()
+                .map(|(id, _)| input.public_input[id.0].clone())
+                .collect_vec();
             let GKRProverOutput {
                 gkr_proof,
                 opening_evaluations,
@@ -645,9 +660,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 num_var_with_rotation,
                 gkr::GKRCircuitWitness {
                     layers: vec![LayerWitness(
-                        chain!(&input.witness, &input.structural_witness, &input.fixed)
-                            .cloned()
-                            .collect_vec(),
+                        chain!(
+                            &input.witness,
+                            &input.structural_witness,
+                            &input.fixed,
+                            &filtered_pub_io_mle,
+                        )
+                        .cloned()
+                        .collect_vec(),
                     )],
                 },
                 // eval value doesnt matter as it wont be used by prover

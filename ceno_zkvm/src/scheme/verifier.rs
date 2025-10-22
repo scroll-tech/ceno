@@ -616,7 +616,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         };
 
         // assume public io is tiny vector, so we evaluate it directly without PCS
-        for &Instance(idx) in cs.instance_name_map.keys() {
+        for &Instance(idx) in cs.instance_openings.keys() {
             let poly = raw_pi[idx].to_vec().into_mle();
             let expected_eval = poly.evaluate(&input_opening_point[..poly.num_vars()]);
             let eval = pi[idx];

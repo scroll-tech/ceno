@@ -210,6 +210,7 @@ impl<
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
             (vec![], vec![]),
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
+                println!("prove circuit name {circuit_name}");
                 let num_instances = circuit_name_num_instances_mapping
                     .get(&circuit_name)
                     .copied()
@@ -362,9 +363,9 @@ impl<
 
         // evaluate pi if there is instance query
         let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
-        if !cs.instance_name_map().is_empty() {
+        if !cs.instance_openings().is_empty() {
             let span = entered_span!("pi::evals");
-            for &Instance(idx) in cs.instance_name_map().keys() {
+            for &Instance(idx) in cs.instance_openings().keys() {
                 let poly = &input.public_input[idx];
                 pi_in_evals.insert(
                     idx,

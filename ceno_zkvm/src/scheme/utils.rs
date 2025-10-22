@@ -407,14 +407,23 @@ pub fn gkr_witness<
                 witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
             });
 
-        // TODO process fixed (and probably short) mle
+        first_layer
+            .in_eval_expr
+            .iter()
+            .skip(phase1_witness_group.len())
+            .enumerate()
+            .for_each(|(index, witin)| {
+                witness_mle_flatten[*witin] = Some(fixed[index].clone());
+            });
+
         assert_eq!(
             first_layer.in_eval_expr.len(),
-            phase1_witness_group.len(),
+            first_layer.n_witin + first_layer.n_fixed,
             "TODO process fixed (and probably short) mle"
         );
         // XXX currently fixed poly not support in layers > 1
-
+        // TODO process fixed (and probably short) mle
+        //         
         // first_layer
         //     .in_eval_expr
         //     .par_iter()

@@ -4,8 +4,8 @@ use gkr_iop::{error::CircuitBuilderError, tables::LookupTable};
 use crate::{
     circuit_builder::CircuitBuilder,
     instructions::riscv::constants::{
-        END_CYCLE_IDX, END_PC_IDX, END_SHARD_ID_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
-        PUBLIC_IO_IDX, UINT_LIMBS,
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
+        SHARD_ID_IDX, UINT_LIMBS,
     },
     tables::InsnRecord,
 };
@@ -40,37 +40,38 @@ impl<'a, E: ExtensionField> InstFetch<E> for CircuitBuilder<'a, E> {
 impl<'a, E: ExtensionField> PublicIOQuery for CircuitBuilder<'a, E> {
     fn query_exit_code(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError> {
         Ok([
-            self.cs.query_instance(|| "exit_code_low", EXIT_CODE_IDX)?,
+            self.cs.query_instance(EXIT_CODE_IDX)?,
             self.cs
-                .query_instance(|| "exit_code_high", EXIT_CODE_IDX + 1)?,
+                .query_instance(EXIT_CODE_IDX + 1)?,
         ])
     }
 
     fn query_init_pc(&mut self) -> Result<Instance, CircuitBuilderError> {
-        self.cs.query_instance(|| "init_pc", INIT_PC_IDX)
+        self.cs.query_instance(INIT_PC_IDX)
     }
 
     fn query_init_cycle(&mut self) -> Result<Instance, CircuitBuilderError> {
-        self.cs.query_instance(|| "init_cycle", INIT_CYCLE_IDX)
+        self.cs.query_instance(INIT_CYCLE_IDX)
     }
 
     fn query_end_pc(&mut self) -> Result<Instance, CircuitBuilderError> {
-        self.cs.query_instance(|| "end_pc", END_PC_IDX)
+        self.cs.query_instance(END_PC_IDX)
     }
 
     fn query_end_cycle(&mut self) -> Result<Instance, CircuitBuilderError> {
-        self.cs.query_instance(|| "end_cycle", END_CYCLE_IDX)
+        self.cs.query_instance(END_CYCLE_IDX)
     }
 
     fn query_shard_id(&mut self) -> Result<Instance, CircuitBuilderError> {
-        self.cs.query_instance(|| "shard_id", END_SHARD_ID_IDX)
+        self.cs.query_instance(SHARD_ID_IDX)
     }
 
     fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError> {
         Ok([
-            self.cs.query_instance(|| "public_io_low", PUBLIC_IO_IDX)?,
             self.cs
-                .query_instance(|| "public_io_high", PUBLIC_IO_IDX + 1)?,
+                .query_instance_for_openings(|| "public_io_low", PUBLIC_IO_IDX)?,
+            self.cs
+                .query_instance_for_openings(|| "public_io_high", PUBLIC_IO_IDX + 1)?,
         ])
     }
 }

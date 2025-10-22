@@ -205,9 +205,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .iter()
             .take(layer.n_witin)
             .map(|mle| Either::Left(mle.as_ref()))
+            .chain(
+                // some non-selector structural witin
+                wit.iter()
+                    .skip(layer.n_witin)
+                    .take(layer.n_structural_witin - layer.out_sel_and_eval_exprs.len())
+                    .map(|mle| Either::Left(mle.as_ref())),
+            )
             .chain(eqs.iter_mut().map(Either::Right))
             .chain(
-                // fixed, start after `n_witin`
+                // fixed and pubio, start after `n_witin and n_structural_witin`
                 wit.iter()
                     .skip(layer.n_witin + layer.n_structural_witin)
                     .map(|mle| Either::Left(mle.as_ref())),
@@ -215,12 +222,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .collect_vec();
         assert_eq!(
             all_witins.len(),
-            layer.n_witin + layer.n_structural_witin + layer.n_fixed,
-            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {}",
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {} + layer.n_instance {}",
             all_witins.len(),
             layer.n_witin,
             layer.n_structural_witin,
             layer.n_fixed,
+            layer.n_instance,
         );
 
         let builder =

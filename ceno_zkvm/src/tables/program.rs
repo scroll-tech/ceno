@@ -269,6 +269,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         multiplicity: &[HashMap<u64, usize>],
         program: &Program,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
         let mut prog_mlt = vec![0_usize; program.instructions.len()];
@@ -279,18 +280,29 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         let mut witness = RowMajorMatrix::<E::BaseField>::new(
             config.program_size,
-            num_witin + num_structural_witin,
+            num_witin,
             InstancePaddingStrategy::Default,
         );
-        witness.par_rows_mut().zip(prog_mlt).for_each(|(row, mlt)| {
-            set_val!(
-                row,
-                config.mlt,
-                E::BaseField::from_canonical_u64(mlt as u64)
-            );
-        });
+        let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
+            config.program_size,
+            1,
+            InstancePaddingStrategy::Default,
+        );
+        let selector_witin = WitIn { id: 0 };
+        witness
+            .par_rows_mut()
+            .zip_eq(structural_witness.par_rows_mut())
+            .zip(prog_mlt)
+            .for_each(|((row, structural_row), mlt)| {
+                set_val!(
+                    row,
+                    config.mlt,
+                    E::BaseField::from_canonical_u64(mlt as u64)
+                );
+                set_val!(structural_row, selector_witin, 1u64);
+            });
 
-        Ok([witness, RowMajorMatrix::empty()])
+        Ok([witness, structural_witness])
     }
 }
 

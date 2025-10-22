@@ -14,7 +14,14 @@ use crate::{
     },
 };
 use ff_ext::ExtensionField;
-use gkr_iop::tables::LookupTable;
+use gkr_iop::{
+    chip::Chip,
+    gkr::{GKRCircuit, layer::Layer},
+    selector::SelectorType,
+    tables::LookupTable,
+};
+use itertools::Itertools;
+use multilinear_extensions::{StructuralWitInType, ToExpr};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 /// Use this trait as parameter to RangeTableCircuit.
@@ -144,6 +151,49 @@ impl<E: ExtensionField, const MAX_BITS_1: usize, const MAX_BITS_2: usize, R: Ran
             || Self::name(),
             |cb| DoubleRangeTableConfig::construct_circuit(cb, R::ROM_TYPE, MAX_BITS_1, MAX_BITS_2),
         )?)
+    }
+
+    fn build_gkr_iop_circuit(
+        cb: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
+    ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
+        let config = Self::construct_circuit(cb, param)?;
+        let lk_table_len = cb.cs.lk_table_expressions.len() * 2;
+
+        let selector = cb.create_structural_witin(
+            || "selector",
+            StructuralWitInType::EqualDistanceSequence {
+                // TODO determin proper size of max length
+                max_len: u32::MAX as usize,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        );
+        let selector_type = SelectorType::Whole(selector.expr());
+
+        // all shared the same selector
+        let (out_evals, mut chip) = (
+            [
+                // r_record
+                vec![],
+                // w_record
+                vec![],
+                // lk_record
+                (0..lk_table_len).collect_vec(),
+                // zero_record
+                vec![],
+            ],
+            Chip::new_from_cb(cb, 0),
+        );
+
+        // register selector to legacy constrain system
+        cb.cs.lk_selector = Some(selector_type.clone());
+
+        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        chip.add_layer(layer);
+
+        Ok((config, Some(chip.gkr_circuit())))
     }
 
     fn generate_fixed_traces(

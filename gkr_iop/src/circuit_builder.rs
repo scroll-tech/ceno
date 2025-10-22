@@ -101,7 +101,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
-    pub instance_name_map: HashMap<Instance, String>,
+    pub instance_openings: HashMap<Instance, String>,
 
     pub r_selector: Option<SelectorType<E>>,
     pub r_expressions: Vec<Expression<E>>,
@@ -166,7 +166,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
-            instance_name_map: HashMap::new(),
+            instance_openings: HashMap::new(),
             r_selector: None,
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
@@ -238,7 +238,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         f
     }
 
-    pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn query_instance(&self, idx: usize) -> Result<Instance, CircuitBuilderError> {
+        let i = Instance(idx);
+        Ok(i)
+    }
+
+    pub fn query_instance_for_openings<NR: Into<String>, N: FnOnce() -> NR>(
         &mut self,
         n: N,
         idx: usize,
@@ -246,7 +251,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let i = Instance(idx);
 
         let name = n().into();
-        self.instance_name_map.insert(i, name);
+        self.instance_openings.insert(i, name);
 
         Ok(i)
     }

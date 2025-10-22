@@ -1,6 +1,12 @@
 use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams};
 use ff_ext::ExtensionField;
-use gkr_iop::gkr::GKRCircuit;
+use gkr_iop::{
+    chip::Chip,
+    gkr::{GKRCircuit, layer::Layer},
+    selector::SelectorType,
+};
+use itertools::Itertools;
+use multilinear_extensions::{StructuralWitInType, ToExpr};
 use std::collections::HashMap;
 use witness::RowMajorMatrix;
 
@@ -36,7 +42,46 @@ pub trait TableCircuit<E: ExtensionField> {
         param: &ProgramParams,
     ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
         let config = Self::construct_circuit(cb, param)?;
-        Ok((config, None))
+        let r_table_len = cb.cs.r_table_expressions.len();
+        let w_table_len = cb.cs.w_table_expressions.len();
+        let lk_table_len = cb.cs.lk_table_expressions.len() * 2;
+
+        let selector = cb.create_structural_witin(
+            || "selector",
+            StructuralWitInType::EqualDistanceSequence {
+                // TODO determin proper size of max length
+                max_len: u32::MAX as usize,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        );
+        let selector_type = SelectorType::Whole(selector.expr());
+
+        // all shared the same selector
+        let (out_evals, mut chip) = (
+            [
+                // r_record
+                (0..r_table_len).collect_vec(),
+                // w_record
+                (r_table_len..r_table_len + w_table_len).collect_vec(),
+                // lk_record
+                (r_table_len + w_table_len..r_table_len + w_table_len + lk_table_len).collect_vec(),
+                // zero_record
+                vec![],
+            ],
+            Chip::new_from_cb(cb, 0),
+        );
+
+        // register selector to legacy constrain system
+        cb.cs.r_selector = Some(selector_type.clone());
+        cb.cs.w_selector = Some(selector_type.clone());
+        cb.cs.lk_selector = Some(selector_type.clone());
+
+        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        chip.add_layer(layer);
+
+        Ok((config, Some(chip.gkr_circuit())))
     }
 
     fn generate_fixed_traces(

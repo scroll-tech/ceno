@@ -4,7 +4,8 @@ use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelExtend, ParallelIterator,
 };
 use std::marker::PhantomData;
 use witness::{
@@ -149,8 +150,16 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<
         num_structural_witin: usize,
         _final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert_eq!(num_structural_witin, 0);
-        Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()])
+        assert!(num_structural_witin == 0 || num_structural_witin == 1);
+        let mut value = Vec::with_capacity(NVRAM::len(&_config.params));
+        value.par_extend(
+            (0..NVRAM::len(&_config.params))
+                .into_par_iter()
+                .map(|_| F::ONE),
+        );
+        let structural_witness =
+            RowMajorMatrix::<F>::new_by_values(value, 1, InstancePaddingStrategy::Default);
+        Ok([RowMajorMatrix::empty(), structural_witness])
     }
 }
 
@@ -252,18 +261,26 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         num_structural_witin: usize,
         final_cycles: &[Cycle],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert_eq!(num_structural_witin, 0);
+        assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
             num_witin,
             InstancePaddingStrategy::Default,
         );
+        let mut structural_witness = RowMajorMatrix::<F>::new(
+            NVRAM::len(&self.params),
+            1,
+            InstancePaddingStrategy::Default,
+        );
+        let selector_witin = WitIn { id: 0 };
 
         final_table
             .par_rows_mut()
+            .zip_eq(structural_witness.par_rows_mut())
             .zip_eq(final_cycles)
-            .for_each(|(row, &cycle)| {
+            .for_each(|((row, structural_row), &cycle)| {
                 set_val!(row, self.final_cycle, cycle);
+                set_val!(structural_row, selector_witin, 1u64);
             });
 
         Ok([final_table, RowMajorMatrix::empty()])

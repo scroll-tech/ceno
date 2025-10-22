@@ -130,8 +130,8 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.w_expressions.len() + self.zkvm_v1_css.w_table_expressions.len()
     }
 
-    pub fn instance_name_map(&self) -> &HashMap<Instance, String> {
-        &self.zkvm_v1_css.instance_name_map
+    pub fn instance_openings(&self) -> &HashMap<Instance, String> {
+        &self.zkvm_v1_css.instance_openings
     }
 
     pub fn is_opcode_circuit(&self) -> bool {

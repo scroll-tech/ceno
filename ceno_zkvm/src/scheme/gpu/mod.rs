@@ -646,7 +646,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
 
         if let Some(gkr_circuit) = gkr_circuit {
             let pub_io_evals = // get public io evaluations
-                cs.instance_name_map
+                cs.instance_openings
                     .keys()
                     .sorted()
                     .map(|Instance(inst_id)| {
