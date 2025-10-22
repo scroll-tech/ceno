@@ -16,7 +16,6 @@ use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 pub use multilinear_extensions::wit_infer_by_expr;
 use multilinear_extensions::{
-    macros::{entered_span, exit_span},
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
@@ -297,6 +296,12 @@ pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
     wit_layers
 }
 
+#[tracing::instrument(
+    skip_all,
+    name = "build_main_witness",
+    fields(profiling_2),
+    level = "trace"
+)]
 pub fn build_main_witness<
     'a,
     E: ExtensionField,
@@ -439,7 +444,6 @@ pub fn gkr_witness<
     // generate all layer witness from input to output
     for (i, layer) in circuit.layers.iter().rev().enumerate() {
         tracing::debug!("generating input {i} layer with layer name {}", layer.name);
-        let span = entered_span!("per_layer_gen_witness", profiling_2 = true);
         // process in_evals to prepare layer witness
         // This should assume the input of the first layer is the phase1 witness of the circuit.
         let current_layer_wits = layer
@@ -486,7 +490,6 @@ pub fn gkr_witness<
                 }
                 other => unimplemented!("{:?}", other),
             });
-        exit_span!(span);
     }
     layer_wits.reverse();
 
