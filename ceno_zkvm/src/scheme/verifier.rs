@@ -368,7 +368,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instance);
+        let mut log2_num_instances = ceil_log2(next_pow2_instance);
+        if composed_cs.has_ecc_ops() {
+            // for opcode circuit with ecc ops, the mles have one extra variable
+            // to store the internal partial sums for ecc additions
+            log2_num_instances += 1;
+        }
+        println!("{log2_num_instances}");
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         // verify and reduce product tower sumcheck
@@ -852,6 +858,7 @@ impl TowerVerify {
             ),
             |(point_and_eval, alpha_pows), round| {
                 let (out_rt, out_claim) = (&point_and_eval.point, &point_and_eval.eval);
+                println!("tower sumcheck round {round} start");
                 let sumcheck_claim = IOPVerifierState::verify(
                     *out_claim,
                     &IOPProof {
@@ -864,6 +871,7 @@ impl TowerVerify {
                     },
                     transcript,
                 );
+                println!("tower sumcheck round {round} end");
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();

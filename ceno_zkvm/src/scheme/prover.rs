@@ -237,6 +237,7 @@ impl<
                     num_read_instances: num_instances, // TODO: fixme
                     num_write_instances: num_instances, // TODO: fixme
                     num_instances,
+                    has_ecc_ops: cs.has_ecc_ops(),
                 };
 
                 if cs.is_opcode_circuit() {
@@ -341,6 +342,7 @@ impl<
                 })
                 .collect_vec();
             let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
+            println!("ys[0].num_vars(): {}", ys[0].num_vars());
             let xs = xs_ys;
             let invs = cs
                 .zkvm_v1_css

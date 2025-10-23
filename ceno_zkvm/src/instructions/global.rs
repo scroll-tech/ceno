@@ -1,4 +1,4 @@
-use std::iter::repeat;
+use std::{cell::RefCell, iter::repeat};
 
 use crate::{
     Value,
@@ -16,12 +16,15 @@ use gkr_iop::{
     chip::Chip, circuit_builder::CircuitBuilder, error::CircuitBuilderError, gkr::layer::Layer,
     selector::SelectorType, utils::lk_multiplicity::Multiplicity,
 };
-use itertools::Itertools;
+use itertools::{Itertools, chain};
 use multilinear_extensions::{
-    Expression, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn, util::max_usable_threads,
+    Expression,
+    StructuralWitInType::EqualDistanceSequence,
+    ToExpr, WitIn,
+    util::{ceil_log2, max_usable_threads},
 };
 use p3::{
-    field::{Field, FieldAlgebra},
+    field::{Field, FieldAlgebra, PrimeField},
     matrix::dense::RowMajorMatrix,
     symmetric::Permutation,
     util::log2_ceil_usize,
@@ -179,7 +182,7 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct GlobalRecord {
     pub addr: u32,
     pub ram_type: RAMType,
@@ -190,6 +193,12 @@ pub struct GlobalRecord {
     pub is_write: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct GlobalPoint<E: ExtensionField> {
+    pub nonce: u32,
+    pub point: SepticPoint<E::BaseField>,
+}
+
 impl GlobalRecord {
     pub fn to_ec_point<
         E: ExtensionField,
@@ -197,7 +206,7 @@ impl GlobalRecord {
     >(
         &self,
         hasher: &P,
-    ) -> (u32, SepticPoint<E::BaseField>) {
+    ) -> GlobalPoint<E> {
         let mut nonce = 0;
         let mut input = [
             E::BaseField::from_canonical_u32(self.addr),
@@ -233,11 +242,9 @@ impl GlobalRecord {
                     _ => false,
                 };
 
-                if negate {
-                    return (nonce, -p);
-                } else {
-                    return (nonce, p);
-                }
+                let point = if negate { -p } else { p };
+
+                return GlobalPoint { nonce, point };
             } else {
                 // try again with different nonce
                 nonce += 1;
@@ -254,11 +261,17 @@ pub struct GlobalChip<E: ExtensionField, P> {
     perm: P,
 }
 
+#[derive(Clone, Debug)]
+pub struct GlobalChipInput<E: ExtensionField> {
+    pub record: GlobalRecord,
+    pub ec_point: Option<GlobalPoint<E>>,
+}
+
 impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]> + Send>
     Instruction<E> for GlobalChip<E, P>
 {
     type InstructionConfig = GlobalConfig<E, P>;
-    type Record = GlobalRecord;
+    type Record = GlobalChipInput<E>;
 
     fn name() -> String {
         "Global".to_string()
@@ -355,9 +368,10 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         config: &Self::InstructionConfig,
         instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
-        record: &GlobalRecord,
+        input: &Self::Record,
     ) -> Result<(), crate::error::ZKVMError> {
         // assign basic fields
+        let record = &input.record;
         let is_ram_register = match record.ram_type {
             RAMType::Register => 1,
             RAMType::Memory => 0,
@@ -373,8 +387,8 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         set_val!(instance, config.is_global_write, record.is_write as u64);
 
         // assign (x, y) and nonce
-        let (nonce, point) = record.to_ec_point::<E, P>(&config.perm);
-        set_val!(instance, config.nonce, nonce as u64);
+        let GlobalPoint { nonce, point } = input.ec_point.as_ref().unwrap();
+        set_val!(instance, config.nonce, *nonce as u64);
         config
             .x
             .iter()
@@ -396,7 +410,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
             .for_each(|(i, v)| *i = E::BaseField::from_canonical_u16(*v));
         input[2 + k] = E::BaseField::from_canonical_u64(record.shard);
         input[2 + k + 1] = E::BaseField::from_canonical_u64(record.global_clk);
-        input[2 + k + 2] = E::BaseField::from_canonical_u32(nonce);
+        input[2 + k + 2] = E::BaseField::from_canonical_u32(*nonce);
 
         config
             .perm_config
@@ -409,11 +423,12 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         config: &Self::InstructionConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<Self::Record>,
+        mut steps: Vec<Self::Record>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
+
         assert!(num_structural_witin == 3);
         let selector_r_witin = WitIn { id: 0 };
         let selector_w_witin = WitIn { id: 1 };
@@ -422,7 +437,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         let nthreads = max_usable_threads();
 
         // local read => global write
-        let num_local_reads = steps.iter().filter(|s| s.is_write).count();
+        let num_local_reads = steps.iter().filter(|s| s.record.is_write).count();
 
         let num_instance_per_batch = if steps.len() > 256 {
             steps.len().div_ceil(nthreads)
@@ -430,6 +445,19 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
             steps.len()
         }
         .max(1);
+
+        let N = next_pow2_instance_padding(steps.len());
+        // compute the input for the binary tree for ec point summation
+        steps
+            .par_chunks_mut(num_instance_per_batch)
+            .for_each(|chunk| {
+                chunk.iter_mut().for_each(|step| {
+                    let point = step.record.to_ec_point::<E, P>(&config.perm);
+
+                    step.ec_point.replace(point);
+                });
+            });
+
         let lk_multiplicity = LkMultiplicity::default();
         // *2 because we need to store the internal nodes of binary tree for ec point summation
         let num_rows_padded = next_pow2_instance_padding(steps.len()) * 2;
@@ -486,17 +514,67 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
             .collect::<Result<(), ZKVMError>>()?;
 
         // assign internal nodes in the binary tree for ec point summation
-        let half_witin_matrix_size = num_rows_padded / 2 * num_witin;
-        let raw_witin_iter = raw_witin.values
-            [half_witin_matrix_size..(2 * half_witin_matrix_size - 1)]
-            .par_chunks_mut(num_witin)
-            .for_each(|instance| {
-                for i in 0..SEPTIC_EXTENSION_DEGREE {
-                    set_val!(instance, config.x[i], E::BaseField::default());
-                    set_val!(instance, config.y[i], E::BaseField::default());
-                    set_val!(instance, config.slope[i], E::BaseField::default());
-                }
-            });
+        let mut cur_layer_points = steps
+            .iter()
+            .map(|step| step.ec_point.as_ref().map(|p| p.point.clone()).unwrap())
+            .enumerate()
+            .collect_vec();
+
+        // slope[0,b] = (input[b,0].y - input[b,1].y) / (input[b,0].x - input[b,1].x)
+        loop {
+            if cur_layer_points.len() <= 1 {
+                break;
+            }
+            // 2b -> b + 2^n
+            let next_layer_offset = cur_layer_points.first().map(|(i, _)| *i / 2 + N).unwrap();
+            cur_layer_points = cur_layer_points
+                .par_chunks(2)
+                .zip(raw_witin.values[next_layer_offset * num_witin..].par_chunks_mut(num_witin))
+                .with_min_len(64)
+                .map(|(pair, instance)| {
+                    // input[1,b] = affine_add(input[b,0], input[b,1])
+                    // the left node is at index 2b, right node is at index 2b+1
+                    // the parent node is at index b + 2^n
+                    let (o, slope, q) = match pair.len() {
+                        2 => {
+                            // l = 2b, r = 2b+1
+                            let (l, p1) = &pair[0];
+                            let (r, p2) = &pair[1];
+                            assert_eq!(*r - *l, 1);
+
+                            // parent node idx = b + 2^n
+                            let o = N + l / 2;
+                            let slope = (&p1.y - &p2.y) * (&p1.x - &p2.x).inverse().unwrap();
+                            let q = p1.clone() + p2.clone();
+
+                            (o, slope, q)
+                        }
+                        1 => {
+                            let (l, p) = &pair[0];
+                            let o = N + l / 2;
+                            (o, SepticExtension::zero(), p.clone())
+                        }
+                        0 | 3.. => unreachable!(),
+                    };
+
+                    config
+                        .x
+                        .iter()
+                        .chain(config.y.iter())
+                        .chain(config.slope.iter())
+                        .zip_eq(chain!(
+                            q.x.deref().iter(),
+                            q.y.deref().iter(),
+                            slope.deref().iter(),
+                        ))
+                        .for_each(|(witin, fe)| {
+                            set_val!(instance, *witin, *fe);
+                        });
+
+                    (o, q)
+                })
+                .collect::<Vec<_>>();
+        }
 
         let raw_witin = witness::RowMajorMatrix::new_by_inner_matrix(
             raw_witin,
@@ -533,7 +611,7 @@ mod tests {
         gadgets::horizen_round_consts,
         instructions::{
             Instruction,
-            global::{GlobalChip, GlobalRecord},
+            global::{GlobalChip, GlobalChipInput, GlobalRecord},
         },
         scheme::{
             PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
@@ -619,7 +697,7 @@ mod tests {
         let global_ec_sum: SepticPoint<F> = global_reads
             .iter()
             .chain(global_writes.iter())
-            .map(|record| record.to_ec_point::<E, PERM>(&global_chip.perm).1)
+            .map(|record| record.to_ec_point::<E, PERM>(&global_chip.perm).point)
             .sum();
 
         let public_value = PublicValues::new(
@@ -644,6 +722,10 @@ mod tests {
             global_writes // local reads
                 .into_iter()
                 .chain(global_reads.into_iter()) // local writes
+                .map(|record| GlobalChipInput {
+                    record,
+                    ec_point: None,
+                })
                 .collect::<Vec<_>>(),
         )
         .unwrap();
@@ -679,6 +761,7 @@ mod tests {
             num_read_instances: n_global_writes as usize,
             num_write_instances: n_global_reads as usize,
             num_instances: (n_global_reads + n_global_writes) as usize,
+            has_ecc_ops: true,
         };
         let mut rng = thread_rng();
         let challenges = [E::random(&mut rng), E::random(&mut rng)];
