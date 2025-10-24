@@ -236,7 +236,7 @@ impl<E: ExtensionField> Layer<E> {
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
         num_instances: usize,
-    ) -> Result<(), BackendError> {
+    ) -> Result<Point<E>, BackendError> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
@@ -267,7 +267,7 @@ impl<E: ExtensionField> Layer<E> {
 
         self.update_claims(claims, &evals, &in_point);
 
-        Ok(())
+        Ok(in_point)
     }
 
     // extract claim and dudup point

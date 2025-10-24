@@ -139,10 +139,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .take(self.exprs.len() + num_rotations * ROTATION_OPENING_COUNT)
             .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
             .collect_vec();
-        let mut zero_expr =
-            extend_exprs_with_rotation(self, &alpha_pows_expr, self.n_witin as WitnessId)
-                .into_iter()
-                .sum::<Expression<E>>();
+        let mut zero_expr = extend_exprs_with_rotation(self, &alpha_pows_expr)
+            .into_iter()
+            .sum::<Expression<E>>();
 
         self.rotation_sumcheck_expression = rotation_expr.clone();
         self.rotation_sumcheck_expression_monomial_terms =
@@ -162,10 +161,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             self.n_instance,
         );
         self.main_sumcheck_expression = Some(zero_expr);
-        self.main_sumcheck_expression_monomial_terms =
-            self.main_sumcheck_expression.as_ref().map(|expr| {
-                expr.get_monomial_terms()
-            });
+        self.main_sumcheck_expression_monomial_terms = self
+            .main_sumcheck_expression
+            .as_ref()
+            .map(|expr| expr.get_monomial_terms());
         exit_span!(span);
     }
 
@@ -433,14 +432,14 @@ fn verify_rotation<E: ExtensionField>(
 pub fn extend_exprs_with_rotation<E: ExtensionField>(
     layer: &Layer<E>,
     alpha_pows: &[Expression<E>],
-    offset_eq_id: WitnessId,
 ) -> Vec<Expression<E>> {
+    let offset_structural_witid = (layer.n_witin + layer.n_fixed + layer.n_instance) as WitnessId;
     let mut alpha_pows_iter = alpha_pows.iter();
     let mut expr_iter = layer.exprs.iter();
     let mut zero_check_exprs = Vec::with_capacity(layer.out_sel_and_eval_exprs.len());
 
     let match_expr = |sel_expr: &Expression<E>| match sel_expr {
-        Expression::StructuralWitIn(id, ..) => Expression::WitIn(offset_eq_id + *id),
+        Expression::StructuralWitIn(id, ..) => Expression::WitIn(offset_structural_witid + *id),
         invalid => panic!("invalid eq format {:?}", invalid),
     };
 
@@ -517,9 +516,9 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
                 Expression::StructuralWitIn(right_eq_id, ..),
                 Expression::StructuralWitIn(eq_id, ..),
             ) => (
-                Expression::WitIn(offset_eq_id + *left_eq_id),
-                Expression::WitIn(offset_eq_id + *right_eq_id),
-                Expression::WitIn(offset_eq_id + *eq_id),
+                Expression::WitIn(offset_structural_witid + *left_eq_id),
+                Expression::WitIn(offset_structural_witid + *right_eq_id),
+                Expression::WitIn(offset_structural_witid + *eq_id),
             ),
             invalid => panic!("invalid eq format {:?}", invalid),
         };

@@ -74,9 +74,15 @@ pub trait TableCircuit<E: ExtensionField> {
         );
 
         // register selector to legacy constrain system
-        cb.cs.r_selector = Some(selector_type.clone());
-        cb.cs.w_selector = Some(selector_type.clone());
-        cb.cs.lk_selector = Some(selector_type.clone());
+        if r_table_len > 0 {
+            cb.cs.r_selector = Some(selector_type.clone());
+        }
+        if w_table_len > 0 {
+            cb.cs.w_selector = Some(selector_type.clone());
+        }
+        if lk_table_len > 0 {
+            cb.cs.lk_selector = Some(selector_type.clone());
+        }
 
         let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
         chip.add_layer(layer);

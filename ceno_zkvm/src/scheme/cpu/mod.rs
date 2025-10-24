@@ -595,9 +595,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                     layers: vec![LayerWitness(
                         chain!(
                             &input.witness,
-                            &input.structural_witness,
                             &input.fixed,
                             &pub_io_mles,
+                            &input.structural_witness,
                         )
                         .cloned()
                         .collect_vec(),

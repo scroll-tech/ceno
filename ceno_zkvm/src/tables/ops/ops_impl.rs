@@ -9,12 +9,12 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
-    structs::ROMType,
+    structs::{ROMType, WitnessId},
     tables::RMMCollections,
 };
-use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
-use multilinear_extensions::StructuralWitInType::EqualDistanceSequence;
-use crate::structs::WitnessId;
+use multilinear_extensions::{
+    Expression, Fixed, StructuralWitIn, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn,
+};
 
 #[derive(Clone, Debug)]
 pub struct OpTableConfig {
@@ -75,7 +75,7 @@ impl OpTableConfig {
         multiplicity: &HashMap<u64, usize>,
         length: usize,
     ) -> Result<RMMCollections<F>, CircuitBuilderError> {
-        assert!(num_structural_witin == 0 || num_structural_witin == 1);
+        assert_eq!(num_structural_witin, 1);
         let num_structural_witin = num_structural_witin.max(1);
         let selector_witin = StructuralWitIn {
             id: num_structural_witin as WitnessId - 1,

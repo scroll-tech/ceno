@@ -21,7 +21,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     e2e::ShardContext,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
-    structs::ProgramParams,
+    structs::{ProgramParams, WitnessId},
     tables::ram::ram_circuit::DynVolatileRamTableConfigTrait,
 };
 use ff_ext::FieldInto;
@@ -386,10 +386,14 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         if final_mem.is_empty() {
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
+        assert_eq!(num_structural_witin, 2);
 
         let num_instances_padded = next_pow2_instance_padding(final_mem.len());
         assert!(num_instances_padded <= DVRAM::max_len(&config.params));
         assert!(DVRAM::max_len(&config.params).is_power_of_two());
+        let selector_witin = WitIn {
+            id: num_structural_witin as WitnessId - 1,
+        };
 
         let mut witness = RowMajorMatrix::<F>::new(
             num_instances_padded,
@@ -437,6 +441,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                     config.addr,
                     DVRAM::addr(&config.params, i) as u64
                 );
+                set_val!(structural_row, selector_witin, 1u64);
             });
 
         Ok([witness, structural_witness])
@@ -484,17 +489,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             vec![Expression::ZERO], // Initial cycle.
         ]
         .concat();
-        // let rlc_record = cb.rlc_chip_record(init_table.clone());
-        // cb.w_table_rlc_record(
-        //     || "init_table",
-        //     (DVRAM::RAM_TYPE as u64).into(),
-        //     SetTableSpec {
-        //         len: None,
-        //         structural_witins: vec![addr],
-        //     },
-        //     init_table,
-        //     rlc_record,
-        // )?;
         cb.w_table_record(
             || "init_table",
             DVRAM::RAM_TYPE,
@@ -522,10 +516,14 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         if final_mem.is_empty() {
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
+        assert_eq!(num_structural_witin, 2);
 
         let num_instances_padded = next_pow2_instance_padding(final_mem.len());
         assert!(num_instances_padded <= DVRAM::max_len(&config.params));
         assert!(DVRAM::max_len(&config.params).is_power_of_two());
+        let selector_witin = WitIn {
+            id: num_structural_witin as WitnessId - 1,
+        };
 
         let mut structural_witness = RowMajorMatrix::<F>::new(
             num_instances_padded,
@@ -553,6 +551,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                     config.addr,
                     DVRAM::addr(&config.params, i) as u64
                 );
+                set_val!(structural_row, selector_witin, 1u64);
             });
 
         Ok([RowMajorMatrix::empty(), structural_witness])

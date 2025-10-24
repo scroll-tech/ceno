@@ -211,7 +211,6 @@ impl<
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
             (vec![], vec![]),
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
-                println!("prove circuit name {circuit_name}");
                 let num_instances = circuit_name_num_instances_mapping
                     .get(&circuit_name)
                     .copied()
@@ -247,7 +246,6 @@ impl<
                     num_instances,
                 };
 
-                assert!(cs.is_opcode_circuit());
                 let (opcode_proof, pi_in_evals, input_opening_point) =
                     self.create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
                 tracing::trace!(

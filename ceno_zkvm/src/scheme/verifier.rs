@@ -212,7 +212,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .sum::<E>();
 
             transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
-            let input_opening_point = if circuit_vk.get_cs().is_opcode_circuit() {
+            if circuit_vk.get_cs().is_with_lk_table() {
+                logup_sum -= chip_logup_sum;
+            } else {
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks = circuit_vk.get_cs().num_lks();
                 // each padding instance contribute to (2^rotation_vars) dummy lookup padding
@@ -227,30 +229,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     num_lks * (num_padded_instance + num_instance_non_selected);
 
                 logup_sum += chip_logup_sum;
-                self.verify_opcode_proof(
-                    circuit_name,
-                    circuit_vk,
-                    proof,
-                    pi_evals,
-                    &mut transcript,
-                    NUM_FANIN,
-                    &point_eval,
-                    &challenges,
-                )?
-            } else {
-                logup_sum -= chip_logup_sum;
-                self.verify_table_proof(
-                    circuit_name,
-                    circuit_vk,
-                    proof,
-                    &vm_proof.raw_pi,
-                    &vm_proof.pi_evals,
-                    &mut transcript,
-                    NUM_FANIN_LOGUP,
-                    &point_eval,
-                    &challenges,
-                )?
             };
+            let input_opening_point = self.verify_opcode_proof(
+                circuit_name,
+                circuit_vk,
+                proof,
+                pi_evals,
+                &mut transcript,
+                NUM_FANIN,
+                &point_eval,
+                &challenges,
+            )?;
             if circuit_vk.get_cs().num_witin() > 0 {
                 witin_openings.push((
                     input_opening_point.len(),
@@ -341,7 +330,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
-        println!("verify _name {_name}");
         let composed_cs = circuit_vk.get_cs();
         let ComposedConstrainSystem {
             zkvm_v1_css: cs,
@@ -459,7 +447,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .collect_vec();
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
-        let GKRClaims(opening_evaluations) = gkr_circuit.verify(
+        let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
             &evals,
@@ -468,7 +456,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript,
             num_instances,
         )?;
-        Ok(opening_evaluations[0].point.clone())
+        Ok(rt)
     }
 
     #[allow(clippy::too_many_arguments)]

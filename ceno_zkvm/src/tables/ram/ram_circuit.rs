@@ -240,7 +240,7 @@ impl<
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}_{}", DVRAM::RAM_TYPE, DVRAM::name())
+        format!("{}_{:?}_RAM", DVRAM::name(), DVRAM::RAM_TYPE,)
     }
 
     fn construct_circuit(

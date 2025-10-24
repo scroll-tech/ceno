@@ -214,6 +214,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             )
             .chain(eqs.iter_mut().map(Either::Right))
             .collect_vec();
+
         assert_eq!(
             all_witins.len(),
             layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,

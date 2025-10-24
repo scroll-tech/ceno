@@ -125,7 +125,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         num_instances: usize,
-    ) -> Result<GKRClaims<Evaluation<E>>, BackendError>
+    ) -> Result<(GKRClaims<Evaluation<E>>, Point<E>), BackendError>
     where
         E: ExtensionField,
     {
@@ -134,20 +134,24 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let mut challenges = challenges.to_vec();
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
-        for (i, (layer, layer_proof)) in izip!(&self.layers, sumcheck_proofs).enumerate() {
-            tracing::debug!("verifier layer {i} layer with layer name {}", layer.name);
-            layer.verify(
-                max_num_variables,
-                layer_proof,
-                &mut evaluations,
-                pub_io_evals,
-                &mut challenges,
-                transcript,
-                num_instances,
-            )?;
-        }
+        let rt = izip!(&self.layers, sumcheck_proofs).enumerate().try_fold(
+            vec![],
+            |_, (i, (layer, layer_proof))| {
+                tracing::debug!("verifier layer {i} layer with layer name {}", layer.name);
+                let rt = layer.verify(
+                    max_num_variables,
+                    layer_proof,
+                    &mut evaluations,
+                    pub_io_evals,
+                    &mut challenges,
+                    transcript,
+                    num_instances,
+                )?;
+                Ok(rt)
+            },
+        )?;
 
-        Ok(GKRClaims(self.opening_evaluations(&evaluations)))
+        Ok((GKRClaims(self.opening_evaluations(&evaluations)), rt))
     }
 
     /// Output opening evaluations. First witin and then fixed.

@@ -407,9 +407,9 @@ pub fn gkr_witness<
             .in_eval_expr
             .iter()
             .take(first_layer.n_witin)
-            .enumerate()
-            .for_each(|(index, witin)| {
-                witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
+            .zip_eq(phase1_witness_group.iter())
+            .for_each(|(index, witin_mle)| {
+                witness_mle_flatten[*index] = Some(witin_mle.clone());
             });
 
         first_layer
@@ -417,25 +417,19 @@ pub fn gkr_witness<
             .iter()
             .skip(first_layer.n_witin)
             .take(first_layer.n_fixed)
-            .enumerate()
-            .for_each(|(index, witin)| {
-                witness_mle_flatten[*witin] = Some(fixed[index].clone());
+            .zip_eq(fixed.iter())
+            .for_each(|(index, fixed_mle)| {
+                witness_mle_flatten[*index] = Some(fixed_mle.clone());
             });
-
-        println!(
-            "pub_io len {}, first_layer.n_instance {}",
-            pub_io_mles.len(),
-            first_layer.n_instance
-        );
 
         first_layer
             .in_eval_expr
             .iter()
             .skip(first_layer.n_witin + first_layer.n_fixed)
             .take(first_layer.n_instance)
-            .enumerate()
-            .for_each(|(index, witin)| {
-                witness_mle_flatten[*witin] = Some(pub_io_mles[index].clone());
+            .zip_eq(pub_io_mles.iter())
+            .for_each(|(index, pubio_mle)| {
+                witness_mle_flatten[*index] = Some(pubio_mle.clone());
             });
 
         // XXX currently fixed poly not support in layers > 1
@@ -489,6 +483,14 @@ pub fn gkr_witness<
             })
             .collect_vec();
 
+        assert_eq!(
+            current_layer_wits.len(),
+            layer.n_witin
+                + layer.n_fixed
+                + layer.n_instance
+                + if i == 0 { layer.n_structural_witin } else { 0 }
+        );
+
         // infer current layer output
         let current_layer_output: Vec<Arc<PB::MultilinearPoly<'b>>> =
             <PD as ProtocolWitnessGeneratorProver<PB>>::layer_witness(
@@ -506,7 +508,6 @@ pub fn gkr_witness<
             .flat_map(|(_, out_eval)| out_eval)
             .zip_eq(&current_layer_output)
             .for_each(|(out_eval, out_mle)| match out_eval {
-                // note: Linear (x - b)/a has been done and encode in expression
                 EvalExpression::Single(out) | EvalExpression::Linear(out, _, _) => {
                     witness_mle_flatten[*out] = Some(out_mle.clone());
                 }

@@ -4,7 +4,7 @@ mod range_impl;
 
 mod range_circuit;
 pub use range_circuit::{
-    DoubleRangeTableCircuit, DynamicRangeTableCircuit, RangeTable, RangeTableCircuit,
+    DoubleRangeTableCircuit, DynamicRangeTableCircuit, RangeTable,
 };
 
 use crate::ROMType;

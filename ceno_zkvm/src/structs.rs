@@ -134,8 +134,8 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         &self.zkvm_v1_css.instance_openings
     }
 
-    pub fn is_opcode_circuit(&self) -> bool {
-        self.gkr_circuit.is_some()
+    pub fn is_with_lk_table(&self) -> bool {
+        !self.zkvm_v1_css.lk_table_expressions.is_empty()
     }
 
     /// return number of lookup operation
