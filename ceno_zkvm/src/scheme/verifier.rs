@@ -377,6 +377,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         println!("{log2_num_instances}");
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
+        // verify ecc proof if exists
+        if composed_cs.has_ecc_ops() {
+            assert!(proof.ecc_proof.is_some());
+            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
+            EccVerifier::new()
+                .verify_ecc_proof(&ecc_proof, transcript)?;
+        }
+
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
@@ -803,6 +811,7 @@ impl TowerVerify {
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
+        println!("alpha_pows in verifier: {:?}", alpha_pows);
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])
@@ -858,7 +867,6 @@ impl TowerVerify {
             ),
             |(point_and_eval, alpha_pows), round| {
                 let (out_rt, out_claim) = (&point_and_eval.point, &point_and_eval.eval);
-                println!("tower sumcheck round {round} start");
                 let sumcheck_claim = IOPVerifierState::verify(
                     *out_claim,
                     &IOPProof {
@@ -871,7 +879,6 @@ impl TowerVerify {
                     },
                     transcript,
                 );
-                println!("tower sumcheck round {round} end");
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();

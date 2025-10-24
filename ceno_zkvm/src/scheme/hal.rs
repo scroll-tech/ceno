@@ -49,8 +49,8 @@ impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
     pub fn log2_num_instances(&self) -> usize {
         let log2 = ceil_log2(next_pow2_instance_padding(self.num_instances));
         if self.has_ecc_ops {
-            // if it's the global chip, then the mles have one extra variable
-            // to store the internal partial sums for ecc additions
+            // the mles have one extra variable to store
+            // the internal partial sums for ecc additions
             log2 + 1
         } else {
             log2

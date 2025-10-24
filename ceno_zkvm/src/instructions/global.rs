@@ -1,4 +1,4 @@
-use std::{cell::RefCell, iter::repeat};
+use std::iter::repeat;
 
 use crate::{
     Value,
@@ -742,8 +742,7 @@ mod tests {
         let backend = create_backend::<E, PCS>(20, SecurityLevel::Conjecture100bits);
         let pd = create_prover(backend);
 
-        // let pk = prover.create_chip_proof();
-        let mut zkvm_pk = ZKVMProvingKey::new(pp, vp);
+        let zkvm_pk = ZKVMProvingKey::new(pp, vp);
         let zkvm_vk = zkvm_pk.get_vk_slow();
         let zkvm_prover = ZKVMProver::new(zkvm_pk, pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
