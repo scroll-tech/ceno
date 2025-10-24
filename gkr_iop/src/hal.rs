@@ -2,11 +2,11 @@ use crate::gkr::layer::{
     Layer,
     hal::{LinearLayerProver, SumcheckLayerProver, ZerocheckLayerProver},
 };
+use either::Either;
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::mle::Point;
 use std::{fmt::Debug, sync::Arc};
-use either::Either;
 
 pub trait MultilinearPolynomial<E: ExtensionField> {
     fn num_vars(&self) -> usize;
