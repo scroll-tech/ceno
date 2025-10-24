@@ -314,15 +314,14 @@ impl<
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
         // build main witness
-        let (records, is_padded) =
-            build_main_witness::<E, PCS, PB, PD>(&self.device, cs, &input, challenges);
+        let records = build_main_witness::<E, PCS, PB, PD>(cs, &input, challenges);
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
         // (internally calls build_tower_witness)
         let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) = self
             .device
-            .prove_tower_relation(cs, &input, &records, is_padded, challenges, transcript);
+            .prove_tower_relation(cs, &input, &records, transcript);
         exit_span!(span);
 
         assert_eq!(

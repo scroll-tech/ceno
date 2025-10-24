@@ -2,15 +2,11 @@ use super::hal::{
     DeviceTransporter, MainSumcheckProver, OpeningProver, ProverDevice, TowerProver, TraceCommitter,
 };
 use crate::{
-    circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP},
+        constants::NUM_FANIN,
         hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
-        utils::{
-            infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
-            wit_infer_by_expr,
-        },
+        utils::{infer_tower_logup_witness, infer_tower_product_witness},
     },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
@@ -24,8 +20,8 @@ use gkr_iop::{
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Expression, Instance, WitnessId,
-    mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
+    Expression,
+    mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
@@ -297,8 +293,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [ArcMultilinearExtension<'b, E>],
-        is_padded: bool,
-        challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
         Vec<TowerProverSpec<'c, CpuBackend<E, PCS>>>,
@@ -311,12 +305,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = composed_cs;
-        let num_instances_with_rotation =
-            input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
         let num_var_with_rotation =
             input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
-
-        let chip_record_alpha = challenges[0];
 
         let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
         let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
@@ -335,46 +325,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             &records[offset..][..cs.lk_expressions.len()]
         };
 
-        // remove is_padded logic
-        assert!(is_padded);
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_last_layer");
         let mut r_set_last_layer = r_set_wit
             .iter()
             .chain(w_set_wit.iter())
-            .map(|wit| {
-                if is_padded {
-                    wit.as_view_chunks(NUM_FANIN)
-                } else {
-                    masked_mle_split_to_chunks(wit, num_instances_with_rotation, NUM_FANIN, E::ONE)
-                }
-            })
+            .map(|wit| wit.as_view_chunks(NUM_FANIN))
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
 
         let mut lk_numerator_last_layer = lk_n_wit
             .iter()
             .chain(lk_d_wit.iter())
-            .enumerate()
-            .map(|(i, wit)| {
-                if is_padded {
-                    wit.as_view_chunks(NUM_FANIN)
-                } else {
-                    let default = if i < lk_n_wit.len() {
-                        // For table circuit, the last layer's length is always two's power
-                        // so the padding will not happen, therefore we can use any value here.
-                        E::ONE
-                    } else {
-                        chip_record_alpha
-                    };
-                    masked_mle_split_to_chunks(
-                        wit,
-                        num_instances_with_rotation,
-                        NUM_FANIN_LOGUP,
-                        default,
-                    )
-                }
-            })
+            .map(|wit| wit.as_view_chunks(NUM_FANIN))
             .collect::<Vec<_>>();
         let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
         exit_span!(span);
@@ -515,8 +478,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [Arc<MultilinearExtension<'b, E>>],
-        is_padded: bool,
-        challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
     ) -> TowerRelationOutput<E>
     where
@@ -526,7 +487,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         // First build tower witness
         let span = entered_span!("build_tower_witness", profiling_2 = true);
         let (mut out_evals, prod_specs, logup_specs) =
-            self.build_tower_witness(composed_cs, input, records, is_padded, challenges);
+            self.build_tower_witness(composed_cs, input, records);
         exit_span!(span);
 
         // Then prove the tower relation

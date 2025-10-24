@@ -1490,7 +1490,7 @@ Hints:
                 &[],
                 &pub_io_evals
                     .iter()
-                    .map(|v| v.right().clone().unwrap())
+                    .map(|v| v.right().unwrap())
                     .collect_vec(),
                 &challenges,
                 &gs_final,
@@ -1505,7 +1505,7 @@ Hints:
                 &[],
                 &pub_io_evals
                     .iter()
-                    .map(|v| v.right().clone().unwrap())
+                    .map(|v| v.right().unwrap())
                     .collect_vec(),
                 &challenges,
                 &gs_init,

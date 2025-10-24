@@ -1,7 +1,7 @@
 use crate::{
     scheme::{
         constants::MIN_PAR_SIZE,
-        hal::{MainSumcheckProver, ProofInput, ProverDevice},
+        hal::{ProofInput, ProverDevice},
     },
     structs::ComposedConstrainSystem,
 };
@@ -29,50 +29,6 @@ use rayon::{
 };
 use std::{iter, sync::Arc};
 use witness::next_pow2_instance_padding;
-
-// first computes the masked mle'[j] = mle[j] if j < num_instance, else default
-// then split it into `num_parts` smaller mles
-pub(crate) fn masked_mle_split_to_chunks<'a, 'b, E: ExtensionField>(
-    mle: &'a MultilinearExtension<'a, E>,
-    num_instance: usize,
-    num_chunks: usize,
-    default: E,
-) -> Vec<MultilinearExtension<'b, E>> {
-    assert!(num_chunks.is_power_of_two());
-    assert!(
-        num_instance <= mle.evaluations().len(),
-        "num_instance {num_instance} > {}",
-        mle.evaluations().len()
-    );
-
-    // TODO: when mle.len() is two's power, we should avoid the clone
-    (0..num_chunks)
-        .into_par_iter()
-        .map(|part_idx| {
-            let n = mle.evaluations().len() / num_chunks;
-
-            match mle.evaluations() {
-                FieldType::Ext(evals) => (part_idx * n..(part_idx + 1) * n)
-                    .into_par_iter()
-                    .with_min_len(64)
-                    .map(|i| if i < num_instance { evals[i] } else { default })
-                    .collect::<Vec<_>>()
-                    .into_mle(),
-                FieldType::Base(evals) => (part_idx * n..(part_idx + 1) * n)
-                    .map(|i| {
-                        if i < num_instance {
-                            E::from(evals[i])
-                        } else {
-                            default
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .into_mle(),
-                _ => unreachable!(),
-            }
-        })
-        .collect::<Vec<_>>()
-}
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
@@ -304,80 +260,76 @@ pub fn build_main_witness<
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     PD: ProverDevice<PB>,
 >(
-    device: &PD,
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'a, PB>,
     challenges: &[E; 2],
-) -> (Vec<Arc<PB::MultilinearPoly<'a>>>, bool) {
-    let (mles, is_padded) = {
-        let ComposedConstrainSystem {
-            zkvm_v1_css: cs,
-            gkr_circuit,
-        } = composed_cs;
-        let log2_num_instances = input.log2_num_instances();
-        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+) -> Vec<Arc<PB::MultilinearPoly<'a>>> {
+    let ComposedConstrainSystem {
+        zkvm_v1_css: cs,
+        gkr_circuit,
+    } = composed_cs;
+    let log2_num_instances = input.log2_num_instances();
+    let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
-        // sanity check
-        assert_eq!(input.witness.len(), cs.num_witin as usize);
+    // sanity check
+    assert_eq!(input.witness.len(), cs.num_witin as usize);
 
-        // structural witness can be empty. In this case they are `eq`, and will be filled later
-        assert!(
-            input.structural_witness.len() == cs.num_structural_witin as usize
-                || input.structural_witness.is_empty(),
-        );
-        assert_eq!(input.fixed.len(), cs.num_fixed);
+    // structural witness can be empty. In this case they are `eq`, and will be filled later
+    assert!(
+        input.structural_witness.len() == cs.num_structural_witin as usize
+            || input.structural_witness.is_empty(),
+    );
+    assert_eq!(input.fixed.len(), cs.num_fixed);
 
-        // check all witness size are power of 2
+    // check all witness size are power of 2
+    assert!(
+        input
+            .witness
+            .iter()
+            .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
+    );
+
+    if !input.structural_witness.is_empty() {
         assert!(
             input
-                .witness
+                .structural_witness
                 .iter()
                 .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
         );
+    }
 
-        if !input.structural_witness.is_empty() {
-            assert!(
-                input
-                    .structural_witness
-                    .iter()
-                    .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
-            );
-        }
-
-        let Some(gkr_circuit) = gkr_circuit else {
-            panic!("empty gkr-iop")
-        };
-
-        // circuit must have at least one read/write/lookup
-        assert!(
-            cs.r_expressions.len()
-                + cs.w_expressions.len()
-                + cs.lk_expressions.len()
-                + cs.r_table_expressions.len()
-                + cs.w_table_expressions.len()
-                + cs.lk_table_expressions.len()
-                > 0,
-            "assert circuit"
-        );
-
-        let pub_io_mles = cs
-            .instance_openings
-            .iter()
-            .map(|instance| input.public_input[instance.0].clone())
-            .collect_vec();
-
-        let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
-            gkr_circuit,
-            &input.witness,
-            &input.structural_witness,
-            &input.fixed,
-            &pub_io_mles,
-            &input.pub_io_evals,
-            challenges,
-        );
-        (gkr_circuit_out.0.0, true)
+    let Some(gkr_circuit) = gkr_circuit else {
+        panic!("empty gkr-iop")
     };
-    (mles, is_padded)
+
+    // circuit must have at least one read/write/lookup
+    assert!(
+        cs.r_expressions.len()
+            + cs.w_expressions.len()
+            + cs.lk_expressions.len()
+            + cs.r_table_expressions.len()
+            + cs.w_table_expressions.len()
+            + cs.lk_table_expressions.len()
+            > 0,
+        "assert circuit"
+    );
+
+    let pub_io_mles = cs
+        .instance_openings
+        .iter()
+        .map(|instance| input.public_input[instance.0].clone())
+        .collect_vec();
+
+    let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
+        gkr_circuit,
+        &input.witness,
+        &input.structural_witness,
+        &input.fixed,
+        &pub_io_mles,
+        &input.pub_io_evals,
+        challenges,
+    );
+    gkr_circuit_out.0.0
 }
 
 pub fn gkr_witness<

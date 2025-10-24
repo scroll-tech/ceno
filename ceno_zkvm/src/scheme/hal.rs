@@ -1,5 +1,4 @@
 use crate::{
-    circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::cpu::TowerRelationOutput,
     structs::{ComposedConstrainSystem, ZKVMProvingKey},
@@ -76,8 +75,6 @@ pub trait TowerProver<PB: ProverBackend> {
         cs: &ComposedConstrainSystem<PB::E>,
         input: &ProofInput<'a, PB>,
         records: &'c [Arc<PB::MultilinearPoly<'b>>],
-        is_padded: bool,
-        challenge: &[PB::E; 2],
     ) -> (
         Vec<Vec<Vec<PB::E>>>,
         Vec<TowerProverSpec<'c, PB>>,
@@ -95,8 +92,6 @@ pub trait TowerProver<PB: ProverBackend> {
         composed_cs: &ComposedConstrainSystem<PB::E>,
         input: &ProofInput<'a, PB>,
         records: &'c [Arc<PB::MultilinearPoly<'b>>],
-        is_padded: bool,
-        challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
     ) -> TowerRelationOutput<PB::E>
     where

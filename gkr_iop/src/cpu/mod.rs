@@ -8,7 +8,7 @@ use ff_ext::ExtensionField;
 use itertools::izip;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
-    mle::{ArcMultilinearExtension, MultilinearExtension, Point},
+    mle::{MultilinearExtension, Point},
     wit_infer_by_monomial_expr,
 };
 use p3::field::TwoAdicField;

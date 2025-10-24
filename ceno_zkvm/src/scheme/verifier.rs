@@ -8,14 +8,13 @@ use ff_ext::{Instrumented, PoseidonField};
 use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
-    scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP},
+    scheme::constants::NUM_FANIN,
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
     utils::{
         eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
         eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
     },
 };
-use gkr_iop::gkr::GKRClaims;
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{

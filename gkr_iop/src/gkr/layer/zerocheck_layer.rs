@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use itertools::{Itertools, assert_equal, chain, izip};
+use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{
     ChallengeId, Expression, ToExpr, WitnessId,
     macros::{entered_span, exit_span},
