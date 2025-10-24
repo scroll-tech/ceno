@@ -484,7 +484,17 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             vec![Expression::ZERO], // Initial cycle.
         ]
         .concat();
-
+        // let rlc_record = cb.rlc_chip_record(init_table.clone());
+        // cb.w_table_rlc_record(
+        //     || "init_table",
+        //     (DVRAM::RAM_TYPE as u64).into(),
+        //     SetTableSpec {
+        //         len: None,
+        //         structural_witins: vec![addr],
+        //     },
+        //     init_table,
+        //     rlc_record,
+        // )?;
         cb.w_table_record(
             || "init_table",
             DVRAM::RAM_TYPE,

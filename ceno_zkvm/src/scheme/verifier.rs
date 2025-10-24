@@ -1,6 +1,6 @@
 use either::Either;
 use ff_ext::ExtensionField;
-use std::marker::PhantomData;
+use std::{iter, marker::PhantomData};
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
@@ -341,6 +341,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
     ) -> Result<Point<E>, ZKVMError> {
+        println!("verify _name {_name}");
         let composed_cs = circuit_vk.get_cs();
         let ComposedConstrainSystem {
             zkvm_v1_css: cs,
@@ -350,13 +351,55 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len() + cs.r_table_expressions.len(),
             cs.w_expressions.len() + cs.w_table_expressions.len(),
-            cs.lk_expressions.len() + cs.lk_table_expressions.len() * 2,
+            cs.lk_expressions.len() + cs.lk_table_expressions.len(),
         );
         let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instance);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+
+        // constrain log2_num_instances within max length
+        cs.r_table_expressions
+            .iter()
+            .chain(&cs.w_table_expressions)
+            .for_each(|set_table_expr| {
+                // iterate through structural witins and collect max round.
+                let num_vars = set_table_expr
+                    .table_spec
+                    .len
+                    .map(ceil_log2)
+                    .unwrap_or_else(|| {
+                        set_table_expr
+                            .table_spec
+                            .structural_witins
+                            .iter()
+                            .map(|StructuralWitIn { witin_type, .. }| {
+                                let hint_num_vars = log2_num_instances;
+                                assert!((1 << hint_num_vars) <= witin_type.max_len());
+                                hint_num_vars
+                            })
+                            .max()
+                            .unwrap_or(log2_num_instances)
+                    });
+                assert_eq!(num_vars, log2_num_instances);
+            });
+        cs.lk_table_expressions.iter().for_each(|l| {
+            // iterate through structural witins and collect max round.
+            let num_vars = l.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
+                l.table_spec
+                    .structural_witins
+                    .iter()
+                    .map(|StructuralWitIn { witin_type, .. }| {
+                        let hint_num_vars = log2_num_instances;
+                        assert!((1 << hint_num_vars) <= witin_type.max_len());
+                        hint_num_vars
+                    })
+                    .max()
+                    .unwrap_or(log2_num_instances)
+            });
+            assert_eq!(num_vars, log2_num_instances);
+        });
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -375,18 +418,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript,
         )?;
 
-        // verify LogUp witness nominator p(x) ?= constant vector 1
-        logup_p_evals
-            .iter()
-            .try_for_each(|PointAndEval { eval, .. }| {
-                if *eval != E::ONE {
-                    Err(ZKVMError::VerifyError(
-                        "Lookup table witness p(x) != constant 1".into(),
-                    ))
-                } else {
-                    Ok(())
-                }
-            })?;
+        if cs.lk_table_expressions.is_empty() {
+            // verify LogUp witness nominator p(x) ?= constant vector 1
+            logup_p_evals
+                .iter()
+                .try_for_each(|PointAndEval { eval, .. }| {
+                    if *eval != E::ONE {
+                        Err(ZKVMError::VerifyError(
+                            "Lookup table witness p(x) != constant 1".into(),
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                })?;
+        }
 
         debug_assert!(
             chain!(&record_evals, &logup_p_evals, &logup_q_evals)
@@ -401,11 +446,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         debug_assert_eq!(logup_p_evals.len(), lk_counts_per_instance);
         debug_assert_eq!(logup_q_evals.len(), lk_counts_per_instance);
 
+        let evals = record_evals
+            .iter()
+            // append p_evals if there got lk table expressions
+            .chain(if cs.lk_table_expressions.is_empty() {
+                Either::Left(iter::empty())
+            } else {
+                Either::Right(logup_p_evals.iter())
+            })
+            .chain(&logup_q_evals)
+            .cloned()
+            .collect_vec();
+
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
         let GKRClaims(opening_evaluations) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
-            &chain!(record_evals, logup_q_evals).collect_vec(),
+            &evals,
             pi,
             challenges,
             transcript,

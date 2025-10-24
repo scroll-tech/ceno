@@ -12,7 +12,9 @@ use crate::{
     structs::ROMType,
     tables::RMMCollections,
 };
-use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
+use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
+use multilinear_extensions::StructuralWitInType::EqualDistanceSequence;
+use crate::structs::WitnessId;
 
 #[derive(Clone, Debug)]
 pub struct OpTableConfig {
@@ -75,7 +77,16 @@ impl OpTableConfig {
     ) -> Result<RMMCollections<F>, CircuitBuilderError> {
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
-        let selector_witin = WitIn { id: 0 };
+        let selector_witin = StructuralWitIn {
+            id: num_structural_witin as WitnessId - 1,
+            // type doesn't matter
+            witin_type: EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        }; // last witin id is selector
         let mut witness =
             RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
         let mut structural_witness = RowMajorMatrix::<F>::new(

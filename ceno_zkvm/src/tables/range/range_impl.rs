@@ -143,6 +143,16 @@ impl DynamicRangeTableConfig {
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
+        let selector_witin = StructuralWitIn {
+            id: num_structural_witin as WitnessId - 1,
+            // type doesn't matter
+            witin_type: EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        }; // last witin id is selector
 
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {
@@ -169,6 +179,7 @@ impl DynamicRangeTableConfig {
                 set_val!(row, self.mlt, F::from_canonical_u64(*mlt as u64));
                 set_val!(structural_row, self.range, i);
                 set_val!(structural_row, self.bits, b);
+                structural_row[selector_witin.id as usize] = F::ONE;
             });
 
         Ok([witness, structural_witness])

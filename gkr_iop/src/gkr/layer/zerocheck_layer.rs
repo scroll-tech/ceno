@@ -1,11 +1,11 @@
 use ff_ext::ExtensionField;
-use itertools::{Itertools, chain, izip};
+use itertools::{Itertools, assert_equal, chain, izip};
 use multilinear_extensions::{
     ChallengeId, Expression, ToExpr, WitnessId,
     macros::{entered_span, exit_span},
     mle::Point,
     monomialize_expr_to_wit_terms,
-    utils::{eval_by_expr, eval_by_expr_with_instance},
+    utils::{eval_by_expr, eval_by_expr_with_instance, expr_convert_to_witins},
     virtual_poly::VPAuxInfo,
 };
 use p3::field::{FieldAlgebra, dot_product};
@@ -139,7 +139,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .take(self.exprs.len() + num_rotations * ROTATION_OPENING_COUNT)
             .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
             .collect_vec();
-        let zero_expr =
+        let mut zero_expr =
             extend_exprs_with_rotation(self, &alpha_pows_expr, self.n_witin as WitnessId)
                 .into_iter()
                 .sum::<Expression<E>>();
@@ -155,15 +155,16 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 )
             });
 
+        expr_convert_to_witins(
+            &mut zero_expr,
+            self.n_witin as WitnessId,
+            self.n_fixed as WitnessId,
+            self.n_instance,
+        );
         self.main_sumcheck_expression = Some(zero_expr);
         self.main_sumcheck_expression_monomial_terms =
             self.main_sumcheck_expression.as_ref().map(|expr| {
-                monomialize_expr_to_wit_terms(
-                    expr,
-                    self.n_witin as WitnessId,
-                    self.n_fixed as WitnessId,
-                    self.n_instance,
-                )
+                expr.get_monomial_terms()
             });
         exit_span!(span);
     }
@@ -213,10 +214,16 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             main:
                 SumcheckLayerProof {
                     proof: IOPProof { proofs },
-                    evals: mut main_evals,
+                    evals: main_evals,
                 },
             rotation: rotation_proof,
         } = proof;
+
+        assert_eq!(
+            main_evals.len(),
+            self.n_witin + self.n_fixed + self.n_instance + self.n_structural_witin,
+            "invalid main_evals length",
+        );
 
         if let Some(rotation_proof) = rotation_proof {
             // verify rotation proof
@@ -286,13 +293,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         // eval eq and set to respective witin
         izip!(&self.out_sel_and_eval_exprs, &eval_and_dedup_points).for_each(
             |((sel_type, _), (_, out_point))| {
-                sel_type.evaluate(
-                    &mut main_evals,
-                    out_point.as_ref().unwrap(),
-                    &in_point,
-                    num_instances,
-                    self.n_witin,
-                );
+                if let Some((expected_eval, wit_id)) =
+                    sel_type.evaluate(out_point.as_ref().unwrap(), &in_point, num_instances)
+                {
+                    let wit_id = wit_id as usize + self.n_witin + self.n_fixed + self.n_instance;
+                    assert_eq!(main_evals[wit_id], expected_eval);
+                }
             },
         );
 
