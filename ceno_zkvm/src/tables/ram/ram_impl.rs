@@ -1072,7 +1072,8 @@ mod tests {
     fn test_well_formed_address_padding() {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = HintsCircuit::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+        let (config, _) =
+            HintsCircuit::build_gkr_iop_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
         let def_params = ProgramParams::default();
         let lkm = LkMultiplicity::default().into_finalize_result();
@@ -1100,7 +1101,7 @@ mod tests {
             .cs
             .structural_witin_namespace_map
             .iter()
-            .position(|name| name == "riscv/RAM_Memory_HintsTable/addr")
+            .position(|name| name == "riscv/HintsTable_Memory_RAM/addr")
             .unwrap();
 
         structural_witness.padding_by_strategy();

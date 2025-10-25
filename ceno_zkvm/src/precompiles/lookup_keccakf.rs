@@ -20,7 +20,7 @@ use gkr_iop::{
 use itertools::{Itertools, iproduct, izip, zip_eq};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
+    Expression, StructuralWitIn, ToExpr, WitIn,
     mle::PointAndEval,
     util::{ceil_log2, max_usable_threads},
 };
@@ -185,15 +185,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 //     cb.create_fixed(|| format!("keccak_fixed_{}", id))
                 // })),
                 array::from_fn(|id| {
-                    cb.create_structural_witin(
-                        || format!("keccak_eq_{}", id),
-                        StructuralWitInType::EqualDistanceSequence {
-                            max_len: 0,
-                            offset: 0,
-                            multi_factor: 0,
-                            descending: false,
-                        },
-                    )
+                    cb.create_placeholder_structural_witin(|| format!("keccak_eq_{}", id))
                 }),
             )
         };

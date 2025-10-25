@@ -209,7 +209,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 // some non-selector structural witin
                 wit.iter()
                     .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
-                    .take(layer.n_structural_witin - layer.out_sel_and_eval_exprs.len())
+                    .take(
+                        layer.n_structural_witin
+                            - layer.out_sel_and_eval_exprs.len()
+                            - layer.rotation_exprs.0.as_ref().map(|_| ROTATION_OPENING_COUNT).unwrap_or(0),
+                    )
                     .map(|mle| Either::Left(mle.as_ref())),
             )
             .chain(eqs.iter_mut().map(Either::Right))
