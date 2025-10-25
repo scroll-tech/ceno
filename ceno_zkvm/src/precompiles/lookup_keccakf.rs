@@ -1015,7 +1015,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     fields(profiling_1)
 )]
 pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
-    (layout, gkr_circuit, num_witin, num_structual_witin): (
+    (layout, gkr_circuit, num_witin, num_structural_witin): (
         TestKeccakLayout<E>,
         GKRCircuit<E>,
         u16,
@@ -1068,7 +1068,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     );
     let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
         layout.layout.phase1_witin_rmm_height(states.len()),
-        num_structual_witin as usize,
+        num_structural_witin as usize,
         InstancePaddingStrategy::Default,
     );
     let raw_witin_iter =
