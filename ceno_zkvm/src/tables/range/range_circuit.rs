@@ -110,16 +110,7 @@ impl<E: ExtensionField, const MAX_BITS_1: usize, const MAX_BITS_2: usize, R: Ran
         let config = Self::construct_circuit(cb, param)?;
         let lk_table_len = cb.cs.lk_table_expressions.len() * 2;
 
-        let selector = cb.create_structural_witin(
-            || "selector",
-            StructuralWitInType::EqualDistanceSequence {
-                // TODO determin proper size of max length
-                max_len: u32::MAX as usize,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Whole(selector.expr());
 
         // all shared the same selector

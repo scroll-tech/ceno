@@ -96,6 +96,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub witin_namespace_map: Vec<String>,
 
     pub num_structural_witin: WitnessId,
+    pub structural_witins: Vec<StructuralWitIn>,
     pub structural_witin_namespace_map: Vec<String>,
 
     pub num_fixed: usize,
@@ -162,6 +163,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             // platform,
             witin_namespace_map: vec![],
             num_structural_witin: 0,
+            structural_witins: vec![],
             structural_witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
@@ -220,12 +222,20 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             id: self.num_structural_witin,
             witin_type,
         };
+        self.structural_witins.push(wit_in.clone());
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
         let path = self.ns.compute_path(n().into());
         self.structural_witin_namespace_map.push(path);
 
         wit_in
+    }
+
+    pub fn create_placeholder_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+    ) -> StructuralWitIn {
+        self.create_structural_witin(n, StructuralWitInType::Empty)
     }
 
     pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> Fixed {
@@ -563,6 +573,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.create_structural_witin(name_fn, witin_type)
+    }
+
+    pub fn create_placeholder_structural_witin<NR, N>(&mut self, name_fn: N) -> StructuralWitIn
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.create_placeholder_structural_witin(name_fn)
     }
 
     pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Fixed

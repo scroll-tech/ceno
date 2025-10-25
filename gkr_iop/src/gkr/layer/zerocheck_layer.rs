@@ -1,9 +1,9 @@
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{
-    ChallengeId, Expression, ToExpr, WitnessId,
+    ChallengeId, Expression, Instance, StructuralWitIn, StructuralWitInType, ToExpr, WitnessId,
     macros::{entered_span, exit_span},
-    mle::Point,
+    mle::{IntoMLE, Point},
     monomialize_expr_to_wit_terms,
     utils::{eval_by_expr, eval_by_expr_with_instance, expr_convert_to_witins},
     virtual_poly::VPAuxInfo,
@@ -28,7 +28,11 @@ use crate::{
     },
     hal::{ProverBackend, ProverDevice},
     selector::SelectorType,
-    utils::rotation_selector_eval,
+    utils::{
+        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
+        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
+        rotation_selector_eval,
+    },
 };
 
 pub(crate) struct RotationPoints<E: ExtensionField> {
@@ -68,6 +72,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         proof: LayerProof<E>,
         eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         pub_io_evals: &[E],
+        raw_pi: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         num_instances: usize,
@@ -198,6 +203,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         proof: LayerProof<E>,
         mut eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         pub_io_evals: &[E],
+        raw_pi: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         num_instances: usize,
@@ -289,17 +295,77 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         );
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
-        // eval eq and set to respective witin
+        let structural_witin_offset = self.n_witin + self.n_fixed + self.n_instance;
+        // eval selector and set to respective witin
         izip!(&self.out_sel_and_eval_exprs, &eval_and_dedup_points).for_each(
             |((sel_type, _), (_, out_point))| {
                 if let Some((expected_eval, wit_id)) =
                     sel_type.evaluate(out_point.as_ref().unwrap(), &in_point, num_instances)
                 {
-                    let wit_id = wit_id as usize + self.n_witin + self.n_fixed + self.n_instance;
+                    let wit_id = wit_id as usize + structural_witin_offset;
                     assert_eq!(main_evals[wit_id], expected_eval);
                 }
             },
         );
+
+        // check structural witin
+        for StructuralWitIn { id, witin_type } in &self.structural_witins {
+            let wit_id = *id as usize + structural_witin_offset;
+            let expected_eval = match witin_type {
+                StructuralWitInType::EqualDistanceSequence {
+                    offset,
+                    multi_factor,
+                    descending,
+                    ..
+                } => eval_wellform_address_vec(
+                    *offset as u64,
+                    *multi_factor as u64,
+                    &in_point,
+                    *descending,
+                ),
+                StructuralWitInType::StackedIncrementalSequence { .. } => {
+                    eval_stacked_wellform_address_vec(&in_point)
+                }
+
+                StructuralWitInType::StackedConstantSequence { .. } => {
+                    eval_stacked_constant_vec(&in_point)
+                }
+                StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
+                    eval_inner_repeated_incremental_vec(*k as u64, &in_point)
+                }
+                StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
+                    eval_outer_repeated_incremental_vec(*k as u64, &in_point)
+                }
+                StructuralWitInType::Empty => continue,
+            };
+            if expected_eval != main_evals[wit_id] {
+                return Err(BackendError::LayerVerificationFailed(
+                    format!("layer {} structural witin mismatch", self.name.clone()).into(),
+                    VerifierError::ClaimNotMatch(
+                        format!("{}", expected_eval).into(),
+                        format!("{}", main_evals[wit_id]).into(),
+                    ),
+                ));
+            }
+        }
+
+        // check pub-io
+        // assume public io is tiny vector, so we evaluate it directly without PCS
+        let pubio_offset = self.n_witin + self.n_fixed;
+        for (index, instance) in self.instance_openings.iter().enumerate() {
+            let index = pubio_offset + index;
+            let poly = raw_pi[instance.0].to_vec().into_mle();
+            let expected_eval = poly.evaluate(&in_point[..poly.num_vars()]);
+            if expected_eval != main_evals[index] {
+                return Err(BackendError::LayerVerificationFailed(
+                    format!("layer {} pi mismatch", self.name.clone()).into(),
+                    VerifierError::ClaimNotMatch(
+                        format!("{}", expected_eval).into(),
+                        format!("{}", main_evals[index]).into(),
+                    ),
+                ));
+            }
+        }
 
         let got_claim = eval_by_expr_with_instance(
             &[],

@@ -1265,6 +1265,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                     gkr_proof.clone(),
                     &out_evals,
                     &[],
+                    &[],
                     &challenges,
                     &mut verifier_transcript,
                     num_instances,

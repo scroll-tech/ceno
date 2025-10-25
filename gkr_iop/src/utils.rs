@@ -207,6 +207,107 @@ pub fn eq_eval_less_or_equal_than<E: ExtensionField>(max_idx: usize, a: &[E], b:
     ans
 }
 
+/// evaluate MLE M(x0, x1, x2, ..., xn) address vector with it evaluation format
+/// on r = [r0, r1, r2, ...rn] succinctly
+/// where `M = descending * scaled * M' + offset`
+/// offset, scaled, is constant, descending = +1/-1
+/// and M' := [0, 1, 2, 3, ....2^n-1]
+/// succinctly format of M'(r) = r0 + r1 * 2 + r2 * 2^2 + .... rn * 2^n
+pub fn eval_wellform_address_vec<E: ExtensionField>(
+    offset: u64,
+    scaled: u64,
+    r: &[E],
+    descending: bool,
+) -> E {
+    let (offset, scaled) = (E::from_canonical_u64(offset), E::from_canonical_u64(scaled));
+    let tmp = scaled
+        * r.iter()
+            .scan(E::ONE, |state, x| {
+                let result = *x * *state;
+                *state *= E::from_canonical_u64(2); // Update the state for the next power of 2
+                Some(result)
+            })
+            .sum::<E>();
+    let tmp = if descending { tmp.neg() } else { tmp };
+    offset + tmp
+}
+
+/// Evaluate MLE with the following evaluation over the hypercube:
+/// [0, 0, 0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, ..., 0, 1, 2, ..., 2^n-1]
+/// which is the concatenation of
+/// [0]
+/// [0, 1]
+/// [0, 1, 2, 3]
+/// ...
+/// [0, 1, 2, ..., 2^n-1]
+/// which is then prefixed by a single zero to make all the subvectors aligned to powers of two.
+/// This function is used to support dynamic range check.
+/// Note that this MLE has n+1 variables, so r should have length n+1.
+///
+/// conceptually, we traverse evaluations in the sequence:
+///   [0, 0], [0, 1], [0, 1, 2, 3], ...
+/// for every `next` element is already in a well-formed incremental structure,
+/// so we can reuse `eval_wellform_address_vec` to obtain its value.
+///
+/// at each step `i`, we combine:
+///   - the accumulated result so far, weighted by `(1 - r[i])`
+///   - the evaluation of the current prefix `r[..i]`, weighted by `r[i]`.
+///
+/// this iterative version avoids recursion for efficiency and clarity.
+pub fn eval_stacked_wellform_address_vec<E: ExtensionField>(r: &[E]) -> E {
+    if r.len() < 2 {
+        return E::ZERO;
+    }
+
+    let mut res = E::ZERO;
+    for i in 1..r.len() {
+        res = res * (E::ONE - r[i]) + eval_wellform_address_vec(0, 1, &r[..i], false) * r[i];
+    }
+    res
+}
+
+/// Evaluate MLE with the following evaluation over the hypercube:
+/// [0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, ..., n, n, n, ..., n]
+/// which is the concatenation of
+/// [0]
+/// [1, 1]
+/// [2, 2, 2, 2]
+/// ...
+/// [n, n, n, ..., n]
+/// which is then prefixed by a single zero to make all the subvectors aligned to powers of two.
+/// This function is used to support dynamic range check.
+/// Note that this MLE has n+1 variables, so r should have length n+1.
+pub fn eval_stacked_constant_vec<E: ExtensionField>(r: &[E]) -> E {
+    if r.len() < 2 {
+        return E::ZERO;
+    }
+
+    let mut res = E::ZERO;
+    for (i, r) in r.iter().enumerate().skip(1) {
+        res = res * (E::ONE - *r) + E::from_canonical_usize(i) * *r;
+    }
+    res
+}
+
+/// evaluate MLE M(x0, x1, x2, ..., xn) address vector with it evaluation format
+/// on r = [r0, r1, r2, ...rn] succinctly
+/// where `M = [0 ... 0 1 ... 1 ... 2^(n-k)-1 ... 2^(n-k)-1]`
+/// where each element is repeated 2^k times
+/// The value is the same as M(xk, xk+1, ..., xn), i.e., just abandoning
+/// the first k elements from r
+pub fn eval_inner_repeated_incremental_vec<E: ExtensionField>(k: u64, r: &[E]) -> E {
+    eval_wellform_address_vec(0, 1, &r[k as usize..], false)
+}
+
+/// evaluate MLE M(x0, x1, x2, ..., xn) address vector with it evaluation format
+/// on r = [r0, r1, r2, ...rn] succinctly
+/// where `M = [0 1 ... 2^k-1] * 2^(n-k)`
+/// The value is the same as M(x0, ..., xk), i.e., just taking
+/// the first k elements from r
+pub fn eval_outer_repeated_incremental_vec<E: ExtensionField>(k: u64, r: &[E]) -> E {
+    eval_wellform_address_vec(0, 1, &r[..k as usize], false)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

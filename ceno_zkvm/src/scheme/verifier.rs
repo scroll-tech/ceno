@@ -234,6 +234,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 circuit_vk,
                 proof,
                 pi_evals,
+                &vm_proof.raw_pi,
                 &mut transcript,
                 NUM_FANIN,
                 &point_eval,
@@ -324,6 +325,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMChipProof<E>,
         pi: &[E],
+        raw_pi: &[Vec<E::BaseField>],
         transcript: &mut impl Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -426,7 +428,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .all_equal()
         );
 
-        // verify zero statement (degree > 1) + sel sumcheck
         let num_rw_records = r_counts_per_instance + w_counts_per_instance;
 
         debug_assert_eq!(record_evals.len(), num_rw_records);
@@ -451,6 +452,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             proof.gkr_iop_proof.clone().unwrap(),
             &evals,
             pi,
+            raw_pi,
             challenges,
             transcript,
             num_instances,
@@ -605,6 +607,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
                             eval_outer_repeated_incremental_vec(k as u64, &rt_tower)
                         }
+                        StructuralWitInType::Empty => todo!(),
                     })
                     .collect_vec()
             })

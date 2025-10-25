@@ -47,15 +47,7 @@ pub trait Instruction<E: ExtensionField> {
         let zero_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
-        let selector = cb.create_structural_witin(
-            || "selector",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(E::BaseField::ZERO, selector.expr());
 
         // all shared the same selector

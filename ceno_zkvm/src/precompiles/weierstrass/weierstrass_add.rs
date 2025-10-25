@@ -785,6 +785,7 @@ pub fn run_weierstrass_add<
                     gkr_proof.clone(),
                     &out_evals,
                     &[],
+                    &[],
                     &challenges,
                     &mut verifier_transcript,
                     num_instances,

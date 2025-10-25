@@ -993,6 +993,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
                     &out_evals,
                     &[],
                     &[],
+                    &[],
                     &mut verifier_transcript,
                     num_instances,
                 )
