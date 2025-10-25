@@ -8,83 +8,11 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
-    structs::ROMType,
+    structs::{ROMType, WitnessId},
 };
-use multilinear_extensions::{StructuralWitIn, StructuralWitInType, ToExpr, WitIn};
-
-#[derive(Clone, Debug)]
-pub struct RangeTableConfig {
-    range: StructuralWitIn,
-    mlt: WitIn,
-}
-
-impl RangeTableConfig {
-    pub fn construct_circuit<E: ExtensionField>(
-        cb: &mut CircuitBuilder<E>,
-        rom_type: ROMType,
-        table_len: usize,
-    ) -> Result<Self, CircuitBuilderError> {
-        let range = cb.create_structural_witin(
-            || "structural range witin",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len: table_len,
-                offset: 0,
-                multi_factor: 1,
-                descending: false,
-            },
-        );
-        let mlt = cb.create_witin(|| "mlt");
-
-        let record_exprs = vec![range.expr()];
-
-        cb.lk_table_record(
-            || "record",
-            SetTableSpec {
-                len: Some(table_len),
-                structural_witins: vec![range],
-            },
-            rom_type,
-            record_exprs,
-            mlt.expr(),
-        )?;
-
-        Ok(Self { range, mlt })
-    }
-
-    pub fn assign_instances<F: SmallField>(
-        &self,
-        num_witin: usize,
-        num_structural_witin: usize,
-        multiplicity: &HashMap<u64, usize>,
-        content: Vec<u64>,
-        length: usize,
-    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        let mut witness: RowMajorMatrix<F> =
-            RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
-        let mut structural_witness = RowMajorMatrix::<F>::new(
-            length,
-            num_structural_witin,
-            InstancePaddingStrategy::Default,
-        );
-
-        let mut mlts = vec![0; length];
-        for (idx, mlt) in multiplicity {
-            mlts[*idx as usize] = *mlt;
-        }
-
-        witness
-            .par_rows_mut()
-            .zip(structural_witness.par_rows_mut())
-            .zip(mlts)
-            .zip(content)
-            .for_each(|(((row, structural_row), mlt), i)| {
-                set_val!(row, self.mlt, F::from_canonical_u64(mlt as u64));
-                set_val!(structural_row, self.range, F::from_canonical_u64(i));
-            });
-
-        Ok([witness, structural_witness])
-    }
-}
+use multilinear_extensions::{
+    StructuralWitIn, StructuralWitInType, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn,
+};
 
 #[derive(Clone, Debug)]
 pub struct DynamicRangeTableConfig {
@@ -141,6 +69,16 @@ impl DynamicRangeTableConfig {
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
+        let selector_witin = StructuralWitIn {
+            id: num_structural_witin as WitnessId - 1,
+            // type doesn't matter
+            witin_type: EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        }; // last witin id is selector
 
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {
@@ -167,6 +105,7 @@ impl DynamicRangeTableConfig {
                 set_val!(row, self.mlt, F::from_canonical_u64(*mlt as u64));
                 set_val!(structural_row, self.range, i);
                 set_val!(structural_row, self.bits, b);
+                structural_row[selector_witin.id as usize] = F::ONE;
             });
 
         Ok([witness, structural_witness])
@@ -241,6 +180,16 @@ impl DoubleRangeTableConfig {
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
+        let selector_witin = StructuralWitIn {
+            id: num_structural_witin as WitnessId - 1,
+            // type doesn't matter
+            witin_type: EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        }; // last witin id is selector
 
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {
@@ -257,6 +206,7 @@ impl DoubleRangeTableConfig {
                 set_val!(row, self.mlt, F::from_canonical_u64(*mlt as u64));
                 set_val!(structural_row, self.range_a, F::from_canonical_usize(a));
                 set_val!(structural_row, self.range_b, F::from_canonical_usize(b));
+                structural_row[selector_witin.id as usize] = F::ONE;
             });
 
         Ok([witness, structural_witness])

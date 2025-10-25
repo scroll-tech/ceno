@@ -1,6 +1,6 @@
 use either::Either;
 use ff_ext::ExtensionField;
-use std::marker::PhantomData;
+use std::{iter, marker::PhantomData};
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
@@ -8,18 +8,13 @@ use ff_ext::{Instrumented, PoseidonField};
 use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
-    scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP},
+    scheme::constants::NUM_FANIN,
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
-    utils::{
-        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
-        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
-    },
 };
-use gkr_iop::gkr::GKRClaims;
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Instance, StructuralWitIn, StructuralWitInType,
+    StructuralWitIn,
     mle::IntoMLE,
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
@@ -212,7 +207,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .sum::<E>();
 
             transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
-            let input_opening_point = if circuit_vk.get_cs().is_opcode_circuit() {
+            if circuit_vk.get_cs().is_with_lk_table() {
+                logup_sum -= chip_logup_sum;
+            } else {
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks = circuit_vk.get_cs().num_lks();
                 // each padding instance contribute to (2^rotation_vars) dummy lookup padding
@@ -227,30 +224,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     num_lks * (num_padded_instance + num_instance_non_selected);
 
                 logup_sum += chip_logup_sum;
-                self.verify_opcode_proof(
-                    circuit_name,
-                    circuit_vk,
-                    proof,
-                    pi_evals,
-                    &mut transcript,
-                    NUM_FANIN,
-                    &point_eval,
-                    &challenges,
-                )?
-            } else {
-                logup_sum -= chip_logup_sum;
-                self.verify_table_proof(
-                    circuit_name,
-                    circuit_vk,
-                    proof,
-                    &vm_proof.raw_pi,
-                    &vm_proof.pi_evals,
-                    &mut transcript,
-                    NUM_FANIN_LOGUP,
-                    &point_eval,
-                    &challenges,
-                )?
             };
+            let input_opening_point = self.verify_opcode_proof(
+                circuit_name,
+                circuit_vk,
+                proof,
+                pi_evals,
+                &vm_proof.raw_pi,
+                &mut transcript,
+                NUM_FANIN,
+                &point_eval,
+                &challenges,
+            )?;
             if circuit_vk.get_cs().num_witin() > 0 {
                 witin_openings.push((
                     input_opening_point.len(),
@@ -336,6 +321,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMChipProof<E>,
         pi: &[E],
+        raw_pi: &[Vec<E::BaseField>],
         transcript: &mut impl Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
@@ -350,13 +336,55 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len() + cs.r_table_expressions.len(),
             cs.w_expressions.len() + cs.w_table_expressions.len(),
-            cs.lk_expressions.len() + cs.lk_table_expressions.len() * 2,
+            cs.lk_expressions.len() + cs.lk_table_expressions.len(),
         );
         let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instance);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+
+        // constrain log2_num_instances within max length
+        cs.r_table_expressions
+            .iter()
+            .chain(&cs.w_table_expressions)
+            .for_each(|set_table_expr| {
+                // iterate through structural witins and collect max round.
+                let num_vars = set_table_expr
+                    .table_spec
+                    .len
+                    .map(ceil_log2)
+                    .unwrap_or_else(|| {
+                        set_table_expr
+                            .table_spec
+                            .structural_witins
+                            .iter()
+                            .map(|StructuralWitIn { witin_type, .. }| {
+                                let hint_num_vars = log2_num_instances;
+                                assert!((1 << hint_num_vars) <= witin_type.max_len());
+                                hint_num_vars
+                            })
+                            .max()
+                            .unwrap_or(log2_num_instances)
+                    });
+                assert_eq!(num_vars, log2_num_instances);
+            });
+        cs.lk_table_expressions.iter().for_each(|l| {
+            // iterate through structural witins and collect max round.
+            let num_vars = l.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
+                l.table_spec
+                    .structural_witins
+                    .iter()
+                    .map(|StructuralWitIn { witin_type, .. }| {
+                        let hint_num_vars = log2_num_instances;
+                        assert!((1 << hint_num_vars) <= witin_type.max_len());
+                        hint_num_vars
+                    })
+                    .max()
+                    .unwrap_or(log2_num_instances)
+            });
+            assert_eq!(num_vars, log2_num_instances);
+        });
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -375,18 +403,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript,
         )?;
 
-        // verify LogUp witness nominator p(x) ?= constant vector 1
-        logup_p_evals
-            .iter()
-            .try_for_each(|PointAndEval { eval, .. }| {
-                if *eval != E::ONE {
-                    Err(ZKVMError::VerifyError(
-                        "Lookup table witness p(x) != constant 1".into(),
-                    ))
-                } else {
-                    Ok(())
-                }
-            })?;
+        if cs.lk_table_expressions.is_empty() {
+            // verify LogUp witness nominator p(x) ?= constant vector 1
+            logup_p_evals
+                .iter()
+                .try_for_each(|PointAndEval { eval, .. }| {
+                    if *eval != E::ONE {
+                        Err(ZKVMError::VerifyError(
+                            "Lookup table witness p(x) != constant 1".into(),
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                })?;
+        }
 
         debug_assert!(
             chain!(&record_evals, &logup_p_evals, &logup_q_evals)
@@ -394,245 +424,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .all_equal()
         );
 
-        // verify zero statement (degree > 1) + sel sumcheck
         let num_rw_records = r_counts_per_instance + w_counts_per_instance;
 
         debug_assert_eq!(record_evals.len(), num_rw_records);
         debug_assert_eq!(logup_p_evals.len(), lk_counts_per_instance);
         debug_assert_eq!(logup_q_evals.len(), lk_counts_per_instance);
 
+        let evals = record_evals
+            .iter()
+            // append p_evals if there got lk table expressions
+            .chain(if cs.lk_table_expressions.is_empty() {
+                Either::Left(iter::empty())
+            } else {
+                Either::Right(logup_p_evals.iter())
+            })
+            .chain(&logup_q_evals)
+            .cloned()
+            .collect_vec();
+
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
-        let GKRClaims(opening_evaluations) = gkr_circuit.verify(
+        let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
-            &chain!(record_evals, logup_q_evals).collect_vec(),
+            &evals,
             pi,
+            raw_pi,
             challenges,
             transcript,
             num_instances,
         )?;
-        Ok(opening_evaluations[0].point.clone())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn verify_table_proof(
-        &self,
-        name: &str,
-        circuit_vk: &VerifyingKey<E>,
-        proof: &ZKVMChipProof<E>,
-        raw_pi: &[Vec<E::BaseField>],
-        pi: &[E],
-        transcript: &mut impl Transcript<E>,
-        num_logup_fanin: usize,
-        _out_evals: &PointAndEval<E>,
-        challenges: &[E; 2],
-    ) -> Result<Point<E>, ZKVMError> {
-        let ComposedConstrainSystem {
-            zkvm_v1_css: cs, ..
-        } = circuit_vk.get_cs();
-        let with_rw = !cs.r_table_expressions.is_empty() && !cs.w_table_expressions.is_empty();
-        if with_rw {
-            debug_assert!(
-                cs.r_table_expressions
-                    .iter()
-                    .zip_eq(cs.w_table_expressions.iter())
-                    .all(|(r, w)| r.table_spec.len == w.table_spec.len)
-            );
-        }
-        let log2_num_instances = next_pow2_instance_padding(proof.num_instances).ilog2() as usize;
-
-        // verify and reduce product tower sumcheck
-        let tower_proofs = &proof.tower_proof;
-
-        // NOTE: for all structural witness within same constrain system should got same hints num variable via `log2_num_instances`
-        let expected_rounds = interleave(&cs.r_table_expressions, &cs.w_table_expressions)
-            .map(|set_table_expr| {
-                // iterate through structural witins and collect max round.
-                let num_vars = set_table_expr
-                    .table_spec
-                    .len
-                    .map(ceil_log2)
-                    .unwrap_or_else(|| {
-                        set_table_expr
-                            .table_spec
-                            .structural_witins
-                            .iter()
-                            .map(|StructuralWitIn { witin_type, .. }| {
-                                let hint_num_vars = log2_num_instances;
-                                assert!((1 << hint_num_vars) <= witin_type.max_len());
-                                hint_num_vars
-                            })
-                            .max()
-                            .unwrap()
-                    });
-                assert_eq!(num_vars, log2_num_instances);
-                num_vars
-            })
-            .chain(cs.lk_table_expressions.iter().map(|l| {
-                // iterate through structural witins and collect max round.
-                let num_vars = l.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
-                    l.table_spec
-                        .structural_witins
-                        .iter()
-                        .map(|StructuralWitIn { witin_type, .. }| {
-                            let hint_num_vars = log2_num_instances;
-                            assert!((1 << hint_num_vars) <= witin_type.max_len());
-                            hint_num_vars
-                        })
-                        .max()
-                        .unwrap()
-                });
-                assert_eq!(num_vars, log2_num_instances);
-                num_vars
-            }))
-            .collect_vec();
-
-        let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
-            TowerVerify::verify(
-                interleave(&proof.r_out_evals, &proof.w_out_evals)
-                    .map(|eval| eval.to_vec())
-                    .collect_vec(),
-                proof
-                    .lk_out_evals
-                    .iter()
-                    .map(|eval| eval.to_vec())
-                    .collect_vec(),
-                tower_proofs,
-                expected_rounds,
-                num_logup_fanin,
-                transcript,
-            )?;
-
-        // TODO: return error instead of panic
-        assert_eq!(
-            logup_q_point_and_eval.len(),
-            cs.lk_table_expressions.len(),
-            "[lk_q_record] mismatch length"
-        );
-        assert_eq!(
-            logup_p_point_and_eval.len(),
-            cs.lk_table_expressions.len(),
-            "[lk_p_record] mismatch length"
-        );
-        assert_eq!(
-            prod_point_and_eval.len(),
-            cs.r_table_expressions.len() + cs.w_table_expressions.len(),
-            "[prod_record] mismatch length"
-        );
-
-        // TODO differentiate `ram_bus` via cs
-        let is_shard_ram_bus_circuit = false;
-
-        let input_opening_point = if !is_shard_ram_bus_circuit {
-            // evaluate the evaluation of structural mles at input_opening_point by verifier
-            let structural_evals = if with_rw {
-                // only iterate r set, as read/write set round should match
-                Either::Left(cs.r_table_expressions.iter())
-            } else {
-                Either::Right(cs.r_table_expressions.iter().chain(&cs.w_table_expressions))
-            }
-            .map(|set_table_expr| &set_table_expr.table_spec)
-            .chain(cs.lk_table_expressions.iter().map(|r| &r.table_spec))
-            .flat_map(|table_spec| {
-                table_spec
-                    .structural_witins
-                    .iter()
-                    .map(|structural_witin| match structural_witin.witin_type {
-                        StructuralWitInType::EqualDistanceSequence {
-                            offset,
-                            multi_factor,
-                            descending,
-                            ..
-                        } => eval_wellform_address_vec(
-                            offset as u64,
-                            multi_factor as u64,
-                            &rt_tower,
-                            descending,
-                        ),
-                        StructuralWitInType::StackedIncrementalSequence { .. } => {
-                            eval_stacked_wellform_address_vec(&rt_tower)
-                        }
-                        StructuralWitInType::StackedConstantSequence { .. } => {
-                            eval_stacked_constant_vec(&rt_tower)
-                        }
-                        StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
-                            eval_inner_repeated_incremental_vec(k as u64, &rt_tower)
-                        }
-                        StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
-                            eval_outer_repeated_incremental_vec(k as u64, &rt_tower)
-                        }
-                    })
-                    .collect_vec()
-            })
-            .collect_vec();
-
-            // verify records (degree = 1) statement, thus no sumcheck
-            let expected_evals = interleave(
-                &cs.r_table_expressions, // r
-                &cs.w_table_expressions, // w
-            )
-            .map(|rw| &rw.expr)
-            .chain(
-                cs.lk_table_expressions
-                    .iter()
-                    .flat_map(|lk| vec![&lk.multiplicity, &lk.values]), // p, q
-            )
-            .map(|expr| {
-                eval_by_expr_with_instance(
-                    &proof.fixed_in_evals,
-                    &proof.wits_in_evals,
-                    &structural_evals,
-                    pi,
-                    challenges,
-                    expr,
-                )
-                .right()
-                .unwrap()
-            })
-            .collect_vec();
-            for (expected_eval, eval) in expected_evals.iter().zip(
-                prod_point_and_eval
-                    .into_iter()
-                    .chain(
-                        logup_p_point_and_eval
-                            .into_iter()
-                            .zip_eq(logup_q_point_and_eval)
-                            .flat_map(|(p_point_and_eval, q_point_and_eval)| {
-                                [p_point_and_eval, q_point_and_eval]
-                            }),
-                    )
-                    .map(|point_and_eval| point_and_eval.eval),
-            ) {
-                if expected_eval != &eval {
-                    return Err(ZKVMError::VerifyError(
-                        format!("table {name} evaluation mismatch {expected_eval:?} != {eval:?}")
-                            .into(),
-                    ));
-                }
-            }
-            rt_tower
-        } else {
-            unimplemented!("shard ram bus circuit go here");
-        };
-
-        // assume public io is tiny vector, so we evaluate it directly without PCS
-        for &Instance(idx) in cs.instance_name_map.keys() {
-            let poly = raw_pi[idx].to_vec().into_mle();
-            let expected_eval = poly.evaluate(&input_opening_point[..poly.num_vars()]);
-            let eval = pi[idx];
-            if expected_eval != eval {
-                return Err(ZKVMError::VerifyError(
-                    format!("pub input on index {idx} mismatch  {expected_eval:?} != {eval:?}")
-                        .into(),
-                ));
-            }
-            tracing::trace!(
-                "[table {name}] verified public inputs on index {idx} with point {:?}",
-                input_opening_point
-            );
-        }
-
-        Ok(input_opening_point)
+        Ok(rt)
     }
 }
 

@@ -130,12 +130,12 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.w_expressions.len() + self.zkvm_v1_css.w_table_expressions.len()
     }
 
-    pub fn instance_name_map(&self) -> &HashMap<Instance, String> {
-        &self.zkvm_v1_css.instance_name_map
+    pub fn instance_openings(&self) -> &[Instance] {
+        &self.zkvm_v1_css.instance_openings
     }
 
-    pub fn is_opcode_circuit(&self) -> bool {
-        self.gkr_circuit.is_some()
+    pub fn is_with_lk_table(&self) -> bool {
+        !self.zkvm_v1_css.lk_table_expressions.is_empty()
     }
 
     /// return number of lookup operation

@@ -44,7 +44,8 @@ impl<E: ExtensionField> Chip<E> {
                 + cb.cs.r_table_expressions.len()
                 + cb.cs.lk_table_expressions.len() * 2
                 + cb.cs.num_fixed
-                + cb.cs.num_witin as usize,
+                + cb.cs.num_witin as usize
+                + cb.cs.instance_openings.len(),
             final_out_evals: (0..cb.cs.w_expressions.len()
                 + cb.cs.r_expressions.len()
                 + cb.cs.lk_expressions.len()

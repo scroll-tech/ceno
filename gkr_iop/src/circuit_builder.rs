@@ -96,12 +96,13 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub witin_namespace_map: Vec<String>,
 
     pub num_structural_witin: WitnessId,
+    pub structural_witins: Vec<StructuralWitIn>,
     pub structural_witin_namespace_map: Vec<String>,
 
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
-    pub instance_name_map: HashMap<Instance, String>,
+    pub instance_openings: Vec<Instance>,
 
     pub r_selector: Option<SelectorType<E>>,
     pub r_expressions: Vec<Expression<E>>,
@@ -162,11 +163,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             // platform,
             witin_namespace_map: vec![],
             num_structural_witin: 0,
+            structural_witins: vec![],
             structural_witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
-            instance_name_map: HashMap::new(),
+            instance_openings: vec![],
             r_selector: None,
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
@@ -220,12 +222,20 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             id: self.num_structural_witin,
             witin_type,
         };
+        self.structural_witins.push(wit_in);
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
         let path = self.ns.compute_path(n().into());
         self.structural_witin_namespace_map.push(path);
 
         wit_in
+    }
+
+    pub fn create_placeholder_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+    ) -> StructuralWitIn {
+        self.create_structural_witin(n, StructuralWitInType::Empty)
     }
 
     pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> Fixed {
@@ -238,17 +248,25 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         f
     }
 
-    pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn query_instance(&self, idx: usize) -> Result<Instance, CircuitBuilderError> {
+        let i = Instance(idx);
+        Ok(i)
+    }
+
+    pub fn query_instance_for_openings(
         &mut self,
-        n: N,
         idx: usize,
     ) -> Result<Instance, CircuitBuilderError> {
         let i = Instance(idx);
 
-        let name = n().into();
-        self.instance_name_map.insert(i, name);
+        assert!(
+            !self.instance_openings.contains(&i),
+            "query same pubio idx {idx} mle more than once",
+        );
+        self.instance_openings.push(i);
 
-        Ok(i)
+        // return instance only count
+        Ok(Instance(self.instance_openings.len() - 1))
     }
 
     pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {
@@ -555,6 +573,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.create_structural_witin(name_fn, witin_type)
+    }
+
+    pub fn create_placeholder_structural_witin<NR, N>(&mut self, name_fn: N) -> StructuralWitIn
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.create_placeholder_structural_witin(name_fn)
     }
 
     pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Fixed

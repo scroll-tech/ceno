@@ -4,7 +4,8 @@ use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelExtend, ParallelIterator,
 };
 use std::marker::PhantomData;
 use witness::{
@@ -20,7 +21,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     e2e::ShardContext,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
-    structs::ProgramParams,
+    structs::{ProgramParams, WitnessId},
     tables::ram::ram_circuit::DynVolatileRamTableConfigTrait,
 };
 use ff_ext::FieldInto;
@@ -149,8 +150,16 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<
         num_structural_witin: usize,
         _final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert_eq!(num_structural_witin, 0);
-        Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()])
+        assert!(num_structural_witin == 0 || num_structural_witin == 1);
+        let mut value = Vec::with_capacity(NVRAM::len(&_config.params));
+        value.par_extend(
+            (0..NVRAM::len(&_config.params))
+                .into_par_iter()
+                .map(|_| F::ONE),
+        );
+        let structural_witness =
+            RowMajorMatrix::<F>::new_by_values(value, 1, InstancePaddingStrategy::Default);
+        Ok([RowMajorMatrix::empty(), structural_witness])
     }
 }
 
@@ -252,21 +261,29 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         num_structural_witin: usize,
         final_cycles: &[Cycle],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert_eq!(num_structural_witin, 0);
+        assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let mut final_table = RowMajorMatrix::<F>::new(
             NVRAM::len(&self.params),
             num_witin,
             InstancePaddingStrategy::Default,
         );
+        let mut structural_witness = RowMajorMatrix::<F>::new(
+            NVRAM::len(&self.params),
+            1,
+            InstancePaddingStrategy::Default,
+        );
+        let selector_witin = WitIn { id: 0 };
 
         final_table
             .par_rows_mut()
+            .zip_eq(structural_witness.par_rows_mut())
             .zip_eq(final_cycles)
-            .for_each(|(row, &cycle)| {
+            .for_each(|((row, structural_row), &cycle)| {
                 set_val!(row, self.final_cycle, cycle);
+                set_val!(structural_row, selector_witin, 1u64);
             });
 
-        Ok([final_table, RowMajorMatrix::empty()])
+        Ok([final_table, structural_witness])
     }
 }
 
@@ -369,10 +386,14 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         if final_mem.is_empty() {
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
+        assert_eq!(num_structural_witin, 2);
 
         let num_instances_padded = next_pow2_instance_padding(final_mem.len());
         assert!(num_instances_padded <= DVRAM::max_len(&config.params));
         assert!(DVRAM::max_len(&config.params).is_power_of_two());
+        let selector_witin = WitIn {
+            id: num_structural_witin as WitnessId - 1,
+        };
 
         let mut witness = RowMajorMatrix::<F>::new(
             num_instances_padded,
@@ -420,6 +441,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                     config.addr,
                     DVRAM::addr(&config.params, i) as u64
                 );
+                set_val!(structural_row, selector_witin, 1u64);
             });
 
         Ok([witness, structural_witness])
@@ -467,7 +489,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             vec![Expression::ZERO], // Initial cycle.
         ]
         .concat();
-
         cb.w_table_record(
             || "init_table",
             DVRAM::RAM_TYPE,
@@ -495,10 +516,14 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         if final_mem.is_empty() {
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
+        assert_eq!(num_structural_witin, 2);
 
         let num_instances_padded = next_pow2_instance_padding(final_mem.len());
         assert!(num_instances_padded <= DVRAM::max_len(&config.params));
         assert!(DVRAM::max_len(&config.params).is_power_of_two());
+        let selector_witin = WitIn {
+            id: num_structural_witin as WitnessId - 1,
+        };
 
         let mut structural_witness = RowMajorMatrix::<F>::new(
             num_instances_padded,
@@ -526,6 +551,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                     config.addr,
                     DVRAM::addr(&config.params, i) as u64
                 );
+                set_val!(structural_row, selector_witin, 1u64);
             });
 
         Ok([RowMajorMatrix::empty(), structural_witness])
@@ -1046,7 +1072,8 @@ mod tests {
     fn test_well_formed_address_padding() {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = HintsCircuit::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+        let (config, _) =
+            HintsCircuit::build_gkr_iop_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
         let def_params = ProgramParams::default();
         let lkm = LkMultiplicity::default().into_finalize_result();
@@ -1074,7 +1101,7 @@ mod tests {
             .cs
             .structural_witin_namespace_map
             .iter()
-            .position(|name| name == "riscv/RAM_Memory_HintsTable/addr")
+            .position(|name| name == "riscv/HintsTable_Memory_RAM/addr")
             .unwrap();
 
         structural_witness.padding_by_strategy();

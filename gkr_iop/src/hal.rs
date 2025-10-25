@@ -2,6 +2,7 @@ use crate::gkr::layer::{
     Layer,
     hal::{LinearLayerProver, SumcheckLayerProver, ZerocheckLayerProver},
 };
+use either::Either;
 use ff_ext::ExtensionField;
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::mle::Point;
@@ -50,7 +51,7 @@ pub trait ProtocolWitnessGeneratorProver<PB: ProverBackend> {
     fn layer_witness<'a>(
         layer: &Layer<PB::E>,
         layer_wits: &[Arc<PB::MultilinearPoly<'a>>],
-        pub_io_evals: &[Arc<PB::MultilinearPoly<'a>>],
+        pub_io_evals: &[Either<<PB::E as ExtensionField>::BaseField, PB::E>],
         challenges: &[PB::E],
     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
