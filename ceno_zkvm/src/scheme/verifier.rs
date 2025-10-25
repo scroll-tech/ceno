@@ -381,8 +381,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         if composed_cs.has_ecc_ops() {
             assert!(proof.ecc_proof.is_some());
             let ecc_proof = proof.ecc_proof.as_ref().unwrap();
-            EccVerifier::new()
-                .verify_ecc_proof(&ecc_proof, transcript)?;
+            EccVerifier::new().verify_ecc_proof(&ecc_proof, transcript)?;
         }
 
         // verify and reduce product tower sumcheck

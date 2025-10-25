@@ -414,7 +414,8 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
 
         config
             .perm_config
-            .assign_instance(&mut instance[21 + UINT_LIMBS..], input);
+            // TODO: 28 is hardcoded
+            .assign_instance(&mut instance[28 + UINT_LIMBS..], input);
 
         Ok(())
     }
@@ -658,8 +659,8 @@ mod tests {
             .unwrap();
 
         // create a bunch of random memory read/write records
-        let n_global_reads = 16;
-        let n_global_writes = 16;
+        let n_global_reads = 8;
+        let n_global_writes = 24;
         let global_reads = (0..n_global_reads)
             .map(|i| {
                 let addr = i * 8;
