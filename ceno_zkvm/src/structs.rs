@@ -137,6 +137,10 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.w_expressions.len() + self.zkvm_v1_css.w_table_expressions.len()
     }
 
+    pub fn has_ecc_ops(&self) -> bool {
+        !self.zkvm_v1_css.ec_final_sum.is_empty()
+    }
+
     pub fn instance_name_map(&self) -> &HashMap<Instance, String> {
         &self.zkvm_v1_css.instance_name_map
     }

@@ -114,10 +114,10 @@ impl CpuEccProver {
         let mut y0 = filter_bj(&ys, 0);
         let mut x1 = filter_bj(&xs, 1);
         let mut y1 = filter_bj(&ys, 1);
-        // build x[1,b], y[1,b], s[0,b]
+        // build x[1,b], y[1,b], s[1,b]
         let mut x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
         let mut y3 = ys.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
-        let mut s = invs.iter().map(|x| x.as_view_slice(2, 0)).collect_vec();
+        let mut s = invs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
 
         let s = SymbolicSepticExtension::new(
             s.iter_mut()
@@ -155,7 +155,7 @@ impl CpuEccProver {
                 .collect(),
         );
         // affine addition
-        // zerocheck: 0 = s[0,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1]) with b != (1,...,1)
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1]) with b != (1,...,1)
         exprs.extend(
             (s.clone() * (&x0 - &x1) - (&y0 - &y1))
                 .to_exprs()
@@ -164,7 +164,7 @@ impl CpuEccProver {
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
 
-        // zerocheck: 0 = s[0,b]^2 - x[b,0] - x[b,1] - x[1,b] with b != (1,...,1)
+        // zerocheck: 0 = s[1,b]^2 - x[b,0] - x[b,1] - x[1,b] with b != (1,...,1)
         exprs.extend(
             ((&s * &s) - &x0 - &x1 - &x3)
                 .to_exprs()
@@ -177,7 +177,7 @@ impl CpuEccProver {
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
 
-        // zerocheck: 0 = s[0,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b]) with b != (1,...,1)
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b]) with b != (1,...,1)
         exprs.extend(
             (s.clone() * (&x0 - &x3) - (&y0 + &y3))
                 .to_exprs()
@@ -200,7 +200,7 @@ impl CpuEccProver {
         let evals = state.get_mle_flatten_final_evaluations();
 
         assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
-        // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[0,rt]
+        // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
         assert_eq!(evals.len(), 1 + SEPTIC_EXTENSION_DEGREE * 7);
 
         let x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
@@ -254,7 +254,7 @@ impl CpuEccProver {
             }
         }
 
-        // TODO: prove the validity of s[0,rt], x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt]
+        // TODO: prove the validity of s[1,rt], x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt]
         EccQuarkProof {
             zerocheck_proof,
             num_vars: n,
@@ -845,8 +845,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         } = composed_cs;
 
         let num_instances = input.num_instances;
-        let next_pow2_instances = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instances);
+        let log2_num_instances = input.log2_num_instances();
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
@@ -1132,7 +1131,8 @@ mod tests {
             let mut points = (0..n_points)
                 .map(|_| SepticPoint::<F>::random(&mut rng))
                 .collect_vec();
-            let mut s = Vec::with_capacity(n_points);
+            let mut s = Vec::with_capacity(2 * n_points);
+            s.extend(repeat(SepticExtension::zero()).take(n_points));
 
             for layer in (1..=log2_n).rev() {
                 let num_inputs = 1 << layer;
@@ -1160,7 +1160,7 @@ mod tests {
             final_sum = points.last().cloned().unwrap();
 
             // padding to 2*N
-            s.extend(repeat(SepticExtension::zero()).take(n_points + 1));
+            s.push(SepticExtension::zero());
             points.push(SepticPoint::point_at_infinity());
 
             assert_eq!(s.len(), 2 * n_points);

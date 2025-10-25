@@ -237,6 +237,7 @@ impl<
                     num_read_instances: num_instances, // TODO: fixme
                     num_write_instances: num_instances, // TODO: fixme
                     num_instances,
+                    has_ecc_ops: cs.has_ecc_ops(),
                 };
 
                 if cs.is_opcode_circuit() {
@@ -342,16 +343,16 @@ impl<
                 .collect_vec();
             let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
             let xs = xs_ys;
-            let invs = cs
+            let slopes = cs
                 .zkvm_v1_css
                 .ec_slope_exprs
                 .iter()
                 .map(|expr| match expr {
                     Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                    _ => unreachable!("ec inv's expression must be WitIn"),
+                    _ => unreachable!("slope's expression must be WitIn"),
                 })
                 .collect_vec();
-            Some(self.device.prove_ec_sum_quark(xs, ys, invs, transcript)?)
+            Some(self.device.prove_ec_sum_quark(xs, ys, slopes, transcript)?)
         } else {
             None
         };

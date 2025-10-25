@@ -201,6 +201,7 @@ fn test_rw_lk_expression_combination() {
             num_read_instances: num_instances,
             num_write_instances: num_instances,
             num_instances,
+            has_ecc_ops: false,
         };
         let (proof, _, _) = prover
             .create_chip_proof(

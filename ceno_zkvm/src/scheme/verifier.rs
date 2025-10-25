@@ -368,8 +368,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instance);
+        let mut log2_num_instances = ceil_log2(next_pow2_instance);
+        if composed_cs.has_ecc_ops() {
+            // for opcode circuit with ecc ops, the mles have one extra variable
+            // to store the internal partial sums for ecc additions
+            log2_num_instances += 1;
+        }
+        println!("{log2_num_instances}");
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+
+        // verify ecc proof if exists
+        if composed_cs.has_ecc_ops() {
+            assert!(proof.ecc_proof.is_some());
+            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
+            EccVerifier::new().verify_ecc_proof(&ecc_proof, transcript)?;
+        }
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -797,6 +810,7 @@ impl TowerVerify {
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
+        println!("alpha_pows in verifier: {:?}", alpha_pows);
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])

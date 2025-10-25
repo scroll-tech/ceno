@@ -637,9 +637,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             gkr_circuit,
         } = composed_cs;
 
-        let num_instances = input.num_instances;
-        let next_pow2_instances = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instances);
+        let log2_num_instances = input.log2_num_instances();
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
