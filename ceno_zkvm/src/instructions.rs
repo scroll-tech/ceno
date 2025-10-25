@@ -11,7 +11,7 @@ use gkr_iop::{
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::Itertools;
-use multilinear_extensions::{StructuralWitInType, ToExpr, WitIn, util::max_usable_threads};
+use multilinear_extensions::{ToExpr, WitIn, util::max_usable_threads};
 use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},

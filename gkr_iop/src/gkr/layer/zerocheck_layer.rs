@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{
-    ChallengeId, Expression, Instance, StructuralWitIn, StructuralWitInType, ToExpr, WitnessId,
+    ChallengeId, Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitnessId,
     macros::{entered_span, exit_span},
     mle::{IntoMLE, Point},
     monomialize_expr_to_wit_terms,

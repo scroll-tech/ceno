@@ -310,10 +310,13 @@ pub fn eval_outer_repeated_incremental_vec<E: ExtensionField>(k: u64, r: &[E]) -
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use ff_ext::{FromUniformBytes, GoldilocksExt2};
-    use p3::goldilocks::Goldilocks;
+    use p3::{field::FieldAlgebra, goldilocks::Goldilocks};
+    use std::{iter, sync::Arc};
+
+    type E = GoldilocksExt2;
+
+    use multilinear_extensions::mle::MultilinearExtension;
 
     use super::*;
 
@@ -351,5 +354,93 @@ mod tests {
             right_eval,
             bh.get_rotation_right_eval_from_left(rotated_eval, left_eval, &point)
         );
+    }
+
+    #[test]
+    fn test_eval_stacked_wellform_address_vec() {
+        let r = [
+            E::from_canonical_usize(123),
+            E::from_canonical_usize(456),
+            E::from_canonical_usize(789),
+            E::from_canonical_usize(3210),
+            E::from_canonical_usize(9876),
+        ];
+        for n in 0..r.len() {
+            let v = iter::once(E::ZERO)
+                .chain((0..=n).flat_map(|i| (0..(1 << i)).map(E::from_canonical_usize)))
+                .collect::<Vec<E>>();
+            let poly = MultilinearExtension::from_evaluations_ext_vec(n + 1, v);
+            assert_eq!(
+                eval_stacked_wellform_address_vec(&r[0..=n]),
+                poly.evaluate(&r[0..=n])
+            )
+        }
+    }
+
+    #[test]
+    fn test_eval_stacked_constant_vec() {
+        let r = [
+            E::from_canonical_usize(123),
+            E::from_canonical_usize(456),
+            E::from_canonical_usize(789),
+            E::from_canonical_usize(3210),
+            E::from_canonical_usize(9876),
+        ];
+        for n in 0..r.len() {
+            let v = iter::once(E::ZERO)
+                .chain((0..=n).flat_map(|i| iter::repeat_n(i, 1 << i).map(E::from_canonical_usize)))
+                .collect::<Vec<E>>();
+            let poly = MultilinearExtension::from_evaluations_ext_vec(n + 1, v);
+            assert_eq!(
+                eval_stacked_constant_vec(&r[0..=n]),
+                poly.evaluate(&r[0..=n])
+            )
+        }
+    }
+
+    #[test]
+    fn test_eval_inner_repeating_incremental_vec() {
+        let r = [
+            E::from_canonical_usize(123),
+            E::from_canonical_usize(456),
+            E::from_canonical_usize(789),
+            E::from_canonical_usize(3210),
+            E::from_canonical_usize(9876),
+        ];
+        for n in 1..=r.len() {
+            for k in 0..=n {
+                let v = (0..(1 << (n - k)))
+                    .flat_map(|i| iter::repeat_n(E::from_canonical_usize(i), 1 << k))
+                    .collect::<Vec<E>>();
+                let poly = MultilinearExtension::from_evaluations_ext_vec(n, v);
+                assert_eq!(
+                    eval_inner_repeated_incremental_vec(k as u64, &r[0..n]),
+                    poly.evaluate(&r[0..n])
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn test_eval_outer_repeating_incremental_vec() {
+        let r = [
+            E::from_canonical_usize(123),
+            E::from_canonical_usize(456),
+            E::from_canonical_usize(789),
+            E::from_canonical_usize(3210),
+            E::from_canonical_usize(9876),
+        ];
+        for n in 1..=r.len() {
+            for k in 0..=n {
+                let v = iter::repeat_n(0, 1 << (n - k))
+                    .flat_map(|_| (0..(1 << k)).map(E::from_canonical_usize))
+                    .collect::<Vec<E>>();
+                let poly = MultilinearExtension::from_evaluations_ext_vec(n, v);
+                assert_eq!(
+                    eval_outer_repeated_incremental_vec(k as u64, &r[0..n]),
+                    poly.evaluate(&r[0..n])
+                )
+            }
+        }
     }
 }

@@ -222,7 +222,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             id: self.num_structural_witin,
             witin_type,
         };
-        self.structural_witins.push(wit_in.clone());
+        self.structural_witins.push(wit_in);
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
         let path = self.ns.compute_path(n().into());

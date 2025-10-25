@@ -19,7 +19,7 @@ use gkr_iop::{
     tables::LookupTable,
 };
 use itertools::Itertools;
-use multilinear_extensions::{StructuralWitInType, ToExpr};
+use multilinear_extensions::ToExpr;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 /// Use this trait as parameter to RangeTableCircuit.

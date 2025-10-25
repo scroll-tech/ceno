@@ -19,7 +19,7 @@ use gkr_iop::{
     selector::SelectorType,
 };
 use itertools::Itertools;
-use multilinear_extensions::{StructuralWitInType, ToExpr};
+use multilinear_extensions::ToExpr;
 use p3::field::FieldAlgebra;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 

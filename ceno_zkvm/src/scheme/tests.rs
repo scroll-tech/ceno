@@ -11,9 +11,7 @@ use crate::{
         create_backend, create_prover,
         hal::{ProofInput, TowerProverSpec},
     },
-    structs::{
-        PointAndEval, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
-    },
+    structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::ProgramTableCircuit,
     witness::{LkMultiplicity, set_val},
 };
@@ -37,12 +35,12 @@ use ff_ext::{Instrumented, PoseidonField};
 
 use super::{
     PublicValues,
-    constants::{MAX_NUM_VARIABLES, NUM_FANIN},
+    constants::MAX_NUM_VARIABLES,
     prover::ZKVMProver,
     utils::infer_tower_product_witness,
     verifier::{TowerVerify, ZKVMVerifier},
 };
-use crate::{e2e::ShardContext, tables::DynamicRangeTableCircuit};
+use crate::{e2e::ShardContext, scheme::constants::NUM_FANIN, tables::DynamicRangeTableCircuit};
 use itertools::Itertools;
 use mpcs::{
     PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits, WhirDefault,
@@ -51,6 +49,7 @@ use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
 use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use transcript::{BasicTranscript, Transcript};
+use crate::structs::PointAndEval;
 
 struct TestConfig {
     pub(crate) reg_id: WitIn,
@@ -230,6 +229,7 @@ fn test_rw_lk_expression_combination() {
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
+                &[],
                 &[],
                 &mut v_transcript,
                 NUM_FANIN,
