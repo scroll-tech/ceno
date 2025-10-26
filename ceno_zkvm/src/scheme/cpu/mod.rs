@@ -26,7 +26,7 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -539,88 +539,65 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
-        if let Some(gkr_circuit) = gkr_circuit {
-            let pub_io_mles = cs
-                .instance_openings
-                .iter()
-                .map(|instance| input.public_input[instance.0].clone())
-                .collect_vec();
-            let GKRProverOutput {
-                gkr_proof,
-                opening_evaluations,
-                mut rt,
-            } = gkr_circuit.prove::<CpuBackend<E, PCS>, CpuProver<_>>(
-                num_threads,
-                num_var_with_rotation,
-                gkr::GKRCircuitWitness {
-                    layers: vec![LayerWitness(
-                        chain!(
-                            &input.witness,
-                            &input.fixed,
-                            &pub_io_mles,
-                            &input.structural_witness,
-                        )
-                        .cloned()
-                        .collect_vec(),
-                    )],
-                },
-                // eval value doesnt matter as it wont be used by prover
-                &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
-                &input
-                    .pub_io_evals
-                    .iter()
-                    .map(|v| v.map_either(E::from, |v| v).into_inner())
+        let Some(gkr_circuit) = gkr_circuit else {
+            panic!("empty gkr circuit")
+        };
+        let pub_io_mles = cs
+            .instance_openings
+            .iter()
+            .map(|instance| input.public_input[instance.0].clone())
+            .collect_vec();
+        let GKRProverOutput {
+            gkr_proof,
+            opening_evaluations,
+            mut rt,
+        } = gkr_circuit.prove::<CpuBackend<E, PCS>, CpuProver<_>>(
+            num_threads,
+            num_var_with_rotation,
+            gkr::GKRCircuitWitness {
+                layers: vec![LayerWitness(
+                    chain!(
+                        &input.witness,
+                        &input.fixed,
+                        &pub_io_mles,
+                        &input.structural_witness,
+                    )
+                    .cloned()
                     .collect_vec(),
-                challenges,
-                transcript,
-                num_instances,
-            )?;
-            assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
-            Ok((
-                rt.remove(0),
-                MainSumcheckEvals {
-                    wits_in_evals: opening_evaluations
-                        .iter()
-                        .take(cs.num_witin as usize)
-                        .map(|Evaluation { value, .. }| value)
-                        .copied()
-                        .collect_vec(),
-                    fixed_in_evals: opening_evaluations
-                        .iter()
-                        .skip(cs.num_witin as usize)
-                        .take(cs.num_fixed)
-                        .map(|Evaluation { value, .. }| value)
-                        .copied()
-                        .collect_vec(),
-                },
-                None,
-                Some(gkr_proof),
-            ))
-        } else {
-            let (wits_in_evals, fixed_in_evals, main_sumcheck_proof, rt) = {
-                let span = entered_span!("fixed::evals + witin::evals");
-                let mut evals = input
-                    .witness
-                    .par_iter()
-                    .chain(input.fixed.par_iter())
-                    .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
-                    .collect::<Vec<_>>();
-                let fixed_in_evals = evals.split_off(input.witness.len());
-                let wits_in_evals = evals;
-                exit_span!(span);
-                (wits_in_evals, fixed_in_evals, None, rt_tower)
-            };
-
-            Ok((
-                rt,
-                MainSumcheckEvals {
-                    wits_in_evals,
-                    fixed_in_evals,
-                },
-                main_sumcheck_proof,
-                None,
-            ))
-        }
+                )],
+            },
+            // eval value doesnt matter as it wont be used by prover
+            &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
+            &input
+                .pub_io_evals
+                .iter()
+                .map(|v| v.map_either(E::from, |v| v).into_inner())
+                .collect_vec(),
+            challenges,
+            transcript,
+            num_instances,
+        )?;
+        assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
+        Ok((
+            rt.remove(0),
+            MainSumcheckEvals {
+                wits_in_evals: opening_evaluations
+                    .iter()
+                    .take(cs.num_witin as usize)
+                    .map(|Evaluation { value, .. }| value)
+                    .copied()
+                    .collect_vec(),
+                fixed_in_evals: opening_evaluations
+                    .iter()
+                    .skip(cs.num_witin as usize)
+                    .take(cs.num_fixed)
+                    .map(|Evaluation { value, .. }| value)
+                    .copied()
+                    .collect_vec(),
+            },
+            None,
+            Some(gkr_proof),
+        ))
     }
 }
 
