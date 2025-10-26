@@ -40,7 +40,10 @@ use super::{
     utils::infer_tower_product_witness,
     verifier::{TowerVerify, ZKVMVerifier},
 };
-use crate::{e2e::ShardContext, scheme::constants::NUM_FANIN, tables::DynamicRangeTableCircuit};
+use crate::{
+    e2e::ShardContext, scheme::constants::NUM_FANIN, structs::PointAndEval,
+    tables::DynamicRangeTableCircuit,
+};
 use itertools::Itertools;
 use mpcs::{
     PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits, WhirDefault,
@@ -49,7 +52,6 @@ use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
 use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use transcript::{BasicTranscript, Transcript};
-use crate::structs::PointAndEval;
 
 struct TestConfig {
     pub(crate) reg_id: WitIn,

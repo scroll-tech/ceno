@@ -212,7 +212,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     .take(
                         layer.n_structural_witin
                             - layer.out_sel_and_eval_exprs.len()
-                            - layer.rotation_exprs.0.as_ref().map(|_| ROTATION_OPENING_COUNT).unwrap_or(0),
+                            - layer
+                                .rotation_exprs
+                                .0
+                                .as_ref()
+                                .map(|_| ROTATION_OPENING_COUNT)
+                                .unwrap_or(0),
                     )
                     .map(|mle| Either::Left(mle.as_ref())),
             )
