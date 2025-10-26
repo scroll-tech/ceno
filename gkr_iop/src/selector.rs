@@ -392,3 +392,34 @@ impl<E: ExtensionField> SelectorType<E> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ff_ext::{BabyBearExt4, FromUniformBytes};
+    use p3::field::FieldAlgebra;
+    use rand::thread_rng;
+
+    use crate::selector::{SelectorContext, SelectorType};
+
+    type E = BabyBearExt4;
+
+    #[test]
+    fn test_quark_lt_selector() {
+        let mut rng = thread_rng();
+        let n_vars = 4;
+        let n = 1 << n_vars; // 2^n_vars
+        let n_points = 5;
+        let selector = SelectorType::QuarkBinaryTreeLessThan(0.into());
+        let ctx = SelectorContext::new(0, n_points, n_vars);
+        let out_rt = E::random_vec(n_vars, &mut rng);
+        let sel_mle = selector.compute(&out_rt, &ctx).unwrap();
+
+        // 1st chunk: v = sel[0..n/2], zero out v[n_points..]
+        assert!(
+            sel_mle.get_ext_field_vec()[..n / 2][n_points..]
+                .iter()
+                .all(|v| *v == E::ONE)
+        );
+        println!("{:?}", &sel_mle.get_ext_field_vec()[..n / 2]);
+    }
+}
