@@ -523,6 +523,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             structural_witin,
             &[],
             &[],
+            &[],
             Some(challenge),
             lkm,
         )
@@ -534,7 +535,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         program: &[ceno_emul::Instruction],
         lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        Self::run_maybe_challenge(cb, &[], wits_in, &[], program, &[], None, lkm)
+        Self::run_maybe_challenge(cb, &[], wits_in, &[], program, &[], &[], None, lkm)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -544,7 +545,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
-        pi: &[ArcMultilinearExtension<'a, E>],
+        pi_mles: &[ArcMultilinearExtension<'a, E>],
+        pub_io_evals: &[Either<E::BaseField, E>],
         challenge: Option<[E; 2]>,
         lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
@@ -557,7 +559,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             fixed,
             wits_in,
             structural_witin,
-            pi,
+            pi_mles,
+            pub_io_evals,
             1,
             challenge,
             lkm,
@@ -572,21 +575,14 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
         structural_witin: &[ArcMultilinearExtension<'a, E>],
-        pi: &[ArcMultilinearExtension<'a, E>],
+        pi_mles: &[ArcMultilinearExtension<'a, E>],
+        pub_io_evals: &[Either<E::BaseField, E>],
         num_instances: usize,
         challenge: [E; 2],
         expected_lkm: Option<Multiplicity<u64>>,
     ) -> Result<LkMultiplicityRaw<E>, Vec<MockProverError<E, u64>>> {
         let mut shared_lkm = LkMultiplicityRaw::<E>::default();
         let mut errors = vec![];
-
-        let pub_io_evals = pi.iter().map(|v| v.index(0)).collect_vec();
-
-        let pi_mles = cs
-            .instance_openings
-            .iter()
-            .map(|instance| pi[instance.0].clone())
-            .collect_vec();
 
         // Assert zero expressions
         for (expr, name) in cs
@@ -611,10 +607,14 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 if let Some(zero_selector) = &cs.zero_selector {
                     structural_witin[zero_selector.selector_expr().id()].clone()
                 } else {
+                    let num_instance_padded = next_pow2_instance_padding(num_instances);
                     let mut selector = vec![E::BaseField::ONE; num_instances];
-                    selector.resize(wits_in[0].evaluations().len(), E::BaseField::ZERO);
-                    MultilinearExtension::from_evaluation_vec_smart(wits_in[0].num_vars(), selector)
-                        .into()
+                    selector.resize(num_instance_padded, E::BaseField::ZERO);
+                    MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(num_instance_padded),
+                        selector,
+                    )
+                    .into()
                 };
 
             // require_equal does not always have the form of Expr::Sum as
@@ -702,18 +702,22 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let lk_selector: ArcMultilinearExtension<_> = if let Some(lk_selector) = &cs.lk_selector {
             structural_witin[lk_selector.selector_expr().id()].clone()
         } else {
+            let num_instance_padded = next_pow2_instance_padding(num_instances);
             let mut selector = vec![E::BaseField::ONE; num_instances];
-            selector.resize(wits_in[0].evaluations().len(), E::BaseField::ZERO);
-            MultilinearExtension::from_evaluation_vec_smart(wits_in[0].num_vars(), selector).into()
+            selector.resize(num_instance_padded, E::BaseField::ZERO);
+            MultilinearExtension::from_evaluation_vec_smart(
+                ceil_log2(num_instance_padded),
+                selector,
+            )
+            .into()
         };
 
         // Lookup expressions
-        for ((expr, name), (rom_type, _)) in cs
-            .lk_expressions
-            .iter()
-            .zip_eq(cs.lk_expressions_namespace_map.iter())
-            .zip_eq(cs.lk_expressions_items_map.iter())
-        {
+        for (expr, (name, (rom_type, _))) in cs.lk_expressions.iter().zip(
+            cs.lk_expressions_namespace_map
+                .iter()
+                .zip_eq(cs.lk_expressions_items_map.iter()),
+        ) {
             let expr_evaluated = wit_infer_by_expr(
                 expr,
                 cs.num_witin,
@@ -1016,7 +1020,6 @@ Hints:
                 .iter()
                 .map(|instance| pi_mles[instance.0].clone())
                 .collect_vec();
-            let is_opcode = gkr_circuit.is_some();
             let [witness, structural_witness] = witnesses
                 .get_opcode_witness(circuit_name)
                 .or_else(|| witnesses.get_table_witness(circuit_name))
@@ -1055,7 +1058,8 @@ Hints:
                 .map_or(vec![], |fixed| {
                     fixed.to_mles().into_iter().map(|f| f.into()).collect_vec()
                 });
-            if is_opcode {
+            // not lookup table
+            if cs.lk_table_expressions.is_empty() {
                 tracing::info!(
                     "Mock proving opcode {} with {} entries",
                     circuit_name,
@@ -1072,6 +1076,7 @@ Hints:
                     &witness,
                     &structural_witness,
                     &pi_mles,
+                    &pub_io_evals,
                     num_rows,
                     challenges,
                     lkm_from_assignments,
@@ -1171,6 +1176,11 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
+                    let pi_mles = cs
+                        .instance_openings
+                        .iter()
+                        .map(|instance| pi_mles[instance.0].clone())
+                        .collect_vec();
 
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
@@ -1272,6 +1282,11 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
+                    let pi_mles = cs
+                        .instance_openings
+                        .iter()
+                        .map(|instance| pi_mles[instance.0].clone())
+                        .collect_vec();
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
                         continue;
