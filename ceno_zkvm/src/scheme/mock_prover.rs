@@ -632,8 +632,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     fixed,
                     wits_in,
                     structural_witin,
-                    &pi_mles,
-                    &pub_io_evals,
+                    pi_mles,
+                    pub_io_evals,
                     &challenge,
                 );
                 let left_evaluated =
@@ -647,8 +647,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     fixed,
                     wits_in,
                     structural_witin,
-                    &pi_mles,
-                    &pub_io_evals,
+                    pi_mles,
+                    pub_io_evals,
                     &challenge,
                 );
                 let right_evaluated =
@@ -679,8 +679,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     fixed,
                     wits_in,
                     structural_witin,
-                    &pi_mles,
-                    &pub_io_evals,
+                    pi_mles,
+                    pub_io_evals,
                     &challenge,
                 );
                 let expr_evaluated =
@@ -726,8 +726,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 fixed,
                 wits_in,
                 structural_witin,
-                &pi_mles,
-                &pub_io_evals,
+                pi_mles,
+                pub_io_evals,
                 &challenge,
             );
             let expr_evaluated = filter_mle_by_selector_mle(expr_evaluated, lk_selector.clone());
@@ -772,8 +772,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             fixed,
                             wits_in,
                             structural_witin,
-                            &pi_mles,
-                            &pub_io_evals,
+                            pi_mles,
+                            pub_io_evals,
                             &challenge,
                         );
                         if arg_expr.is_constant() && arg_eval.evaluations.len() == 1 {
@@ -1012,8 +1012,7 @@ Hints:
         // Process all circuits.
         for (circuit_name, composed_cs) in &cs.circuit_css {
             let ComposedConstrainSystem {
-                zkvm_v1_css: cs,
-                gkr_circuit,
+                zkvm_v1_css: cs, ..
             } = &composed_cs;
             let pi_mles = cs
                 .instance_openings

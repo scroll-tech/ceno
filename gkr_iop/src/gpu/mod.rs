@@ -11,9 +11,9 @@ use witness::RowMajorMatrix;
 
 use crate::cpu::default_backend_config;
 
+use either::Either;
 use itertools::{Itertools, izip};
 use std::marker::PhantomData;
-use either::Either;
 
 pub mod gpu_prover {
     pub use ceno_gpu::{
