@@ -584,6 +584,14 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let mut shared_lkm = LkMultiplicityRaw::<E>::default();
         let mut errors = vec![];
 
+        let num_instance_padded = wits_in
+            .first()
+            .or_else(|| fixed.first())
+            .or_else(|| pi_mles.first())
+            .or_else(|| structural_witin.first())
+            .map(|mle| mle.evaluations().len())
+            .unwrap_or_else(|| next_pow2_instance_padding(num_instances));
+
         // Assert zero expressions
         for (expr, name) in cs
             .assert_zero_expressions
@@ -607,7 +615,6 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 if let Some(zero_selector) = &cs.zero_selector {
                     structural_witin[zero_selector.selector_expr().id()].clone()
                 } else {
-                    let num_instance_padded = next_pow2_instance_padding(num_instances);
                     let mut selector = vec![E::BaseField::ONE; num_instances];
                     selector.resize(num_instance_padded, E::BaseField::ZERO);
                     MultilinearExtension::from_evaluation_vec_smart(
@@ -702,7 +709,6 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let lk_selector: ArcMultilinearExtension<_> = if let Some(lk_selector) = &cs.lk_selector {
             structural_witin[lk_selector.selector_expr().id()].clone()
         } else {
-            let num_instance_padded = next_pow2_instance_padding(num_instances);
             let mut selector = vec![E::BaseField::ONE; num_instances];
             selector.resize(num_instance_padded, E::BaseField::ZERO);
             MultilinearExtension::from_evaluation_vec_smart(
