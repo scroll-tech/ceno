@@ -227,7 +227,7 @@ fn test_rw_lk_expression_combination() {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
         }
         verifier
-            .verify_opcode_proof(
+            .verify_chip_proof(
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,

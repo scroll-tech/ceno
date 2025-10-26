@@ -225,7 +225,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
                 logup_sum += chip_logup_sum;
             };
-            let input_opening_point = self.verify_opcode_proof(
+            let input_opening_point = self.verify_chip_proof(
                 circuit_name,
                 circuit_vk,
                 proof,
@@ -312,10 +312,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         Ok(true)
     }
 
-    // TODO: unify `verify_opcode_proof` and `verify_table_proof`
     /// verify proof and return input opening point
     #[allow(clippy::too_many_arguments)]
-    pub fn verify_opcode_proof(
+    pub fn verify_chip_proof(
         &self,
         _name: &str,
         circuit_vk: &VerifyingKey<E>,
