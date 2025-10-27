@@ -127,7 +127,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                             .is_zero(),
                         "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
                         layer.name
-                                    );
+                    );
                 };
                 match out_eval {
                     EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
@@ -170,7 +170,7 @@ where
                         .is_zero(),
                     "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
                     layer.name
-                                );
+                );
             };
             match out_eval {
                 EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
