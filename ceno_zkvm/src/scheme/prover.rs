@@ -352,7 +352,10 @@ impl<
                     _ => unreachable!("slope's expression must be WitIn"),
                 })
                 .collect_vec();
-            Some(self.device.prove_ec_sum_quark(xs, ys, slopes, transcript)?)
+            Some(
+                self.device
+                    .prove_ec_sum_quark(input.num_instances, xs, ys, slopes, transcript)?,
+            )
         } else {
             None
         };

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use crate::{
     circuit_builder::ConstraintSystem,
     error::ZKVMError,
-    scheme::{cpu::TowerRelationOutput, septic_curve::SepticPoint},
+    scheme::cpu::TowerRelationOutput,
     structs::{ComposedConstrainSystem, EccQuarkProof, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
@@ -12,7 +12,7 @@ use gkr_iop::{
     hal::{ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{Expression, mle::MultilinearExtension, util::ceil_log2};
+use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
@@ -86,6 +86,7 @@ pub trait TraceCommitter<PB: ProverBackend> {
 pub trait EccQuarkProver<PB: ProverBackend> {
     fn prove_ec_sum_quark<'a>(
         &self,
+        num_instances: usize,
         xs: Vec<Arc<PB::MultilinearPoly<'a>>>,
         ys: Vec<Arc<PB::MultilinearPoly<'a>>>,
         invs: Vec<Arc<PB::MultilinearPoly<'a>>>,

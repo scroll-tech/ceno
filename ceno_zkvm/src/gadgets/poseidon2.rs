@@ -12,7 +12,7 @@ use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use num_bigint::BigUint;
 use p3::{
-    babybear::{BabyBear, BabyBearInternalLayerParameters},
+    babybear::BabyBearInternalLayerParameters,
     field::{Field, FieldAlgebra, PrimeField},
     monty_31::InternalLayerBaseParameters,
     poseidon2::{GenericPoseidon2LinearLayers, MDSMat4, mds_light_permutation},
@@ -485,6 +485,6 @@ mod tests {
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
         let poseidon2_constants = horizen_round_consts();
-        let poseidon2_config = Poseidon2BabyBearConfig::construct(&mut cb, poseidon2_constants);
+        let _ = Poseidon2BabyBearConfig::construct(&mut cb, poseidon2_constants);
     }
 }

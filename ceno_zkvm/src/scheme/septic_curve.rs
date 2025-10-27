@@ -594,6 +594,28 @@ impl<F: Field> MulAssign<Self> for SepticExtension<F> {
 #[derive(Clone, Debug)]
 pub struct SymbolicSepticExtension<E: ExtensionField>(pub Vec<Expression<E>>);
 
+impl<E: ExtensionField> SymbolicSepticExtension<E> {
+    pub fn mul_scalar(&self, scalar: Either<E::BaseField, E>) -> Self {
+        let res = self
+            .0
+            .iter()
+            .map(|a| a.clone() * Expression::Constant(scalar))
+            .collect();
+
+        SymbolicSepticExtension(res)
+    }
+
+    pub fn add_scalar(&self, scalar: Either<E::BaseField, E>) -> Self {
+        let res = self
+            .0
+            .iter()
+            .map(|a| a.clone() + Expression::Constant(scalar))
+            .collect();
+
+        SymbolicSepticExtension(res)
+    }
+}
+
 impl<E: ExtensionField> Add<Self> for &SymbolicSepticExtension<E> {
     type Output = SymbolicSepticExtension<E>;
 
@@ -885,9 +907,6 @@ impl<F: Field> SepticPoint<F> {
 
 impl<F: Field + FromUniformBytes> SepticPoint<F> {
     pub fn random(mut rng: impl RngCore) -> Self {
-        let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
-        let a: F = F::from_canonical_u32(2);
-
         loop {
             let x = SepticExtension::random(&mut rng);
             if let Some(point) = Self::from_x(x) {

@@ -18,16 +18,12 @@ use gkr_iop::{
 };
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
-    Expression,
-    StructuralWitInType::EqualDistanceSequence,
-    ToExpr, WitIn,
-    util::{ceil_log2, max_usable_threads},
+    Expression, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn, util::max_usable_threads,
 };
 use p3::{
-    field::{Field, FieldAlgebra, PrimeField},
+    field::{Field, FieldAlgebra},
     matrix::dense::RowMajorMatrix,
     symmetric::Permutation,
-    util::log2_ceil_usize,
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelExtend, ParallelIterator},
@@ -599,12 +595,10 @@ mod tests {
     use ff_ext::{BabyBearExt4, FromUniformBytes, PoseidonField};
     use itertools::Itertools;
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
-    use p3::{babybear::BabyBear, field::FieldAlgebra};
+    use p3::babybear::BabyBear;
     use rand::thread_rng;
     use tracing_forest::{ForestLayer, util::LevelFilter};
-    use tracing_subscriber::{
-        EnvFilter, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
-    };
+    use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
     use transcript::BasicTranscript;
 
     use crate::{
@@ -634,15 +628,9 @@ mod tests {
         let default_filter = EnvFilter::builder()
             .with_default_directive(LevelFilter::DEBUG.into())
             .from_env_lossy();
-        // let fmt_layer = fmt::layer()
-        //     .compact()
-        //     .with_thread_ids(false)
-        //     .with_thread_names(false)
-        //     .without_time();
 
         Registry::default()
             .with(ForestLayer::default())
-            // .with(fmt_layer)
             .with(default_filter)
             .init();
 
@@ -659,8 +647,8 @@ mod tests {
             .unwrap();
 
         // create a bunch of random memory read/write records
-        let n_global_reads = 8;
-        let n_global_writes = 24;
+        let n_global_reads = 130;
+        let n_global_writes = 140;
         let global_reads = (0..n_global_reads)
             .map(|i| {
                 let addr = i * 8;
@@ -781,7 +769,7 @@ mod tests {
             .iter()
             .map(|mle| mle.evaluate(&point[..mle.num_vars()]))
             .collect_vec();
-        let opening_point = verifier
+        let vrf_point = verifier
             .verify_opcode_proof(
                 "global",
                 &pk.vk,
@@ -793,5 +781,6 @@ mod tests {
                 &challenges,
             )
             .expect("verify global chip proof");
+        assert_eq!(vrf_point, point);
     }
 }

@@ -27,7 +27,7 @@ use crate::{
         },
     },
     hal::{ProverBackend, ProverDevice},
-    selector::{self, SelectorContext, SelectorType},
+    selector::{SelectorContext, SelectorType},
     utils::rotation_selector_eval,
 };
 
@@ -456,7 +456,8 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
             | SelectorType::Prefix(sel)
             | SelectorType::OrderedSparse32 {
                 expression: sel, ..
-            } => match_expr(sel) * zero_check_expr,
+            }
+            | SelectorType::QuarkBinaryTreeLessThan(sel) => match_expr(sel) * zero_check_expr,
         };
         zero_check_exprs.push(expr);
     }
