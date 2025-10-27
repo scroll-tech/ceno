@@ -176,4 +176,94 @@ impl<Expr: Clone, P: FieldParameters> FieldLtCols<Expr, P> {
             1.into(),
         )
     }
+
+    pub fn condition_eval<E, E1, E2>(
+        &self,
+        builder: &mut CircuitBuilder<E>,
+        lhs: &E1,
+        rhs: &E2,
+        cond: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        E: ExtensionField,
+        E1: Into<Polynomial<Expression<E>>> + Clone,
+        E2: Into<Polynomial<Expression<E>>> + Clone,
+        Expr: ToExpr<E, Output = Expression<E>>,
+        Expression<E>: From<Expr>,
+    {
+        // The byte flags give a specification of which byte is `first_eq`, i,e, the first most
+        // significant byte for which the lhs is smaller than the modulus. To verify the
+        // less-than claim we need to check that:
+        // * For all bytes until `first_eq` the lhs byte is equal to the modulus byte.
+        // * For the `first_eq` byte the lhs byte is smaller than the modulus byte.
+        // * all byte flags are boolean.
+        // * only one byte flag is set to one, and the rest are set to zero.
+
+        // Check the flags are of valid form.
+
+        // Verify that only one flag is set to one.
+        let mut sum_flags: Expression<E> = 0.into();
+        for flag in self.byte_flags.0.iter() {
+            // Assert that the flag is boolean.
+            // It should be builder.assert_bit(|| "if cond, flag", cond.expr() * flag.expr())?;
+            // But this makes the degree of sumcheck to be 5 (which is not supported by the backend),
+            // therefore, we just assume byte flags are boolean no matter cond is 1 or 0.
+            builder.assert_bit(|| "flag", flag.expr())?;
+            // Add the flag to the sum.
+            sum_flags = sum_flags.clone() + flag.expr();
+        }
+        // Assert that the sum is equal to one.
+        builder.condition_require_one(|| "sum_flags", cond.expr(), sum_flags.expr())?;
+        builder.condition_require_zero(|| "sum_flags", 1 - cond.expr(), sum_flags.expr())?;
+
+        // Check the less-than condition.
+
+        // A flag to indicate whether an equality check is necessary (this is for all bytes from
+        // most significant until the first inequality.
+        let mut is_inequality_visited: Expression<E> = 0.into();
+
+        let rhs: Polynomial<_> = rhs.clone().into();
+        let lhs: Polynomial<_> = lhs.clone().into();
+
+        let mut lhs_comparison_byte: Expression<E> = 0.into();
+        let mut rhs_comparison_byte: Expression<E> = 0.into();
+        for (lhs_byte, rhs_byte, flag) in izip!(
+            lhs.coefficients().iter().rev(),
+            rhs.coefficients().iter().rev(),
+            self.byte_flags.0.iter().rev()
+        ) {
+            // Once the byte flag was set to one, we turn off the quality check flag.
+            // We can do this by calculating the sum of the flags since only `1` is set to `1`.
+            is_inequality_visited = is_inequality_visited.expr() + flag.expr();
+
+            lhs_comparison_byte = lhs_comparison_byte.expr() + lhs_byte.expr() * flag.expr();
+            rhs_comparison_byte = rhs_comparison_byte.expr() + flag.expr() * rhs_byte.expr();
+
+            builder.condition_require_zero(
+                || "if cond, when not inequality visited, assert lhs_byte == rhs_byte",
+                cond.expr(),
+                (1 - is_inequality_visited.clone()) * (lhs_byte.clone() - rhs_byte.clone()),
+            )?;
+        }
+
+        builder.condition_require_zero(
+            || "if cond, lhs_comparison_byte == lhs_comparison_byte",
+            cond.expr(),
+            self.lhs_comparison_byte.expr() - lhs_comparison_byte,
+        )?;
+        builder.condition_require_zero(
+            || "if cond, rhs_comparison_byte == rhs_comparison_byte",
+            cond.expr(),
+            self.rhs_comparison_byte.expr() - rhs_comparison_byte,
+        )?;
+
+        // Send the comparison interaction.
+        // Since sum_flags = 1 when cond = 1, and sum_flags = 0 when cond = 0,
+        // we have (self.lhs_comparison_byte < self.rhs_comparison_byte) == sum_flags
+        builder.lookup_ltu_byte(
+            self.lhs_comparison_byte.expr(),
+            self.rhs_comparison_byte.expr(),
+            sum_flags,
+        )
+    }
 }

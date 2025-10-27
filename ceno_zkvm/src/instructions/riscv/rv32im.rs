@@ -19,7 +19,7 @@ use crate::{
             },
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
-                KeccakInstruction, WeierstrassAddAssignInstruction,
+                KeccakInstruction, Uint256MulInstruction, WeierstrassAddAssignInstruction,
                 WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
@@ -43,7 +43,7 @@ use ceno_emul::{
     Bn254FpMulSpec,
     InsnKind::{self, *},
     KeccakSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec,
-    Sha256ExtendSpec, StepRecord, SyscallSpec,
+    Sha256ExtendSpec, StepRecord, SyscallSpec, Uint256MulSpec,
 };
 use dummy::LargeEcallDummy;
 use ecall::EcallDummy;
@@ -133,6 +133,8 @@ pub struct Rv32imConfig<E: ExtensionField> {
         <WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>> as Instruction<E>>::InstructionConfig,
     pub secp256k1_decompress_config:
         <WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>> as Instruction<E>>::InstructionConfig,
+    pub uint256_mul_config:
+        <Uint256MulInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // Tables.
     pub dynamic_range_config: <DynamicRangeTableCircuit<E, 18> as TableCircuit<E>>::TableConfig,
@@ -218,6 +220,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             .register_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>>();
         let secp256k1_decompress_config =
             cs.register_opcode_circuit::<WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>>();
+        let uint256_mul_config = cs.register_opcode_circuit::<Uint256MulInstruction<E>>();
 
         // tables
         let dynamic_range_config =
@@ -291,6 +294,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             secp256k1_add_config,
             secp256k1_double_config,
             secp256k1_decompress_config,
+            uint256_mul_config,
             // tables
             dynamic_range_config,
             double_u8_range_config,
@@ -386,6 +390,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             cs,
             &self.secp256k1_decompress_config,
         );
+        fixed.register_opcode_circuit::<Uint256MulInstruction<E>>(cs, &self.uint256_mul_config);
 
         // table
         fixed.register_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>(
@@ -422,6 +427,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut secp256k1_add_records = Vec::new();
         let mut secp256k1_double_records = Vec::new();
         let mut secp256k1_decompress_records = Vec::new();
+        let mut uint256_mul_records = Vec::new();
         steps.into_iter().for_each(|record| {
             let insn_kind = record.insn.kind;
             match insn_kind {
@@ -446,6 +452,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 }
                 InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DecompressSpec::CODE => {
                     secp256k1_decompress_records.push(record);
+                }
+                InsnKind::ECALL if record.rs1().unwrap().value == Uint256MulSpec::CODE => {
+                    uint256_mul_records.push(record);
                 }
                 // other type of ecalls are handled by dummy ecall instruction
                 _ => {
@@ -556,6 +565,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             &self.secp256k1_decompress_config,
             secp256k1_decompress_records,
         )?;
+        witness.assign_opcode_circuit::<Uint256MulInstruction<E>>(
+            cs,
+            &self.uint256_mul_config,
+            uint256_mul_records,
+        )?;
 
         assert_eq!(
             all_records.keys().cloned().collect::<BTreeSet<_>>(),
@@ -597,8 +611,7 @@ pub struct GroupedSteps(BTreeMap<InsnKind, Vec<StepRecord>>);
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {
     ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
-    secp256k1_decompress_config:
-        <LargeEcallDummy<E, Secp256k1DecompressSpec> as Instruction<E>>::InstructionConfig,
+
     sha256_extend_config:
         <LargeEcallDummy<E, Sha256ExtendSpec> as Instruction<E>>::InstructionConfig,
     bn254_fp_add_config: <LargeEcallDummy<E, Bn254FpAddSpec> as Instruction<E>>::InstructionConfig,
@@ -612,8 +625,6 @@ pub struct DummyExtraConfig<E: ExtensionField> {
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
-        let secp256k1_decompress_config =
-            cs.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>();
         let sha256_extend_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>();
         let bn254_fp_add_config =
@@ -627,7 +638,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
 
         Self {
             ecall_config,
-            secp256k1_decompress_config,
             sha256_extend_config,
             bn254_fp_add_config,
             bn254_fp_mul_config,
@@ -642,10 +652,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
         fixed.register_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(
-            cs,
-            &self.secp256k1_decompress_config,
-        );
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
             cs,
             &self.sha256_extend_config,
@@ -676,7 +682,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
     ) -> Result<(), ZKVMError> {
         let mut steps = steps.0;
 
-        let mut secp256k1_decompress_steps = Vec::new();
         let mut sha256_extend_steps = Vec::new();
         let mut bn254_fp_add_steps = Vec::new();
         let mut bn254_fp_mul_steps = Vec::new();
@@ -687,7 +692,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         if let Some(ecall_steps) = steps.remove(&ECALL) {
             for step in ecall_steps {
                 match step.rs1().unwrap().value {
-                    Secp256k1DecompressSpec::CODE => secp256k1_decompress_steps.push(step),
                     Sha256ExtendSpec::CODE => sha256_extend_steps.push(step),
                     Bn254FpAddSpec::CODE => bn254_fp_add_steps.push(step),
                     Bn254FpMulSpec::CODE => bn254_fp_mul_steps.push(step),
@@ -698,11 +702,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             }
         }
 
-        witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(
-            cs,
-            &self.secp256k1_decompress_config,
-            secp256k1_decompress_steps,
-        )?;
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
             cs,
             &self.sha256_extend_config,
