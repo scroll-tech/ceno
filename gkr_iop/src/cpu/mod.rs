@@ -8,6 +8,7 @@ use ff_ext::ExtensionField;
 use itertools::izip;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
+    macros::{entered_span, exit_span},
     mle::{MultilinearExtension, Point},
     wit_infer_by_monomial_expr,
 };
@@ -112,12 +113,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         pub_io_evals: &[Either<E::BaseField, E>],
         challenges: &[E],
     ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        let span = entered_span!("witness_infer", profiling_2 = true);
         let out_evals: Vec<_> = layer
             .out_sel_and_eval_exprs
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(iter::repeat(sel_type), out_eval.iter()))
             .collect();
-        layer
+        let res = layer
             .exprs_with_selector_out_eval_monomial_form
             .par_iter()
             .zip_eq(layer.expr_names.par_iter())
@@ -142,6 +144,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     EvalExpression::Partition(_, _) => unimplemented!(),
                 }
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        exit_span!(span);
+        res
     }
 }

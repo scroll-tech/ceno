@@ -154,7 +154,7 @@ pub trait DeviceTransporter<PB: ProverBackend> {
 
     fn transport_mles<'a>(
         &self,
-        mles: Vec<MultilinearExtension<'a, PB::E>>,
+        mles: &[MultilinearExtension<'a, PB::E>],
     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
 

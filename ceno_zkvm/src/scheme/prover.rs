@@ -207,6 +207,10 @@ impl<
         ];
         tracing::debug!("global challenges in prover: {:?}", challenges);
 
+        let public_input_span = entered_span!("public_input", profiling_1 = true);
+        let public_input = self.device.transport_mles(&pi);
+        exit_span!(public_input_span);
+
         let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
             (vec![], vec![]),
@@ -224,24 +228,28 @@ impl<
                     return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points, evaluations));
                 }
                 transcript.append_field_element(&E::BaseField::from_canonical_u64(index as u64));
+
                 // TODO: add an enum for circuit type either in constraint_system or vk
                 let witness_mle = witness_mles
                     .drain(..cs.num_witin())
                     .map(|mle| mle.into())
                     .collect_vec();
-                let structural_witness = self.device.transport_mles(
-                    structural_wits
-                        .remove(circuit_name)
-                        .map(|(sw, _)| sw)
-                        .unwrap_or(vec![]),
-                );
+
+                let structural_witness_span =
+                    entered_span!("structural_witness", profiling_2 = true);
+                let structural_mles = structural_wits
+                    .remove(circuit_name)
+                    .map(|(sw, _)| sw)
+                    .unwrap_or(vec![]);
+                let structural_witness = self.device.transport_mles(&structural_mles);
+                exit_span!(structural_witness_span);
+
                 let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
-                let public_input = self.device.transport_mles(pi.clone());
                 let input = ProofInput {
                     witness: witness_mle,
                     fixed,
                     structural_witness,
-                    public_input,
+                    public_input: public_input.clone(),
                     pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
                     num_instances,
                 };
@@ -331,6 +339,7 @@ impl<
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
+        let span = entered_span!("prove_main_constraints", profiling_2 = true);
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) = self
             .device
             .prove_main_constraints(rt_tower, &input, cs, challenges, transcript)?;
@@ -338,6 +347,7 @@ impl<
             wits_in_evals,
             fixed_in_evals,
         } = evals;
+        exit_span!(span);
 
         // evaluate pi if there is instance query
         let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
