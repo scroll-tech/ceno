@@ -383,9 +383,9 @@ impl<E: ExtensionField> SelectorType<E> {
 mod tests {
     use ff_ext::{BabyBearExt4, FromUniformBytes};
     use multilinear_extensions::{
-        util::ceil_log2, virtual_poly::build_eq_x_r_vec, StructuralWitIn, ToExpr
+        StructuralWitIn, ToExpr, util::ceil_log2, virtual_poly::build_eq_x_r_vec,
     };
-    use p3::field::{FieldAlgebra};
+    use p3::field::FieldAlgebra;
     use rand::thread_rng;
 
     use crate::selector::{SelectorContext, SelectorType};

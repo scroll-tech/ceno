@@ -739,7 +739,11 @@ impl<E: ExtensionField> Mul<Expression<E>> for SymbolicSepticExtension<E> {
 
 impl<E: ExtensionField> SymbolicSepticExtension<E> {
     pub fn new(exprs: Vec<Expression<E>>) -> Self {
-        assert!(exprs.len() == 7);
+        assert!(
+            exprs.len() == 7,
+            "exprs length must be 7, but got {}",
+            exprs.len()
+        );
         Self(exprs)
     }
 

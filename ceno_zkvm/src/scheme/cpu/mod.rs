@@ -6,8 +6,8 @@ use crate::{
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE},
-        hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
-        septic_curve::{SepticPoint, SymbolicSepticExtension},
+        hal::{DeviceProvingKey, EccQuarkProver, MainSumcheckEvals, ProofInput, TowerProverSpec},
+        septic_curve::{SepticExtension, SepticPoint, SymbolicSepticExtension},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
             wit_infer_by_expr,
@@ -58,6 +58,7 @@ pub type TowerRelationOutput<E> = (
 
 // accumulate N=2^n EC points into one EC point using affine coordinates
 // in one layer which borrows ideas from the [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
+#[derive(Default)]
 pub struct CpuEccProver;
 
 impl CpuEccProver {
@@ -68,10 +69,9 @@ impl CpuEccProver {
     pub fn create_ecc_proof<'a, E: ExtensionField>(
         &self,
         num_instances: usize,
-        mut xs: Vec<MultilinearExtension<'a, E>>,
-        mut ys: Vec<MultilinearExtension<'a, E>>,
-        invs: Vec<MultilinearExtension<'a, E>>,
-        sum: SepticPoint<E::BaseField>,
+        xs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        ys: Vec<Arc<MultilinearExtension<'a, E>>>,
+        invs: Vec<Arc<MultilinearExtension<'a, E>>>,
         transcript: &mut impl Transcript<E>,
     ) -> EccQuarkProof<E> {
         assert_eq!(xs.len(), SEPTIC_EXTENSION_DEGREE);
@@ -120,7 +120,7 @@ impl CpuEccProver {
         let mut exprs_add = vec![];
         let mut exprs_bypass = vec![];
 
-        let filter_bj = |v: &[MultilinearExtension<'_, E>], j: usize| {
+        let filter_bj = |v: &[Arc<MultilinearExtension<'_, E>>], j: usize| {
             v.iter()
                 .map(|v| {
                     v.get_base_field_vec()
@@ -140,14 +140,8 @@ impl CpuEccProver {
         let mut x1 = filter_bj(&xs, 1);
         let mut y1 = filter_bj(&ys, 1);
         // build x[1,b], y[1,b], s[0,b]
-        let mut x3 = xs
-            .iter_mut()
-            .map(|x| x.as_view_slice_mut(2, 1))
-            .collect_vec();
-        let mut y3 = ys
-            .iter_mut()
-            .map(|x| x.as_view_slice_mut(2, 1))
-            .collect_vec();
+        let mut x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+        let mut y3 = ys.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
         let mut s = invs.iter().map(|x| x.as_view_slice(2, 0)).collect_vec();
 
         let s = SymbolicSepticExtension::new(
@@ -249,27 +243,27 @@ impl CpuEccProver {
         // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[0,rt]
         assert_eq!(evals.len(), 2 + SEPTIC_EXTENSION_DEGREE * 7);
 
+        let last_evaluation_index = (1 << n) - 1;
+        let x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+        let y3 = ys.iter().map(|y| y.as_view_slice(2, 1)).collect_vec();
+        let final_sum_x: SepticExtension<E::BaseField> = (x3.iter())
+            .map(|x| x.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
+            .collect_vec()
+            .into();
+        let final_sum_y: SepticExtension<E::BaseField> = (y3.iter())
+            .map(|y| y.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
+            .collect_vec()
+            .into();
+        let final_sum = SepticPoint::from_affine(final_sum_x, final_sum_y);
+
         #[cfg(feature = "sanity-check")]
         {
-            let last_evaluation_index = (1 << n) - 1;
             let s = invs.iter().map(|x| x.as_view_slice(2, 0)).collect_vec();
             let x0 = filter_bj(&xs, 0);
             let y0 = filter_bj(&ys, 0);
             let x1 = filter_bj(&xs, 1);
             let y1 = filter_bj(&ys, 1);
-            let x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
-            let y3 = ys.iter().map(|y| y.as_view_slice(2, 1)).collect_vec();
-            let final_sum_x: SepticExtension<E::BaseField> = (x3.iter())
-                .map(|x| x.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
-                .collect_vec()
-                .into();
-            let final_sum_y: SepticExtension<E::BaseField> = (y3.iter())
-                .map(|y| y.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
-                .collect_vec()
-                .into();
-            let final_sum = SepticPoint::from_affine(final_sum_x, final_sum_y);
 
-            assert_eq!(final_sum, sum);
             // check evaluations
             assert_eq!(
                 eq_eval_less_or_equal_than(last_evaluation_index - 1, &out_rt, &rt),
@@ -306,8 +300,23 @@ impl CpuEccProver {
             zerocheck_proof,
             num_instances,
             evals,
-            sum,
+            sum: final_sum,
         }
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<CpuBackend<E, PCS>>
+    for CpuProver<CpuBackend<E, PCS>>
+{
+    fn prove_ec_sum_quark<'a>(
+        &self,
+        num_instances: usize,
+        xs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        ys: Vec<Arc<MultilinearExtension<'a, E>>>,
+        invs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<EccQuarkProof<E>, ZKVMError> {
+        Ok(CpuEccProver::new().create_ecc_proof(num_instances, xs, ys, invs, transcript))
     }
 }
 
@@ -1144,7 +1153,7 @@ mod tests {
         util::transpose,
     };
     use p3::babybear::BabyBear;
-    use std::iter::repeat_n;
+    use std::{iter::repeat_n, sync::Arc};
     use transcript::BasicTranscript;
     use witness::next_pow2_instance_padding;
 
@@ -1238,13 +1247,13 @@ mod tests {
         let prover = CpuEccProver::new();
         let quark_proof = prover.create_ecc_proof(
             n_points,
-            xs.to_vec(),
-            ys.to_vec(),
-            s.to_vec(),
-            final_sum,
+            xs.to_vec().into_iter().map(Arc::new).collect_vec(),
+            ys.to_vec().into_iter().map(Arc::new).collect_vec(),
+            s.to_vec().into_iter().map(Arc::new).collect_vec(),
             &mut transcript,
         );
 
+        assert_eq!(quark_proof.sum, final_sum);
         let mut transcript = BasicTranscript::new(b"test");
         let verifier = EccVerifier::new();
         assert!(

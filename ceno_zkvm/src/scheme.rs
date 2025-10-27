@@ -1,3 +1,4 @@
+use crate::structs::EccQuarkProof;
 use ff_ext::ExtensionField;
 use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
@@ -59,6 +60,7 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub gkr_iop_proof: Option<GKRProof<E>>,
 
     pub tower_proof: TowerProofs<E>,
+    pub ecc_proof: Option<EccQuarkProof<E>>,
 
     pub num_read_instances: usize,
     pub num_write_instances: usize,

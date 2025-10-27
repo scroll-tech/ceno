@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use crate::{
     circuit_builder::ConstraintSystem,
     error::ZKVMError,
-    scheme::cpu::TowerRelationOutput,
-    structs::{ComposedConstrainSystem, ZKVMProvingKey},
+    scheme::{cpu::TowerRelationOutput, septic_curve::SepticPoint},
+    structs::{ComposedConstrainSystem, EccQuarkProof, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
 use gkr_iop::{
@@ -12,7 +12,7 @@ use gkr_iop::{
     hal::{ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
+use multilinear_extensions::{Expression, mle::MultilinearExtension, util::ceil_log2};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
@@ -24,6 +24,7 @@ pub trait ProverDevice<PB>:
     + OpeningProver<PB>
     + DeviceTransporter<PB>
     + ProtocolWitnessGeneratorProver<PB>
+    + EccQuarkProver<PB>
 // + FixedMLEPadder<PB>
 where
     PB: ProverBackend,
@@ -66,6 +67,23 @@ pub trait TraceCommitter<PB: ProverBackend> {
         PB::PcsData,
         <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Commitment,
     );
+}
+
+/// Accumulate N (not necessarily power of 2) EC points into one EC point using affine coordinates
+/// in one layer which borrows ideas from the [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
+/// Note that these points are defined over the septic extension field of BabyBear.
+///
+/// The main constraint enforced in this quark layer is:
+///    p[1,b] = affine_add(p[b,0], p[b,1]) for all b < N
+pub trait EccQuarkProver<PB: ProverBackend> {
+    fn prove_ec_sum_quark<'a>(
+        &self,
+        num_instances: usize,
+        xs: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        ys: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        invs: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> Result<EccQuarkProof<PB::E>, ZKVMError>;
 }
 
 pub trait TowerProver<PB: ProverBackend> {

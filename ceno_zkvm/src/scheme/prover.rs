@@ -9,12 +9,12 @@ use std::{
     sync::Arc,
 };
 
-use crate::scheme::hal::MainSumcheckEvals;
+use crate::scheme::{constants::SEPTIC_EXTENSION_DEGREE, hal::MainSumcheckEvals};
 use gkr_iop::hal::MultilinearPolynomial;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Instance,
+    Expression, Instance,
     mle::{IntoMLE, MultilinearExtension},
 };
 use p3::field::FieldAlgebra;
@@ -329,6 +329,36 @@ impl<
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
+        // run ecc quark prover
+        let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
+            let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
+            assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
+            let mut xs_ys = ec_point_exprs
+                .into_iter()
+                .map(|expr| match expr {
+                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
+                    _ => unreachable!("ec point's expression must be WitIn"),
+                })
+                .collect_vec();
+            let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
+            let xs = xs_ys;
+            let invs = cs
+                .zkvm_v1_css
+                .ec_slope_exprs
+                .iter()
+                .map(|expr| match expr {
+                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
+                    _ => unreachable!("ec inv's expression must be WitIn"),
+                })
+                .collect_vec();
+            Some(
+                self.device
+                    .prove_ec_sum_quark(input.num_instances, xs, ys, invs, transcript)?,
+            )
+        } else {
+            None
+        };
+
         // build main witness
         let (records, is_padded) =
             build_main_witness::<E, PCS, PB, PD>(&self.device, cs, &input, challenges);
@@ -346,7 +376,14 @@ impl<
             num_var_with_rotation,
         );
 
-        // override cs.gkr_circuit.layers
+        // TODO: batch reduction into main sumcheck
+        // x[rt,0] = \sum_b eq([rt,0], b) * x[b]
+        // x[rt,1] = \sum_b eq([rt,1], b) * x[b]
+        // x[1,rt] = \sum_b eq([1,rt], b) * x[b]
+        // y[rt,0] = \sum_b eq([rt,0], b) * y[b]
+        // y[rt,1] = \sum_b eq([rt,1], b) * y[b]
+        // y[1,rt] = \sum_b eq([1,rt], b) * y[b]
+        // s[0,rt] = \sum_b eq([0,rt], b) * s[b]
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
@@ -380,6 +417,7 @@ impl<
                 main_sumcheck_proofs,
                 gkr_iop_proof,
                 tower_proof,
+                ecc_proof,
                 fixed_in_evals,
                 wits_in_evals,
                 num_read_instances: input.num_read_instances,
