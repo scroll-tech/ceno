@@ -21,7 +21,6 @@ use ff_ext::BabyBearExt4;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::circuit_builder::DebugIndex;
 use std::hash::Hash;
-use tracing::span::Record;
 
 fn sb(prev: Word, rs2: Word, shift: u32) -> Word {
     let shift = (shift * 8) as usize;

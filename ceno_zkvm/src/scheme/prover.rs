@@ -335,7 +335,7 @@ impl<
             let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
             assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
             let mut xs_ys = ec_point_exprs
-                .into_iter()
+                .iter()
                 .map(|expr| match expr {
                     Expression::WitIn(id) => input.witness[*id as usize].clone(),
                     _ => unreachable!("ec point's expression must be WitIn"),

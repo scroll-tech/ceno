@@ -1245,9 +1245,9 @@ mod tests {
         let prover = CpuEccProver::new();
         let quark_proof = prover.create_ecc_proof(
             n_points,
-            xs.to_vec().into_iter().map(Arc::new).collect_vec(),
-            ys.to_vec().into_iter().map(Arc::new).collect_vec(),
-            s.to_vec().into_iter().map(Arc::new).collect_vec(),
+            xs.iter().cloned().map(Arc::new).collect_vec(),
+            ys.iter().cloned().map(Arc::new).collect_vec(),
+            s.iter().cloned().map(Arc::new).collect_vec(),
             &mut transcript,
         );
 

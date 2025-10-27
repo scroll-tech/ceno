@@ -65,7 +65,7 @@ impl<F: Field, const WIDTH: usize> GenericPoseidon2LinearLayers<F, WIDTH>
             let diag_m1_matrix: &[F; WIDTH] = unsafe { transmute(diag_m1_matrix) };
             let sum = state.iter().cloned().sum::<F>();
             for (input, diag_m1) in state.iter_mut().zip(diag_m1_matrix) {
-                *input = sum.clone() + F::from_f(*diag_m1) * input.clone();
+                *input = sum + F::from_f(*diag_m1) * *input;
             }
         } else {
             panic!("Unsupported field");
@@ -325,7 +325,6 @@ impl<
 //////////////////////////////////////////////////////////////////////////
 /// The following routines are taken from poseidon2-air/src/generation.rs
 //////////////////////////////////////////////////////////////////////////
-
 fn generate_trace_rows_for_perm<
     F: PrimeField,
     LinearLayers: GenericPoseidon2LinearLayers<F, WIDTH>,

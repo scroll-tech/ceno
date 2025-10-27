@@ -1,4 +1,4 @@
-use std::iter::repeat;
+use std::iter::repeat_n;
 
 use crate::{
     Value,
@@ -13,12 +13,8 @@ use crate::{
 };
 use ff_ext::{ExtensionField, FieldInto, POSEIDON2_BABYBEAR_WIDTH, SmallField};
 use gkr_iop::{
-    chip::Chip,
-    circuit_builder::CircuitBuilder,
-    error::CircuitBuilderError,
-    gkr::layer::Layer,
-    selector::SelectorType,
-    utils::lk_multiplicity::{self, Multiplicity},
+    chip::Chip, circuit_builder::CircuitBuilder, error::CircuitBuilderError, gkr::layer::Layer,
+    selector::SelectorType, utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
@@ -187,7 +183,7 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         input.push(global_clk.expr());
         // add nonce to ensure poseidon2(input) always map to a valid ec point
         input.push(nonce.expr());
-        input.extend(repeat(E::BaseField::ZERO.expr()).take(16 - input.len()));
+        input.extend(repeat_n(E::BaseField::ZERO.expr(), 16 - input.len()));
 
         let mut record = vec![];
         record.push(addr.expr());
@@ -407,7 +403,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
             .chain(config.y.iter())
             .zip_eq((point.x.deref()).iter().chain((point.y.deref()).iter()))
             .for_each(|(witin, fe)| {
-                instance[witin.id as usize] = fe.clone();
+                instance[witin.id as usize] = *fe;
             });
 
         let ram_type = E::BaseField::from_canonical_u32(record.ram_type as u32);
@@ -637,8 +633,8 @@ mod tests {
 
     type E = BabyBearExt4;
     type F = BabyBear;
-    type PERM = <F as PoseidonField>::P;
-    type PCS = BasefoldDefault<E>;
+    type Perm = <F as PoseidonField>::P;
+    type Pcs = BasefoldDefault<E>;
 
     #[test]
     fn test_global_chip() {
@@ -655,7 +651,7 @@ mod tests {
         // init global chip with horizen_rc_consts
         let rc = horizen_round_consts();
         let perm = <F as PoseidonField>::get_default_perm();
-        let global_chip = GlobalChip::<E, PERM> { rc, perm };
+        let global_chip = GlobalChip::<E, Perm> { rc, perm };
 
         let mut cs = ConstraintSystem::new(|| "global chip test");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -704,7 +700,7 @@ mod tests {
         let global_ec_sum: SepticPoint<F> = global_reads
             .iter()
             .chain(global_writes.iter())
-            .map(|record| record.to_ec_point::<E, PERM>(&global_chip.perm).point)
+            .map(|record| record.to_ec_point::<E, Perm>(&global_chip.perm).point)
             .sum();
 
         let public_value = PublicValues::new(
@@ -722,13 +718,13 @@ mod tests {
                 .collect_vec(),
         );
         // assign witness
-        let (witness, lk) = GlobalChip::assign_instances(
+        let (witness, _) = GlobalChip::assign_instances(
             &config,
             cs.num_witin as usize,
             cs.num_structural_witin as usize,
             global_writes // local reads
                 .into_iter()
-                .chain(global_reads.into_iter()) // local writes
+                .chain(global_reads) // local writes
                 .map(|record| GlobalChipInput {
                     record,
                     ec_point: None,
@@ -744,9 +740,9 @@ mod tests {
         let pk = composed_cs.key_gen();
 
         // create chip proof for global chip
-        let pcs_param = PCS::setup(1 << 20, SecurityLevel::Conjecture100bits).unwrap();
-        let (pp, vp) = PCS::trim(pcs_param, 1 << 20).unwrap();
-        let backend = create_backend::<E, PCS>(20, SecurityLevel::Conjecture100bits);
+        let pcs_param = Pcs::setup(1 << 20, SecurityLevel::Conjecture100bits).unwrap();
+        let (pp, vp) = Pcs::trim(pcs_param, 1 << 20).unwrap();
+        let backend = create_backend::<E, Pcs>(20, SecurityLevel::Conjecture100bits);
         let pd = create_prover(backend);
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
