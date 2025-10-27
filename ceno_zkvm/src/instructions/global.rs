@@ -42,11 +42,93 @@ use crate::{
     scheme::constants::SEPTIC_EXTENSION_DEGREE,
 };
 
-// opcode circuit + mem init/final table + global chip:
-// have read/write consistency for RAMType::Register and RAMType::Memory
-//
-// global chip: read from and write into a global set shared
-//      among multiple shards
+/// A record for a read/write into the global set
+#[derive(Default, Debug, Clone)]
+pub struct GlobalRecord {
+    pub addr: u32,
+    pub ram_type: RAMType,
+    pub value: u32,
+    pub shard: u64,
+    pub local_clk: u64,
+    pub global_clk: u64,
+    pub is_write: bool,
+}
+
+/// An EC point corresponding to a global read/write record
+/// whose x-coordinate is derived from Poseidon2 hash of the record
+#[derive(Clone, Debug)]
+pub struct GlobalPoint<E: ExtensionField> {
+    pub nonce: u32,
+    pub point: SepticPoint<E::BaseField>,
+}
+
+impl GlobalRecord {
+    pub fn to_ec_point<
+        E: ExtensionField,
+        P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>,
+    >(
+        &self,
+        hasher: &P,
+    ) -> GlobalPoint<E> {
+        let mut nonce = 0;
+        let mut input = [
+            E::BaseField::from_canonical_u32(self.addr),
+            E::BaseField::from_canonical_u32(self.ram_type as u32),
+            E::BaseField::from_canonical_u32(self.value & 0xFFFF), // lower 16 bits
+            E::BaseField::from_canonical_u32((self.value >> 16) & 0xFFFF), // higher 16 bits
+            E::BaseField::from_canonical_u64(self.shard),
+            E::BaseField::from_canonical_u64(self.global_clk),
+            E::BaseField::from_canonical_u32(nonce),
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+            E::BaseField::ZERO,
+        ];
+
+        let prime = E::BaseField::order().to_u64_digits()[0];
+        loop {
+            let x: SepticExtension<E::BaseField> =
+                hasher.permute(input)[0..SEPTIC_EXTENSION_DEGREE].into();
+            if let Some(p) = SepticPoint::from_x(x) {
+                let y6 = (p.y.0)[SEPTIC_EXTENSION_DEGREE - 1].to_canonical_u64();
+                let is_y_in_2nd_half = y6 >= (prime / 2);
+
+                // we negate y if needed
+                // to ensure read => y in [0, p/2) and write => y in [p/2, p)
+                let negate = match (self.is_write, is_y_in_2nd_half) {
+                    (true, false) => true, // write, y in [0, p/2)
+                    (false, true) => true, // read, y in [p/2, p)
+                    _ => false,
+                };
+
+                let point = if negate { -p } else { p };
+
+                return GlobalPoint { nonce, point };
+            } else {
+                // try again with different nonce
+                nonce += 1;
+                input[6] = E::BaseField::from_canonical_u32(nonce);
+            }
+        }
+    }
+}
+/// opcode circuit + mem init/final table + local finalize circuit + global chip
+/// global chip is used to ensure the **local** reads and writes produced by 
+/// opcode circuits / memory init / memory finalize table / local finalize circuit
+/// can balance out.
+/// 
+/// 1. For a local memory read record whose previous write is not in the same shard,
+///    the global chip will read it from the **global set** and insert a local write record.
+/// 2. For a local memory write record which will **not** be read in the future, 
+///    the local finalize circuit will consume it by inserting a local read record.
+/// 3. For a local memory write record which will be read in the future, 
+///    the global chip will insert a local read record and write it to the **global set**.
+/// 
 pub struct GlobalConfig<E: ExtensionField, P> {
     addr: WitIn,
     is_ram_register: WitIn,
@@ -182,77 +264,6 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
     }
 }
 
-#[derive(Default, Debug, Clone)]
-pub struct GlobalRecord {
-    pub addr: u32,
-    pub ram_type: RAMType,
-    pub value: u32,
-    pub shard: u64,
-    pub local_clk: u64,
-    pub global_clk: u64,
-    pub is_write: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct GlobalPoint<E: ExtensionField> {
-    pub nonce: u32,
-    pub point: SepticPoint<E::BaseField>,
-}
-
-impl GlobalRecord {
-    pub fn to_ec_point<
-        E: ExtensionField,
-        P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>,
-    >(
-        &self,
-        hasher: &P,
-    ) -> GlobalPoint<E> {
-        let mut nonce = 0;
-        let mut input = [
-            E::BaseField::from_canonical_u32(self.addr),
-            E::BaseField::from_canonical_u32(self.ram_type as u32),
-            E::BaseField::from_canonical_u32(self.value & 0xFFFF), // lower 16 bits
-            E::BaseField::from_canonical_u32((self.value >> 16) & 0xFFFF), // higher 16 bits
-            E::BaseField::from_canonical_u64(self.shard),
-            E::BaseField::from_canonical_u64(self.global_clk),
-            E::BaseField::from_canonical_u32(nonce),
-            E::BaseField::ZERO,
-            E::BaseField::ZERO,
-            E::BaseField::ZERO,
-            E::BaseField::ZERO,
-            E::BaseField::ZERO,
-            E::BaseField::ZERO,
-            E::BaseField::ZERO,
-            E::BaseField::ZERO,
-            E::BaseField::ZERO,
-        ];
-
-        let prime = E::BaseField::order().to_u64_digits()[0];
-        loop {
-            let x: SepticExtension<E::BaseField> =
-                hasher.permute(input)[0..SEPTIC_EXTENSION_DEGREE].into();
-            if let Some(p) = SepticPoint::from_x(x) {
-                let y6 = (p.y.0)[SEPTIC_EXTENSION_DEGREE - 1].to_canonical_u64();
-                let is_y_in_2nd_half = y6 >= (prime / 2);
-
-                // we negate y if needed
-                let negate = match (self.is_write, is_y_in_2nd_half) {
-                    (true, false) => true, // write, y in [0, p/2)
-                    (false, true) => true, // read, y in [p/2, p)
-                    _ => false,
-                };
-
-                let point = if negate { -p } else { p };
-
-                return GlobalPoint { nonce, point };
-            } else {
-                // try again with different nonce
-                nonce += 1;
-                input[6] = E::BaseField::from_canonical_u32(nonce);
-            }
-        }
-    }
-}
 
 // This chip is used to manage read/write into a global set
 // shared among multiple shards
