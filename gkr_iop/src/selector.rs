@@ -189,19 +189,13 @@ impl<E: ExtensionField> SelectorType<E> {
 
                 let num_instances_sequence = (0..out_point.len())
                     // clean up sig bits
-                    .scan(
-                        (ctx.num_instances / 2, ctx.num_instances.div_ceil(2)),
-                        |(n_instance, raw_instance_ceiling), _| {
-                            if *n_instance > 0 {
-                                let cur = *n_instance;
-                                *n_instance = *raw_instance_ceiling / 2;
-                                *raw_instance_ceiling = raw_instance_ceiling.div_ceil(2);
-                                Some(cur)
-                            } else {
-                                Some(0)
-                            }
-                        },
-                    )
+                    .scan(ctx.num_instances, |n_instance, _| {
+                        // n points to sum means we have n/2 addition pairs
+                        let cur = *n_instance / 2;
+                        // the next layer has ceil(n/2) points to sum
+                        *n_instance = (*n_instance).div_ceil(2);
+                        Some(cur)
+                    })
                     .collect::<Vec<_>>();
 
                 // split sel into different size of region, set tailing 0 of respective chunk size
@@ -307,9 +301,7 @@ impl<E: ExtensionField> SelectorType<E> {
                 // so num_instances and 1 << out_point.len() are on same scaling
                 assert!(ctx.num_instances > 0);
                 assert!(ctx.num_instances <= (1 << out_point.len()));
-                if out_point.is_empty() {
-                    panic!("empty out_point size")
-                }
+                assert!(!out_point.is_empty());
                 assert_eq!(out_point.len(), in_point.len());
 
                 // we break down this special selector evaluation into recursive structure
@@ -319,19 +311,13 @@ impl<E: ExtensionField> SelectorType<E> {
 
                 // calculate prefix 1 length of each layer
                 let mut prefix_one_seq = (0..out_point.len())
-                    .scan(
-                        (ctx.num_instances / 2, ctx.num_instances.div_ceil(2)),
-                        |(n_instance, raw_instance_ceiling), _| {
-                            if *n_instance > 0 {
-                                let cur = *n_instance;
-                                *n_instance = *raw_instance_ceiling / 2;
-                                *raw_instance_ceiling = raw_instance_ceiling.div_ceil(2);
-                                Some(cur)
-                            } else {
-                                Some(0)
-                            }
-                        },
-                    )
+                    .scan(ctx.num_instances, |n_instance, _| {
+                        // n points to sum means we have n/2 addition pairs
+                        let cur = *n_instance / 2;
+                        // next layer has ceil(n/2) points to sum
+                        *n_instance = (*n_instance).div_ceil(2);
+                        Some(cur)
+                    })
                     .collect::<Vec<_>>();
                 prefix_one_seq.reverse();
                 let mut prefix_one_seq_iter = prefix_one_seq.iter();
@@ -396,7 +382,10 @@ impl<E: ExtensionField> SelectorType<E> {
 #[cfg(test)]
 mod tests {
     use ff_ext::{BabyBearExt4, FromUniformBytes};
-    use p3::field::FieldAlgebra;
+    use multilinear_extensions::{
+        util::ceil_log2, virtual_poly::build_eq_x_r_vec, StructuralWitIn, ToExpr
+    };
+    use p3::field::{FieldAlgebra};
     use rand::thread_rng;
 
     use crate::selector::{SelectorContext, SelectorType};
@@ -406,20 +395,41 @@ mod tests {
     #[test]
     fn test_quark_lt_selector() {
         let mut rng = thread_rng();
-        let n_vars = 4;
-        let n = 1 << n_vars; // 2^n_vars
         let n_points = 5;
-        let selector = SelectorType::QuarkBinaryTreeLessThan(0.into());
+        let n_vars = ceil_log2(n_points);
+        let witin = StructuralWitIn {
+            id: 0,
+            witin_type: multilinear_extensions::StructuralWitInType::EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        };
+        let selector = SelectorType::QuarkBinaryTreeLessThan(witin.expr());
         let ctx = SelectorContext::new(0, n_points, n_vars);
         let out_rt = E::random_vec(n_vars, &mut rng);
         let sel_mle = selector.compute(&out_rt, &ctx).unwrap();
 
-        // 1st chunk: v = sel[0..n/2], zero out v[n_points..]
-        assert!(
-            sel_mle.get_ext_field_vec()[..n / 2][n_points..]
-                .iter()
-                .all(|v| *v == E::ONE)
-        );
-        println!("{:?}", &sel_mle.get_ext_field_vec()[..n / 2]);
+        // if we have 5 points to sum, then
+        // in 1st layer: two additions p12 = p1 + p2, p34 = p3 + p4, p5 kept
+        // in 2nd layer: one addition p14 = p12 + p34, p5 kept
+        // in 3rd layer: one addition p15 = p14 + p5
+        let eq = build_eq_x_r_vec(&out_rt);
+        let vec = sel_mle.get_ext_field_vec();
+        assert_eq!(vec[0], eq[0]); // p1+p2
+        assert_eq!(vec[1], eq[1]); // p3+p4
+        assert_eq!(vec[2], E::ZERO); // p5
+        assert_eq!(vec[3], E::ZERO);
+        assert_eq!(vec[4], eq[4]); // p1+p2+p3+p4
+        assert_eq!(vec[5], E::ZERO); // p5
+        assert_eq!(vec[6], eq[6]); // p1+p2+p3+p4+p5
+        assert_eq!(vec[7], E::ZERO);
+
+        let in_rt = E::random_vec(n_vars, &mut rng);
+        let mut evals = vec![];
+        // TODO: avoid the param evals when we evaluate a selector
+        selector.evaluate(&mut evals, &out_rt, &in_rt, &ctx, 0);
+        assert_eq!(sel_mle.evaluate(&in_rt), evals[0]);
     }
 }
