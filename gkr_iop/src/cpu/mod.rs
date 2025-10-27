@@ -4,13 +4,13 @@ use crate::{
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
 use ff_ext::ExtensionField;
-use itertools::{izip};
+use itertools::izip;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits};
 use multilinear_extensions::{
     mle::{ArcMultilinearExtension, MultilinearExtension, Point},
     wit_infer_by_monomial_expr,
 };
-use p3::field::TwoAdicField;
+use p3::field::{Field, TwoAdicField};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{iter, rc::Rc, sync::Arc};
 use witness::RowMajorMatrix;
@@ -127,7 +127,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                             .is_zero(),
                         "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
                         layer.name
-                    );
+                                    );
                 };
                 match out_eval {
                     EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
@@ -170,7 +170,7 @@ where
                         .is_zero(),
                     "layer name: {}, expr name: \"{expr_name}\" got non_zero mle",
                     layer.name
-                );
+                                );
             };
             match out_eval {
                 EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {

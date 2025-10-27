@@ -193,15 +193,15 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         record.push(addr.expr());
         record.push(ram_type);
         record.extend(value.memory_expr());
-        record.push(shard.expr());
         record.push(local_clk.expr());
 
         // if is_global_write = 1, then it means we are propagating a local write to global
         // so we need to insert a local read record to cancel out this local write
-
         cb.assert_bit(|| "is_global_write must be boolean", is_global_write.expr())?;
+        // TODO: for all local reads, enforce they come to global writes
+        // TODO: for all local writes, enforce they come from global reads
 
-        // local read/write consistency
+        // global read => insert a local write with local_clk = 0
         cb.condition_require_zero(
             || "is_global_read => local_clk = 0",
             1 - is_global_write.expr(),
@@ -211,12 +211,12 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
 
         cb.read_record(
             || "r_record",
-            gkr_iop::RAMType::Memory, // TODO fixme
+            gkr_iop::RAMType::Memory, // FIXME: should be dynamic, either Register or Memory
             record.clone(),
         )?;
         cb.write_record(
             || "w_record",
-            gkr_iop::RAMType::Memory, // TODO fixme
+            gkr_iop::RAMType::Memory, // FIXME: should be dynamic, either Register or Memory
             record.clone(),
         )?;
 
@@ -263,8 +263,8 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
     }
 }
 
-// This chip is used to manage read/write into a global set
-// shared among multiple shards
+/// This chip is used to manage read/write into a global set
+/// shared among multiple shards
 pub struct GlobalChip<E: ExtensionField, P> {
     rc: RoundConstants<E::BaseField, POSEIDON2_BABYBEAR_WIDTH, 4, 13>,
     perm: P,
@@ -273,7 +273,7 @@ pub struct GlobalChip<E: ExtensionField, P> {
 #[derive(Clone, Debug)]
 pub struct GlobalChipInput<E: ExtensionField> {
     pub record: GlobalRecord,
-    pub ec_point: Option<GlobalPoint<E>>,
+    pub ec_point: Option<GlobalPoint<E>>, // to be filled during instance assignment
 }
 
 impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]> + Send>
@@ -302,14 +302,6 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, gkr_iop::gkr::GKRCircuit<E>), crate::error::ZKVMError>
     {
-        let config = self.construct_circuit(cb, param)?;
-
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-
         // create three selectors: selector_r, selector_w, selector_zero
         let selector_r = cb.create_structural_witin(
             || "selector_r",
@@ -323,6 +315,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         );
         let selector_w = cb.create_structural_witin(
             || "selector_w",
+            // this is just a placeholder, the actural type is SelectorType::Prefix()
             EqualDistanceSequence {
                 max_len: 0,
                 offset: 0,
@@ -332,6 +325,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         );
         let selector_zero = cb.create_structural_witin(
             || "selector_zero",
+            // this is just a placeholder, the actural type is SelectorType::Prefix()
             EqualDistanceSequence {
                 max_len: 0,
                 offset: 0,
@@ -339,6 +333,15 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
                 descending: false,
             },
         );
+
+        let config = self.construct_circuit(cb, param)?;
+
+        let w_len = cb.cs.w_expressions.len();
+        let r_len = cb.cs.r_expressions.len();
+        let lk_len = cb.cs.lk_expressions.len();
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
         let selector_r = SelectorType::Prefix(selector_r.expr());
         // note that the actual offset should be set by prover
         // depending on the number of local read instances
@@ -404,7 +407,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
             .chain(config.y.iter())
             .zip_eq((point.x.deref()).iter().chain((point.y.deref()).iter()))
             .for_each(|(witin, fe)| {
-                set_val!(instance, *witin, fe.to_canonical_u64());
+                instance[witin.id as usize] = fe.clone();
             });
 
         let ram_type = E::BaseField::from_canonical_u32(record.ram_type as u32);
@@ -423,7 +426,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
 
         config
             .perm_config
-            // TODO: 28 is hardcoded
+            // TODO: remove hardcoded constant 28
             .assign_instance(&mut instance[28 + UINT_LIMBS..], input);
 
         Ok(())
@@ -446,7 +449,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
 
         let nthreads = max_usable_threads();
 
-        // local read => global write
+        // local read iff it's global write
         let num_local_reads = steps.iter().filter(|s| s.record.is_write).count();
 
         let num_instance_per_batch = if steps.len() > 256 {
@@ -456,7 +459,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         }
         .max(1);
 
-        let N = next_pow2_instance_padding(steps.len());
+        let n = next_pow2_instance_padding(steps.len());
         // compute the input for the binary tree for ec point summation
         steps
             .par_chunks_mut(num_instance_per_batch)
@@ -470,7 +473,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
 
         let lk_multiplicity = LkMultiplicity::default();
         // *2 because we need to store the internal nodes of binary tree for ec point summation
-        let num_rows_padded = 2 * N;
+        let num_rows_padded = 2 * n;
 
         let mut raw_witin = {
             let matrix_size = num_rows_padded * num_witin;
@@ -501,7 +504,8 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         raw_witin_iter
             .zip_eq(raw_structual_witin_iter)
             .zip_eq(steps.par_chunks(num_instance_per_batch))
-            .flat_map(|((instances, structural_instance), steps)| {
+            .enumerate()
+            .flat_map(|(chunk_idx, ((instances, structural_instance), steps))| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
                 instances
                     .chunks_mut(num_witin)
@@ -509,7 +513,8 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
                     .zip_eq(steps)
                     .enumerate()
                     .map(|(i, ((instance, structural_instance), step))| {
-                        let (sel_r, sel_w) = if i < num_local_reads {
+                        let row = chunk_idx * num_instance_per_batch + i;
+                        let (sel_r, sel_w) = if row < num_local_reads {
                             (E::BaseField::ONE, E::BaseField::ZERO)
                         } else {
                             (E::BaseField::ZERO, E::BaseField::ONE)
@@ -535,8 +540,8 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
             if cur_layer_points.len() <= 1 {
                 break;
             }
-            // 2b -> b + 2^n
-            let next_layer_offset = cur_layer_points.first().map(|(i, _)| *i / 2 + N).unwrap();
+            // 2b -> b + 2^log_n
+            let next_layer_offset = cur_layer_points.first().map(|(i, _)| *i / 2 + n).unwrap();
             cur_layer_points = cur_layer_points
                 .par_chunks(2)
                 .zip(raw_witin.values[next_layer_offset * num_witin..].par_chunks_mut(num_witin))
@@ -552,8 +557,8 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
                             let (r, p2) = &pair[1];
                             assert_eq!(*r - *l, 1);
 
-                            // parent node idx = b + 2^n
-                            let o = N + l / 2;
+                            // parent node idx = b + 2^log2_n
+                            let o = n + l / 2;
                             let slope = (&p1.y - &p2.y) * (&p1.x - &p2.x).inverse().unwrap();
                             let q = p1.clone() + p2.clone();
 
@@ -561,7 +566,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
                         }
                         1 => {
                             let (l, p) = &pair[0];
-                            let o = N + l / 2;
+                            let o = n + l / 2;
                             (o, SepticExtension::zero(), p.clone())
                         }
                         _ => unreachable!(),
@@ -660,9 +665,8 @@ mod tests {
             .unwrap();
 
         // create a bunch of random memory read/write records
-        // TODO: handle n_r + n_w > 256 case
-        let n_global_reads = 70;
-        let n_global_writes = 142;
+        let n_global_reads = 1700;
+        let n_global_writes = 1420;
         let global_reads = (0..n_global_reads)
             .map(|i| {
                 let addr = i * 8;
