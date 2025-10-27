@@ -22,7 +22,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
     type WitnessInput = ();
 
     fn name() -> String {
-        format!("OPS_{:?}", OP::ROM_TYPE)
+        format!("{:?}_OPS_ROM_TABLE", OP::ROM_TYPE)
     }
 
     fn construct_circuit(

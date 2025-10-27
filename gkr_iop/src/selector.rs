@@ -2,7 +2,7 @@ use rayon::iter::IndexedParallelIterator;
 
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
-    Expression,
+    Expression, WitnessId,
     mle::{IntoMLE, MultilinearExtension, Point},
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
@@ -81,14 +81,12 @@ impl<E: ExtensionField> SelectorType<E> {
     /// Evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
     pub fn evaluate(
         &self,
-        evals: &mut Vec<E>,
         out_point: &Point<E>,
         in_point: &Point<E>,
         num_instances: usize,
-        offset_eq_id: usize,
-    ) {
+    ) -> Option<(E, WitnessId)> {
         let (expr, eval) = match self {
-            SelectorType::None => return,
+            SelectorType::None => return None,
             SelectorType::Whole(expr) => {
                 debug_assert_eq!(out_point.len(), in_point.len());
                 (expr, eq_eval(out_point, in_point))
@@ -118,11 +116,7 @@ impl<E: ExtensionField> SelectorType<E> {
         let Expression::StructuralWitIn(wit_id, _) = expr else {
             panic!("Wrong selector expression format");
         };
-        let wit_id = *wit_id as usize + offset_eq_id;
-        if wit_id >= evals.len() {
-            evals.resize(wit_id + 1, E::ZERO);
-        }
-        evals[wit_id] = eval;
+        Some((eval, *wit_id))
     }
 
     /// return ordered indices of OrderedSparse32

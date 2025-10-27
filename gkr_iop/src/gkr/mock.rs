@@ -73,11 +73,12 @@ impl<E: ExtensionField> MockProver<E> {
                     wit_infer_by_expr(
                         &(sel.selector_expr() * expr),
                         layer.n_witin as WitnessId,
-                        layer.n_structural_witin as WitnessId,
                         layer.n_fixed as WitnessId,
+                        layer.n_instance,
                         &[],
                         &wits,
                         &structural_wits,
+                        &[],
                         &[],
                         &challenges,
                     )
@@ -91,8 +92,8 @@ impl<E: ExtensionField> MockProver<E> {
                     out.iter().map(|out| {
                         out.mock_evaluate(
                             layer.n_witin as WitnessId,
-                            layer.n_structural_witin as WitnessId,
                             layer.n_fixed as WitnessId,
+                            layer.n_instance,
                             &evaluations,
                             &challenges,
                             num_vars,
@@ -146,8 +147,8 @@ impl<E: ExtensionField> EvalExpression<E> {
     pub fn mock_evaluate<'a>(
         &self,
         n_witin: WitnessId,
-        n_structural_witin: WitnessId,
         n_fixed: WitnessId,
+        n_instance: usize,
         evals: &[ArcMultilinearExtension<'a, E>],
         challenges: &[E],
         num_vars: usize,
@@ -160,10 +161,11 @@ impl<E: ExtensionField> EvalExpression<E> {
             EvalExpression::Linear(i, c0, c1) => wit_infer_by_expr(
                 &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
                 n_witin,
-                n_structural_witin,
                 n_fixed,
+                n_instance,
                 &[],
                 evals,
+                &[],
                 &[],
                 &[],
                 challenges,
@@ -174,12 +176,7 @@ impl<E: ExtensionField> EvalExpression<E> {
                     .iter()
                     .map(|part| {
                         part.mock_evaluate(
-                            n_witin,
-                            n_structural_witin,
-                            n_fixed,
-                            evals,
-                            challenges,
-                            num_vars,
+                            n_witin, n_fixed, n_instance, evals, challenges, num_vars,
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;

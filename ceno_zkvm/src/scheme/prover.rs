@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::scheme::hal::MainSumcheckEvals;
+use either::Either;
 use gkr_iop::hal::MultilinearPolynomial;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -249,52 +250,31 @@ impl<
                     fixed,
                     structural_witness,
                     public_input: public_input.clone(),
+                    pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
                     num_instances,
                 };
 
-                if cs.is_opcode_circuit() {
-                    let (opcode_proof, _, input_opening_point) = self.create_chip_proof(
-                        circuit_name,
-                        pk,
-                        input,
-                        &mut transcript,
-                        &challenges,
-                    )?;
-                    tracing::trace!(
-                        "generated proof for opcode {} with num_instances={}",
-                        circuit_name,
-                        num_instances
-                    );
+                let (opcode_proof, pi_in_evals, input_opening_point) =
+                    self.create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
+                tracing::trace!(
+                    "generated proof for opcode {} with num_instances={}",
+                    circuit_name,
+                    num_instances
+                );
+                if cs.num_witin() > 0 || cs.num_fixed() > 0 {
                     points.push(input_opening_point);
-                    evaluations.push(vec![opcode_proof.wits_in_evals.clone()]);
-                    chip_proofs.insert(index, opcode_proof);
+                    evaluations.push(vec![
+                        opcode_proof.wits_in_evals.clone(),
+                        opcode_proof.fixed_in_evals.clone(),
+                    ]);
                 } else {
-                    // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
-                    // input.num_instances = 1 << input.log2_num_instances();
-                    let (table_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
-                        circuit_name,
-                        pk,
-                        input,
-                        &mut transcript,
-                        &challenges,
-                    )?;
-                    if cs.num_witin() > 0 || cs.num_fixed() > 0 {
-                        points.push(input_opening_point);
-                        evaluations.push(vec![
-                            table_proof.wits_in_evals.clone(),
-                            table_proof.fixed_in_evals.clone(),
-                        ]);
-                    } else {
-                        assert!(table_proof.wits_in_evals.is_empty());
-                        assert!(table_proof.fixed_in_evals.is_empty());
-                    }
-                    // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
-                    // table_proof.num_instances = num_instances;
-                    chip_proofs.insert(index, table_proof);
-                    for (idx, eval) in pi_in_evals {
-                        pi_evals[idx] = eval;
-                    }
-                };
+                    assert!(opcode_proof.wits_in_evals.is_empty());
+                    assert!(opcode_proof.fixed_in_evals.is_empty());
+                }
+                chip_proofs.insert(index, opcode_proof);
+                for (idx, eval) in pi_in_evals {
+                    pi_evals[idx] = eval;
+                }
                 Ok((points, evaluations))
             },
         )?;
@@ -341,18 +321,15 @@ impl<
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
-        // println!("create_chip_proof: {}", name);
-
         // build main witness
-        let (records, is_padded) =
-            build_main_witness::<E, PCS, PB, PD>(&self.device, cs, &input, challenges);
+        let records = build_main_witness::<E, PCS, PB, PD>(cs, &input, challenges);
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
         // (internally calls build_tower_witness)
         let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) = self
             .device
-            .prove_tower_relation(cs, &input, &records, is_padded, challenges, transcript);
+            .prove_tower_relation(cs, &input, &records, challenges, transcript);
         exit_span!(span);
 
         assert_eq!(
@@ -374,9 +351,9 @@ impl<
 
         // evaluate pi if there is instance query
         let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
-        if !cs.instance_name_map().is_empty() {
+        if !cs.instance_openings().is_empty() {
             let span = entered_span!("pi::evals");
-            for &Instance(idx) in cs.instance_name_map().keys() {
+            for &Instance(idx) in cs.instance_openings() {
                 let poly = &input.public_input[idx];
                 pi_in_evals.insert(
                     idx,

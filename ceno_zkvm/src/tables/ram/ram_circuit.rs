@@ -19,7 +19,7 @@ use gkr_iop::{
     selector::SelectorType,
 };
 use itertools::Itertools;
-use multilinear_extensions::{StructuralWitInType, ToExpr};
+use multilinear_extensions::ToExpr;
 use p3::field::FieldAlgebra;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
@@ -240,7 +240,7 @@ impl<
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}_{}", DVRAM::RAM_TYPE, DVRAM::name())
+        format!("{}_{:?}_RAM", DVRAM::name(), DVRAM::RAM_TYPE,)
     }
 
     fn construct_circuit(
@@ -311,16 +311,7 @@ impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
         let config = Self::construct_circuit(cb, param)?;
         let r_table_len = cb.cs.r_table_expressions.len();
 
-        let selector = cb.create_structural_witin(
-            || "selector",
-            StructuralWitInType::EqualDistanceSequence {
-                // TODO determin proper size of max length
-                max_len: u32::MAX as usize,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(E::BaseField::ZERO, selector.expr());
 
         // all shared the same selector
