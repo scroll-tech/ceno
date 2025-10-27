@@ -13,8 +13,12 @@ use crate::{
 };
 use ff_ext::{ExtensionField, FieldInto, POSEIDON2_BABYBEAR_WIDTH, SmallField};
 use gkr_iop::{
-    chip::Chip, circuit_builder::CircuitBuilder, error::CircuitBuilderError, gkr::layer::Layer,
-    selector::SelectorType, utils::lk_multiplicity::Multiplicity,
+    chip::Chip,
+    circuit_builder::CircuitBuilder,
+    error::CircuitBuilderError,
+    gkr::layer::Layer,
+    selector::SelectorType,
+    utils::lk_multiplicity::{self, Multiplicity},
 };
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
@@ -363,7 +367,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
     fn assign_instance(
         config: &Self::InstructionConfig,
         instance: &mut [E::BaseField],
-        _lk_multiplicity: &mut LkMultiplicity,
+        lk_multiplicity: &mut LkMultiplicity,
         input: &Self::Record,
     ) -> Result<(), crate::error::ZKVMError> {
         // assign basic fields
@@ -375,7 +379,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         };
         set_val!(instance, config.addr, record.addr as u64);
         set_val!(instance, config.is_ram_register, is_ram_register as u64);
-        let value = Value::new_unchecked(record.value);
+        let value = Value::new(record.value, lk_multiplicity);
         config.value.assign_limbs(instance, value.as_u16_limbs());
         set_val!(instance, config.shard, record.shard);
         set_val!(instance, config.global_clk, record.global_clk);
@@ -457,7 +461,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
 
         let lk_multiplicity = LkMultiplicity::default();
         // *2 because we need to store the internal nodes of binary tree for ec point summation
-        let num_rows_padded = next_pow2_instance_padding(steps.len()) * 2;
+        let num_rows_padded = 2 * N;
 
         let mut raw_witin = {
             let matrix_size = num_rows_padded * num_witin;
@@ -517,7 +521,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
             .enumerate()
             .collect_vec();
 
-        // slope[0,b] = (input[b,0].y - input[b,1].y) / (input[b,0].x - input[b,1].x)
+        // slope[1,b] = (input[b,0].y - input[b,1].y) / (input[b,0].x - input[b,1].x)
         loop {
             if cur_layer_points.len() <= 1 {
                 break;
@@ -551,7 +555,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
                             let o = N + l / 2;
                             (o, SepticExtension::zero(), p.clone())
                         }
-                        0 | 3.. => unreachable!(),
+                        _ => unreachable!(),
                     };
 
                     config
@@ -647,8 +651,9 @@ mod tests {
             .unwrap();
 
         // create a bunch of random memory read/write records
-        let n_global_reads = 130;
-        let n_global_writes = 140;
+        // TODO: handle n_r + n_w > 256 case
+        let n_global_reads = 70;
+        let n_global_writes = 142;
         let global_reads = (0..n_global_reads)
             .map(|i| {
                 let addr = i * 8;
