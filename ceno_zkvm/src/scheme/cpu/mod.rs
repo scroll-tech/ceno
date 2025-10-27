@@ -46,7 +46,7 @@ use transcript::Transcript;
 use witness::next_pow2_instance_padding;
 
 #[cfg(feature = "sanity-check")]
-use {crate::scheme::septic_curve::SepticExtension, gkr_iop::utils::eq_eval_less_or_equal_than};
+use {gkr_iop::utils::eq_eval_less_or_equal_than};
 
 pub type TowerRelationOutput<E> = (
     Point<E>,
