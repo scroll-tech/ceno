@@ -53,6 +53,8 @@ pub enum SelectorType<E: ExtensionField> {
         indices: Vec<usize>,
         expression: Expression<E>,
     },
+    /// binary tree [`quark`] from paper
+    QuarkBinaryTreeLessThan(Expression<E>),
 }
 
 impl<E: ExtensionField> SelectorType<E> {
@@ -119,6 +121,7 @@ impl<E: ExtensionField> SelectorType<E> {
                         .into_mle(),
                 )
             }
+            SelectorType::QuarkBinaryTreeLessThan(..) => unimplemented!(),
         }
     }
 
@@ -149,6 +152,7 @@ impl<E: ExtensionField> SelectorType<E> {
                 sel.splice(end..sel.len(), repeat_n(E::ZERO, sel.len() - end));
                 Some(sel.into_mle())
             }
+            // compute true and false mle eq(1; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (eq() - sel(y; b[5..]))
             SelectorType::OrderedSparse32 { indices, .. } => {
                 assert_eq!(out_point.len(), ceil_log2(ctx.num_instances) + 5);
 
@@ -176,10 +180,63 @@ impl<E: ExtensionField> SelectorType<E> {
                     });
                 Some(sel.into_mle())
             }
+            // also see evaluate() function for more explanation
+            SelectorType::QuarkBinaryTreeLessThan(_) => {
+                assert_eq!(ctx.offset, 0);
+                // num_instances: number of prefix one in leaf layer
+                let mut sel: Vec<E> = build_eq_x_r_vec(out_point);
+                let n = sel.len();
+
+                let num_instances_sequence = (0..out_point.len())
+                    // clean up sig bits
+                    .scan(ctx.num_instances, |n_instance, _| {
+                        // n points to sum means we have n/2 addition pairs
+                        let cur = *n_instance / 2;
+                        // the next layer has ceil(n/2) points to sum
+                        *n_instance = (*n_instance).div_ceil(2);
+                        Some(cur)
+                    })
+                    .collect::<Vec<_>>();
+
+                // split sel into different size of region, set tailing 0 of respective chunk size
+                // 1st round: take v = sel[0..sel.len()/2], zero out v[num_instances_sequence[0]..]
+                // 2nd round: take v = sel[sel.len()/2 .. sel.len()/4], zero out v[num_instances_sequence[1]..]
+                // ...
+                // each round: progressively smaller chunk
+                // example: round 0 uses first half, round 1 uses next quarter, etc.
+                // compute cumulative start indices:
+                // e.g. chunk = n/2, then start = 0, chunk, chunk + chunk/2, chunk + chunk/2 + chunk/4, ...
+                // compute disjoint start indices and lengths
+                let chunks: Vec<(usize, usize)> = {
+                    let mut result = Vec::new();
+                    let mut start = 0;
+                    let mut chunk_len = n / 2;
+                    while chunk_len > 0 {
+                        result.push((start, chunk_len));
+                        start += chunk_len;
+                        chunk_len /= 2;
+                    }
+                    result
+                };
+
+                for (i, (start, len)) in chunks.into_iter().enumerate() {
+                    let slice = &mut sel[start..start + len];
+
+                    // determine from which index to zero
+                    let zero_start = num_instances_sequence.get(i).copied().unwrap_or(0).min(len);
+
+                    for x in &mut slice[zero_start..] {
+                        *x = E::ZERO;
+                    }
+                }
+
+                // zero out last bh evaluations
+                *sel.last_mut().unwrap() = E::ZERO;
+                Some(sel.into_mle())
+            }
         }
     }
 
-    /// Evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
     pub fn evaluate(
         &self,
         evals: &mut Vec<E>,
@@ -219,6 +276,7 @@ impl<E: ExtensionField> SelectorType<E> {
                 };
                 (expression, sel)
             }
+            // evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
             SelectorType::OrderedSparse32 {
                 indices,
                 expression,
@@ -235,6 +293,57 @@ impl<E: ExtensionField> SelectorType<E> {
                     &in_point[5..],
                 );
                 (expression, eval * sel)
+            }
+            SelectorType::QuarkBinaryTreeLessThan(expr) => {
+                // num_instances count on leaf layer
+                // where nodes size is 2^(N) / 2
+                // out_point.len() is also log(2^(N)) - 1
+                // so num_instances and 1 << out_point.len() are on same scaling
+                assert!(ctx.num_instances > 0);
+                assert!(ctx.num_instances <= (1 << out_point.len()));
+                assert!(!out_point.is_empty());
+                assert_eq!(out_point.len(), in_point.len());
+
+                // we break down this special selector evaluation into recursive structure
+                // iterating through out_point and in_point, for each i
+                // next_eval = lhs * (1-out_point[i]) * (1 - in_point[i]) + prev_eval * out_point[i] * in_point[i]
+                // where the lhs is in consecutive prefix 1 follow by 0
+
+                // calculate prefix 1 length of each layer
+                let mut prefix_one_seq = (0..out_point.len())
+                    .scan(ctx.num_instances, |n_instance, _| {
+                        // n points to sum means we have n/2 addition pairs
+                        let cur = *n_instance / 2;
+                        // next layer has ceil(n/2) points to sum
+                        *n_instance = (*n_instance).div_ceil(2);
+                        Some(cur)
+                    })
+                    .collect::<Vec<_>>();
+                prefix_one_seq.reverse();
+
+                let mut res = if prefix_one_seq[0] == 0 {
+                    E::ZERO
+                } else {
+                    assert_eq!(prefix_one_seq[0], 1);
+                    (E::ONE - out_point[0]) * (E::ONE - in_point[0])
+                };
+                for i in 1..out_point.len() {
+                    let num_prefix_one_lhs = prefix_one_seq[i];
+                    let lhs_res = if num_prefix_one_lhs == 0 {
+                        E::ZERO
+                    } else {
+                        (E::ONE - out_point[i])
+                            * (E::ONE - in_point[i])
+                            * eq_eval_less_or_equal_than(
+                                num_prefix_one_lhs - 1,
+                                &out_point[..i],
+                                &in_point[..i],
+                            )
+                    };
+                    let rhs_res = (out_point[i] * in_point[i]) * res;
+                    res = lhs_res + rhs_res;
+                }
+                (expr, res)
             }
         };
         let Expression::StructuralWitIn(wit_id, _) = expr else {
@@ -262,5 +371,60 @@ impl<E: ExtensionField> SelectorType<E> {
             | Self::Prefix(expression) => expression,
             e => unimplemented!("no selector expression in {:?}", e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ff_ext::{BabyBearExt4, FromUniformBytes};
+    use multilinear_extensions::{
+        StructuralWitIn, ToExpr, util::ceil_log2, virtual_poly::build_eq_x_r_vec,
+    };
+    use p3::field::FieldAlgebra;
+    use rand::thread_rng;
+
+    use crate::selector::{SelectorContext, SelectorType};
+
+    type E = BabyBearExt4;
+
+    #[test]
+    fn test_quark_lt_selector() {
+        let mut rng = thread_rng();
+        let n_points = 5;
+        let n_vars = ceil_log2(n_points);
+        let witin = StructuralWitIn {
+            id: 0,
+            witin_type: multilinear_extensions::StructuralWitInType::EqualDistanceSequence {
+                max_len: 0,
+                offset: 0,
+                multi_factor: 0,
+                descending: false,
+            },
+        };
+        let selector = SelectorType::QuarkBinaryTreeLessThan(witin.expr());
+        let ctx = SelectorContext::new(0, n_points, n_vars);
+        let out_rt = E::random_vec(n_vars, &mut rng);
+        let sel_mle = selector.compute(&out_rt, &ctx).unwrap();
+
+        // if we have 5 points to sum, then
+        // in 1st layer: two additions p12 = p1 + p2, p34 = p3 + p4, p5 kept
+        // in 2nd layer: one addition p14 = p12 + p34, p5 kept
+        // in 3rd layer: one addition p15 = p14 + p5
+        let eq = build_eq_x_r_vec(&out_rt);
+        let vec = sel_mle.get_ext_field_vec();
+        assert_eq!(vec[0], eq[0]); // p1+p2
+        assert_eq!(vec[1], eq[1]); // p3+p4
+        assert_eq!(vec[2], E::ZERO); // p5
+        assert_eq!(vec[3], E::ZERO);
+        assert_eq!(vec[4], eq[4]); // p1+p2+p3+p4
+        assert_eq!(vec[5], E::ZERO); // p5
+        assert_eq!(vec[6], eq[6]); // p1+p2+p3+p4+p5
+        assert_eq!(vec[7], E::ZERO);
+
+        let in_rt = E::random_vec(n_vars, &mut rng);
+        let mut evals = vec![];
+        // TODO: avoid the param evals when we evaluate a selector
+        selector.evaluate(&mut evals, &out_rt, &in_rt, &ctx, 0);
+        assert_eq!(sel_mle.evaluate(&in_rt), evals[0]);
     }
 }

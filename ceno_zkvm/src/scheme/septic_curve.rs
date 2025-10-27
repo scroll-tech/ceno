@@ -594,6 +594,28 @@ impl<F: Field> MulAssign<Self> for SepticExtension<F> {
 #[derive(Clone, Debug)]
 pub struct SymbolicSepticExtension<E: ExtensionField>(pub Vec<Expression<E>>);
 
+impl<E: ExtensionField> SymbolicSepticExtension<E> {
+    pub fn mul_scalar(&self, scalar: Either<E::BaseField, E>) -> Self {
+        let res = self
+            .0
+            .iter()
+            .map(|a| a.clone() * Expression::Constant(scalar))
+            .collect();
+
+        SymbolicSepticExtension(res)
+    }
+
+    pub fn add_scalar(&self, scalar: Either<E::BaseField, E>) -> Self {
+        let res = self
+            .0
+            .iter()
+            .map(|a| a.clone() + Expression::Constant(scalar))
+            .collect();
+
+        SymbolicSepticExtension(res)
+    }
+}
+
 impl<E: ExtensionField> Add<Self> for &SymbolicSepticExtension<E> {
     type Output = SymbolicSepticExtension<E>;
 

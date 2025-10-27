@@ -78,6 +78,7 @@ pub trait TraceCommitter<PB: ProverBackend> {
 pub trait EccQuarkProver<PB: ProverBackend> {
     fn prove_ec_sum_quark<'a>(
         &self,
+        num_instances: usize,
         xs: Vec<Arc<PB::MultilinearPoly<'a>>>,
         ys: Vec<Arc<PB::MultilinearPoly<'a>>>,
         invs: Vec<Arc<PB::MultilinearPoly<'a>>>,

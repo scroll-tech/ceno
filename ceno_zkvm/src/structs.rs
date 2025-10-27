@@ -31,7 +31,7 @@ use witness::RowMajorMatrix;
 ))]
 pub struct EccQuarkProof<E: ExtensionField> {
     pub zerocheck_proof: IOPProof<E>,
-    pub num_vars: usize,
+    pub num_instances: usize,
     pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[0,rt], y[0,rt], s[0,rt]
     pub sum: SepticPoint<E::BaseField>,
 }

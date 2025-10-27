@@ -351,7 +351,10 @@ impl<
                     _ => unreachable!("ec inv's expression must be WitIn"),
                 })
                 .collect_vec();
-            Some(self.device.prove_ec_sum_quark(xs, ys, invs, transcript)?)
+            Some(
+                self.device
+                    .prove_ec_sum_quark(input.num_instances, xs, ys, invs, transcript)?,
+            )
         } else {
             None
         };
