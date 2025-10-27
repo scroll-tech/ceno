@@ -320,30 +320,25 @@ impl<E: ExtensionField> SelectorType<E> {
                     })
                     .collect::<Vec<_>>();
                 prefix_one_seq.reverse();
-                let mut prefix_one_seq_iter = prefix_one_seq.iter();
 
-                let mut res = if let Some(first) = prefix_one_seq_iter.by_ref().next() {
-                    if *first > 0 {
-                        assert_eq!(*first, 1);
-                        (E::ONE - out_point[0]) * (E::ONE - in_point[0])
-                    } else {
-                        E::ZERO
-                    }
+                let mut res = if prefix_one_seq[0] == 0 {
+                    E::ZERO
                 } else {
-                    unreachable!()
+                    assert_eq!(prefix_one_seq[0], 1);
+                    (E::ONE - out_point[0]) * (E::ONE - in_point[0])
                 };
                 for i in 1..out_point.len() {
-                    let num_prefix_one_lhs = prefix_one_seq_iter.by_ref().next().unwrap();
-                    let lhs_res = if *num_prefix_one_lhs > 0 {
+                    let num_prefix_one_lhs = prefix_one_seq[i];
+                    let lhs_res = if num_prefix_one_lhs == 0 {
+                        E::ZERO
+                    } else {
                         (E::ONE - out_point[i])
                             * (E::ONE - in_point[i])
                             * eq_eval_less_or_equal_than(
-                                *num_prefix_one_lhs - 1,
+                                num_prefix_one_lhs - 1,
                                 &out_point[..i],
                                 &in_point[..i],
                             )
-                    } else {
-                        E::ZERO
                     };
                     let rhs_res = (out_point[i] * in_point[i]) * res;
                     res = lhs_res + rhs_res;
