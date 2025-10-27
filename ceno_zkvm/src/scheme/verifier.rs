@@ -8,6 +8,7 @@ use ff_ext::{Instrumented, PoseidonField};
 use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
+    instructions::riscv::constants::{INIT_PC_IDX, SHARD_ID_IDX},
     scheme::constants::NUM_FANIN,
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
 };
@@ -51,6 +52,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         self.verify_proof_halt(vm_proof, transcript, true)
     }
 
+    #[tracing::instrument(skip_all, name = "verify_proof")]
+    pub fn verify_proofs(
+        &self,
+        vm_proofs: Vec<ZKVMProof<E, PCS>>,
+        transcripts: Vec<impl ForkableTranscript<E>>,
+    ) -> Result<bool, ZKVMError> {
+        self.verify_proofs_halt(vm_proofs, transcripts, true)
+    }
+
     /// Verify a trace from start to optional halt.
     pub fn verify_proof_halt(
         &self,
@@ -58,22 +68,71 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         transcript: impl ForkableTranscript<E>,
         expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
-        // require ecall/halt proof to exist, depending whether we expect a halt.
-        let has_halt = vm_proof.has_halt(&self.vk);
-        if has_halt != expect_halt {
-            return Err(ZKVMError::VerifyError(
-                format!("ecall/halt mismatch: expected {expect_halt} != {has_halt}",).into(),
-            ));
-        }
+        self.verify_proofs_halt(vec![vm_proof], vec![transcript], expect_halt)
+    }
 
-        self.verify_proof_validity(vm_proof, transcript)
+    /// Verify a trace from start to optional halt.
+    pub fn verify_proofs_halt(
+        &self,
+        vm_proofs: Vec<ZKVMProof<E, PCS>>,
+        transcripts: Vec<impl ForkableTranscript<E>>,
+        expect_halt: bool,
+    ) -> Result<bool, ZKVMError> {
+        // main invariant between opcode circuits and table circuits
+        let _prod_r = E::ONE;
+        let _prod_w = E::ONE;
+        let _logup_sum = E::ZERO;
+        vm_proofs
+            .into_iter()
+            .zip_eq(transcripts)
+            .enumerate()
+            .try_for_each(|(shard_id, (vm_proof, transcript))| {
+                // require ecall/halt proof to exist, depend on whether we expect a halt.
+                let has_halt = vm_proof.has_halt(&self.vk);
+                if has_halt != expect_halt {
+                    return Err(ZKVMError::VerifyError(
+                        format!(
+                            "{shard_id}th proof ecall/halt mismatch: expected {expect_halt} != {has_halt}",
+                        )
+                            .into(),
+                    ));
+                }
+                // check first shard
+                // check last shard
+
+                // check init ts = 4
+                // check pc match prev pc
+
+                // TODO shard_ram_bus
+                // extract shard_ram_bus.local_read, extract shard_ram_bus.local_write
+                // extract shard_ram_bus.shard_ram_bus_read, extract shard_ram_bus.shard_ram_bus_write
+
+                let _shard_ram_bus = vm_proof.raw_pi[INIT_PC_IDX].clone();
+                let (prod_r, prod_w, logup_sum) = self.verify_proof_validity(shard_id, vm_proof, transcript)?;
+
+                // check rw_set equality of shard proof
+                if prod_r != prod_w {
+                    return Err(ZKVMError::VerifyError(format!("{shard_id}th prod_r != prod_w").into()));
+                }
+
+                // check logup sum of shard proof
+                if logup_sum != E::ZERO {
+                    return Err(ZKVMError::VerifyError(
+                        format!("{shard_id}th logup_sum({:?}) != 0", logup_sum).into(),
+                    ));
+                }
+
+                Ok(())
+            })?;
+        Ok(true)
     }
 
     fn verify_proof_validity(
         &self,
+        shard_id: usize,
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: impl ForkableTranscript<E>,
-    ) -> Result<bool, ZKVMError> {
+    ) -> Result<(E, E, E), ZKVMError> {
         // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
@@ -87,7 +146,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             if *chip_idx >= self.vk.circuit_vks.len() {
                 return Err(ZKVMError::VKNotFound(
                     format!(
-                        "chip index {chip_idx} not found in vk set [0..{})",
+                        "{shard_id}th shard chip index {chip_idx} not found in vk set [0..{})",
                         self.vk.circuit_vks.len()
                     )
                     .into(),
@@ -102,6 +161,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .iter()
             .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
 
+        // check shard id
+        assert_eq!(
+            vm_proof.raw_pi[SHARD_ID_IDX],
+            vec![E::BaseField::from_canonical_usize(shard_id)]
+        );
+
         // verify constant poly(s) evaluation result match
         // we can evaluate at this moment because constant always evaluate to same value
         // non-constant poly(s) will be verified in respective (table) proof accordingly
@@ -110,7 +175,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .try_for_each(|(i, (raw, eval))| {
                 if raw.len() == 1 && E::from(raw[0]) != *eval {
                     Err(ZKVMError::VerifyError(
-                        format!("pub input on index {i} mismatch  {raw:?} != {eval:?}").into(),
+                        format!("{shard_id}th shard pub input on index {i} mismatch  {raw:?} != {eval:?}").into(),
                     ))
                 } else {
                     Ok(())
@@ -145,7 +210,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-        tracing::trace!("challenges in verifier: {:?}", challenges);
+        tracing::trace!(
+            "{shard_id}th shard challenges in verifier: {:?}",
+            challenges
+        );
 
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
@@ -163,7 +231,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             {
                 return Err(ZKVMError::InvalidProof(
                     format!(
-                        "witness/fixed evaluations length mismatch: ({}, {}) != ({}, {})",
+                        "{shard_id}th shard witness/fixed evaluations length mismatch: ({}, {}) != ({}, {})",
                         proof.wits_in_evals.len(),
                         proof.fixed_in_evals.len(),
                         circuit_vk.get_cs().num_witin(),
@@ -177,7 +245,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             {
                 return Err(ZKVMError::InvalidProof(
                     format!(
-                        "read/write evaluations length mismatch: ({}, {}) != ({}, {})",
+                        "{shard_id}th shard read/write evaluations length mismatch: ({}, {}) != ({}, {})",
                         proof.r_out_evals.len(),
                         proof.w_out_evals.len(),
                         circuit_vk.get_cs().num_reads(),
@@ -189,7 +257,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             if proof.lk_out_evals.len() != circuit_vk.get_cs().num_lks() {
                 return Err(ZKVMError::InvalidProof(
                     format!(
-                        "lookup evaluations length mismatch: {} != {}",
+                        "{shard_id}th shard lookup evaluations length mismatch: {} != {}",
                         proof.lk_out_evals.len(),
                         circuit_vk.get_cs().num_lks(),
                     )
@@ -248,19 +316,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     (input_opening_point.clone(), proof.fixed_in_evals.clone()),
                 ));
             }
+            // TODO for non first shard, excluding init prod_w related tables
             prod_w *= proof.w_out_evals.iter().flatten().copied().product::<E>();
             prod_r *= proof.r_out_evals.iter().flatten().copied().product::<E>();
-            tracing::debug!("verified proof for circuit {}", circuit_name);
+            tracing::debug!("{shard_id}th shard verified proof for circuit {}", circuit_name);
         }
         logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
             * dummy_table_item.inverse();
-
-        // check logup relation across all proofs
-        if logup_sum != E::ZERO {
-            return Err(ZKVMError::VerifyError(
-                format!("logup_sum({:?}) != 0", logup_sum).into(),
-            ));
-        }
 
         #[cfg(debug_assertions)]
         {
@@ -304,12 +366,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         .right()
         .unwrap();
         prod_r *= finalize_global_state;
-        // check rw_set equality across all proofs
-        if prod_r != prod_w {
-            return Err(ZKVMError::VerifyError("prod_r != prod_w".into()));
-        }
 
-        Ok(true)
+        Ok((prod_r, prod_w, logup_sum))
     }
 
     /// verify proof and return input opening point
@@ -540,7 +598,7 @@ impl TowerVerify {
 
         let max_num_variables = num_variables.iter().max().unwrap();
 
-        let (next_rt, _) = (0..(max_num_variables-1)).try_fold(
+        let (next_rt, _) = (0..(max_num_variables - 1)).try_fold(
             (
                 PointAndEval {
                     point: initial_rt,
@@ -571,27 +629,27 @@ impl TowerVerify {
                     .map(|((spec_index, alpha), max_round)| {
                         eq_eval(out_rt, &rt)
                             * *alpha
-                            * if round < *max_round-1 {tower_proofs.prod_specs_eval[spec_index][round].iter().copied().product()} else {
-                                E::ZERO
-                            }
+                            * if round < *max_round - 1 { tower_proofs.prod_specs_eval[spec_index][round].iter().copied().product() } else {
+                            E::ZERO
+                        }
                     })
                     .sum::<E>()
                     + (0..num_logup_spec)
-                        .zip_eq(alpha_pows[num_prod_spec..].chunks(2))
-                        .zip_eq(num_variables[num_prod_spec..].iter())
-                        .map(|((spec_index, alpha), max_round)| {
-                            let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
-                            eq_eval(out_rt, &rt) * if round < *max_round-1 {
-                                let evals = &tower_proofs.logup_specs_eval[spec_index][round];
-                                let (p1, p2, q1, q2) =
-                                        (evals[0], evals[1], evals[2], evals[3]);
-                                    *alpha_numerator * (p1 * q2 + p2 * q1)
-                                        + *alpha_denominator * (q1 * q2)
-                            } else {
-                                E::ZERO
-                            }
-                        })
-                        .sum::<E>();
+                    .zip_eq(alpha_pows[num_prod_spec..].chunks(2))
+                    .zip_eq(num_variables[num_prod_spec..].iter())
+                    .map(|((spec_index, alpha), max_round)| {
+                        let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
+                        eq_eval(out_rt, &rt) * if round < *max_round - 1 {
+                            let evals = &tower_proofs.logup_specs_eval[spec_index][round];
+                            let (p1, p2, q1, q2) =
+                                (evals[0], evals[1], evals[2], evals[3]);
+                            *alpha_numerator * (p1 * q2 + p2 * q1)
+                                + *alpha_denominator * (q1 * q2)
+                        } else {
+                            E::ZERO
+                        }
+                    })
+                    .sum::<E>();
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
                     return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));
                 }
@@ -599,7 +657,7 @@ impl TowerVerify {
                 // derive single eval
                 // rt' = r_merge || rt
                 // r_merge.len() == ceil_log2(num_product_fanin)
-                let r_merge =transcript.sample_and_append_vec(b"merge", log2_num_fanin);
+                let r_merge = transcript.sample_and_append_vec(b"merge", log2_num_fanin);
                 let coeffs = build_eq_x_r_vec_sequential(&r_merge);
                 assert_eq!(coeffs.len(), num_fanin);
                 let rt_prime = [rt, r_merge].concat();
@@ -614,17 +672,17 @@ impl TowerVerify {
                     .zip(next_alpha_pows.iter())
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
-                        if round < max_round -1 {
+                        if round < max_round - 1 {
                             // merged evaluation
                             let evals = izip!(
                                 tower_proofs.prod_specs_eval[spec_index][round].iter(),
                                 coeffs.iter()
                             )
-                            .map(|(a, b)| *a * *b)
-                            .sum::<E>();
+                                .map(|(a, b)| *a * *b)
+                                .sum::<E>();
                             // this will keep update until round > evaluation
                             prod_spec_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), evals);
-                            if next_round < max_round -1 {
+                            if next_round < max_round - 1 {
                                 *alpha * evals
                             } else {
                                 E::ZERO
@@ -638,28 +696,28 @@ impl TowerVerify {
                     .zip_eq(next_alpha_pows[num_prod_spec..].chunks(2))
                     .zip_eq(num_variables[num_prod_spec..].iter())
                     .map(|((spec_index, alpha), max_round)| {
-                        if round < max_round -1 {
+                        if round < max_round - 1 {
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
                             // merged evaluation
                             let p_evals = izip!(
                                 tower_proofs.logup_specs_eval[spec_index][round][0..2].iter(),
                                 coeffs.iter()
                             )
-                            .map(|(a, b)| *a * *b)
-                            .sum::<E>();
+                                .map(|(a, b)| *a * *b)
+                                .sum::<E>();
 
                             let q_evals = izip!(
                                 tower_proofs.logup_specs_eval[spec_index][round][2..4].iter(),
                                 coeffs.iter()
                             )
-                            .map(|(a, b)| *a * *b)
-                            .sum::<E>();
+                                .map(|(a, b)| *a * *b)
+                                .sum::<E>();
 
                             // this will keep update until round > evaluation
                             logup_spec_p_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), p_evals);
                             logup_spec_q_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), q_evals);
 
-                            if next_round < max_round -1 {
+                            if next_round < max_round - 1 {
                                 *alpha_numerator * p_evals + *alpha_denominator * q_evals
                             } else {
                                 E::ZERO
