@@ -7,6 +7,7 @@ use either::Either;
 use ff_ext::ExtensionField;
 use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
 use std::marker::PhantomData;
+use strum_macros::EnumIter;
 use transcript::Transcript;
 use witness::RowMajorMatrix;
 
@@ -77,12 +78,13 @@ pub struct ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );
 
-#[derive(Clone, Debug, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Copy, EnumIter, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(usize)]
 pub enum RAMType {
-    GlobalState,
+    GlobalState = 0,
     Register,
     Memory,
+    Undefined,
 }
 
 impl_expr_from_unsigned!(RAMType);

@@ -86,6 +86,7 @@ use p3::{field::FieldAlgebra, goldilocks::Goldilocks};
 
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::{IsEqualConfig, Signed},
     instructions::{
@@ -286,6 +287,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -312,7 +314,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         // R-type instruction
         config
             .r_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         // Assign signed values, if any, and compute low 32-bit limb of product
         let prod_lo_hi = match &config.sign_deps {

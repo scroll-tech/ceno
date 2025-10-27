@@ -40,6 +40,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     chip_handler::MemoryExpr,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
@@ -1025,6 +1026,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     verify: bool,
     test_outputs: bool,
 ) -> Result<GKRProof<E>, BackendError> {
+    let mut shard_ctx = ShardContext::default();
     let num_instances = states.len();
     let num_instances_rounds = num_instances * ROUNDS.next_power_of_two();
     let log2_num_instance_rounds = ceil_log2(num_instances_rounds);
@@ -1073,9 +1075,11 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     );
     let raw_witin_iter =
         phase1_witness.par_batch_iter_mut(num_instance_per_batch * ROUNDS.next_power_of_two());
+    let shard_ctx_vec = shard_ctx.get_forked();
     raw_witin_iter
         .zip_eq(instances.par_chunks(num_instance_per_batch))
-        .for_each(|(instances, steps)| {
+        .zip(shard_ctx_vec)
+        .for_each(|((instances, steps), mut shard_ctx)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
                 .chunks_mut(num_witin as usize * ROUNDS.next_power_of_two())
@@ -1087,6 +1091,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                             .vm_state
                             .assign_instance(
                                 instance,
+                                &shard_ctx,
                                 &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
                             )
                             .expect("assign vm_state error");
@@ -1095,6 +1100,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                                 mem_config
                                     .assign_op(
                                         instance,
+                                        &mut shard_ctx,
                                         &mut lk_multiplicity,
                                         10,
                                         &MemOp {

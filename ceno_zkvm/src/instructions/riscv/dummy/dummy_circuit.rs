@@ -9,9 +9,9 @@ use super::super::{
     insn_base::{ReadMEM, ReadRS1, ReadRS2, StateInOut, WriteMEM, WriteRD},
 };
 use crate::{
-    chip_handler::general::InstFetch, circuit_builder::CircuitBuilder, error::ZKVMError,
-    instructions::Instruction, structs::ProgramParams, tables::InsnRecord, uint::Value,
-    witness::LkMultiplicity,
+    chip_handler::general::InstFetch, circuit_builder::CircuitBuilder, e2e::ShardContext,
+    error::ZKVMError, instructions::Instruction, structs::ProgramParams, tables::InsnRecord,
+    uint::Value, witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
@@ -70,11 +70,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        config.assign_instance(instance, lk_multiplicity, step)
+        config.assign_instance(instance, shard_ctx, lk_multiplicity, step)
     }
 }
 
@@ -242,30 +243,31 @@ impl<E: ExtensionField> DummyConfig<E> {
     pub(super) fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         // State in and out
-        self.vm_state.assign_instance(instance, step)?;
+        self.vm_state.assign_instance(instance, shard_ctx, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);
 
         // Registers
         if let Some((rs1_op, rs1_read)) = &self.rs1 {
-            rs1_op.assign_instance(instance, lk_multiplicity, step)?;
+            rs1_op.assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
             let rs1_val = Value::new_unchecked(step.rs1().expect("rs1 value").value);
             rs1_read.assign_value(instance, rs1_val);
         }
         if let Some((rs2_op, rs2_read)) = &self.rs2 {
-            rs2_op.assign_instance(instance, lk_multiplicity, step)?;
+            rs2_op.assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
             let rs2_val = Value::new_unchecked(step.rs2().expect("rs2 value").value);
             rs2_read.assign_value(instance, rs2_val);
         }
         if let Some((rd_op, rd_written)) = &self.rd {
-            rd_op.assign_instance(instance, lk_multiplicity, step)?;
+            rd_op.assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
             let rd_val = Value::new_unchecked(step.rd().expect("rd value").value.after);
             rd_written.assign_value(instance, rd_val);
@@ -284,10 +286,10 @@ impl<E: ExtensionField> DummyConfig<E> {
             mem_after.assign_value(instance, Value::new(mem_op.value.after, lk_multiplicity));
         }
         if let Some(mem_read) = &self.mem_read {
-            mem_read.assign_instance(instance, lk_multiplicity, step)?;
+            mem_read.assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
         }
         if let Some(mem_write) = &self.mem_write {
-            mem_write.assign_instance::<E>(instance, lk_multiplicity, step)?;
+            mem_write.assign_instance::<E>(instance, shard_ctx, lk_multiplicity, step)?;
         }
 
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).1;
