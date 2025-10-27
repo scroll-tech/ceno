@@ -184,6 +184,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
     records: &[ArcMultilinearExtensionGpu<'_, E>],
+    challenges: &[E; 2],
     cuda_hal: &CudaHalBB31,
     prod_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
@@ -203,6 +204,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     } = composed_cs;
     let num_instances_with_rotation =
         input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
+    let chip_record_alpha = challenges[0];
 
     // TODO: safety ?
     let records = unsafe {
@@ -432,6 +434,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, GpuBackend<E, PCS>>,
         records: &'c [ArcMultilinearExtensionGpu<'b, E>],
+        challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
     ) -> TowerRelationOutput<E>
     where
@@ -459,6 +462,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             composed_cs,
             input,
             records,
+            challenges,
             &cuda_hal,
             &mut _prod_buffers,
             &mut _logup_buffers,
@@ -606,7 +610,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         witness_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData,
         fixed_data: Option<Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData>>,
         points: Vec<Point<E>>,
-        mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
+        mut evals: Vec<Vec<Vec<E>>>, // where each inner Vec<E> = wit_evals + fixed_evals
         transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {

@@ -329,7 +329,7 @@ impl<
         // (internally calls build_tower_witness)
         let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) = self
             .device
-            .prove_tower_relation(cs, &input, &records, transcript);
+            .prove_tower_relation(cs, &input, &records, challenges, transcript);
         exit_span!(span);
 
         assert_eq!(

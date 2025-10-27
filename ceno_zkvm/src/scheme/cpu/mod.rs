@@ -478,6 +478,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [Arc<MultilinearExtension<'b, E>>],
+        _challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
     ) -> TowerRelationOutput<E>
     where

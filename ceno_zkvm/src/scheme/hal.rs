@@ -92,6 +92,7 @@ pub trait TowerProver<PB: ProverBackend> {
         composed_cs: &ComposedConstrainSystem<PB::E>,
         input: &ProofInput<'a, PB>,
         records: &'c [Arc<PB::MultilinearPoly<'b>>],
+        challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
     ) -> TowerRelationOutput<PB::E>
     where
