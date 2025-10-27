@@ -543,7 +543,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
     for CpuProver<CpuBackend<E, PCS>>
 {
     #[allow(clippy::type_complexity)]
-    #[tracing::instrument(skip_all, name = "table_witness", fields(profiling_3), level = "trace")]
+    #[tracing::instrument(skip_all, name = "table_witness", fields(profiling_2), level = "trace")]
     fn table_witness<'a>(
         &self,
         input: &ProofInput<'a, CpuBackend<<CpuBackend<E, PCS> as ProverBackend>::E, PCS>>,
@@ -551,7 +551,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
     ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         // main constraint: lookup denominator and numerator record witness inference
-        let record_span = entered_span!("record");
+        let span = entered_span!("witness_infer", profiling_2 = true);
         let records: Vec<ArcMultilinearExtension<'_, E>> = cs
             .r_table_expressions
             .par_iter()
@@ -580,7 +580,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 )
             })
             .collect();
-        exit_span!(record_span);
+        exit_span!(span);
         records
     }
 
@@ -774,9 +774,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
 
     fn transport_mles<'a>(
         &self,
-        mles: Vec<MultilinearExtension<'a, E>>,
+        mles: &[MultilinearExtension<'a, E>],
     ) -> Vec<ArcMultilinearExtension<'a, E>> {
-        mles.into_iter().map(|mle| mle.into()).collect_vec()
+        mles.iter().map(|mle| mle.clone().into()).collect_vec()
     }
 }
 
