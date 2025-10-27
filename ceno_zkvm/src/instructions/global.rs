@@ -118,17 +118,16 @@ impl GlobalRecord {
     }
 }
 /// opcode circuit + mem init/final table + local finalize circuit + global chip
-/// global chip is used to ensure the **local** reads and writes produced by 
+/// global chip is used to ensure the **local** reads and writes produced by
 /// opcode circuits / memory init / memory finalize table / local finalize circuit
 /// can balance out.
-/// 
+///
 /// 1. For a local memory read record whose previous write is not in the same shard,
 ///    the global chip will read it from the **global set** and insert a local write record.
-/// 2. For a local memory write record which will **not** be read in the future, 
+/// 2. For a local memory write record which will **not** be read in the future,
 ///    the local finalize circuit will consume it by inserting a local read record.
-/// 3. For a local memory write record which will be read in the future, 
+/// 3. For a local memory write record which will be read in the future,
 ///    the global chip will insert a local read record and write it to the **global set**.
-/// 
 pub struct GlobalConfig<E: ExtensionField, P> {
     addr: WitIn,
     is_ram_register: WitIn,
@@ -263,7 +262,6 @@ impl<E: ExtensionField, P> GlobalConfig<E, P> {
         })
     }
 }
-
 
 // This chip is used to manage read/write into a global set
 // shared among multiple shards
