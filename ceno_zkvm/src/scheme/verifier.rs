@@ -82,11 +82,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let _prod_r = E::ONE;
         let _prod_w = E::ONE;
         let _logup_sum = E::ZERO;
+        assert!(!vm_proofs.is_empty());
+        let num_proofs = vm_proofs.len();
         vm_proofs
             .into_iter()
             .zip_eq(transcripts)
+            // optionally halt on last chunk
+            .zip_eq(iter::repeat_n(false, num_proofs - 1).chain(iter::once(expect_halt)))
             .enumerate()
-            .try_for_each(|(shard_id, (vm_proof, transcript))| {
+            .try_for_each(|(shard_id, ((vm_proof, transcript), expect_halt))| {
                 // require ecall/halt proof to exist, depend on whether we expect a halt.
                 let has_halt = vm_proof.has_halt(&self.vk);
                 if has_halt != expect_halt {
@@ -97,42 +101,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             .into(),
                     ));
                 }
-                // check first shard
-                // check last shard
-
-                // check init ts = 4
-                // check pc match prev pc
-
-                // TODO shard_ram_bus
-                // extract shard_ram_bus.local_read, extract shard_ram_bus.local_write
-                // extract shard_ram_bus.shard_ram_bus_read, extract shard_ram_bus.shard_ram_bus_write
-
-                let _shard_ram_bus = vm_proof.raw_pi[INIT_PC_IDX].clone();
-                let (prod_r, prod_w, logup_sum) = self.verify_proof_validity(shard_id, vm_proof, transcript)?;
-
-                // check rw_set equality of shard proof
-                if prod_r != prod_w {
-                    return Err(ZKVMError::VerifyError(format!("{shard_id}th prod_r != prod_w").into()));
-                }
-
-                // check logup sum of shard proof
-                if logup_sum != E::ZERO {
-                    return Err(ZKVMError::VerifyError(
-                        format!("{shard_id}th logup_sum({:?}) != 0", logup_sum).into(),
-                    ));
-                }
+                // TODO check init ts = 4
+                // TODO check init_pc match prev end_pc
+                // TODO add to global ec
+                let _shard_ram_bus = self.verify_proof_validity(shard_id, vm_proof, transcript)?;
 
                 Ok(())
             })?;
+        // TODO check global ec_sum == 0
         Ok(true)
     }
 
     fn verify_proof_validity(
         &self,
         shard_id: usize,
-        vm_proof: ZKVMProof<E, PCS>,
+        mut vm_proof: ZKVMProof<E, PCS>,
         mut transcript: impl ForkableTranscript<E>,
-    ) -> Result<(E, E, E), ZKVMError> {
+    ) -> Result<Vec<E::BaseField>, ZKVMError> {
         // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
@@ -237,7 +222,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         circuit_vk.get_cs().num_witin(),
                         circuit_vk.get_cs().num_fixed(),
                     )
-                    .into(),
+                        .into(),
                 ));
             }
             if proof.r_out_evals.len() != circuit_vk.get_cs().num_reads()
@@ -251,7 +236,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         circuit_vk.get_cs().num_reads(),
                         circuit_vk.get_cs().num_writes(),
                     )
-                    .into(),
+                        .into(),
                 ));
             }
             if proof.lk_out_evals.len() != circuit_vk.get_cs().num_lks() {
@@ -319,7 +304,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             // TODO for non first shard, excluding init prod_w related tables
             prod_w *= proof.w_out_evals.iter().flatten().copied().product::<E>();
             prod_r *= proof.r_out_evals.iter().flatten().copied().product::<E>();
-            tracing::debug!("{shard_id}th shard verified proof for circuit {}", circuit_name);
+            tracing::debug!(
+                "{shard_id}th shard verified proof for circuit {}",
+                circuit_name
+            );
         }
         logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
             * dummy_table_item.inverse();
@@ -367,7 +355,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         .unwrap();
         prod_r *= finalize_global_state;
 
-        Ok((prod_r, prod_w, logup_sum))
+        // extract shard_ram_bus.local_read, extract shard_ram_bus.local_write
+        // TODO add local_read, local_write to prod_r, prod_w
+        // extract shard_ram_bus.shard_ram_bus_read, extract shard_ram_bus.shard_ram_bus_write
+        let shard_ram_bus = std::mem::take(&mut vm_proof.raw_pi[INIT_PC_IDX]);
+
+        // check rw_set equality of shard proof
+        if prod_r != prod_w {
+            return Err(ZKVMError::VerifyError(
+                format!("{shard_id}th prod_r != prod_w").into(),
+            ));
+        }
+
+        // check logup sum of shard proof
+        if logup_sum != E::ZERO {
+            return Err(ZKVMError::VerifyError(
+                format!("{shard_id}th logup_sum({:?}) != 0", logup_sum).into(),
+            ));
+        }
+
+        Ok(shard_ram_bus)
     }
 
     /// verify proof and return input opening point
