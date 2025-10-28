@@ -12,6 +12,7 @@ use super::{
 };
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{Instruction, riscv::constants::LIMB_BITS},
     structs::ProgramParams,
@@ -375,6 +376,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
@@ -391,7 +393,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         config.divisor.assign_limbs(instance, divisor_limbs);
 
         // R-type instruction
-        config.r_insn.assign_instance(instance, lkm, step)?;
+        config
+            .r_insn
+            .assign_instance(instance, shard_ctx, lkm, step)?;
 
         let (signed, _div) = match I::INST_KIND {
             InsnKind::DIV => (true, true),

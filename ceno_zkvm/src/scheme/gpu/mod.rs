@@ -9,7 +9,7 @@ use crate::{
     },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
-use ceno_gpu::gl64::GpuPolynomialExt;
+use ceno_gpu::bb31::GpuPolynomialExt;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::{
     gkr::{
@@ -45,6 +45,7 @@ use gkr_iop::gpu::gpu_prover::*;
 
 pub struct GpuTowerProver;
 
+use crate::scheme::constants::NUM_FANIN;
 use gkr_iop::gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu};
 
 // Extract out_evals from GPU-built tower witnesses
@@ -59,7 +60,7 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     let mut w_out_evals = Vec::new();
     for (i, gpu_spec) in prod_gpu.iter().enumerate() {
         let first_layer_evals: Vec<E> = gpu_spec
-            .get_final_evals(0)
+            .get_output_evals()
             .expect("Failed to extract final evals from GPU product tower");
 
         // Product tower first layer should have 2 MLEs
@@ -81,7 +82,7 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     let mut lk_out_evals = Vec::new();
     for gpu_spec in logup_gpu.iter() {
         let first_layer_evals: Vec<E> = gpu_spec
-            .get_final_evals(0)
+            .get_output_evals()
             .expect("Failed to extract final evals from GPU logup tower");
 
         // Logup tower first layer should have 4 MLEs
@@ -108,9 +109,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         <GpuBackend<E, PCS> as ProverBackend>::PcsData,
         PCS::Commitment,
     ) {
-        if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
-        {
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 
@@ -139,11 +138,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             let cuda_hal = get_cuda_hal().unwrap();
             exit_span!(span);
 
-            let traces_gl64: Vec<witness::RowMajorMatrix<p3::goldilocks::Goldilocks>> =
+            let traces_gl64: Vec<witness::RowMajorMatrix<BB31Base>> =
                 unsafe { std::mem::transmute(vec_traces) };
 
             let span = entered_span!("[gpu] batch_commit", profiling_2 = true);
-            let pcs_data = cuda_hal.basefold.batch_commit(traces_gl64).unwrap();
+            let pcs_data = cuda_hal
+                .basefold
+                .batch_commit(&cuda_hal, traces_gl64)
+                .unwrap();
             exit_span!(span);
 
             let span = entered_span!("[gpu] get_pure_commitment", profiling_2 = true);
@@ -183,9 +185,9 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
     records: &[ArcMultilinearExtensionGpu<'_, E>],
     challenges: &[E; 2],
-    cuda_hal: &CudaHalGL64,
-    prod_buffers: &'buf mut Vec<BufferImpl<GL64Ext>>,
-    logup_buffers: &'buf mut Vec<BufferImpl<GL64Ext>>,
+    cuda_hal: &CudaHalBB31,
+    prod_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
+    logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
 ) -> Result<
     (
         Vec<ceno_gpu::GpuProverSpec<'buf>>,
@@ -194,7 +196,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     String,
 > {
     use crate::scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP};
-    use ceno_gpu::{CudaHal as _, gl64::GpuPolynomialExt};
+    use ceno_gpu::{CudaHal as _, bb31::GpuPolynomialExt};
     use p3::field::FieldAlgebra;
 
     let ComposedConstrainSystem {
@@ -203,6 +205,14 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     let num_instances_with_rotation =
         input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
     let chip_record_alpha = challenges[0];
+
+    // TODO: safety ?
+    let records = unsafe {
+        std::mem::transmute::<
+            &[ArcMultilinearExtensionGpu<'_, E>],
+            &[ArcMultilinearExtensionGpu<'static, E>],
+        >(records)
+    };
 
     // Parse records into different categories (same as build_tower_witness)
     let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
@@ -229,10 +239,11 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
+                &cuda_hal,
                 wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN,
-                GL64Ext::ONE,
+                BB31Ext::ONE,
             )
             .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for r_set: {:?}", e))?;
         r_set_gpu_chunks.push(gpu_chunks);
@@ -243,10 +254,11 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
+                &cuda_hal,
                 wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN,
-                GL64Ext::ONE,
+                BB31Ext::ONE,
             )
             .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for w_set: {:?}", e))?;
         w_set_gpu_chunks.push(gpu_chunks);
@@ -260,10 +272,11 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
+                &cuda_hal,
                 wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN_LOGUP,
-                GL64Ext::ONE,
+                BB31Ext::ONE,
             )
             .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for lk_n: {:?}", e))?;
         lk_numerator_gpu_chunks.push(gpu_chunks);
@@ -271,13 +284,14 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
     for wit in lk_d_wit.iter() {
         // For GPU backend, E must be GoldilocksExt2. This is ensured by the caller.
-        let chip_record_alpha_gl: GL64Ext = unsafe {
-            assert_eq!(std::mem::size_of::<E>(), std::mem::size_of::<GL64Ext>());
+        let chip_record_alpha_gl: BB31Ext = unsafe {
+            assert_eq!(std::mem::size_of::<E>(), std::mem::size_of::<BB31Ext>());
             std::mem::transmute_copy(&chip_record_alpha)
         };
         let gpu_chunks = cuda_hal
             .tower
             .masked_mle_split_to_chunks(
+                &cuda_hal,
                 wit.as_ceno_gpu_ext(),
                 num_instances_with_rotation,
                 NUM_FANIN_LOGUP,
@@ -348,10 +362,10 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .into_iter()
             .map(|lk_d_chunks| {
                 let nv = lk_d_chunks[0].num_vars();
-                let p1_gpu = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, GL64Ext::ONE)
+                let p1_gpu = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
                     .map_err(|e| format!("Failed to create p1 GPU polynomial with scalar: {:?}", e))
                     .unwrap();
-                let p2_gpu = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, GL64Ext::ONE)
+                let p2_gpu = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
                     .map_err(|e| format!("Failed to create p2 GPU polynomial with scalar: {:?}", e))
                     .unwrap();
                 // Use [1, 1, q1, q2] format for the last layer
@@ -430,9 +444,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         'a: 'b,
         'b: 'c,
     {
-        if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
-        {
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 
@@ -443,8 +455,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         let r_set_len = cs.r_expressions.len() + cs.r_table_expressions.len();
 
         // GPU optimization: Use build_tower_witness_gpu which handles buffer allocation internally
-        let mut _prod_buffers: Vec<ceno_gpu::gl64::buffer::BufferImpl<GL64Ext>> = Vec::new();
-        let mut _logup_buffers: Vec<ceno_gpu::gl64::buffer::BufferImpl<GL64Ext>> = Vec::new();
+        let mut _prod_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
+        let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
 
         // Call build_tower_witness_gpu which will allocate buffers and build GPU specs
         let span = entered_span!("build_tower_witness", profiling_2 = true);
@@ -470,8 +482,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         exit_span!(span);
 
         // transcript >>> BasicTranscript<E>
-        let basic_tr: &mut BasicTranscript<GoldilocksExt2> =
-            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GoldilocksExt2>) };
+        let basic_tr: &mut BasicTranscript<BB31Ext> =
+            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
 
         let input = ceno_gpu::TowerInput {
             prod_specs: prod_gpu,
@@ -481,7 +493,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         let (point_gl, proof_gpu) = cuda_hal
             .tower
-            .create_proof(&input, basic_tr)
+            .create_proof(&cuda_hal, &input, NUM_FANIN, basic_tr)
             .expect("gpu tower create_proof failed");
         exit_span!(span);
 
@@ -496,6 +508,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
+    #[allow(clippy::type_complexity)]
+    #[tracing::instrument(skip_all, name = "table_witness", fields(profiling_2), level = "trace")]
     fn table_witness<'a>(
         &self,
         input: &ProofInput<'a, GpuBackend<E, PCS>>,
@@ -516,6 +530,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 .all(|(r, w)| r.table_spec.len == w.table_spec.len)
         );
 
+        let span = entered_span!("preprocess", profiling_2 = true);
         let layer_witin = input
             .witness
             .iter()
@@ -527,7 +542,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         let num_vars = input.witness[0].num_vars();
 
         // main constraint: lookup denominator and numerator record witness inference
-        let record_span = entered_span!("record");
         let (num_non_zero_expr, term_coefficients, mle_indices_per_term, _) = cs
             .r_table_expressions
             .iter()
@@ -554,7 +568,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                     &[],
                     challenges,
                 );
-                let coeffs_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(coeffs) };
+                let coeffs_gl64: Vec<BB31Ext> = unsafe { std::mem::transmute(coeffs) };
                 (coeffs_gl64, indices, size_info)
             })
             .fold(
@@ -568,9 +582,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                     (num_non_zero_expr, coeff_acc, indices_acc, size_acc)
                 },
             );
+        exit_span!(span);
 
+        let span = entered_span!("witness_infer", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(layer_witin) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
 
@@ -594,6 +610,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 &mut next_witness_buf,
             )
             .unwrap();
+        exit_span!(span);
 
         let next_mles = next_witness_buf
             .into_iter()
@@ -604,7 +621,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             })
             .collect_vec();
 
-        exit_span!(record_span);
         next_mles
     }
 
@@ -737,43 +753,41 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         fixed_data: Option<Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData>>,
         points: Vec<Point<E>>,
         mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
-        circuit_num_polys: &[(usize, usize)],
-        num_instances: &[(usize, usize)],
         transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
-        if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
-        {
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 
         let mut rounds = vec![];
-        rounds.push((
-            &witness_data,
-            points
-                .iter()
-                .zip_eq(evals.iter_mut())
-                .zip_eq(num_instances.iter())
-                .map(|((point, evals), (chip_idx, _))| {
-                    let (num_witin, _) = circuit_num_polys[*chip_idx];
-                    (point.clone(), evals.drain(..num_witin).collect_vec())
+        rounds.push((&witness_data, {
+            evals
+                .iter_mut()
+                .zip(&points)
+                .filter_map(|(evals, point)| {
+                    let witin_evals = evals.remove(0);
+                    if !witin_evals.is_empty() {
+                        Some((point.clone(), witin_evals))
+                    } else {
+                        None
+                    }
                 })
-                .collect_vec(),
-        ));
+                .collect_vec()
+        }));
         if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
-            rounds.push((
-                fixed_data,
-                points
-                    .iter()
-                    .zip_eq(evals.iter_mut())
-                    .zip_eq(num_instances.iter())
-                    .filter(|(_, (chip_idx, _))| {
-                        let (_, num_fixed) = circuit_num_polys[*chip_idx];
-                        num_fixed > 0
+            rounds.push((fixed_data, {
+                evals
+                    .iter_mut()
+                    .zip(points)
+                    .filter_map(|(evals, point)| {
+                        if !evals.is_empty() && !evals[0].is_empty() {
+                            Some((point.clone(), evals.remove(0)))
+                        } else {
+                            None
+                        }
                     })
-                    .map(|((point, evals), _)| (point.clone(), evals.to_vec()))
-                    .collect_vec(),
-            ));
+                    .collect_vec()
+            }));
         }
 
         // use ceno_gpu::{
@@ -784,21 +798,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         // Type conversions using unsafe transmute
         let prover_param = &self.backend.pp;
         let pp_gl64: &mpcs::basefold::structure::BasefoldProverParams<
-            GL64Ext,
+            BB31Ext,
             mpcs::BasefoldRSParams,
         > = unsafe { std::mem::transmute(prover_param) };
         let rounds_gl64: Vec<_> = rounds
             .iter()
             .map(|(commitment, point_eval_pairs)| {
                 let commitment_gl64: &BasefoldCommitmentWithWitnessGpu<
-                    GL64Base,
-                    BufferImpl<GL64Base>,
+                    BB31Base,
+                    BufferImpl<BB31Base>,
+                    GpuDigestLayer,
+                    GpuMatrix<'static>,
+                    GpuPolynomial<'static>,
                 > = unsafe { std::mem::transmute(*commitment) };
                 let point_eval_pairs_gl64: Vec<_> = point_eval_pairs
                     .iter()
                     .map(|(point, evals)| {
-                        let point_gl64: &Vec<GL64Ext> = unsafe { std::mem::transmute(point) };
-                        let evals_gl64: &Vec<GL64Ext> = unsafe { std::mem::transmute(evals) };
+                        let point_gl64: &Vec<BB31Ext> = unsafe { std::mem::transmute(point) };
+                        let evals_gl64: &Vec<BB31Ext> = unsafe { std::mem::transmute(evals) };
                         (point_gl64.clone(), evals_gl64.clone())
                     })
                     .collect();
@@ -806,10 +823,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
             })
             .collect();
 
-        let gpu_proof = if std::any::TypeId::of::<E>() == std::any::TypeId::of::<GoldilocksExt2>() {
+        let gpu_proof = if std::any::TypeId::of::<E>() == std::any::TypeId::of::<BB31Ext>() {
             let transcript_any = transcript as &mut dyn std::any::Any;
             let basic_transcript = transcript_any
-                .downcast_mut::<BasicTranscript<GoldilocksExt2>>()
+                .downcast_mut::<BasicTranscript<BB31Ext>>()
                 .expect("Type should match");
 
             let cuda_hal = get_cuda_hal().unwrap();
@@ -839,22 +856,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
                 <GpuBackend<E, PCS> as ProverBackend>::Pcs,
             >,
         >,
-    ) -> DeviceProvingKey<GpuBackend<E, PCS>> {
+    ) -> DeviceProvingKey<'_, GpuBackend<E, PCS>> {
         let pcs_data_original = pk.fixed_commit_wd.clone().unwrap();
 
         // assert pcs match
-        let is_pcs_match =
-            std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>>()
-                == std::mem::size_of::<PCS::CommitmentWithWitness>();
+        let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
+            == std::mem::size_of::<PCS::CommitmentWithWitness>();
         assert!(is_pcs_match, "pcs mismatch");
 
         // 1. transmute from PCS::CommitmentWithWitness to BasefoldCommitmentWithWitness<E>
-        let basefold_commitment: &mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2> =
+        let basefold_commitment: &mpcs::BasefoldCommitmentWithWitness<BB31Ext> =
             unsafe { std::mem::transmute_copy(&pcs_data_original.as_ref()) };
-        // 2. convert from BasefoldCommitmentWithWitness<E> to BasefoldCommitmentWithWitness<GL64Base>
+        // 2. convert from BasefoldCommitmentWithWitness<E> to BasefoldCommitmentWithWitness<BB31Base>
         let cuda_hal = get_cuda_hal().unwrap();
-        let pcs_data_basefold =
-            convert_ceno_to_gpu_basefold_commitment(&cuda_hal, basefold_commitment);
+        let pcs_data_basefold = convert_ceno_to_gpu_basefold_commitment::<
+            CudaHalBB31,
+            BB31Ext,
+            BB31Base,
+            GpuDigestLayer,
+            GpuMatrix,
+            GpuPolynomial,
+        >(&cuda_hal, basefold_commitment);
         let pcs_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
             unsafe { std::mem::transmute_copy(&pcs_data_basefold) };
         std::mem::forget(pcs_data_basefold);
@@ -875,7 +897,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
 
     fn transport_mles<'a>(
         &self,
-        mles: Vec<MultilinearExtension<'a, E>>,
+        mles: &[MultilinearExtension<'a, E>],
     ) -> Vec<ArcMultilinearExtensionGpu<'a, E>> {
         let cuda_hal = get_cuda_hal().unwrap();
         mles.iter()

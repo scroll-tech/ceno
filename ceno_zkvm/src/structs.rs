@@ -1,5 +1,6 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::Instruction,
     scheme::septic_curve::SepticPoint,
@@ -126,8 +127,17 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.num_witin.into()
     }
 
+    pub fn num_structural_witin(&self) -> usize {
+        self.zkvm_v1_css.num_structural_witin.into()
+    }
+
     pub fn num_fixed(&self) -> usize {
         self.zkvm_v1_css.num_fixed
+    }
+
+    /// static circuit means there is only fixed column
+    pub fn is_static_circuit(&self) -> bool {
+        (self.num_witin() + self.num_structural_witin()) == 0 && self.num_fixed() > 0
     }
 
     pub fn num_reads(&self) -> usize {
@@ -147,9 +157,7 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     }
 
     pub fn is_opcode_circuit(&self) -> bool {
-        self.zkvm_v1_css.lk_table_expressions.is_empty()
-            && self.zkvm_v1_css.r_table_expressions.is_empty()
-            && self.zkvm_v1_css.w_table_expressions.is_empty()
+        self.gkr_circuit.is_some()
     }
 
     /// return number of lookup operation
@@ -235,18 +243,13 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let config = TC::construct_circuit(&mut circuit_builder, &self.params).unwrap();
-        assert!(
-            self.circuit_css
-                .insert(
-                    TC::name(),
-                    ComposedConstrainSystem {
-                        zkvm_v1_css: cs,
-                        gkr_circuit: None
-                    }
-                )
-                .is_none()
-        );
+        let (config, gkr_iop_circuit) =
+            TC::build_gkr_iop_circuit(&mut circuit_builder, &self.params).unwrap();
+        let cs = ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit: gkr_iop_circuit,
+        };
+        assert!(self.circuit_css.insert(TC::name(), cs).is_none());
         config
     }
 
@@ -336,6 +339,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn assign_opcode_circuit<OC: Instruction<E, Record = StepRecord>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &mut ShardContext,
         config: &OC::InstructionConfig,
         records: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
@@ -344,6 +348,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) = OC::assign_instances(
             config,
+            shard_ctx,
             cs.zkvm_v1_css.num_witin as usize,
             cs.zkvm_v1_css.num_structural_witin as usize,
             records,
@@ -430,6 +435,7 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
     pub fixed_commit_wd: Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    pub circuit_index_fixed_num_instances: BTreeMap<usize, usize>,
 
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
@@ -444,6 +450,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             circuit_pks: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
+            circuit_index_fixed_num_instances: BTreeMap::new(),
             fixed_commit_wd: None,
             fixed_commit: None,
         }

@@ -112,14 +112,14 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub r_expressions_namespace_map: Vec<String>,
     // for each read expression we store its ram type and original value before doing RLC
     // the original value will be used for debugging
-    pub r_ram_types: Vec<(RAMType, Vec<Expression<E>>)>,
+    pub r_ram_types: Vec<(Expression<E>, Vec<Expression<E>>)>,
 
     pub w_selector: Option<SelectorType<E>>,
     pub w_expressions: Vec<Expression<E>>,
     pub w_expressions_namespace_map: Vec<String>,
     // for each write expression we store its ram type and original value before doing RLC
     // the original value will be used for debugging
-    pub w_ram_types: Vec<(RAMType, Vec<Expression<E>>)>,
+    pub w_ram_types: Vec<(Expression<E>, Vec<Expression<E>>)>,
 
     /// init/final ram expression
     pub r_table_expressions: Vec<SetTableExpression<E>>,
@@ -336,12 +336,27 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         N: FnOnce() -> NR,
     {
         let rlc_record = self.rlc_chip_record(record.clone());
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
-        );
+        self.r_table_rlc_record(
+            name_fn,
+            (ram_type as u64).into(),
+            table_spec,
+            record,
+            rlc_record,
+        )
+    }
+
+    pub fn r_table_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
         self.r_table_expressions.push(SetTableExpression {
             expr: rlc_record,
             table_spec,
@@ -365,12 +380,27 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         N: FnOnce() -> NR,
     {
         let rlc_record = self.rlc_chip_record(record.clone());
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
-        );
+        self.w_table_rlc_record(
+            name_fn,
+            (ram_type as u64).into(),
+            table_spec,
+            record,
+            rlc_record,
+        )
+    }
+
+    pub fn w_table_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
         self.w_table_expressions.push(SetTableExpression {
             expr: rlc_record,
             table_spec,
@@ -394,7 +424,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.r_expressions_namespace_map.push(path);
         // Since r_expression is RLC(record) and when we're debugging
         // it's helpful to recover the value of record itself.
-        self.r_ram_types.push((ram_type, record));
+        self.r_ram_types.push(((ram_type as u64).into(), record));
         Ok(())
     }
 
@@ -408,7 +438,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);
-        self.w_ram_types.push((ram_type, record));
+        self.w_ram_types.push(((ram_type as u64).into(), record));
         Ok(())
     }
 
@@ -606,6 +636,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             .r_table_record(name_fn, ram_type, table_spec, record)
     }
 
+    pub fn r_table_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .r_table_rlc_record(name_fn, ram_type, table_spec, record, rlc_record)
+    }
+
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
@@ -619,6 +665,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
     {
         self.cs
             .w_table_record(name_fn, ram_type, table_spec, record)
+    }
+
+    pub fn w_table_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .w_table_rlc_record(name_fn, ram_type, table_spec, record, rlc_record)
     }
 
     pub fn read_record<NR, N>(

@@ -6,6 +6,7 @@ use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -56,6 +57,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -66,7 +68,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
             step.rs2().unwrap().value as u64,
         );
 
-        config.assign_instance(instance, lk_multiplicity, step)
+        config.assign_instance(instance, shard_ctx, lk_multiplicity, step)
     }
 }
 
@@ -109,11 +111,12 @@ impl<E: ExtensionField> LogicConfig<E> {
     fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         self.r_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         let rs1_read = split_to_u8(step.rs1().unwrap().value);
         self.rs1_read.assign_limbs(instance, &rs1_read);

@@ -5,6 +5,7 @@ use crate::{
     Value,
     chip_handler::general::InstFetch,
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -138,6 +139,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
@@ -180,7 +182,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
         config
             .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         Ok(())
     }

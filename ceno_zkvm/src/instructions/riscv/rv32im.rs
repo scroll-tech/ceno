@@ -9,6 +9,7 @@ use crate::instructions::riscv::lui::LuiInstruction;
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::tables::PowTableCircuit;
 use crate::{
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -409,6 +410,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
     pub fn assign_opcode_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &mut ShardContext,
         witness: &mut ZKVMWitnesses<E>,
         steps: Vec<StepRecord>,
     ) -> Result<GroupedSteps, ZKVMError> {
@@ -422,38 +424,49 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut secp256k1_add_records = Vec::new();
         let mut secp256k1_double_records = Vec::new();
         let mut secp256k1_decompress_records = Vec::new();
-        steps.into_iter().for_each(|record| {
-            let insn_kind = record.insn.kind;
-            match insn_kind {
-                // ecall / halt
-                InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
-                    halt_records.push(record);
+        steps
+            .into_iter()
+            .filter_map(|step| {
+                if shard_ctx.is_current_shard_cycle(step.cycle()) {
+                    Some(step)
+                } else {
+                    None
                 }
-                InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => {
-                    keccak_records.push(record);
+            })
+            .for_each(|record| {
+                let insn_kind = record.insn.kind;
+                match insn_kind {
+                    // ecall / halt
+                    InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
+                        halt_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => {
+                        keccak_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == Bn254AddSpec::CODE => {
+                        bn254_add_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == Bn254DoubleSpec::CODE => {
+                        bn254_double_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1AddSpec::CODE => {
+                        secp256k1_add_records.push(record);
+                    }
+                    InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DoubleSpec::CODE => {
+                        secp256k1_double_records.push(record);
+                    }
+                    InsnKind::ECALL
+                        if record.rs1().unwrap().value == Secp256k1DecompressSpec::CODE =>
+                    {
+                        secp256k1_decompress_records.push(record);
+                    }
+                    // other type of ecalls are handled by dummy ecall instruction
+                    _ => {
+                        // it's safe to unwrap as all_records are initialized with Vec::new()
+                        all_records.get_mut(&insn_kind).unwrap().push(record);
+                    }
                 }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254AddSpec::CODE => {
-                    bn254_add_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254DoubleSpec::CODE => {
-                    bn254_double_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1AddSpec::CODE => {
-                    secp256k1_add_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DoubleSpec::CODE => {
-                    secp256k1_double_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DecompressSpec::CODE => {
-                    secp256k1_decompress_records.push(record);
-                }
-                // other type of ecalls are handled by dummy ecall instruction
-                _ => {
-                    // it's safe to unwrap as all_records are initialized with Vec::new()
-                    all_records.get_mut(&insn_kind).unwrap().push(record);
-                }
-            }
-        });
+            });
 
         for (insn_kind, (_, records)) in
             izip!(InsnKind::iter(), &all_records).sorted_by_key(|(_, (_, a))| Reverse(a.len()))
@@ -465,6 +478,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             ($insn_kind:ident,$instruction:ty,$config:ident) => {
                 witness.assign_opcode_circuit::<$instruction>(
                     cs,
+                    shard_ctx,
                     &self.$config,
                     all_records.remove(&($insn_kind)).unwrap(),
                 )?;
@@ -524,35 +538,46 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(SB, SbInstruction<E>, sb_config);
 
         // ecall / halt
-        witness.assign_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config, halt_records)?;
+        witness.assign_opcode_circuit::<HaltInstruction<E>>(
+            cs,
+            shard_ctx,
+            &self.halt_config,
+            halt_records,
+        )?;
         witness.assign_opcode_circuit::<KeccakInstruction<E>>(
             cs,
+            shard_ctx,
             &self.keccak_config,
             keccak_records,
         )?;
         witness.assign_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
             cs,
+            shard_ctx,
             &self.bn254_add_config,
             bn254_add_records,
         )?;
         witness.assign_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>>(
             cs,
+            shard_ctx,
             &self.bn254_double_config,
             bn254_double_records,
         )?;
         witness.assign_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>>(
             cs,
+            shard_ctx,
             &self.secp256k1_add_config,
             secp256k1_add_records,
         )?;
         witness
             .assign_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>>(
                 cs,
+                shard_ctx,
                 &self.secp256k1_double_config,
                 secp256k1_double_records,
             )?;
         witness.assign_opcode_circuit::<WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>>(
             cs,
+            shard_ctx,
             &self.secp256k1_decompress_config,
             secp256k1_decompress_records,
         )?;
@@ -671,6 +696,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn assign_opcode_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &mut ShardContext,
         witness: &mut ZKVMWitnesses<E>,
         steps: GroupedSteps,
     ) -> Result<(), ZKVMError> {
@@ -700,35 +726,46 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
 
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Secp256k1DecompressSpec>>(
             cs,
+            shard_ctx,
             &self.secp256k1_decompress_config,
             secp256k1_decompress_steps,
         )?;
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
             cs,
+            shard_ctx,
             &self.sha256_extend_config,
             sha256_extend_steps,
         )?;
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(
             cs,
+            shard_ctx,
             &self.bn254_fp_add_config,
             bn254_fp_add_steps,
         )?;
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254FpMulSpec>>(
             cs,
+            shard_ctx,
             &self.bn254_fp_mul_config,
             bn254_fp_mul_steps,
         )?;
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>(
             cs,
+            shard_ctx,
             &self.bn254_fp2_add_config,
             bn254_fp2_add_steps,
         )?;
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>(
             cs,
+            shard_ctx,
             &self.bn254_fp2_mul_config,
             bn254_fp2_mul_steps,
         )?;
-        witness.assign_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config, other_steps)?;
+        witness.assign_opcode_circuit::<EcallDummy<E>>(
+            cs,
+            shard_ctx,
+            &self.ecall_config,
+            other_steps,
+        )?;
 
         let _ = steps.remove(&INVALID);
         let keys: Vec<&InsnKind> = steps.keys().collect::<Vec<_>>();

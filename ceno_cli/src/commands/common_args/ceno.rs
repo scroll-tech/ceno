@@ -78,6 +78,14 @@ pub struct CenoOptions {
     #[arg(long)]
     pub out_vk: Option<PathBuf>,
 
+    /// shard id
+    #[arg(long, default_value = "0")]
+    shard_id: u32,
+
+    /// number of total shards.
+    #[arg(long, default_value = "1")]
+    max_num_shards: u32,
+
     /// Profiling granularity.
     /// Setting any value restricts logs to profiling information
     #[arg(long)]
@@ -337,6 +345,7 @@ fn run_elf_inner<
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
     let program = Program::load_elf(&elf_bytes, u32::MAX).context("failed to load elf")?;
     print_cargo_message("Loaded", format_args!("{}", elf_path.display()));
+    let shards = Shards::new(options.shard_id as usize, options.max_num_shards as usize);
 
     let public_io = options
         .read_public_io()
@@ -385,6 +394,7 @@ fn run_elf_inner<
         create_prover(backend.clone()),
         program,
         platform,
+        shards,
         &hints,
         &public_io,
         options.max_steps,

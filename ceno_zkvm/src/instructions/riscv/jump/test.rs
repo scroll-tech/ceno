@@ -2,6 +2,7 @@ use super::{JalInstruction, JalrInstruction};
 use crate::{
     Value,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     instructions::{Instruction, riscv::constants::UInt},
     scheme::mock_prover::{MOCK_PC_START, MockProver},
     structs::ProgramParams,
@@ -43,6 +44,7 @@ fn verify_test_opcode_jal<E: ExtensionField>(pc_offset: i32) {
     let insn_code = encode_rv32(InsnKind::JAL, 0, 0, 4, pc_offset);
     let (raw_witin, lkm) = JalInstruction::<E>::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_j_instruction(
@@ -119,6 +121,7 @@ fn verify_test_opcode_jalr<E: ExtensionField>(rs1_read: Word, imm: i32) {
 
     let (raw_witin, lkm) = JalrInstruction::<E>::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_i_instruction(

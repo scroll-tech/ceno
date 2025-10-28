@@ -19,7 +19,7 @@ impl SyscallSpec for Secp256k1AddSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * SECP256K1_ARG_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::SECP256K1_ADD;
+    const CODE: u32 = ceno_syscall::SECP256K1_ADD;
 }
 
 impl SyscallSpec for Secp256k1DoubleSpec {
@@ -27,7 +27,7 @@ impl SyscallSpec for Secp256k1DoubleSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = SECP256K1_ARG_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::SECP256K1_DOUBLE;
+    const CODE: u32 = ceno_syscall::SECP256K1_DOUBLE;
 }
 
 impl SyscallSpec for Secp256k1DecompressSpec {
@@ -35,7 +35,7 @@ impl SyscallSpec for Secp256k1DecompressSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * COORDINATE_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::SECP256K1_DECOMPRESS;
+    const CODE: u32 = ceno_syscall::SECP256K1_DECOMPRESS;
 }
 
 // A secp256k1 point in uncompressed form takes 64 bytes

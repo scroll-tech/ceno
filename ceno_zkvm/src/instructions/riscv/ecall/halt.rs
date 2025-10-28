@@ -1,6 +1,7 @@
 use crate::{
     chip_handler::{RegisterChipOperations, general::PublicIOQuery},
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
     instructions::{
@@ -73,6 +74,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        _shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,

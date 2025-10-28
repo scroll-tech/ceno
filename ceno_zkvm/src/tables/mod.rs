@@ -1,7 +1,9 @@
 use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams};
 use ff_ext::ExtensionField;
+use gkr_iop::gkr::GKRCircuit;
 use std::collections::HashMap;
 use witness::RowMajorMatrix;
+
 mod range;
 pub use range::*;
 
@@ -28,6 +30,14 @@ pub trait TableCircuit<E: ExtensionField> {
         circuit_builder: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self::TableConfig, ZKVMError>;
+
+    fn build_gkr_iop_circuit(
+        cb: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
+    ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
+        let config = Self::construct_circuit(cb, param)?;
+        Ok((config, None))
+    }
 
     fn generate_fixed_traces(
         config: &Self::TableConfig,

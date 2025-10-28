@@ -2,10 +2,9 @@
 
 **WORKING IN PROGRESS**
 
-TODOs:
-- [ ] secp256k1
-- [ ] bn254
-- [ ] sha256
+- [x] secp256k1
+- [x] bn254
+- [x] sha256
 - [ ] secp256r1
 
 ## Usage
@@ -51,3 +50,16 @@ fn main() {
     // Your other code here
 }
 ```
+
+## Development
+
+### k256
+
+This crate use patched [k256](https://docs.rs/k256/latest/k256/) crate.
+
+Our patched [k256](https://github.com/scroll-tech/elliptic-curves) is modified from the sp1 fork
+[k256](https://github.com/sp1-patches/elliptic-curves/tree/patch-k256-13.4-sp1-5.0.0/k256).
+
+The sp1 patches: https://github.com/RustCrypto/elliptic-curves/compare/k256/v0.13.4...sp1-patches:elliptic-curves:patch-k256-13.4-sp1-5.0.0
+
+The scroll-tech patches: https://github.com/RustCrypto/elliptic-curves/compare/k256/v0.13.4...scroll-tech:elliptic-curves:ceno/k256-13.4

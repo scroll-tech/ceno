@@ -1,5 +1,5 @@
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams,
+    circuit_builder::CircuitBuilder, e2e::ShardContext, error::ZKVMError, structs::ProgramParams,
     tables::RMMCollections, witness::LkMultiplicity,
 };
 use ff_ext::{ExtensionField, FieldInto};
@@ -96,8 +96,9 @@ pub trait Instruction<E: ExtensionField> {
     }
 
     // assign single instance giving step from trace
-    fn assign_instance(
+    fn assign_instance<'a>(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext<'a>,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &Self::Record,
@@ -105,6 +106,7 @@ pub trait Instruction<E: ExtensionField> {
 
     fn assign_instances(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
         steps: Vec<Self::Record>,
@@ -134,22 +136,32 @@ pub trait Instruction<E: ExtensionField> {
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
         let raw_structual_witin_iter =
             raw_structual_witin.par_batch_iter_mut(num_instance_per_batch);
+        let shard_ctx_vec = shard_ctx.get_forked();
 
         raw_witin_iter
             .zip_eq(raw_structual_witin_iter)
             .zip_eq(steps.par_chunks(num_instance_per_batch))
-            .flat_map(|((instances, structural_instance), steps)| {
-                let mut lk_multiplicity = lk_multiplicity.clone();
-                instances
-                    .chunks_mut(num_witin)
-                    .zip_eq(structural_instance.chunks_mut(num_structural_witin))
-                    .zip_eq(steps)
-                    .map(|((instance, structural_instance), step)| {
-                        set_val!(structural_instance, selector_witin, E::BaseField::ONE);
-                        Self::assign_instance(config, instance, &mut lk_multiplicity, step)
-                    })
-                    .collect::<Vec<_>>()
-            })
+            .zip(shard_ctx_vec)
+            .flat_map(
+                |(((instances, structural_instance), steps), mut shard_ctx)| {
+                    let mut lk_multiplicity = lk_multiplicity.clone();
+                    instances
+                        .chunks_mut(num_witin)
+                        .zip_eq(structural_instance.chunks_mut(num_structural_witin))
+                        .zip_eq(steps)
+                        .map(|((instance, structural_instance), step)| {
+                            set_val!(structural_instance, selector_witin, E::BaseField::ONE);
+                            Self::assign_instance(
+                                config,
+                                &mut shard_ctx,
+                                instance,
+                                &mut lk_multiplicity,
+                                step,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                },
+            )
             .collect::<Result<(), ZKVMError>>()?;
 
         raw_witin.padding_by_strategy();

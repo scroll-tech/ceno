@@ -113,14 +113,20 @@ impl<
         // only keep track of circuits that have non-zero instances
         let mut num_instances = Vec::with_capacity(self.pk.circuit_pks.len());
         let mut num_instances_with_rotation = Vec::with_capacity(self.pk.circuit_pks.len());
+        let mut circuit_name_num_instances_mapping = BTreeMap::new();
         for (index, (circuit_name, ProvingKey { vk, .. })) in self.pk.circuit_pks.iter().enumerate()
         {
             // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
                 .get_opcode_witness(circuit_name)
                 .or_else(|| witnesses.get_table_witness(circuit_name))
-                .map(|rmms| &rmms[0])
-                .map(|rmm| rmm.num_instances())
+                .map(|rmms| {
+                    if rmms[0].num_instances() == 0 {
+                        rmms[1].num_instances()
+                    } else {
+                        rmms[0].num_instances()
+                    }
+                })
                 .and_then(|num_instance| {
                     if num_instance > 0 {
                         Some(num_instance)
@@ -128,12 +134,25 @@ impl<
                         None
                     }
                 })
+                .or_else(|| {
+                    vk.get_cs().is_static_circuit().then(|| {
+                        self.pk
+                            .circuit_index_fixed_num_instances
+                            .get(&index)
+                            .copied()
+                            .unwrap_or(0)
+                    })
+                })
             {
                 num_instances.push((
                     index,
                     num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
                 ));
-                num_instances_with_rotation.push((index, num_instance))
+                num_instances_with_rotation.push((index, num_instance));
+                circuit_name_num_instances_mapping.insert(
+                    circuit_name,
+                    num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
+                );
             }
         }
 
@@ -144,7 +163,6 @@ impl<
         }
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
-        let mut wits_instances = BTreeMap::new();
         let mut wits_rmms = BTreeMap::new();
         let mut structural_wits = BTreeMap::new();
 
@@ -157,30 +175,18 @@ impl<
             } else {
                 RowMajorMatrix::empty()
             };
-            let rotation_vars = self
-                .pk
-                .circuit_pks
-                .get(&circuit_name)
-                .unwrap()
-                .vk
-                .get_cs()
-                .rotation_vars();
-            let num_instances = witness_rmm.num_instances() >> (rotation_vars.unwrap_or(0));
-            assert!(
-                wits_instances
-                    .insert(circuit_name.clone(), num_instances)
-                    .is_none()
-            );
-            if num_instances == 0 {
-                continue;
+
+            if witness_rmm.num_instances() > 0 {
+                wits_rmms.insert(circuit_name_index_mapping[&circuit_name], witness_rmm);
             }
-
-            let structural_witness = structural_witness_rmm.to_mles();
-            wits_rmms.insert(circuit_name_index_mapping[&circuit_name], witness_rmm);
-            structural_wits.insert(circuit_name, (structural_witness, num_instances));
+            if structural_witness_rmm.num_instances() > 0 {
+                let num_instances = circuit_name_num_instances_mapping
+                    .get(&circuit_name)
+                    .unwrap();
+                let structural_witness = structural_witness_rmm.to_mles();
+                structural_wits.insert(circuit_name, (structural_witness, num_instances));
+            }
         }
-
-        debug_assert_eq!(num_instances.len(), wits_rmms.len());
 
         // commit to witness traces in batch
         let (mut witness_mles, witness_data, witin_commit) = self.device.commit_traces(wits_rmms);
@@ -200,13 +206,18 @@ impl<
         ];
         tracing::debug!("global challenges in prover: {:?}", challenges);
 
+        let public_input_span = entered_span!("public_input", profiling_1 = true);
+        let public_input = self.device.transport_mles(&pi);
+        exit_span!(public_input_span);
+
         let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
             (vec![], vec![]),
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
-                let num_instances = *wits_instances
-                    .get(circuit_name)
-                    .ok_or(ZKVMError::WitnessNotFound(circuit_name.to_string().into()))?;
+                let num_instances = circuit_name_num_instances_mapping
+                    .get(&circuit_name)
+                    .copied()
+                    .unwrap_or(0);
                 let cs = pk.get_cs();
                 if num_instances == 0 {
                     // we need to drain respective fixed when num_instances is 0
@@ -216,24 +227,28 @@ impl<
                     return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points, evaluations));
                 }
                 transcript.append_field_element(&E::BaseField::from_canonical_u64(index as u64));
+
                 // TODO: add an enum for circuit type either in constraint_system or vk
                 let witness_mle = witness_mles
                     .drain(..cs.num_witin())
                     .map(|mle| mle.into())
                     .collect_vec();
-                let structural_witness = self.device.transport_mles(
-                    structural_wits
-                        .remove(circuit_name)
-                        .map(|(sw, _)| sw)
-                        .unwrap_or(vec![]),
-                );
+
+                let structural_witness_span =
+                    entered_span!("structural_witness", profiling_2 = true);
+                let structural_mles = structural_wits
+                    .remove(circuit_name)
+                    .map(|(sw, _)| sw)
+                    .unwrap_or(vec![]);
+                let structural_witness = self.device.transport_mles(&structural_mles);
+                exit_span!(structural_witness_span);
+
                 let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
-                let public_input = self.device.transport_mles(pi.clone());
-                let mut input = ProofInput {
+                let input = ProofInput {
                     witness: witness_mle,
                     fixed,
                     structural_witness,
-                    public_input,
+                    public_input: public_input.clone(),
                     num_read_instances: num_instances, // TODO: fixme
                     num_write_instances: num_instances, // TODO: fixme
                     num_instances,
@@ -254,23 +269,30 @@ impl<
                         num_instances
                     );
                     points.push(input_opening_point);
-                    evaluations.push(opcode_proof.wits_in_evals.clone());
+                    evaluations.push(vec![opcode_proof.wits_in_evals.clone()]);
                     chip_proofs.insert(index, opcode_proof);
                 } else {
                     // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
-                    input.num_instances = 1 << input.log2_num_instances();
-                    let (mut table_proof, pi_in_evals, input_opening_point) = self
-                        .create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
-                    points.push(input_opening_point);
-                    evaluations.push(
-                        [
+                    // input.num_instances = 1 << input.log2_num_instances();
+                    let (table_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
+                        circuit_name,
+                        pk,
+                        input,
+                        &mut transcript,
+                        &challenges,
+                    )?;
+                    if cs.num_witin() > 0 || cs.num_fixed() > 0 {
+                        points.push(input_opening_point);
+                        evaluations.push(vec![
                             table_proof.wits_in_evals.clone(),
                             table_proof.fixed_in_evals.clone(),
-                        ]
-                        .concat(),
-                    );
+                        ]);
+                    } else {
+                        assert!(table_proof.wits_in_evals.is_empty());
+                        assert!(table_proof.fixed_in_evals.is_empty());
+                    }
                     // FIXME: PROGRAM table circuit is not guaranteed to have 2^n instances
-                    table_proof.num_instances = num_instances;
+                    // table_proof.num_instances = num_instances;
                     chip_proofs.insert(index, table_proof);
                     for (idx, eval) in pi_in_evals {
                         pi_evals[idx] = eval;
@@ -283,20 +305,12 @@ impl<
 
         // batch opening pcs
         // generate static info from prover key for expected num variable
-        let circuit_num_polys = self
-            .pk
-            .circuit_pks
-            .values()
-            .map(|pk| (pk.get_cs().num_witin(), pk.get_cs().num_fixed()))
-            .collect_vec();
         let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
         let mpcs_opening_proof = self.device.open(
             witness_data,
             Some(device_pk.pcs_data),
             points,
             evaluations,
-            &circuit_num_polys,
-            &num_instances_with_rotation,
             &mut transcript,
         );
         exit_span!(pcs_opening);
@@ -388,6 +402,7 @@ impl<
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
+        let span = entered_span!("prove_main_constraints", profiling_2 = true);
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) = self
             .device
             .prove_main_constraints(rt_tower, &input, cs, challenges, transcript)?;
@@ -395,6 +410,7 @@ impl<
             wits_in_evals,
             fixed_in_evals,
         } = evals;
+        exit_span!(span);
 
         // evaluate pi if there is instance query
         let mut pi_in_evals: HashMap<usize, E> = HashMap::new();

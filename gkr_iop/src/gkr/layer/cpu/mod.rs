@@ -175,6 +175,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             )
         )
         .collect_vec();
+
         // zero check eq || rotation eq
         let mut eqs = layer
             .out_sel_and_eval_exprs
@@ -231,15 +232,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             layer.n_structural_witin,
             layer.n_fixed,
         );
+
         let builder =
             VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins);
 
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
         let (proof, prover_state) = IOPProverState::prove(
             builder.to_virtual_polys_with_monomial_terms(
-                &layer
+                layer
                     .main_sumcheck_expression_monomial_terms
-                    .clone()
+                    .as_ref()
                     .unwrap(),
                 pub_io_evals,
                 &main_sumcheck_challenges,

@@ -78,6 +78,7 @@ pub struct PublicValues {
     init_cycle: u64,
     end_pc: u32,
     end_cycle: u64,
+    shard_id: u32,
     public_io: Vec<u32>,
     global_sum: Vec<u32>,
 }
@@ -89,6 +90,7 @@ impl PublicValues {
         init_cycle: u64,
         end_pc: u32,
         end_cycle: u64,
+        shard_id: u32,
         public_io: Vec<u32>,
         global_sum: Vec<u32>,
     ) -> Self {
@@ -98,6 +100,7 @@ impl PublicValues {
             init_cycle,
             end_pc,
             end_cycle,
+            shard_id,
             public_io,
             global_sum,
         }
@@ -112,6 +115,7 @@ impl PublicValues {
             vec![E::BaseField::from_canonical_u64(self.init_cycle)],
             vec![E::BaseField::from_canonical_u32(self.end_pc)],
             vec![E::BaseField::from_canonical_u64(self.end_cycle)],
+            vec![E::BaseField::from_canonical_u32(self.shard_id)],
         ]
         .into_iter()
         .chain(

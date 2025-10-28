@@ -3,6 +3,7 @@ use std::iter::repeat_n;
 use crate::{
     Value,
     chip_handler::general::PublicIOQuery,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::{Poseidon2Config, RoundConstants},
     instructions::riscv::constants::UINT_LIMBS,
@@ -372,8 +373,9 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         Ok((config, chip.gkr_circuit()))
     }
 
-    fn assign_instance(
+    fn assign_instance<'a>(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext<'a>,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         input: &Self::Record,
@@ -383,7 +385,7 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         let is_ram_register = match record.ram_type {
             RAMType::Register => 1,
             RAMType::Memory => 0,
-            RAMType::GlobalState => unreachable!(),
+            _ => unreachable!(),
         };
         set_val!(instance, config.addr, record.addr as u64);
         set_val!(instance, config.is_ram_register, is_ram_register as u64);
@@ -428,8 +430,9 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
         Ok(())
     }
 
-    fn assign_instances(
+    fn assign_instances<'a>(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext<'a>,
         num_witin: usize,
         num_structural_witin: usize,
         mut steps: Vec<Self::Record>,
@@ -497,31 +500,41 @@ impl<E: ExtensionField, P: Permutation<[E::BaseField; POSEIDON2_BABYBEAR_WIDTH]>
             [0..steps.len() * num_structural_witin]
             .par_chunks_mut(num_instance_per_batch * num_structural_witin);
 
+        let shard_ctx_vec = shard_ctx.get_forked();
         raw_witin_iter
             .zip_eq(raw_structual_witin_iter)
             .zip_eq(steps.par_chunks(num_instance_per_batch))
+            .zip(shard_ctx_vec)
             .enumerate()
-            .flat_map(|(chunk_idx, ((instances, structural_instance), steps))| {
-                let mut lk_multiplicity = lk_multiplicity.clone();
-                instances
-                    .chunks_mut(num_witin)
-                    .zip_eq(structural_instance.chunks_mut(num_structural_witin))
-                    .zip_eq(steps)
-                    .enumerate()
-                    .map(|(i, ((instance, structural_instance), step))| {
-                        let row = chunk_idx * num_instance_per_batch + i;
-                        let (sel_r, sel_w) = if row < num_local_reads {
-                            (E::BaseField::ONE, E::BaseField::ZERO)
-                        } else {
-                            (E::BaseField::ZERO, E::BaseField::ONE)
-                        };
-                        set_val!(structural_instance, selector_r_witin, sel_r);
-                        set_val!(structural_instance, selector_w_witin, sel_w);
-                        set_val!(structural_instance, selector_zero_witin, E::BaseField::ONE);
-                        Self::assign_instance(config, instance, &mut lk_multiplicity, step)
-                    })
-                    .collect::<Vec<_>>()
-            })
+            .flat_map(
+                |(chunk_idx, (((instances, structural_instance), steps), mut shard_ctx))| {
+                    let mut lk_multiplicity = lk_multiplicity.clone();
+                    instances
+                        .chunks_mut(num_witin)
+                        .zip_eq(structural_instance.chunks_mut(num_structural_witin))
+                        .zip_eq(steps)
+                        .enumerate()
+                        .map(|(i, ((instance, structural_instance), step))| {
+                            let row = chunk_idx * num_instance_per_batch + i;
+                            let (sel_r, sel_w) = if row < num_local_reads {
+                                (E::BaseField::ONE, E::BaseField::ZERO)
+                            } else {
+                                (E::BaseField::ZERO, E::BaseField::ONE)
+                            };
+                            set_val!(structural_instance, selector_r_witin, sel_r);
+                            set_val!(structural_instance, selector_w_witin, sel_w);
+                            set_val!(structural_instance, selector_zero_witin, E::BaseField::ONE);
+                            Self::assign_instance(
+                                config,
+                                &mut shard_ctx,
+                                instance,
+                                &mut lk_multiplicity,
+                                step,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                },
+            )
             .collect::<Result<(), ZKVMError>>()?;
 
         // assign internal nodes in the binary tree for ec point summation
@@ -617,6 +630,7 @@ mod tests {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
+        e2e::ShardContext,
         gadgets::horizen_round_consts,
         instructions::{
             Instruction,
@@ -709,6 +723,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             vec![0], // dummy
             global_ec_sum
                 .x
@@ -717,9 +732,11 @@ mod tests {
                 .map(|fe| fe.as_canonical_u32())
                 .collect_vec(),
         );
+        let mut shard_context = ShardContext::default();
         // assign witness
         let (witness, _) = GlobalChip::assign_instances(
             &config,
+            &mut shard_context,
             cs.num_witin as usize,
             cs.num_structural_witin as usize,
             global_writes // local reads

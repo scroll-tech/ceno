@@ -42,7 +42,7 @@ use super::{
     utils::infer_tower_product_witness,
     verifier::{TowerVerify, ZKVMVerifier},
 };
-use crate::tables::DynamicRangeTableCircuit;
+use crate::{e2e::ShardContext, tables::DynamicRangeTableCircuit};
 use itertools::Itertools;
 use mpcs::{
     PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits, WhirDefault,
@@ -94,6 +94,7 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        _shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
@@ -122,6 +123,7 @@ fn test_rw_lk_expression_combination() {
         let name = TestCircuit::<E, RW, L>::name();
         let mut zkvm_cs = ZKVMConstraintSystem::default();
         let config = zkvm_cs.register_opcode_circuit::<TestCircuit<E, RW, L>>();
+        let mut shard_ctx = ShardContext::default();
 
         // generate fixed traces
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
@@ -144,6 +146,7 @@ fn test_rw_lk_expression_combination() {
         zkvm_witness
             .assign_opcode_circuit::<TestCircuit<E, RW, L>>(
                 &zkvm_cs,
+                &mut shard_ctx,
                 &config,
                 vec![StepRecord::default(); num_instances],
             )
@@ -281,6 +284,7 @@ fn test_single_add_instance_e2e() {
     Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
+    let mut shard_ctx = ShardContext::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
@@ -346,10 +350,20 @@ fn test_single_add_instance_e2e() {
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
     zkvm_witness
-        .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
+        .assign_opcode_circuit::<AddInstruction<E>>(
+            &zkvm_cs,
+            &mut shard_ctx,
+            &add_config,
+            add_records,
+        )
         .unwrap();
     zkvm_witness
-        .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
+        .assign_opcode_circuit::<HaltInstruction<E>>(
+            &zkvm_cs,
+            &mut shard_ctx,
+            &halt_config,
+            halt_records,
+        )
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
     zkvm_witness
@@ -363,7 +377,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0], vec![0; 14]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)

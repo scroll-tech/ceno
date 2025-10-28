@@ -64,6 +64,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     chip_handler::MemoryExpr,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::{FieldOperation, field_op::FieldOpCols},
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
@@ -565,6 +566,7 @@ pub fn run_weierstrass_double<
     verify: bool,
     test_outputs: bool,
 ) -> Result<GKRProof<E>, BackendError> {
+    let mut shard_ctx = ShardContext::default();
     let num_instances = points.len();
     let log2_num_instance = ceil_log2(num_instances);
     let num_threads = optimal_sumcheck_threads(log2_num_instance);
@@ -594,9 +596,11 @@ pub fn run_weierstrass_double<
         InstancePaddingStrategy::Default,
     );
     let raw_witin_iter = phase1_witness.par_batch_iter_mut(num_instance_per_batch);
+    let shard_ctx_vec = shard_ctx.get_forked();
     raw_witin_iter
         .zip_eq(instances.par_chunks(num_instance_per_batch))
-        .for_each(|(instances, steps)| {
+        .zip(shard_ctx_vec)
+        .for_each(|((instances, steps), mut shard_ctx)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
                 .chunks_mut(num_witin as usize)
@@ -606,6 +610,7 @@ pub fn run_weierstrass_double<
                         .vm_state
                         .assign_instance(
                             instance,
+                            &shard_ctx,
                             &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
                         )
                         .expect("assign vm_state error");
@@ -613,6 +618,7 @@ pub fn run_weierstrass_double<
                         mem_config
                             .assign_op(
                                 instance,
+                                &mut shard_ctx,
                                 &mut lk_multiplicity,
                                 10,
                                 &MemOp {
