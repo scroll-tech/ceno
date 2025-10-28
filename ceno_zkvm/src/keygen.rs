@@ -12,6 +12,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         self,
         pp: PCS::ProverParam,
         vp: PCS::VerifierParam,
+        entry_pc: u32,
         mut vm_fixed_traces: ZKVMFixedTraces<E>,
     ) -> Result<ZKVMProvingKey<E, PCS>, ZKVMError> {
         let mut vm_pk = ZKVMProvingKey::new(pp.clone(), vp);
@@ -40,6 +41,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
 
         vm_pk.initial_global_state_expr = self.initial_global_state_expr;
         vm_pk.finalize_global_state_expr = self.finalize_global_state_expr;
+
+        vm_pk.set_program_entry_pc(entry_pc);
 
         Ok(vm_pk)
     }

@@ -895,7 +895,12 @@ impl<E: ExtensionField> E2EProgramCtx<'_, E> {
             .system_config
             .zkvm_cs
             .clone()
-            .key_gen::<PCS>(pp.clone(), vp.clone(), self.zkvm_fixed_traces.clone())
+            .key_gen::<PCS>(
+                pp.clone(),
+                vp.clone(),
+                self.program.entry,
+                self.zkvm_fixed_traces.clone(),
+            )
             .expect("keygen failed");
         let vk = pk.get_vk_slow();
         (pk, vk)
@@ -915,6 +920,7 @@ impl<E: ExtensionField> E2EProgramCtx<'_, E> {
             .key_gen::<PCS>(
                 pb.get_pp().clone(),
                 pb.get_vp().clone(),
+                self.program.entry,
                 self.zkvm_fixed_traces.clone(),
             )
             .expect("keygen failed");

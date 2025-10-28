@@ -409,6 +409,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,
+    // entry program counter
+    pub entry_pc: u32,
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
     pub fixed_commit_wd: Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
@@ -425,6 +427,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
         Self {
             pp,
             vp,
+            entry_pc: 0,
             circuit_pks: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
@@ -451,12 +454,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
         }
         Ok(())
     }
+
+    pub(crate) fn set_program_entry_pc(&mut self, entry_pc: u32) {
+        self.entry_pc = entry_pc;
+    }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
     pub fn get_vk_slow(&self) -> ZKVMVerifyingKey<E, PCS> {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
+            entry_pc: self.entry_pc,
             circuit_vks: self
                 .circuit_pks
                 .iter()
@@ -483,6 +491,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 ))]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,
+    // entry program counter
+    pub entry_pc: u32,
     // vk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,

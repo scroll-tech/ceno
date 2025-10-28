@@ -132,6 +132,7 @@ fn test_rw_lk_expression_combination() {
             .key_gen::<Pcs>(
                 device.backend.pp.clone(),
                 device.backend.vp.clone(),
+                0,
                 zkvm_fixed_traces,
             )
             .unwrap();
@@ -308,7 +309,7 @@ fn test_single_add_instance_e2e() {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp, vp, program.entry, zkvm_fixed_traces)
         .expect("keygen failed");
     let vk = pk.get_vk_slow();
 

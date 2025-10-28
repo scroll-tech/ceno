@@ -8,7 +8,7 @@ use ff_ext::{Instrumented, PoseidonField};
 use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
-    instructions::riscv::constants::{INIT_PC_IDX, SHARD_ID_IDX},
+    instructions::riscv::constants::{END_PC_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX},
     scheme::constants::NUM_FANIN,
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
 };
@@ -84,13 +84,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let _logup_sum = E::ZERO;
         assert!(!vm_proofs.is_empty());
         let num_proofs = vm_proofs.len();
-        vm_proofs
+        let _end_pc = vm_proofs
             .into_iter()
             .zip_eq(transcripts)
             // optionally halt on last chunk
             .zip_eq(iter::repeat_n(false, num_proofs - 1).chain(iter::once(expect_halt)))
             .enumerate()
-            .try_for_each(|(shard_id, ((vm_proof, transcript), expect_halt))| {
+            .try_fold(None, |prev_pc, (shard_id, ((vm_proof, transcript), expect_halt))| {
                 // require ecall/halt proof to exist, depend on whether we expect a halt.
                 let has_halt = vm_proof.has_halt(&self.vk);
                 if has_halt != expect_halt {
@@ -101,12 +101,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             .into(),
                     ));
                 }
-                // TODO check init ts = 4
-                // TODO check init_pc match prev end_pc
+                // check init cycle = 4
+                assert_eq!(vm_proof.pi_evals[INIT_CYCLE_IDX], E::from_canonical_usize(4));
+                // check init_pc match prev end_pc
+                if let Some(prev_pc) = prev_pc {
+                    assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], prev_pc);
+                } else {
+                    // first chunk, check program entry
+                    assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], E::from_canonical_u32(self.vk.entry_pc));
+                }
+                let end_pc = vm_proof.pi_evals[END_PC_IDX];
                 // TODO add to global ec
                 let _shard_ram_bus = self.verify_proof_validity(shard_id, vm_proof, transcript)?;
-
-                Ok(())
+                Ok(Some(end_pc))
             })?;
         // TODO check global ec_sum == 0
         Ok(true)

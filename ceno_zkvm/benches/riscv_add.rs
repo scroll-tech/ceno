@@ -55,7 +55,7 @@ fn bench_add(c: &mut Criterion) {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp, vp, 0, zkvm_fixed_traces)
         .expect("keygen failed");
 
     let (max_num_variables, security_level) = default_backend_config();
