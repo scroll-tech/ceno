@@ -352,20 +352,20 @@ fn run_inner<
         checkpoint,
     );
 
-    let zkvm_proof = result
-        .proof
+    let zkvm_proofs = result
+        .proofs
         .expect("PrepSanityCheck should yield zkvm_proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
-    let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
+    let proof_bytes = bincode::serialize(&zkvm_proofs).unwrap();
     fs::write(&proof_file, proof_bytes).unwrap();
     let vk_bytes = bincode::serialize(&vk).unwrap();
     fs::write(&vk_file, vk_bytes).unwrap();
 
     if checkpoint > Checkpoint::PrepVerify {
         let verifier = ZKVMVerifier::new(vk);
-        verify(&zkvm_proof, &verifier).expect("Verification failed");
-        soundness_test(zkvm_proof, &verifier);
+        verify(zkvm_proofs.clone(), &verifier).expect("Verification failed");
+        soundness_test(zkvm_proofs.first().cloned().unwrap(), &verifier);
     }
 }
 

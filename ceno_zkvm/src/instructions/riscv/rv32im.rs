@@ -425,7 +425,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut secp256k1_double_records = Vec::new();
         let mut secp256k1_decompress_records = Vec::new();
 
-        filtered_steps.into_iter().for_each(|record| {
+        steps.into_iter().for_each(|record| {
             let insn_kind = record.insn.kind;
             match insn_kind {
                 // ecall / halt

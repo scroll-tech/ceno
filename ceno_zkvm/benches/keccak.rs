@@ -57,7 +57,10 @@ fn keccak_prove(c: &mut Criterion) {
         max_steps,
         Checkpoint::Complete,
     );
-    let proof = result.proof.expect("PrepSanityCheck do not provide proof");
+    let proof = result
+        .proofs
+        .expect("PrepSanityCheck do not provide proof")
+        .remove(0);
     let vk = result.vk.expect("PrepSanityCheck do not provide verifier");
 
     println!("e2e proof {}", proof);

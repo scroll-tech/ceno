@@ -248,7 +248,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
     for CpuProver<CpuBackend<E, PCS>>
 {
     fn commit_traces<'a>(
-        &mut self,
+        &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
         Vec<MultilinearExtension<'a, E>>,

@@ -439,12 +439,12 @@ fn prove_inner<
     checkpoint: Checkpoint,
 ) -> anyhow::Result<()> {
     let result = run_elf_inner::<E, PCS, P>(args, compilation_options, elf_path, checkpoint)?;
-    let zkvm_proof = result.proof.expect("PrepSanityCheck should yield proof.");
+    let zkvm_proofs = result.proofs.expect("PrepSanityCheck should yield proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk);
-    if let Err(e) = verify(&zkvm_proof, &verifier) {
+    if let Err(e) = verify(zkvm_proofs.clone(), &verifier) {
         bail!("Verification failed: {e:?}");
     }
     print_cargo_message(
@@ -457,7 +457,7 @@ fn prove_inner<
         print_cargo_message("Writing", format_args!("proof to {}", path.display()));
         let proof_file =
             File::create(&path).context(format!("failed to create {}", path.display()))?;
-        bincode::serialize_into(proof_file, &zkvm_proof)
+        bincode::serialize_into(proof_file, &zkvm_proofs)
             .context("failed to serialize zkvm proof")?;
     }
     if let Some(out_vk) = args.out_vk.as_ref() {
