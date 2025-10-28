@@ -425,8 +425,8 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         assert_eq!(final_sum.len(), 7 * 2);
 
         assert_eq!(self.ec_point_exprs.len(), 0);
-        self.ec_point_exprs.extend(xs.into_iter());
-        self.ec_point_exprs.extend(ys.into_iter());
+        self.ec_point_exprs.extend(xs);
+        self.ec_point_exprs.extend(ys);
 
         self.ec_slope_exprs = slopes;
         self.ec_final_sum = final_sum;

@@ -275,7 +275,7 @@ pub fn infer_tower_product_witness<E: ExtensionField>(
     assert!(num_product_fanin.is_power_of_two());
 
     let log2_num_product_fanin = log2_strict_usize(num_product_fanin);
-    assert!(num_vars % log2_num_product_fanin == 0);
+    assert!(num_vars.is_multiple_of(log2_num_product_fanin));
     assert!(
         last_layer
             .iter()
@@ -378,7 +378,7 @@ pub fn infer_septic_sum_witness<E: ExtensionField>(
             outputs.set_len(SEPTIC_JACOBIAN_NUM_MLES * 2 * output_len);
         }
 
-        (0..2).into_iter().for_each(|chunk| {
+        (0..2).for_each(|chunk| {
             (0..output_len)
                 .into_par_iter()
                 .with_min_len(MIN_PAR_SIZE)

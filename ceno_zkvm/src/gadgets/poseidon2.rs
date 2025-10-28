@@ -12,7 +12,7 @@ use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use num_bigint::BigUint;
 use p3::{
-    babybear::{BabyBear, BabyBearInternalLayerParameters},
+    babybear::BabyBearInternalLayerParameters,
     field::{Field, FieldAlgebra, PrimeField},
     monty_31::InternalLayerBaseParameters,
     poseidon2::{GenericPoseidon2LinearLayers, MDSMat4, mds_light_permutation},
@@ -65,7 +65,7 @@ impl<F: Field, const WIDTH: usize> GenericPoseidon2LinearLayers<F, WIDTH>
             let diag_m1_matrix: &[F; WIDTH] = unsafe { transmute(diag_m1_matrix) };
             let sum = state.iter().cloned().sum::<F>();
             for (input, diag_m1) in state.iter_mut().zip(diag_m1_matrix) {
-                *input = sum.clone() + F::from_f(*diag_m1) * input.clone();
+                *input = sum + F::from_f(*diag_m1) * *input;
             }
         } else {
             panic!("Unsupported field");
@@ -325,7 +325,6 @@ impl<
 //////////////////////////////////////////////////////////////////////////
 /// The following routines are taken from poseidon2-air/src/generation.rs
 //////////////////////////////////////////////////////////////////////////
-
 fn generate_trace_rows_for_perm<
     F: PrimeField,
     LinearLayers: GenericPoseidon2LinearLayers<F, WIDTH>,
@@ -485,6 +484,6 @@ mod tests {
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
         let poseidon2_constants = horizen_round_consts();
-        let poseidon2_config = Poseidon2BabyBearConfig::construct(&mut cb, poseidon2_constants);
+        let _ = Poseidon2BabyBearConfig::construct(&mut cb, poseidon2_constants);
     }
 }

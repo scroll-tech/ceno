@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use crate::{
     circuit_builder::ConstraintSystem,
     error::ZKVMError,
-    scheme::{cpu::TowerRelationOutput, septic_curve::SepticPoint},
+    scheme::cpu::TowerRelationOutput,
     structs::{ComposedConstrainSystem, EccQuarkProof, ZKVMProvingKey},
 };
 use ff_ext::ExtensionField;
@@ -12,7 +12,7 @@ use gkr_iop::{
     hal::{ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{Expression, mle::MultilinearExtension, util::ceil_log2};
+use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
@@ -41,12 +41,20 @@ pub struct ProofInput<'a, PB: ProverBackend> {
     pub num_read_instances: usize,
     pub num_write_instances: usize,
     pub num_instances: usize,
+    pub has_ecc_ops: bool,
 }
 
 impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
     #[inline]
     pub fn log2_num_instances(&self) -> usize {
-        ceil_log2(next_pow2_instance_padding(self.num_instances))
+        let log2 = ceil_log2(next_pow2_instance_padding(self.num_instances));
+        if self.has_ecc_ops {
+            // the mles have one extra variable to store
+            // the internal partial sums for ecc additions
+            log2 + 1
+        } else {
+            log2
+        }
     }
 }
 

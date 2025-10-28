@@ -72,14 +72,12 @@ impl<'a, E: ExtensionField> PublicIOQuery for CircuitBuilder<'a, E> {
 
     fn query_global_rw_sum(&mut self) -> Result<Vec<Instance>, CircuitBuilderError> {
         let x = (0..SEPTIC_EXTENSION_DEGREE)
-            .into_iter()
             .map(|i| {
                 self.cs
                     .query_instance(|| format!("global_rw_sum_x_{}", i), GLOBAL_RW_SUM_IDX + i)
             })
             .collect::<Result<Vec<Instance>, CircuitBuilderError>>()?;
         let y = (0..SEPTIC_EXTENSION_DEGREE)
-            .into_iter()
             .map(|i| {
                 self.cs.query_instance(
                     || format!("global_rw_sum_y_{}", i),

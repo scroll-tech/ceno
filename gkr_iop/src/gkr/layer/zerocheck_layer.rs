@@ -27,7 +27,7 @@ use crate::{
         },
     },
     hal::{ProverBackend, ProverDevice},
-    selector::{self, SelectorContext, SelectorType},
+    selector::{SelectorContext, SelectorType},
     utils::rotation_selector_eval,
 };
 

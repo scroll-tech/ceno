@@ -12,10 +12,12 @@ const BABY_BEAR_POSEIDON2_WIDTH: usize = 16;
 const BABY_BEAR_POSEIDON2_HALF_FULL_ROUNDS: usize = 4;
 const BABY_BEAR_POSEIDON2_PARTIAL_ROUNDS: usize = 13;
 
+#[allow(dead_code)]
 pub(crate) fn horizen_to_p3_babybear(horizen_babybear: HorizenBabyBear) -> BabyBear {
     BabyBear::from_canonical_u64(horizen_babybear.into_bigint().0[0])
 }
 
+#[allow(dead_code)]
 pub(crate) fn horizen_round_consts() -> RoundConstants<
     BabyBear,
     BABY_BEAR_POSEIDON2_WIDTH,

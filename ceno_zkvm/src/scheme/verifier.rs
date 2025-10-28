@@ -23,7 +23,6 @@ use crate::{
 use gkr_iop::{
     gkr::GKRClaims,
     selector::{SelectorContext, SelectorType},
-    utils::eq_eval_less_or_equal_than,
 };
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -372,8 +371,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instance);
+        let mut log2_num_instances = ceil_log2(next_pow2_instance);
+        if composed_cs.has_ecc_ops() {
+            // for opcode circuit with ecc ops, the mles have one extra variable
+            // to store the internal partial sums for ecc additions
+            log2_num_instances += 1;
+        }
+        println!("{log2_num_instances}");
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+
+        // verify ecc proof if exists
+        if composed_cs.has_ecc_ops() {
+            assert!(proof.ecc_proof.is_some());
+            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
+            EccVerifier::new().verify_ecc_proof(ecc_proof, transcript)?;
+        }
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -1003,6 +1015,7 @@ impl TowerVerify {
     }
 }
 
+#[derive(Default)]
 pub struct EccVerifier;
 
 impl EccVerifier {
@@ -1034,38 +1047,24 @@ impl EccVerifier {
             transcript,
         );
 
-        let s0: SepticExtension<E> = proof.evals[2..][0..][..SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let x0: SepticExtension<E> = proof.evals[2..][SEPTIC_EXTENSION_DEGREE..]
-            [..SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let y0: SepticExtension<E> = proof.evals[2..][2 * SEPTIC_EXTENSION_DEGREE..]
-            [..SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let x1: SepticExtension<E> = proof.evals[2..][3 * SEPTIC_EXTENSION_DEGREE..]
-            [..SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let y1: SepticExtension<E> = proof.evals[2..][4 * SEPTIC_EXTENSION_DEGREE..]
-            [..SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let x3: SepticExtension<E> = proof.evals[2..][5 * SEPTIC_EXTENSION_DEGREE..]
-            [..SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
-        let y3: SepticExtension<E> = proof.evals[2..][6 * SEPTIC_EXTENSION_DEGREE..]
-            [..SEPTIC_EXTENSION_DEGREE]
-            .try_into()
-            .unwrap();
+        let s0: SepticExtension<E> = proof.evals[2..][0..][..SEPTIC_EXTENSION_DEGREE].into();
+        let x0: SepticExtension<E> =
+            proof.evals[2..][SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let y0: SepticExtension<E> =
+            proof.evals[2..][2 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let x1: SepticExtension<E> =
+            proof.evals[2..][3 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let y1: SepticExtension<E> =
+            proof.evals[2..][4 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let x3: SepticExtension<E> =
+            proof.evals[2..][5 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let y3: SepticExtension<E> =
+            proof.evals[2..][6 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
 
         let rt = sumcheck_claim
             .point
             .iter()
-            .map(|c| c.elements.clone())
+            .map(|c| c.elements)
             .collect_vec();
 
         // zerocheck: 0 = s[0,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1])

@@ -2,7 +2,6 @@ use crate::{
     circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams,
     tables::RMMCollections, witness::LkMultiplicity,
 };
-use ceno_emul::StepRecord;
 use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{
     chip::Chip,

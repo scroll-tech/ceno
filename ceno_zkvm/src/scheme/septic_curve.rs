@@ -412,8 +412,8 @@ impl<F: Field> QuadraticExtension<F> {
 impl<F: Field + FromUniformBytes> SepticExtension<F> {
     pub fn random(mut rng: impl RngCore) -> Self {
         let mut arr = [F::ZERO; 7];
-        for i in 0..7 {
-            arr[i] = F::random(&mut rng);
+        for item in arr.iter_mut() {
+            *item = F::random(&mut rng);
         }
         Self(arr)
     }
@@ -434,8 +434,8 @@ impl<F: FieldAlgebra + Copy> Add<&Self> for SepticExtension<F> {
 
     fn add(self, other: &Self) -> Self {
         let mut result = [F::ZERO; 7];
-        for i in 0..7 {
-            result[i] = self.0[i] + other.0[i];
+        for (i, res) in result.iter_mut().enumerate() {
+            *res = self.0[i] + other.0[i];
         }
         Self(result)
     }
@@ -446,8 +446,8 @@ impl<F: FieldAlgebra + Copy> Add<Self> for &SepticExtension<F> {
 
     fn add(self, other: Self) -> SepticExtension<F> {
         let mut result = [F::ZERO; 7];
-        for i in 0..7 {
-            result[i] = self.0[i] + other.0[i];
+        for (i, res) in result.iter_mut().enumerate() {
+            *res = self.0[i] + other.0[i];
         }
         SepticExtension(result)
     }
@@ -466,8 +466,8 @@ impl<F: FieldAlgebra + Copy> Neg for SepticExtension<F> {
 
     fn neg(self) -> Self {
         let mut result = [F::ZERO; 7];
-        for i in 0..7 {
-            result[i] = -self.0[i];
+        for (res, src) in result.iter_mut().zip(self.0.iter()) {
+            *res = -(*src);
         }
         Self(result)
     }
@@ -478,8 +478,8 @@ impl<F: FieldAlgebra + Copy> Sub<&Self> for SepticExtension<F> {
 
     fn sub(self, other: &Self) -> Self {
         let mut result = [F::ZERO; 7];
-        for i in 0..7 {
-            result[i] = self.0[i] - other.0[i];
+        for (i, res) in result.iter_mut().enumerate() {
+            *res = self.0[i] - other.0[i];
         }
         Self(result)
     }
@@ -490,8 +490,8 @@ impl<F: FieldAlgebra + Copy> Sub<Self> for &SepticExtension<F> {
 
     fn sub(self, other: Self) -> SepticExtension<F> {
         let mut result = [F::ZERO; 7];
-        for i in 0..7 {
-            result[i] = self.0[i] - other.0[i];
+        for (i, res) in result.iter_mut().enumerate() {
+            *res = self.0[i] - other.0[i];
         }
         SepticExtension(result)
     }
@@ -529,8 +529,8 @@ impl<F: Field> Mul<F> for &SepticExtension<F> {
 
     fn mul(self, other: F) -> Self::Output {
         let mut result = [F::ZERO; 7];
-        for i in 0..7 {
-            result[i] = self.0[i] * other;
+        for (i, res) in result.iter_mut().enumerate() {
+            *res = self.0[i] * other;
         }
         SepticExtension(result)
     }
@@ -787,11 +787,7 @@ impl<F: Field> SepticPoint<F> {
     }
 
     pub fn from_affine(x: SepticExtension<F>, y: SepticExtension<F>) -> Self {
-        let is_infinity = if x.is_zero() && y.is_zero() {
-            true
-        } else {
-            false
-        };
+        let is_infinity = x.is_zero() && y.is_zero();
 
         Self { x, y, is_infinity }
     }
@@ -907,9 +903,6 @@ impl<F: Field> SepticPoint<F> {
 
 impl<F: Field + FromUniformBytes> SepticPoint<F> {
     pub fn random(mut rng: impl RngCore) -> Self {
-        let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
-        let a: F = F::from_canonical_u32(2);
-
         loop {
             let x = SepticExtension::random(&mut rng);
             if let Some(point) = Self::from_x(x) {
