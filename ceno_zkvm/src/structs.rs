@@ -158,6 +158,10 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
             .as_ref()
             .map(|param| param.rotation_cyclic_subgroup_size)
     }
+
+    pub fn with_omc_init_only(&self) -> bool {
+        self.zkvm_v1_css.with_omc_init_only
+    }
 }
 
 #[derive(Clone)]

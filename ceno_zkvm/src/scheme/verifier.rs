@@ -210,6 +210,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
+            if shard_id > 0 && circuit_vk.get_cs().with_omc_init_only() {
+                return Err(ZKVMError::InvalidProof(
+                    format!("{shard_id}th shard non-first shard got omc dynamic table init",)
+                        .into(),
+                ));
+            }
+
             // check chip proof is well-formed
             if proof.wits_in_evals.len() != circuit_vk.get_cs().num_witin()
                 || proof.fixed_in_evals.len() != circuit_vk.get_cs().num_fixed()
