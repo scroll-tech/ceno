@@ -67,13 +67,13 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 /// each field will be interpret to (constant) polynomial
 #[derive(Default, Clone, Debug)]
 pub struct PublicValues {
-    exit_code: u32,
-    init_pc: u32,
-    init_cycle: u64,
-    end_pc: u32,
-    end_cycle: u64,
-    shard_id: u32,
-    public_io: Vec<u32>,
+    pub exit_code: u32,
+    pub init_pc: u32,
+    pub init_cycle: u64,
+    pub end_pc: u32,
+    pub end_cycle: u64,
+    pub shard_id: u32,
+    pub public_io: Vec<u32>,
 }
 
 impl PublicValues {

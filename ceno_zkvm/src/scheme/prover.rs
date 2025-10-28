@@ -77,7 +77,7 @@ impl<
         level = "trace"
     )]
     pub fn create_proof(
-        &mut self,
+        &self,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
         mut transcript: impl Transcript<E> + 'static,

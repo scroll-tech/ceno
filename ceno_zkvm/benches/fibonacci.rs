@@ -13,7 +13,7 @@ use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 
-use ceno_zkvm::{e2e::Shards, scheme::verifier::ZKVMVerifier};
+use ceno_zkvm::{e2e::MultiProver, scheme::verifier::ZKVMVerifier};
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 
@@ -54,7 +54,7 @@ fn fibonacci_prove(c: &mut Criterion) {
             create_prover(backend.clone()),
             program.clone(),
             platform.clone(),
-            Shards::default(),
+            MultiProver::default(),
             &Vec::from(&hints),
             &[],
             max_steps,
@@ -92,7 +92,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                             create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),
-                            Shards::default(),
+                            MultiProver::default(),
                             &Vec::from(&hints),
                             &[],
                             max_steps,

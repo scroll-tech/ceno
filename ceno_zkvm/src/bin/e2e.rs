@@ -4,8 +4,8 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
-        Checkpoint, FieldType, PcsKind, Preset, Shards, run_e2e_with_checkpoint, setup_platform,
-        setup_platform_debug, verify,
+        Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
+        setup_platform, setup_platform_debug, verify,
     },
     scheme::{
         ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
@@ -109,13 +109,13 @@ struct Args {
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
 
-    // shard id
+    // prover id
     #[arg(long, default_value = "0")]
-    shard_id: u32,
+    prover_id: u32,
 
-    // number of total shards
+    // number of available prover.
     #[arg(long, default_value = "1")]
-    max_num_shards: u32,
+    num_provers: u32,
 }
 
 fn main() {
@@ -248,7 +248,7 @@ fn main() {
         .unwrap_or_default();
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
-    let shards = Shards::new(args.shard_id as usize, args.max_num_shards as usize);
+    let multi_prover = MultiProver::new(args.prover_id as usize, args.num_provers as usize);
 
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
@@ -258,7 +258,7 @@ fn main() {
                 prover,
                 program,
                 platform,
-                shards,
+                multi_prover,
                 &hints,
                 &public_io,
                 max_steps,
@@ -274,7 +274,7 @@ fn main() {
                 prover,
                 program,
                 platform,
-                shards,
+                multi_prover,
                 &hints,
                 &public_io,
                 max_steps,
@@ -290,7 +290,7 @@ fn main() {
                 prover,
                 program,
                 platform,
-                shards,
+                multi_prover,
                 &hints,
                 &public_io,
                 max_steps,
@@ -306,7 +306,7 @@ fn main() {
                 prover,
                 program,
                 platform,
-                shards,
+                multi_prover,
                 &hints,
                 &public_io,
                 max_steps,
@@ -333,7 +333,7 @@ fn run_inner<
     pd: PD,
     program: Program,
     platform: Platform,
-    shards: Shards,
+    multi_prover: MultiProver,
     hints: &[u32],
     public_io: &[u32],
     max_steps: usize,
@@ -342,7 +342,14 @@ fn run_inner<
     checkpoint: Checkpoint,
 ) {
     let result = run_e2e_with_checkpoint::<E, PCS, _, _>(
-        pd, program, platform, shards, hints, public_io, max_steps, checkpoint,
+        pd,
+        program,
+        platform,
+        multi_prover,
+        hints,
+        public_io,
+        max_steps,
+        checkpoint,
     );
 
     let zkvm_proof = result

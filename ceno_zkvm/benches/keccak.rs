@@ -8,7 +8,7 @@ use ceno_zkvm::{
     scheme::{create_backend, create_prover},
 };
 mod alloc;
-use ceno_zkvm::{e2e::Shards, scheme::verifier::ZKVMVerifier};
+use ceno_zkvm::{e2e::MultiProver, scheme::verifier::ZKVMVerifier};
 use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
@@ -51,7 +51,7 @@ fn keccak_prove(c: &mut Criterion) {
         create_prover(backend.clone()),
         program.clone(),
         platform.clone(),
-        Shards::default(),
+        MultiProver::default(),
         &Vec::from(&hints),
         &[],
         max_steps,
@@ -86,7 +86,7 @@ fn keccak_prove(c: &mut Criterion) {
                         create_prover(backend.clone()),
                         program.clone(),
                         platform.clone(),
-                        Shards::default(),
+                        MultiProver::default(),
                         &Vec::from(&hints),
                         &[],
                         max_steps,
