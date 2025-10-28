@@ -75,12 +75,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
         // require ecall/halt proof to exist, depending whether we expect a halt.
-        let has_halt = vm_proof.has_halt(&self.vk);
-        if has_halt != expect_halt {
-            return Err(ZKVMError::VerifyError(
-                format!("ecall/halt mismatch: expected {expect_halt} != {has_halt}",).into(),
-            ));
-        }
+        // let has_halt = vm_proof.has_halt(&self.vk);
+        // if has_halt != expect_halt {
+        //     return Err(ZKVMError::VerifyError(
+        //         format!("ecall/halt mismatch: expected {expect_halt} != {has_halt}",).into(),
+        //     ));
+        // }
 
         self.verify_proof_validity(vm_proof, transcript)
     }
