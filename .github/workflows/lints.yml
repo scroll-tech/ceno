@@ -66,3 +66,5 @@ jobs:
         run: taplo --version || cargo install taplo-cli
       - name: Run taplo
         run: taplo fmt --check --diff
+      - name: Ensure Cargo.lock not modified by build
+        run: git diff --exit-code Cargo.lock
