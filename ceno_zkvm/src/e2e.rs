@@ -38,8 +38,8 @@ use std::{
 use transcript::BasicTranscript as Transcript;
 use witness::next_pow2_instance_padding;
 
-pub const MIN_CYCLE_PER_SHARDS: Cycle = 1 << 20;
-pub const MAX_CYCLE_PER_SHARDS: Cycle = 1 << 27;
+pub const DEFAULT_MIN_CYCLE_PER_SHARDS: Cycle = 1 << 24;
+pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 27;
 
 /// The polynomial commitment scheme kind
 #[derive(
@@ -117,14 +117,23 @@ pub struct RAMRecord {
 pub struct MultiProver {
     pub prover_id: usize,
     pub max_provers: usize,
+    pub min_cycle_per_shard: Cycle,
+    pub max_cycle_per_shard: Cycle,
 }
 
 impl MultiProver {
-    pub fn new(prover_id: usize, max_provers: usize) -> Self {
+    pub fn new(
+        prover_id: usize,
+        max_provers: usize,
+        min_cycle_per_shard: Cycle,
+        max_cycle_per_shard: Cycle,
+    ) -> Self {
         assert!(prover_id < max_provers);
         Self {
             prover_id,
             max_provers,
+            min_cycle_per_shard,
+            max_cycle_per_shard,
         }
     }
 }
@@ -134,6 +143,8 @@ impl Default for MultiProver {
         Self {
             prover_id: 0,
             max_provers: 1,
+            min_cycle_per_shard: DEFAULT_MIN_CYCLE_PER_SHARDS,
+            max_cycle_per_shard: DEFAULT_MAX_CYCLE_PER_SHARDS,
         }
     }
 }
@@ -182,13 +193,12 @@ impl<'a> ShardContext<'a> {
         executed_instructions: usize,
         addr_future_accesses: NextCycleAccess,
     ) -> Vec<Self> {
-        // current strategy: at least each shard deal with one instruction
-        let max_num_shards = multi_prover.max_provers.min(executed_instructions);
+        let min_cycle_per_shard = multi_prover.min_cycle_per_shard;
+        let max_cycle_per_shard = multi_prover.max_cycle_per_shard;
         assert!(
-            multi_prover.prover_id < max_num_shards,
-            "implement mechanism to skip current shard proof"
+            min_cycle_per_shard < max_cycle_per_shard,
+            "invalid input: min_cycle_per_shard {min_cycle_per_shard} > max_cycle_per_shard {max_cycle_per_shard}"
         );
-
         let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN as usize;
         let max_threads = max_usable_threads();
 
@@ -203,17 +213,16 @@ impl<'a> ShardContext<'a> {
         let mut last_shard_count = None;
         let mut expected_inst_per_shard = 0;
         for _ in 0..MAX_ITER {
-            expected_inst_per_shard = executed_instructions.div_ceil(max_num_shards);
-
-            if (MIN_CYCLE_PER_SHARDS as usize..MAX_CYCLE_PER_SHARDS as usize)
+            expected_inst_per_shard = executed_instructions.div_ceil(num_shards);
+            if (min_cycle_per_shard as usize..max_cycle_per_shard as usize)
                 .contains(&expected_inst_per_shard)
             {
                 break;
             }
 
-            if expected_inst_per_shard >= MAX_CYCLE_PER_SHARDS as usize {
+            if expected_inst_per_shard >= max_cycle_per_shard as usize {
                 num_shards += 1;
-            } else if expected_inst_per_shard < MIN_CYCLE_PER_SHARDS as usize {
+            } else if expected_inst_per_shard < min_cycle_per_shard as usize {
                 if num_shards == 1 {
                     break;
                 }
@@ -341,7 +350,7 @@ impl<'a> ShardContext<'a> {
 
     #[inline(always)]
     pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
-        let mut ts = prev_cycle - self.current_shard_offset_cycle();
+        let mut ts = prev_cycle.saturating_sub(self.current_shard_offset_cycle());
         if ts < Tracer::SUBCYCLES_PER_INSN {
             ts = 0
         }

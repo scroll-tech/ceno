@@ -116,6 +116,14 @@ struct Args {
     // number of available prover.
     #[arg(long, default_value = "1")]
     num_provers: u32,
+
+    // min cycle per shard
+    #[arg(long, default_value = "16777216")] // 16777216 = 2^24
+    min_cycle_per_shard: u64,
+
+    // max cycle per shard
+    #[arg(long, default_value = "536870912")] // 536870912 = 2^29
+    max_cycle_per_shard: u64,
 }
 
 fn main() {
@@ -248,7 +256,12 @@ fn main() {
         .unwrap_or_default();
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
-    let multi_prover = MultiProver::new(args.prover_id as usize, args.num_provers as usize);
+    let multi_prover = MultiProver::new(
+        args.prover_id as usize,
+        args.num_provers as usize,
+        args.min_cycle_per_shard,
+        args.max_cycle_per_shard,
+    );
 
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
