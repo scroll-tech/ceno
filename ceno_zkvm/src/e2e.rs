@@ -1435,7 +1435,7 @@ mod tests {
 
     #[test]
     fn test_single_prover_shard_ctx() {
-        for (name, max_cycle_per_shard, executed_instruction, expected_shard) in vec![
+        for (name, max_cycle_per_shard, executed_instruction, expected_shard) in [
             ("1 shard", 1 << 6, (1 << 6) / 4 - 1, 1),
             (
                 "max inst + 10, split to 2 shard",
@@ -1461,7 +1461,7 @@ mod tests {
     ) {
         let shard_ctx = ShardContext::new(
             MultiProver::new(0, 1, 1 << 3, max_cycle_per_shard),
-            executed_instruction as usize,
+            executed_instruction,
             NextCycleAccess::default(),
         );
         assert_eq!(shard_ctx.len(), expected_shard, "{name} test case failed");
@@ -1487,7 +1487,7 @@ mod tests {
 
     #[test]
     fn test_multi_prover_shard_ctx() {
-        for (name, num_shards, num_prover, expected_num_shards_of_provers) in vec![
+        for (name, num_shards, num_prover, expected_num_shards_of_provers) in [
             ("2 provers", 7, 2, vec![4, 3]),
             ("2 provers", 10, 3, vec![4, 3, 3]),
         ] {
