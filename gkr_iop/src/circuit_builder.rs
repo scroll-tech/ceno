@@ -419,12 +419,22 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
+        self.read_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+    }
+
+    pub fn read_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError> {
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.r_expressions_namespace_map.push(path);
         // Since r_expression is RLC(record) and when we're debugging
         // it's helpful to recover the value of record itself.
-        self.r_ram_types.push(((ram_type as u64).into(), record));
+        self.r_ram_types.push((ram_type, record));
         Ok(())
     }
 
@@ -435,10 +445,22 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
+        self.write_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+    }
+
+    pub fn write_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError> {
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);
-        self.w_ram_types.push(((ram_type as u64).into(), record));
+        // Since w_expression is RLC(record) and when we're debugging
+        // it's helpful to recover the value of record itself.
+        self.w_ram_types.push((ram_type, record));
         Ok(())
     }
 
@@ -696,6 +718,21 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.read_record(name_fn, ram_type, record)
     }
 
+    pub fn read_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .read_rlc_record(name_fn, ram_type, record, rlc_record)
+    }
+
     pub fn write_record<NR, N>(
         &mut self,
         name_fn: N,
@@ -707,6 +744,21 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.write_record(name_fn, ram_type, record)
+    }
+
+    pub fn write_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .write_rlc_record(name_fn, ram_type, record, rlc_record)
     }
 
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {

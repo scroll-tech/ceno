@@ -181,7 +181,7 @@ impl<E: ExtensionField> GlobalConfig<E> {
 
         let mut record = vec![];
         record.push(addr.expr());
-        record.push(ram_type);
+        record.push(ram_type.clone());
         record.extend(value.memory_expr());
         record.push(local_clk.expr());
 
@@ -198,16 +198,17 @@ impl<E: ExtensionField> GlobalConfig<E> {
             local_clk.expr(),
         )?;
         // TODO: enforce shard = shard_id in the public values
-
-        cb.read_record(
+        cb.read_rlc_record(
             || "r_record",
-            gkr_iop::RAMType::Memory, // FIXME: should be dynamic, either Register or Memory
+            ram_type.clone(),
             record.clone(),
+            cb.rlc_chip_record(record.clone()),
         )?;
-        cb.write_record(
+        cb.write_rlc_record(
             || "w_record",
-            gkr_iop::RAMType::Memory, // FIXME: should be dynamic, either Register or Memory
+            ram_type,
             record.clone(),
+            cb.rlc_chip_record(record),
         )?;
 
         // enforces final_sum = \sum_i (x_i, y_i) using ecc quark protocol
@@ -437,7 +438,7 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
 
-        assert!(num_structural_witin == 3);
+        assert_eq!(num_structural_witin, 3);
         let selector_r_witin = WitIn { id: 0 };
         let selector_w_witin = WitIn { id: 1 };
         let selector_zero_witin = WitIn { id: 2 };
