@@ -187,6 +187,16 @@ impl<'a> Default for ShardContext<'a> {
     }
 }
 
+/// `prover_id` and `num_provers` in MultiProver are exposed as arguments
+/// to specify the number of physical provers in a cluster,
+/// each mark with a prover_id.
+/// The overall trace data is divided into shards, which are distributed evenly among the provers.
+/// The number of shards are in general agnostic to number of provers.
+/// Each prover is assigned n shard where n can be even empty
+///
+/// Shard distribution follows a balanced allocation strategy
+/// for example, if there are 10 shards and 3 provers,
+/// the shard counts will be distributed as 3, 3, and 4, ensuring an even workload across all provers.
 impl<'a> ShardContext<'a> {
     pub fn new(
         multi_prover: MultiProver,
