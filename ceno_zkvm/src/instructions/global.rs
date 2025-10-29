@@ -3,23 +3,21 @@ use std::{collections::HashMap, iter::repeat_n, marker::PhantomData};
 use crate::{
     Value,
     chip_handler::general::PublicIOQuery,
-    e2e::ShardContext,
     error::ZKVMError,
-    gadgets::{Poseidon2Config, RoundConstants},
+    gadgets::Poseidon2Config,
     instructions::riscv::constants::UINT_LIMBS,
     scheme::septic_curve::{SepticExtension, SepticPoint},
     structs::{ProgramParams, RAMType},
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
-use ff_ext::{ExtensionField, FieldInto, POSEIDON2_BABYBEAR_WIDTH, PoseidonField, SmallField};
+use ff_ext::{ExtensionField, FieldInto, PoseidonField, SmallField};
 use gkr_iop::{
     chip::Chip,
     circuit_builder::CircuitBuilder,
     error::CircuitBuilderError,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
-    utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
@@ -38,10 +36,7 @@ use rayon::{
 use std::ops::Deref;
 use witness::{InstancePaddingStrategy, next_pow2_instance_padding, set_val};
 
-use crate::{
-    instructions::{Instruction, riscv::constants::UInt},
-    scheme::constants::SEPTIC_EXTENSION_DEGREE,
-};
+use crate::{instructions::riscv::constants::UInt, scheme::constants::SEPTIC_EXTENSION_DEGREE};
 
 /// A record for a read/write into the global set
 #[derive(Default, Debug, Clone)]
@@ -428,9 +423,9 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
     }
 
     fn generate_fixed_traces(
-        config: &Self::TableConfig,
-        num_fixed: usize,
-        input: &Self::FixedInput,
+        _config: &Self::TableConfig,
+        _num_fixed: usize,
+        _input: &Self::FixedInput,
     ) -> witness::RowMajorMatrix<<E as ExtensionField>::BaseField> {
         unimplemented!()
     }
@@ -439,7 +434,7 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        mut steps: &Self::WitnessInput,
+        steps: &Self::WitnessInput,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
@@ -612,8 +607,6 @@ mod tests {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        e2e::ShardContext,
-        gadgets::horizen_round_consts,
         instructions::global::{GlobalChip, GlobalChipInput, GlobalRecord},
         scheme::{
             PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
@@ -643,9 +636,7 @@ mod tests {
             .init();
 
         // init global chip with horizen_rc_consts
-        let rc = horizen_round_consts();
         let perm = <F as PoseidonField>::get_default_perm();
-        let global_chip: GlobalChip<E> = GlobalChip::default();
 
         let mut cs = ConstraintSystem::new(|| "global chip test");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -690,7 +681,6 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let perm = <F as PoseidonField>::get_default_perm();
         let input = global_writes // local reads
             .into_iter()
             .chain(global_reads) // local writes

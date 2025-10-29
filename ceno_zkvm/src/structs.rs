@@ -7,7 +7,7 @@ use crate::{
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
 };
-use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
+use ceno_emul::{CENO_PLATFORM, Platform};
 use ff_ext::ExtensionField;
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
