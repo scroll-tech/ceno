@@ -137,7 +137,6 @@ pub struct GlobalConfig<E: ExtensionField> {
     y: Vec<WitIn>,
     slope: Vec<WitIn>,
     perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
-    perm: <E::BaseField as PoseidonField>::P,
 }
 
 impl<E: ExtensionField> GlobalConfig<E> {
@@ -167,7 +166,6 @@ impl<E: ExtensionField> GlobalConfig<E> {
         let ram_type: Expression<E> = is_ram_reg.clone() * reg + (1 - is_ram_reg) * mem;
 
         let rc = <E::BaseField as PoseidonField>::get_default_perm_rc().into();
-        let perm = <E::BaseField as PoseidonField>::get_default_perm();
         let perm_config = Poseidon2Config::construct(cb, rc);
 
         let mut input = vec![];
@@ -250,7 +248,6 @@ impl<E: ExtensionField> GlobalConfig<E> {
             nonce,
             is_global_write,
             perm_config,
-            perm,
         })
     }
 }
