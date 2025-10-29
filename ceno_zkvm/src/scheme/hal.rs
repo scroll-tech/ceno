@@ -56,7 +56,7 @@ pub trait TraceCommitter<PB: ProverBackend> {
     // the traces in the form of multilinear polynomials
     #[allow(clippy::type_complexity)]
     fn commit_traces<'a>(
-        &mut self,
+        &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<<PB::E as ExtensionField>::BaseField>>,
     ) -> (
         Vec<PB::MultilinearPoly<'a>>,

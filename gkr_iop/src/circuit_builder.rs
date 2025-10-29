@@ -123,6 +123,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub r_table_expressions_namespace_map: Vec<String>,
     pub w_table_expressions: Vec<SetTableExpression<E>>,
     pub w_table_expressions_namespace_map: Vec<String>,
+    // specify whether constrains system cover only init_w
+    // as it imply w/r set and final_w might happen ACROSS shards
+    pub with_omc_init_only: bool,
 
     pub lk_selector: Option<SelectorType<E>>,
     /// lookup expression
@@ -181,6 +184,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             r_table_expressions_namespace_map: vec![],
             w_table_expressions: vec![],
             w_table_expressions_namespace_map: vec![],
+            with_omc_init_only: false,
             lk_selector: None,
             lk_expressions: vec![],
             lk_table_expressions: vec![],
@@ -492,6 +496,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let t = cb(self);
         self.ns.pop_namespace();
         t
+    }
+
+    pub fn set_omc_init_only(&mut self) {
+        self.with_omc_init_only = true;
     }
 }
 
@@ -1215,6 +1223,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn rotate_and_assert_eq(&mut self, a: Expression<E>, b: Expression<E>) {
         self.cs.rotations.push((a, b));
+    }
+
+    pub fn set_omc_init_only(&mut self) {
+        self.cs.set_omc_init_only();
     }
 }
 

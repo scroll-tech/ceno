@@ -72,6 +72,7 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
+        cb.set_omc_init_only();
         assert!(NVRAM::WRITABLE);
         let init_v = (0..NVRAM::V_LIMBS)
             .map(|i| cb.create_fixed(|| format!("init_v_limb_{i}")))
@@ -467,6 +468,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
+        cb.set_omc_init_only();
         let max_len = DVRAM::max_len(params);
         let addr = cb.create_structural_witin(
             || "addr",
