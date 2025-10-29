@@ -30,7 +30,6 @@ sumcheck.workspace = true
 transcript.workspace = true
 whir.workspace = true
 witness.workspace = true
-zkhash.workspace = true
 lazy_static.workspace = true
 
 itertools.workspace = true

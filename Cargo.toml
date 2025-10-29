@@ -80,7 +80,6 @@ tracing = { version = "0.1", features = [
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uint = "0.8"
-zkhash = { git = "https://github.com/HorizenLabs/poseidon2.git" }
 lazy_static = "1.5.0"
 
 ceno_gpu = { path = "utils/cuda_hal", package = "cuda_hal" }

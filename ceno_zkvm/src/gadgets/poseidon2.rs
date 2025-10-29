@@ -507,19 +507,20 @@ fn generate_sbox<F: PrimeField, const DEGREE: u64, const REGISTERS: usize>(
 
 #[cfg(test)]
 mod tests {
-    use crate::gadgets::{
-        poseidon2::Poseidon2BabyBearConfig, poseidon2_constants::horizen_round_consts,
-    };
-    use ff_ext::BabyBearExt4;
+    use crate::gadgets::poseidon2::Poseidon2BabyBearConfig;
+    use ff_ext::{BabyBearExt4, PoseidonField};
     use gkr_iop::circuit_builder::{CircuitBuilder, ConstraintSystem};
+    use p3::babybear::BabyBear;
 
     type E = BabyBearExt4;
+    type F = BabyBear;
     #[test]
     fn test_poseidon2_gadget() {
         let mut cs = ConstraintSystem::new(|| "poseidon2 gadget test");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
-        let poseidon2_constants = horizen_round_consts();
-        let _ = Poseidon2BabyBearConfig::construct(&mut cb, poseidon2_constants);
+        // let poseidon2_constants = horizen_round_consts();
+        let rc = <F as PoseidonField>::get_default_perm_rc().into();
+        let _ = Poseidon2BabyBearConfig::construct(&mut cb, rc);
     }
 }
