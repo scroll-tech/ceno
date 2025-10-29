@@ -3,6 +3,7 @@ use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
+        constants::SEPTIC_EXTENSION_DEGREE,
         hal::ProverDevice,
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
@@ -433,7 +434,7 @@ pub fn emulate_program<'a>(
         end_cycle,
         shards.shard_id as u32,
         io_init.iter().map(|rec| rec.value).collect_vec(),
-        vec![0; 14], // point_at_infinity
+        vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );
 
     // Find the final register values and cycles.

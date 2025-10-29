@@ -9,7 +9,7 @@ use crate::{
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE},
-        septic_curve::SepticExtension,
+        septic_curve::{SepticExtension, SepticPoint},
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
@@ -372,13 +372,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             // to store the internal partial sums for ecc additions
             log2_num_instances += 1;
         }
-        println!("{log2_num_instances}");
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         // verify ecc proof if exists
         if composed_cs.has_ecc_ops() {
+            tracing::debug!("verifying ecc proof...");
             assert!(proof.ecc_proof.is_some());
             let ecc_proof = proof.ecc_proof.as_ref().unwrap();
+
+            let xy = cs
+                .ec_final_sum
+                .iter()
+                .map(|expr| {
+                    eval_by_expr_with_instance(&[], &[], &[], pi, challenges, &expr)
+                        .right()
+                        .and_then(|v| v.as_base())
+                        .unwrap()
+                })
+                .collect_vec();
+            let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
+            let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
+
+            assert_eq!(
+                SepticPoint {
+                    x,
+                    y,
+                    is_infinity: false,
+                },
+                ecc_proof.sum
+            );
+            // assert ec sum in public input matches that in ecc proof
             EccVerifier::new().verify_ecc_proof(ecc_proof, transcript)?;
         }
 

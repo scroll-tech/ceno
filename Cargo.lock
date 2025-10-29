@@ -1957,7 +1957,6 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "once_cell",
  "p3",
@@ -2824,7 +2823,6 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "bincode",
  "clap",
@@ -2848,7 +2846,6 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "either",
  "ff_ext",
@@ -3169,7 +3166,6 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "p3-air",
  "p3-baby-bear",
@@ -3645,7 +3641,6 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "ff_ext",
  "p3",
@@ -4629,7 +4624,6 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -4751,7 +4745,6 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "either",
  "ff_ext",
@@ -4769,7 +4762,6 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "itertools 0.13.0",
  "p3",
@@ -5164,7 +5156,6 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -5436,7 +5427,6 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "bincode",
  "clap",
@@ -5723,7 +5713,6 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=chore%2Fsw_curve_default#c2580ace319e01bc8657dc92a6b5775348ce3133"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",
@@ -5884,7 +5873,7 @@ dependencies = [
 [[package]]
 name = "zkhash"
 version = "0.2.0"
-source = "git+https://github.com/HorizenLabs/poseidon2.git?rev=bb476b9#bb476b9ca38198cf5092487283c8b8c5d4317c4e"
+source = "git+https://github.com/HorizenLabs/poseidon2.git#055bde3f4782731ba5f5ce5888a440a94327eaf3"
 dependencies = [
  "ark-ff 0.4.2",
  "ark-std 0.4.0",

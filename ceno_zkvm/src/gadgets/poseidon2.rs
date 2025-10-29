@@ -35,6 +35,42 @@ pub struct RoundConstants<
     pub ending_full_round_constants: [[F; WIDTH]; HALF_FULL_ROUNDS],
 }
 
+impl<F: Field, const WIDTH: usize, const HALF_FULL_ROUNDS: usize, const PARTIAL_ROUNDS: usize>
+    From<Vec<F>> for RoundConstants<F, WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>
+{
+    fn from(value: Vec<F>) -> Self {
+        let mut iter = value.into_iter();
+        let mut beginning_full_round_constants = [[F::ZERO; WIDTH]; HALF_FULL_ROUNDS];
+        for round in 0..HALF_FULL_ROUNDS {
+            for i in 0..WIDTH {
+                beginning_full_round_constants[round][i] =
+                    iter.next().expect("insufficient round constants");
+            }
+        }
+
+        let mut partial_round_constants = [F::ZERO; PARTIAL_ROUNDS];
+        for round in 0..PARTIAL_ROUNDS {
+            partial_round_constants[round] = iter.next().expect("insufficient round constants");
+        }
+
+        let mut ending_full_round_constants = [[F::ZERO; WIDTH]; HALF_FULL_ROUNDS];
+        for round in 0..HALF_FULL_ROUNDS {
+            for i in 0..WIDTH {
+                ending_full_round_constants[round][i] =
+                    iter.next().expect("insufficient round constants");
+            }
+        }
+
+        assert!(iter.next().is_none(), "round constants are too many");
+
+        RoundConstants {
+            beginning_full_round_constants,
+            partial_round_constants,
+            ending_full_round_constants,
+        }
+    }
+}
+
 pub type Poseidon2BabyBearConfig = Poseidon2Config<BabyBearExt4, 16, 7, 1, 4, 13>;
 pub struct Poseidon2Config<
     E: ExtensionField,

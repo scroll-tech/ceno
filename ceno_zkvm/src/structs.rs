@@ -336,12 +336,12 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.lk_mlts.get(name)
     }
 
-    pub fn assign_opcode_circuit<OC: Instruction<E, Record = StepRecord>>(
+    pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
         config: &OC::InstructionConfig,
-        records: Vec<StepRecord>,
+        records: Vec<OC::Record>,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
 
