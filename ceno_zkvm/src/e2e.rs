@@ -349,6 +349,16 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
+    pub fn before_current_shard_cycle(&self, cycle: Cycle) -> bool {
+        (cycle as usize) < self.cur_shard_cycle_range.start
+    }
+
+    #[inline(always)]
+    pub fn after_current_shard_cycle(&self, cycle: Cycle) -> bool {
+        (cycle as usize) >= self.cur_shard_cycle_range.end
+    }
+
+    #[inline(always)]
     pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
         let mut ts = prev_cycle.saturating_sub(self.current_shard_offset_cycle());
         if ts < Tracer::SUBCYCLES_PER_INSN {
@@ -376,7 +386,7 @@ impl<'a> ShardContext<'a> {
     ) {
         // check read from external mem bus
         // exclude first shard
-        if prev_cycle < self.cur_shard_cycle_range.start as Cycle
+        if self.before_current_shard_cycle(prev_cycle)
             && self.is_current_shard_cycle(cycle)
             && !self.is_first_shard()
         {
@@ -414,7 +424,7 @@ impl<'a> ShardContext<'a> {
                         None
                     }
                 })
-            && future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle
+            && self.after_current_shard_cycle(future_touch_cycle)
             && self.is_current_shard_cycle(cycle)
         {
             let ram_record = self
@@ -500,7 +510,7 @@ pub fn emulate_program<'a>(
     max_steps: usize,
     init_mem_state: &InitMemState,
     platform: &Platform,
-    shards: &MultiProver,
+    multi_prover: &MultiProver,
 ) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
@@ -558,7 +568,7 @@ pub fn emulate_program<'a>(
         Tracer::SUBCYCLES_PER_INSN,
         vm.get_pc().into(),
         end_cycle,
-        shards.prover_id as u32,
+        multi_prover.prover_id as u32,
         io_init.iter().map(|rec| rec.value).collect_vec(),
     );
 
@@ -680,7 +690,11 @@ pub fn emulate_program<'a>(
         ),
     );
 
-    let shard_ctxs = ShardContext::new(shards.clone(), insts, vm.take_tracer().next_accesses());
+    let shard_ctxs = ShardContext::new(
+        multi_prover.clone(),
+        insts,
+        vm.take_tracer().next_accesses(),
+    );
 
     EmulationResult {
         pi,
@@ -867,9 +881,25 @@ pub fn generate_witness<'a, E: ExtensionField>(
     program: &Program,
 ) -> impl Iterator<Item = (ZKVMWitnesses<E>, ShardContext<'a>, PublicValues)> {
     let shard_ctxs = std::mem::take(&mut emul_result.shard_ctxs);
+    assert!(!shard_ctxs.is_empty());
     let mut all_records = std::mem::take(&mut emul_result.all_records);
+    assert!(!all_records.is_empty());
+
+    // clean up all records before first shard start cycle, as it's not belong to current prover
+    let start = all_records
+        .iter()
+        .position(|step| shard_ctxs[0].before_current_shard_cycle(step.cycle()));
+
+    if let Some(start) = start {
+        tracing::debug!("drop {} records as not belong to current shard", start);
+        // Drop everything before `start` efficiently
+        let tail = all_records.split_off(start);
+        all_records = tail;
+    }
+
     let pi = std::mem::take(&mut emul_result.pi);
     shard_ctxs.into_iter().map(move |mut shard_ctx| {
+        // assume public io clone low cost
         let mut pi = pi.clone();
         let n = all_records
             .iter()
@@ -880,7 +910,11 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
         tracing::debug!("{}th shard collect {n} steps", shard_ctx.shard_id);
         let current_shard_end_cycle = filtered_steps.last().unwrap().cycle() + 4;
-        let current_shard_init_pc = filtered_steps[0].pc().before.0;
+        let current_shard_init_pc = if shard_ctx.is_first_shard() {
+            program.entry
+        } else {
+            filtered_steps[0].pc().before.0
+        };
         let current_shard_end_pc = filtered_steps.last().unwrap().pc().after.0;
 
         let mut zkvm_witness = ZKVMWitnesses::default();
