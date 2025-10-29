@@ -214,15 +214,16 @@ impl<'a> ShardContext<'a> {
         let mut expected_inst_per_shard = 0;
         for _ in 0..MAX_ITER {
             expected_inst_per_shard = executed_instructions.div_ceil(num_shards);
+            let expected_cycle_per_shard = expected_inst_per_shard * subcycle_per_insn;
             if (min_cycle_per_shard as usize..max_cycle_per_shard as usize)
-                .contains(&expected_inst_per_shard)
+                .contains(&expected_cycle_per_shard)
             {
                 break;
             }
 
-            if expected_inst_per_shard >= max_cycle_per_shard as usize {
+            if expected_cycle_per_shard >= max_cycle_per_shard as usize {
                 num_shards += 1;
-            } else if expected_inst_per_shard < min_cycle_per_shard as usize {
+            } else if expected_cycle_per_shard < min_cycle_per_shard as usize {
                 if num_shards == 1 {
                     break;
                 }
@@ -1425,4 +1426,95 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::e2e::{MultiProver, ShardContext};
+    use ceno_emul::{Cycle, NextCycleAccess};
+
+    #[test]
+    fn test_single_prover_shard_ctx() {
+        for (name, max_cycle_per_shard, executed_instruction, expected_shard) in vec![
+            ("1 shard", 1 << 6, (1 << 6) / 4 - 1, 1),
+            (
+                "max inst + 10, split to 2 shard",
+                1 << 6,
+                (1 << 6) / 4 + 10,
+                2,
+            ),
+        ] {
+            test_single_shard_ctx_helper(
+                name,
+                max_cycle_per_shard,
+                executed_instruction,
+                expected_shard,
+            );
+        }
+    }
+
+    fn test_single_shard_ctx_helper(
+        name: &str,
+        max_cycle_per_shard: Cycle,
+        executed_instruction: usize,
+        expected_shard: usize,
+    ) {
+        let shard_ctx = ShardContext::new(
+            MultiProver::new(0, 1, 1 << 3, max_cycle_per_shard),
+            executed_instruction as usize,
+            NextCycleAccess::default(),
+        );
+        assert_eq!(shard_ctx.len(), expected_shard, "{name} test case failed");
+        assert_eq!(
+            shard_ctx.first().unwrap().cur_shard_cycle_range.start,
+            4,
+            "{name} test case failed"
+        );
+        assert_eq!(
+            shard_ctx.last().unwrap().cur_shard_cycle_range.end,
+            executed_instruction * 4 + 4,
+            "{name} test case failed"
+        );
+        if shard_ctx.len() > 1 {
+            for pair in shard_ctx.windows(2) {
+                assert_eq!(
+                    pair[0].cur_shard_cycle_range.end, pair[1].cur_shard_cycle_range.start,
+                    "{name} test case failed"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_multi_prover_shard_ctx() {
+        for (name, num_shards, num_prover, expected_num_shards_of_provers) in vec![
+            ("2 provers", 7, 2, vec![4, 3]),
+            ("2 provers", 10, 3, vec![4, 3, 3]),
+        ] {
+            test_multi_shard_ctx_helper(
+                name,
+                num_shards,
+                num_prover,
+                expected_num_shards_of_provers,
+            );
+        }
+    }
+
+    fn test_multi_shard_ctx_helper(
+        name: &str,
+        num_shards: usize,
+        num_prover: usize,
+        expected_num_shards_of_provers: Vec<usize>,
+    ) {
+        let max_cycle_per_shard = (1 << 8) * 4;
+        let executed_instruction = (1 << 8) * num_shards - 10; // this will be split into num_shards
+        for (prover_id, expected_shard) in (0..num_prover).zip(expected_num_shards_of_provers) {
+            let shard_ctx = ShardContext::new(
+                MultiProver::new(prover_id, num_prover, 1 << 3, max_cycle_per_shard),
+                executed_instruction,
+                NextCycleAccess::default(),
+            );
+            assert_eq!(shard_ctx.len(), expected_shard, "{name} test case failed");
+        }
+    }
 }
