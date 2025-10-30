@@ -568,8 +568,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = composed_cs;
-        let num_instances_with_rotation =
-            input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
+        let num_instances: usize = input.num_instances();
+        let num_instances_with_rotation = num_instances << composed_cs.rotation_vars().unwrap_or(0);
         let num_var_with_rotation =
             input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
 
@@ -869,7 +869,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             gkr_circuit,
         } = composed_cs;
 
-        let num_instances = input.num_instances;
+        let num_instances = input.num_instances();
         let log2_num_instances = input.log2_num_instances();
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
@@ -912,17 +912,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 vec![
                     SelectorContext {
                         offset: 0,
-                        num_instances: input.num_read_instances,
+                        num_instances: input.num_instances[0],
                         num_vars: num_var_with_rotation,
                     },
                     SelectorContext {
-                        offset: input.num_read_instances,
-                        num_instances: input.num_write_instances,
+                        offset: input.num_instances[0],
+                        num_instances: input.num_instances[1],
                         num_vars: num_var_with_rotation,
                     },
                     SelectorContext {
                         offset: 0,
-                        num_instances: input.num_instances,
+                        num_instances,
                         num_vars: num_var_with_rotation,
                     },
                 ]

@@ -38,16 +38,19 @@ pub struct ProofInput<'a, PB: ProverBackend> {
     pub structural_witness: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub fixed: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub public_input: Vec<Arc<PB::MultilinearPoly<'a>>>,
-    pub num_read_instances: usize,
-    pub num_write_instances: usize,
-    pub num_instances: usize,
+    pub num_instances: Vec<usize>,
     pub has_ecc_ops: bool,
 }
 
 impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
+    pub fn num_instances(&self) -> usize {
+        self.num_instances.iter().sum()
+    }
+
     #[inline]
     pub fn log2_num_instances(&self) -> usize {
-        let log2 = ceil_log2(next_pow2_instance_padding(self.num_instances));
+        let num_instance = self.num_instances();
+        let log2 = ceil_log2(next_pow2_instance_padding(num_instance));
         if self.has_ecc_ops {
             // the mles have one extra variable to store
             // the internal partial sums for ecc additions
