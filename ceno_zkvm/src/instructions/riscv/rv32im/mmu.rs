@@ -1,7 +1,7 @@
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::global::{GlobalChip, GlobalChipInput, GlobalPoint, GlobalRecord},
+    instructions::global::GlobalChip,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsCircuit, LocalFinalCircuit,
@@ -11,9 +11,8 @@ use crate::{
     },
 };
 use ceno_emul::{Addr, Cycle, IterAddresses, WORD_SIZE, Word};
-use ff_ext::{ExtensionField, PoseidonField};
+use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator as _};
 use std::{collections::HashSet, iter::zip, ops::Range, sync::Arc};
 use witness::InstancePaddingStrategy;
 
@@ -158,58 +157,13 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         .into_iter()
         .filter(|(_, record)| !record.is_empty())
         .collect_vec();
-        // take all mem result and
+
         witness.assign_table_circuit::<LocalFinalCircuit<E>>(
             cs,
             &self.local_final_circuit,
             &(shard_ctx, all_records.as_slice()),
         )?;
-
-        let perm = <E::BaseField as PoseidonField>::get_default_perm();
-        let global_input = shard_ctx
-            .read_records()
-            .par_iter()
-            .flat_map_iter(|records| {
-                records.iter().map(|(vma, record)| {
-                    let global_read: GlobalRecord = (vma, record, false).into();
-                    let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
-                    GlobalChipInput {
-                        record: global_read,
-                        ec_point,
-                    }
-                })
-            })
-            .chain(
-                shard_ctx
-                    .write_records()
-                    .par_iter()
-                    .flat_map_iter(|records| {
-                        records.iter().map(|(vma, record)| {
-                            let global_write: GlobalRecord = (vma, record, true).into();
-                            let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
-                            GlobalChipInput {
-                                record: global_write,
-                                ec_point,
-                            }
-                        })
-                    }),
-            )
-            .collect::<Vec<_>>();
-
-        witness.assign_table_circuit::<GlobalChip<E>>(cs, &self.ram_bus_circuit, &global_input)?;
-        // reset number of instances for global chip
-        *witness
-            .num_instances
-            .get_mut(&GlobalChip::<E>::name())
-            .unwrap() = global_input.len();
-
-        // set number of global reads
-        let num_global_reads: usize = shard_ctx
-            .read_records()
-            .iter()
-            .map(|records| records.len())
-            .sum();
-        witness.set_num_global_reads(num_global_reads);
+        witness.assign_global_chip_circuit(cs, &shard_ctx, &self.ram_bus_circuit)?;
 
         Ok(())
     }

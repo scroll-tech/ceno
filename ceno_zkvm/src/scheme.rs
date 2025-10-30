@@ -62,9 +62,7 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub tower_proof: TowerProofs<E>,
     pub ecc_proof: Option<EccQuarkProof<E>>,
 
-    pub num_read_instances: usize,
-    pub num_write_instances: usize,
-    pub num_instances: usize,
+    pub num_instances: Vec<usize>,
 
     pub fixed_in_evals: Vec<E>,
     pub wits_in_evals: Vec<E>,
@@ -212,7 +210,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         let halt_instance_count = self
             .chip_proofs
             .get(&halt_circuit_index)
-            .map_or(0, |proof| proof.num_instances);
+            .map_or(0, |proof| proof.num_instances.iter().sum());
         if halt_instance_count > 0 {
             assert_eq!(
                 halt_instance_count, 1,
