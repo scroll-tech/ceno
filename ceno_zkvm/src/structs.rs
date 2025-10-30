@@ -157,7 +157,8 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     }
 
     pub fn is_opcode_circuit(&self) -> bool {
-        self.gkr_circuit.is_some()
+        // TODO: is global chip opcode circuit??
+        self.gkr_circuit.is_some() || self.has_ecc_ops()
     }
 
     /// return number of lookup operation
@@ -321,6 +322,8 @@ pub struct ZKVMWitnesses<E: ExtensionField> {
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, Multiplicity<u64>>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
+    pub num_global_reads: usize,
+    pub num_instances: BTreeMap<String, usize>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
@@ -334,6 +337,12 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
     pub fn get_lk_mlt(&self, name: &String) -> Option<&Multiplicity<u64>> {
         self.lk_mlts.get(name)
+    }
+
+    pub fn set_num_global_reads(&mut self, num: usize) {
+        assert_eq!(self.num_global_reads, 0);
+
+        self.num_global_reads = num;
     }
 
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
@@ -353,6 +362,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             cs.zkvm_v1_css.num_structural_witin as usize,
             records,
         )?;
+        assert!(
+            self.num_instances
+                .insert(OC::name(), witness[0].num_instances())
+                .is_none()
+        );
         assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
@@ -406,6 +420,12 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
+        let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
+        assert!(
+            self.num_instances
+                .insert(TC::name(), num_instances)
+                .is_none()
+        );
         assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
         assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
 

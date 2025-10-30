@@ -38,6 +38,23 @@ type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
 pub type ZkVMCpuProver<E, PCS> =
     ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
 
+#[derive(Clone, Debug, Default)]
+pub struct ChipInstances {
+    pub num_reads: usize,  // number of local read instances in offline memory check
+    pub num_writes: usize, // number of local write instances in offline memory check
+    pub num_instances: usize, // number of main instances
+}
+
+impl ChipInstances {
+    pub fn new(num_reads: usize, num_writes: usize, num_instances: usize) -> Self {
+        ChipInstances {
+            num_reads,
+            num_writes,
+            num_instances,
+        }
+    }
+}
+
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB, PD> {
     pub pk: Arc<ZKVMProvingKey<E, PCS>>,
     device: PD,
@@ -118,15 +135,9 @@ impl<
         {
             // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
-                .get_opcode_witness(circuit_name)
-                .or_else(|| witnesses.get_table_witness(circuit_name))
-                .map(|rmms| {
-                    if rmms[0].num_instances() == 0 {
-                        rmms[1].num_instances()
-                    } else {
-                        rmms[0].num_instances()
-                    }
-                })
+                .num_instances
+                .get(circuit_name)
+                .cloned()
                 .and_then(|num_instance| {
                     if num_instance > 0 {
                         Some(num_instance)
@@ -144,22 +155,26 @@ impl<
                     })
                 })
             {
-                num_instances.push((
-                    index,
-                    num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
-                ));
+                let inst = if vk.get_cs().has_ecc_ops() {
+                    let num_global_reads = witnesses.num_global_reads;
+                    let num_local_reads = num_instance - num_global_reads;
+                    let num_local_writes = num_global_reads;
+                    ChipInstances::new(num_local_reads, num_local_writes, num_instance)
+                } else {
+                    ChipInstances::new(num_instance, num_instance, num_instance)
+                };
+
+                num_instances.push((index, inst.clone()));
                 num_instances_with_rotation.push((index, num_instance));
-                circuit_name_num_instances_mapping.insert(
-                    circuit_name,
-                    num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
-                );
+                circuit_name_num_instances_mapping.insert(circuit_name, inst);
             }
         }
 
         // write (circuit_idx, num_var) to transcript
-        for (circuit_idx, num_instance) in &num_instances {
+        for (circuit_idx, inst) in &num_instances {
             transcript.append_message(&circuit_idx.to_le_bytes());
-            transcript.append_message(&num_instance.to_le_bytes());
+            transcript.append_message(&inst.num_instances.to_le_bytes());
+            // TODO: write num_reads and num_writes
         }
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
@@ -214,10 +229,11 @@ impl<
         let (points, evaluations) = self.pk.circuit_pks.iter().enumerate().try_fold(
             (vec![], vec![]),
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
-                let num_instances = circuit_name_num_instances_mapping
+                let inst = circuit_name_num_instances_mapping
                     .get(&circuit_name)
-                    .copied()
-                    .unwrap_or(0);
+                    .cloned()
+                    .unwrap_or_default();
+                let num_instances = inst.num_instances;
                 let cs = pk.get_cs();
                 if num_instances == 0 {
                     // we need to drain respective fixed when num_instances is 0
@@ -249,8 +265,8 @@ impl<
                     fixed,
                     structural_witness,
                     public_input: public_input.clone(),
-                    num_read_instances: num_instances, // TODO: fixme
-                    num_write_instances: num_instances, // TODO: fixme
+                    num_read_instances: inst.num_reads,
+                    num_write_instances: inst.num_writes,
                     num_instances,
                     has_ecc_ops: cs.has_ecc_ops(),
                 };

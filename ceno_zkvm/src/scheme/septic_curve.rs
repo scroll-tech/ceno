@@ -41,7 +41,7 @@ pub struct SexticExtension<F>([F; 6]);
 /// # check if f(x) is irreducible
 /// print(f.is_irreducible())
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct SepticExtension<F>(pub [F; 7]);
 
 impl<F: Copy + Clone + Default> From<&[F]> for SepticExtension<F> {
@@ -759,7 +759,7 @@ impl<E: ExtensionField> SymbolicSepticExtension<E> {
 /// Note that
 /// 1. The curve's cofactor is 1
 /// 2. The curve's order is a large prime number of 31x7 bits
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct SepticPoint<F> {
     pub x: SepticExtension<F>,
     pub y: SepticExtension<F>,

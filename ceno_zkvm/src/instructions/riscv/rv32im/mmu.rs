@@ -1,7 +1,7 @@
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::global::{GlobalChip, GlobalChipInput, GlobalRecord},
+    instructions::global::{GlobalChip, GlobalChipInput, GlobalPoint, GlobalRecord},
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsCircuit, LocalFinalCircuit,
@@ -169,39 +169,47 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         let global_input = shard_ctx
             .read_records()
             .par_iter()
-            .chain(shard_ctx.write_records().par_iter())
             .flat_map_iter(|records| {
                 records.iter().map(|(vma, record)| {
-                    let addr = match record.ram_type {
-                        gkr_iop::RAMType::Register => record.id as u32,
-                        gkr_iop::RAMType::Memory => (*vma).into(),
-                        _ => unreachable!(),
-                    };
-                    let (is_write, local_clk, global_clk) = if record.prev_value.is_some() {
-                        // global write
-                        (true, record.cycle, record.cycle)
-                    } else {
-                        (false, 0, record.prev_cycle)
-                    };
-                    let global_rw = GlobalRecord {
-                        addr,
-                        ram_type: record.ram_type,
-                        value: record.value,
-                        shard: record.prev_cycle, // TODO: extract shard id properly
-                        local_clk: local_clk,
-                        global_clk: global_clk,
-                        is_write: is_write,
-                    };
-
-                    let ec_point = global_rw.to_ec_point(&perm);
+                    let global_read: GlobalRecord = (vma, record, false).into();
+                    let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
                     GlobalChipInput {
-                        record: global_rw,
+                        record: global_read,
                         ec_point,
                     }
                 })
             })
+            .chain(
+                shard_ctx
+                    .write_records()
+                    .par_iter()
+                    .flat_map_iter(|records| {
+                        records.iter().map(|(vma, record)| {
+                            let global_write: GlobalRecord = (vma, record, true).into();
+                            let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
+                            GlobalChipInput {
+                                record: global_write,
+                                ec_point,
+                            }
+                        })
+                    }),
+            )
             .collect::<Vec<_>>();
+
         witness.assign_table_circuit::<GlobalChip<E>>(cs, &self.ram_bus_circuit, &global_input)?;
+        // reset number of instances for global chip
+        *witness
+            .num_instances
+            .get_mut(&GlobalChip::<E>::name())
+            .unwrap() = global_input.len();
+
+        // set number of global reads
+        let num_global_reads: usize = shard_ctx
+            .read_records()
+            .iter()
+            .map(|records| records.len())
+            .sum();
+        witness.set_num_global_reads(num_global_reads);
 
         Ok(())
     }

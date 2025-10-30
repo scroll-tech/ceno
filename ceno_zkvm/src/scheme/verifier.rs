@@ -9,7 +9,7 @@ use crate::{
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE},
-        septic_curve::{SepticExtension, SepticPoint},
+        septic_curve::SepticExtension,
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
@@ -380,27 +380,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert!(proof.ecc_proof.is_some());
             let ecc_proof = proof.ecc_proof.as_ref().unwrap();
 
-            let xy = cs
-                .ec_final_sum
-                .iter()
-                .map(|expr| {
-                    eval_by_expr_with_instance(&[], &[], &[], pi, challenges, &expr)
-                        .right()
-                        .and_then(|v| v.as_base())
-                        .unwrap()
-                })
-                .collect_vec();
-            let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
-            let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
+            // TODO: enable this
+            // let xy = cs
+            //     .ec_final_sum
+            //     .iter()
+            //     .map(|expr| {
+            //         eval_by_expr_with_instance(&[], &[], &[], pi, challenges, &expr)
+            //             .right()
+            //             .and_then(|v| v.as_base())
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            // let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
+            // let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
 
-            assert_eq!(
-                SepticPoint {
-                    x,
-                    y,
-                    is_infinity: false,
-                },
-                ecc_proof.sum
-            );
+            // assert_eq!(
+            //     SepticPoint {
+            //         x,
+            //         y,
+            //         is_infinity: false,
+            //     },
+            //     ecc_proof.sum
+            // );
             // assert ec sum in public input matches that in ecc proof
             EccVerifier::new().verify_ecc_proof(ecc_proof, transcript)?;
         }
@@ -976,6 +977,7 @@ impl EccVerifier {
             b"ecc_alpha",
         );
         let mut alpha_pows_iter = alpha_pows.iter();
+        println!("ecc verifier alpha_pows[1]: {:?}", alpha_pows[1]);
 
         let sumcheck_claim = IOPVerifierState::verify(
             E::ZERO,

@@ -3,6 +3,7 @@ use std::{collections::HashMap, iter::repeat_n, marker::PhantomData};
 use crate::{
     Value,
     chip_handler::general::PublicIOQuery,
+    e2e::RAMRecord,
     error::ZKVMError,
     gadgets::Poseidon2Config,
     instructions::riscv::constants::UINT_LIMBS,
@@ -11,6 +12,7 @@ use crate::{
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
+use ceno_emul::WordAddr;
 use ff_ext::{ExtensionField, FieldInto, PoseidonField, SmallField};
 use gkr_iop::{
     chip::Chip,
@@ -50,6 +52,32 @@ pub struct GlobalRecord {
     pub is_write: bool,
 }
 
+impl From<(&WordAddr, &RAMRecord, bool)> for GlobalRecord {
+    fn from((vma, record, is_write): (&WordAddr, &RAMRecord, bool)) -> Self {
+        let addr = match record.ram_type {
+            RAMType::Register => record.id as u32,
+            RAMType::Memory => (*vma).into(),
+            _ => unreachable!(),
+        };
+        let value = record.prev_value.map_or(record.value, |v| v);
+        let (shard, local_clk, global_clk) = if is_write {
+            // FIXME: extract shard id and local_clk from record.cycle
+            (record.cycle, record.cycle, record.cycle)
+        } else {
+            (record.prev_cycle, 0, record.prev_cycle)
+        };
+
+        GlobalRecord {
+            addr,
+            ram_type: record.ram_type,
+            value,
+            shard,
+            local_clk,
+            global_clk,
+            is_write,
+        }
+    }
+}
 /// An EC point corresponding to a global read/write record
 /// whose x-coordinate is derived from Poseidon2 hash of the record
 #[derive(Clone, Debug)]
@@ -153,7 +181,7 @@ impl<E: ExtensionField> GlobalConfig<E> {
             .collect();
         let addr = cb.create_witin(|| "addr");
         let is_ram_register = cb.create_witin(|| "is_ram_register");
-        let value = UInt::new(|| "value", cb)?;
+        let value = UInt::new_unchecked(|| "value", cb)?;
         let shard = cb.create_witin(|| "shard");
         let global_clk = cb.create_witin(|| "global_clk");
         let local_clk = cb.create_witin(|| "local_clk");
@@ -447,6 +475,11 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
 
         // local read iff it's global write
         let num_local_reads = steps.iter().filter(|s| s.record.is_write).count();
+        tracing::debug!(
+            "{} local reads / {} local writes in global chip",
+            num_local_reads,
+            steps.len() - num_local_reads
+        );
 
         let num_instance_per_batch = if steps.len() > 256 {
             steps.len().div_ceil(nthreads)

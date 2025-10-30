@@ -45,9 +45,6 @@ use sumcheck::{
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
 
-#[cfg(feature = "sanity-check")]
-use gkr_iop::utils::eq_eval_less_or_equal_than;
-
 pub type TowerRelationOutput<E> = (
     Point<E>,
     TowerProofs<E>,
@@ -78,6 +75,11 @@ impl CpuEccProver {
         assert_eq!(ys.len(), SEPTIC_EXTENSION_DEGREE);
 
         let n = xs[0].num_vars() - 1;
+        tracing::debug!(
+            "Creating EC Summation Quark proof with {} points in {n} variables",
+            num_instances
+        );
+
         let out_rt = transcript.sample_and_append_vec(b"ecc", n);
         let num_threads = optimal_sumcheck_threads(out_rt.len());
 
@@ -258,44 +260,25 @@ impl CpuEccProver {
 
         #[cfg(feature = "sanity-check")]
         {
-            let s = invs.iter().map(|x| x.as_view_slice(2, 0)).collect_vec();
+            let s = invs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
             let x0 = filter_bj(&xs, 0);
             let y0 = filter_bj(&ys, 0);
             let x1 = filter_bj(&xs, 1);
             let y1 = filter_bj(&ys, 1);
 
+            let evals = &evals[2..];
             // check evaluations
-            assert_eq!(
-                eq_eval_less_or_equal_than(last_evaluation_index - 1, &out_rt, &rt),
-                evals[0]
-            );
             for i in 0..SEPTIC_EXTENSION_DEGREE {
-                assert_eq!(s[i].evaluate(&rt), evals[1 + i]);
-                assert_eq!(x0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE + 1 + i]);
-                assert_eq!(
-                    y0[i].evaluate(&rt),
-                    evals[SEPTIC_EXTENSION_DEGREE * 2 + 1 + i]
-                );
-                assert_eq!(
-                    x1[i].evaluate(&rt),
-                    evals[SEPTIC_EXTENSION_DEGREE * 3 + 1 + i]
-                );
-                assert_eq!(
-                    y1[i].evaluate(&rt),
-                    evals[SEPTIC_EXTENSION_DEGREE * 4 + 1 + i]
-                );
-                assert_eq!(
-                    x3[i].evaluate(&rt),
-                    evals[SEPTIC_EXTENSION_DEGREE * 5 + 1 + i]
-                );
-                assert_eq!(
-                    y3[i].evaluate(&rt),
-                    evals[SEPTIC_EXTENSION_DEGREE * 6 + 1 + i]
-                );
+                assert_eq!(s[i].evaluate(&rt), evals[i]);
+                assert_eq!(x0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE + i]);
+                assert_eq!(y0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 2 + i]);
+                assert_eq!(x1[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 3 + i]);
+                assert_eq!(y1[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 4 + i]);
+                assert_eq!(x3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 5 + i]);
+                assert_eq!(y3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 6 + i]);
             }
         }
 
-        // TODO: prove the validity of s[1,rt], x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt]
         EccQuarkProof {
             zerocheck_proof,
             num_instances,
