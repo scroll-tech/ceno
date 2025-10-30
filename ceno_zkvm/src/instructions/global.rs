@@ -61,17 +61,16 @@ impl From<(&WordAddr, &RAMRecord, bool)> for GlobalRecord {
         };
         let value = record.prev_value.map_or(record.value, |v| v);
         let (shard, local_clk, global_clk) = if is_write {
-            // FIXME: extract shard id and local_clk from record.cycle
-            (record.cycle, record.cycle, record.cycle)
+            (record.shard_id, record.cycle, record.cycle)
         } else {
-            (record.prev_cycle, 0, record.prev_cycle)
+            (record.shard_id, 0, record.prev_cycle)
         };
 
         GlobalRecord {
             addr,
             ram_type: record.ram_type,
             value,
-            shard,
+            shard: shard as u64,
             local_clk,
             global_clk,
             is_write,
