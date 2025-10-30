@@ -785,9 +785,7 @@ mod tests {
             structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
             fixed: vec![],
             public_input: public_input_mles.clone(),
-            num_read_instances: n_global_writes as usize,
-            num_write_instances: n_global_reads as usize,
-            num_instances: (n_global_reads + n_global_writes) as usize,
+            num_instances: vec![n_global_writes as usize, n_global_reads as usize],
             has_ecc_ops: true,
         };
         let mut rng = thread_rng();

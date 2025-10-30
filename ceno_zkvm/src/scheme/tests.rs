@@ -201,9 +201,7 @@ fn test_rw_lk_expression_combination() {
             witness: wits_in,
             structural_witness: structural_in,
             public_input: vec![],
-            num_read_instances: num_instances,
-            num_write_instances: num_instances,
-            num_instances,
+            num_instances: vec![num_instances],
             has_ecc_ops: false,
         };
         let (proof, _, _) = prover
