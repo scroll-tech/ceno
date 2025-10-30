@@ -404,6 +404,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             // );
             // assert ec sum in public input matches that in ecc proof
             EccVerifier::new().verify_ecc_proof(ecc_proof, transcript)?;
+            tracing::debug!("ecc proof verified.");
         }
 
         // verify and reduce product tower sumcheck
@@ -462,6 +463,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ]
         } else {
             // it's global chip
+            tracing::debug!(
+                "num_reads: {}, num_writes: {}, total: {}",
+                proof.num_read_instances,
+                proof.num_write_instances,
+                proof.num_instances
+            );
             vec![
                 SelectorContext {
                     offset: 0,
@@ -977,7 +984,6 @@ impl EccVerifier {
             b"ecc_alpha",
         );
         let mut alpha_pows_iter = alpha_pows.iter();
-        println!("ecc verifier alpha_pows[1]: {:?}", alpha_pows[1]);
 
         let sumcheck_claim = IOPVerifierState::verify(
             E::ZERO,
