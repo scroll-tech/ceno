@@ -462,6 +462,12 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         _multiplicity: &[HashMap<u64, usize>],
         steps: &Self::WitnessInput,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        if steps.is_empty() {
+            return Ok([
+                witness::RowMajorMatrix::empty(),
+                witness::RowMajorMatrix::empty(),
+            ]);
+        }
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
