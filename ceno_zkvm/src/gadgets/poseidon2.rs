@@ -35,6 +35,42 @@ pub struct RoundConstants<
     pub ending_full_round_constants: [[F; WIDTH]; HALF_FULL_ROUNDS],
 }
 
+impl<F: Field, const WIDTH: usize, const HALF_FULL_ROUNDS: usize, const PARTIAL_ROUNDS: usize>
+    From<Vec<F>> for RoundConstants<F, WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>
+{
+    fn from(value: Vec<F>) -> Self {
+        let mut iter = value.into_iter();
+        let mut beginning_full_round_constants = [[F::ZERO; WIDTH]; HALF_FULL_ROUNDS];
+        for round in 0..HALF_FULL_ROUNDS {
+            for i in 0..WIDTH {
+                beginning_full_round_constants[round][i] =
+                    iter.next().expect("insufficient round constants");
+            }
+        }
+
+        let mut partial_round_constants = [F::ZERO; PARTIAL_ROUNDS];
+        for round in 0..PARTIAL_ROUNDS {
+            partial_round_constants[round] = iter.next().expect("insufficient round constants");
+        }
+
+        let mut ending_full_round_constants = [[F::ZERO; WIDTH]; HALF_FULL_ROUNDS];
+        for round in 0..HALF_FULL_ROUNDS {
+            for i in 0..WIDTH {
+                ending_full_round_constants[round][i] =
+                    iter.next().expect("insufficient round constants");
+            }
+        }
+
+        assert!(iter.next().is_none(), "round constants are too many");
+
+        RoundConstants {
+            beginning_full_round_constants,
+            partial_round_constants,
+            ending_full_round_constants,
+        }
+    }
+}
+
 pub type Poseidon2BabyBearConfig = Poseidon2Config<BabyBearExt4, 16, 7, 1, 4, 13>;
 pub struct Poseidon2Config<
     E: ExtensionField,
@@ -471,19 +507,20 @@ fn generate_sbox<F: PrimeField, const DEGREE: u64, const REGISTERS: usize>(
 
 #[cfg(test)]
 mod tests {
-    use crate::gadgets::{
-        poseidon2::Poseidon2BabyBearConfig, poseidon2_constants::horizen_round_consts,
-    };
-    use ff_ext::BabyBearExt4;
+    use crate::gadgets::poseidon2::Poseidon2BabyBearConfig;
+    use ff_ext::{BabyBearExt4, PoseidonField};
     use gkr_iop::circuit_builder::{CircuitBuilder, ConstraintSystem};
+    use p3::babybear::BabyBear;
 
     type E = BabyBearExt4;
+    type F = BabyBear;
     #[test]
     fn test_poseidon2_gadget() {
         let mut cs = ConstraintSystem::new(|| "poseidon2 gadget test");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
-        let poseidon2_constants = horizen_round_consts();
-        let _ = Poseidon2BabyBearConfig::construct(&mut cb, poseidon2_constants);
+        // let poseidon2_constants = horizen_round_consts();
+        let rc = <F as PoseidonField>::get_default_perm_rc().into();
+        let _ = Poseidon2BabyBearConfig::construct(&mut cb, rc);
     }
 }
