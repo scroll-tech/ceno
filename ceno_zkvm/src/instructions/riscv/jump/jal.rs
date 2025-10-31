@@ -14,7 +14,7 @@ use crate::{
     structs::ProgramParams,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind, PC_STEP_SIZE};
+use ceno_emul::{InsnKind, PC_STEP_SIZE, StepRecord};
 use multilinear_extensions::ToExpr;
 
 pub struct JalConfig<E: ExtensionField> {
@@ -37,6 +37,7 @@ pub struct JalInstruction<E>(PhantomData<E>);
 ///   of native WitIn values for address space arithmetic.
 impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     type InstructionConfig = JalConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", InsnKind::JAL)

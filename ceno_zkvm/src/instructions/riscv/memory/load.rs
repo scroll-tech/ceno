@@ -38,6 +38,7 @@ pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
     type InstructionConfig = LoadConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

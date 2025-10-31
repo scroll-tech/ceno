@@ -15,7 +15,7 @@ use crate::{
     tables::InsnRecord,
     witness::{LkMultiplicity, set_val},
 };
-use ceno_emul::{InsnKind, PC_STEP_SIZE};
+use ceno_emul::{InsnKind, PC_STEP_SIZE, StepRecord};
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
@@ -38,6 +38,7 @@ pub struct JalrInstruction<E>(PhantomData<E>);
 ///   the program table
 impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     type InstructionConfig = JalrConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", InsnKind::JALR)

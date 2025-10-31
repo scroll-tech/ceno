@@ -139,6 +139,7 @@ pub struct MulhConfig<E: ExtensionField> {
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBase<E, I> {
     type InstructionConfig = MulhConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

@@ -13,7 +13,7 @@ use crate::{
     },
     structs::ProgramParams,
 };
-use ceno_emul::InsnKind;
+use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::gadgets::AssertLtConfig;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
@@ -42,6 +42,7 @@ pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

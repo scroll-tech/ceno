@@ -40,6 +40,7 @@ pub struct ShiftImmConfig<E: ExtensionField> {
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

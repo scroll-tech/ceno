@@ -40,6 +40,7 @@ enum SetLessThanDependencies<E: ExtensionField> {
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruction<E, I> {
     type InstructionConfig = SetLessThanConfig<E>;
+    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
