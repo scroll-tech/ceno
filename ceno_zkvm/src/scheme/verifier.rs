@@ -969,6 +969,7 @@ impl TowerVerify {
     }
 }
 
+#[derive(Default)]
 pub struct EccVerifier;
 
 impl EccVerifier {
