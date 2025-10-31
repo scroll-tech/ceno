@@ -43,12 +43,7 @@ fn test_opcode_xori() {
     verify::<XoriOp>("negative imm", TEST, NEG, TEST ^ NEG);
 }
 
-fn verify<I: LogicOp + Default>(
-    name: &'static str,
-    rs1_read: u32,
-    imm: u32,
-    expected_rd_written: u32,
-) {
+fn verify<I: LogicOp>(name: &'static str, rs1_read: u32, imm: u32, expected_rd_written: u32) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
 

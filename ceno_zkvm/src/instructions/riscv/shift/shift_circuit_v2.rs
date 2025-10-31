@@ -371,7 +371,7 @@ pub struct ShiftImmConfig<E: ExtensionField> {
 }
 
 #[derive(Default)]
-pub struct ShiftImmInstruction<E, I: Default>(PhantomData<(E, I)>);
+pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;

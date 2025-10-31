@@ -19,7 +19,7 @@ pub struct ArithConfig<E: ExtensionField> {
 }
 
 #[derive(Default)]
-pub struct ArithInstruction<E, I: Default>(PhantomData<(E, I)>);
+pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 
 #[derive(Default)]
 pub struct AddOp;

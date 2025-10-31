@@ -216,9 +216,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         }
     }
 
-    pub fn register_opcode_circuit<OC: Instruction<E> + Default>(
-        &mut self,
-    ) -> OC::InstructionConfig {
+    pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let (config, gkr_iop_circuit) =

@@ -38,7 +38,7 @@ pub struct SetLessThanImmConfig<E: ExtensionField> {
 }
 
 #[derive(Default)]
-pub struct SetLessThanImmInstruction<E, I: Default>(PhantomData<(E, I)>);
+pub struct SetLessThanImmInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInstruction<E, I> {
     type InstructionConfig = SetLessThanImmConfig<E>;
