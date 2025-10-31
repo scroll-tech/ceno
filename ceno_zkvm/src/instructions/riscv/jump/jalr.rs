@@ -38,7 +38,6 @@ pub struct JalrInstruction<E>(PhantomData<E>);
 ///   the program table
 impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     type InstructionConfig = JalrConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", InsnKind::JALR)

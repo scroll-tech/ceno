@@ -13,7 +13,7 @@ use crate::{
     structs::ProgramParams,
     utils::{split_to_limb, split_to_u8},
 };
-use ceno_emul::{InsnKind, StepRecord};
+use ceno_emul::InsnKind;
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
@@ -277,7 +277,6 @@ pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftRTypeConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -375,7 +374,6 @@ pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

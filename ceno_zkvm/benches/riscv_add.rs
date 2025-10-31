@@ -111,9 +111,7 @@ fn bench_add(c: &mut Criterion) {
                             witness: polys,
                             structural_witness: vec![],
                             public_input: vec![],
-                            num_read_instances: num_instances,
-                            num_write_instances: num_instances,
-                            num_instances,
+                            num_instances: vec![num_instances],
                             has_ecc_ops: false,
                         };
                         let _ = prover

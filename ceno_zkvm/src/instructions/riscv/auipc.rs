@@ -18,7 +18,7 @@ use crate::{
     utils::split_to_u8,
     witness::LkMultiplicity,
 };
-use ceno_emul::{InsnKind, StepRecord};
+use ceno_emul::InsnKind;
 use gkr_iop::tables::{LookupTable, ops::XorTable};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
@@ -38,7 +38,6 @@ pub struct AuipcInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     type InstructionConfig = AuipcConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", InsnKind::AUIPC)

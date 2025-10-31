@@ -30,7 +30,6 @@ pub struct LargeEcallDummy<E, S>(PhantomData<(E, S)>);
 
 impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S> {
     type InstructionConfig = LargeEcallConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         S::NAME.to_owned()

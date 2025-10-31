@@ -33,7 +33,6 @@ pub struct InstructionConfig<E: ExtensionField> {
 
 impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     type InstructionConfig = InstructionConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", Self::INST_KIND)

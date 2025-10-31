@@ -37,7 +37,6 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     for StoreInstruction<E, I, N_ZEROS>
 {
     type InstructionConfig = StoreConfig<E, N_ZEROS>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

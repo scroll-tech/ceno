@@ -10,7 +10,7 @@ use crate::{
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
 };
-use ceno_emul::{CENO_PLATFORM, Platform};
+use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
@@ -344,7 +344,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
         config: &OC::InstructionConfig,
-        records: Vec<OC::Record>,
+        records: Vec<StepRecord>,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
 

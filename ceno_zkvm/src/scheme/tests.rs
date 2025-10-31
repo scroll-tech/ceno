@@ -63,7 +63,6 @@ struct TestCircuit<E: ExtensionField, const RW: usize, const L: usize> {
 
 impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for TestCircuit<E, RW, L> {
     type InstructionConfig = TestConfig;
-    type Record = StepRecord;
 
     fn name() -> String {
         "TEST".into()

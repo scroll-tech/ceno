@@ -42,7 +42,6 @@ pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

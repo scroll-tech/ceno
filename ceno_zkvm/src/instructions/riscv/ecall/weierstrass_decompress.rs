@@ -67,7 +67,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
     for WeierstrassDecompressInstruction<E, EC>
 {
     type InstructionConfig = EcallWeierstrassDecompressConfig<E, EC>;
-    type Record = StepRecord;
 
     fn name() -> String {
         "Ecall_WeierstrassDecompress_".to_string() + format!("{:?}", EC::CURVE_TYPE).as_str()

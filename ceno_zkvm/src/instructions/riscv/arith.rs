@@ -39,7 +39,6 @@ pub type SubInstruction<E> = ArithInstruction<E, SubOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
