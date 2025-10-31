@@ -41,7 +41,7 @@ use witness::{InstancePaddingStrategy, next_pow2_instance_padding, set_val};
 use crate::{instructions::riscv::constants::UInt, scheme::constants::SEPTIC_EXTENSION_DEGREE};
 
 /// A record for a read/write into the global set
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct GlobalRecord {
     pub addr: u32,
     pub ram_type: RAMType,
