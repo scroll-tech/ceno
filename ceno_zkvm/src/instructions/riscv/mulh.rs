@@ -123,7 +123,12 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| Ok(MulhInstructionBase::<E, I>::construct_circuit(cb, &ProgramParams::default())),
+                |cb| {
+                    Ok(MulhInstructionBase::<E, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
             )
             .unwrap()
             .unwrap();
@@ -206,7 +211,12 @@ mod test {
         let config = cb
             .namespace(
                 || "mulh",
-                |cb| Ok(MulhInstruction::<E>::construct_circuit(cb, &ProgramParams::default())),
+                |cb| {
+                    Ok(MulhInstruction::<E>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
             )
             .unwrap()
             .unwrap();
@@ -285,7 +295,12 @@ mod test {
         let config = cb
             .namespace(
                 || "mulhsu",
-                |cb| Ok(MulhsuInstruction::construct_circuit(cb, &ProgramParams::default())),
+                |cb| {
+                    Ok(MulhsuInstruction::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
             )
             .unwrap()
             .unwrap();

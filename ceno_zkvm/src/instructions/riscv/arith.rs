@@ -173,7 +173,12 @@ mod test {
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| Ok(ArithInstruction::<GoldilocksExt2, I>::construct_circuit(cb, &ProgramParams::default())),
+                |cb| {
+                    Ok(ArithInstruction::<GoldilocksExt2, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
             )
             .unwrap()
             .unwrap();

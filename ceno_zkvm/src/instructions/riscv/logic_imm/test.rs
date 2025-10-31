@@ -63,7 +63,10 @@ fn verify<I: LogicOp + Default>(
         .namespace(
             || format!("{prefix}_({name})"),
             |cb| {
-                let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(cb, &ProgramParams::default());
+                let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(
+                    cb,
+                    &ProgramParams::default(),
+                );
                 Ok(config)
             },
         )

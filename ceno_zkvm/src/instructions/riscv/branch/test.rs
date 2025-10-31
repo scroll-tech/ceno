@@ -262,7 +262,8 @@ fn test_bge_circuit() -> Result<(), ZKVMError> {
 fn impl_bge_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<(), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "riscv");
     let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-    let config = BgeInstruction::construct_circuit(&mut circuit_builder, &ProgramParams::default())?;
+    let config =
+        BgeInstruction::construct_circuit(&mut circuit_builder, &ProgramParams::default())?;
 
     let pc_after = if taken {
         ByteAddr(MOCK_PC_START.0 - 8)

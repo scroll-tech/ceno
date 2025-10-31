@@ -152,7 +152,12 @@ mod tests {
         let config = cb
             .namespace(
                 || format!("{prefix}_({name})"),
-                |cb| Ok(ShiftLogicalInstruction::<E, I>::construct_circuit(cb, &ProgramParams::default())),
+                |cb| {
+                    Ok(ShiftLogicalInstruction::<E, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
             )
             .unwrap()
             .unwrap();
