@@ -28,12 +28,11 @@ fn test_opcode_jal() {
 fn verify_test_opcode_jal<E: ExtensionField>(pc_offset: i32) {
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let inst = JalInstruction::default();
     let config = cb
         .namespace(
             || "jal",
             |cb| {
-                let config = inst.construct_circuit(cb, &ProgramParams::default());
+                let config = JalInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -89,12 +88,11 @@ fn test_opcode_jalr() {
 fn verify_test_opcode_jalr<E: ExtensionField>(rs1_read: Word, imm: i32) {
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let inst = JalrInstruction::default();
     let config = cb
         .namespace(
             || "jalr",
             |cb| {
-                let config = inst.construct_circuit(cb, &ProgramParams::default());
+                let config = JalrInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )

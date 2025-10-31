@@ -9,25 +9,19 @@ use crate::instructions::riscv::shift::shift_circuit_v2::ShiftImmInstruction;
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::instructions::riscv::shift_imm::shift_imm_circuit::ShiftImmInstruction;
 
-#[derive(Default)]
 pub struct SlliOp;
-
 impl RIVInstruction for SlliOp {
     const INST_KIND: InsnKind = InsnKind::SLLI;
 }
 pub type SlliInstruction<E> = ShiftImmInstruction<E, SlliOp>;
 
-#[derive(Default)]
 pub struct SraiOp;
-
 impl RIVInstruction for SraiOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SRAI;
 }
 pub type SraiInstruction<E> = ShiftImmInstruction<E, SraiOp>;
 
-#[derive(Default)]
 pub struct SrliOp;
-
 impl RIVInstruction for SrliOp {
     const INST_KIND: ceno_emul::InsnKind = InsnKind::SRLI;
 }
@@ -149,8 +143,10 @@ mod test {
             .namespace(
                 || format!("{prefix}_({name})"),
                 |cb| {
-                    let inst = ShiftImmInstruction::<E, I>::default();
-                    let config = inst.construct_circuit(cb, &ProgramParams::default());
+                    let config = ShiftImmInstruction::<E, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    );
                     Ok(config)
                 },
             )

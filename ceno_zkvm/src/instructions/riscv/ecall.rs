@@ -14,9 +14,7 @@ pub use halt::HaltInstruction;
 
 use super::{RIVInstruction, dummy::DummyInstruction};
 
-#[derive(Default)]
 pub struct EcallOp;
-
 impl RIVInstruction for EcallOp {
     const INST_KIND: InsnKind = InsnKind::ECALL;
 }

@@ -13,7 +13,7 @@ use crate::{
     structs::ProgramParams,
     utils::{split_to_limb, split_to_u8},
 };
-use ceno_emul::{InsnKind, StepRecord};
+use ceno_emul::InsnKind;
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
@@ -272,19 +272,16 @@ pub struct ShiftRTypeConfig<E: ExtensionField> {
     r_insn: RInstructionConfig<E>,
 }
 
-#[derive(Default)]
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftRTypeConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
@@ -371,19 +368,16 @@ pub struct ShiftImmConfig<E: ExtensionField> {
     imm: WitIn,
 }
 
-#[derive(Default)]
-pub struct ShiftImmInstruction<E, I: Default>(PhantomData<(E, I)>);
+pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {

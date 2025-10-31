@@ -50,19 +50,16 @@ pub struct EcallKeccakConfig<E: ExtensionField> {
 }
 
 /// KeccakInstruction can handle any instruction and produce its side-effects.
-#[derive(Default)]
 pub struct KeccakInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
     type InstructionConfig = EcallKeccakConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         "Ecall_Keccak".to_string()
     }
 
     fn construct_circuit(
-        &self,
         _circuit_builder: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -70,7 +67,6 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
     }
 
     fn build_gkr_iop_circuit(
-        &self,
         cb: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {

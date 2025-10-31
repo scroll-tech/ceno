@@ -56,21 +56,18 @@ struct TestConfig {
     pub(crate) reg_id: WitIn,
 }
 
-#[derive(Default)]
 struct TestCircuit<E: ExtensionField, const RW: usize, const L: usize> {
     phantom: PhantomData<E>,
 }
 
 impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for TestCircuit<E, RW, L> {
     type InstructionConfig = TestConfig;
-    type Record = StepRecord;
 
     fn name() -> String {
         "TEST".into()
     }
 
     fn construct_circuit(
-        &self,
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

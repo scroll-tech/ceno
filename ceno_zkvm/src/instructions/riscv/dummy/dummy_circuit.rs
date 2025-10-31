@@ -20,19 +20,16 @@ use p3::field::FieldAlgebra;
 use witness::set_val;
 
 /// DummyInstruction can handle any instruction and produce its side-effects.
-#[derive(Default)]
 pub struct DummyInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E, I> {
     type InstructionConfig = DummyConfig<E>;
-    type Record = StepRecord;
 
     fn name() -> String {
         format!("{:?}_DUMMY", I::INST_KIND)
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

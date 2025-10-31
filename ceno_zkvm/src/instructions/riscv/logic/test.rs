@@ -18,12 +18,11 @@ const B: Word = 0xef552020;
 fn test_opcode_and() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let inst = AndInstruction::default();
     let config = cb
         .namespace(
             || "and",
             |cb| {
-                let config = inst.construct_circuit(cb, &ProgramParams::default());
+                let config = AndInstruction::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -62,12 +61,11 @@ fn test_opcode_and() {
 fn test_opcode_or() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let inst = OrInstruction::default();
     let config = cb
         .namespace(
             || "or",
             |cb| {
-                let config = inst.construct_circuit(cb, &ProgramParams::default());
+                let config = OrInstruction::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -106,12 +104,11 @@ fn test_opcode_or() {
 fn test_opcode_xor() {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let inst = XorInstruction::default();
     let config = cb
         .namespace(
             || "xor",
             |cb| {
-                let config = inst.construct_circuit(cb, &ProgramParams::default());
+                let config = XorInstruction::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )

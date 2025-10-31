@@ -55,7 +55,6 @@ pub type TowerRelationOutput<E> = (
 
 // accumulate N=2^n EC points into one EC point using affine coordinates
 // in one layer which borrows ideas from the [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
-#[derive(Default)]
 pub struct CpuEccProver;
 
 impl CpuEccProver {

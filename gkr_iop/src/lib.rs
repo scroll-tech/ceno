@@ -78,12 +78,9 @@ pub struct ProtocolVerifier<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );
 
-#[derive(
-    Clone, Debug, Copy, Default, EnumIter, PartialEq, Eq, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, Debug, Copy, EnumIter, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(usize)]
 pub enum RAMType {
-    #[default]
     GlobalState = 0,
     Register,
     Memory,

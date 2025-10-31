@@ -43,15 +43,9 @@ fn test_opcode_xori() {
     verify::<XoriOp>("negative imm", TEST, NEG, TEST ^ NEG);
 }
 
-fn verify<I: LogicOp + Default>(
-    name: &'static str,
-    rs1_read: u32,
-    imm: u32,
-    expected_rd_written: u32,
-) {
+fn verify<I: LogicOp>(name: &'static str, rs1_read: u32, imm: u32, expected_rd_written: u32) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let inst = LogicInstruction::<GoldilocksExt2, I>::default();
 
     let (prefix, rd_written) = match I::INST_KIND {
         InsnKind::ANDI => ("ANDI", rs1_read & imm),
@@ -64,7 +58,10 @@ fn verify<I: LogicOp + Default>(
         .namespace(
             || format!("{prefix}_({name})"),
             |cb| {
-                let config = inst.construct_circuit(cb, &ProgramParams::default());
+                let config = LogicInstruction::<GoldilocksExt2, I>::construct_circuit(
+                    cb,
+                    &ProgramParams::default(),
+                );
                 Ok(config)
             },
         )

@@ -2,6 +2,7 @@ use crate::{
     circuit_builder::CircuitBuilder, e2e::ShardContext, error::ZKVMError, structs::ProgramParams,
     tables::RMMCollections, witness::LkMultiplicity,
 };
+use ceno_emul::StepRecord;
 use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{
     chip::Chip,
@@ -23,7 +24,6 @@ pub mod riscv;
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
-    type Record: Sync;
 
     fn padding_strategy() -> InstancePaddingStrategy {
         InstancePaddingStrategy::Default
@@ -33,17 +33,15 @@ pub trait Instruction<E: ExtensionField> {
 
     /// construct circuit and manipulate circuit builder, then return the respective config
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError>;
 
     fn build_gkr_iop_circuit(
-        &self,
         cb: &mut CircuitBuilder<E>,
         param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
-        let config = self.construct_circuit(cb, param)?;
+        let config = Self::construct_circuit(cb, param)?;
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();
         let lk_len = cb.cs.lk_expressions.len();
@@ -101,7 +99,7 @@ pub trait Instruction<E: ExtensionField> {
         shard_ctx: &mut ShardContext<'a>,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
-        step: &Self::Record,
+        step: &StepRecord,
     ) -> Result<(), ZKVMError>;
 
     fn assign_instances(
@@ -109,7 +107,7 @@ pub trait Instruction<E: ExtensionField> {
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<Self::Record>,
+        steps: Vec<StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
