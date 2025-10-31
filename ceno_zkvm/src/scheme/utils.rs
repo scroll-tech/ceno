@@ -322,7 +322,9 @@ pub fn infer_tower_product_witness<E: ExtensionField>(
                     }
                 });
 
-                unsafe { evaluations.set_len(output_len); }
+                unsafe {
+                    evaluations.set_len(output_len);
+                }
                 evaluations.into_mle()
             })
             .collect_vec();
