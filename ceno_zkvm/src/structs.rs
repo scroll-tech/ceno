@@ -481,13 +481,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 .insert(
                     GlobalChip::<E>::name(),
                     vec![
+                        // global write -> local read
                         shard_ctx
-                            .read_records()
+                            .write_records()
                             .iter()
                             .map(|records| records.len())
                             .sum(),
+                        // global read -> local write
                         shard_ctx
-                            .write_records()
+                            .read_records()
                             .iter()
                             .map(|records| records.len())
                             .sum(),
