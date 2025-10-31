@@ -61,7 +61,6 @@ impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
     }
 }
 
-#[derive(Clone)]
 pub struct TowerProverSpec<'a, PB: ProverBackend> {
     pub witness: Vec<Vec<PB::MultilinearPoly<'a>>>,
 }

@@ -469,7 +469,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             cs.zkvm_v1_css.num_witin as usize,
             cs.zkvm_v1_css.num_structural_witin as usize,
             self.combined_lk_mlt.as_ref().unwrap(),
-            &global_input,
+            &(global_input, shard_ctx.cur_shard()),
         )?;
         // set num_read, num_write as separate instance
         assert!(
