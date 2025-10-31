@@ -1,8 +1,7 @@
 use crate::{
     scheme::{
-        constants::{MIN_PAR_SIZE, SEPTIC_JACOBIAN_NUM_MLES},
+        constants::MIN_PAR_SIZE,
         hal::{MainSumcheckProver, ProofInput, ProverDevice},
-        septic_curve::{SepticExtension, SepticJacobianPoint},
     },
     structs::ComposedConstrainSystem,
 };
@@ -27,7 +26,7 @@ use rayon::{
     },
     prelude::ParallelSliceMut,
 };
-use std::{array::from_fn, iter, sync::Arc};
+use std::{iter, sync::Arc};
 use witness::next_pow2_instance_padding;
 
 // first computes the masked mle'[j] = mle[j] if j < num_instance, else default
@@ -294,10 +293,7 @@ pub fn infer_tower_product_witness<E: ExtensionField>(
             .map(|index| {
                 // avoid the overhead of vector initialization
                 let mut evaluations: Vec<E> = Vec::with_capacity(output_len);
-                unsafe {
-                    // will be filled immediately
-                    evaluations.set_len(output_len);
-                }
+                let remaining = evaluations.spare_capacity_mut();
 
                 input_layer.chunks_exact(2).enumerate().for_each(|(i, f)| {
                     match (f[0].evaluations(), f[1].evaluations()) {
@@ -307,24 +303,26 @@ pub fn infer_tower_product_witness<E: ExtensionField>(
                             if i == 0 {
                                 (start..(start + output_len))
                                     .into_par_iter()
-                                    .zip(evaluations.par_iter_mut())
+                                    .zip(remaining.par_iter_mut())
                                     .with_min_len(MIN_PAR_SIZE)
                                     .for_each(|(index, evaluations)| {
-                                        *evaluations = f1[index] * f2[index]
+                                        evaluations.write(f1[index] * f2[index]);
                                     });
                             } else {
                                 (start..(start + output_len))
                                     .into_par_iter()
-                                    .zip(evaluations.par_iter_mut())
+                                    .zip(remaining.par_iter_mut())
                                     .with_min_len(MIN_PAR_SIZE)
                                     .for_each(|(index, evaluations)| {
-                                        *evaluations *= f1[index] * f2[index]
+                                        evaluations.write(f1[index] * f2[index]);
                                     });
                             }
                         }
                         _ => unreachable!("must be extension field"),
                     }
                 });
+
+                unsafe { evaluations.set_len(output_len); }
                 evaluations.into_mle()
             })
             .collect_vec();
@@ -334,94 +332,6 @@ pub fn infer_tower_product_witness<E: ExtensionField>(
     wit_layers.reverse();
 
     wit_layers
-}
-
-/// Infer from input layer (layer n) to the output layer (layer 0)
-/// Note that each layer has 3 * 7 * 2 multilinear polynomials since we use jacobian coordinates.
-///
-/// The relation between layer i and layer i+1 is as follows:
-/// (x1', y1', z1')[b] = jacobian_add( (x1, y1, z1)[0,b], (x2, y2, z2)[1,b] )
-/// (x2', y2', z2')[b] = jacobian_add( (x3, y3, z3)[0,b], (x4, y4, z4)[1,b] )
-///
-/// TODO handle jacobian_add & jacobian_double at the same time
-pub fn infer_septic_sum_witness<E: ExtensionField>(
-    p_mles: Vec<MultilinearExtension<E>>,
-) -> Vec<Vec<MultilinearExtension<E>>> {
-    assert_eq!(p_mles.len(), SEPTIC_JACOBIAN_NUM_MLES * 2);
-    assert!(p_mles.iter().map(|p| p.num_vars()).all_equal());
-
-    // +1 as the input layer has 2*N points where N = 2^num_vars
-    // and the output layer has 2 points
-    let num_layers = p_mles[0].num_vars() + 1;
-    println!("{num_layers} layers in total");
-
-    let mut layers = Vec::with_capacity(num_layers);
-    layers.push(p_mles);
-
-    for layer in (0..num_layers - 1).rev() {
-        let input_layer = layers.last().unwrap();
-        let p = input_layer[0..SEPTIC_JACOBIAN_NUM_MLES]
-            .iter()
-            .map(|mle| mle.get_base_field_vec())
-            .collect_vec();
-        let q = input_layer[SEPTIC_JACOBIAN_NUM_MLES..]
-            .iter()
-            .map(|mle| mle.get_base_field_vec())
-            .collect_vec();
-
-        let output_len = p[0].len() / 2;
-        let mut outputs: Vec<E::BaseField> =
-            Vec::with_capacity(SEPTIC_JACOBIAN_NUM_MLES * 2 * output_len);
-        unsafe {
-            // will be filled immediately
-            outputs.set_len(SEPTIC_JACOBIAN_NUM_MLES * 2 * output_len);
-        }
-
-        (0..2).for_each(|chunk| {
-            (0..output_len)
-                .into_par_iter()
-                .with_min_len(MIN_PAR_SIZE)
-                .zip_eq(outputs.par_chunks_mut(SEPTIC_JACOBIAN_NUM_MLES * 2))
-                .for_each(|(idx, output)| {
-                    let row = chunk * output_len + idx;
-                    let offset = chunk * SEPTIC_JACOBIAN_NUM_MLES;
-
-                    let p1 = SepticJacobianPoint {
-                        x: SepticExtension(from_fn(|i| p[i][row])),
-                        y: SepticExtension(from_fn(|i| p[i + 7][row])),
-                        z: SepticExtension(from_fn(|i| p[i + 14][row])),
-                    };
-                    let p2 = SepticJacobianPoint {
-                        x: SepticExtension(from_fn(|i| q[i][row])),
-                        y: SepticExtension(from_fn(|i| q[i + 7][row])),
-                        z: SepticExtension(from_fn(|i| q[i + 14][row])),
-                    };
-                    assert!(p1.is_on_curve(), "{layer}, {row}");
-                    assert!(p2.is_on_curve(), "{layer}, {row}");
-
-                    let p3 = &p1 + &p2;
-
-                    output[offset..offset + 7].clone_from_slice(&p3.x);
-                    output[offset + 7..offset + 14].clone_from_slice(&p3.y);
-                    output[offset + 14..offset + 21].clone_from_slice(&p3.z);
-                });
-        });
-
-        // transpose
-        let output_mles = (0..SEPTIC_JACOBIAN_NUM_MLES * 2)
-            .map(|i| {
-                (0..output_len)
-                    .into_par_iter()
-                    .map(|j| outputs[j * SEPTIC_JACOBIAN_NUM_MLES * 2 + i])
-                    .collect::<Vec<_>>()
-                    .into_mle()
-            })
-            .collect_vec();
-        layers.push(output_mles);
-    }
-
-    layers.reverse();
-    layers
 }
 
 #[tracing::instrument(
@@ -641,23 +551,18 @@ pub fn gkr_witness<
 #[cfg(test)]
 mod tests {
 
-    use ff_ext::{BabyBearExt4, FieldInto, GoldilocksExt2};
+    use ff_ext::{FieldInto, GoldilocksExt2};
     use itertools::Itertools;
     use multilinear_extensions::{
         commutative_op_mle_pair,
         mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
         smart_slice::SmartSlice,
-        util::{ceil_log2, transpose},
+        util::ceil_log2,
     };
-    use p3::{babybear::BabyBear, field::FieldAlgebra};
+    use p3::field::FieldAlgebra;
 
-    use crate::scheme::{
-        constants::SEPTIC_JACOBIAN_NUM_MLES,
-        septic_curve::{SepticExtension, SepticJacobianPoint, SepticPoint},
-        utils::{
-            infer_septic_sum_witness, infer_tower_logup_witness, infer_tower_product_witness,
-            interleaving_mles_to_mles,
-        },
+    use crate::scheme::utils::{
+        infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
     };
 
     #[test]
@@ -963,69 +868,5 @@ mod tests {
                     .sum::<E>(),
             ]))
         );
-    }
-
-    #[test]
-    fn test_infer_septic_addition_witness() {
-        type F = BabyBear;
-        type E = BabyBearExt4;
-
-        let n_points = 1 << 6;
-        let mut rng = rand::thread_rng();
-        // sample n points
-        let points: Vec<SepticJacobianPoint<F>> = (0..n_points)
-            .map(|_| SepticJacobianPoint::<F>::random(&mut rng))
-            .collect_vec();
-
-        // transform points to row major matrix
-        let trace = points[0..n_points / 2]
-            .iter()
-            .zip(points[n_points / 2..n_points].iter())
-            .map(|(p, q)| {
-                [p, q]
-                    .iter()
-                    .flat_map(|p| p.x.0.iter().chain(p.y.0.iter()).chain(p.z.0.iter()))
-                    .copied()
-                    .collect_vec()
-            })
-            .collect_vec();
-
-        // transpose row major matrix to column major matrix
-        let p_mles: Vec<MultilinearExtension<E>> = transpose(trace)
-            .into_iter()
-            .map(|v| v.into_mle())
-            .collect_vec();
-
-        let layers = infer_septic_sum_witness(p_mles);
-        let output_layer = &layers[0];
-        assert!(output_layer.iter().all(|mle| mle.num_vars() == 0));
-        assert!(output_layer.len() == SEPTIC_JACOBIAN_NUM_MLES * 2);
-
-        // recover points from output layer
-        let output_points: Vec<SepticJacobianPoint<F>> = output_layer
-            .chunks_exact(SEPTIC_JACOBIAN_NUM_MLES)
-            .map(|mles| {
-                mles.iter()
-                    .map(|mle| mle.get_base_field_vec()[0])
-                    .collect_vec()
-            })
-            .map(|chunk| SepticJacobianPoint {
-                x: SepticExtension(chunk[0..7].try_into().unwrap()),
-                y: SepticExtension(chunk[7..14].try_into().unwrap()),
-                z: SepticExtension(chunk[14..21].try_into().unwrap()),
-            })
-            .collect_vec();
-        assert!(output_points.iter().all(|p| p.is_on_curve()));
-        assert_eq!(output_points.len(), 2);
-
-        let point_acc: SepticPoint<F> = output_points
-            .into_iter()
-            .sum::<SepticJacobianPoint<F>>()
-            .into_affine();
-        let expected_acc: SepticPoint<F> = points
-            .into_iter()
-            .sum::<SepticJacobianPoint<F>>()
-            .into_affine();
-        assert_eq!(point_acc, expected_acc);
     }
 }
