@@ -48,6 +48,7 @@ derive = { path = "../derive" }
 generic-array.workspace = true
 generic_static = "0.2"
 num.workspace = true
+num-bigint = "0.4.6"
 parse-size = "1.1"
 rand.workspace = true
 sp1-curves.workspace = true

@@ -27,7 +27,7 @@ use crate::{
         },
     },
     hal::{ProverBackend, ProverDevice},
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
     utils::rotation_selector_eval,
 };
 
@@ -58,7 +58,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         pub_io_evals: &[PB::E],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (LayerProof<PB::E>, Point<PB::E>);
 
     #[allow(clippy::too_many_arguments)]
@@ -70,7 +70,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> Result<LayerClaims<E>, BackendError>;
 }
 
@@ -177,7 +177,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         pub_io_evals: &[PB::E],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (LayerProof<PB::E>, Point<PB::E>) {
         <PD as ZerocheckLayerProver<PB>>::prove(
             self,
@@ -188,7 +188,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             pub_io_evals,
             challenges,
             transcript,
-            num_instances,
+            selector_ctxs,
         )
     }
 
@@ -200,7 +200,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> Result<LayerClaims<E>, BackendError> {
         assert_eq!(
             self.out_sel_and_eval_exprs.len(),
@@ -284,17 +284,20 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
         // eval eq and set to respective witin
-        izip!(&self.out_sel_and_eval_exprs, &eval_and_dedup_points).for_each(
-            |((sel_type, _), (_, out_point))| {
-                sel_type.evaluate(
-                    &mut main_evals,
-                    out_point.as_ref().unwrap(),
-                    &in_point,
-                    num_instances,
-                    self.n_witin,
-                );
-            },
-        );
+        izip!(
+            &self.out_sel_and_eval_exprs,
+            &eval_and_dedup_points,
+            selector_ctxs.iter()
+        )
+        .for_each(|((sel_type, _), (_, out_point), selector_ctx)| {
+            sel_type.evaluate(
+                &mut main_evals,
+                out_point.as_ref().unwrap(),
+                &in_point,
+                selector_ctx,
+                self.n_witin,
+            );
+        });
 
         let got_claim = eval_by_expr_with_instance(
             &[],
@@ -450,10 +453,11 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
         let expr = match sel_type {
             SelectorType::None => zero_check_expr,
             SelectorType::Whole(sel)
-            | SelectorType::Prefix(_, sel)
+            | SelectorType::Prefix(sel)
             | SelectorType::OrderedSparse32 {
                 expression: sel, ..
-            } => match_expr(sel) * zero_check_expr,
+            }
+            | SelectorType::QuarkBinaryTreeLessThan(sel) => match_expr(sel) * zero_check_expr,
         };
         zero_check_exprs.push(expr);
     }

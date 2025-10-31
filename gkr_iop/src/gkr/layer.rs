@@ -21,7 +21,7 @@ use crate::{
     error::BackendError,
     evaluation::EvalExpression,
     hal::{MultilinearPolynomial, ProverBackend, ProverDevice},
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
 };
 
 pub mod cpu;
@@ -184,7 +184,7 @@ impl<E: ExtensionField> Layer<E> {
         pub_io_evals: &[E],
         challenges: &mut Vec<E>,
         transcript: &mut T,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> LayerProof<E> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
@@ -204,7 +204,7 @@ impl<E: ExtensionField> Layer<E> {
                     pub_io_evals,
                     challenges,
                     transcript,
-                    num_instances,
+                    selector_ctxs,
                 )
             }
             LayerType::Linear => {
@@ -232,7 +232,7 @@ impl<E: ExtensionField> Layer<E> {
         pub_io_evals: &[E],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> Result<(), BackendError> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
@@ -246,7 +246,7 @@ impl<E: ExtensionField> Layer<E> {
                 pub_io_evals,
                 challenges,
                 transcript,
-                num_instances,
+                selector_ctxs,
             )?,
             LayerType::Linear => {
                 assert_eq!(eval_and_dedup_points.len(), 1);

@@ -4,6 +4,7 @@ use transcript::Transcript;
 use crate::{
     gkr::layer::{Layer, LayerWitness, sumcheck_layer::LayerProof},
     hal::ProverBackend,
+    selector::SelectorContext,
 };
 
 pub trait LinearLayerProver<PB: ProverBackend> {
@@ -37,6 +38,6 @@ pub trait ZerocheckLayerProver<PB: ProverBackend> {
         pub_io_evals: &[PB::E],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (LayerProof<PB::E>, Point<PB::E>);
 }

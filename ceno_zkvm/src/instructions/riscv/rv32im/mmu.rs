@@ -1,12 +1,13 @@
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
+    instructions::global::GlobalChip,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsCircuit, LocalFinalCircuit,
-        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable, RBCircuit,
-        RegTable, RegTableInitCircuit, StackInitCircuit, StackTable, StaticMemInitCircuit,
-        StaticMemTable, TableCircuit,
+        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable, RegTable,
+        RegTableInitCircuit, StackInitCircuit, StackTable, StaticMemInitCircuit, StaticMemTable,
+        TableCircuit,
     },
 };
 use ceno_emul::{Addr, Cycle, IterAddresses, WORD_SIZE, Word};
@@ -31,7 +32,7 @@ pub struct MmuConfig<'a, E: ExtensionField> {
     /// finalized circuit for all MMIO
     pub local_final_circuit: <LocalFinalCircuit<'a, E> as TableCircuit<E>>::TableConfig,
     /// ram bus to deal with cross shard read/write
-    pub ram_bus_circuit: <RBCircuit<'a, E> as TableCircuit<E>>::TableConfig,
+    pub ram_bus_circuit: <GlobalChip<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
@@ -47,7 +48,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         let stack_init_config = cs.register_table_circuit::<StackInitCircuit<E>>();
         let heap_init_config = cs.register_table_circuit::<HeapInitCircuit<E>>();
         let local_final_circuit = cs.register_table_circuit::<LocalFinalCircuit<E>>();
-        let ram_bus_circuit = cs.register_table_circuit::<RBCircuit<E>>();
+        let ram_bus_circuit = cs.register_table_circuit::<GlobalChip<E>>();
 
         Self {
             reg_init_config,
@@ -94,7 +95,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         fixed.register_table_circuit::<StackInitCircuit<E>>(cs, &self.stack_init_config, &());
         fixed.register_table_circuit::<HeapInitCircuit<E>>(cs, &self.heap_init_config, &());
         fixed.register_table_circuit::<LocalFinalCircuit<E>>(cs, &self.local_final_circuit, &());
-        fixed.register_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, &());
+        // fixed.register_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, &());
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -156,14 +157,13 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         .into_iter()
         .filter(|(_, record)| !record.is_empty())
         .collect_vec();
-        // take all mem result and
+
         witness.assign_table_circuit::<LocalFinalCircuit<E>>(
             cs,
             &self.local_final_circuit,
             &(shard_ctx, all_records.as_slice()),
         )?;
-
-        witness.assign_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, shard_ctx)?;
+        witness.assign_global_chip_circuit(cs, shard_ctx, &self.ram_bus_circuit)?;
 
         Ok(())
     }
