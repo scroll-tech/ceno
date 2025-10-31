@@ -27,7 +27,7 @@ use multilinear_extensions::{
 };
 use p3::{
     field::{Field, FieldAlgebra},
-    matrix::dense::RowMajorMatrix,
+    matrix::{Matrix, dense::RowMajorMatrix},
     symmetric::Permutation,
 };
 use rayon::{
@@ -353,6 +353,21 @@ impl<E: ExtensionField> GlobalChip<E> {
 
         Ok(())
     }
+
+    fn extract_ec_sum(
+        config: &GlobalConfig<E>,
+        rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    ) -> Vec<<E as ExtensionField>::BaseField> {
+        assert!(rmm.height() >= 2);
+        let instance = &rmm[rmm.height() - 2];
+
+        config
+            .x
+            .iter()
+            .chain(config.y.iter())
+            .map(|witin| instance[witin.id as usize])
+            .collect_vec()
+    }
 }
 
 impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
@@ -643,7 +658,10 @@ mod tests {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::global::{GlobalChip, GlobalChipInput, GlobalRecord},
+        instructions::{
+            global::{GlobalChip, GlobalChipInput, GlobalRecord},
+            riscv::constants::GLOBAL_RW_SUM_IDX,
+        },
         scheme::{
             PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
             septic_curve::SepticPoint, verifier::ZKVMVerifier,
@@ -756,6 +774,17 @@ mod tests {
             &input,
         )
         .unwrap();
+
+        // api extract ec sum from rmm witness
+        assert_eq!(
+            public_value
+                .to_vec::<E>()
+                .into_iter()
+                .skip(GLOBAL_RW_SUM_IDX)
+                .flatten()
+                .collect_vec(),
+            GlobalChip::extract_ec_sum(&config, &witness[0])
+        );
 
         let composed_cs = ComposedConstrainSystem {
             zkvm_v1_css: cs,
