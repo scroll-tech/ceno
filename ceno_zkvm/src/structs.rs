@@ -2,17 +2,21 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::Instruction,
+    instructions::{
+        Instruction,
+        global::{GlobalChip, GlobalChipInput, GlobalPoint, GlobalRecord},
+    },
     scheme::septic_curve::SepticPoint,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
 };
 use ceno_emul::{CENO_PLATFORM, Platform};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -157,7 +161,8 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     }
 
     pub fn is_opcode_circuit(&self) -> bool {
-        self.gkr_circuit.is_some()
+        // TODO: is global chip opcode circuit??
+        self.gkr_circuit.is_some() || self.has_ecc_ops()
     }
 
     /// return number of lookup operation
@@ -321,6 +326,8 @@ pub struct ZKVMWitnesses<E: ExtensionField> {
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, Multiplicity<u64>>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
+    // in ram bus chip, num_instances length would be > 1
+    pub num_instances: BTreeMap<String, Vec<usize>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
@@ -353,6 +360,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             cs.zkvm_v1_css.num_structural_witin as usize,
             records,
         )?;
+        assert!(
+            self.num_instances
+                .insert(OC::name(), vec![witness[0].num_instances()])
+                .is_none()
+        );
         assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
@@ -406,8 +418,95 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
+        let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
+        assert!(
+            self.num_instances
+                .insert(TC::name(), vec![num_instances])
+                .is_none()
+        );
         assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
         assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
+
+        Ok(())
+    }
+
+    pub fn assign_global_chip_circuit(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &ShardContext,
+        config: &<GlobalChip<E> as TableCircuit<E>>::TableConfig,
+    ) -> Result<(), ZKVMError> {
+        let perm = <E::BaseField as PoseidonField>::get_default_perm();
+        let global_input = shard_ctx
+            .read_records()
+            .par_iter()
+            .flat_map_iter(|records| {
+                records.iter().map(|(vma, record)| {
+                    let global_read: GlobalRecord = (vma, record, false).into();
+                    let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
+                    GlobalChipInput {
+                        record: global_read,
+                        ec_point,
+                    }
+                })
+            })
+            .chain(
+                shard_ctx
+                    .write_records()
+                    .par_iter()
+                    .flat_map_iter(|records| {
+                        records.iter().map(|(vma, record)| {
+                            let global_write: GlobalRecord = (vma, record, true).into();
+                            let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
+                            GlobalChipInput {
+                                record: global_write,
+                                ec_point,
+                            }
+                        })
+                    }),
+            )
+            .collect::<Vec<_>>();
+        assert!(self.combined_lk_mlt.is_some());
+        let cs = cs.get_cs(&GlobalChip::<E>::name()).unwrap();
+        let witness = GlobalChip::assign_instances(
+            config,
+            cs.zkvm_v1_css.num_witin as usize,
+            cs.zkvm_v1_css.num_structural_witin as usize,
+            self.combined_lk_mlt.as_ref().unwrap(),
+            &global_input,
+        )?;
+        // set num_read, num_write as separate instance
+        assert!(
+            self.num_instances
+                .insert(
+                    GlobalChip::<E>::name(),
+                    vec![
+                        // global write -> local read
+                        shard_ctx
+                            .write_records()
+                            .iter()
+                            .map(|records| records.len())
+                            .sum(),
+                        // global read -> local write
+                        shard_ctx
+                            .read_records()
+                            .iter()
+                            .map(|records| records.len())
+                            .sum(),
+                    ]
+                )
+                .is_none()
+        );
+        assert!(
+            self.witnesses_tables
+                .insert(GlobalChip::<E>::name(), witness)
+                .is_none()
+        );
+        assert!(
+            !self
+                .witnesses_opcodes
+                .contains_key(&GlobalChip::<E>::name())
+        );
 
         Ok(())
     }

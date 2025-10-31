@@ -203,7 +203,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         zkvm_v1_css: cs, ..
     } = composed_cs;
     let num_instances_with_rotation =
-        input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
+        input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
     let chip_record_alpha = challenges[0];
 
     // TODO: safety ?

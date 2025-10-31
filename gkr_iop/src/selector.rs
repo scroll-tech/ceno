@@ -267,14 +267,18 @@ impl<E: ExtensionField> SelectorType<E> {
                     ctx.num_vars
                 );
 
-                let eq_end = eq_eval_less_or_equal_than(end - 1, out_point, in_point);
-                let sel = if start > 0 {
-                    let eq_start = eq_eval_less_or_equal_than(start - 1, out_point, in_point);
-                    eq_end - eq_start
+                if end == 0 {
+                    (expression, E::ZERO)
                 } else {
-                    eq_end
-                };
-                (expression, sel)
+                    let eq_end = eq_eval_less_or_equal_than(end - 1, out_point, in_point);
+                    let sel = if start > 0 {
+                        let eq_start = eq_eval_less_or_equal_than(start - 1, out_point, in_point);
+                        eq_end - eq_start
+                    } else {
+                        eq_end
+                    };
+                    (expression, sel)
+                }
             }
             // evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
             SelectorType::OrderedSparse32 {

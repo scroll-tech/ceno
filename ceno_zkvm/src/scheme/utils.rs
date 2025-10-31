@@ -502,7 +502,7 @@ pub fn build_main_witness<
         } else {
             (
                 <PD as MainSumcheckProver<PB>>::table_witness(device, input, cs, challenges),
-                input.num_instances > 1 && input.num_instances.is_power_of_two(),
+                input.num_instances() > 1 && input.num_instances().is_power_of_two(),
             )
         }
     };

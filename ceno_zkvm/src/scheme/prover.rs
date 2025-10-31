@@ -118,17 +118,11 @@ impl<
         {
             // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
-                .get_opcode_witness(circuit_name)
-                .or_else(|| witnesses.get_table_witness(circuit_name))
-                .map(|rmms| {
-                    if rmms[0].num_instances() == 0 {
-                        rmms[1].num_instances()
-                    } else {
-                        rmms[0].num_instances()
-                    }
-                })
+                .num_instances
+                .get(circuit_name)
+                .cloned()
                 .and_then(|num_instance| {
-                    if num_instance > 0 {
+                    if num_instance.iter().sum::<usize>() > 0 {
                         Some(num_instance)
                     } else {
                         None
@@ -140,26 +134,28 @@ impl<
                             .circuit_index_fixed_num_instances
                             .get(&index)
                             .copied()
-                            .unwrap_or(0)
+                            .map(|num_instance| vec![num_instance])
+                            .unwrap_or(vec![])
                     })
                 })
             {
-                num_instances.push((
-                    index,
-                    num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
-                ));
+                let num_instance_exclude_rotation = num_instance
+                    .iter()
+                    .map(|num_instance| num_instance >> vk.get_cs().rotation_vars().unwrap_or(0))
+                    .collect_vec();
+                num_instances.push((index, num_instance_exclude_rotation.clone()));
+                circuit_name_num_instances_mapping
+                    .insert(circuit_name, num_instance_exclude_rotation);
                 num_instances_with_rotation.push((index, num_instance));
-                circuit_name_num_instances_mapping.insert(
-                    circuit_name,
-                    num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
-                );
             }
         }
 
         // write (circuit_idx, num_var) to transcript
         for (circuit_idx, num_instance) in &num_instances {
             transcript.append_message(&circuit_idx.to_le_bytes());
-            transcript.append_message(&num_instance.to_le_bytes());
+            for num_instance in num_instance {
+                transcript.append_message(&num_instance.to_le_bytes());
+            }
         }
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
@@ -216,10 +212,10 @@ impl<
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
                 let num_instances = circuit_name_num_instances_mapping
                     .get(&circuit_name)
-                    .copied()
-                    .unwrap_or(0);
+                    .cloned()
+                    .unwrap_or_default();
                 let cs = pk.get_cs();
-                if num_instances == 0 {
+                if num_instances.is_empty() {
                     // we need to drain respective fixed when num_instances is 0
                     if cs.num_fixed() > 0 {
                         let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
@@ -249,9 +245,7 @@ impl<
                     fixed,
                     structural_witness,
                     public_input: public_input.clone(),
-                    num_read_instances: num_instances, // TODO: fixme
-                    num_write_instances: num_instances, // TODO: fixme
-                    num_instances,
+                    num_instances: num_instances.clone(),
                     has_ecc_ops: cs.has_ecc_ops(),
                 };
 
@@ -264,7 +258,7 @@ impl<
                         &challenges,
                     )?;
                     tracing::trace!(
-                        "generated proof for opcode {} with num_instances={}",
+                        "generated proof for opcode {} with num_instances={:?}",
                         circuit_name,
                         num_instances
                     );
@@ -366,10 +360,13 @@ impl<
                     _ => unreachable!("slope's expression must be WitIn"),
                 })
                 .collect_vec();
-            Some(
-                self.device
-                    .prove_ec_sum_quark(input.num_instances, xs, ys, slopes, transcript)?,
-            )
+            Some(self.device.prove_ec_sum_quark(
+                input.num_instances(),
+                xs,
+                ys,
+                slopes,
+                transcript,
+            )?)
         } else {
             None
         };
@@ -437,8 +434,6 @@ impl<
                 ecc_proof,
                 fixed_in_evals,
                 wits_in_evals,
-                num_read_instances: input.num_read_instances,
-                num_write_instances: input.num_write_instances,
                 num_instances: input.num_instances,
             },
             pi_in_evals,
