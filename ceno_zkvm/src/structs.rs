@@ -221,10 +221,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     ) -> OC::InstructionConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let op_circuit = OC::default();
-        let (config, gkr_iop_circuit) = op_circuit
-            .build_gkr_iop_circuit(&mut circuit_builder, &self.params)
-            .unwrap();
+        let (config, gkr_iop_circuit) =
+            OC::build_gkr_iop_circuit(&mut circuit_builder, &self.params).unwrap();
         let cs = ComposedConstrainSystem {
             zkvm_v1_css: cs,
             gkr_circuit: Some(gkr_iop_circuit),

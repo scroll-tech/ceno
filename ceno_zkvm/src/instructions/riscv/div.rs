@@ -179,11 +179,10 @@ mod test {
     ) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let inst = Insn::default();
         let config = cb
             .namespace(
                 || format!("{}_({})", Insn::name(), name),
-                |cb| Ok(inst.construct_circuit(cb, &ProgramParams::default())),
+                |cb| Ok(Insn::construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();

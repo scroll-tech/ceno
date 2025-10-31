@@ -32,7 +32,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

@@ -60,12 +60,14 @@ mod test {
     ) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let inst = SetLessThanInstruction::<E, I>::default();
         let config = cb
             .namespace(
                 || format!("{}/{name}", I::INST_KIND),
                 |cb| {
-                    let config = inst.construct_circuit(cb, &ProgramParams::default());
+                    let config = SetLessThanInstruction::<E, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    );
                     Ok(config)
                 },
             )

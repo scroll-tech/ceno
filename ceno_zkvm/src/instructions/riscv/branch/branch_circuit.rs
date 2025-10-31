@@ -44,7 +44,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<BranchConfig<E>, ZKVMError> {

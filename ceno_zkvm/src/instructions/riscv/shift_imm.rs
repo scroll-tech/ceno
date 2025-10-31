@@ -149,8 +149,10 @@ mod test {
             .namespace(
                 || format!("{prefix}_({name})"),
                 |cb| {
-                    let inst = ShiftImmInstruction::<E, I>::default();
-                    let config = inst.construct_circuit(cb, &ProgramParams::default());
+                    let config = ShiftImmInstruction::<E, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    );
                     Ok(config)
                 },
             )

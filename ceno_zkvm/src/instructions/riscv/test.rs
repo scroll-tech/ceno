@@ -17,15 +17,13 @@ fn test_multiple_opcode() {
     let params = ProgramParams::default();
 
     let mut cs = ConstraintSystem::new(|| "riscv");
-    let add_inst = AddInstruction::<E>::default();
     let _add_config = cs.namespace(
         || "add",
-        |cs| add_inst.construct_circuit(&mut CircuitBuilder::<E>::new(cs), &params),
+        |cs| AddInstruction::construct_circuit(&mut CircuitBuilder::<E>::new(cs), &params),
     );
-    let sub_inst = SubInstruction::<E>::default();
     let _sub_config = cs.namespace(
         || "sub",
-        |cs| sub_inst.construct_circuit(&mut CircuitBuilder::<E>::new(cs), &params),
+        |cs| SubInstruction::construct_circuit(&mut CircuitBuilder::<E>::new(cs), &params),
     );
     let param = Pcs::setup(1 << 10, SecurityLevel::default()).unwrap();
     let (_, _) = Pcs::trim(param, 1 << 10).unwrap();

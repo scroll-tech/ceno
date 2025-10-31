@@ -33,17 +33,15 @@ pub trait Instruction<E: ExtensionField> {
 
     /// construct circuit and manipulate circuit builder, then return the respective config
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError>;
 
     fn build_gkr_iop_circuit(
-        &self,
         cb: &mut CircuitBuilder<E>,
         param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
-        let config = self.construct_circuit(cb, param)?;
+        let config = Self::construct_circuit(cb, param)?;
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();
         let lk_len = cb.cs.lk_expressions.len();

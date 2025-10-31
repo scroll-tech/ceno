@@ -79,18 +79,17 @@ fn load(mem_value: Word, insn: InsnKind, shift: u32) -> Word {
 fn impl_opcode_store<
     E: ExtensionField + Hash,
     I: RIVInstruction,
-    Inst: Instruction<E, Record = StepRecord> + Default,
+    Inst: Instruction<E, Record = StepRecord>,
 >(
     imm: i32,
 ) {
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let inst = Inst::default();
     let config = cb
         .namespace(
             || Inst::name(),
             |cb| {
-                let config = inst.construct_circuit(cb, &ProgramParams::default());
+                let config = Inst::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -149,18 +148,17 @@ fn impl_opcode_store<
 fn impl_opcode_load<
     E: ExtensionField + Hash,
     I: RIVInstruction,
-    Inst: Instruction<E, Record = StepRecord> + Default,
+    Inst: Instruction<E, Record = StepRecord>,
 >(
     imm: i32,
 ) {
     let mut cs = ConstraintSystem::<E>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
-    let inst = Inst::default();
     let config = cb
         .namespace(
             || Inst::name(),
             |cb| {
-                let config = inst.construct_circuit(cb, &ProgramParams::default());
+                let config = Inst::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )

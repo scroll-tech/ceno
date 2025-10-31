@@ -50,7 +50,6 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<JalConfig<E>, ZKVMError> {

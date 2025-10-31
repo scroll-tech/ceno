@@ -174,12 +174,16 @@ mod test {
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let insn_code = encode_rv32(I::INST_KIND, 2, 0, 4, imm);
-        let inst = SetLessThanImmInstruction::<E, I>::default();
 
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| Ok(inst.construct_circuit(cb, &ProgramParams::default())),
+                |cb| {
+                    Ok(SetLessThanImmInstruction::<E, I>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
             )
             .unwrap()
             .unwrap();

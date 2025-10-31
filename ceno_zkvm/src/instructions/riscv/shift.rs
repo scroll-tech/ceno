@@ -129,7 +129,6 @@ mod tests {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
 
-        let inst = ShiftLogicalInstruction::<E, I>::default();
         let shift = rs2_read & 0b11111;
         let (prefix, insn_code, rd_written) = match I::INST_KIND {
             InsnKind::SLL => (
@@ -153,7 +152,7 @@ mod tests {
         let config = cb
             .namespace(
                 || format!("{prefix}_({name})"),
-                |cb| Ok(inst.construct_circuit(cb, &ProgramParams::default())),
+                |cb| Ok(ShiftLogicalInstruction::<E, I>::construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();

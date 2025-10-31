@@ -50,7 +50,6 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

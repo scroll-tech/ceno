@@ -42,7 +42,6 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<LuiConfig<E>, ZKVMError> {
@@ -144,12 +143,11 @@ mod tests {
     fn test_opcode_lui<E: ExtensionField>(rd: u32, imm: i32) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let inst = LuiInstruction::default();
         let config = cb
             .namespace(
                 || "lui",
                 |cb| {
-                    let config = inst.construct_circuit(cb, &ProgramParams::default());
+                    let config = LuiInstruction::construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )

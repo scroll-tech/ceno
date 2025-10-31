@@ -120,11 +120,10 @@ mod test {
 
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let inst = MulhInstructionBase::<E, I>::default();
         let config = cb
             .namespace(
                 || format!("{:?}_({name})", I::INST_KIND),
-                |cb| Ok(inst.construct_circuit(cb, &ProgramParams::default())),
+                |cb| Ok(MulhInstructionBase::<E, I>::construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();
@@ -204,11 +203,10 @@ mod test {
     fn verify_mulh<E: ExtensionField>(rs1: i32, rs2: i32) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let inst = MulhInstruction::<E>::default();
         let config = cb
             .namespace(
                 || "mulh",
-                |cb| Ok(inst.construct_circuit(cb, &ProgramParams::default())),
+                |cb| Ok(MulhInstruction::<E>::construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();
@@ -284,11 +282,10 @@ mod test {
     fn verify_mulhsu<E: ExtensionField>(rs1: i32, rs2: u32) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let inst = MulhsuInstruction::<E>::default();
         let config = cb
             .namespace(
                 || "mulhsu",
-                |cb| Ok(inst.construct_circuit(cb, &ProgramParams::default())),
+                |cb| Ok(MulhsuInstruction::construct_circuit(cb, &ProgramParams::default())),
             )
             .unwrap()
             .unwrap();

@@ -67,7 +67,6 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
     }
 
     fn construct_circuit(
-        &self,
         _circuit_builder: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
@@ -75,7 +74,6 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
     }
 
     fn build_gkr_iop_circuit(
-        &self,
         cb: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {

@@ -284,7 +284,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
@@ -383,7 +382,6 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut crate::circuit_builder::CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {

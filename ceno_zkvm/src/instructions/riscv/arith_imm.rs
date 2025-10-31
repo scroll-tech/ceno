@@ -51,12 +51,11 @@ mod test {
     fn test_opcode_addi_internal<E: ExtensionField>(rs1: u32, rd: u32, imm: i32) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let inst = AddiInstruction::<E>::default();
         let config = cb
             .namespace(
                 || "addi",
                 |cb| {
-                    let config = inst.construct_circuit(cb, &ProgramParams::default());
+                    let config = AddiInstruction::construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )

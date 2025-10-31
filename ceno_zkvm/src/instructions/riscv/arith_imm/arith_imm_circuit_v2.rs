@@ -40,7 +40,6 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {

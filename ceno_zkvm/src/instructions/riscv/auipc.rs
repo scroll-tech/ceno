@@ -45,7 +45,6 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     }
 
     fn construct_circuit(
-        &self,
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<AuipcConfig<E>, ZKVMError> {
@@ -230,12 +229,11 @@ mod tests {
     fn test_opcode_auipc<E: ExtensionField>(rd: u32, imm: i32) {
         let mut cs = ConstraintSystem::<E>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let inst = AuipcInstruction::default();
         let config = cb
             .namespace(
                 || "auipc",
                 |cb| {
-                    let config = inst.construct_circuit(cb, &ProgramParams::default());
+                    let config = AuipcInstruction::construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )
