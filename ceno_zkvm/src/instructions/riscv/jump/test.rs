@@ -32,7 +32,7 @@ fn verify_test_opcode_jal<E: ExtensionField>(pc_offset: i32) {
         .namespace(
             || "jal",
             |cb| {
-                let config = JalInstruction::construct_circuit(cb, &ProgramParams::default());
+                let config = JalInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )
@@ -92,7 +92,7 @@ fn verify_test_opcode_jalr<E: ExtensionField>(rs1_read: Word, imm: i32) {
         .namespace(
             || "jalr",
             |cb| {
-                let config = JalrInstruction::construct_circuit(cb, &ProgramParams::default());
+                let config = JalrInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
                 Ok(config)
             },
         )

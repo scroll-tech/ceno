@@ -12,21 +12,18 @@ use mulh_circuit::MulhInstructionBase;
 use mulh_circuit_v2::MulhInstructionBase;
 
 pub struct MulOp;
-
 impl RIVInstruction for MulOp {
     const INST_KIND: InsnKind = InsnKind::MUL;
 }
 pub type MulInstruction<E> = MulhInstructionBase<E, MulOp>;
 
 pub struct MulhOp;
-
 impl RIVInstruction for MulhOp {
     const INST_KIND: InsnKind = InsnKind::MULH;
 }
 pub type MulhInstruction<E> = MulhInstructionBase<E, MulhOp>;
 
 pub struct MulhuOp;
-
 impl RIVInstruction for MulhuOp {
     const INST_KIND: InsnKind = InsnKind::MULHU;
 }
@@ -34,7 +31,6 @@ impl RIVInstruction for MulhuOp {
 pub type MulhuInstruction<E> = MulhInstructionBase<E, MulhuOp>;
 
 pub struct MulhsuOp;
-
 impl RIVInstruction for MulhsuOp {
     const INST_KIND: InsnKind = InsnKind::MULHSU;
 }
@@ -208,7 +204,7 @@ mod test {
             .namespace(
                 || "mulh",
                 |cb| {
-                    Ok(MulhInstruction::<E>::construct_circuit(
+                    Ok(MulhInstruction::construct_circuit(
                         cb,
                         &ProgramParams::default(),
                     ))

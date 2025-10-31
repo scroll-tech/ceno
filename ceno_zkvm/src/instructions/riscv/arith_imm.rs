@@ -3,8 +3,6 @@ mod arith_imm_circuit;
 #[cfg(feature = "u16limb_circuit")]
 mod arith_imm_circuit_v2;
 
-use ff_ext::ExtensionField;
-
 #[cfg(feature = "u16limb_circuit")]
 pub use crate::instructions::riscv::arith_imm::arith_imm_circuit_v2::AddiInstruction;
 
@@ -13,7 +11,7 @@ pub use crate::instructions::riscv::arith_imm::arith_imm_circuit::AddiInstructio
 
 use super::RIVInstruction;
 
-impl<E: ExtensionField> RIVInstruction for AddiInstruction<E> {
+impl<E> RIVInstruction for AddiInstruction<E> {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::ADDI;
 }
 
@@ -55,7 +53,8 @@ mod test {
             .namespace(
                 || "addi",
                 |cb| {
-                    let config = AddiInstruction::construct_circuit(cb, &ProgramParams::default());
+                    let config =
+                        AddiInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )

@@ -7,21 +7,18 @@ mod branch_circuit_v2;
 mod test;
 
 pub struct BeqOp;
-
 impl RIVInstruction for BeqOp {
     const INST_KIND: InsnKind = InsnKind::BEQ;
 }
 pub type BeqInstruction<E> = branch_circuit::BranchCircuit<E, BeqOp>;
 
 pub struct BneOp;
-
 impl RIVInstruction for BneOp {
     const INST_KIND: InsnKind = InsnKind::BNE;
 }
 pub type BneInstruction<E> = branch_circuit::BranchCircuit<E, BneOp>;
 
 pub struct BltuOp;
-
 impl RIVInstruction for BltuOp {
     const INST_KIND: InsnKind = InsnKind::BLTU;
 }
@@ -31,7 +28,6 @@ pub type BltuInstruction<E> = branch_circuit_v2::BranchCircuit<E, BltuOp>;
 pub type BltuInstruction<E> = branch_circuit::BranchCircuit<E, BltuOp>;
 
 pub struct BgeuOp;
-
 impl RIVInstruction for BgeuOp {
     const INST_KIND: InsnKind = InsnKind::BGEU;
 }
@@ -41,7 +37,6 @@ pub type BgeuInstruction<E> = branch_circuit_v2::BranchCircuit<E, BgeuOp>;
 pub type BgeuInstruction<E> = branch_circuit::BranchCircuit<E, BgeuOp>;
 
 pub struct BltOp;
-
 impl RIVInstruction for BltOp {
     const INST_KIND: InsnKind = InsnKind::BLT;
 }

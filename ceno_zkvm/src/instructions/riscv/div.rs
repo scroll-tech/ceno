@@ -8,7 +8,6 @@ mod div_circuit_v2;
 use super::RIVInstruction;
 
 pub struct DivuOp;
-
 impl RIVInstruction for DivuOp {
     const INST_KIND: InsnKind = InsnKind::DIVU;
 }
@@ -18,7 +17,6 @@ pub type DivuInstruction<E> = div_circuit_v2::ArithInstruction<E, DivuOp>;
 pub type DivuInstruction<E> = div_circuit::ArithInstruction<E, DivuOp>;
 
 pub struct RemuOp;
-
 impl RIVInstruction for RemuOp {
     const INST_KIND: InsnKind = InsnKind::REMU;
 }
@@ -28,7 +26,6 @@ pub type RemuInstruction<E> = div_circuit_v2::ArithInstruction<E, RemuOp>;
 pub type RemuInstruction<E> = div_circuit::ArithInstruction<E, RemuOp>;
 
 pub struct RemOp;
-
 impl RIVInstruction for RemOp {
     const INST_KIND: InsnKind = InsnKind::REM;
 }
@@ -37,9 +34,7 @@ pub type RemInstruction<E> = div_circuit_v2::ArithInstruction<E, RemOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type RemInstruction<E> = div_circuit::ArithInstruction<E, RemOp>;
 
-#[derive(Default)]
 pub struct DivOp;
-
 impl RIVInstruction for DivOp {
     const INST_KIND: InsnKind = InsnKind::DIV;
 }
@@ -164,7 +159,7 @@ mod test {
         const INSN_KIND: InsnKind = InsnKind::REMU;
     }
 
-    fn verify<E: ExtensionField, Insn: Instruction<E> + TestInstance<E> + Default>(
+    fn verify<E: ExtensionField, Insn: Instruction<E> + TestInstance<E>>(
         name: &str,
         dividend: <Insn as TestInstance<E>>::NumType,
         divisor: <Insn as TestInstance<E>>::NumType,
@@ -227,7 +222,7 @@ mod test {
     }
 
     // shortcut to verify given pair produces correct output
-    fn verify_positive<E: ExtensionField, Insn: Instruction<E> + TestInstance<E> + Default>(
+    fn verify_positive<E: ExtensionField, Insn: Instruction<E> + TestInstance<E>>(
         name: &str,
         dividend: <Insn as TestInstance<E>>::NumType,
         divisor: <Insn as TestInstance<E>>::NumType,

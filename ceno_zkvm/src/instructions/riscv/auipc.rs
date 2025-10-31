@@ -231,7 +231,8 @@ mod tests {
             .namespace(
                 || "auipc",
                 |cb| {
-                    let config = AuipcInstruction::construct_circuit(cb, &ProgramParams::default());
+                    let config =
+                        AuipcInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )

@@ -8,7 +8,6 @@ use ceno_emul::InsnKind;
 use super::RIVInstruction;
 
 pub struct SltOp;
-
 impl RIVInstruction for SltOp {
     const INST_KIND: InsnKind = InsnKind::SLT;
 }
@@ -18,7 +17,6 @@ pub type SltInstruction<E> = slt_circuit_v2::SetLessThanInstruction<E, SltOp>;
 pub type SltInstruction<E> = slt_circuit::SetLessThanInstruction<E, SltOp>;
 
 pub struct SltuOp;
-
 impl RIVInstruction for SltuOp {
     const INST_KIND: InsnKind = InsnKind::SLTU;
 }
@@ -62,7 +60,7 @@ mod test {
             .namespace(
                 || format!("{}/{name}", I::INST_KIND),
                 |cb| {
-                    let config = SetLessThanInstruction::<E, I>::construct_circuit(
+                    let config = SetLessThanInstruction::<_, I>::construct_circuit(
                         cb,
                         &ProgramParams::default(),
                     );

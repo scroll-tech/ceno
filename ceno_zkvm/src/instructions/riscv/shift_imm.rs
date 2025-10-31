@@ -10,21 +10,18 @@ use crate::instructions::riscv::shift::shift_circuit_v2::ShiftImmInstruction;
 use crate::instructions::riscv::shift_imm::shift_imm_circuit::ShiftImmInstruction;
 
 pub struct SlliOp;
-
 impl RIVInstruction for SlliOp {
     const INST_KIND: InsnKind = InsnKind::SLLI;
 }
 pub type SlliInstruction<E> = ShiftImmInstruction<E, SlliOp>;
 
 pub struct SraiOp;
-
 impl RIVInstruction for SraiOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SRAI;
 }
 pub type SraiInstruction<E> = ShiftImmInstruction<E, SraiOp>;
 
 pub struct SrliOp;
-
 impl RIVInstruction for SrliOp {
     const INST_KIND: ceno_emul::InsnKind = InsnKind::SRLI;
 }

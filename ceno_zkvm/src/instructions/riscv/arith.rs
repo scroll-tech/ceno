@@ -21,14 +21,12 @@ pub struct ArithConfig<E: ExtensionField> {
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 
 pub struct AddOp;
-
 impl RIVInstruction for AddOp {
     const INST_KIND: InsnKind = InsnKind::ADD;
 }
 pub type AddInstruction<E> = ArithInstruction<E, AddOp>;
 
 pub struct SubOp;
-
 impl RIVInstruction for SubOp {
     const INST_KIND: InsnKind = InsnKind::SUB;
 }

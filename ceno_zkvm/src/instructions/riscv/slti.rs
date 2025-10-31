@@ -13,14 +13,12 @@ use crate::instructions::riscv::slti::slti_circuit::SetLessThanImmInstruction;
 use super::RIVInstruction;
 
 pub struct SltiOp;
-
 impl RIVInstruction for SltiOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLTI;
 }
 pub type SltiInstruction<E> = SetLessThanImmInstruction<E, SltiOp>;
 
 pub struct SltiuOp;
-
 impl RIVInstruction for SltiuOp {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::SLTIU;
 }

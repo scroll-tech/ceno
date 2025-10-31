@@ -12,21 +12,18 @@ use crate::instructions::riscv::shift::shift_circuit::ShiftLogicalInstruction;
 use crate::instructions::riscv::shift::shift_circuit_v2::ShiftLogicalInstruction;
 
 pub struct SllOp;
-
 impl RIVInstruction for SllOp {
     const INST_KIND: InsnKind = InsnKind::SLL;
 }
 pub type SllInstruction<E> = ShiftLogicalInstruction<E, SllOp>;
 
 pub struct SrlOp;
-
 impl RIVInstruction for SrlOp {
     const INST_KIND: InsnKind = InsnKind::SRL;
 }
 pub type SrlInstruction<E> = ShiftLogicalInstruction<E, SrlOp>;
 
 pub struct SraOp;
-
 impl RIVInstruction for SraOp {
     const INST_KIND: InsnKind = InsnKind::SRA;
 }

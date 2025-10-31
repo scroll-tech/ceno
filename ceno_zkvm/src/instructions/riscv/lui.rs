@@ -145,7 +145,8 @@ mod tests {
             .namespace(
                 || "lui",
                 |cb| {
-                    let config = LuiInstruction::construct_circuit(cb, &ProgramParams::default());
+                    let config =
+                        LuiInstruction::<E>::construct_circuit(cb, &ProgramParams::default());
                     Ok(config)
                 },
             )
