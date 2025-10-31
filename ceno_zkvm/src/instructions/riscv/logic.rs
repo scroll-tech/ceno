@@ -7,7 +7,6 @@ mod test;
 
 use ceno_emul::InsnKind;
 
-#[derive(Default)]
 pub struct AndOp;
 
 impl LogicOp for AndOp {
@@ -16,7 +15,6 @@ impl LogicOp for AndOp {
 }
 pub type AndInstruction<E> = LogicInstruction<E, AndOp>;
 
-#[derive(Default)]
 pub struct OrOp;
 
 impl LogicOp for OrOp {
@@ -25,7 +23,6 @@ impl LogicOp for OrOp {
 }
 pub type OrInstruction<E> = LogicInstruction<E, OrOp>;
 
-#[derive(Default)]
 pub struct XorOp;
 
 impl LogicOp for XorOp {

@@ -34,7 +34,6 @@ pub struct JalrConfig<E: ExtensionField> {
     pub rd_high: WitIn,
 }
 
-#[derive(Default)]
 pub struct JalrInstruction<E>(PhantomData<E>);
 
 /// JALR instruction circuit

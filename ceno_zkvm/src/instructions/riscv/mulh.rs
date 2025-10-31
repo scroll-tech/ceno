@@ -11,7 +11,6 @@ use mulh_circuit::MulhInstructionBase;
 #[cfg(feature = "u16limb_circuit")]
 use mulh_circuit_v2::MulhInstructionBase;
 
-#[derive(Default)]
 pub struct MulOp;
 
 impl RIVInstruction for MulOp {
@@ -19,7 +18,6 @@ impl RIVInstruction for MulOp {
 }
 pub type MulInstruction<E> = MulhInstructionBase<E, MulOp>;
 
-#[derive(Default)]
 pub struct MulhOp;
 
 impl RIVInstruction for MulhOp {
@@ -27,7 +25,6 @@ impl RIVInstruction for MulhOp {
 }
 pub type MulhInstruction<E> = MulhInstructionBase<E, MulhOp>;
 
-#[derive(Default)]
 pub struct MulhuOp;
 
 impl RIVInstruction for MulhuOp {
@@ -36,7 +33,6 @@ impl RIVInstruction for MulhuOp {
 
 pub type MulhuInstruction<E> = MulhInstructionBase<E, MulhuOp>;
 
-#[derive(Default)]
 pub struct MulhsuOp;
 
 impl RIVInstruction for MulhsuOp {

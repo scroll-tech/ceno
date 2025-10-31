@@ -50,7 +50,6 @@ pub struct EcallKeccakConfig<E: ExtensionField> {
 }
 
 /// KeccakInstruction can handle any instruction and produce its side-effects.
-#[derive(Default)]
 pub struct KeccakInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {

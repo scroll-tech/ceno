@@ -7,7 +7,6 @@ mod div_circuit_v2;
 
 use super::RIVInstruction;
 
-#[derive(Default)]
 pub struct DivuOp;
 
 impl RIVInstruction for DivuOp {
@@ -18,7 +17,6 @@ pub type DivuInstruction<E> = div_circuit_v2::ArithInstruction<E, DivuOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type DivuInstruction<E> = div_circuit::ArithInstruction<E, DivuOp>;
 
-#[derive(Default)]
 pub struct RemuOp;
 
 impl RIVInstruction for RemuOp {
@@ -29,7 +27,6 @@ pub type RemuInstruction<E> = div_circuit_v2::ArithInstruction<E, RemuOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type RemuInstruction<E> = div_circuit::ArithInstruction<E, RemuOp>;
 
-#[derive(Default)]
 pub struct RemOp;
 
 impl RIVInstruction for RemOp {

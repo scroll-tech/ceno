@@ -23,7 +23,6 @@ use crate::{
 use multilinear_extensions::Expression;
 pub use p3::field::FieldAlgebra;
 
-#[derive(Default)]
 pub struct BranchCircuit<E, I>(PhantomData<(E, I)>);
 
 pub struct BranchConfig<E: ExtensionField> {

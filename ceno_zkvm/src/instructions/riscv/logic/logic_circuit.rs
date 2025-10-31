@@ -25,7 +25,6 @@ pub trait LogicOp {
 }
 
 /// The Instruction circuit for a given LogicOp.
-#[derive(Default)]
 pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {

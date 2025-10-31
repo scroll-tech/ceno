@@ -33,7 +33,6 @@ pub struct AuipcConfig<E: ExtensionField> {
     pub rd_written: UInt8<E>,
 }
 
-#[derive(Default)]
 pub struct AuipcInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {

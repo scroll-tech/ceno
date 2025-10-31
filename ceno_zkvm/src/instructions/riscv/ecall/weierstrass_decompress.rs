@@ -60,7 +60,6 @@ pub struct EcallWeierstrassDecompressConfig<E: ExtensionField, EC: EllipticCurve
 }
 
 /// WeierstrassDecompressInstruction can handle any instruction and produce its side-effects.
-#[derive(Default)]
 pub struct WeierstrassDecompressInstruction<E, EC>(PhantomData<(E, EC)>);
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E>

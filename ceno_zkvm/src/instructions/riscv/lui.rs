@@ -30,7 +30,6 @@ pub struct LuiConfig<E: ExtensionField> {
     pub rd_written: [WitIn; UINT_BYTE_LIMBS - 1],
 }
 
-#[derive(Default)]
 pub struct LuiInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {

@@ -12,7 +12,6 @@ use crate::instructions::riscv::slti::slti_circuit::SetLessThanImmInstruction;
 
 use super::RIVInstruction;
 
-#[derive(Default)]
 pub struct SltiOp;
 
 impl RIVInstruction for SltiOp {
@@ -20,7 +19,6 @@ impl RIVInstruction for SltiOp {
 }
 pub type SltiInstruction<E> = SetLessThanImmInstruction<E, SltiOp>;
 
-#[derive(Default)]
 pub struct SltiuOp;
 
 impl RIVInstruction for SltiuOp {

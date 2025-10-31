@@ -24,7 +24,6 @@ use gkr_iop::tables::ops::{AndTable, OrTable, XorTable};
 use ceno_emul::InsnKind;
 use gkr_iop::tables::OpsTable;
 
-#[derive(Default)]
 pub struct AndiOp;
 
 impl LogicOp for AndiOp {
@@ -33,7 +32,6 @@ impl LogicOp for AndiOp {
 }
 pub type AndiInstruction<E> = LogicInstruction<E, AndiOp>;
 
-#[derive(Default)]
 pub struct OriOp;
 
 impl LogicOp for OriOp {
@@ -42,7 +40,6 @@ impl LogicOp for OriOp {
 }
 pub type OriInstruction<E> = LogicInstruction<E, OriOp>;
 
-#[derive(Default)]
 pub struct XoriOp;
 
 impl LogicOp for XoriOp {

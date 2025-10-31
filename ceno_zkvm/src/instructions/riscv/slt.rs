@@ -7,7 +7,6 @@ use ceno_emul::InsnKind;
 
 use super::RIVInstruction;
 
-#[derive(Default)]
 pub struct SltOp;
 
 impl RIVInstruction for SltOp {
@@ -18,7 +17,6 @@ pub type SltInstruction<E> = slt_circuit_v2::SetLessThanInstruction<E, SltOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type SltInstruction<E> = slt_circuit::SetLessThanInstruction<E, SltOp>;
 
-#[derive(Default)]
 pub struct SltuOp;
 
 impl RIVInstruction for SltuOp {

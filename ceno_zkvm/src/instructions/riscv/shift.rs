@@ -11,7 +11,6 @@ use crate::instructions::riscv::shift::shift_circuit::ShiftLogicalInstruction;
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::shift::shift_circuit_v2::ShiftLogicalInstruction;
 
-#[derive(Default)]
 pub struct SllOp;
 
 impl RIVInstruction for SllOp {
@@ -19,7 +18,6 @@ impl RIVInstruction for SllOp {
 }
 pub type SllInstruction<E> = ShiftLogicalInstruction<E, SllOp>;
 
-#[derive(Default)]
 pub struct SrlOp;
 
 impl RIVInstruction for SrlOp {
@@ -27,7 +25,6 @@ impl RIVInstruction for SrlOp {
 }
 pub type SrlInstruction<E> = ShiftLogicalInstruction<E, SrlOp>;
 
-#[derive(Default)]
 pub struct SraOp;
 
 impl RIVInstruction for SraOp {

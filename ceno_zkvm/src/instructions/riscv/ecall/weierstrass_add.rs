@@ -53,7 +53,6 @@ pub struct EcallWeierstrassAddAssignConfig<E: ExtensionField, EC: EllipticCurve>
 }
 
 /// WeierstrassAddAssignInstruction can handle any instruction and produce its side-effects.
-#[derive(Default)]
 pub struct WeierstrassAddAssignInstruction<E, EC>(PhantomData<(E, EC)>);
 
 impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>

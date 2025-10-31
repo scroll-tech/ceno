@@ -25,7 +25,6 @@ use witness::set_val;
 /// including multiple memory operations.
 ///
 /// Unsafe: The content is not constrained.
-#[derive(Default)]
 pub struct LargeEcallDummy<E, S>(PhantomData<(E, S)>);
 
 impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S> {

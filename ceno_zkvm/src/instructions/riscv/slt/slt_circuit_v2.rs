@@ -15,7 +15,6 @@ use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::marker::PhantomData;
 
-#[derive(Default)]
 pub struct SetLessThanInstruction<E, I>(PhantomData<(E, I)>);
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.

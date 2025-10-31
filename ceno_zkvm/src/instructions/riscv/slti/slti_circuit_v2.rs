@@ -37,7 +37,6 @@ pub struct SetLessThanImmConfig<E: ExtensionField> {
     uint_lt_config: UIntLimbsLTConfig<E>,
 }
 
-#[derive(Default)]
 pub struct SetLessThanImmInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInstruction<E, I> {

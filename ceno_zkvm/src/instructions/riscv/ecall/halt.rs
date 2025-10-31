@@ -27,7 +27,6 @@ pub struct HaltConfig {
     lt_x10_cfg: AssertLtConfig,
 }
 
-#[derive(Default)]
 pub struct HaltInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {

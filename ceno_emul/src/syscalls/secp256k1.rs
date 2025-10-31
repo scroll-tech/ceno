@@ -5,13 +5,10 @@ use std::iter;
 
 use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
-#[derive(Default)]
 pub struct Secp256k1AddSpec;
 
-#[derive(Default)]
 pub struct Secp256k1DoubleSpec;
 
-#[derive(Default)]
 pub struct Secp256k1DecompressSpec;
 
 impl SyscallSpec for Secp256k1AddSpec {

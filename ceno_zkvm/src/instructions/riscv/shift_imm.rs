@@ -9,7 +9,6 @@ use crate::instructions::riscv::shift::shift_circuit_v2::ShiftImmInstruction;
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::instructions::riscv::shift_imm::shift_imm_circuit::ShiftImmInstruction;
 
-#[derive(Default)]
 pub struct SlliOp;
 
 impl RIVInstruction for SlliOp {
@@ -17,7 +16,6 @@ impl RIVInstruction for SlliOp {
 }
 pub type SlliInstruction<E> = ShiftImmInstruction<E, SlliOp>;
 
-#[derive(Default)]
 pub struct SraiOp;
 
 impl RIVInstruction for SraiOp {
@@ -25,7 +23,6 @@ impl RIVInstruction for SraiOp {
 }
 pub type SraiInstruction<E> = ShiftImmInstruction<E, SraiOp>;
 
-#[derive(Default)]
 pub struct SrliOp;
 
 impl RIVInstruction for SrliOp {

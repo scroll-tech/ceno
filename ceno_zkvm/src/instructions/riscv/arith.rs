@@ -18,10 +18,8 @@ pub struct ArithConfig<E: ExtensionField> {
     rd_written: UInt<E>,
 }
 
-#[derive(Default)]
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 
-#[derive(Default)]
 pub struct AddOp;
 
 impl RIVInstruction for AddOp {
@@ -29,7 +27,6 @@ impl RIVInstruction for AddOp {
 }
 pub type AddInstruction<E> = ArithInstruction<E, AddOp>;
 
-#[derive(Default)]
 pub struct SubOp;
 
 impl RIVInstruction for SubOp {

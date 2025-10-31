@@ -23,7 +23,6 @@ use crate::e2e::ShardContext;
 use itertools::Itertools;
 use std::{array, marker::PhantomData};
 
-#[derive(Default)]
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
 pub struct MulhConfig<E: ExtensionField> {

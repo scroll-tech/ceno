@@ -56,7 +56,6 @@ struct TestConfig {
     pub(crate) reg_id: WitIn,
 }
 
-#[derive(Default)]
 struct TestCircuit<E: ExtensionField, const RW: usize, const L: usize> {
     phantom: PhantomData<E>,
 }

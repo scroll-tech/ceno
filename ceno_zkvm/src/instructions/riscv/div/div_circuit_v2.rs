@@ -44,7 +44,6 @@ pub struct DivRemConfig<E: ExtensionField> {
     lt_diff: WitIn,
 }
 
-#[derive(Default)]
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {

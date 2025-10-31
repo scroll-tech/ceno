@@ -20,7 +20,6 @@ use p3::field::FieldAlgebra;
 use witness::set_val;
 
 /// DummyInstruction can handle any instruction and produce its side-effects.
-#[derive(Default)]
 pub struct DummyInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E, I> {

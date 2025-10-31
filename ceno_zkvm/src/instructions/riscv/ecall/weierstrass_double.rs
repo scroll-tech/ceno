@@ -55,7 +55,6 @@ pub struct EcallWeierstrassDoubleAssignConfig<
 }
 
 /// WeierstrassDoubleAssignInstruction can handle any instruction and produce its side-effects.
-#[derive(Default)]
 pub struct WeierstrassDoubleAssignInstruction<E, EC>(PhantomData<(E, EC)>);
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E>

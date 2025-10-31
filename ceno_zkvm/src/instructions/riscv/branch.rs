@@ -6,7 +6,6 @@ mod branch_circuit_v2;
 #[cfg(test)]
 mod test;
 
-#[derive(Default)]
 pub struct BeqOp;
 
 impl RIVInstruction for BeqOp {
@@ -14,7 +13,6 @@ impl RIVInstruction for BeqOp {
 }
 pub type BeqInstruction<E> = branch_circuit::BranchCircuit<E, BeqOp>;
 
-#[derive(Default)]
 pub struct BneOp;
 
 impl RIVInstruction for BneOp {
@@ -22,7 +20,6 @@ impl RIVInstruction for BneOp {
 }
 pub type BneInstruction<E> = branch_circuit::BranchCircuit<E, BneOp>;
 
-#[derive(Default)]
 pub struct BltuOp;
 
 impl RIVInstruction for BltuOp {
@@ -33,7 +30,6 @@ pub type BltuInstruction<E> = branch_circuit_v2::BranchCircuit<E, BltuOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type BltuInstruction<E> = branch_circuit::BranchCircuit<E, BltuOp>;
 
-#[derive(Default)]
 pub struct BgeuOp;
 
 impl RIVInstruction for BgeuOp {
@@ -44,7 +40,6 @@ pub type BgeuInstruction<E> = branch_circuit_v2::BranchCircuit<E, BgeuOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type BgeuInstruction<E> = branch_circuit::BranchCircuit<E, BgeuOp>;
 
-#[derive(Default)]
 pub struct BltOp;
 
 impl RIVInstruction for BltOp {
@@ -55,7 +50,6 @@ pub type BltInstruction<E> = branch_circuit_v2::BranchCircuit<E, BltOp>;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub type BltInstruction<E> = branch_circuit::BranchCircuit<E, BltOp>;
 
-#[derive(Default)]
 pub struct BgeOp;
 impl RIVInstruction for BgeOp {
     const INST_KIND: InsnKind = InsnKind::BGE;

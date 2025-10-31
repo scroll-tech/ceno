@@ -27,7 +27,6 @@ pub struct JalConfig<E: ExtensionField> {
     pub rd_written: UInt8<E>,
 }
 
-#[derive(Default)]
 pub struct JalInstruction<E>(PhantomData<E>);
 
 /// JAL instruction circuit
