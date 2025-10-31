@@ -1235,10 +1235,8 @@ mod tests {
 
         assert_eq!(quark_proof.sum, final_sum);
         let mut transcript = BasicTranscript::new(b"test");
-        let verifier = EccVerifier::new();
         assert!(
-            verifier
-                .verify_ecc_proof(&quark_proof, &mut transcript)
+            EccVerifier::verify_ecc_proof(&quark_proof, &mut transcript)
                 .inspect_err(|err| println!("err {:?}", err))
                 .is_ok()
         );

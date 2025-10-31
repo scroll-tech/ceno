@@ -30,7 +30,6 @@ sumcheck.workspace = true
 transcript.workspace = true
 whir.workspace = true
 witness.workspace = true
-lazy_static.workspace = true
 
 itertools.workspace = true
 ndarray.workspace = true
@@ -49,12 +48,12 @@ derive = { path = "../derive" }
 generic-array.workspace = true
 generic_static = "0.2"
 num.workspace = true
+num-bigint = "0.4.6"
 parse-size = "1.1"
 rand.workspace = true
 sp1-curves.workspace = true
 tempfile = "3.14"
 tiny-keccak.workspace = true
-num-bigint = "0.4.6"
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }

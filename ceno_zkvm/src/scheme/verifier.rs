@@ -405,7 +405,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             //     ecc_proof.sum
             // );
             // assert ec sum in public input matches that in ecc proof
-            EccVerifier::new().verify_ecc_proof(ecc_proof, transcript)?;
+            EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
             tracing::debug!("ecc proof verified.");
         }
 
@@ -969,16 +969,10 @@ impl TowerVerify {
     }
 }
 
-#[derive(Default)]
 pub struct EccVerifier;
 
 impl EccVerifier {
-    pub fn new() -> Self {
-        Self {}
-    }
-
     pub fn verify_ecc_proof<E: ExtensionField>(
-        &self,
         proof: &EccQuarkProof<E>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), ZKVMError> {
