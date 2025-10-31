@@ -72,7 +72,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
-        expect_halt: bool,
+        _expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
         // require ecall/halt proof to exist, depending whether we expect a halt.
         // let has_halt = vm_proof.has_halt(&self.vk);
