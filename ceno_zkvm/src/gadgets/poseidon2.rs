@@ -296,6 +296,11 @@ impl<
         }
     }
 
+    #[inline(always)]
+    pub fn num_polys(&self) -> usize {
+        self.cols.len()
+    }
+
     pub fn inputs(&self) -> Vec<Expression<E>> {
         let col_exprs = self.cols.iter().map(|c| c.expr()).collect::<Vec<_>>();
 

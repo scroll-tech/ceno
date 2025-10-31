@@ -506,6 +506,7 @@ pub fn gkr_witness<
                 Either::Right(iter::empty())
             })
             .chain(fixed.iter().cloned())
+            .chain(pub_io.iter().cloned())
             .collect_vec();
 
         // infer current layer output

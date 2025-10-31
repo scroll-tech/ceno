@@ -18,6 +18,7 @@ use gkr_iop::{
     chip::Chip,
     circuit_builder::CircuitBuilder,
     error::CircuitBuilderError,
+    gadgets::IsLtConfig,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
 };
@@ -160,6 +161,7 @@ pub struct GlobalConfig<E: ExtensionField> {
     global_clk: WitIn,
     local_clk: WitIn,
     nonce: WitIn,
+    is_shard_lt_cur: IsLtConfig,
     // if it's a write to global set, then insert a local read record
     // s.t. local offline memory checking can cancel out
     // this serves as propagating local write to global.
@@ -183,7 +185,7 @@ impl<E: ExtensionField> GlobalConfig<E> {
             .map(|i| cb.create_witin(|| format!("slope{}", i)))
             .collect();
         let addr = cb.create_witin(|| "addr");
-        let is_ram_register = cb.create_witin(|| "is_ram_register");
+        let is_ram_register = cb.create_bit(|| "is_ram_register")?;
         let value = UInt::new_unchecked(|| "value", cb)?;
         let shard = cb.create_witin(|| "shard");
         let global_clk = cb.create_witin(|| "global_clk");
@@ -195,9 +197,6 @@ impl<E: ExtensionField> GlobalConfig<E> {
         let reg: Expression<E> = RAMType::Register.into();
         let mem: Expression<E> = RAMType::Memory.into();
         let ram_type: Expression<E> = is_ram_reg.clone() * reg + (1 - is_ram_reg) * mem;
-
-        let rc = <E::BaseField as PoseidonField>::get_default_perm_rc().into();
-        let perm_config = Poseidon2Config::construct(cb, rc);
 
         let mut input = vec![];
         input.push(addr.expr());
@@ -228,7 +227,31 @@ impl<E: ExtensionField> GlobalConfig<E> {
             1 - is_global_write.expr(),
             local_clk.expr(),
         )?;
-        // TODO: enforce shard = shard_id in the public values
+
+        // if it's global write => shard == cur_shard
+        let cur_shard = cb.query_shard_id()?;
+        cb.condition_require_zero(
+            || "global_write = true => shard = instance.shard",
+            is_global_write.expr(),
+            shard.expr() - Expression::Instance(cur_shard),
+        )?;
+
+        // global read => shard < cur_shard
+        let is_shard_lt_cur = IsLtConfig::construct_circuit(
+            cb,
+            || "shard < cur_shard",
+            shard.expr(),
+            Expression::Instance(cur_shard),
+            16,
+        )?;
+        cb.condition_require_equal(
+            || "global read => shard < cur_shard",
+            is_global_write.expr(),
+            is_shard_lt_cur.expr(),
+            E::BaseField::ONE.expr(),  // true
+            E::BaseField::ZERO.expr(), // false
+        )?;
+
         cb.read_rlc_record(
             || "r_record",
             ram_type.clone(),
@@ -251,6 +274,8 @@ impl<E: ExtensionField> GlobalConfig<E> {
             final_sum.into_iter().map(|x| x.expr()).collect::<Vec<_>>(),
         );
 
+        let rc = <E::BaseField as PoseidonField>::get_default_perm_rc().into();
+        let perm_config = Poseidon2Config::construct(cb, rc);
         // enforces x = poseidon2([addr, ram_type, value[0], value[1], shard, global_clk, nonce, 0, ..., 0])
         for (input_expr, hasher_input) in input.into_iter().zip_eq(perm_config.inputs().into_iter())
         {
@@ -275,6 +300,7 @@ impl<E: ExtensionField> GlobalConfig<E> {
             is_ram_register,
             value,
             shard,
+            is_shard_lt_cur,
             global_clk,
             local_clk,
             nonce,
@@ -301,8 +327,9 @@ impl<E: ExtensionField> GlobalChip<E> {
     fn assign_instance(
         config: &GlobalConfig<E>,
         instance: &mut [E::BaseField],
-        _lk_multiplicity: &mut LkMultiplicity,
+        lk_multiplicity: &mut LkMultiplicity,
         input: &GlobalChipInput<E>,
+        cur_shard: usize,
     ) -> Result<(), crate::error::ZKVMError> {
         // assign basic fields
         let record = &input.record;
@@ -319,6 +346,13 @@ impl<E: ExtensionField> GlobalChip<E> {
         set_val!(instance, config.global_clk, record.global_clk);
         set_val!(instance, config.local_clk, record.local_clk);
         set_val!(instance, config.is_global_write, record.is_write as u64);
+
+        config.is_shard_lt_cur.assign_instance(
+            instance,
+            lk_multiplicity,
+            record.shard,
+            cur_shard as u64,
+        )?;
 
         // assign (x, y) and nonce
         let GlobalPoint { nonce, point } = &input.ec_point;
@@ -346,10 +380,11 @@ impl<E: ExtensionField> GlobalChip<E> {
         input[2 + k + 1] = E::BaseField::from_canonical_u64(record.global_clk);
         input[2 + k + 2] = E::BaseField::from_canonical_u32(*nonce);
 
+        let num_perm_polys = config.perm_config.num_polys();
+        let offset = instance.len() - num_perm_polys;
         config
             .perm_config
-            // TODO: remove hardcoded constant 28
-            .assign_instance(&mut instance[28 + UINT_LIMBS..], input);
+            .assign_instance(&mut instance[offset..], input);
 
         Ok(())
     }
@@ -358,7 +393,7 @@ impl<E: ExtensionField> GlobalChip<E> {
 impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
     type TableConfig = GlobalConfig<E>;
     type FixedInput = ();
-    type WitnessInput = Vec<GlobalChipInput<E>>;
+    type WitnessInput = (Vec<GlobalChipInput<E>>, usize);
 
     fn name() -> String {
         "Global".to_string()
@@ -463,8 +498,10 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        steps: &Self::WitnessInput,
+        input: &Self::WitnessInput,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        let steps = &input.0;
+        let cur_shard = input.1;
         if steps.is_empty() {
             return Ok([
                 witness::RowMajorMatrix::empty(),
@@ -483,6 +520,8 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         let nthreads = max_usable_threads();
 
         // local read iff it's global write
+        // local reads are placed before local writes
+        // i.e. global writes are placed before global reads
         let num_local_reads = steps.iter().filter(|s| s.record.is_write).count();
         tracing::debug!(
             "{} local reads / {} local writes in global chip",
@@ -551,7 +590,13 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
                         set_val!(structural_instance, selector_r_witin, sel_r);
                         set_val!(structural_instance, selector_w_witin, sel_w);
                         set_val!(structural_instance, selector_zero_witin, E::BaseField::ONE);
-                        Self::assign_instance(config, instance, &mut lk_multiplicity, step)
+                        Self::assign_instance(
+                            config,
+                            instance,
+                            &mut lk_multiplicity,
+                            step,
+                            cur_shard,
+                        )
                     })
                     .collect::<Vec<_>>()
             })
@@ -683,6 +728,8 @@ mod tests {
         // create a bunch of random memory read/write records
         let n_global_reads = 1700;
         let n_global_writes = 1420;
+        let prev_shard = 0;
+        let cur_shard = 1;
         let global_reads = (0..n_global_reads)
             .map(|i| {
                 let addr = i * 8;
@@ -692,7 +739,7 @@ mod tests {
                     addr: addr as u32,
                     ram_type: RAMType::Memory,
                     value: value as u32,
-                    shard: 0,
+                    shard: prev_shard,
                     local_clk: 0,
                     global_clk: i,
                     is_write: false,
@@ -709,7 +756,7 @@ mod tests {
                     addr: addr as u32,
                     ram_type: RAMType::Memory,
                     value: value as u32,
-                    shard: 1,
+                    shard: cur_shard,
                     local_clk: i,
                     global_clk: i,
                     is_write: true,
@@ -737,7 +784,7 @@ mod tests {
             0,
             0,
             0,
-            0,
+            cur_shard as u32,
             vec![0], // dummy
             global_ec_sum
                 .x
@@ -747,13 +794,14 @@ mod tests {
                 .collect_vec(),
         );
 
+        tracing::debug!("num_witin: {}", cs.num_witin);
         // assign witness
         let witness = GlobalChip::assign_instances(
             &config,
             cs.num_witin as usize,
             cs.num_structural_witin as usize,
             &[],
-            &input,
+            &(input, cur_shard as usize),
         )
         .unwrap();
 

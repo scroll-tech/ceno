@@ -275,6 +275,11 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
+    pub fn cur_shard(&self) -> usize {
+        self.shards.shard_id
+    }
+
+    #[inline(always)]
     pub fn is_first_shard(&self) -> bool {
         self.shards.shard_id == 0
     }

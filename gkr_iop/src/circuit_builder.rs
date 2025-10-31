@@ -471,10 +471,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         slopes: Vec<Expression<E>>,
         final_sum: Vec<Expression<E>>,
     ) {
-        assert_eq!(xs.len(), 7);
-        assert_eq!(ys.len(), 7);
-        assert_eq!(slopes.len(), 7);
-        assert_eq!(final_sum.len(), 7 * 2);
+        const SEPTIC_EXTENSION_DEGREE: usize = 7;
+        assert_eq!(xs.len(), SEPTIC_EXTENSION_DEGREE);
+        assert_eq!(ys.len(), SEPTIC_EXTENSION_DEGREE);
+        assert_eq!(slopes.len(), SEPTIC_EXTENSION_DEGREE);
+        assert_eq!(final_sum.len(), SEPTIC_EXTENSION_DEGREE * 2);
 
         assert_eq!(self.ec_point_exprs.len(), 0);
         self.ec_point_exprs.extend(xs);
