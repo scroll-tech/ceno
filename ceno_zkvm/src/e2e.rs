@@ -109,6 +109,8 @@ pub struct RAMRecord {
     // prev_cycle and cycle are global cycle
     pub prev_cycle: Cycle,
     pub cycle: Cycle,
+    // shard_cycle is cycle in current local shard, which already offset by start cycle
+    pub shard_cycle: Cycle,
     pub prev_value: Option<Word>,
     pub value: Word,
     // for global reads, `shard_id` refers to the shard that previously produced this value.
@@ -304,6 +306,11 @@ impl<'a> ShardContext<'a> {
         ts
     }
 
+    #[inline(always)]
+    pub fn aligned_current_ts(&self, cycle: Cycle) -> Cycle {
+        cycle.saturating_sub(self.current_shard_offset_cycle())
+    }
+
     pub fn current_shard_offset_cycle(&self) -> Cycle {
         // cycle of each local shard start from Tracer::SUBCYCLES_PER_INSN
         (self.cur_shard_cycle_range.start as Cycle) - Tracer::SUBCYCLES_PER_INSN
@@ -341,6 +348,7 @@ impl<'a> ShardContext<'a> {
                     addr,
                     prev_cycle,
                     cycle,
+                    shard_cycle: 0,
                     prev_value,
                     value,
                     shard_id: prev_shard_id,
@@ -366,6 +374,7 @@ impl<'a> ShardContext<'a> {
             && future_touch_cycle >= self.cur_shard_cycle_range.end as Cycle
             && self.is_current_shard_cycle(cycle)
         {
+            let shard_cycle = self.aligned_current_ts(cycle);
             let ram_record = self
                 .write_thread_based_record_storage
                 .as_mut()
@@ -379,6 +388,7 @@ impl<'a> ShardContext<'a> {
                     addr,
                     prev_cycle,
                     cycle,
+                    shard_cycle,
                     prev_value,
                     value,
                     shard_id: self.shards.shard_id,
