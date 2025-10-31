@@ -298,7 +298,7 @@ pub struct GlobalChipInput<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> GlobalChip<E> {
-    fn assign_instance<'a>(
+    fn assign_instance(
         config: &GlobalConfig<E>,
         instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
