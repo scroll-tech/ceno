@@ -1,4 +1,4 @@
-/// TODO FIXME LayerConstrainSystem is deprecated
+/// TODO: LayerConstrainSystem is deprecated
 use std::{cmp::Ordering, collections::BTreeMap};
 
 use crate::{
@@ -134,7 +134,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         assert!(size <= 16);
         let rlc_record = rlc_chip_record(
             vec![
-                // TODO FIXME layer constrain system is deprecated
+                // TODO: layer constrain system is deprecated
                 E::BaseField::from_canonical_u64(LookupTable::Dynamic as u64).expr(),
                 value.clone(),
             ],
