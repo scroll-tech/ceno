@@ -434,28 +434,30 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     ) -> Result<(), ZKVMError> {
         let perm = <E::BaseField as PoseidonField>::get_default_perm();
         let global_input = shard_ctx
-            .read_records()
+            .write_records()
             .par_iter()
             .flat_map_iter(|records| {
+                // global write -> local reads
                 records.iter().map(|(vma, record)| {
-                    let global_read: GlobalRecord = (vma, record, false).into();
-                    let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
+                    let global_write: GlobalRecord = (vma, record, true).into();
+                    let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
                     GlobalChipInput {
-                        record: global_read,
+                        record: global_write,
                         ec_point,
                     }
                 })
             })
             .chain(
                 shard_ctx
-                    .write_records()
+                    .read_records()
                     .par_iter()
                     .flat_map_iter(|records| {
+                        // global read -> local write
                         records.iter().map(|(vma, record)| {
-                            let global_write: GlobalRecord = (vma, record, true).into();
-                            let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
+                            let global_read: GlobalRecord = (vma, record, false).into();
+                            let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
                             GlobalChipInput {
-                                record: global_write,
+                                record: global_read,
                                 ec_point,
                             }
                         })
