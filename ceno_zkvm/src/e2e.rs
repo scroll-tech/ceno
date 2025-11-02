@@ -36,6 +36,7 @@ use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -167,6 +168,9 @@ pub struct ShardContext<'a> {
     max_cycle: Cycle,
     // TODO optimize this map as it's super huge
     addr_future_accesses: Arc<NextCycleAccess>,
+    // this is only updated in first shard
+    addr_accessed_thread_based_first_shard:
+        Either<Vec<FxHashSet<WordAddr>>, &'a mut FxHashSet<WordAddr>>,
     read_thread_based_record_storage:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     write_thread_based_record_storage:
@@ -183,6 +187,12 @@ impl<'a> Default for ShardContext<'a> {
             num_shards: 1,
             max_cycle: Cycle::default(),
             addr_future_accesses: Arc::new(Default::default()),
+            addr_accessed_thread_based_first_shard: Either::Left(
+                (0..max_threads)
+                    .into_par_iter()
+                    .map(|_| Default::default())
+                    .collect::<Vec<_>>(),
+            ),
             read_thread_based_record_storage: Either::Left(
                 (0..max_threads)
                     .into_par_iter()
@@ -299,6 +309,12 @@ impl<'a> ShardContext<'a> {
                     num_shards,
                     max_cycle: max_cycle as Cycle,
                     addr_future_accesses: addr_future_accesses.clone(),
+                    addr_accessed_thread_based_first_shard: Either::Left(
+                        (0..max_threads)
+                            .into_par_iter()
+                            .map(|_| Default::default())
+                            .collect::<Vec<_>>(),
+                    ),
                     // TODO with_capacity optimisation
                     read_thread_based_record_storage: Either::Left(
                         (0..max_threads)
@@ -324,23 +340,31 @@ impl<'a> ShardContext<'a> {
         match (
             &mut self.read_thread_based_record_storage,
             &mut self.write_thread_based_record_storage,
+            &mut self.addr_accessed_thread_based_first_shard,
         ) {
             (
                 Either::Left(read_thread_based_record_storage),
                 Either::Left(write_thread_based_record_storage),
+                Either::Left(addr_accessed_thread_based_first_shard),
             ) => read_thread_based_record_storage
                 .iter_mut()
                 .zip(write_thread_based_record_storage.iter_mut())
-                .map(|(read, write)| ShardContext {
-                    shard_id: self.shard_id,
-                    num_shards: self.num_shards,
-                    max_cycle: self.max_cycle,
-                    addr_future_accesses: self.addr_future_accesses.clone(),
-                    read_thread_based_record_storage: Either::Right(read),
-                    write_thread_based_record_storage: Either::Right(write),
-                    cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
-                    expected_inst_per_shard: self.expected_inst_per_shard,
-                })
+                .zip(addr_accessed_thread_based_first_shard.iter_mut())
+                .map(
+                    |((read, write), addr_accessed_thread_based_first_shard)| ShardContext {
+                        shard_id: self.shard_id,
+                        num_shards: self.num_shards,
+                        max_cycle: self.max_cycle,
+                        addr_future_accesses: self.addr_future_accesses.clone(),
+                        addr_accessed_thread_based_first_shard: Either::Right(
+                            addr_accessed_thread_based_first_shard,
+                        ),
+                        read_thread_based_record_storage: Either::Right(read),
+                        write_thread_based_record_storage: Either::Right(write),
+                        cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
+                        expected_inst_per_shard: self.expected_inst_per_shard,
+                    },
+                )
                 .collect_vec(),
             _ => panic!("invalid type"),
         }
@@ -413,6 +437,23 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
+    pub fn find_future_next_access(&self, cycle: Cycle, addr: WordAddr) -> Option<Cycle> {
+        self.addr_future_accesses
+            .get(cycle as usize)
+            .and_then(|res| {
+                if res.len() == 1 {
+                    Some(res[0].1)
+                } else if res.len() > 1 {
+                    res.iter()
+                        .find(|(m_addr, _)| *m_addr == addr)
+                        .map(|(_, cycle)| *cycle)
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[inline(always)]
     #[allow(clippy::too_many_arguments)]
     pub fn send(
         &mut self,
@@ -453,20 +494,7 @@ impl<'a> ShardContext<'a> {
         }
 
         // check write to external mem bus
-        if let Some(future_touch_cycle) =
-            self.addr_future_accesses
-                .get(cycle as usize)
-                .and_then(|res| {
-                    if res.len() == 1 {
-                        Some(res[0].1)
-                    } else if res.len() > 1 {
-                        res.iter()
-                            .find(|(m_addr, _)| *m_addr == addr)
-                            .map(|(_, cycle)| *cycle)
-                    } else {
-                        None
-                    }
-                })
+        if let Some(future_touch_cycle) = self.find_future_next_access(cycle, addr)
             && self.after_current_shard_cycle(future_touch_cycle)
             && self.is_current_shard_cycle(cycle)
         {
@@ -491,6 +519,32 @@ impl<'a> ShardContext<'a> {
                 },
             );
         }
+
+        if self.is_first_shard() {
+            let addr_accessed = self
+                .addr_accessed_thread_based_first_shard
+                .as_mut()
+                .right()
+                .expect("illegal type");
+            addr_accessed.insert(addr);
+        }
+    }
+
+    /// merge map from different thread, which keep the largest cycle when matched same address
+    pub fn get_addr_accessed_first_shard(&self) -> FxHashSet<WordAddr> {
+        let mut merged = FxHashSet::default();
+        let addr_accessed_thread_based_first_shard =
+            match &self.addr_accessed_thread_based_first_shard {
+                Either::Left(addr_accessed_thread_based_first_shard) => {
+                    addr_accessed_thread_based_first_shard
+                }
+                Either::Right(_) => panic!("invalid type"),
+            };
+
+        for s in addr_accessed_thread_based_first_shard {
+            merged.extend(s);
+        }
+        merged
     }
 
     /// Splits a total count `num_shards` into up to `num_provers` non-empty parts, distributing as evenly as possible.

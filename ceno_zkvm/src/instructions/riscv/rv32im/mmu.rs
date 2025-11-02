@@ -163,7 +163,11 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             &self.local_final_circuit,
             &(shard_ctx, all_records.as_slice()),
         )?;
-        witness.assign_global_chip_circuit(cs, shard_ctx, &self.ram_bus_circuit)?;
+        witness.assign_global_chip_circuit(
+            cs,
+            &(shard_ctx, all_records.as_slice()),
+            &self.ram_bus_circuit,
+        )?;
 
         Ok(())
     }

@@ -8,22 +8,23 @@ use crate::{
     },
     scheme::septic_curve::SepticPoint,
     state::StateCircuit,
-    tables::{RMMCollections, TableCircuit},
+    tables::{MemFinalRecord, RMMCollections, TableCircuit},
 };
-use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
 use sumcheck::structs::{IOPProof, IOPProverMessage};
-use witness::RowMajorMatrix;
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 /// proof that the sum of N=2^n EC points is equal to `sum`
 /// in one layer instead of GKR layered circuit approach
@@ -431,14 +432,25 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn assign_global_chip_circuit(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
-        shard_ctx: &ShardContext,
+        // shard_ctx: &ShardContext,
+        (shard_ctx, final_mem): &(
+            &ShardContext,
+            &[(InstancePaddingStrategy, &[MemFinalRecord])],
+        ),
         config: &<GlobalChip<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
         let perm = <E::BaseField as PoseidonField>::get_default_perm();
+        let waddr_first_access = if shard_ctx.is_first_shard() {
+            shard_ctx.get_addr_accessed_first_shard()
+        } else {
+            FxHashSet::default()
+        };
+        println!("addr_first_access len() {}", waddr_first_access.len());
+        println!("global write len() {}", shard_ctx.write_records().len());
         let global_input = shard_ctx
             .write_records()
-            .par_iter()
-            .flat_map_iter(|records| {
+            .iter()
+            .flat_map(|records| {
                 // global write -> local reads
                 records.iter().map(|(vma, record)| {
                     let global_write: GlobalRecord = (vma, record, true).into();
@@ -449,22 +461,68 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     }
                 })
             })
-            .chain(
-                shard_ctx
-                    .read_records()
-                    .par_iter()
-                    .flat_map_iter(|records| {
-                        // global read -> local write
-                        records.iter().map(|(vma, record)| {
-                            let global_read: GlobalRecord = (vma, record, false).into();
-                            let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
-                            GlobalChipInput {
-                                record: global_read,
-                                ec_point,
+            .chain({
+                if shard_ctx.is_first_shard() {
+                    final_mem.iter().flat_map(|(_, final_mem)| {
+                        final_mem.iter().filter_map(|mem_record| {
+                            // prepare global writes record for those record which not accessed in first record
+                            // but access in future shard
+                            let (waddr, addr): (WordAddr, u32) = match mem_record.ram_type {
+                                RAMType::Register => (
+                                    Platform::register_vma(mem_record.addr as RegIdx).into(),
+                                    mem_record.addr,
+                                ),
+                                RAMType::Memory => (mem_record.addr.into(), mem_record.addr),
+                                _ => unimplemented!(),
+                            };
+                            if !waddr_first_access.contains(&waddr)
+                                && shard_ctx.after_current_shard_cycle(mem_record.cycle)
+                            {
+                                let global_write = GlobalRecord {
+                                    addr: match mem_record.ram_type {
+                                        RAMType::Register => addr,
+                                        RAMType::Memory => waddr.into(),
+                                        _ => unimplemented!(),
+                                    },
+                                    ram_type: mem_record.ram_type,
+                                    value: mem_record.value,
+                                    shard: 0,
+                                    local_clk: 0 as u64,
+                                    global_clk: 0 as u64,
+                                    is_to_write_set: true,
+                                };
+                                let waddr_test: WordAddr = mem_record.addr.into();
+                                println!(
+                                    "mem_record.addr {:x}, into_waddr {:x}, global_write {:?}",
+                                    mem_record.addr,
+                                    waddr_test.baddr().0,
+                                    global_write
+                                );
+                                let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
+                                Some(GlobalChipInput {
+                                    record: global_write,
+                                    ec_point,
+                                })
+                            } else {
+                                None
                             }
                         })
-                    }),
-            )
+                    })
+                } else {
+                    todo!()
+                }
+            })
+            .chain(shard_ctx.read_records().iter().flat_map(|records| {
+                // global read -> local write
+                records.iter().map(|(vma, record)| {
+                    let global_read: GlobalRecord = (vma, record, false).into();
+                    let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
+                    GlobalChipInput {
+                        record: global_read,
+                        ec_point,
+                    }
+                })
+            }))
             .collect::<Vec<_>>();
         assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&GlobalChip::<E>::name()).unwrap();
