@@ -22,9 +22,7 @@ use gkr_iop::{
     selector::SelectorType,
 };
 use itertools::{Itertools, chain};
-use multilinear_extensions::{
-    Expression, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn, util::max_usable_threads,
-};
+use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
 use p3::{
     field::{Field, FieldAlgebra},
     matrix::dense::RowMajorMatrix,
@@ -395,36 +393,9 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         param: &ProgramParams,
     ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), crate::error::ZKVMError> {
         // create three selectors: selector_r, selector_w, selector_zero
-        let selector_r = cb.create_structural_witin(
-            || "selector_r",
-            // this is just a placeholder, the actural type is SelectorType::Prefix()
-            EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
-        let selector_w = cb.create_structural_witin(
-            || "selector_w",
-            // this is just a placeholder, the actural type is SelectorType::Prefix()
-            EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
-        let selector_zero = cb.create_structural_witin(
-            || "selector_zero",
-            // this is just a placeholder, the actural type is SelectorType::Prefix()
-            EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let selector_r = cb.create_placeholder_structural_witin(|| "selector_r");
+        let selector_w = cb.create_placeholder_structural_witin(|| "selector_w");
+        let selector_zero = cb.create_placeholder_structural_witin(|| "selector_zero");
 
         let config = Self::construct_circuit(cb, param)?;
 
