@@ -1,8 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use super::ram_impl::{
-    LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableConfig, RAMBusConfig,
-};
+use super::ram_impl::{LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableConfig};
 use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
@@ -368,55 +366,6 @@ impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
             num_witin,
             num_structural_witin,
             final_mem,
-        )?)
-    }
-}
-
-/// This circuit is generalized version to handle all mmio records
-pub struct RamBusCircuit<'a, const V_LIMBS: usize, E>(PhantomData<(&'a (), E)>);
-
-impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
-    for RamBusCircuit<'a, V_LIMBS, E>
-{
-    type TableConfig = RAMBusConfig<V_LIMBS>;
-    type FixedInput = ();
-    type WitnessInput = ShardContext<'a>;
-
-    fn name() -> String {
-        "RamBusCircuit".to_string()
-    }
-
-    fn construct_circuit(
-        cb: &mut CircuitBuilder<E>,
-        params: &ProgramParams,
-    ) -> Result<Self::TableConfig, ZKVMError> {
-        Ok(cb.namespace(
-            || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb, params),
-        )?)
-    }
-
-    fn generate_fixed_traces(
-        _config: &Self::TableConfig,
-        _num_fixed: usize,
-        _init_v: &Self::FixedInput,
-    ) -> RowMajorMatrix<E::BaseField> {
-        RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
-    }
-
-    fn assign_instances(
-        config: &Self::TableConfig,
-        num_witin: usize,
-        num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
-        shard_ctx: &Self::WitnessInput,
-    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
-        // assume returned table is well-formed include padding
-        Ok(Self::TableConfig::assign_instances(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
         )?)
     }
 }
