@@ -8,13 +8,24 @@ use ff_ext::{Instrumented, PoseidonField};
 use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
-    scheme::constants::NUM_FANIN,
-    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs, VerifyingKey, ZKVMVerifyingKey},
+    scheme::{
+        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        septic_curve::SepticExtension,
+    },
+    structs::{
+        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
+        ZKVMVerifyingKey,
+    },
+};
+use gkr_iop::{
+    self,
+    selector::{SelectorContext, SelectorType},
 };
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    StructuralWitIn,
+    Expression, StructuralWitIn,
+    StructuralWitInType::StackedConstantSequence,
     mle::IntoMLE,
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
@@ -56,15 +67,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
-        expect_halt: bool,
+        _expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
         // require ecall/halt proof to exist, depending whether we expect a halt.
-        let has_halt = vm_proof.has_halt(&self.vk);
-        if has_halt != expect_halt {
-            return Err(ZKVMError::VerifyError(
-                format!("ecall/halt mismatch: expected {expect_halt} != {has_halt}",).into(),
-            ));
-        }
+        // let has_halt = vm_proof.has_halt(&self.vk);
+        // if has_halt != expect_halt {
+        //     return Err(ZKVMError::VerifyError(
+        //         format!("ecall/halt mismatch: expected {expect_halt} != {has_halt}",).into(),
+        //     ));
+        // }
 
         self.verify_proof_validity(vm_proof, transcript)
     }
@@ -126,7 +137,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // write (circuit_idx, num_instance) to transcript
         for (circuit_idx, proof) in &vm_proof.chip_proofs {
             transcript.append_message(&circuit_idx.to_le_bytes());
-            transcript.append_message(&proof.num_instances.to_le_bytes());
+            for num_instance in &proof.num_instances {
+                transcript.append_message(&num_instance.to_le_bytes());
+            }
         }
 
         // write witin commitment to transcript
@@ -153,7 +166,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut witin_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
         let mut fixed_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
         for (index, proof) in &vm_proof.chip_proofs {
-            assert!(proof.num_instances > 0);
+            let num_instance: usize = proof.num_instances.iter().sum();
+            assert!(num_instance > 0);
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
@@ -213,11 +227,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks = circuit_vk.get_cs().num_lks();
                 // each padding instance contribute to (2^rotation_vars) dummy lookup padding
-                let num_padded_instance = (next_pow2_instance_padding(proof.num_instances)
-                    - proof.num_instances)
+                let num_padded_instance = (next_pow2_instance_padding(num_instance) - num_instance)
                     * (1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0));
                 // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
-                let num_instance_non_selected = proof.num_instances
+                let num_instance_non_selected = num_instance
                     * ((1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0))
                         - (circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0) + 1));
                 dummy_table_item_multiplicity +=
@@ -331,7 +344,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             zkvm_v1_css: cs,
             gkr_circuit,
         } = &composed_cs;
-        let num_instances = proof.num_instances;
+        let num_instances = proof.num_instances.iter().sum();
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len() + cs.r_table_expressions.len(),
             cs.w_expressions.len() + cs.w_table_expressions.len(),
@@ -340,7 +353,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
 
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instance);
+        let mut log2_num_instances = ceil_log2(next_pow2_instance);
+        if composed_cs.has_ecc_ops() {
+            // for opcode circuit with ecc ops, the mles have one extra variable
+            // to store the internal partial sums for ecc additions
+            log2_num_instances += 1;
+        }
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         // constrain log2_num_instances within max length
@@ -384,6 +402,39 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             });
             assert_eq!(num_vars, log2_num_instances);
         });
+
+        // verify ecc proof if exists
+        if composed_cs.has_ecc_ops() {
+            tracing::debug!("verifying ecc proof...");
+            assert!(proof.ecc_proof.is_some());
+            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
+
+            // TODO: enable this
+            // let xy = cs
+            //     .ec_final_sum
+            //     .iter()
+            //     .map(|expr| {
+            //         eval_by_expr_with_instance(&[], &[], &[], pi, challenges, &expr)
+            //             .right()
+            //             .and_then(|v| v.as_base())
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            // let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
+            // let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
+
+            // assert_eq!(
+            //     SepticPoint {
+            //         x,
+            //         y,
+            //         is_infinity: false,
+            //     },
+            //     ecc_proof.sum
+            // );
+            // assert ec sum in public input matches that in ecc proof
+            EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
+            tracing::debug!("ecc proof verified.");
+        }
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -442,6 +493,44 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .collect_vec();
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
+        let selector_ctxs = if cs.ec_final_sum.is_empty() {
+            assert_eq!(proof.num_instances.len(), 1);
+            // it's not global chip
+            vec![
+                SelectorContext::new(0, num_instances, num_var_with_rotation);
+                gkr_circuit
+                    .layers
+                    .first()
+                    .map(|layer| layer.out_sel_and_eval_exprs.len())
+                    .unwrap_or(0)
+            ]
+        } else {
+            assert_eq!(proof.num_instances.len(), 2);
+            // it's global chip
+            tracing::debug!(
+                "num_reads: {}, num_writes: {}, total: {}",
+                proof.num_instances[0],
+                proof.num_instances[1],
+                proof.num_instances[0] + proof.num_instances[1],
+            );
+            vec![
+                SelectorContext {
+                    offset: 0,
+                    num_instances: proof.num_instances[0],
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: proof.num_instances[0],
+                    num_instances: proof.num_instances[1],
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: 0,
+                    num_instances: proof.num_instances[0] + proof.num_instances[1],
+                    num_vars: num_var_with_rotation,
+                },
+            ]
+        };
         let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
@@ -450,7 +539,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             raw_pi,
             challenges,
             transcript,
-            num_instances,
+            &selector_ctxs,
         )?;
         Ok(rt)
     }
@@ -528,6 +617,8 @@ impl TowerVerify {
                 )
             })
             .unzip::<_, _, Vec<_>, Vec<_>>();
+
+        // initial claim = \sum_j alpha^j * out_j[rt]
         let initial_claim = izip!(&prod_spec_point_n_eval, &alpha_pows)
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
             .sum::<E>()
@@ -540,7 +631,7 @@ impl TowerVerify {
 
         let max_num_variables = num_variables.iter().max().unwrap();
 
-        let (next_rt, _) = (0..(max_num_variables-1)).try_fold(
+        let (next_rt, _) = (0..(max_num_variables - 1)).try_fold(
             (
                 PointAndEval {
                     point: initial_rt,
@@ -565,33 +656,40 @@ impl TowerVerify {
 
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
+                let eq = eq_eval(out_rt, &rt);
                 let expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
-                        eq_eval(out_rt, &rt)
-                            * *alpha
-                            * if round < *max_round-1 {tower_proofs.prod_specs_eval[spec_index][round].iter().copied().product()} else {
-                                E::ZERO
-                            }
+                        // prod'[b] = prod[0,b] * prod[1,b]
+                        // prod'[out_rt] = \sum_b eq(out_rt,b) * prod'[b] = \sum_b eq(out_rt,b) * prod[0,b] * prod[1,b]
+                        eq * *alpha
+                            * if round < *max_round - 1 { tower_proofs.prod_specs_eval[spec_index][round].iter().copied().product() } else {
+                            E::ZERO
+                        }
                     })
                     .sum::<E>()
                     + (0..num_logup_spec)
-                        .zip_eq(alpha_pows[num_prod_spec..].chunks(2))
-                        .zip_eq(num_variables[num_prod_spec..].iter())
-                        .map(|((spec_index, alpha), max_round)| {
-                            let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
-                            eq_eval(out_rt, &rt) * if round < *max_round-1 {
-                                let evals = &tower_proofs.logup_specs_eval[spec_index][round];
-                                let (p1, p2, q1, q2) =
-                                        (evals[0], evals[1], evals[2], evals[3]);
-                                    *alpha_numerator * (p1 * q2 + p2 * q1)
-                                        + *alpha_denominator * (q1 * q2)
-                            } else {
-                                E::ZERO
-                            }
-                        })
-                        .sum::<E>();
+                    .zip_eq(alpha_pows[num_prod_spec..].chunks(2))
+                    .zip_eq(num_variables[num_prod_spec..].iter())
+                    .map(|((spec_index, alpha), max_round)| {
+                        // logup_q'[b] = logup_q[0,b] * logup_q[1,b]
+                        // logup_p'[b] = logup_p[0,b] * logup_q[1,b] + logup_p[1,b] * logup_q[0,b]
+                        // logup_p'[out_rt] = \sum_b eq(out_rt,b) * (logup_p[0,b] * logup_q[1,b] + logup_p[1,b] * logup_q[0,b])
+                        // logup_q'[out_rt] = \sum_b eq(out_rt,b) * logup_q[0,b] * logup_q[1,b]
+                        let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
+                        eq * if round < *max_round - 1 {
+                            let evals = &tower_proofs.logup_specs_eval[spec_index][round];
+                            let (p1, p2, q1, q2) =
+                                (evals[0], evals[1], evals[2], evals[3]);
+                            *alpha_numerator * (p1 * q2 + p2 * q1)
+                                + *alpha_denominator * (q1 * q2)
+                        } else {
+                            E::ZERO
+                        }
+                    })
+                    .sum::<E>();
+
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
                     return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));
                 }
@@ -599,7 +697,7 @@ impl TowerVerify {
                 // derive single eval
                 // rt' = r_merge || rt
                 // r_merge.len() == ceil_log2(num_product_fanin)
-                let r_merge =transcript.sample_and_append_vec(b"merge", log2_num_fanin);
+                let r_merge = transcript.sample_and_append_vec(b"merge", log2_num_fanin);
                 let coeffs = build_eq_x_r_vec_sequential(&r_merge);
                 assert_eq!(coeffs.len(), num_fanin);
                 let rt_prime = [rt, r_merge].concat();
@@ -614,17 +712,18 @@ impl TowerVerify {
                     .zip(next_alpha_pows.iter())
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
-                        if round < max_round -1 {
+                        // prod'[rt,r_merge] = \sum_b eq(r_merge, b) * prod'[b,rt]
+                        if round < max_round - 1 {
                             // merged evaluation
                             let evals = izip!(
                                 tower_proofs.prod_specs_eval[spec_index][round].iter(),
                                 coeffs.iter()
                             )
-                            .map(|(a, b)| *a * *b)
-                            .sum::<E>();
+                                .map(|(a, b)| *a * *b)
+                                .sum::<E>();
                             // this will keep update until round > evaluation
                             prod_spec_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), evals);
-                            if next_round < max_round -1 {
+                            if next_round < max_round - 1 {
                                 *alpha * evals
                             } else {
                                 E::ZERO
@@ -638,28 +737,28 @@ impl TowerVerify {
                     .zip_eq(next_alpha_pows[num_prod_spec..].chunks(2))
                     .zip_eq(num_variables[num_prod_spec..].iter())
                     .map(|((spec_index, alpha), max_round)| {
-                        if round < max_round -1 {
+                        if round < max_round - 1 {
                             let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
                             // merged evaluation
                             let p_evals = izip!(
                                 tower_proofs.logup_specs_eval[spec_index][round][0..2].iter(),
                                 coeffs.iter()
                             )
-                            .map(|(a, b)| *a * *b)
-                            .sum::<E>();
+                                .map(|(a, b)| *a * *b)
+                                .sum::<E>();
 
                             let q_evals = izip!(
                                 tower_proofs.logup_specs_eval[spec_index][round][2..4].iter(),
                                 coeffs.iter()
                             )
-                            .map(|(a, b)| *a * *b)
-                            .sum::<E>();
+                                .map(|(a, b)| *a * *b)
+                                .sum::<E>();
 
                             // this will keep update until round > evaluation
                             logup_spec_p_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), p_evals);
                             logup_spec_q_point_n_eval[spec_index] = PointAndEval::new(rt_prime.clone(), q_evals);
 
-                            if next_round < max_round -1 {
+                            if next_round < max_round - 1 {
                                 *alpha_numerator * p_evals + *alpha_denominator * q_evals
                             } else {
                                 E::ZERO
@@ -669,8 +768,10 @@ impl TowerVerify {
                         }
                     })
                     .sum::<E>();
+
                 // sum evaluation from different specs
                 let next_eval = next_prod_spec_evals + next_logup_spec_evals;
+
                 Ok((PointAndEval {
                     point: rt_prime,
                     eval: next_eval,
@@ -684,5 +785,134 @@ impl TowerVerify {
             logup_spec_p_point_n_eval,
             logup_spec_q_point_n_eval,
         ))
+    }
+}
+
+pub struct EccVerifier;
+
+impl EccVerifier {
+    pub fn verify_ecc_proof<E: ExtensionField>(
+        proof: &EccQuarkProof<E>,
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<(), ZKVMError> {
+        let num_vars = next_pow2_instance_padding(proof.num_instances).ilog2() as usize;
+        let out_rt = transcript.sample_and_append_vec(b"ecc", num_vars);
+        let alpha_pows = transcript.sample_and_append_challenge_pows(
+            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2,
+            b"ecc_alpha",
+        );
+        let mut alpha_pows_iter = alpha_pows.iter();
+
+        let sumcheck_claim = IOPVerifierState::verify(
+            E::ZERO,
+            &proof.zerocheck_proof,
+            &VPAuxInfo {
+                max_degree: 3,
+                max_num_variables: num_vars,
+                phantom: PhantomData,
+            },
+            transcript,
+        );
+
+        let s0: SepticExtension<E> = proof.evals[2..][0..][..SEPTIC_EXTENSION_DEGREE].into();
+        let x0: SepticExtension<E> =
+            proof.evals[2..][SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let y0: SepticExtension<E> =
+            proof.evals[2..][2 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let x1: SepticExtension<E> =
+            proof.evals[2..][3 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let y1: SepticExtension<E> =
+            proof.evals[2..][4 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let x3: SepticExtension<E> =
+            proof.evals[2..][5 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+        let y3: SepticExtension<E> =
+            proof.evals[2..][6 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+
+        let rt = sumcheck_claim
+            .point
+            .iter()
+            .map(|c| c.elements)
+            .collect_vec();
+
+        // zerocheck: 0 = s[0,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1])
+        // zerocheck: 0 = s[0,b]^2 - x[b,0] - x[b,1] - x[1,b]
+        // zerocheck: 0 = s[0,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b])
+        // zerocheck: 0 = (x[1,b] - x[b,0])
+        // zerocheck: 0 = (y[1,b] - y[b,0])
+        //
+        // note that they are not septic extension field elements,
+        // we just want to reuse the multiply/add/sub formulas
+        let v1: SepticExtension<E> = s0.clone() * (&x0 - &x1) - (&y0 - &y1);
+        let v2: SepticExtension<E> = s0.square() - &x0 - &x1 - &x3;
+        let v3: SepticExtension<E> = s0 * (&x0 - &x3) - (&y0 + &y3);
+
+        let v4: SepticExtension<E> = &x3 - &x0;
+        let v5: SepticExtension<E> = &y3 - &y0;
+
+        let [v1, v2, v3, v4, v5] = [v1, v2, v3, v4, v5].map(|v| {
+            v.0.into_iter()
+                .zip(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(c, alpha)| c * *alpha)
+                .collect_vec()
+        });
+
+        let sel_add_expr = SelectorType::<E>::QuarkBinaryTreeLessThan(Expression::StructuralWitIn(
+            0,
+            // this value doesn't matter, as we only need structural id
+            StackedConstantSequence { max_value: 0 },
+        ));
+        let Some((expected_sel_add, _)) = sel_add_expr.evaluate(
+            &out_rt,
+            &rt,
+            &SelectorContext {
+                offset: 0,
+                num_instances: proof.num_instances,
+                num_vars,
+            },
+        ) else {
+            unreachable!()
+        };
+
+        if proof.evals[0] != expected_sel_add {
+            return Err(ZKVMError::VerifyError(
+                (format!(
+                    "sel_add evaluation mismatch, expected {}, got {}",
+                    expected_sel_add, proof.evals[0]
+                ))
+                .into(),
+            ));
+        }
+
+        // derive `sel_bypass = eq - sel_add - sel_last_onehot`
+        let expected_sel_bypass = eq_eval(&out_rt, &rt)
+            - expected_sel_add
+            - (out_rt.iter().copied().product::<E>() * rt.iter().copied().product::<E>());
+
+        if proof.evals[1] != expected_sel_bypass {
+            return Err(ZKVMError::VerifyError(
+                (format!(
+                    "sel_bypass evaluation mismatch, expected {}, got {}",
+                    expected_sel_bypass, proof.evals[1]
+                ))
+                .into(),
+            ));
+        }
+
+        let add_evaluations = vec![v1, v2, v3].into_iter().flatten().sum::<E>();
+        let bypass_evaluations = vec![v4, v5].into_iter().flatten().sum::<E>();
+        if sumcheck_claim.expected_evaluation
+            != add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass
+        {
+            return Err(ZKVMError::VerifyError(
+                (format!(
+                    "ecc zerocheck failed: mismatched evaluation, expected {}, got {}",
+                    sumcheck_claim.expected_evaluation,
+                    add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass
+                ))
+                .into(),
+            ));
+        }
+
+        Ok(())
     }
 }

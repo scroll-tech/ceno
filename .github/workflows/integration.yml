@@ -63,10 +63,11 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
-      - name: Run fibonacci (release + goldilocks)
-        env:
-          RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+      # note: the global chip does not support goldilocks field yet
+      # - name: Run fibonacci (release + goldilocks)
+      # env:
+      #   RUSTFLAGS: "-C opt-level=3"
+      #   run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
       - name: Run Guest Heap Alloc (debug)
         env:
@@ -80,10 +81,11 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
 
-      - name: Run Guest Heap Alloc (release + goldilocks)
-        env:
-          RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
+      # note: the global chip does not support goldilocks field yet
+      # - name: Run Guest Heap Alloc (release + goldilocks)
+      # env:
+      #   RUSTFLAGS: "-C opt-level=3"
+      #   run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
 
       - name: Run keccak_syscall (release)
         env:

@@ -8,6 +8,7 @@ use crate::{
             zerocheck_layer::RotationPoints,
         },
     },
+    selector::SelectorContext,
     utils::{rotation_next_base_mle, rotation_selector},
 };
 use either::Either;
@@ -113,7 +114,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         pub_io_evals: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (
         LayerProof<<CpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<CpuBackend<E, PCS> as ProverBackend>::E>,
@@ -125,6 +126,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             "out eval length {} != with distinct out_point {}",
             layer.out_sel_and_eval_exprs.len(),
             out_points.len(),
+        );
+        assert_eq!(
+            layer.out_sel_and_eval_exprs.len(),
+            selector_ctxs.len(),
+            "selector_ctxs length {}",
+            selector_ctxs.len()
         );
 
         let (_, raw_rotation_exprs) = &layer.rotation_exprs;
@@ -174,7 +181,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .out_sel_and_eval_exprs
             .par_iter()
             .zip(out_points.par_iter())
-            .filter_map(|((sel_type, _), point)| sel_type.compute(point, num_instances))
+            .zip(selector_ctxs.par_iter())
+            .filter_map(|(((sel_type, _), point), selector_ctx)| {
+                sel_type.compute(point, selector_ctx)
+            })
             // for rotation left point
             .chain(rotation_left.par_iter().map(|rotation_left| {
                 MultilinearExtension::from_evaluations_ext_vec(
@@ -316,7 +326,7 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
     )
     .collect_vec();
     exit_span!(span);
-    // TODO FIXME: we pick a random point from output point, does it sound?
+    // TODO: we pick a random point from output point, does it sound?
     let builder = VirtualPolynomialsBuilder::new_with_mles(
         num_threads,
         max_num_variables,

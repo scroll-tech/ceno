@@ -2,23 +2,45 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::Instruction,
+    instructions::{
+        Instruction,
+        global::{GlobalChip, GlobalChipInput, GlobalPoint, GlobalRecord},
+    },
+    scheme::septic_curve::SepticPoint,
     state::StateCircuit,
     tables::{RMMCollections, TableCircuit},
 };
 use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
-use sumcheck::structs::IOPProverMessage;
+use sumcheck::structs::{IOPProof, IOPProverMessage};
 use witness::RowMajorMatrix;
+
+/// proof that the sum of N=2^n EC points is equal to `sum`
+/// in one layer instead of GKR layered circuit approach
+/// note that this one layer IOP borrowed ideas from
+/// [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct EccQuarkProof<E: ExtensionField> {
+    pub zerocheck_proof: IOPProof<E>,
+    pub num_instances: usize,
+    pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[0,rt], y[0,rt], s[0,rt]
+    pub rt: Point<E>,
+    pub sum: SepticPoint<E::BaseField>,
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -132,6 +154,9 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
 
     pub fn instance_openings(&self) -> &[Instance] {
         &self.zkvm_v1_css.instance_openings
+    }
+    pub fn has_ecc_ops(&self) -> bool {
+        !self.zkvm_v1_css.ec_final_sum.is_empty()
     }
 
     pub fn is_with_lk_table(&self) -> bool {
@@ -295,6 +320,8 @@ pub struct ZKVMWitnesses<E: ExtensionField> {
     witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
     lk_mlts: BTreeMap<String, Multiplicity<u64>>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
+    // in ram bus chip, num_instances length would be > 1
+    pub num_instances: BTreeMap<String, Vec<usize>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
@@ -327,6 +354,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             cs.zkvm_v1_css.num_structural_witin as usize,
             records,
         )?;
+        assert!(
+            self.num_instances
+                .insert(OC::name(), vec![witness[0].num_instances()])
+                .is_none()
+        );
         assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
         assert!(!self.witnesses_tables.contains_key(&OC::name()));
         assert!(
@@ -380,8 +412,97 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
+        let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
+        assert!(
+            self.num_instances
+                .insert(TC::name(), vec![num_instances])
+                .is_none()
+        );
         assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
         assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
+
+        Ok(())
+    }
+
+    pub fn assign_global_chip_circuit(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &ShardContext,
+        config: &<GlobalChip<E> as TableCircuit<E>>::TableConfig,
+    ) -> Result<(), ZKVMError> {
+        let perm = <E::BaseField as PoseidonField>::get_default_perm();
+        let global_input = shard_ctx
+            .write_records()
+            .par_iter()
+            .flat_map_iter(|records| {
+                // global write -> local reads
+                records.iter().map(|(vma, record)| {
+                    let global_write: GlobalRecord = (vma, record, true).into();
+                    let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
+                    GlobalChipInput {
+                        record: global_write,
+                        ec_point,
+                    }
+                })
+            })
+            .chain(
+                shard_ctx
+                    .read_records()
+                    .par_iter()
+                    .flat_map_iter(|records| {
+                        // global read -> local write
+                        records.iter().map(|(vma, record)| {
+                            let global_read: GlobalRecord = (vma, record, false).into();
+                            let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
+                            GlobalChipInput {
+                                record: global_read,
+                                ec_point,
+                            }
+                        })
+                    }),
+            )
+            .collect::<Vec<_>>();
+        assert!(self.combined_lk_mlt.is_some());
+        let cs = cs.get_cs(&GlobalChip::<E>::name()).unwrap();
+        let witness = GlobalChip::assign_instances(
+            config,
+            cs.zkvm_v1_css.num_witin as usize,
+            cs.zkvm_v1_css.num_structural_witin as usize,
+            self.combined_lk_mlt.as_ref().unwrap(),
+            &global_input,
+        )?;
+        // set num_read, num_write as separate instance
+        assert!(
+            self.num_instances
+                .insert(
+                    GlobalChip::<E>::name(),
+                    vec![
+                        // global write -> local read
+                        shard_ctx
+                            .write_records()
+                            .iter()
+                            .map(|records| records.len())
+                            .sum(),
+                        // global read -> local write
+                        shard_ctx
+                            .read_records()
+                            .iter()
+                            .map(|records| records.len())
+                            .sum(),
+                    ]
+                )
+                .is_none()
+        );
+        assert!(
+            self.witnesses_tables
+                .insert(GlobalChip::<E>::name(), witness)
+                .is_none()
+        );
+        assert!(
+            !self
+                .witnesses_opcodes
+                .contains_key(&GlobalChip::<E>::name())
+        );
 
         Ok(())
     }

@@ -4,9 +4,10 @@ use gkr_iop::{error::CircuitBuilderError, tables::LookupTable};
 use crate::{
     circuit_builder::CircuitBuilder,
     instructions::riscv::constants::{
-        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
-        SHARD_ID_IDX, UINT_LIMBS,
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, GLOBAL_RW_SUM_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
+        PUBLIC_IO_IDX, SHARD_ID_IDX, UINT_LIMBS,
     },
+    scheme::constants::SEPTIC_EXTENSION_DEGREE,
     tables::InsnRecord,
 };
 use multilinear_extensions::{Expression, Instance};
@@ -21,6 +22,7 @@ pub trait PublicIOQuery {
     fn query_init_cycle(&mut self) -> Result<Instance, CircuitBuilderError>;
     fn query_end_pc(&mut self) -> Result<Instance, CircuitBuilderError>;
     fn query_end_cycle(&mut self) -> Result<Instance, CircuitBuilderError>;
+    fn query_global_rw_sum(&mut self) -> Result<Vec<Instance>, CircuitBuilderError>;
     fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError>;
     #[allow(dead_code)]
     fn query_shard_id(&mut self) -> Result<Instance, CircuitBuilderError>;
@@ -70,5 +72,19 @@ impl<'a, E: ExtensionField> PublicIOQuery for CircuitBuilder<'a, E> {
             self.cs.query_instance_for_openings(PUBLIC_IO_IDX)?,
             self.cs.query_instance_for_openings(PUBLIC_IO_IDX + 1)?,
         ])
+    }
+
+    fn query_global_rw_sum(&mut self) -> Result<Vec<Instance>, CircuitBuilderError> {
+        let x = (0..SEPTIC_EXTENSION_DEGREE)
+            .map(|i| self.cs.query_instance(GLOBAL_RW_SUM_IDX + i))
+            .collect::<Result<Vec<Instance>, CircuitBuilderError>>()?;
+        let y = (0..SEPTIC_EXTENSION_DEGREE)
+            .map(|i| {
+                self.cs
+                    .query_instance(GLOBAL_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE + i)
+            })
+            .collect::<Result<Vec<Instance>, CircuitBuilderError>>()?;
+
+        Ok([x, y].concat())
     }
 }

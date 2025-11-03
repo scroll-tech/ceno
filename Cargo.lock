@@ -1044,6 +1044,7 @@ dependencies = [
  "multilinear_extensions",
  "ndarray",
  "num",
+ "num-bigint",
  "once_cell",
  "p3",
  "parse-size",
