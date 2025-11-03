@@ -5,14 +5,15 @@ use crate::{
     circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP},
-        hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE},
+        hal::{DeviceProvingKey, EccQuarkProver, MainSumcheckEvals, ProofInput, TowerProverSpec},
+        septic_curve::{SepticExtension, SepticPoint, SymbolicSepticExtension},
         utils::{
             infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
             wit_infer_by_expr,
         },
     },
-    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
+    structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -20,6 +21,7 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
+    selector::{SelectorContext, SelectorType},
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -30,7 +32,10 @@ use multilinear_extensions::{
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -47,6 +52,258 @@ pub type TowerRelationOutput<E> = (
     Vec<Vec<E>>,
     Vec<Vec<E>>,
 );
+
+// accumulate N=2^n EC points into one EC point using affine coordinates
+// in one layer which borrows ideas from the [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
+pub struct CpuEccProver;
+
+impl CpuEccProver {
+    pub fn create_ecc_proof<'a, E: ExtensionField>(
+        num_instances: usize,
+        xs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        ys: Vec<Arc<MultilinearExtension<'a, E>>>,
+        invs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        transcript: &mut impl Transcript<E>,
+    ) -> EccQuarkProof<E> {
+        assert_eq!(xs.len(), SEPTIC_EXTENSION_DEGREE);
+        assert_eq!(ys.len(), SEPTIC_EXTENSION_DEGREE);
+
+        let n = xs[0].num_vars() - 1;
+        tracing::debug!(
+            "Creating EC Summation Quark proof with {} points in {n} variables",
+            num_instances
+        );
+
+        let out_rt = transcript.sample_and_append_vec(b"ecc", n);
+        let num_threads = optimal_sumcheck_threads(out_rt.len());
+
+        // expression with add (3 zero constrains) and bypass (2 zero constrains)
+        let alpha_pows = transcript.sample_and_append_challenge_pows(
+            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2,
+            b"ecc_alpha",
+        );
+        let mut alpha_pows_iter = alpha_pows.iter();
+
+        let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
+
+        let sel_add = SelectorType::QuarkBinaryTreeLessThan(0.into());
+        let sel_add_ctx = SelectorContext {
+            offset: 0,
+            num_instances,
+            num_vars: n,
+        };
+        let mut sel_add_mle: MultilinearExtension<'_, E> =
+            sel_add.compute(&out_rt, &sel_add_ctx).unwrap();
+        // we construct sel_bypass witness here
+        // verifier can derive it via `sel_bypass = eq - sel_add - sel_last_onehot`
+        let mut sel_bypass_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
+        match sel_add_mle.evaluations() {
+            FieldType::Ext(sel_add_mle) => sel_add_mle
+                .par_iter()
+                .zip_eq(sel_bypass_mle.par_iter_mut())
+                .for_each(|(sel_add, sel_bypass)| {
+                    if *sel_add != E::ZERO {
+                        *sel_bypass = E::ZERO;
+                    }
+                }),
+            _ => unreachable!(),
+        }
+        *sel_bypass_mle.last_mut().unwrap() = E::ZERO;
+        let mut sel_bypass_mle = sel_bypass_mle.into_mle();
+        let sel_add_expr = expr_builder.lift(sel_add_mle.to_either());
+        let sel_bypass_expr = expr_builder.lift(sel_bypass_mle.to_either());
+
+        let mut exprs_add = vec![];
+        let mut exprs_bypass = vec![];
+
+        let filter_bj = |v: &[Arc<MultilinearExtension<'_, E>>], j: usize| {
+            v.iter()
+                .map(|v| {
+                    v.get_base_field_vec()
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| *i % 2 == j)
+                        .map(|(_, v)| v)
+                        .cloned()
+                        .collect_vec()
+                        .into_mle()
+                })
+                .collect_vec()
+        };
+        // build x[b,0], x[b,1], y[b,0], y[b,1]
+        let mut x0 = filter_bj(&xs, 0);
+        let mut y0 = filter_bj(&ys, 0);
+        let mut x1 = filter_bj(&xs, 1);
+        let mut y1 = filter_bj(&ys, 1);
+        // build x[1,b], y[1,b], s[1,b]
+        let mut x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+        let mut y3 = ys.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+        let mut s = invs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+
+        let s = SymbolicSepticExtension::new(
+            s.iter_mut()
+                .map(|s| expr_builder.lift(s.to_either()))
+                .collect(),
+        );
+        let x0 = SymbolicSepticExtension::new(
+            x0.iter_mut()
+                .map(|x| expr_builder.lift(x.to_either()))
+                .collect(),
+        );
+        let y0 = SymbolicSepticExtension::new(
+            y0.iter_mut()
+                .map(|y| expr_builder.lift(y.to_either()))
+                .collect(),
+        );
+        let x1 = SymbolicSepticExtension::new(
+            x1.iter_mut()
+                .map(|x| expr_builder.lift(x.to_either()))
+                .collect(),
+        );
+        let y1 = SymbolicSepticExtension::new(
+            y1.iter_mut()
+                .map(|y| expr_builder.lift(y.to_either()))
+                .collect(),
+        );
+        let x3 = SymbolicSepticExtension::new(
+            x3.iter_mut()
+                .map(|x| expr_builder.lift(x.to_either()))
+                .collect(),
+        );
+        let y3 = SymbolicSepticExtension::new(
+            y3.iter_mut()
+                .map(|y| expr_builder.lift(y.to_either()))
+                .collect(),
+        );
+        // affine addition
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1]) with b != (1,...,1)
+        exprs_add.extend(
+            (s.clone() * (&x0 - &x1) - (&y0 - &y1))
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        // zerocheck: 0 = s[1,b]^2 - x[b,0] - x[b,1] - x[1,b] with b != (1,...,1)
+        exprs_add.extend(
+            ((&s * &s) - &x0 - &x1 - &x3)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b]) with b != (1,...,1)
+        exprs_add.extend(
+            (s.clone() * (&x0 - &x3) - (&y0 + &y3))
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        let exprs_add = exprs_add.into_iter().sum::<Expression<E>>() * sel_add_expr;
+
+        // deal with bypass
+        // 0 = (x[1,b] - x[b,0])
+        exprs_bypass.extend(
+            (&x3 - &x0)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        // 0 = (y[1,b] - y[b,0])
+        exprs_bypass.extend(
+            (&y3 - &y0)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+        assert!(alpha_pows_iter.next().is_none());
+
+        let exprs_bypass = exprs_bypass.into_iter().sum::<Expression<E>>() * sel_bypass_expr;
+
+        let (zerocheck_proof, state) = IOPProverState::prove(
+            expr_builder.to_virtual_polys(&[exprs_add + exprs_bypass], &[]),
+            transcript,
+        );
+
+        let rt = state.collect_raw_challenges();
+        let evals = state.get_mle_flatten_final_evaluations();
+
+        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
+        // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
+        assert_eq!(evals.len(), 2 + SEPTIC_EXTENSION_DEGREE * 7);
+
+        let last_evaluation_index = (1 << n) - 1;
+        let x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+        let y3 = ys.iter().map(|y| y.as_view_slice(2, 1)).collect_vec();
+        let final_sum_x: SepticExtension<E::BaseField> = (x3.iter())
+            .map(|x| x.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
+            .collect_vec()
+            .into();
+        let final_sum_y: SepticExtension<E::BaseField> = (y3.iter())
+            .map(|y| y.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
+            .collect_vec()
+            .into();
+        let final_sum = SepticPoint::from_affine(final_sum_x, final_sum_y);
+
+        #[cfg(feature = "sanity-check")]
+        {
+            let s = invs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+            let x0 = filter_bj(&xs, 0);
+            let y0 = filter_bj(&ys, 0);
+            let x1 = filter_bj(&xs, 1);
+            let y1 = filter_bj(&ys, 1);
+
+            let evals = &evals[2..];
+            // check evaluations
+            for i in 0..SEPTIC_EXTENSION_DEGREE {
+                assert_eq!(s[i].evaluate(&rt), evals[i]);
+                assert_eq!(x0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE + i]);
+                assert_eq!(y0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 2 + i]);
+                assert_eq!(x1[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 3 + i]);
+                assert_eq!(y1[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 4 + i]);
+                assert_eq!(x3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 5 + i]);
+                assert_eq!(y3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 6 + i]);
+            }
+        }
+
+        EccQuarkProof {
+            zerocheck_proof,
+            num_instances,
+            evals,
+            rt,
+            sum: final_sum,
+        }
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<CpuBackend<E, PCS>>
+    for CpuProver<CpuBackend<E, PCS>>
+{
+    fn prove_ec_sum_quark<'a>(
+        &self,
+        num_instances: usize,
+        xs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        ys: Vec<Arc<MultilinearExtension<'a, E>>>,
+        invs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<EccQuarkProof<E>, ZKVMError> {
+        Ok(CpuEccProver::create_ecc_proof(
+            num_instances,
+            xs,
+            ys,
+            invs,
+            transcript,
+        ))
+    }
+}
+
 pub struct CpuTowerProver;
 
 impl CpuTowerProver {
@@ -59,7 +316,7 @@ impl CpuTowerProver {
         #[derive(Debug, Clone)]
         enum GroupedMLE<'a, E: ExtensionField> {
             Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
-            Logup((usize, Vec<MultilinearExtension<'a, E>>)), /* usize is the index in logup_specs */
+            Logup((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in logup_specs
         }
 
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
@@ -311,8 +568,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = composed_cs;
-        let num_instances_with_rotation =
-            input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
+        let num_instances: usize = input.num_instances();
+        let num_instances_with_rotation = num_instances << composed_cs.rotation_vars().unwrap_or(0);
         let num_var_with_rotation =
             input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
 
@@ -612,9 +869,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             gkr_circuit,
         } = composed_cs;
 
-        let num_instances = input.num_instances;
-        let next_pow2_instances = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instances);
+        let num_instances = input.num_instances();
+        let log2_num_instances = input.log2_num_instances();
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
@@ -637,6 +893,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         }
                     })
                     .collect_vec();
+            let selector_ctxs = if cs.ec_final_sum.is_empty() {
+                // it's not global chip
+                vec![
+                    SelectorContext {
+                        offset: 0,
+                        num_instances,
+                        num_vars: num_var_with_rotation,
+                    };
+                    gkr_circuit
+                        .layers
+                        .first()
+                        .map(|layer| layer.out_sel_and_eval_exprs.len())
+                        .unwrap_or(0)
+                ]
+            } else {
+                // it's global chip
+                vec![
+                    SelectorContext {
+                        offset: 0,
+                        num_instances: input.num_instances[0],
+                        num_vars: num_var_with_rotation,
+                    },
+                    SelectorContext {
+                        offset: input.num_instances[0],
+                        num_instances: input.num_instances[1],
+                        num_vars: num_var_with_rotation,
+                    },
+                    SelectorContext {
+                        offset: 0,
+                        num_instances,
+                        num_vars: num_var_with_rotation,
+                    },
+                ]
+            };
             let GKRProverOutput {
                 gkr_proof,
                 opening_evaluations,
@@ -655,7 +945,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 &pub_io_evals,
                 challenges,
                 transcript,
-                num_instances,
+                &selector_ctxs,
             )?;
             Ok((
                 opening_evaluations[0].point.clone(),
@@ -828,5 +1118,127 @@ where
 {
     fn get_pb(&self) -> &CpuBackend<E, PCS> {
         self.backend.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::scheme::{
+        constants::SEPTIC_EXTENSION_DEGREE,
+        cpu::CpuEccProver,
+        septic_curve::{SepticExtension, SepticPoint},
+        verifier::EccVerifier,
+    };
+    use ff_ext::BabyBearExt4;
+    use itertools::Itertools;
+    use multilinear_extensions::{
+        mle::{IntoMLE, MultilinearExtension},
+        util::transpose,
+    };
+    use p3::babybear::BabyBear;
+    use std::{iter::repeat_n, sync::Arc};
+    use transcript::BasicTranscript;
+    use witness::next_pow2_instance_padding;
+
+    #[test]
+    fn test_ecc_quark_prover() {
+        for n_points in 1..2 ^ 10 {
+            test_ecc_quark_prover_inner(n_points)
+        }
+    }
+
+    fn test_ecc_quark_prover_inner(n_points: usize) {
+        type E = BabyBearExt4;
+        type F = BabyBear;
+
+        let log2_n = next_pow2_instance_padding(n_points).ilog2();
+        let mut rng = rand::thread_rng();
+
+        let final_sum;
+        // generate 1 ecc add witness
+        let ecc_spec: Vec<MultilinearExtension<'_, E>> = {
+            // sample N = 2^n points
+            let mut points = (0..n_points)
+                .map(|_| SepticPoint::<F>::random(&mut rng))
+                .collect_vec();
+            points.extend(repeat_n(
+                SepticPoint::point_at_infinity(),
+                (1 << log2_n) - points.len(),
+            ));
+            let mut s = Vec::with_capacity(1 << (log2_n + 1));
+            s.extend(repeat_n(SepticExtension::zero(), 1 << log2_n));
+
+            for layer in (1..=log2_n).rev() {
+                let num_inputs = 1 << layer;
+                let inputs = &points[points.len() - num_inputs..];
+
+                s.extend(inputs.chunks_exact(2).map(|chunk| {
+                    let p = &chunk[0];
+                    let q = &chunk[1];
+                    if q.is_infinity {
+                        SepticExtension::zero()
+                    } else {
+                        (&p.y - &q.y) * (&p.x - &q.x).inverse().unwrap()
+                    }
+                }));
+
+                points.extend(
+                    inputs
+                        .chunks_exact(2)
+                        .map(|chunk| {
+                            let p = chunk[0].clone();
+                            let q = chunk[1].clone();
+                            p + q
+                        })
+                        .collect_vec(),
+                );
+            }
+            final_sum = points.last().cloned().unwrap();
+
+            // padding to 2*N
+            s.push(SepticExtension::zero());
+            points.push(SepticPoint::point_at_infinity());
+
+            assert_eq!(s.len(), 1 << (log2_n + 1));
+            assert_eq!(points.len(), 1 << (log2_n + 1));
+
+            // transform points to row major matrix
+            let trace = points
+                .iter()
+                .zip_eq(s.iter())
+                .map(|(p, s)| {
+                    p.x.iter()
+                        .chain(p.y.iter())
+                        .chain(s.iter())
+                        .copied()
+                        .collect_vec()
+                })
+                .collect_vec();
+
+            // transpose row major matrix to column major matrix
+            transpose(trace)
+                .into_iter()
+                .map(|v| v.into_mle())
+                .collect_vec()
+        };
+        let (xs, rest) = ecc_spec.split_at(SEPTIC_EXTENSION_DEGREE);
+        let (ys, s) = rest.split_at(SEPTIC_EXTENSION_DEGREE);
+
+        let mut transcript = BasicTranscript::new(b"test");
+        let quark_proof = CpuEccProver::create_ecc_proof(
+            n_points,
+            xs.iter().cloned().map(Arc::new).collect_vec(),
+            ys.iter().cloned().map(Arc::new).collect_vec(),
+            s.iter().cloned().map(Arc::new).collect_vec(),
+            &mut transcript,
+        );
+
+        assert_eq!(quark_proof.sum, final_sum);
+        let mut transcript = BasicTranscript::new(b"test");
+        assert!(
+            EccVerifier::verify_ecc_proof(&quark_proof, &mut transcript)
+                .inspect_err(|err| println!("err {:?}", err))
+                .is_ok()
+        );
     }
 }

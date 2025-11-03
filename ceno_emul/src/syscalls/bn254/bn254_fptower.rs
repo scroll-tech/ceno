@@ -12,6 +12,7 @@ use crate::{
 use super::types::{BN254_FP_WORDS, BN254_FP2_WORDS};
 
 pub struct Bn254FpAddSpec;
+
 impl SyscallSpec for Bn254FpAddSpec {
     const NAME: &'static str = "BN254_FP_ADD";
 

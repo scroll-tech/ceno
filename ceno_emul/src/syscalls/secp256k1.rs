@@ -6,7 +6,9 @@ use std::iter;
 use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
 pub struct Secp256k1AddSpec;
+
 pub struct Secp256k1DoubleSpec;
+
 pub struct Secp256k1DecompressSpec;
 
 impl SyscallSpec for Secp256k1AddSpec {

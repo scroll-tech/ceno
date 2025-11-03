@@ -20,7 +20,6 @@ use gkr_iop::{
 };
 use itertools::Itertools;
 use multilinear_extensions::{StructuralWitInType, ToExpr};
-use p3::field::FieldAlgebra;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 #[derive(Clone, Debug)]
@@ -321,7 +320,7 @@ impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
                 descending: false,
             },
         );
-        let selector_type = SelectorType::Prefix(E::BaseField::ZERO, selector.expr());
+        let selector_type = SelectorType::Prefix(selector.expr());
 
         // all shared the same selector
         let (out_evals, mut chip) = (

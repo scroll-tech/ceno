@@ -156,6 +156,11 @@ macro_rules! tower_mle_4 {
     }};
 }
 
+pub fn log2_strict_usize(n: usize) -> usize {
+    assert!(n.is_power_of_two());
+    n.trailing_zeros() as usize
+}
+
 /// infer logup witness from last layer
 /// return is the ([p1,p2], [q1,q2]) for each layer
 pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
@@ -254,45 +259,80 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
         .collect_vec()
 }
 
-/// infer tower witness from last layer
-pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
+/// Infer tower witness from input layer (layer 0 is the output layer and layer n is the input layer).
+/// The relation between layer i and layer i+1 is as follows:
+///      prod[i][b] = ∏_s prod[i+1][s,b]
+/// where 2^s is the fanin of the product gate `num_product_fanin`.
+pub fn infer_tower_product_witness<E: ExtensionField>(
     num_vars: usize,
     last_layer: Vec<MultilinearExtension<'_, E>>,
     num_product_fanin: usize,
 ) -> Vec<Vec<MultilinearExtension<'_, E>>> {
+    // sanity check
     assert!(last_layer.len() == num_product_fanin);
-    assert_eq!(num_product_fanin % 2, 0);
-    let log2_num_product_fanin = ceil_log2(num_product_fanin);
-    let mut wit_layers =
-        (0..(num_vars / log2_num_product_fanin) - 1).fold(vec![last_layer], |mut acc, _| {
-            let next_layer = acc.last().unwrap();
-            let cur_len = next_layer[0].evaluations().len() / num_product_fanin;
-            let cur_layer: Vec<MultilinearExtension<E>> = (0..num_product_fanin)
-                .map(|index| {
-                    let mut evaluations = vec![E::ONE; cur_len];
-                    next_layer.chunks_exact(2).for_each(|f| {
-                        match (f[0].evaluations(), f[1].evaluations()) {
-                            (FieldType::Ext(f1), FieldType::Ext(f2)) => {
-                                let start: usize = index * cur_len;
-                                (start..(start + cur_len))
+    assert!(num_product_fanin.is_power_of_two());
+
+    let log2_num_product_fanin = log2_strict_usize(num_product_fanin);
+    assert!(num_vars.is_multiple_of(log2_num_product_fanin));
+    assert!(
+        last_layer
+            .iter()
+            .all(|p| p.num_vars() == num_vars - log2_num_product_fanin)
+    );
+
+    let num_layers = num_vars / log2_num_product_fanin;
+
+    let mut wit_layers = Vec::with_capacity(num_layers);
+    wit_layers.push(last_layer);
+
+    for _ in (0..num_layers - 1).rev() {
+        let input_layer = wit_layers.last().unwrap();
+        let output_len = input_layer[0].evaluations().len() / num_product_fanin;
+
+        let output_layer: Vec<MultilinearExtension<E>> = (0..num_product_fanin)
+            .map(|index| {
+                // avoid the overhead of vector initialization
+                let mut evaluations: Vec<E> = Vec::with_capacity(output_len);
+                let remaining = evaluations.spare_capacity_mut();
+
+                input_layer.chunks_exact(2).enumerate().for_each(|(i, f)| {
+                    match (f[0].evaluations(), f[1].evaluations()) {
+                        (FieldType::Ext(f1), FieldType::Ext(f2)) => {
+                            let start: usize = index * output_len;
+
+                            if i == 0 {
+                                (start..(start + output_len))
                                     .into_par_iter()
-                                    .zip(evaluations.par_iter_mut())
+                                    .zip(remaining.par_iter_mut())
                                     .with_min_len(MIN_PAR_SIZE)
-                                    .map(|(index, evaluations)| {
-                                        *evaluations *= f1[index] * f2[index]
-                                    })
-                                    .collect()
+                                    .for_each(|(index, evaluations)| {
+                                        evaluations.write(f1[index] * f2[index]);
+                                    });
+                            } else {
+                                (start..(start + output_len))
+                                    .into_par_iter()
+                                    .zip(remaining.par_iter_mut())
+                                    .with_min_len(MIN_PAR_SIZE)
+                                    .for_each(|(index, evaluations)| {
+                                        evaluations.write(f1[index] * f2[index]);
+                                    });
                             }
-                            _ => unreachable!("must be extension field"),
                         }
-                    });
-                    evaluations.into_mle()
-                })
-                .collect_vec();
-            acc.push(cur_layer);
-            acc
-        });
+                        _ => unreachable!("must be extension field"),
+                    }
+                });
+
+                unsafe {
+                    evaluations.set_len(output_len);
+                }
+                evaluations.into_mle()
+            })
+            .collect_vec();
+        wit_layers.push(output_layer);
+    }
+
     wit_layers.reverse();
+
     wit_layers
 }
 
@@ -374,7 +414,7 @@ pub fn build_main_witness<
         } else {
             (
                 <PD as MainSumcheckProver<PB>>::table_witness(device, input, cs, challenges),
-                input.num_instances > 1 && input.num_instances.is_power_of_two(),
+                input.num_instances() > 1 && input.num_instances().is_power_of_two(),
             )
         }
     };

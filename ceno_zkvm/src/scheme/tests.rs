@@ -55,6 +55,7 @@ use transcript::{BasicTranscript, Transcript};
 struct TestConfig {
     pub(crate) reg_id: WitIn,
 }
+
 struct TestCircuit<E: ExtensionField, const RW: usize, const L: usize> {
     phantom: PhantomData<E>,
 }
@@ -197,7 +198,8 @@ fn test_rw_lk_expression_combination() {
             witness: wits_in,
             structural_witness: structural_in,
             public_input: vec![],
-            num_instances,
+            num_instances: vec![num_instances],
+            has_ecc_ops: false,
         };
         let (proof, _, _) = prover
             .create_chip_proof(
@@ -370,7 +372,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, vec![0]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(zkvm_witness, pi, transcript)

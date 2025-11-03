@@ -11,6 +11,7 @@ use transcript::Transcript;
 use crate::{
     error::BackendError,
     hal::{ProverBackend, ProverDevice},
+    selector::SelectorContext,
 };
 
 pub mod booleanhypercube;
@@ -77,7 +78,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> Result<GKRProverOutput<E, Evaluation<E>>, BackendError> {
         let mut running_evals = out_evals.to_vec();
         // running evals is a global referable within chip
@@ -97,7 +98,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                     pub_io_evals,
                     &mut challenges,
                     transcript,
-                    num_instances,
+                    selector_ctxs,
                 );
                 exit_span!(span);
                 res
@@ -122,7 +123,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> Result<GKRClaims<Evaluation<E>>, BackendError>
     where
         E: ExtensionField,
@@ -141,7 +142,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                 pub_io_evals,
                 &mut challenges,
                 transcript,
-                num_instances,
+                selector_ctxs,
             )?;
         }
 
