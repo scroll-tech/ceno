@@ -72,7 +72,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
-        expect_halt: bool,
+        _expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
         // require ecall/halt proof to exist, depending whether we expect a halt.
         // let has_halt = vm_proof.has_halt(&self.vk);
@@ -405,7 +405,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             //     ecc_proof.sum
             // );
             // assert ec sum in public input matches that in ecc proof
-            EccVerifier::new().verify_ecc_proof(ecc_proof, transcript)?;
+            EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
             tracing::debug!("ecc proof verified.");
         }
 
@@ -972,12 +972,7 @@ impl TowerVerify {
 pub struct EccVerifier;
 
 impl EccVerifier {
-    pub fn new() -> Self {
-        Self {}
-    }
-
     pub fn verify_ecc_proof<E: ExtensionField>(
-        &self,
         proof: &EccQuarkProof<E>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<(), ZKVMError> {

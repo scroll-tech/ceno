@@ -82,6 +82,7 @@ pub struct PublicValues {
 }
 
 impl PublicValues {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         exit_code: u32,
         init_pc: u32,

@@ -52,22 +52,35 @@ pub struct GlobalRecord {
     pub shard: u64,
     pub local_clk: u64,
     pub global_clk: u64,
-    pub is_write: bool,
+    pub is_to_write_set: bool,
 }
 
 impl From<(&WordAddr, &RAMRecord, bool)> for GlobalRecord {
-    fn from((vma, record, is_write): (&WordAddr, &RAMRecord, bool)) -> Self {
+    fn from((vma, record, is_to_write_set): (&WordAddr, &RAMRecord, bool)) -> Self {
         let addr = match record.ram_type {
             RAMType::Register => record.id as u32,
             RAMType::Memory => (*vma).into(),
             _ => unreachable!(),
         };
-        let value = record.prev_value.map_or(record.value, |v| v);
-        let (shard, local_clk, global_clk) = if is_write {
-            (record.shard_id, record.shard_cycle, record.cycle)
+        let (shard, local_clk, global_clk, value) = if is_to_write_set {
+            // global write -> local read
+            (
+                record.shard_id,
+                record.shard_cycle,
+                record.cycle,
+                // local read is for cancel final write value in `Write` set
+                record.value,
+            )
         } else {
+            // global read -> local write
             debug_assert_eq!(record.shard_cycle, 0);
-            (record.shard_id, 0, record.prev_cycle)
+            (
+                record.shard_id,
+                0,
+                record.prev_cycle,
+                // local write is for adapting write from previous shard
+                record.prev_value.unwrap_or(record.value),
+            )
         };
 
         GlobalRecord {
@@ -77,7 +90,7 @@ impl From<(&WordAddr, &RAMRecord, bool)> for GlobalRecord {
             shard: shard as u64,
             local_clk,
             global_clk,
-            is_write,
+            is_to_write_set,
         }
     }
 }
@@ -124,7 +137,7 @@ impl GlobalRecord {
 
                 // we negate y if needed
                 // to ensure read => y in [0, p/2) and write => y in [p/2, p)
-                let negate = match (self.is_write, is_y_in_2nd_half) {
+                let negate = match (self.is_to_write_set, is_y_in_2nd_half) {
                     (true, false) => true, // write, y in [0, p/2)
                     (false, true) => true, // read, y in [p/2, p)
                     _ => false,
@@ -211,8 +224,8 @@ impl<E: ExtensionField> GlobalConfig<E> {
         input.extend(repeat_n(E::BaseField::ZERO.expr(), 16 - input.len()));
 
         let mut record = vec![];
-        record.push(addr.expr());
         record.push(ram_type.clone());
+        record.push(addr.expr());
         record.extend(value.memory_expr());
         record.push(local_clk.expr());
 
@@ -298,7 +311,7 @@ pub struct GlobalChipInput<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> GlobalChip<E> {
-    fn assign_instance<'a>(
+    fn assign_instance(
         config: &GlobalConfig<E>,
         instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
@@ -318,7 +331,11 @@ impl<E: ExtensionField> GlobalChip<E> {
         set_val!(instance, config.shard, record.shard);
         set_val!(instance, config.global_clk, record.global_clk);
         set_val!(instance, config.local_clk, record.local_clk);
-        set_val!(instance, config.is_global_write, record.is_write as u64);
+        set_val!(
+            instance,
+            config.is_global_write,
+            record.is_to_write_set as u64
+        );
 
         // assign (x, y) and nonce
         let GlobalPoint { nonce, point } = &input.ec_point;
@@ -473,6 +490,8 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
     ) -> witness::RowMajorMatrix<<E as ExtensionField>::BaseField> {
         unimplemented!()
     }
+
+    /// steps format: local reads ++ local writes
     fn assign_instances<'a>(
         config: &Self::TableConfig,
         num_witin: usize,
@@ -498,7 +517,10 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         let nthreads = max_usable_threads();
 
         // local read iff it's global write
-        let num_local_reads = steps.iter().filter(|s| s.record.is_write).count();
+        let num_local_reads = steps
+            .iter()
+            .take_while(|s| s.record.is_to_write_set)
+            .count();
         tracing::debug!(
             "{} local reads / {} local writes in global chip",
             num_local_reads,
@@ -713,7 +735,7 @@ mod tests {
                     shard: 0,
                     local_clk: 0,
                     global_clk: i,
-                    is_write: false,
+                    is_to_write_set: false,
                 }
             })
             .collect::<Vec<_>>();
@@ -730,7 +752,7 @@ mod tests {
                     shard: 1,
                     local_clk: i,
                     global_clk: i,
-                    is_write: true,
+                    is_to_write_set: true,
                 }
             })
             .collect::<Vec<_>>();

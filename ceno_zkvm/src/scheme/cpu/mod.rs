@@ -58,12 +58,7 @@ pub type TowerRelationOutput<E> = (
 pub struct CpuEccProver;
 
 impl CpuEccProver {
-    pub fn new() -> Self {
-        Self {}
-    }
-
     pub fn create_ecc_proof<'a, E: ExtensionField>(
-        &self,
         num_instances: usize,
         xs: Vec<Arc<MultilinearExtension<'a, E>>>,
         ys: Vec<Arc<MultilinearExtension<'a, E>>>,
@@ -299,7 +294,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<CpuBa
         invs: Vec<Arc<MultilinearExtension<'a, E>>>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<EccQuarkProof<E>, ZKVMError> {
-        Ok(CpuEccProver::new().create_ecc_proof(num_instances, xs, ys, invs, transcript))
+        Ok(CpuEccProver::create_ecc_proof(
+            num_instances,
+            xs,
+            ys,
+            invs,
+            transcript,
+        ))
     }
 }
 
@@ -1224,8 +1225,7 @@ mod tests {
         let (ys, s) = rest.split_at(SEPTIC_EXTENSION_DEGREE);
 
         let mut transcript = BasicTranscript::new(b"test");
-        let prover = CpuEccProver::new();
-        let quark_proof = prover.create_ecc_proof(
+        let quark_proof = CpuEccProver::create_ecc_proof(
             n_points,
             xs.iter().cloned().map(Arc::new).collect_vec(),
             ys.iter().cloned().map(Arc::new).collect_vec(),
@@ -1235,10 +1235,8 @@ mod tests {
 
         assert_eq!(quark_proof.sum, final_sum);
         let mut transcript = BasicTranscript::new(b"test");
-        let verifier = EccVerifier::new();
         assert!(
-            verifier
-                .verify_ecc_proof(&quark_proof, &mut transcript)
+            EccVerifier::verify_ecc_proof(&quark_proof, &mut transcript)
                 .inspect_err(|err| println!("err {:?}", err))
                 .is_ok()
         );
