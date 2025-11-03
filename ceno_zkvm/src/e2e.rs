@@ -1,6 +1,9 @@
 use crate::{
     error::ZKVMError,
-    instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
+    instructions::{
+        global::GlobalChip,
+        riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
+    },
     scheme::{
         PublicValues, ZKVMProof,
         constants::SEPTIC_EXTENSION_DEGREE,
@@ -14,7 +17,9 @@ use crate::{
         ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
         ZKVMWitnesses,
     },
-    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
+    tables::{
+        MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig, TableCircuit,
+    },
 };
 use ceno_emul::{
     Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, NextCycleAccess,
@@ -23,7 +28,7 @@ use ceno_emul::{
 };
 use clap::ValueEnum;
 use either::Either;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 use gkr_iop::{RAMType, hal::ProverBackend};
@@ -1019,7 +1024,21 @@ pub fn generate_witness<'a, E: ExtensionField>(
         pi.shard_id = shard_ctx.shard_id as u32;
         pi.end_pc = current_shard_end_pc;
         pi.end_cycle = current_shard_end_cycle;
-        // TODO set shard ram bus expected output to pi
+        // set shard ram bus expected output to pi
+        let global_chip_withess = zkvm_witness.get_table_witness(&GlobalChip::<E>::name());
+        if let Some(global_chip_withess) = global_chip_withess
+            && global_chip_withess[0].num_instances() > 0
+        {
+            for (f, v) in GlobalChip::<E>::extract_ec_sum(
+                &system_config.mmu_config.ram_bus_circuit,
+                &global_chip_withess[0],
+            )
+            .into_iter()
+            .zip_eq(pi.global_sum.as_mut_slice())
+            {
+                *v = f.to_canonical_u64() as u32;
+            }
+        }
 
         (zkvm_witness, shard_ctx, pi)
     })

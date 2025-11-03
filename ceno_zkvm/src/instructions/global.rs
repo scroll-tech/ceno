@@ -369,7 +369,7 @@ impl<E: ExtensionField> GlobalChip<E> {
         Ok(())
     }
 
-    fn extract_ec_sum(
+    pub fn extract_ec_sum(
         config: &GlobalConfig<E>,
         rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
     ) -> Vec<<E as ExtensionField>::BaseField> {

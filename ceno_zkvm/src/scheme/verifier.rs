@@ -8,7 +8,9 @@ use ff_ext::{Instrumented, PoseidonField};
 use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
-    instructions::riscv::constants::{END_PC_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX},
+    instructions::riscv::constants::{
+        END_PC_IDX, GLOBAL_RW_SUM_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX,
+    },
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::SepticExtension,
@@ -488,29 +490,30 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert!(proof.ecc_proof.is_some());
             let ecc_proof = proof.ecc_proof.as_ref().unwrap();
 
-            // TODO: enable this
-            // let xy = cs
-            //     .ec_final_sum
-            //     .iter()
-            //     .map(|expr| {
-            //         eval_by_expr_with_instance(&[], &[], &[], pi, challenges, &expr)
-            //             .right()
-            //             .and_then(|v| v.as_base())
-            //             .unwrap()
-            //     })
-            //     .collect_vec();
-            // let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
-            // let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
+            let xy = cs
+                .ec_final_sum
+                .iter()
+                .map(|expr| {
+                    eval_by_expr_with_instance(&[], &[], &[], pi, challenges, expr)
+                        .right()
+                        .and_then(|v| v.as_base())
+                        .unwrap()
+                })
+                .collect_vec();
+            let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
+            let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
 
-            // assert_eq!(
-            //     SepticPoint {
-            //         x,
-            //         y,
-            //         is_infinity: false,
-            //     },
-            //     ecc_proof.sum
-            // );
+            assert_eq!(&ecc_proof.sum.x, &x);
+            assert_eq!(&ecc_proof.sum.y, &y);
+            assert!(!ecc_proof.sum.is_infinity);
             // assert ec sum in public input matches that in ecc proof
+            assert_eq!(raw_pi[GLOBAL_RW_SUM_IDX].len(), SEPTIC_EXTENSION_DEGREE * 2);
+            for (f, expected_f) in raw_pi[GLOBAL_RW_SUM_IDX]
+                .iter()
+                .zip_eq(x.0.iter().chain(y.0.iter()))
+            {
+                assert_eq!(f, expected_f)
+            }
             EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
             tracing::debug!("ecc proof verified.");
         }
