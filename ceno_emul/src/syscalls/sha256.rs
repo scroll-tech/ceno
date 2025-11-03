@@ -38,7 +38,6 @@ pub fn sha_extend(w: &mut [u32]) {
             .wrapping_add(s0)
             .wrapping_add(w[i - 7])
             .wrapping_add(s1);
-        // TODO: why doesn't sp1 use wrapping_add?
     }
 }
 

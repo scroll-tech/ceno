@@ -19,6 +19,7 @@ use rayon::{
 };
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
+pub mod global;
 pub mod riscv;
 
 pub trait Instruction<E: ExtensionField> {
@@ -48,7 +49,7 @@ pub trait Instruction<E: ExtensionField> {
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
         let selector = cb.create_placeholder_structural_witin(|| "selector");
-        let selector_type = SelectorType::Prefix(E::BaseField::ZERO, selector.expr());
+        let selector_type = SelectorType::Prefix(selector.expr());
 
         // all shared the same selector
         let (out_evals, mut chip) = (
@@ -71,7 +72,7 @@ pub trait Instruction<E: ExtensionField> {
         cb.cs.lk_selector = Some(selector_type.clone());
         cb.cs.zero_selector = Some(selector_type.clone());
 
-        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
         chip.add_layer(layer);
 
         Ok((config, chip.gkr_circuit()))
@@ -100,7 +101,7 @@ pub trait Instruction<E: ExtensionField> {
         num_structural_witin: usize,
         steps: Vec<StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
-        // FIXME selector is the only structural witness
+        // TODO: selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
         assert!(num_structural_witin == 0 || num_structural_witin == 1);

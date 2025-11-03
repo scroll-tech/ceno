@@ -9,13 +9,13 @@ use std::{
     sync::Arc,
 };
 
-use crate::scheme::hal::MainSumcheckEvals;
+use crate::scheme::{constants::SEPTIC_EXTENSION_DEGREE, hal::MainSumcheckEvals};
 use either::Either;
 use gkr_iop::hal::MultilinearPolynomial;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Instance,
+    Expression, Instance,
     mle::{IntoMLE, MultilinearExtension},
 };
 use p3::field::FieldAlgebra;
@@ -119,17 +119,11 @@ impl<
         {
             // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
-                .get_opcode_witness(circuit_name)
-                .or_else(|| witnesses.get_table_witness(circuit_name))
-                .map(|rmms| {
-                    if rmms[0].num_instances() == 0 {
-                        rmms[1].num_instances()
-                    } else {
-                        rmms[0].num_instances()
-                    }
-                })
+                .num_instances
+                .get(circuit_name)
+                .cloned()
                 .and_then(|num_instance| {
-                    if num_instance > 0 {
+                    if num_instance.iter().sum::<usize>() > 0 {
                         Some(num_instance)
                     } else {
                         None
@@ -141,26 +135,28 @@ impl<
                             .circuit_index_fixed_num_instances
                             .get(&index)
                             .copied()
-                            .unwrap_or(0)
+                            .map(|num_instance| vec![num_instance])
+                            .unwrap_or(vec![])
                     })
                 })
             {
-                num_instances.push((
-                    index,
-                    num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
-                ));
+                let num_instance_exclude_rotation = num_instance
+                    .iter()
+                    .map(|num_instance| num_instance >> vk.get_cs().rotation_vars().unwrap_or(0))
+                    .collect_vec();
+                num_instances.push((index, num_instance_exclude_rotation.clone()));
+                circuit_name_num_instances_mapping
+                    .insert(circuit_name, num_instance_exclude_rotation);
                 num_instances_with_rotation.push((index, num_instance));
-                circuit_name_num_instances_mapping.insert(
-                    circuit_name,
-                    num_instance >> vk.get_cs().rotation_vars().unwrap_or(0),
-                );
             }
         }
 
         // write (circuit_idx, num_var) to transcript
         for (circuit_idx, num_instance) in &num_instances {
             transcript.append_message(&circuit_idx.to_le_bytes());
-            transcript.append_message(&num_instance.to_le_bytes());
+            for num_instance in num_instance {
+                transcript.append_message(&num_instance.to_le_bytes());
+            }
         }
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
@@ -217,10 +213,10 @@ impl<
             |(mut points, mut evaluations), (index, (circuit_name, pk))| {
                 let num_instances = circuit_name_num_instances_mapping
                     .get(&circuit_name)
-                    .copied()
-                    .unwrap_or(0);
+                    .cloned()
+                    .unwrap_or_default();
                 let cs = pk.get_cs();
-                if num_instances == 0 {
+                if num_instances.is_empty() {
                     // we need to drain respective fixed when num_instances is 0
                     if cs.num_fixed() > 0 {
                         let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
@@ -251,13 +247,14 @@ impl<
                     structural_witness,
                     public_input: public_input.clone(),
                     pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
-                    num_instances,
+                    num_instances: num_instances.clone(),
+                    has_ecc_ops: cs.has_ecc_ops(),
                 };
 
                 let (opcode_proof, pi_in_evals, input_opening_point) =
                     self.create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
                 tracing::trace!(
-                    "generated proof for opcode {} with num_instances={}",
+                    "generated proof for opcode {} with num_instances={:?}",
                     circuit_name,
                     num_instances
                 );
@@ -321,6 +318,39 @@ impl<
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
+        // run ecc quark prover
+        let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
+            let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
+            assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
+            let mut xs_ys = ec_point_exprs
+                .iter()
+                .map(|expr| match expr {
+                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
+                    _ => unreachable!("ec point's expression must be WitIn"),
+                })
+                .collect_vec();
+            let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
+            let xs = xs_ys;
+            let slopes = cs
+                .zkvm_v1_css
+                .ec_slope_exprs
+                .iter()
+                .map(|expr| match expr {
+                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
+                    _ => unreachable!("slope's expression must be WitIn"),
+                })
+                .collect_vec();
+            Some(self.device.prove_ec_sum_quark(
+                input.num_instances(),
+                xs,
+                ys,
+                slopes,
+                transcript,
+            )?)
+        } else {
+            None
+        };
+
         // build main witness
         let records = build_main_witness::<E, PCS, PB, PD>(cs, &input, challenges);
 
@@ -336,6 +366,15 @@ impl<
             rt_tower.len(), // num var length should equal to max_num_instance
             num_var_with_rotation,
         );
+
+        // TODO: batch reduction into main sumcheck
+        // x[rt,0] = \sum_b eq([rt,0], b) * x[b]
+        // x[rt,1] = \sum_b eq([rt,1], b) * x[b]
+        // x[1,rt] = \sum_b eq([1,rt], b) * x[b]
+        // y[rt,0] = \sum_b eq([rt,0], b) * y[b]
+        // y[rt,1] = \sum_b eq([rt,1], b) * y[b]
+        // y[1,rt] = \sum_b eq([1,rt], b) * y[b]
+        // s[0,rt] = \sum_b eq([0,rt], b) * s[b]
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
@@ -371,6 +410,7 @@ impl<
                 main_sumcheck_proofs,
                 gkr_iop_proof,
                 tower_proof,
+                ecc_proof,
                 fixed_in_evals,
                 wits_in_evals,
                 num_instances: input.num_instances,

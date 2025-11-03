@@ -112,7 +112,8 @@ fn bench_add(c: &mut Criterion) {
                             structural_witness: vec![],
                             public_input: vec![],
                             pub_io_evals: vec![],
-                            num_instances,
+                            num_instances: vec![num_instances],
+                            has_ecc_ops: false,
                         };
                         let _ = prover
                             .create_chip_proof(

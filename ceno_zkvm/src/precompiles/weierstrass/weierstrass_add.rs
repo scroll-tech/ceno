@@ -36,7 +36,7 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     error::{BackendError, CircuitBuilderError},
     gkr::{GKRCircuit, GKRProof, GKRProverOutput, layer::Layer, mock::MockProver},
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
 };
 use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
@@ -133,11 +133,12 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
         };
 
         let eq = cb.create_placeholder_structural_witin(|| "weierstrass_add_eq");
+        let sel = SelectorType::Prefix(eq.expr());
         let selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_mem_write: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_lookup: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_zero: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
+            sel_mem_read: sel.clone(),
+            sel_mem_write: sel.clone(),
+            sel_lookup: sel.clone(),
+            sel_zero: sel.clone(),
         };
 
         // Default expression, will be updated in build_layer_logic
@@ -745,6 +746,7 @@ pub fn run_weierstrass_add<
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
+    let selector_ctxs = vec![SelectorContext::new(0, num_instances, log2_num_instance); 1];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -754,7 +756,7 @@ pub fn run_weierstrass_add<
             &[],
             &challenges,
             &mut prover_transcript,
-            num_instances,
+            &selector_ctxs,
         )
         .expect("Failed to prove phase");
     exit_span!(span);
@@ -780,7 +782,7 @@ pub fn run_weierstrass_add<
                     &[],
                     &challenges,
                     &mut verifier_transcript,
-                    num_instances,
+                    &selector_ctxs,
                 )
                 .expect("GKR verify failed");
 

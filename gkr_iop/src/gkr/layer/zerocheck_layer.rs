@@ -27,7 +27,7 @@ use crate::{
         },
     },
     hal::{ProverBackend, ProverDevice},
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
     utils::{
         eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
         eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
@@ -62,7 +62,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         pub_io_evals: &[PB::E],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (LayerProof<PB::E>, Point<PB::E>);
 
     #[allow(clippy::too_many_arguments)]
@@ -75,7 +75,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         raw_pi: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> Result<LayerClaims<E>, BackendError>;
 }
 
@@ -182,7 +182,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         pub_io_evals: &[PB::E],
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (LayerProof<PB::E>, Point<PB::E>) {
         <PD as ZerocheckLayerProver<PB>>::prove(
             self,
@@ -193,7 +193,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             pub_io_evals,
             challenges,
             transcript,
-            num_instances,
+            selector_ctxs,
         )
     }
 
@@ -206,7 +206,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         raw_pi: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> Result<LayerClaims<E>, BackendError> {
         assert_eq!(
             self.out_sel_and_eval_exprs.len(),
@@ -297,16 +297,19 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
 
         let structural_witin_offset = self.n_witin + self.n_fixed + self.n_instance;
         // eval selector and set to respective witin
-        izip!(&self.out_sel_and_eval_exprs, &eval_and_dedup_points).for_each(
-            |((sel_type, _), (_, out_point))| {
-                if let Some((expected_eval, wit_id)) =
-                    sel_type.evaluate(out_point.as_ref().unwrap(), &in_point, num_instances)
-                {
-                    let wit_id = wit_id as usize + structural_witin_offset;
-                    assert_eq!(main_evals[wit_id], expected_eval);
-                }
-            },
-        );
+        izip!(
+            &self.out_sel_and_eval_exprs,
+            &eval_and_dedup_points,
+            selector_ctxs.iter()
+        )
+        .for_each(|((sel_type, _), (_, out_point), selector_ctx)| {
+            if let Some((expected_eval, wit_id)) =
+                sel_type.evaluate(out_point.as_ref().unwrap(), &in_point, selector_ctx)
+            {
+                let wit_id = wit_id as usize + structural_witin_offset;
+                assert_eq!(main_evals[wit_id], expected_eval);
+            }
+        });
 
         // check structural witin
         for StructuralWitIn { id, witin_type } in &self.structural_witins {
@@ -521,10 +524,11 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
         let expr = match sel_type {
             SelectorType::None => zero_check_expr,
             SelectorType::Whole(sel)
-            | SelectorType::Prefix(_, sel)
+            | SelectorType::Prefix(sel)
             | SelectorType::OrderedSparse32 {
                 expression: sel, ..
-            } => match_expr(sel) * zero_check_expr,
+            }
+            | SelectorType::QuarkBinaryTreeLessThan(sel) => match_expr(sel) * zero_check_expr,
         };
         zero_check_exprs.push(expr);
     }

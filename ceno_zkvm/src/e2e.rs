@@ -3,6 +3,7 @@ use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
+        constants::SEPTIC_EXTENSION_DEGREE,
         hal::ProverDevice,
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
@@ -107,10 +108,16 @@ pub struct RAMRecord {
     pub ram_type: RAMType,
     pub id: u64,
     pub addr: WordAddr,
+    // prev_cycle and cycle are global cycle
     pub prev_cycle: Cycle,
     pub cycle: Cycle,
+    // shard_cycle is cycle in current local shard, which already offset by start cycle
+    pub shard_cycle: Cycle,
     pub prev_value: Option<Word>,
     pub value: Word,
+    // for global reads, `shard_id` refers to the shard that previously produced this value.
+    // for global write, `shard_id` refers to current shard.
+    pub shard_id: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -160,6 +167,7 @@ pub struct ShardContext<'a> {
     write_thread_based_record_storage:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     pub cur_shard_cycle_range: std::ops::Range<usize>,
+    pub expected_inst_per_shard: usize,
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -183,6 +191,7 @@ impl<'a> Default for ShardContext<'a> {
                     .collect::<Vec<_>>(),
             ),
             cur_shard_cycle_range: Tracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
+            expected_inst_per_shard: usize::MAX,
         }
     }
 }
@@ -207,7 +216,7 @@ impl<'a> ShardContext<'a> {
         let max_cycle_per_shard = multi_prover.max_cycle_per_shard;
         assert!(
             min_cycle_per_shard < max_cycle_per_shard,
-            "invalid input: min_cycle_per_shard {min_cycle_per_shard} > max_cycle_per_shard {max_cycle_per_shard}"
+            "invalid input: min_cycle_per_shard {min_cycle_per_shard} >= max_cycle_per_shard {max_cycle_per_shard}"
         );
         let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN as usize;
         let max_threads = max_usable_threads();
@@ -300,6 +309,7 @@ impl<'a> ShardContext<'a> {
                             .collect::<Vec<_>>(),
                     ),
                     cur_shard_cycle_range,
+                    expected_inst_per_shard,
                 }
             })
             .collect_vec()
@@ -324,6 +334,7 @@ impl<'a> ShardContext<'a> {
                     read_thread_based_record_storage: Either::Right(read),
                     write_thread_based_record_storage: Either::Right(write),
                     cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
+                    expected_inst_per_shard: self.expected_inst_per_shard,
                 })
                 .collect_vec(),
             _ => panic!("invalid type"),
@@ -370,12 +381,25 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
+    pub fn extract_prev_shard_id(&self, cycle: Cycle) -> usize {
+        let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN;
+        let per_shard_cycles =
+            (self.expected_inst_per_shard as u64).saturating_mul(subcycle_per_insn);
+        ((cycle.saturating_sub(subcycle_per_insn)) / per_shard_cycles) as usize
+    }
+
+    #[inline(always)]
     pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
         let mut ts = prev_cycle.saturating_sub(self.current_shard_offset_cycle());
         if ts < Tracer::SUBCYCLES_PER_INSN {
             ts = 0
         }
         ts
+    }
+
+    #[inline(always)]
+    pub fn aligned_current_ts(&self, cycle: Cycle) -> Cycle {
+        cycle.saturating_sub(self.current_shard_offset_cycle())
     }
 
     pub fn current_shard_offset_cycle(&self) -> Cycle {
@@ -401,6 +425,7 @@ impl<'a> ShardContext<'a> {
             && self.is_current_shard_cycle(cycle)
             && !self.is_first_shard()
         {
+            let prev_shard_id = self.extract_prev_shard_id(prev_cycle);
             let ram_record = self
                 .read_thread_based_record_storage
                 .as_mut()
@@ -414,8 +439,10 @@ impl<'a> ShardContext<'a> {
                     addr,
                     prev_cycle,
                     cycle,
+                    shard_cycle: 0,
                     prev_value,
                     value,
+                    shard_id: prev_shard_id,
                 },
             );
         }
@@ -438,6 +465,7 @@ impl<'a> ShardContext<'a> {
             && self.after_current_shard_cycle(future_touch_cycle)
             && self.is_current_shard_cycle(cycle)
         {
+            let shard_cycle = self.aligned_current_ts(cycle);
             let ram_record = self
                 .write_thread_based_record_storage
                 .as_mut()
@@ -451,8 +479,10 @@ impl<'a> ShardContext<'a> {
                     addr,
                     prev_cycle,
                     cycle,
+                    shard_cycle,
                     prev_value,
                     value,
+                    shard_id: self.shard_id,
                 },
             );
         }
@@ -581,6 +611,7 @@ pub fn emulate_program<'a>(
         end_cycle,
         multi_prover.prover_id as u32,
         io_init.iter().map(|rec| rec.value).collect_vec(),
+        vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );
 
     // Find the final register values and cycles.

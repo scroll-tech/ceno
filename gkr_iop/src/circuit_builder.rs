@@ -104,6 +104,10 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub instance_openings: Vec<Instance>,
 
+    pub ec_point_exprs: Vec<Expression<E>>,
+    pub ec_slope_exprs: Vec<Expression<E>>,
+    pub ec_final_sum: Vec<Expression<E>>,
+
     pub r_selector: Option<SelectorType<E>>,
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
@@ -172,6 +176,9 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
             instance_openings: vec![],
+            ec_final_sum: vec![],
+            ec_slope_exprs: vec![],
+            ec_point_exprs: vec![],
             r_selector: None,
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
@@ -434,12 +441,22 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
+        self.read_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+    }
+
+    pub fn read_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError> {
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.r_expressions_namespace_map.push(path);
         // Since r_expression is RLC(record) and when we're debugging
         // it's helpful to recover the value of record itself.
-        self.r_ram_types.push(((ram_type as u64).into(), record));
+        self.r_ram_types.push((ram_type, record));
         Ok(())
     }
 
@@ -450,11 +467,43 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
+        self.write_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+    }
+
+    pub fn write_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError> {
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);
-        self.w_ram_types.push(((ram_type as u64).into(), record));
+        // Since w_expression is RLC(record) and when we're debugging
+        // it's helpful to recover the value of record itself.
+        self.w_ram_types.push((ram_type, record));
         Ok(())
+    }
+
+    pub fn ec_sum(
+        &mut self,
+        xs: Vec<Expression<E>>,
+        ys: Vec<Expression<E>>,
+        slopes: Vec<Expression<E>>,
+        final_sum: Vec<Expression<E>>,
+    ) {
+        assert_eq!(xs.len(), 7);
+        assert_eq!(ys.len(), 7);
+        assert_eq!(slopes.len(), 7);
+        assert_eq!(final_sum.len(), 7 * 2);
+
+        assert_eq!(self.ec_point_exprs.len(), 0);
+        self.ec_point_exprs.extend(xs);
+        self.ec_point_exprs.extend(ys);
+
+        self.ec_slope_exprs = slopes;
+        self.ec_final_sum = final_sum;
     }
 
     pub fn require_zero<NR: Into<String>, N: FnOnce() -> NR>(
@@ -703,6 +752,21 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.read_record(name_fn, ram_type, record)
     }
 
+    pub fn read_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .read_rlc_record(name_fn, ram_type, record, rlc_record)
+    }
+
     pub fn write_record<NR, N>(
         &mut self,
         name_fn: N,
@@ -716,8 +780,33 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.write_record(name_fn, ram_type, record)
     }
 
+    pub fn write_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .write_rlc_record(name_fn, ram_type, record, rlc_record)
+    }
+
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
         self.cs.rlc_chip_record(records)
+    }
+
+    pub fn ec_sum(
+        &mut self,
+        xs: Vec<Expression<E>>,
+        ys: Vec<Expression<E>>,
+        slope: Vec<Expression<E>>,
+        final_sum: Vec<Expression<E>>,
+    ) {
+        self.cs.ec_sum(xs, ys, slope, final_sum);
     }
 
     pub fn create_bit<NR, N>(&mut self, name_fn: N) -> Result<WitIn, CircuitBuilderError>
