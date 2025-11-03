@@ -932,10 +932,16 @@ pub fn generate_witness<'a, E: ExtensionField>(
     let mut all_records = std::mem::take(&mut emul_result.all_records);
     assert!(!all_records.is_empty());
 
+    tracing::debug!(
+        "first shard cycle range {:?}",
+        shard_ctxs[0].cur_shard_cycle_range
+    );
     // clean up all records before first shard start cycle, as it's not belong to current prover
-    let start = all_records
-        .iter()
-        .position(|step| shard_ctxs[0].before_current_shard_cycle(step.cycle()));
+    let start = all_records.iter().position(|step| {
+        shard_ctxs[0]
+            .cur_shard_cycle_range
+            .contains(&(step.cycle() as usize))
+    });
 
     if let Some(start) = start {
         tracing::debug!("drop {} records as not belong to current shard", start);
@@ -1290,9 +1296,6 @@ pub fn run_e2e_with_checkpoint<
     let zkvm_proofs = zkvm_witness
         .map(|(zkvm_witness, shard_ctx, pi)| {
             if is_mock_proving {
-                if shard_ctx.num_shards > 1 {
-                    todo!("support mock proving on more than 1 shard")
-                }
                 MockProver::assert_satisfied_full(
                     &ctx.system_config.zkvm_cs,
                     ctx.zkvm_fixed_traces.clone(),
