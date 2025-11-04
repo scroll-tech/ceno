@@ -75,7 +75,7 @@ pub trait TableCircuit<E: ExtensionField> {
             cb.cs.lk_selector = Some(selector_type.clone());
         }
 
-        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))

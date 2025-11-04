@@ -2,6 +2,7 @@ use super::{PublicValues, utils::wit_infer_by_expr};
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     state::{GlobalState, StateCircuit},
     structs::{
         ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
@@ -968,6 +969,7 @@ Hints:
     }
 
     pub fn assert_satisfied_full(
+        shard_ctx: &ShardContext,
         cs: &ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
@@ -1025,6 +1027,16 @@ Hints:
                 .iter()
                 .map(|instance| pi_mles[instance.0].clone())
                 .collect_vec();
+
+            // skip init table on non-first shard
+            if composed_cs.with_omc_init_only() && !shard_ctx.is_first_shard() {
+                wit_mles.insert(circuit_name.clone(), vec![]);
+                structural_wit_mles.insert(circuit_name.clone(), vec![]);
+                fixed_mles.insert(circuit_name.clone(), vec![]);
+                num_instances.insert(circuit_name.clone(), 0);
+                continue;
+            }
+
             let [witness, structural_witness] = witnesses
                 .get_opcode_witness(circuit_name)
                 .or_else(|| witnesses.get_table_witness(circuit_name))

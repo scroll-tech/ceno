@@ -1023,7 +1023,10 @@ pub fn generate_witness<'a, E: ExtensionField>(
         std::mem::swap(&mut all_records, &mut filtered_steps);
 
         tracing::debug!("{}th shard collect {n} steps", shard_ctx.shard_id);
-        let current_shard_end_cycle = filtered_steps.last().unwrap().cycle() + 4;
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let current_shard_end_cycle = filtered_steps.last().unwrap().cycle()
+            + Tracer::SUBCYCLES_PER_INSN
+            - current_shard_offset_cycle;
         let current_shard_init_pc = if shard_ctx.is_first_shard() {
             program.entry
         } else {
@@ -1117,7 +1120,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             .unwrap();
 
         pi.init_pc = current_shard_init_pc;
-        pi.init_cycle = 4;
+        pi.init_cycle = Tracer::SUBCYCLES_PER_INSN;
         pi.shard_id = shard_ctx.shard_id as u32;
         pi.end_pc = current_shard_end_pc;
         pi.end_cycle = current_shard_end_cycle;
@@ -1388,6 +1391,7 @@ pub fn run_e2e_with_checkpoint<
         .map(|(zkvm_witness, shard_ctx, pi)| {
             if is_mock_proving {
                 MockProver::assert_satisfied_full(
+                    &shard_ctx,
                     &ctx.system_config.zkvm_cs,
                     ctx.zkvm_fixed_traces.clone(),
                     &zkvm_witness,
@@ -1401,7 +1405,7 @@ pub fn run_e2e_with_checkpoint<
             let transcript = Transcript::new(b"riscv");
             let start = std::time::Instant::now();
             let zkvm_proof = prover
-                .create_proof(zkvm_witness, pi, transcript)
+                .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
                 .expect("create_proof failed");
             tracing::debug!(
                 "{}th shard proof created in {:?}",
@@ -1473,6 +1477,7 @@ pub fn run_e2e_proof<
                     todo!("support mock proving on more than 1 shard")
                 }
                 MockProver::assert_satisfied_full(
+                    &shard_ctx,
                     &ctx.system_config.zkvm_cs,
                     ctx.zkvm_fixed_traces.clone(),
                     &zkvm_witness,
@@ -1484,7 +1489,7 @@ pub fn run_e2e_proof<
 
             let transcript = Transcript::new(b"riscv");
             prover
-                .create_proof(zkvm_witness, pi, transcript)
+                .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
                 .expect("create_proof failed")
         })
         .collect_vec()

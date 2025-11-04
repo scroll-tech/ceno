@@ -379,7 +379,7 @@ fn test_single_add_instance_e2e() {
     let pi = PublicValues::new(0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
-        .create_proof(zkvm_witness, pi, transcript)
+        .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
     println!("encoded zkvm proof {}", &zkvm_proof,);

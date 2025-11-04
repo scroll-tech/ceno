@@ -147,6 +147,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self::TableConfig, ZKVMError> {
+        cb.set_omc_init_only();
         Ok(cb.namespace(
             || Self::name(),
             |cb| Self::TableConfig::construct_circuit(cb, params),
@@ -335,7 +336,7 @@ impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(selector_type.clone());
 
-        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))

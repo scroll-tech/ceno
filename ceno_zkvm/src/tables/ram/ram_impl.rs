@@ -146,15 +146,18 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     fn assign_instances<F: SmallField>(
-        _config: &Self::Config,
+        config: &Self::Config,
         _num_witin: usize,
         num_structural_witin: usize,
-        _final_mem: &[MemFinalRecord],
+        final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        if final_mem.is_empty() {
+            return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
+        }
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
-        let mut value = Vec::with_capacity(NVRAM::len(&_config.params));
+        let mut value = Vec::with_capacity(NVRAM::len(&config.params));
         value.par_extend(
-            (0..NVRAM::len(&_config.params))
+            (0..NVRAM::len(&config.params))
                 .into_par_iter()
                 .map(|_| F::ONE),
         );
@@ -236,8 +239,11 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableInitConfig<NVRAM> 
         &self,
         _num_witin: usize,
         num_structural_witin: usize,
-        _final_mem: &[MemFinalRecord],
+        final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        if final_mem.is_empty() {
+            return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
+        }
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let mut value = Vec::with_capacity(NVRAM::len(&self.params));
         value.par_extend(
@@ -556,6 +562,8 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
             structural_witness_value_rest = structural_witness_r;
         }
 
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+
         witness_mut_slices
             .par_iter_mut()
             .zip_eq(structural_witness_mut_slices.par_iter_mut())
@@ -581,7 +589,8 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
                                     set_val!(row, limb, val as u64);
                                 });
                             }
-                            set_val!(row, self.final_cycle, rec.cycle);
+                            let shard_cycle = rec.cycle - current_shard_offset_cycle;
+                            set_val!(row, self.final_cycle, shard_cycle);
 
                             set_val!(row, self.ram_type, rec.ram_type as u64);
                             set_val!(row, self.addr_subset, rec.addr as u64);

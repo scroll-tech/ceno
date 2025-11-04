@@ -29,6 +29,7 @@ use witness::RowMajorMatrix;
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 use crate::{
+    e2e::ShardContext,
     error::ZKVMError,
     scheme::{hal::ProofInput, utils::build_main_witness},
     structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
@@ -78,6 +79,7 @@ impl<
     )]
     pub fn create_proof(
         &self,
+        shard_ctx: &ShardContext,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
         mut transcript: impl Transcript<E> + 'static,
@@ -117,6 +119,10 @@ impl<
         let mut circuit_name_num_instances_mapping = BTreeMap::new();
         for (index, (circuit_name, ProvingKey { vk, .. })) in self.pk.circuit_pks.iter().enumerate()
         {
+            // skip omc init on >1 shard
+            if !shard_ctx.is_first_shard() && vk.get_cs().with_omc_init_only() {
+                continue;
+            }
             // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
                 .num_instances
@@ -174,6 +180,7 @@ impl<
             };
 
             if witness_rmm.num_instances() > 0 {
+                println!("adding circuit_name {circuit_name} witness_rmm");
                 wits_rmms.insert(circuit_name_index_mapping[&circuit_name], witness_rmm);
             }
             if structural_witness_rmm.num_instances() > 0 {
