@@ -16,7 +16,7 @@ use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Mult
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -445,6 +445,55 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         } else {
             FxHashSet::default()
         };
+
+        let non_first_shard_records = if shard_ctx.is_first_shard() {
+            final_mem
+                .par_iter()
+                .flat_map_iter(|(_, final_mem)| {
+                    final_mem.iter().filter_map(|mem_record| {
+                        // prepare global writes record for those record which not accessed in first record
+                        // but access in future shard
+                        let (waddr, addr): (WordAddr, u32) = match mem_record.ram_type {
+                            RAMType::Register => (
+                                Platform::register_vma(mem_record.addr as RegIdx).into(),
+                                mem_record.addr,
+                            ),
+                            RAMType::Memory => (mem_record.addr.into(), mem_record.addr),
+                            _ => unimplemented!(),
+                        };
+                        if !waddr_first_access.contains(&waddr)
+                            && shard_ctx.after_current_shard_cycle(mem_record.cycle)
+                        {
+                            let global_write = GlobalRecord {
+                                addr: match mem_record.ram_type {
+                                    RAMType::Register => addr,
+                                    RAMType::Memory => waddr.into(),
+                                    _ => unimplemented!(),
+                                },
+                                ram_type: mem_record.ram_type,
+                                // fill initial value to cancel initial record
+                                value: mem_record.init_value,
+                                shard: 0,
+                                local_clk: 0,
+                                global_clk: 0,
+                                is_to_write_set: true,
+                            };
+                            let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
+                            Some(GlobalChipInput {
+                                record: global_write,
+                                ec_point,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+        let non_first_shard_records_len = non_first_shard_records.len();
+
         let global_input = shard_ctx
             .write_records()
             .par_iter()
@@ -459,58 +508,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     }
                 })
             })
-            .chain({
-                if shard_ctx.is_first_shard() {
-                    final_mem.par_iter().flat_map_iter(|(_, final_mem)| {
-                        final_mem.iter().filter_map(|mem_record| {
-                            // prepare global writes record for those record which not accessed in first record
-                            // but access in future shard
-                            let (waddr, addr): (WordAddr, u32) = match mem_record.ram_type {
-                                RAMType::Register => (
-                                    Platform::register_vma(mem_record.addr as RegIdx).into(),
-                                    mem_record.addr,
-                                ),
-                                RAMType::Memory => (mem_record.addr.into(), mem_record.addr),
-                                _ => unimplemented!(),
-                            };
-                            if !waddr_first_access.contains(&waddr)
-                                && shard_ctx.after_current_shard_cycle(mem_record.cycle)
-                            {
-                                let global_write = GlobalRecord {
-                                    addr: match mem_record.ram_type {
-                                        RAMType::Register => addr,
-                                        RAMType::Memory => waddr.into(),
-                                        _ => unimplemented!(),
-                                    },
-                                    ram_type: mem_record.ram_type,
-                                    // fill initial value to cancel initial record
-                                    value: mem_record.init_value,
-                                    shard: 0,
-                                    local_clk: 0,
-                                    global_clk: 0,
-                                    is_to_write_set: true,
-                                };
-                                // let waddr_test: WordAddr = mem_record.addr.into();
-                                // println!(
-                                //     "mem_record.addr {:x}, into_waddr {:x}, global_write {:?}",
-                                //     mem_record.addr,
-                                //     waddr_test.baddr().0,
-                                //     global_write
-                                // );
-                                let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
-                                Some(GlobalChipInput {
-                                    record: global_write,
-                                    ec_point,
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                } else {
-                    todo!()
-                }
-            })
+            .chain(non_first_shard_records.into_par_iter())
             .chain(
                 shard_ctx
                     .read_records()
@@ -549,7 +547,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                             .write_records()
                             .iter()
                             .map(|records| records.len())
-                            .sum(),
+                            .sum::<usize>()
+                            + non_first_shard_records_len,
                         // global read -> local write
                         shard_ctx
                             .read_records()

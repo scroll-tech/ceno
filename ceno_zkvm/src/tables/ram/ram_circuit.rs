@@ -1,7 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use super::ram_impl::{
-    LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableConfig, RAMBusConfig,
+    LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableInitConfig, RAMBusConfig,
 };
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -135,9 +135,9 @@ pub struct PubIORamCircuit<E, R>(PhantomData<(E, R)>);
 impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
     for PubIORamCircuit<E, NVRAM>
 {
-    type TableConfig = PubIOTableConfig<NVRAM>;
+    type TableConfig = PubIOTableInitConfig<NVRAM>;
     type FixedInput = [Addr];
-    type WitnessInput = [Cycle];
+    type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
@@ -167,10 +167,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        final_cycles: &[Cycle],
+        final_mem: &[MemFinalRecord],
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed including padding
-        Ok(config.assign_instances(num_witin, num_structural_witin, final_cycles)?)
+        Ok(config.assign_instances(num_witin, num_structural_witin, final_mem)?)
     }
 }
 

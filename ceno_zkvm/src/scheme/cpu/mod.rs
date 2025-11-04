@@ -190,7 +190,6 @@ impl CpuEccProver {
                 .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
-
         // zerocheck: 0 = s[1,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b]) with b != (1,...,1)
         exprs_add.extend(
             (s.clone() * (&x0 - &x3) - (&y0 + &y3))
@@ -211,7 +210,6 @@ impl CpuEccProver {
                 .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
-
         // 0 = (y[1,b] - y[b,0])
         exprs_bypass.extend(
             (&y3 - &y0)
@@ -232,7 +230,6 @@ impl CpuEccProver {
         let rt = state.collect_raw_challenges();
         let evals = state.get_mle_flatten_final_evaluations();
 
-        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
         // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
         assert_eq!(evals.len(), 2 + SEPTIC_EXTENSION_DEGREE * 7);
 
@@ -269,6 +266,7 @@ impl CpuEccProver {
                 assert_eq!(y3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 6 + i]);
             }
         }
+        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
 
         EccQuarkProof {
             zerocheck_proof,

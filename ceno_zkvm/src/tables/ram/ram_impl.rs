@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, Cycle, WORD_SIZE};
+use ceno_emul::{Addr, WORD_SIZE};
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
@@ -167,16 +167,13 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<
 /// define public io
 /// init value set by instance
 #[derive(Clone, Debug)]
-pub struct PubIOTableConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
+pub struct PubIOTableInitConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
     addr: Fixed,
-
-    final_cycle: WitIn,
-
     phantom: PhantomData<NVRAM>,
     params: ProgramParams,
 }
 
-impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
+impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableInitConfig<NVRAM> {
     pub fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
@@ -185,22 +182,11 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
         let init_v = cb.query_public_io()?;
         let addr = cb.create_fixed(|| "addr");
 
-        let final_cycle = cb.create_witin(|| "final_cycle");
-
         let init_table = [
             vec![(NVRAM::RAM_TYPE as usize).into()],
             vec![Expression::Fixed(addr)],
             init_v.iter().map(|v| v.expr_as_instance()).collect_vec(),
             vec![Expression::ZERO], // Initial cycle.
-        ]
-        .concat();
-
-        let final_table = [
-            // a v t
-            vec![(NVRAM::RAM_TYPE as usize).into()],
-            vec![Expression::Fixed(addr)],
-            init_v.iter().map(|v| v.expr_as_instance()).collect_vec(),
-            vec![final_cycle.expr()],
         ]
         .concat();
 
@@ -213,19 +199,9 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
             },
             init_table,
         )?;
-        cb.r_table_record(
-            || "final_table",
-            NVRAM::RAM_TYPE,
-            SetTableSpec {
-                len: Some(NVRAM::len(params)),
-                structural_witins: vec![],
-            },
-            final_table,
-        )?;
 
         Ok(Self {
             addr,
-            final_cycle,
             phantom: PhantomData,
             params: params.clone(),
         })
@@ -258,33 +234,20 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableConfig<NVRAM> {
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
     pub fn assign_instances<F: SmallField>(
         &self,
-        num_witin: usize,
+        _num_witin: usize,
         num_structural_witin: usize,
-        final_cycles: &[Cycle],
+        _final_mem: &[MemFinalRecord],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
-        let mut final_table = RowMajorMatrix::<F>::new(
-            NVRAM::len(&self.params),
-            num_witin,
-            InstancePaddingStrategy::Default,
+        let mut value = Vec::with_capacity(NVRAM::len(&self.params));
+        value.par_extend(
+            (0..NVRAM::len(&self.params))
+                .into_par_iter()
+                .map(|_| F::ONE),
         );
-        let mut structural_witness = RowMajorMatrix::<F>::new(
-            NVRAM::len(&self.params),
-            1,
-            InstancePaddingStrategy::Default,
-        );
-        let selector_witin = WitIn { id: 0 };
-
-        final_table
-            .par_rows_mut()
-            .zip_eq(structural_witness.par_rows_mut())
-            .zip_eq(final_cycles)
-            .for_each(|((row, structural_row), &cycle)| {
-                set_val!(row, self.final_cycle, cycle);
-                set_val!(structural_row, selector_witin, 1u64);
-            });
-
-        Ok([final_table, structural_witness])
+        let structural_witness =
+            RowMajorMatrix::<F>::new_by_values(value, 1, InstancePaddingStrategy::Default);
+        Ok([RowMajorMatrix::empty(), structural_witness])
     }
 }
 

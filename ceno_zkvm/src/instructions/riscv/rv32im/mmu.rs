@@ -10,7 +10,7 @@ use crate::{
         TableCircuit,
     },
 };
-use ceno_emul::{Addr, Cycle, IterAddresses, WORD_SIZE, Word};
+use ceno_emul::{Addr, IterAddresses, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use std::{collections::HashSet, iter::zip, ops::Range, sync::Arc};
@@ -22,7 +22,7 @@ pub struct MmuConfig<'a, E: ExtensionField> {
     /// Initialization of memory with static addresses.
     pub static_mem_init_config: <StaticMemInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of public IO.
-    pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub public_io_init_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of hints.
     pub hints_config: <HintsCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of heap.
@@ -42,7 +42,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
 
         let static_mem_init_config = cs.register_table_circuit::<StaticMemInitCircuit<E>>();
 
-        let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
+        let public_io_init_config = cs.register_table_circuit::<PubIOCircuit<E>>();
 
         let hints_config = cs.register_table_circuit::<HintsCircuit<E>>();
         let stack_init_config = cs.register_table_circuit::<StackInitCircuit<E>>();
@@ -53,7 +53,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         Self {
             reg_init_config,
             static_mem_init_config,
-            public_io_config,
+            public_io_init_config,
             hints_config,
             stack_init_config,
             heap_init_config,
@@ -90,7 +90,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             static_mem_init,
         );
 
-        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_addrs);
+        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_init_config, io_addrs);
         fixed.register_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, &());
         fixed.register_table_circuit::<StackInitCircuit<E>>(cs, &self.stack_init_config, &());
         fixed.register_table_circuit::<HeapInitCircuit<E>>(cs, &self.heap_init_config, &());
@@ -106,7 +106,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         witness: &mut ZKVMWitnesses<E>,
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
-        io_cycles: &[Cycle],
+        io_final: &[MemFinalRecord],
         hints_final: &[MemFinalRecord],
         stack_final: &[MemFinalRecord],
         heap_final: &[MemFinalRecord],
@@ -123,7 +123,11 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             static_mem_final,
         )?;
 
-        witness.assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_cycles)?;
+        witness.assign_table_circuit::<PubIOCircuit<E>>(
+            cs,
+            &self.public_io_init_config,
+            io_final,
+        )?;
         witness.assign_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, hints_final)?;
         witness.assign_table_circuit::<StackInitCircuit<E>>(
             cs,
@@ -137,6 +141,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         )?;
 
         let all_records = vec![
+            (InstancePaddingStrategy::Default, io_final),
             (InstancePaddingStrategy::Default, reg_final),
             (InstancePaddingStrategy::Default, static_mem_final),
             (

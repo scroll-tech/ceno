@@ -1066,12 +1066,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 &mut zkvm_witness,
                 &emul_result.final_mem_state.reg,
                 &emul_result.final_mem_state.mem,
-                &emul_result
-                    .final_mem_state
-                    .io
-                    .iter()
-                    .map(|rec| rec.cycle)
-                    .collect_vec(),
+                &emul_result.final_mem_state.io,
                 &emul_result.final_mem_state.hints,
                 &emul_result.final_mem_state.stack,
                 &emul_result.final_mem_state.heap,
