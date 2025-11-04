@@ -1,4 +1,5 @@
 use crate::{
+    e2e::ShardContext,
     error::ZKVMError,
     scheme::cpu::TowerRelationOutput,
     structs::{ComposedConstrainSystem, EccQuarkProof, ZKVMProvingKey},
@@ -182,6 +183,7 @@ pub struct DeviceProvingKey<'a, PB: ProverBackend> {
 pub trait DeviceTransporter<PB: ProverBackend> {
     fn transport_proving_key(
         &self,
+        shard_ctx: &ShardContext,
         proving_key: Arc<ZKVMProvingKey<PB::E, PB::Pcs>>,
     ) -> DeviceProvingKey<'_, PB>;
 

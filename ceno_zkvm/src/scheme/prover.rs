@@ -205,7 +205,9 @@ impl<
 
         // transfer pk to device
         let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
-        let device_pk = self.device.transport_proving_key(self.pk.clone());
+        let device_pk = self
+            .device
+            .transport_proving_key(shard_ctx, self.pk.clone());
         let mut fixed_mles = device_pk.fixed_mles;
         exit_span!(transfer_pk_span);
 
@@ -229,6 +231,11 @@ impl<
                     .cloned()
                     .unwrap_or_default();
                 let cs = pk.get_cs();
+                if !shard_ctx.is_first_shard() && cs.with_omc_init_only() {
+                    assert!(num_instances.is_empty());
+                    // skip drain respective fixed because we use different set of fixed commitment
+                    return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points, evaluations));
+                }
                 if num_instances.is_empty() {
                     // we need to drain respective fixed when num_instances is 0
                     if cs.num_fixed() > 0 {
