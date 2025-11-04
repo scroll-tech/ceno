@@ -23,16 +23,16 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [workspace.dependencies]
-ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
-mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
-p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
-poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
-sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
-sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
-transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
-whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
-witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", rev = "a4b4a6862aa6261114136eb7a4058778d9f47ef6" }
+ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", tag = "v1.0.0-alpha.13" }
+mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", tag = "v1.0.0-alpha.13" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", tag = "v1.0.0-alpha.13" }
+p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", tag = "v1.0.0-alpha.13" }
+poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", tag = "v1.0.0-alpha.13" }
+sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", tag = "v1.0.0-alpha.13" }
+sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", tag = "v1.0.0-alpha.13" }
+transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", tag = "v1.0.0-alpha.13" }
+whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", tag = "v1.0.0-alpha.13" }
+witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", tag = "v1.0.0-alpha.13" }
 
 alloy-primitives = "1.3"
 anyhow = { version = "1.0", default-features = false }
