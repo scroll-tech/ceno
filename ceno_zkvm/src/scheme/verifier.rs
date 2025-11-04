@@ -13,7 +13,7 @@ use crate::{
     },
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
-        septic_curve::SepticExtension,
+        septic_curve::{SepticExtension, SepticPoint},
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
@@ -91,19 +91,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         transcripts: Vec<impl ForkableTranscript<E>>,
         expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
-        // main invariant between opcode circuits and table circuits
-        let _prod_r = E::ONE;
-        let _prod_w = E::ONE;
-        let _logup_sum = E::ZERO;
         assert!(!vm_proofs.is_empty());
         let num_proofs = vm_proofs.len();
-        let _end_pc = vm_proofs
+        let (_end_pc, shard_ec_sum) = vm_proofs
             .into_iter()
             .zip_eq(transcripts)
             // optionally halt on last chunk
             .zip_eq(iter::repeat_n(false, num_proofs - 1).chain(iter::once(expect_halt)))
             .enumerate()
-            .try_fold(None, |prev_pc, (shard_id, ((vm_proof, transcript), expect_halt))| {
+            .try_fold((None, SepticPoint::<E::BaseField>::default()), |(prev_pc, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
                 // require ecall/halt proof to exist, depend on whether we expect a halt.
                 let has_halt = vm_proof.has_halt(&self.vk);
                 if has_halt != expect_halt {
@@ -124,20 +120,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], E::from_canonical_u32(self.vk.entry_pc));
                 }
                 let end_pc = vm_proof.pi_evals[END_PC_IDX];
-                // TODO add to global ec
-                let _shard_ram_bus = self.verify_proof_validity(shard_id, vm_proof, transcript)?;
-                Ok(Some(end_pc))
+                // add to global shard ec
+                shard_ec_sum = shard_ec_sum + self.verify_proof_validity(shard_id, vm_proof, transcript)?;
+                Ok((Some(end_pc), shard_ec_sum))
             })?;
-        // TODO check global ec_sum == 0
+        // check shard ec_sum is_infinity
+        if !shard_ec_sum.is_infinity {
+            return Err(ZKVMError::VerifyError(
+                "shard_ec_sum is not infinity".into(),
+            ));
+        }
         Ok(true)
     }
 
     fn verify_proof_validity(
         &self,
         shard_id: usize,
-        mut vm_proof: ZKVMProof<E, PCS>,
+        vm_proof: ZKVMProof<E, PCS>,
         mut transcript: impl ForkableTranscript<E>,
-    ) -> Result<Vec<E::BaseField>, ZKVMError> {
+    ) -> Result<SepticPoint<E::BaseField>, ZKVMError> {
         // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
@@ -233,6 +234,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let point_eval = PointAndEval::default();
         let mut witin_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
         let mut fixed_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
+        let mut shard_ec_sum = SepticPoint::<E::BaseField>::default();
         for (index, proof) in &vm_proof.chip_proofs {
             let num_instance: usize = proof.num_instances.iter().sum();
             assert!(num_instance > 0);
@@ -313,7 +315,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
                 logup_sum += chip_logup_sum;
             };
-            let input_opening_point = self.verify_chip_proof(
+            let (input_opening_point, chip_shard_ec_sum) = self.verify_chip_proof(
                 circuit_name,
                 circuit_vk,
                 proof,
@@ -343,6 +345,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 "{shard_id}th shard verified proof for circuit {}",
                 circuit_name
             );
+            if let Some(chip_shard_ec_sum) = chip_shard_ec_sum {
+                shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
+            }
         }
         logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
             * dummy_table_item.inverse();
@@ -397,11 +402,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         .unwrap();
         prod_r *= finalize_global_state;
 
-        // extract shard_ram_bus.local_read, extract shard_ram_bus.local_write
-        // TODO add local_read, local_write to prod_r, prod_w
-        // extract shard_ram_bus.shard_ram_bus_read, extract shard_ram_bus.shard_ram_bus_write
-        let shard_ram_bus = std::mem::take(&mut vm_proof.raw_pi[INIT_PC_IDX]);
-
         // check rw_set equality of shard proof
         if prod_r != prod_w {
             return Err(ZKVMError::VerifyError(
@@ -416,11 +416,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
 
-        Ok(shard_ram_bus)
+        Ok(shard_ec_sum)
     }
 
     /// verify proof and return input opening point
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     pub fn verify_chip_proof(
         &self,
         _name: &str,
@@ -432,7 +432,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
-    ) -> Result<Point<E>, ZKVMError> {
+    ) -> Result<(Point<E>, Option<SepticPoint<E::BaseField>>), ZKVMError> {
         let composed_cs = circuit_vk.get_cs();
         let ComposedConstrainSystem {
             zkvm_v1_css: cs,
@@ -498,7 +498,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         });
 
         // verify ecc proof if exists
-        if composed_cs.has_ecc_ops() {
+        let shard_ec_sum: Option<SepticPoint<E::BaseField>> = if composed_cs.has_ecc_ops() {
             tracing::debug!("verifying ecc proof...");
             assert!(proof.ecc_proof.is_some());
             let ecc_proof = proof.ecc_proof.as_ref().unwrap();
@@ -533,7 +533,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
             EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
             tracing::debug!("ecc proof verified.");
-        }
+            Some(SepticPoint::from_affine(
+                SepticExtension::from(&global_ec_sum[0..SEPTIC_EXTENSION_DEGREE]),
+                SepticExtension::from(&global_ec_sum[SEPTIC_EXTENSION_DEGREE..]),
+            ))
+        } else {
+            None
+        };
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -640,7 +646,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript,
             &selector_ctxs,
         )?;
-        Ok(rt)
+        Ok((rt, shard_ec_sum))
     }
 }
 

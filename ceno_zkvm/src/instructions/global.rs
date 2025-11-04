@@ -833,7 +833,7 @@ mod tests {
             .iter()
             .map(|mle| mle.evaluate(&point[..mle.num_vars()]))
             .collect_vec();
-        let vrf_point = verifier
+        let (vrf_point, _) = verifier
             .verify_chip_proof(
                 "global",
                 &pk.vk,
