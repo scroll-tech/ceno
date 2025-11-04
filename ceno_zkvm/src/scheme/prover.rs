@@ -100,7 +100,13 @@ impl<
 
         // commit to fixed commitment
         let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
-        if let Some(fixed_commit) = &self.pk.fixed_commit {
+        if let Some(fixed_commit) = &self.pk.fixed_commit
+            && shard_ctx.is_first_shard()
+        {
+            PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
+        } else if let Some(fixed_commit) = &self.pk.fixed_no_omc_init_commit
+            && !shard_ctx.is_first_shard()
+        {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
         exit_span!(span);

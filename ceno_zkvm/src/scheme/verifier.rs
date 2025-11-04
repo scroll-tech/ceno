@@ -189,7 +189,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // write fixed commitment to transcript
         // TODO check soundness if there is no fixed_commit but got fixed proof?
-        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
+        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref()
+            && shard_id == 0
+        {
+            PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
+        } else if let Some(fixed_commit) = self.vk.fixed_no_omc_init_commit.as_ref()
+            && shard_id > 0
+        {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
@@ -350,7 +356,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // verify mpcs
         let mut rounds = vec![(vm_proof.witin_commit.clone(), witin_openings)];
-        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
+
+        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref()
+            && shard_id == 0
+        {
+            rounds.push((fixed_commit.clone(), fixed_openings));
+        } else if let Some(fixed_commit) = self.vk.fixed_no_omc_init_commit.as_ref()
+            && shard_id > 0
+        {
             rounds.push((fixed_commit.clone(), fixed_openings));
         }
         PCS::batch_verify(

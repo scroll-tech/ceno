@@ -598,6 +598,11 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
     pub fixed_commit_wd: Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+
+    pub fixed_no_omc_init_commit_wd:
+        Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
+    pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+
     pub circuit_index_fixed_num_instances: BTreeMap<usize, usize>,
 
     // expression for global state in/out
@@ -617,12 +622,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             circuit_index_fixed_num_instances: BTreeMap::new(),
             fixed_commit_wd: None,
             fixed_commit: None,
+            fixed_no_omc_init_commit_wd: None,
+            fixed_no_omc_init_commit: None,
         }
     }
 
     pub(crate) fn commit_fixed(
         &mut self,
         fixed_traces: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+        fixed_traces_no_omc_init: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<(), ZKVMError> {
         if !fixed_traces.is_empty() {
             let fixed_commit_wd =
@@ -634,6 +642,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
         } else {
             self.fixed_commit_wd = None;
             self.fixed_commit = None;
+        }
+
+        if !fixed_traces_no_omc_init.is_empty() {
+            let fixed_commit_wd = PCS::batch_commit(
+                &self.pp,
+                fixed_traces_no_omc_init.into_values().collect_vec(),
+            )
+            .map_err(ZKVMError::PCSError)?;
+            let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
+            self.fixed_no_omc_init_commit_wd = Some(Arc::new(fixed_commit_wd));
+            self.fixed_no_omc_init_commit = Some(fixed_commit);
+        } else {
+            self.fixed_no_omc_init_commit_wd = None;
+            self.fixed_no_omc_init_commit = None;
         }
         Ok(())
     }
@@ -654,6 +676,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
             fixed_commit: self.fixed_commit.clone(),
+            fixed_no_omc_init_commit: self.fixed_no_omc_init_commit.clone(),
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
             finalize_global_state_expr: self.finalize_global_state_expr.clone(),
@@ -679,6 +702,7 @@ pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E
     // vk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
     pub finalize_global_state_expr: Expression<E>,
