@@ -1058,9 +1058,43 @@ pub fn generate_witness<'a, E: ExtensionField>(
             .config
             .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
             .unwrap();
+
+        if shard_ctx.is_first_shard() {
+            // assign init table on first shard
+            system_config
+                .mmu_config
+                .assign_init_table_circuit(
+                    &system_config.zkvm_cs,
+                    &mut zkvm_witness,
+                    &emul_result.final_mem_state.reg,
+                    &emul_result.final_mem_state.mem,
+                    &emul_result.final_mem_state.io,
+                    &emul_result.final_mem_state.hints,
+                    &emul_result.final_mem_state.stack,
+                    &emul_result.final_mem_state.heap,
+                )
+                .unwrap();
+        } else {
+            // empty assignment
+            system_config
+                .mmu_config
+                .assign_init_table_circuit(
+                    &system_config.zkvm_cs,
+                    &mut zkvm_witness,
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                )
+                .unwrap();
+        }
+
+        // assign continuation circuit
         system_config
             .mmu_config
-            .assign_table_circuit(
+            .assign_continuation_circuit(
                 &system_config.zkvm_cs,
                 &shard_ctx,
                 &mut zkvm_witness,
@@ -1072,6 +1106,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 &emul_result.final_mem_state.heap,
             )
             .unwrap();
+
         // assign program circuit
         zkvm_witness
             .assign_table_circuit::<ProgramTableCircuit<E>>(

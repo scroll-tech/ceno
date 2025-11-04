@@ -4,10 +4,10 @@ use crate::{
     instructions::global::GlobalChip,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, LocalFinalCircuit,
-        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOInitCircuit, PubIOTable, RegTable,
-        RegTableInitCircuit, StackInitCircuit, StackTable, StaticMemInitCircuit, StaticMemTable,
-        TableCircuit,
+        DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, HintsTable,
+        LocalFinalCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOInitCircuit,
+        PubIOTable, RegTable, RegTableInitCircuit, StackInitCircuit, StackTable,
+        StaticMemInitCircuit, StaticMemTable, TableCircuit,
     },
 };
 use ceno_emul::{Addr, IterAddresses, WORD_SIZE, Word};
@@ -103,10 +103,9 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn assign_table_circuit(
+    pub fn assign_init_table_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
-        shard_ctx: &ShardContext,
         witness: &mut ZKVMWitnesses<E>,
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
@@ -147,10 +146,24 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             &self.heap_init_config,
             heap_final,
         )?;
+        Ok(())
+    }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn assign_continuation_circuit(
+        &self,
+        cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &ShardContext,
+        witness: &mut ZKVMWitnesses<E>,
+        reg_final: &[MemFinalRecord],
+        static_mem_final: &[MemFinalRecord],
+        io_final: &[MemFinalRecord],
+        hints_final: &[MemFinalRecord],
+        stack_final: &[MemFinalRecord],
+        heap_final: &[MemFinalRecord],
+    ) -> Result<(), ZKVMError> {
         let all_records = vec![
             (InstancePaddingStrategy::Default, io_final),
-            (InstancePaddingStrategy::Default, hints_final),
             (InstancePaddingStrategy::Default, reg_final),
             (InstancePaddingStrategy::Default, static_mem_final),
             (
@@ -159,6 +172,13 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
                     Arc::new(move |row: u64, _: u64| StackTable::addr(&params, row as usize) as u64)
                 }),
                 stack_final,
+            ),
+            (
+                InstancePaddingStrategy::Custom({
+                    let params = cs.params.clone();
+                    Arc::new(move |row: u64, _: u64| HintsTable::addr(&params, row as usize) as u64)
+                }),
+                hints_final,
             ),
             (
                 InstancePaddingStrategy::Custom({
@@ -182,7 +202,6 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             &(shard_ctx, all_records.as_slice()),
             &self.ram_bus_circuit,
         )?;
-
         Ok(())
     }
 
