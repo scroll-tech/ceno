@@ -130,10 +130,10 @@ impl<
 /// This circuit does not and cannot decide whether the memory is mutable or not.
 /// It supports LOAD where the program reads the public input,
 /// or STORE where the memory content must equal the public input after execution.
-pub struct PubIORamCircuit<E, R>(PhantomData<(E, R)>);
+pub struct PubIORamInitCircuit<E, R>(PhantomData<(E, R)>);
 
 impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
-    for PubIORamCircuit<E, NVRAM>
+    for PubIORamInitCircuit<E, NVRAM>
 {
     type TableConfig = PubIOTableInitConfig<NVRAM>;
     type FixedInput = [Addr];

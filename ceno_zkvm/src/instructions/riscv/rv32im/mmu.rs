@@ -4,8 +4,8 @@ use crate::{
     instructions::global::GlobalChip,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsCircuit, LocalFinalCircuit,
-        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit, PubIOTable, RegTable,
+        DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, LocalFinalCircuit,
+        MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOInitCircuit, PubIOTable, RegTable,
         RegTableInitCircuit, StackInitCircuit, StackTable, StaticMemInitCircuit, StaticMemTable,
         TableCircuit,
     },
@@ -22,9 +22,9 @@ pub struct MmuConfig<'a, E: ExtensionField> {
     /// Initialization of memory with static addresses.
     pub static_mem_init_config: <StaticMemInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of public IO.
-    pub public_io_init_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub public_io_init_config: <PubIOInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of hints.
-    pub hints_config: <HintsCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub hints_init_config: <HintsInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of heap.
     pub heap_init_config: <HeapInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of stack.
@@ -42,9 +42,9 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
 
         let static_mem_init_config = cs.register_table_circuit::<StaticMemInitCircuit<E>>();
 
-        let public_io_init_config = cs.register_table_circuit::<PubIOCircuit<E>>();
+        let public_io_init_config = cs.register_table_circuit::<PubIOInitCircuit<E>>();
 
-        let hints_config = cs.register_table_circuit::<HintsCircuit<E>>();
+        let hints_init_config = cs.register_table_circuit::<HintsInitCircuit<E>>();
         let stack_init_config = cs.register_table_circuit::<StackInitCircuit<E>>();
         let heap_init_config = cs.register_table_circuit::<HeapInitCircuit<E>>();
         let local_final_circuit = cs.register_table_circuit::<LocalFinalCircuit<E>>();
@@ -54,7 +54,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             reg_init_config,
             static_mem_init_config,
             public_io_init_config,
-            hints_config,
+            hints_init_config,
             stack_init_config,
             heap_init_config,
             local_final_circuit,
@@ -90,8 +90,12 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             static_mem_init,
         );
 
-        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_init_config, io_addrs);
-        fixed.register_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, &());
+        fixed.register_table_circuit::<PubIOInitCircuit<E>>(
+            cs,
+            &self.public_io_init_config,
+            io_addrs,
+        );
+        fixed.register_table_circuit::<HintsInitCircuit<E>>(cs, &self.hints_init_config, &());
         fixed.register_table_circuit::<StackInitCircuit<E>>(cs, &self.stack_init_config, &());
         fixed.register_table_circuit::<HeapInitCircuit<E>>(cs, &self.heap_init_config, &());
         fixed.register_table_circuit::<LocalFinalCircuit<E>>(cs, &self.local_final_circuit, &());
@@ -123,12 +127,16 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             static_mem_final,
         )?;
 
-        witness.assign_table_circuit::<PubIOCircuit<E>>(
+        witness.assign_table_circuit::<PubIOInitCircuit<E>>(
             cs,
             &self.public_io_init_config,
             io_final,
         )?;
-        witness.assign_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, hints_final)?;
+        witness.assign_table_circuit::<HintsInitCircuit<E>>(
+            cs,
+            &self.hints_init_config,
+            hints_final,
+        )?;
         witness.assign_table_circuit::<StackInitCircuit<E>>(
             cs,
             &self.stack_init_config,
@@ -142,6 +150,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
 
         let all_records = vec![
             (InstancePaddingStrategy::Default, io_final),
+            (InstancePaddingStrategy::Default, hints_final),
             (InstancePaddingStrategy::Default, reg_final),
             (InstancePaddingStrategy::Default, static_mem_final),
             (
