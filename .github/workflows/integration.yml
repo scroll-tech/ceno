@@ -119,7 +119,7 @@ jobs:
       - name: Run 3 shard keccak_syscall (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Run secp256k1_add_syscall (release)
         env:
