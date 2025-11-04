@@ -507,11 +507,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert_eq!(&ecc_proof.sum.y, &y);
             assert!(!ecc_proof.sum.is_infinity);
             // assert ec sum in public input matches that in ecc proof
-            assert_eq!(raw_pi[GLOBAL_RW_SUM_IDX].len(), SEPTIC_EXTENSION_DEGREE * 2);
-            for (f, expected_f) in raw_pi[GLOBAL_RW_SUM_IDX]
+            let global_ec_sum = raw_pi
                 .iter()
-                .zip_eq(x.0.iter().chain(y.0.iter()))
-            {
+                .skip(GLOBAL_RW_SUM_IDX)
+                .take(SEPTIC_EXTENSION_DEGREE * 2)
+                .flatten()
+                .copied()
+                .collect_vec();
+            assert_eq!(global_ec_sum.len(), SEPTIC_EXTENSION_DEGREE * 2);
+            for (f, expected_f) in global_ec_sum.iter().zip_eq(x.0.iter().chain(y.0.iter())) {
                 assert_eq!(f, expected_f)
             }
             EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
