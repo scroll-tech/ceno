@@ -34,6 +34,10 @@ pub struct MemFinalRecord {
     pub addr: Addr,
     pub cycle: Cycle,
     pub value: Word,
+    // initial state value
+    // same as `value` for read-only table
+    // probably different for rw table
+    pub init_value: Word,
 }
 
 impl GetAddr for MemInitRecord {

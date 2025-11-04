@@ -1257,14 +1257,14 @@ Hints:
                             assert_eq!(
                                 writes_within_expr_dedup.insert(record_rlc),
                                 true,
-                                "within expression write duplicated on RAMType {:?} annotation {:?}",
+                                "circuit name {circuit_name} within expression write duplicated on RAMType {:?} annotation {:?} on row {row}",
                                 $ram_type,
                                 annotation
                             );
                             assert_eq!(
                                 writes.insert(record_rlc),
                                 true,
-                                "crossing-chip write duplicated on RAMType {:?} annotation {:?}",
+                                "circuit name {circuit_name} crossing-chip write duplicated on RAMType {:?} annotation {:?} on row {row}",
                                 $ram_type,
                                 annotation
                             );
@@ -1386,20 +1386,19 @@ Hints:
 
                         let mut records = vec![];
                         let mut reads_within_expr_dedup = HashSet::new();
-                        println!("mock prover circuit_name {circuit_name} read_records len() {}", read_records.len());
                         for (row, record) in enumerate(read_records) {
                             // TODO: return error
                             assert_eq!(
                                 reads_within_expr_dedup.insert(record),
                                 true,
-                                "within expression read duplicated on RAMType {:?} annotation {:?} on row {row}",
+                                "circuit name {circuit_name} within expression read duplicated on RAMType {:?} annotation {:?} on row {row}",
                                 $ram_type,
                                 annotation,
                             );
                             assert_eq!(
                                 reads.insert(record),
                                 true,
-                                "crossing-chip read duplicated on RAMType {:?} annotation {:?} on row {row}",
+                                "circuit name {circuit_name} crossing-chip read duplicated on RAMType {:?} annotation {:?} on row {row}",
                                 $ram_type,
                                 annotation,
                             );

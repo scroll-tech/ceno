@@ -1088,6 +1088,7 @@ mod tests {
                 addr: HintsTable::addr(&def_params, i),
                 cycle: 0,
                 value: 0,
+                init_value: 0,
             })
             .collect_vec();
         let [_, mut structural_witness] = HintsCircuit::<E>::assign_instances(

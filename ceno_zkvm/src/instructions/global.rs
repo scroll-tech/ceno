@@ -470,7 +470,6 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         _multiplicity: &[HashMap<u64, usize>],
         steps: &Self::WitnessInput,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
-        steps.iter().for_each(|step| println!("step {:?}", step));
         if steps.is_empty() {
             return Ok([
                 witness::RowMajorMatrix::empty(),

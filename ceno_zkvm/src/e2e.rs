@@ -36,7 +36,7 @@ use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -684,6 +684,7 @@ pub fn emulate_program<'a>(
                     ram_type: RAMType::Register,
                     addr: rec.addr,
                     value: vm.peek_register(index),
+                    init_value: rec.value,
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
             } else {
@@ -692,6 +693,7 @@ pub fn emulate_program<'a>(
                     ram_type: RAMType::Register,
                     addr: rec.addr,
                     value: 0,
+                    init_value: 0,
                     cycle: 0,
                 }
             }
@@ -707,6 +709,7 @@ pub fn emulate_program<'a>(
                 ram_type: RAMType::Memory,
                 addr: rec.addr,
                 value: vm.peek_memory(vma),
+                init_value: rec.value,
                 cycle: *final_access.get(&vma).unwrap_or(&0),
             }
         })
@@ -719,6 +722,7 @@ pub fn emulate_program<'a>(
             ram_type: RAMType::Memory,
             addr: rec.addr,
             value: rec.value,
+            init_value: rec.value,
             cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
         })
         .collect_vec();
@@ -730,6 +734,7 @@ pub fn emulate_program<'a>(
             ram_type: RAMType::Memory,
             addr: rec.addr,
             value: rec.value,
+            init_value: rec.value,
             cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
         })
         .collect_vec();
@@ -748,6 +753,7 @@ pub fn emulate_program<'a>(
                     ram_type: RAMType::Memory,
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
+                    init_value: 0,
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
             })
@@ -772,6 +778,7 @@ pub fn emulate_program<'a>(
                     ram_type: RAMType::Memory,
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
+                    init_value: 0,
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
             })
