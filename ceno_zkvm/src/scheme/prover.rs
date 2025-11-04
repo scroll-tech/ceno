@@ -186,7 +186,6 @@ impl<
             };
 
             if witness_rmm.num_instances() > 0 {
-                println!("adding circuit_name {circuit_name} witness_rmm");
                 wits_rmms.insert(circuit_name_index_mapping[&circuit_name], witness_rmm);
             }
             if structural_witness_rmm.num_instances() > 0 {
