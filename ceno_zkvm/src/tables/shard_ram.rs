@@ -41,9 +41,9 @@ use witness::{InstancePaddingStrategy, next_pow2_instance_padding, set_val};
 
 use crate::{instructions::riscv::constants::UInt, scheme::constants::SEPTIC_EXTENSION_DEGREE};
 
-/// A record for a read/write into the global set
+/// A record for a read/write into the shard RAM
 #[derive(Debug, Clone)]
-pub struct GlobalRecord {
+pub struct ShardRamRecord {
     pub addr: u32,
     pub ram_type: RAMType,
     pub value: u32,
@@ -53,7 +53,7 @@ pub struct GlobalRecord {
     pub is_to_write_set: bool,
 }
 
-impl From<(&WordAddr, &RAMRecord, bool)> for GlobalRecord {
+impl From<(&WordAddr, &RAMRecord, bool)> for ShardRamRecord {
     fn from((vma, record, is_to_write_set): (&WordAddr, &RAMRecord, bool)) -> Self {
         let addr = match record.ram_type {
             RAMType::Register => record.id as u32,
@@ -81,7 +81,7 @@ impl From<(&WordAddr, &RAMRecord, bool)> for GlobalRecord {
             )
         };
 
-        GlobalRecord {
+        ShardRamRecord {
             addr,
             ram_type: record.ram_type,
             value,
@@ -92,6 +92,7 @@ impl From<(&WordAddr, &RAMRecord, bool)> for GlobalRecord {
         }
     }
 }
+
 /// An EC point corresponding to a global read/write record
 /// whose x-coordinate is derived from Poseidon2 hash of the record
 #[derive(Clone, Debug)]
@@ -100,7 +101,7 @@ pub struct GlobalPoint<E: ExtensionField> {
     pub point: SepticPoint<E::BaseField>,
 }
 
-impl GlobalRecord {
+impl ShardRamRecord {
     pub fn to_ec_point<E: ExtensionField, P: Permutation<Vec<E::BaseField>>>(
         &self,
         hasher: &P,
@@ -152,18 +153,18 @@ impl GlobalRecord {
         }
     }
 }
-/// opcode circuit + mem init/final table + local finalize circuit + global chip
-/// global chip is used to ensure the **local** reads and writes produced by
+/// opcode circuit + mem init/final table + local finalize circuit + shard ram circuit
+/// shard ram circuit is used to ensure the **local** reads and writes produced by
 /// opcode circuits / memory init / memory finalize table / local finalize circuit
 /// can balance out.
 ///
 /// 1. For a local memory read record whose previous write is not in the same shard,
-///    the global chip will read it from the **global set** and insert a local write record.
+///    the shard ram circuit will read it from the **global set** and insert a local write record.
 /// 2. For a local memory write record which will **not** be read in the future,
 ///    the local finalize circuit will consume it by inserting a local read record.
 /// 3. For a local memory write record which will be read in the future,
-///    the global chip will insert a local read record and write it to the **global set**.
-pub struct GlobalConfig<E: ExtensionField> {
+///    the shard ram circuit will insert a local read record and write it to the **global set**.
+pub struct ShardRamConfig<E: ExtensionField> {
     addr: WitIn,
     is_ram_register: WitIn,
     value: UInt<E>,
@@ -181,7 +182,7 @@ pub struct GlobalConfig<E: ExtensionField> {
     perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
 }
 
-impl<E: ExtensionField> GlobalConfig<E> {
+impl<E: ExtensionField> ShardRamConfig<E> {
     // TODO: make `WIDTH`, `HALF_FULL_ROUNDS`, `PARTIAL_ROUNDS` generic parameters
     pub fn configure(cb: &mut CircuitBuilder<E>) -> Result<Self, CircuitBuilderError> {
         let x: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
@@ -278,7 +279,7 @@ impl<E: ExtensionField> GlobalConfig<E> {
         // TODO: enforce 0 <= y < p/2 if is_global_write = 1
         //       enforce p/2 <= y < p if is_global_write = 0
 
-        Ok(GlobalConfig {
+        Ok(ShardRamConfig {
             x,
             y,
             slope,
@@ -298,22 +299,22 @@ impl<E: ExtensionField> GlobalConfig<E> {
 /// This chip is used to manage read/write into a global set
 /// shared among multiple shards
 #[derive(Default)]
-pub struct GlobalChip<E> {
+pub struct ShardRamCircuit<E> {
     _marker: PhantomData<E>,
 }
 
 #[derive(Clone, Debug)]
-pub struct GlobalChipInput<E: ExtensionField> {
-    pub record: GlobalRecord,
+pub struct ShardRamInput<E: ExtensionField> {
+    pub record: ShardRamRecord,
     pub ec_point: GlobalPoint<E>,
 }
 
-impl<E: ExtensionField> GlobalChip<E> {
+impl<E: ExtensionField> ShardRamCircuit<E> {
     fn assign_instance(
-        config: &GlobalConfig<E>,
+        config: &ShardRamConfig<E>,
         instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
-        input: &GlobalChipInput<E>,
+        input: &ShardRamInput<E>,
     ) -> Result<(), crate::error::ZKVMError> {
         // assign basic fields
         let record = &input.record;
@@ -370,7 +371,7 @@ impl<E: ExtensionField> GlobalChip<E> {
     }
 
     pub fn extract_ec_sum(
-        config: &GlobalConfig<E>,
+        config: &ShardRamConfig<E>,
         rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
     ) -> Vec<<E as ExtensionField>::BaseField> {
         assert!(rmm.height() >= 2);
@@ -385,10 +386,10 @@ impl<E: ExtensionField> GlobalChip<E> {
     }
 }
 
-impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
-    type TableConfig = GlobalConfig<E>;
+impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
+    type TableConfig = ShardRamConfig<E>;
     type FixedInput = ();
-    type WitnessInput = Vec<GlobalChipInput<E>>;
+    type WitnessInput = Vec<ShardRamInput<E>>;
 
     fn name() -> String {
         "Global".to_string()
@@ -398,7 +399,7 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         cb: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<Self::TableConfig, crate::error::ZKVMError> {
-        let config = GlobalConfig::configure(cb)?;
+        let config = ShardRamConfig::configure(cb)?;
 
         Ok(config)
     }
@@ -651,16 +652,13 @@ mod tests {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{
-            global::{GlobalChip, GlobalChipInput, GlobalRecord},
-            riscv::constants::GLOBAL_RW_SUM_IDX,
-        },
+        instructions::riscv::constants::GLOBAL_RW_SUM_IDX,
         scheme::{
             PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
             septic_curve::SepticPoint, verifier::ZKVMVerifier,
         },
         structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
-        tables::TableCircuit,
+        tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
     };
     use multilinear_extensions::mle::IntoMLE;
     use p3::field::PrimeField32;
@@ -671,7 +669,7 @@ mod tests {
     type Pcs = BasefoldDefault<E>;
 
     #[test]
-    fn test_global_chip() {
+    fn test_shard_ram_circuit() {
         // default filter
         let default_filter = EnvFilter::builder()
             .with_default_directive(LevelFilter::DEBUG.into())
@@ -689,7 +687,7 @@ mod tests {
         let mut cb = CircuitBuilder::new(&mut cs);
 
         let (config, gkr_circuit) =
-            GlobalChip::build_gkr_iop_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            ShardRamCircuit::build_gkr_iop_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
         // create a bunch of random memory read/write records
         let n_global_reads = 1700;
@@ -699,7 +697,7 @@ mod tests {
                 let addr = i * 8;
                 let value = (i + 1) * 8;
 
-                GlobalRecord {
+                ShardRamRecord {
                     addr: addr as u32,
                     ram_type: RAMType::Memory,
                     value: value as u32,
@@ -716,7 +714,7 @@ mod tests {
                 let addr = i * 8;
                 let value = (i + 1) * 8;
 
-                GlobalRecord {
+                ShardRamRecord {
                     addr: addr as u32,
                     ram_type: RAMType::Memory,
                     value: value as u32,
@@ -733,7 +731,7 @@ mod tests {
             .chain(global_reads) // local writes
             .map(|record| {
                 let ec_point = record.to_ec_point::<E, Perm>(&perm);
-                GlobalChipInput { record, ec_point }
+                ShardRamInput { record, ec_point }
             })
             .collect::<Vec<_>>();
 
@@ -759,7 +757,7 @@ mod tests {
         );
 
         // assign witness
-        let witness = GlobalChip::assign_instances(
+        let witness = ShardRamCircuit::assign_instances(
             &config,
             cs.num_witin as usize,
             cs.num_structural_witin as usize,
@@ -776,7 +774,7 @@ mod tests {
                 .skip(GLOBAL_RW_SUM_IDX)
                 .flatten()
                 .collect_vec(),
-            GlobalChip::extract_ec_sum(&config, &witness[0])
+            ShardRamCircuit::extract_ec_sum(&config, &witness[0])
         );
 
         let composed_cs = ComposedConstrainSystem {

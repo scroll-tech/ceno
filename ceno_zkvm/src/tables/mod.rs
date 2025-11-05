@@ -10,6 +10,9 @@ use multilinear_extensions::ToExpr;
 use std::collections::HashMap;
 use witness::RowMajorMatrix;
 
+mod shard_ram;
+pub use shard_ram::*;
+
 mod range;
 pub use range::*;
 
