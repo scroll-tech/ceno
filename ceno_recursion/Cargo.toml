@@ -1,0 +1,50 @@
+[package]
+categories.workspace = true
+description = "Ceno Recursion"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "ceno_recursion"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+ceno_zkvm = { path = "../ceno_zkvm" }
+ceno_emul = { path = "../ceno_emul" }
+gkr_iop = { path = "../gkr_iop" }
+multilinear_extensions.workspace = true
+sumcheck.workspace = true
+transcript.workspace = true
+witness.workspace = true
+mpcs.workspace = true
+ff_ext.workspace = true
+whir.workspace = true
+rand.workspace = true
+tracing.workspace = true
+itertools.workspace = true
+bincode.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+p3.workspace = true
+openvm = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false, features = ["bench-metrics"] }
+openvm-native-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-sdk = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-native-compiler = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-native-compiler-derive = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-native-recursion = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-continuations = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-rv32im-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.1.1", default-features = false }
+openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.1.1", default-features = false }
+p3-monty-31 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "539bbc84085efb609f4f62cb03cf49588388abdb" }
+
+[features]
+default = ["parallel", "nightly-features"]
+nightly-features = [
+  "ceno_zkvm/nightly-features",
+  "openvm-stark-sdk/nightly-features",
+]
+parallel = ["openvm-stark-backend/parallel"]
+bench-metrics = ["openvm-circuit/bench-metrics"]
