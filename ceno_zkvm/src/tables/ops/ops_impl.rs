@@ -1,6 +1,6 @@
 //! The implementation of ops tables. No generics.
 
-use ff_ext::{ExtensionField, FieldInto, SmallField};
+use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -9,12 +9,10 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
-    structs::{ROMType, WitnessId},
+    structs::ROMType,
     tables::RMMCollections,
 };
-use multilinear_extensions::{
-    Expression, Fixed, StructuralWitIn, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn,
-};
+use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 
 #[derive(Clone, Debug)]
 pub struct OpTableConfig {
@@ -77,16 +75,7 @@ impl OpTableConfig {
     ) -> Result<RMMCollections<F>, CircuitBuilderError> {
         assert_eq!(num_structural_witin, 1);
         let num_structural_witin = num_structural_witin.max(1);
-        let selector_witin = StructuralWitIn {
-            id: num_structural_witin as WitnessId - 1,
-            // type doesn't matter
-            witin_type: EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        }; // last witin id is selector
+
         let mut witness =
             RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
         let mut structural_witness = RowMajorMatrix::<F>::new(
@@ -106,7 +95,7 @@ impl OpTableConfig {
             .zip(mlts)
             .for_each(|((row, structural_row), mlt)| {
                 set_val!(row, self.mlt, F::from_v(mlt as u64));
-                set_val!(structural_row, selector_witin, 1u64);
+                *structural_row.last_mut().unwrap() = F::ONE;
             });
 
         Ok([witness, structural_witness])
