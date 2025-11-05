@@ -62,6 +62,75 @@ pub struct TowerProofs<E: ExtensionField> {
     pub logup_specs_points: Vec<Vec<Point<E>>>,
 }
 
+// _debug
+// #[derive(Default, Debug)]
+// pub struct TowerProofInput {
+//     pub num_proofs: usize,
+//     pub proofs: Vec<IOPProverMessageVec>,
+//     // specs -> layers -> evals
+//     pub num_prod_specs: usize,
+//     pub prod_specs_eval: ThreeDimensionalVector,
+//     // specs -> layers -> evals
+//     pub num_logup_specs: usize,
+//     pub logup_specs_eval: ThreeDimensionalVector,
+// }
+#[derive(DslVariable, Clone)]
+pub struct TowerProofInputVariable<C: Config> {
+    pub num_proofs: Usize<C::N>,
+    pub proofs: Array<C, IOPProverMessageVecVariable<C>>,
+    pub num_prod_specs: Usize<C::N>,
+    pub prod_specs_eval: ThreeDimensionalVecVariable<C>,
+    pub num_logup_specs: Usize<C::N>,
+    pub logup_specs_eval: ThreeDimensionalVecVariable<C>,
+}
+
+impl Hintable<InnerConfig> for TowerProofs {
+    type HintVariable = TowerProofInputVariable<InnerConfig>;
+
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let num_proofs = Usize::Var(usize::read(builder));
+        let proofs = builder.dyn_array(num_proofs.clone());
+        iter_zip!(builder, proofs).for_each(|idx_vec, builder| {
+            let ptr = idx_vec[0];
+            let proof = IOPProverMessageVec::read(builder);
+            builder.iter_ptr_set(&proofs, ptr, proof);
+        });
+
+        let num_prod_specs = Usize::Var(usize::read(builder));
+        let prod_specs_eval = ThreeDimensionalVector::read(builder);
+
+        let num_logup_specs = Usize::Var(usize::read(builder));
+        let logup_specs_eval = ThreeDimensionalVector::read(builder);
+
+        TowerProofInputVariable {
+            num_proofs,
+            proofs,
+            num_prod_specs,
+            prod_specs_eval,
+            num_logup_specs,
+            logup_specs_eval,
+        }
+    }
+
+    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
+        let mut stream = Vec::new();
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.num_proofs));
+        for p in &self.proofs {
+            stream.extend(p.write());
+        }
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.num_prod_specs,
+        ));
+        stream.extend(self.prod_specs_eval.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.num_logup_specs,
+        ));
+        stream.extend(self.logup_specs_eval.write());
+
+        stream
+    }
+}
+
 pub type WitnessId = u16;
 pub type ChallengeId = u16;
 

@@ -128,3 +128,76 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
         })
     }
 }
+
+// _debug: hintable
+// pub struct LayerProofInput {
+//     pub has_rotation: usize,
+//     pub rotation: SumcheckLayerProofInput,
+//     pub main: SumcheckLayerProofInput,
+// }
+#[derive(DslVariable, Clone)]
+pub struct LayerProofVariable<C: Config> {
+    pub has_rotation: Usize<C::N>,
+    pub rotation: SumcheckLayerProofVariable<C>,
+    pub main: SumcheckLayerProofVariable<C>,
+}
+impl<E: ExtensionField> VecAutoHintable for LayerProof<E> {}
+impl<E: ExtensionField> Hintable<InnerConfig> for LayerProof<E> {
+    type HintVariable = LayerProofVariable<InnerConfig>;
+
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let has_rotation = Usize::Var(usize::read(builder));
+        let rotation = SumcheckLayerProofInput::read(builder);
+        let main = SumcheckLayerProofInput::read(builder);
+
+        Self::HintVariable {
+            has_rotation,
+            rotation,
+            main,
+        }
+    }
+    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
+        let mut stream = Vec::new();
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_rotation));
+        stream.extend(self.rotation.write());
+        stream.extend(self.main.write());
+        stream
+    }
+}
+
+// _debug: hintable
+// #[derive(Default)]
+// pub struct SumcheckLayerProofInput {
+//     pub proof: IOPProverMessageVec,
+//     pub evals: Vec<E>,
+// }
+#[derive(DslVariable, Clone)]
+pub struct SumcheckLayerProofVariable<C: Config> {
+    pub proof: IOPProverMessageVecVariable<C>,
+    pub evals: Array<C, Ext<C::F, C::EF>>,
+    pub evals_len_div_3: Var<C::N>,
+}
+impl<E: ExtensionField> VecAutoHintable for SumcheckLayerProof<E> {}
+impl<E: ExtensionField> Hintable<InnerConfig> for SumcheckLayerProof<E> {
+    type HintVariable = SumcheckLayerProofVariable<InnerConfig>;
+
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let proof = IOPProverMessageVec::read(builder);
+        let evals = Vec::<E>::read(builder);
+        let evals_len_div_3 = usize::read(builder);
+
+        Self::HintVariable {
+            proof,
+            evals,
+            evals_len_div_3,
+        }
+    }
+    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
+        let mut stream = Vec::new();
+        stream.extend(self.proof.write());
+        stream.extend(self.evals.write());
+        let evals_len_div_3 = self.evals.len() / 3;
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&evals_len_div_3));
+        stream
+    }
+}

@@ -337,3 +337,277 @@ pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 ) -> gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>> {
     gkr_iop::gpu::GpuProver::new(backend)
 }
+
+// _debug: hintable
+// pub struct ZKVMChipProofInput {
+//     pub idx: usize,
+//     // this is the number of instructions before padding
+//     // it's possible that an instruction has multiple rows.
+//     pub num_instances: usize,
+//     // this is the number of variables of each polynomial in the witness matrix
+//     pub num_vars: usize,
+
+//     // product constraints
+//     pub record_r_out_evals_len: usize,
+//     pub record_w_out_evals_len: usize,
+//     pub record_lk_out_evals_len: usize,
+//     pub record_r_out_evals: Vec<Vec<E>>,
+//     pub record_w_out_evals: Vec<Vec<E>>,
+//     pub record_lk_out_evals: Vec<Vec<E>>,
+
+//     pub tower_proof: TowerProofInput,
+
+//     // main constraint and select sumcheck proof
+//     pub main_sumcheck_proofs: IOPProverMessageVec,
+//     pub wits_in_evals: Vec<E>,
+//     pub fixed_in_evals: Vec<E>,
+
+//     // gkr proof
+//     pub has_gkr_proof: bool,
+//     pub gkr_iop_proof: GKRProofInput,
+// }
+
+// impl VecAutoHintable for ZKVMChipProofInput {}
+
+#[derive(DslVariable, Clone)]
+pub struct ZKVMChipProofInputVariable<C: Config> {
+    pub idx: Usize<C::N>,
+    pub idx_felt: Felt<C::F>,
+    pub num_instances: Usize<C::N>,
+    pub num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
+    pub log2_num_instances: Usize<C::N>,
+
+    pub record_r_out_evals_len: Usize<C::N>,
+    pub record_w_out_evals_len: Usize<C::N>,
+    pub record_lk_out_evals_len: Usize<C::N>,
+
+    pub record_r_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
+    pub record_w_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
+    pub record_lk_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
+
+    pub tower_proof: TowerProofInputVariable<C>,
+
+    pub main_sel_sumcheck_proofs: IOPProverMessageVecVariable<C>,
+    pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
+    pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
+
+    pub has_gkr_proof: Usize<C::N>,
+    pub gkr_iop_proof: GKRProofVariable<C>,
+}
+
+impl Hintable<InnerConfig> for ZKVMChipProofInput {
+    type HintVariable = ZKVMChipProofInputVariable<InnerConfig>;
+
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let idx = Usize::Var(usize::read(builder));
+        let idx_felt = F::read(builder);
+        let num_instances = Usize::Var(usize::read(builder));
+        let num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
+        let log2_num_instances = Usize::Var(usize::read(builder));
+
+        let record_r_out_evals_len = Usize::Var(usize::read(builder));
+        let record_w_out_evals_len = Usize::Var(usize::read(builder));
+        let record_lk_out_evals_len = Usize::Var(usize::read(builder));
+
+        let record_r_out_evals = Vec::<Vec<E>>::read(builder);
+        let record_w_out_evals = Vec::<Vec<E>>::read(builder);
+        let record_lk_out_evals = Vec::<Vec<E>>::read(builder);
+
+        let tower_proof = TowerProofInput::read(builder);
+        let main_sel_sumcheck_proofs = IOPProverMessageVec::read(builder);
+        let wits_in_evals = Vec::<E>::read(builder);
+        let fixed_in_evals = Vec::<E>::read(builder);
+
+        let has_gkr_proof = Usize::Var(usize::read(builder));
+        let gkr_iop_proof = GKRProofInput::read(builder);
+
+        ZKVMChipProofInputVariable {
+            idx,
+            idx_felt,
+            num_instances,
+            num_instances_minus_one_bit_decomposition,
+            log2_num_instances,
+            record_r_out_evals_len,
+            record_w_out_evals_len,
+            record_lk_out_evals_len,
+            record_r_out_evals,
+            record_w_out_evals,
+            record_lk_out_evals,
+            tower_proof,
+            main_sel_sumcheck_proofs,
+            wits_in_evals,
+            fixed_in_evals,
+            has_gkr_proof,
+            gkr_iop_proof,
+        }
+    }
+
+    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
+        let mut stream = Vec::new();
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.idx));
+
+        let idx_u32: F = F::from_canonical_u32(self.idx as u32);
+        stream.extend(idx_u32.write());
+
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.num_instances));
+
+        let eq_instance = self.num_instances - 1;
+        let mut bit_decomp: Vec<F> = vec![];
+        for i in 0..32usize {
+            bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
+        }
+        stream.extend(bit_decomp.write());
+
+        let next_pow2_instance = next_pow2_instance_padding(self.num_instances);
+        let log2_num_instances = ceil_log2(next_pow2_instance);
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
+
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.record_r_out_evals_len,
+        ));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.record_w_out_evals_len,
+        ));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.record_lk_out_evals_len,
+        ));
+
+        stream.extend(self.record_r_out_evals.write());
+        stream.extend(self.record_w_out_evals.write());
+        stream.extend(self.record_lk_out_evals.write());
+
+        stream.extend(self.tower_proof.write());
+        stream.extend(self.main_sumcheck_proofs.write());
+        stream.extend(self.wits_in_evals.write());
+        stream.extend(self.fixed_in_evals.write());
+        if self.has_gkr_proof {
+            stream.extend(<usize as Hintable<InnerConfig>>::write(&1));
+        } else {
+            stream.extend(<usize as Hintable<InnerConfig>>::write(&0));
+        }
+        stream.extend(self.gkr_iop_proof.write());
+
+        stream
+    }
+}
+
+// _debug: hintable
+// pub(crate) struct ZKVMProofInput {
+//     pub raw_pi: Vec<Vec<F>>,
+//     // Evaluation of raw_pi.
+//     pub pi_evals: Vec<E>,
+//     pub chip_proofs: Vec<ZKVMChipProofInput>,
+//     pub witin_commit: BasefoldCommitment,
+//     pub pcs_proof: BasefoldProof,
+// }
+
+#[derive(DslVariable, Clone)]
+pub struct ZKVMProofInputVariable<C: Config> {
+    pub raw_pi: Array<C, Array<C, Felt<C::F>>>,
+    pub raw_pi_num_variables: Array<C, Var<C::N>>,
+    pub pi_evals: Array<C, Ext<C::F, C::EF>>,
+    pub chip_proofs: Array<C, ZKVMChipProofInputVariable<C>>,
+    pub max_num_var: Var<C::N>,
+    pub max_width: Var<C::N>,
+    pub witin_commit: BasefoldCommitmentVariable<C>,
+    pub witin_perm: Array<C, Var<C::N>>,
+    pub fixed_perm: Array<C, Var<C::N>>,
+    pub pcs_proof: BasefoldProofVariable<C>,
+}
+
+impl<E: ExtensionField> Hintable<InnerConfig> for ZKVMProof<E> {
+    type HintVariable = ZKVMProofInputVariable<InnerConfig>;
+
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let raw_pi = Vec::<Vec<F>>::read(builder);
+        let raw_pi_num_variables = Vec::<usize>::read(builder);
+        let pi_evals = Vec::<E>::read(builder);
+        let chip_proofs = Vec::<ZKVMChipProofInput>::read(builder);
+        let max_num_var = usize::read(builder);
+        let max_width = usize::read(builder);
+        let witin_commit = BasefoldCommitment::read(builder);
+        let witin_perm = Vec::<usize>::read(builder);
+        let fixed_perm = Vec::<usize>::read(builder);
+        let pcs_proof = BasefoldProof::read(builder);
+
+        ZKVMProofInputVariable {
+            raw_pi,
+            raw_pi_num_variables,
+            pi_evals,
+            chip_proofs,
+            max_num_var,
+            max_width,
+            witin_commit,
+            witin_perm,
+            fixed_perm,
+            pcs_proof,
+        }
+    }
+
+    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
+        let mut stream = Vec::new();
+        let raw_pi_num_variables: Vec<usize> = self
+            .raw_pi
+            .iter()
+            .map(|v| ceil_log2(v.len().next_power_of_two()))
+            .collect();
+        let witin_num_vars = self
+            .chip_proofs
+            .iter()
+            .map(|proof| proof.num_vars)
+            .collect::<Vec<_>>();
+        let witin_max_widths = self
+            .chip_proofs
+            .iter()
+            .map(|proof| proof.wits_in_evals.len().max(1))
+            .collect::<Vec<_>>();
+        let fixed_num_vars = self
+            .chip_proofs
+            .iter()
+            .filter(|proof| proof.fixed_in_evals.len() > 0)
+            .map(|proof| proof.num_vars)
+            .collect::<Vec<_>>();
+        let fixed_max_widths = self
+            .chip_proofs
+            .iter()
+            .filter(|proof| proof.fixed_in_evals.len() > 0)
+            .map(|proof| proof.fixed_in_evals.len())
+            .collect::<Vec<_>>();
+        let max_num_var = witin_num_vars.iter().map(|x| *x).max().unwrap_or(0);
+        let max_width = witin_max_widths
+            .iter()
+            .chain(fixed_max_widths.iter())
+            .map(|x| *x)
+            .max()
+            .unwrap_or(0);
+        let get_perm = |v: Vec<usize>| {
+            let mut perm = vec![0; v.len()];
+            v.into_iter()
+                // the original order
+                .enumerate()
+                .sorted_by(|(_, nv_a), (_, nv_b)| Ord::cmp(nv_b, nv_a))
+                .enumerate()
+                // j is the new index where i is the original index
+                .map(|(j, (i, _))| (i, j))
+                .for_each(|(i, j)| {
+                    perm[i] = j;
+                });
+            perm
+        };
+        let witin_perm = get_perm(witin_num_vars);
+        let fixed_perm = get_perm(fixed_num_vars);
+
+        stream.extend(self.raw_pi.write());
+        stream.extend(raw_pi_num_variables.write());
+        stream.extend(self.pi_evals.write());
+        stream.extend(self.chip_proofs.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&max_num_var));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&max_width));
+        stream.extend(self.witin_commit.write());
+        stream.extend(witin_perm.write());
+        stream.extend(fixed_perm.write());
+        stream.extend(self.pcs_proof.write());
+
+        stream
+    }
+}
