@@ -1,5 +1,6 @@
 use super::hal::{
-    DeviceTransporter, MainSumcheckProver, OpeningProver, ProverDevice, TowerProver, TraceCommitter,
+    DeviceTransporter, EccQuarkProver, MainSumcheckProver, OpeningProver, ProverDevice,
+    TowerProver, TraceCommitter,
 };
 use crate::{
     error::ZKVMError,
@@ -9,25 +10,15 @@ use crate::{
     },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
-use ceno_gpu::bb31::GpuPolynomialExt;
 use ff_ext::{ExtensionField, GoldilocksExt2};
 use gkr_iop::{
-    gkr::{
-        self, Evaluation, GKRProof, GKRProverOutput,
-        layer::{LayerWitness, gpu::utils::extract_mle_relationships_from_monomial_terms},
-    },
+    gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     gpu::{GpuBackend, GpuProver},
-    hal::ProverBackend,
+    hal::{MultilinearPolynomial, ProverBackend},
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{
-    Instance, WitnessId,
-    mle::{FieldType, MultilinearExtension},
-    monomialize_expr_to_wit_terms,
-    util::ceil_log2,
-};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -37,16 +28,20 @@ use sumcheck::{
 use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
-use crate::circuit_builder::ConstraintSystem;
-use gkr_iop::hal::MultilinearPolynomial;
-
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::gpu_prover::*;
 
 pub struct GpuTowerProver;
 
-use crate::{e2e::ShardContext, scheme::constants::NUM_FANIN};
-use gkr_iop::gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu};
+use crate::{
+    e2e::ShardContext,
+    scheme::{constants::NUM_FANIN, cpu::CpuEccProver},
+    structs::EccQuarkProof,
+};
+use gkr_iop::{
+    gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu},
+    selector::SelectorContext,
+};
 
 // Extract out_evals from GPU-built tower witnesses
 #[allow(clippy::type_complexity)]
@@ -102,7 +97,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
     for GpuProver<GpuBackend<E, PCS>>
 {
     fn commit_traces<'a>(
-        &mut self,
+        &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
         Vec<MultilinearExtensionGpu<'a, E>>,
@@ -534,12 +529,47 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             gkr_circuit,
         } = composed_cs;
 
+        let num_instances = input.num_instances();
         let log2_num_instances = input.log2_num_instances();
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         let Some(gkr_circuit) = gkr_circuit else {
             panic!("empty gkr circuit")
+        };
+        let selector_ctxs = if cs.ec_final_sum.is_empty() {
+            // it's not global chip
+            vec![
+                SelectorContext {
+                    offset: 0,
+                    num_instances,
+                    num_vars: num_var_with_rotation,
+                };
+                gkr_circuit
+                    .layers
+                    .first()
+                    .map(|layer| layer.out_sel_and_eval_exprs.len())
+                    .unwrap_or(0)
+            ]
+        } else {
+            // it's global chip
+            vec![
+                SelectorContext {
+                    offset: 0,
+                    num_instances: input.num_instances[0],
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: input.num_instances[0],
+                    num_instances: input.num_instances[1],
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: 0,
+                    num_instances,
+                    num_vars: num_var_with_rotation,
+                },
+            ]
         };
         let pub_io_mles = cs
             .instance_openings
@@ -574,7 +604,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 .collect_vec(),
             challenges,
             transcript,
-            num_instances,
+            &selector_ctxs,
         )?;
         assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
         Ok((
@@ -596,6 +626,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             },
             None,
             Some(gkr_proof),
+        ))
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBackend<E, PCS>>
+    for GpuProver<GpuBackend<E, PCS>>
+{
+    fn prove_ec_sum_quark<'a>(
+        &self,
+        num_instances: usize,
+        xs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
+        ys: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
+        invs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<EccQuarkProof<E>, ZKVMError> {
+        // TODO implement GPU version of `create_ecc_proof`
+        let xs = xs.iter().map(|mle| mle.inner_to_mle().into()).collect_vec();
+        let ys = ys.iter().map(|mle| mle.inner_to_mle().into()).collect_vec();
+        let invs = invs
+            .iter()
+            .map(|mle| mle.inner_to_mle().into())
+            .collect_vec();
+        Ok(CpuEccProver::create_ecc_proof(
+            num_instances,
+            xs,
+            ys,
+            invs,
+            transcript,
         ))
     }
 }
