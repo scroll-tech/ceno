@@ -3,7 +3,7 @@ use crate::{
     tables::RMMCollections, witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
-use ff_ext::{ExtensionField};
+use ff_ext::ExtensionField;
 use gkr_iop::{
     chip::Chip,
     gkr::{GKRCircuit, layer::Layer},
