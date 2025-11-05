@@ -1,11 +1,11 @@
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{
-    ChallengeId, Expression, ToExpr, WitnessId,
+    ChallengeId, Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitnessId,
     macros::{entered_span, exit_span},
-    mle::Point,
+    mle::{IntoMLE, Point},
     monomialize_expr_to_wit_terms,
-    utils::{eval_by_expr, eval_by_expr_with_instance},
+    utils::{eval_by_expr, eval_by_expr_with_instance, expr_convert_to_witins},
     virtual_poly::VPAuxInfo,
 };
 use p3::field::{FieldAlgebra, dot_product};
@@ -28,7 +28,11 @@ use crate::{
     },
     hal::{ProverBackend, ProverDevice},
     selector::{SelectorContext, SelectorType},
-    utils::rotation_selector_eval,
+    utils::{
+        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
+        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
+        rotation_selector_eval,
+    },
 };
 
 pub(crate) struct RotationPoints<E: ExtensionField> {
@@ -68,6 +72,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         proof: LayerProof<E>,
         eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         pub_io_evals: &[E],
+        raw_pi: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         selector_ctxs: &[SelectorContext],
@@ -128,8 +133,8 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 monomialize_expr_to_wit_terms(
                     &expr,
                     self.n_witin as WitnessId,
-                    self.n_structural_witin as WitnessId,
                     self.n_fixed as WitnessId,
+                    self.n_instance,
                 )
             })
             .collect::<Vec<_>>();
@@ -139,10 +144,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .take(self.exprs.len() + num_rotations * ROTATION_OPENING_COUNT)
             .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
             .collect_vec();
-        let zero_expr =
-            extend_exprs_with_rotation(self, &alpha_pows_expr, self.n_witin as WitnessId)
-                .into_iter()
-                .sum::<Expression<E>>();
+        let mut zero_expr = extend_exprs_with_rotation(self, &alpha_pows_expr)
+            .into_iter()
+            .sum::<Expression<E>>();
 
         self.rotation_sumcheck_expression = rotation_expr.clone();
         self.rotation_sumcheck_expression_monomial_terms =
@@ -150,21 +154,22 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 monomialize_expr_to_wit_terms(
                     expr,
                     self.n_witin as WitnessId,
-                    self.n_structural_witin as WitnessId,
                     self.n_fixed as WitnessId,
+                    self.n_instance,
                 )
             });
 
+        expr_convert_to_witins(
+            &mut zero_expr,
+            self.n_witin as WitnessId,
+            self.n_fixed as WitnessId,
+            self.n_instance,
+        );
         self.main_sumcheck_expression = Some(zero_expr);
-        self.main_sumcheck_expression_monomial_terms =
-            self.main_sumcheck_expression.as_ref().map(|expr| {
-                monomialize_expr_to_wit_terms(
-                    expr,
-                    self.n_witin as WitnessId,
-                    self.n_structural_witin as WitnessId,
-                    self.n_fixed as WitnessId,
-                )
-            });
+        self.main_sumcheck_expression_monomial_terms = self
+            .main_sumcheck_expression
+            .as_ref()
+            .map(|expr| expr.get_monomial_terms());
         exit_span!(span);
     }
 
@@ -198,6 +203,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         proof: LayerProof<E>,
         mut eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         pub_io_evals: &[E],
+        raw_pi: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         selector_ctxs: &[SelectorContext],
@@ -213,10 +219,16 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             main:
                 SumcheckLayerProof {
                     proof: IOPProof { proofs },
-                    evals: mut main_evals,
+                    evals: main_evals,
                 },
             rotation: rotation_proof,
         } = proof;
+
+        assert_eq!(
+            main_evals.len(),
+            self.n_witin + self.n_fixed + self.n_instance + self.n_structural_witin,
+            "invalid main_evals length",
+        );
 
         if let Some(rotation_proof) = rotation_proof {
             // verify rotation proof
@@ -283,21 +295,80 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         );
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
-        // eval eq and set to respective witin
+        let structural_witin_offset = self.n_witin + self.n_fixed + self.n_instance;
+        // eval selector and set to respective witin
         izip!(
             &self.out_sel_and_eval_exprs,
             &eval_and_dedup_points,
             selector_ctxs.iter()
         )
         .for_each(|((sel_type, _), (_, out_point), selector_ctx)| {
-            sel_type.evaluate(
-                &mut main_evals,
-                out_point.as_ref().unwrap(),
-                &in_point,
-                selector_ctx,
-                self.n_witin,
-            );
+            if let Some((expected_eval, wit_id)) =
+                sel_type.evaluate(out_point.as_ref().unwrap(), &in_point, selector_ctx)
+            {
+                let wit_id = wit_id as usize + structural_witin_offset;
+                assert_eq!(main_evals[wit_id], expected_eval);
+            }
         });
+
+        // check structural witin
+        for StructuralWitIn { id, witin_type } in &self.structural_witins {
+            let wit_id = *id as usize + structural_witin_offset;
+            let expected_eval = match witin_type {
+                StructuralWitInType::EqualDistanceSequence {
+                    offset,
+                    multi_factor,
+                    descending,
+                    ..
+                } => eval_wellform_address_vec(
+                    *offset as u64,
+                    *multi_factor as u64,
+                    &in_point,
+                    *descending,
+                ),
+                StructuralWitInType::StackedIncrementalSequence { .. } => {
+                    eval_stacked_wellform_address_vec(&in_point)
+                }
+
+                StructuralWitInType::StackedConstantSequence { .. } => {
+                    eval_stacked_constant_vec(&in_point)
+                }
+                StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
+                    eval_inner_repeated_incremental_vec(*k as u64, &in_point)
+                }
+                StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
+                    eval_outer_repeated_incremental_vec(*k as u64, &in_point)
+                }
+                StructuralWitInType::Empty => continue,
+            };
+            if expected_eval != main_evals[wit_id] {
+                return Err(BackendError::LayerVerificationFailed(
+                    format!("layer {} structural witin mismatch", self.name.clone()).into(),
+                    VerifierError::ClaimNotMatch(
+                        format!("{}", expected_eval).into(),
+                        format!("{}", main_evals[wit_id]).into(),
+                    ),
+                ));
+            }
+        }
+
+        // check pub-io
+        // assume public io is tiny vector, so we evaluate it directly without PCS
+        let pubio_offset = self.n_witin + self.n_fixed;
+        for (index, instance) in self.instance_openings.iter().enumerate() {
+            let index = pubio_offset + index;
+            let poly = raw_pi[instance.0].to_vec().into_mle();
+            let expected_eval = poly.evaluate(&in_point[..poly.num_vars()]);
+            if expected_eval != main_evals[index] {
+                return Err(BackendError::LayerVerificationFailed(
+                    format!("layer {} pi mismatch", self.name.clone()).into(),
+                    VerifierError::ClaimNotMatch(
+                        format!("{}", expected_eval).into(),
+                        format!("{}", main_evals[index]).into(),
+                    ),
+                ));
+            }
+        }
 
         let got_claim = eval_by_expr_with_instance(
             &[],
@@ -430,14 +501,14 @@ fn verify_rotation<E: ExtensionField>(
 pub fn extend_exprs_with_rotation<E: ExtensionField>(
     layer: &Layer<E>,
     alpha_pows: &[Expression<E>],
-    offset_eq_id: WitnessId,
 ) -> Vec<Expression<E>> {
+    let offset_structural_witid = (layer.n_witin + layer.n_fixed + layer.n_instance) as WitnessId;
     let mut alpha_pows_iter = alpha_pows.iter();
     let mut expr_iter = layer.exprs.iter();
     let mut zero_check_exprs = Vec::with_capacity(layer.out_sel_and_eval_exprs.len());
 
     let match_expr = |sel_expr: &Expression<E>| match sel_expr {
-        Expression::StructuralWitIn(id, ..) => Expression::WitIn(offset_eq_id + *id),
+        Expression::StructuralWitIn(id, ..) => Expression::WitIn(offset_structural_witid + *id),
         invalid => panic!("invalid eq format {:?}", invalid),
     };
 
@@ -515,9 +586,9 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
                 Expression::StructuralWitIn(right_eq_id, ..),
                 Expression::StructuralWitIn(eq_id, ..),
             ) => (
-                Expression::WitIn(offset_eq_id + *left_eq_id),
-                Expression::WitIn(offset_eq_id + *right_eq_id),
-                Expression::WitIn(offset_eq_id + *eq_id),
+                Expression::WitIn(offset_structural_witid + *left_eq_id),
+                Expression::WitIn(offset_structural_witid + *right_eq_id),
+                Expression::WitIn(offset_structural_witid + *eq_id),
             ),
             invalid => panic!("invalid eq format {:?}", invalid),
         };

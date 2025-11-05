@@ -78,13 +78,21 @@ pub struct CenoOptions {
     #[arg(long)]
     pub out_vk: Option<PathBuf>,
 
-    /// shard id
+    /// prover id
     #[arg(long, default_value = "0")]
-    shard_id: u32,
+    prover_id: u32,
 
-    /// number of total shards.
+    /// number of available prover.
     #[arg(long, default_value = "1")]
-    max_num_shards: u32,
+    num_provers: u32,
+
+    // min cycle per shard
+    #[arg(long, default_value = "16777216")] // 16777216 = 2^24
+    min_cycle_per_shard: u64,
+
+    // max cycle per shard
+    #[arg(long, default_value = "536870912")] // 536870912 = 2^29
+    max_cycle_per_shard: u64,
 
     /// Profiling granularity.
     /// Setting any value restricts logs to profiling information
@@ -345,7 +353,12 @@ fn run_elf_inner<
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
     let program = Program::load_elf(&elf_bytes, u32::MAX).context("failed to load elf")?;
     print_cargo_message("Loaded", format_args!("{}", elf_path.display()));
-    let shards = Shards::new(options.shard_id as usize, options.max_num_shards as usize);
+    let multi_prover = MultiProver::new(
+        options.prover_id as usize,
+        options.num_provers as usize,
+        options.min_cycle_per_shard,
+        options.max_cycle_per_shard,
+    );
 
     let public_io = options
         .read_public_io()
@@ -394,7 +407,7 @@ fn run_elf_inner<
         create_prover(backend.clone()),
         program,
         platform,
-        shards,
+        multi_prover,
         &hints,
         &public_io,
         options.max_steps,
@@ -439,12 +452,12 @@ fn prove_inner<
     checkpoint: Checkpoint,
 ) -> anyhow::Result<()> {
     let result = run_elf_inner::<E, PCS, P>(args, compilation_options, elf_path, checkpoint)?;
-    let zkvm_proof = result.proof.expect("PrepSanityCheck should yield proof.");
+    let zkvm_proofs = result.proofs.expect("PrepSanityCheck should yield proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk);
-    if let Err(e) = verify(&zkvm_proof, &verifier) {
+    if let Err(e) = verify(zkvm_proofs.clone(), &verifier) {
         bail!("Verification failed: {e:?}");
     }
     print_cargo_message(
@@ -457,7 +470,7 @@ fn prove_inner<
         print_cargo_message("Writing", format_args!("proof to {}", path.display()));
         let proof_file =
             File::create(&path).context(format!("failed to create {}", path.display()))?;
-        bincode::serialize_into(proof_file, &zkvm_proof)
+        bincode::serialize_into(proof_file, &zkvm_proofs)
             .context("failed to serialize zkvm proof")?;
     }
     if let Some(out_vk) = args.out_vk.as_ref() {

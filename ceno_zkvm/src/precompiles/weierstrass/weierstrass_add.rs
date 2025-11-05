@@ -41,7 +41,7 @@ use gkr_iop::{
 use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, StructuralWitInType, ToExpr, WitIn,
+    Expression, ToExpr, WitIn,
     util::{ceil_log2, max_usable_threads},
 };
 use num::BigUint;
@@ -132,15 +132,7 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
             slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
         };
 
-        let eq = cb.create_structural_witin(
-            || "weierstrass_add_eq",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let eq = cb.create_placeholder_structural_witin(|| "weierstrass_add_eq");
         let sel = SelectorType::Prefix(eq.expr());
         let selector_type_layout = SelectorTypeLayout {
             sel_mem_read: sel.clone(),
@@ -713,6 +705,7 @@ pub fn run_weierstrass_add<
         &structural_witness,
         &fixed,
         &[],
+        &[],
         &challenges,
     );
     exit_span!(span);
@@ -785,6 +778,7 @@ pub fn run_weierstrass_add<
                     log2_num_instance,
                     gkr_proof.clone(),
                     &out_evals,
+                    &[],
                     &[],
                     &challenges,
                     &mut verifier_transcript,

@@ -4,7 +4,7 @@ use rayon::iter::IndexedParallelIterator;
 
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
-    Expression,
+    Expression, WitnessId,
     mle::{IntoMLE, MultilinearExtension, Point},
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
@@ -239,17 +239,15 @@ impl<E: ExtensionField> SelectorType<E> {
 
     pub fn evaluate(
         &self,
-        evals: &mut Vec<E>,
         out_point: &Point<E>,
         in_point: &Point<E>,
         ctx: &SelectorContext,
-        offset_eq_id: usize,
-    ) {
+    ) -> Option<(E, WitnessId)> {
         assert_eq!(in_point.len(), ctx.num_vars);
         assert_eq!(out_point.len(), ctx.num_vars);
 
         let (expr, eval) = match self {
-            SelectorType::None => return,
+            SelectorType::None => return None,
             SelectorType::Whole(expr) => {
                 debug_assert_eq!(out_point.len(), in_point.len());
                 (expr, eq_eval(out_point, in_point))
@@ -353,11 +351,7 @@ impl<E: ExtensionField> SelectorType<E> {
         let Expression::StructuralWitIn(wit_id, _) = expr else {
             panic!("Wrong selector expression format");
         };
-        let wit_id = *wit_id as usize + offset_eq_id;
-        if wit_id >= evals.len() {
-            evals.resize(wit_id + 1, E::ZERO);
-        }
-        evals[wit_id] = eval;
+        Some((eval, *wit_id))
     }
 
     /// return ordered indices of OrderedSparse32
@@ -426,9 +420,9 @@ mod tests {
         assert_eq!(vec[7], E::ZERO);
 
         let in_rt = E::random_vec(n_vars, &mut rng);
-        let mut evals = vec![];
-        // TODO: avoid the param evals when we evaluate a selector
-        selector.evaluate(&mut evals, &out_rt, &in_rt, &ctx, 0);
-        assert_eq!(sel_mle.evaluate(&in_rt), evals[0]);
+        let Some((eval, _)) = selector.evaluate(&out_rt, &in_rt, &ctx) else {
+            unreachable!()
+        };
+        assert_eq!(sel_mle.evaluate(&in_rt), eval);
     }
 }

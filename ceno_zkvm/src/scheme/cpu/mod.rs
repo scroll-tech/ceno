@@ -1,17 +1,15 @@
 use super::hal::{
-    DeviceTransporter, MainSumcheckProver, OpeningProver, ProverDevice, TowerProver, TraceCommitter,
+    DeviceTransporter, MainSumcheckEvals, MainSumcheckProver, OpeningProver, ProverDevice,
+    TowerProver, TraceCommitter,
 };
 use crate::{
-    circuit_builder::ConstraintSystem,
+    e2e::ShardContext,
     error::ZKVMError,
     scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE},
-        hal::{DeviceProvingKey, EccQuarkProver, MainSumcheckEvals, ProofInput, TowerProverSpec},
+        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        hal::{DeviceProvingKey, EccQuarkProver, ProofInput, TowerProverSpec},
         septic_curve::{SepticExtension, SepticPoint, SymbolicSepticExtension},
-        utils::{
-            infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
-            wit_infer_by_expr,
-        },
+        utils::{infer_tower_logup_witness, infer_tower_product_witness},
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
@@ -26,7 +24,7 @@ use gkr_iop::{
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Expression, Instance, WitnessId,
+    Expression,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
@@ -193,7 +191,6 @@ impl CpuEccProver {
                 .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
-
         // zerocheck: 0 = s[1,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b]) with b != (1,...,1)
         exprs_add.extend(
             (s.clone() * (&x0 - &x3) - (&y0 + &y3))
@@ -214,7 +211,6 @@ impl CpuEccProver {
                 .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
-
         // 0 = (y[1,b] - y[b,0])
         exprs_bypass.extend(
             (&y3 - &y0)
@@ -235,7 +231,6 @@ impl CpuEccProver {
         let rt = state.collect_raw_challenges();
         let evals = state.get_mle_flatten_final_evaluations();
 
-        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
         // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
         assert_eq!(evals.len(), 2 + SEPTIC_EXTENSION_DEGREE * 7);
 
@@ -272,6 +267,7 @@ impl CpuEccProver {
                 assert_eq!(y3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 6 + i]);
             }
         }
+        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
 
         EccQuarkProof {
             zerocheck_proof,
@@ -509,7 +505,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
     for CpuProver<CpuBackend<E, PCS>>
 {
     fn commit_traces<'a>(
-        &mut self,
+        &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
         Vec<MultilinearExtension<'a, E>>,
@@ -554,8 +550,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [ArcMultilinearExtension<'b, E>],
-        is_padded: bool,
-        challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
         Vec<TowerProverSpec<'c, CpuBackend<E, PCS>>>,
@@ -568,12 +562,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = composed_cs;
-        let num_instances: usize = input.num_instances();
-        let num_instances_with_rotation = num_instances << composed_cs.rotation_vars().unwrap_or(0);
         let num_var_with_rotation =
             input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
-
-        let chip_record_alpha = challenges[0];
 
         let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
         let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
@@ -597,39 +587,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let mut r_set_last_layer = r_set_wit
             .iter()
             .chain(w_set_wit.iter())
-            .map(|wit| {
-                if is_padded {
-                    wit.as_view_chunks(NUM_FANIN)
-                } else {
-                    masked_mle_split_to_chunks(wit, num_instances_with_rotation, NUM_FANIN, E::ONE)
-                }
-            })
+            .map(|wit| wit.as_view_chunks(NUM_FANIN))
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
 
         let mut lk_numerator_last_layer = lk_n_wit
             .iter()
             .chain(lk_d_wit.iter())
-            .enumerate()
-            .map(|(i, wit)| {
-                if is_padded {
-                    wit.as_view_chunks(NUM_FANIN)
-                } else {
-                    let default = if i < lk_n_wit.len() {
-                        // For table circuit, the last layer's length is always two's power
-                        // so the padding will not happen, therefore we can use any value here.
-                        E::ONE
-                    } else {
-                        chip_record_alpha
-                    };
-                    masked_mle_split_to_chunks(
-                        wit,
-                        num_instances_with_rotation,
-                        NUM_FANIN_LOGUP,
-                        default,
-                    )
-                }
-            })
+            .map(|wit| wit.as_view_chunks(NUM_FANIN))
             .collect::<Vec<_>>();
         let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
         exit_span!(span);
@@ -770,8 +735,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [Arc<MultilinearExtension<'b, E>>],
-        is_padded: bool,
-        challenges: &[E; 2],
+        _challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
     ) -> TowerRelationOutput<E>
     where
@@ -781,7 +745,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         // First build tower witness
         let span = entered_span!("build_tower_witness", profiling_2 = true);
         let (mut out_evals, prod_specs, logup_specs) =
-            self.build_tower_witness(composed_cs, input, records, is_padded, challenges);
+            self.build_tower_witness(composed_cs, input, records);
         exit_span!(span);
 
         // Then prove the tower relation
@@ -799,48 +763,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
-    #[allow(clippy::type_complexity)]
-    #[tracing::instrument(skip_all, name = "table_witness", fields(profiling_2), level = "trace")]
-    fn table_witness<'a>(
-        &self,
-        input: &ProofInput<'a, CpuBackend<<CpuBackend<E, PCS> as ProverBackend>::E, PCS>>,
-        cs: &ConstraintSystem<<CpuBackend<E, PCS> as ProverBackend>::E>,
-        challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
-    ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
-        // main constraint: lookup denominator and numerator record witness inference
-        let span = entered_span!("witness_infer", profiling_2 = true);
-        let records: Vec<ArcMultilinearExtension<'_, E>> = cs
-            .r_table_expressions
-            .par_iter()
-            .map(|r| &r.expr)
-            .chain(cs.r_expressions.par_iter())
-            .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
-            .chain(cs.w_expressions.par_iter())
-            .chain(
-                cs.lk_table_expressions
-                    .par_iter()
-                    .map(|lk| &lk.multiplicity),
-            )
-            .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
-            .chain(cs.lk_expressions.par_iter())
-            .map(|expr| {
-                wit_infer_by_expr(
-                    expr,
-                    cs.num_witin,
-                    cs.num_structural_witin,
-                    cs.num_fixed as WitnessId,
-                    &input.fixed,
-                    &input.witness,
-                    &input.structural_witness,
-                    &input.public_input,
-                    challenges,
-                )
-            })
-            .collect();
-        exit_span!(span);
-        records
-    }
-
     #[allow(clippy::type_complexity)]
     #[tracing::instrument(
         skip_all,
@@ -874,124 +796,99 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
-        if let Some(gkr_circuit) = gkr_circuit {
-            let pub_io_evals = // get public io evaluations
-                cs.instance_name_map
-                    .keys()
-                    .sorted()
-                    .map(|Instance(inst_id)| {
-                        let mle = &input.public_input[*inst_id];
-                        assert_eq!(
-                            mle.evaluations.len(),
-                            1,
-                            "doesnt support instance with evaluation length > 1"
-                        );
-                        match mle.evaluations() {
-                            FieldType::Base(smart_slice) => E::from(smart_slice[0]),
-                            FieldType::Ext(smart_slice) => smart_slice[0],
-                            _ => unreachable!(),
-                        }
-                    })
-                    .collect_vec();
-            let selector_ctxs = if cs.ec_final_sum.is_empty() {
-                // it's not global chip
-                vec![
-                    SelectorContext {
-                        offset: 0,
-                        num_instances,
-                        num_vars: num_var_with_rotation,
-                    };
-                    gkr_circuit
-                        .layers
-                        .first()
-                        .map(|layer| layer.out_sel_and_eval_exprs.len())
-                        .unwrap_or(0)
-                ]
-            } else {
-                // it's global chip
-                vec![
-                    SelectorContext {
-                        offset: 0,
-                        num_instances: input.num_instances[0],
-                        num_vars: num_var_with_rotation,
-                    },
-                    SelectorContext {
-                        offset: input.num_instances[0],
-                        num_instances: input.num_instances[1],
-                        num_vars: num_var_with_rotation,
-                    },
-                    SelectorContext {
-                        offset: 0,
-                        num_instances,
-                        num_vars: num_var_with_rotation,
-                    },
-                ]
-            };
-            let GKRProverOutput {
-                gkr_proof,
-                opening_evaluations,
-            } = gkr_circuit.prove::<CpuBackend<E, PCS>, CpuProver<_>>(
-                num_threads,
-                num_var_with_rotation,
-                gkr::GKRCircuitWitness {
-                    layers: vec![LayerWitness(
-                        chain!(&input.witness, &input.structural_witness, &input.fixed)
-                            .cloned()
-                            .collect_vec(),
-                    )],
-                },
-                // eval value doesnt matter as it wont be used by prover
-                &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
-                &pub_io_evals,
-                challenges,
-                transcript,
-                &selector_ctxs,
-            )?;
-            Ok((
-                opening_evaluations[0].point.clone(),
-                MainSumcheckEvals {
-                    wits_in_evals: opening_evaluations
-                        .iter()
-                        .take(cs.num_witin as usize)
-                        .map(|Evaluation { value, .. }| value)
-                        .copied()
-                        .collect_vec(),
-                    fixed_in_evals: opening_evaluations
-                        .iter()
-                        .skip((cs.num_witin + cs.num_structural_witin) as usize)
-                        .take(cs.num_fixed)
-                        .map(|Evaluation { value, .. }| value)
-                        .copied()
-                        .collect_vec(),
-                },
-                None,
-                Some(gkr_proof),
-            ))
+        let Some(gkr_circuit) = gkr_circuit else {
+            panic!("empty gkr circuit")
+        };
+        let pub_io_mles = cs
+            .instance_openings
+            .iter()
+            .map(|instance| input.public_input[instance.0].clone())
+            .collect_vec();
+        let selector_ctxs = if cs.ec_final_sum.is_empty() {
+            // it's not global chip
+            vec![
+                SelectorContext {
+                    offset: 0,
+                    num_instances,
+                    num_vars: num_var_with_rotation,
+                };
+                gkr_circuit
+                    .layers
+                    .first()
+                    .map(|layer| layer.out_sel_and_eval_exprs.len())
+                    .unwrap_or(0)
+            ]
         } else {
-            let (wits_in_evals, fixed_in_evals, main_sumcheck_proof, rt) = {
-                let span = entered_span!("fixed::evals + witin::evals");
-                let mut evals = input
-                    .witness
-                    .par_iter()
-                    .chain(input.fixed.par_iter())
-                    .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
-                    .collect::<Vec<_>>();
-                let fixed_in_evals = evals.split_off(input.witness.len());
-                let wits_in_evals = evals;
-                exit_span!(span);
-                (wits_in_evals, fixed_in_evals, None, rt_tower)
-            };
-
-            Ok((
-                rt,
-                MainSumcheckEvals {
-                    wits_in_evals,
-                    fixed_in_evals,
+            // it's global chip
+            vec![
+                SelectorContext {
+                    offset: 0,
+                    num_instances: input.num_instances[0],
+                    num_vars: num_var_with_rotation,
                 },
-                main_sumcheck_proof,
-                None,
-            ))
-        }
+                SelectorContext {
+                    offset: input.num_instances[0],
+                    num_instances: input.num_instances[1],
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: 0,
+                    num_instances,
+                    num_vars: num_var_with_rotation,
+                },
+            ]
+        };
+        let GKRProverOutput {
+            gkr_proof,
+            opening_evaluations,
+            mut rt,
+        } = gkr_circuit.prove::<CpuBackend<E, PCS>, CpuProver<_>>(
+            num_threads,
+            num_var_with_rotation,
+            gkr::GKRCircuitWitness {
+                layers: vec![LayerWitness(
+                    chain!(
+                        &input.witness,
+                        &input.fixed,
+                        &pub_io_mles,
+                        &input.structural_witness,
+                    )
+                    .cloned()
+                    .collect_vec(),
+                )],
+            },
+            // eval value doesnt matter as it wont be used by prover
+            &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
+            &input
+                .pub_io_evals
+                .iter()
+                .map(|v| v.map_either(E::from, |v| v).into_inner())
+                .collect_vec(),
+            challenges,
+            transcript,
+            &selector_ctxs,
+        )?;
+        assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
+        Ok((
+            rt.remove(0),
+            MainSumcheckEvals {
+                wits_in_evals: opening_evaluations
+                    .iter()
+                    .take(cs.num_witin as usize)
+                    .map(|Evaluation { value, .. }| value)
+                    .copied()
+                    .collect_vec(),
+                fixed_in_evals: opening_evaluations
+                    .iter()
+                    .skip(cs.num_witin as usize)
+                    .take(cs.num_fixed)
+                    .map(|Evaluation { value, .. }| value)
+                    .copied()
+                    .collect_vec(),
+            },
+            None,
+            Some(gkr_proof),
+        ))
     }
 }
 
@@ -1045,6 +942,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
 {
     fn transport_proving_key(
         &self,
+        shard_ctx: &ShardContext,
         pk: Arc<
             crate::structs::ZKVMProvingKey<
                 <CpuBackend<E, PCS> as ProverBackend>::E,
@@ -1052,9 +950,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
             >,
         >,
     ) -> DeviceProvingKey<'_, CpuBackend<E, PCS>> {
-        let pcs_data = pk.fixed_commit_wd.clone().unwrap();
-        let fixed_mles =
-            PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());
+        let pcs_data = if shard_ctx.is_first_shard() {
+            pk.fixed_commit_wd.clone().unwrap()
+        } else {
+            pk.fixed_no_omc_init_commit_wd.clone().unwrap()
+        };
+
+        let fixed_mles = PCS::get_arc_mle_witness_from_commitment(pcs_data.as_ref());
 
         DeviceProvingKey {
             pcs_data,

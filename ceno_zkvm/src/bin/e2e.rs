@@ -4,8 +4,8 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
-        Checkpoint, FieldType, PcsKind, Preset, Shards, run_e2e_with_checkpoint, setup_platform,
-        setup_platform_debug, verify,
+        Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
+        setup_platform, setup_platform_debug, verify,
     },
     scheme::{
         ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
@@ -109,13 +109,21 @@ struct Args {
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
 
-    // shard id
+    // prover id
     #[arg(long, default_value = "0")]
-    shard_id: u32,
+    prover_id: u32,
 
-    // number of total shards
+    // number of available prover.
     #[arg(long, default_value = "1")]
-    max_num_shards: u32,
+    num_provers: u32,
+
+    // min cycle per shard
+    #[arg(long, default_value = "16777216")] // 16777216 = 2^24
+    min_cycle_per_shard: u64,
+
+    // max cycle per shard
+    #[arg(long, default_value = "536870912")] // 536870912 = 2^29
+    max_cycle_per_shard: u64,
 }
 
 fn main() {
@@ -248,7 +256,12 @@ fn main() {
         .unwrap_or_default();
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
-    let shards = Shards::new(args.shard_id as usize, args.max_num_shards as usize);
+    let multi_prover = MultiProver::new(
+        args.prover_id as usize,
+        args.num_provers as usize,
+        args.min_cycle_per_shard,
+        args.max_cycle_per_shard,
+    );
 
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
@@ -258,7 +271,7 @@ fn main() {
                 prover,
                 program,
                 platform,
-                shards,
+                multi_prover,
                 &hints,
                 &public_io,
                 max_steps,
@@ -274,7 +287,7 @@ fn main() {
                 prover,
                 program,
                 platform,
-                shards,
+                multi_prover,
                 &hints,
                 &public_io,
                 max_steps,
@@ -290,7 +303,7 @@ fn main() {
                 prover,
                 program,
                 platform,
-                shards,
+                multi_prover,
                 &hints,
                 &public_io,
                 max_steps,
@@ -306,7 +319,7 @@ fn main() {
                 prover,
                 program,
                 platform,
-                shards,
+                multi_prover,
                 &hints,
                 &public_io,
                 max_steps,
@@ -333,7 +346,7 @@ fn run_inner<
     pd: PD,
     program: Program,
     platform: Platform,
-    shards: Shards,
+    multi_prover: MultiProver,
     hints: &[u32],
     public_io: &[u32],
     max_steps: usize,
@@ -342,23 +355,30 @@ fn run_inner<
     checkpoint: Checkpoint,
 ) {
     let result = run_e2e_with_checkpoint::<E, PCS, _, _>(
-        pd, program, platform, shards, hints, public_io, max_steps, checkpoint,
+        pd,
+        program,
+        platform,
+        multi_prover,
+        hints,
+        public_io,
+        max_steps,
+        checkpoint,
     );
 
-    let zkvm_proof = result
-        .proof
+    let zkvm_proofs = result
+        .proofs
         .expect("PrepSanityCheck should yield zkvm_proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
-    let proof_bytes = bincode::serialize(&zkvm_proof).unwrap();
+    let proof_bytes = bincode::serialize(&zkvm_proofs).unwrap();
     fs::write(&proof_file, proof_bytes).unwrap();
     let vk_bytes = bincode::serialize(&vk).unwrap();
     fs::write(&vk_file, vk_bytes).unwrap();
 
     if checkpoint > Checkpoint::PrepVerify {
         let verifier = ZKVMVerifier::new(vk);
-        verify(&zkvm_proof, &verifier).expect("Verification failed");
-        soundness_test(zkvm_proof, &verifier);
+        verify(zkvm_proofs.clone(), &verifier).expect("Verification failed");
+        soundness_test(zkvm_proofs.first().cloned().unwrap(), &verifier);
     }
 }
 

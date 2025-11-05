@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
-    Expression, ToExpr,
+    Expression, Instance, StructuralWitIn, ToExpr,
     mle::{Point, PointAndEval},
     monomial::Term,
 };
@@ -59,7 +59,12 @@ pub struct Layer<E: ExtensionField> {
     pub n_witin: usize,
     pub n_structural_witin: usize,
     pub n_fixed: usize,
+    pub n_instance: usize,
     pub max_expr_degree: usize,
+    /// keep all structural witin which could be evaluated succinctly without PCS
+    pub structural_witins: Vec<StructuralWitIn>,
+    /// instance openings
+    pub instance_openings: Vec<Instance>,
     /// num challenges dedicated to this layer.
     pub n_challenges: usize,
     /// Expressions to prove in this layer. For zerocheck and linear layers,
@@ -124,6 +129,7 @@ impl<E: ExtensionField> Layer<E> {
         n_witin: usize,
         n_structural_witin: usize,
         n_fixed: usize,
+        n_instance: usize,
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
         n_challenges: usize,
@@ -136,6 +142,8 @@ impl<E: ExtensionField> Layer<E> {
             usize,
         ),
         expr_names: Vec<String>,
+        structural_witins: Vec<StructuralWitIn>,
+        instance_openings: Vec<Instance>,
     ) -> Self {
         assert_eq!(expr_names.len(), exprs.len(), "there are expr without name");
         let max_expr_degree = exprs
@@ -152,7 +160,10 @@ impl<E: ExtensionField> Layer<E> {
                     n_witin,
                     n_structural_witin,
                     n_fixed,
+                    n_instance,
                     max_expr_degree,
+                    structural_witins,
+                    instance_openings,
                     n_challenges,
                     exprs,
                     exprs_with_selector_out_eval_monomial_form: vec![],
@@ -185,7 +196,7 @@ impl<E: ExtensionField> Layer<E> {
         challenges: &mut Vec<E>,
         transcript: &mut T,
         selector_ctxs: &[SelectorContext],
-    ) -> LayerProof<E> {
+    ) -> (LayerProof<E>, Point<E>) {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
@@ -220,7 +231,7 @@ impl<E: ExtensionField> Layer<E> {
 
         self.update_claims(claims, &sumcheck_layer_proof.main.evals, &point);
 
-        sumcheck_layer_proof
+        (sumcheck_layer_proof, point)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -230,10 +241,11 @@ impl<E: ExtensionField> Layer<E> {
         proof: LayerProof<E>,
         claims: &mut [PointAndEval<E>],
         pub_io_evals: &[E],
+        raw_pi: &[Vec<E::BaseField>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
         selector_ctxs: &[SelectorContext],
-    ) -> Result<(), BackendError> {
+    ) -> Result<Point<E>, BackendError> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
@@ -244,6 +256,7 @@ impl<E: ExtensionField> Layer<E> {
                 proof,
                 eval_and_dedup_points,
                 pub_io_evals,
+                raw_pi,
                 challenges,
                 transcript,
                 selector_ctxs,
@@ -264,7 +277,7 @@ impl<E: ExtensionField> Layer<E> {
 
         self.update_claims(claims, &evals, &in_point);
 
-        Ok(())
+        Ok(in_point)
     }
 
     // extract claim and dudup point
@@ -465,7 +478,7 @@ impl<E: ExtensionField> Layer<E> {
         } = &cb.cs;
 
         let in_eval_expr = (non_zero_expr_len..)
-            .take(cb.cs.num_witin as usize + cb.cs.num_fixed)
+            .take(cb.cs.num_witin as usize + cb.cs.num_fixed + cb.cs.instance_openings.len())
             .collect_vec();
         if rotations.is_empty() {
             Layer::new(
@@ -474,12 +487,15 @@ impl<E: ExtensionField> Layer<E> {
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
+                cb.cs.instance_openings.len(),
                 expressions,
                 n_challenges,
                 in_eval_expr,
                 expr_evals,
                 ((None, vec![]), 0, 0),
                 expr_names,
+                cb.cs.structural_witins.clone(),
+                cb.cs.instance_openings.clone(),
             )
         } else {
             let Some(RotationParams {
@@ -496,6 +512,7 @@ impl<E: ExtensionField> Layer<E> {
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
+                cb.cs.instance_openings.len(),
                 expressions,
                 n_challenges,
                 in_eval_expr,
@@ -506,6 +523,8 @@ impl<E: ExtensionField> Layer<E> {
                     *rotation_cyclic_subgroup_size,
                 ),
                 expr_names,
+                cb.cs.structural_witins.clone(),
+                cb.cs.instance_openings.clone(),
             )
         }
     }

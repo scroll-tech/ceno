@@ -16,7 +16,9 @@ use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::{collections::HashMap, marker::PhantomData};
-use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
+use witness::{
+    InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding, set_fixed_val, set_val,
+};
 
 /// This structure establishes the order of the fields in instruction records, common to the program table and circuit fetches.
 #[cfg(not(feature = "u16limb_circuit"))]
@@ -269,9 +271,11 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         multiplicity: &[HashMap<u64, usize>],
         program: &Program,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        assert!(!program.instructions.is_empty());
+        assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let multiplicity = &multiplicity[ROMType::Instruction as usize];
 
-        let mut prog_mlt = vec![0_usize; program.instructions.len()];
+        let mut prog_mlt = vec![0_usize; next_pow2_instance_padding(program.instructions.len())];
         for (pc, mlt) in multiplicity {
             let i = (*pc as usize - program.base_address as usize) / WORD_SIZE;
             prog_mlt[i] = *mlt;
@@ -279,18 +283,28 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
 
         let mut witness = RowMajorMatrix::<E::BaseField>::new(
             config.program_size,
-            num_witin + num_structural_witin,
+            num_witin,
             InstancePaddingStrategy::Default,
         );
-        witness.par_rows_mut().zip(prog_mlt).for_each(|(row, mlt)| {
-            set_val!(
-                row,
-                config.mlt,
-                E::BaseField::from_canonical_u64(mlt as u64)
-            );
-        });
+        let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
+            config.program_size,
+            1,
+            InstancePaddingStrategy::Default,
+        );
+        witness
+            .par_rows_mut()
+            .zip_eq(structural_witness.par_rows_mut())
+            .zip(prog_mlt)
+            .for_each(|((row, structural_row), mlt)| {
+                set_val!(
+                    row,
+                    config.mlt,
+                    E::BaseField::from_canonical_u64(mlt as u64)
+                );
+                *structural_row.last_mut().unwrap() = E::BaseField::ONE;
+            });
 
-        Ok([witness, RowMajorMatrix::empty()])
+        Ok([witness, structural_witness])
     }
 }
 

@@ -41,7 +41,7 @@ use gkr_iop::{
 use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, StructuralWitInType, ToExpr, WitIn,
+    Expression, ToExpr, WitIn,
     macros::{entered_span, exit_span},
     util::{ceil_log2, max_usable_threads},
 };
@@ -150,15 +150,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
             neg_y: FieldOpCols::create(cb, || "neg_y"),
         };
 
-        let eq = cb.create_structural_witin(
-            || "weierstrass_decompress_eq",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let eq = cb.create_placeholder_structural_witin(|| "weierstrass_decompress_eq");
         let sel = SelectorType::Prefix(eq.expr());
         let selector_type_layout = SelectorTypeLayout {
             sel_mem_read: sel.clone(),
@@ -693,6 +685,7 @@ pub fn run_weierstrass_decompress<
         &structural_witness,
         &fixed,
         &[],
+        &[],
         &challenges,
     );
     exit_span!(span);
@@ -765,6 +758,7 @@ pub fn run_weierstrass_decompress<
                     log2_num_instance,
                     gkr_proof.clone(),
                     &out_evals,
+                    &[],
                     &[],
                     &challenges,
                     &mut verifier_transcript,

@@ -3,7 +3,7 @@ use crate::{
     tables::RMMCollections, witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
-use ff_ext::{ExtensionField, FieldInto};
+use ff_ext::ExtensionField;
 use gkr_iop::{
     chip::Chip,
     gkr::{GKRCircuit, layer::Layer},
@@ -11,13 +11,13 @@ use gkr_iop::{
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::Itertools;
-use multilinear_extensions::{StructuralWitInType, ToExpr, WitIn, util::max_usable_threads};
+use multilinear_extensions::{ToExpr, util::max_usable_threads};
 use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 pub mod global;
 pub mod riscv;
@@ -48,15 +48,7 @@ pub trait Instruction<E: ExtensionField> {
         let zero_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
-        let selector = cb.create_structural_witin(
-            || "selector",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(selector.expr());
 
         // all shared the same selector
@@ -114,7 +106,6 @@ pub trait Instruction<E: ExtensionField> {
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
-        let selector_witin = WitIn { id: 0 };
 
         let nthreads = max_usable_threads();
         let num_instance_per_batch = if steps.len() > 256 {
@@ -148,7 +139,7 @@ pub trait Instruction<E: ExtensionField> {
                         .zip_eq(structural_instance.chunks_mut(num_structural_witin))
                         .zip_eq(steps)
                         .map(|((instance, structural_instance), step)| {
-                            set_val!(structural_instance, selector_witin, E::BaseField::ONE);
+                            *structural_instance.last_mut().unwrap() = E::BaseField::ONE;
                             Self::assign_instance(
                                 config,
                                 &mut shard_ctx,
