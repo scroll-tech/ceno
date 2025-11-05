@@ -339,6 +339,7 @@ impl<
 
         // run ecc quark prover
         let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
+            let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
             let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
             assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
             let mut xs_ys = ec_point_exprs
@@ -359,13 +360,15 @@ impl<
                     _ => unreachable!("slope's expression must be WitIn"),
                 })
                 .collect_vec();
-            Some(self.device.prove_ec_sum_quark(
+            let ecc_proof = Some(self.device.prove_ec_sum_quark(
                 input.num_instances(),
                 xs,
                 ys,
                 slopes,
                 transcript,
-            )?)
+            )?);
+            exit_span!(span);
+            ecc_proof
         } else {
             None
         };
