@@ -74,8 +74,9 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
     let (num_instances, is_sp32, indices) = match selector {
         SelectorType::None => panic!("SelectorType::None"),
         SelectorType::Whole(_expr) => (eq_len, false, vec![]),
-        SelectorType::Prefix(_, _expr) => (num_instances, false, vec![]),
+        SelectorType::Prefix(_expr) => (num_instances, false, vec![]),
         SelectorType::OrderedSparse32 { indices, .. } => (num_instances, true, indices.clone()),
+        SelectorType::QuarkBinaryTreeLessThan(..) => unimplemented!(),
     };
 
     // type eq
