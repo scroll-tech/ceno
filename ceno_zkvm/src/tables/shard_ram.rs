@@ -690,7 +690,7 @@ mod tests {
             ShardRamCircuit::build_gkr_iop_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
         // create a bunch of random memory read/write records
-        let n_global_reads = 1700;
+        let n_global_reads = 170000;
         let n_global_writes = 1420;
         let global_reads = (0..n_global_reads)
             .map(|i| {
