@@ -291,7 +291,6 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             1,
             InstancePaddingStrategy::Default,
         );
-        let selector_witin = WitIn { id: 0 };
         witness
             .par_rows_mut()
             .zip_eq(structural_witness.par_rows_mut())
@@ -302,7 +301,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
                     config.mlt,
                     E::BaseField::from_canonical_u64(mlt as u64)
                 );
-                set_val!(structural_row, selector_witin, 1u64);
+                *structural_row.last_mut().unwrap() = E::BaseField::ONE;
             });
 
         Ok([witness, structural_witness])

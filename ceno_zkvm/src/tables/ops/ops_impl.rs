@@ -1,6 +1,6 @@
 //! The implementation of ops tables. No generics.
 
-use ff_ext::{ExtensionField, FieldInto, SmallField};
+use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -9,12 +9,10 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
-    structs::{ROMType, WitnessId},
+    structs::ROMType,
     tables::RMMCollections,
 };
-use multilinear_extensions::{
-    Expression, Fixed, StructuralWitIn, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn,
-};
+use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 
 #[derive(Clone, Debug)]
 pub struct OpTableConfig {

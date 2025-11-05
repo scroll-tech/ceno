@@ -21,7 +21,7 @@ use crate::{
     circuit_builder::{CircuitBuilder, SetTableSpec},
     e2e::ShardContext,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
-    structs::{ProgramParams, WitnessId},
+    structs::ProgramParams,
     tables::ram::ram_circuit::DynVolatileRamTableConfigTrait,
 };
 use ff_ext::FieldInto;
@@ -339,9 +339,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         let num_instances_padded = next_pow2_instance_padding(final_mem.len());
         assert!(num_instances_padded <= DVRAM::max_len(&config.params));
         assert!(DVRAM::max_len(&config.params).is_power_of_two());
-        let selector_witin = WitIn {
-            id: num_structural_witin as WitnessId - 1,
-        };
 
         // got some duplicated code segment to simplify parallel assignment flow
         if let Some(init_v) = config.init_v.as_ref() {
@@ -389,7 +386,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                         config.addr,
                         DVRAM::addr(&config.params, i) as u64
                     );
-                    set_val!(structural_row, selector_witin, 1u64);
+                    *structural_row.last_mut().unwrap() = F::ONE;
                 });
 
             Ok([witness, structural_witness])
@@ -420,7 +417,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                         config.addr,
                         DVRAM::addr(&config.params, i) as u64
                     );
-                    set_val!(structural_row, selector_witin, 1u64);
+                    *structural_row.last_mut().unwrap() = F::ONE;
                 });
             Ok([RowMajorMatrix::empty(), structural_witness])
         }
@@ -490,7 +487,6 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
-        let selector_witin = WitIn { id: 0 };
 
         let is_current_shard_mem_record = |record: &&MemFinalRecord| -> bool {
             (shard_ctx.is_first_shard() && record.cycle == 0)
@@ -594,7 +590,7 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
 
                             set_val!(row, self.ram_type, rec.ram_type as u64);
                             set_val!(row, self.addr_subset, rec.addr as u64);
-                            set_val!(structural_row, selector_witin, 1u64);
+                            *structural_row.last_mut().unwrap() = F::ONE;
                         })
                         .count();
 
@@ -621,7 +617,7 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
                                             pad_func(pad_index as u64, self.addr_subset.id as u64)
                                         );
                                         set_val!(row, self.ram_type, *ram_type as u64);
-                                        set_val!(structural_row, selector_witin, 1u64);
+                                        *structural_row.last_mut().unwrap() = F::ONE;
                                     });
                             }
                             _ => unimplemented!(),
