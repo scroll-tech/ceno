@@ -4,6 +4,7 @@ use crate::{
         general::InstFetch,
     },
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
     tables::InsnRecord,
@@ -71,26 +72,28 @@ impl EcallInstructionConfig {
     pub fn assign_instance<E: ExtensionField>(
         &self,
         instance: &mut [E::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(step.rs1().unwrap().previous_cycle);
+        let shard_cycle = step.cycle() - current_shard_offset_cycle;
         set_val!(instance, self.pc, step.pc().before.0 as u64);
-        set_val!(instance, self.ts, step.cycle());
+        set_val!(instance, self.ts, shard_cycle);
         lk_multiplicity.fetch(step.pc().before.0);
 
         // the access of X5 register is stored in rs1()
-        set_val!(
-            instance,
-            self.prev_x5_ts,
-            step.rs1().unwrap().previous_cycle
-        );
+        set_val!(instance, self.prev_x5_ts, shard_prev_cycle);
 
         self.lt_x5_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.rs1().unwrap().previous_cycle,
-            step.cycle() + Tracer::SUBCYCLE_RS1,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_RS1,
         )?;
+
+        // skip shard_ctx.send() as ecall_halt is the last instruction
 
         Ok(())
     }

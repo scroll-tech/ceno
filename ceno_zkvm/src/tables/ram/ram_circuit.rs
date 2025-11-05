@@ -1,6 +1,8 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use super::ram_impl::{LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableConfig};
+use super::ram_impl::{
+    LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableInitConfig,
+};
 use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
@@ -17,7 +19,7 @@ use gkr_iop::{
     selector::SelectorType,
 };
 use itertools::Itertools;
-use multilinear_extensions::{StructuralWitInType, ToExpr};
+use multilinear_extensions::ToExpr;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 #[derive(Clone, Debug)]
@@ -32,6 +34,10 @@ pub struct MemFinalRecord {
     pub addr: Addr,
     pub cycle: Cycle,
     pub value: Word,
+    // initial state value
+    // same as `value` for read-only table
+    // probably different for rw table
+    pub init_value: Word,
 }
 
 impl GetAddr for MemInitRecord {
@@ -124,14 +130,14 @@ impl<
 /// This circuit does not and cannot decide whether the memory is mutable or not.
 /// It supports LOAD where the program reads the public input,
 /// or STORE where the memory content must equal the public input after execution.
-pub struct PubIORamCircuit<E, R>(PhantomData<(E, R)>);
+pub struct PubIORamInitCircuit<E, R>(PhantomData<(E, R)>);
 
 impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
-    for PubIORamCircuit<E, NVRAM>
+    for PubIORamInitCircuit<E, NVRAM>
 {
-    type TableConfig = PubIOTableConfig<NVRAM>;
+    type TableConfig = PubIOTableInitConfig<NVRAM>;
     type FixedInput = [Addr];
-    type WitnessInput = [Cycle];
+    type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
@@ -141,6 +147,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self::TableConfig, ZKVMError> {
+        cb.set_omc_init_only();
         Ok(cb.namespace(
             || Self::name(),
             |cb| Self::TableConfig::construct_circuit(cb, params),
@@ -161,10 +168,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        final_cycles: &[Cycle],
+        final_mem: &[MemFinalRecord],
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed including padding
-        Ok(config.assign_instances(num_witin, num_structural_witin, final_cycles)?)
+        Ok(config.assign_instances(num_witin, num_structural_witin, final_mem)?)
     }
 }
 
@@ -237,7 +244,7 @@ impl<
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}_{}", DVRAM::RAM_TYPE, DVRAM::name())
+        format!("{}_{:?}_RAM", DVRAM::name(), DVRAM::RAM_TYPE,)
     }
 
     fn construct_circuit(
@@ -308,16 +315,7 @@ impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
         let config = Self::construct_circuit(cb, param)?;
         let r_table_len = cb.cs.r_table_expressions.len();
 
-        let selector = cb.create_structural_witin(
-            || "selector",
-            StructuralWitInType::EqualDistanceSequence {
-                // TODO determin proper size of max length
-                max_len: u32::MAX as usize,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(selector.expr());
 
         // all shared the same selector
@@ -338,7 +336,7 @@ impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(selector_type.clone());
 
-        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))

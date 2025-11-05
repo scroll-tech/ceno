@@ -2,6 +2,7 @@ use super::{PublicValues, utils::wit_infer_by_expr};
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     state::{GlobalState, StateCircuit},
     structs::{
         ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
@@ -39,6 +40,7 @@ use std::{
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
+    ops::Index,
     sync::OnceLock,
 };
 use strum::IntoEnumIterator;
@@ -522,6 +524,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             structural_witin,
             &[],
             &[],
+            &[],
             Some(challenge),
             lkm,
         )
@@ -533,7 +536,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         program: &[ceno_emul::Instruction],
         lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        Self::run_maybe_challenge(cb, &[], wits_in, &[], program, &[], None, lkm)
+        Self::run_maybe_challenge(cb, &[], wits_in, &[], program, &[], &[], None, lkm)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -543,7 +546,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         wits_in: &[ArcMultilinearExtension<'a, E>],
         structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
-        pi: &[ArcMultilinearExtension<'a, E>],
+        pi_mles: &[ArcMultilinearExtension<'a, E>],
+        pub_io_evals: &[Either<E::BaseField, E>],
         challenge: Option<[E; 2]>,
         lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
@@ -556,7 +560,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             fixed,
             wits_in,
             structural_witin,
-            pi,
+            pi_mles,
+            pub_io_evals,
             1,
             challenge,
             lkm,
@@ -571,13 +576,22 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
         structural_witin: &[ArcMultilinearExtension<'a, E>],
-        pi: &[ArcMultilinearExtension<'a, E>],
+        pi_mles: &[ArcMultilinearExtension<'a, E>],
+        pub_io_evals: &[Either<E::BaseField, E>],
         num_instances: usize,
         challenge: [E; 2],
         expected_lkm: Option<Multiplicity<u64>>,
     ) -> Result<LkMultiplicityRaw<E>, Vec<MockProverError<E, u64>>> {
         let mut shared_lkm = LkMultiplicityRaw::<E>::default();
         let mut errors = vec![];
+
+        let num_instance_padded = wits_in
+            .first()
+            .or_else(|| fixed.first())
+            .or_else(|| pi_mles.first())
+            .or_else(|| structural_witin.first())
+            .map(|mle| mle.evaluations().len())
+            .unwrap_or_else(|| next_pow2_instance_padding(num_instances));
 
         // Assert zero expressions
         for (expr, name) in cs
@@ -603,9 +617,12 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     structural_witin[zero_selector.selector_expr().id()].clone()
                 } else {
                     let mut selector = vec![E::BaseField::ONE; num_instances];
-                    selector.resize(wits_in[0].evaluations().len(), E::BaseField::ZERO);
-                    MultilinearExtension::from_evaluation_vec_smart(wits_in[0].num_vars(), selector)
-                        .into()
+                    selector.resize(num_instance_padded, E::BaseField::ZERO);
+                    MultilinearExtension::from_evaluation_vec_smart(
+                        ceil_log2(num_instance_padded),
+                        selector,
+                    )
+                    .into()
                 };
 
             // require_equal does not always have the form of Expr::Sum as
@@ -618,12 +635,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let left_evaluated = wit_infer_by_expr(
                     left,
                     cs.num_witin,
-                    cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
+                    cs.instance_openings.len(),
                     fixed,
                     wits_in,
                     structural_witin,
-                    pi,
+                    pi_mles,
+                    pub_io_evals,
                     &challenge,
                 );
                 let left_evaluated =
@@ -632,12 +650,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let right_evaluated = wit_infer_by_expr(
                     &right,
                     cs.num_witin,
-                    cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
+                    cs.instance_openings.len(),
                     fixed,
                     wits_in,
                     structural_witin,
-                    pi,
+                    pi_mles,
+                    pub_io_evals,
                     &challenge,
                 );
                 let right_evaluated =
@@ -663,12 +682,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 let expr_evaluated = wit_infer_by_expr(
                     expr,
                     cs.num_witin,
-                    cs.num_structural_witin,
                     cs.num_fixed as WitnessId,
+                    cs.instance_openings.len(),
                     fixed,
                     wits_in,
                     structural_witin,
-                    pi,
+                    pi_mles,
+                    pub_io_evals,
                     &challenge,
                 );
                 let expr_evaluated =
@@ -691,26 +711,30 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             structural_witin[lk_selector.selector_expr().id()].clone()
         } else {
             let mut selector = vec![E::BaseField::ONE; num_instances];
-            selector.resize(wits_in[0].evaluations().len(), E::BaseField::ZERO);
-            MultilinearExtension::from_evaluation_vec_smart(wits_in[0].num_vars(), selector).into()
+            selector.resize(num_instance_padded, E::BaseField::ZERO);
+            MultilinearExtension::from_evaluation_vec_smart(
+                ceil_log2(num_instance_padded),
+                selector,
+            )
+            .into()
         };
 
         // Lookup expressions
-        for ((expr, name), (rom_type, _)) in cs
-            .lk_expressions
-            .iter()
-            .zip_eq(cs.lk_expressions_namespace_map.iter())
-            .zip_eq(cs.lk_expressions_items_map.iter())
-        {
+        for (expr, (name, (rom_type, _))) in cs.lk_expressions.iter().zip(
+            cs.lk_expressions_namespace_map
+                .iter()
+                .zip_eq(cs.lk_expressions_items_map.iter()),
+        ) {
             let expr_evaluated = wit_infer_by_expr(
                 expr,
                 cs.num_witin,
-                cs.num_structural_witin,
                 cs.num_fixed as WitnessId,
+                cs.instance_openings.len(),
                 fixed,
                 wits_in,
                 structural_witin,
-                pi,
+                pi_mles,
+                pub_io_evals,
                 &challenge,
             );
             let expr_evaluated = filter_mle_by_selector_mle(expr_evaluated, lk_selector.clone());
@@ -750,12 +774,13 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         let arg_eval = wit_infer_by_expr(
                             arg_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             wits_in,
                             structural_witin,
-                            pi,
+                            pi_mles,
+                            pub_io_evals,
                             &challenge,
                         );
                         if arg_expr.is_constant() && arg_eval.evaluations.len() == 1 {
@@ -944,6 +969,7 @@ Hints:
     }
 
     pub fn assert_satisfied_full(
+        shard_ctx: &ShardContext,
         cs: &ZKVMConstraintSystem<E>,
         mut fixed_trace: ZKVMFixedTraces<E>,
         witnesses: &ZKVMWitnesses<E>,
@@ -952,13 +978,12 @@ Hints:
     ) where
         E: LkMultiplicityKey,
     {
-        let instance = pi
+        let pub_io_evals = pi
             .to_vec::<E>()
-            .concat()
             .into_iter()
-            .map(|i| E::from(i))
+            .map(|v| Either::Right(E::from(*v.index(0))))
             .collect_vec();
-        let pi_mles = pi
+        let pi_mles: Vec<ArcMultilinearExtension<E>> = pi
             .to_vec::<E>()
             .into_mles()
             .into_iter()
@@ -995,10 +1020,23 @@ Hints:
         // Process all circuits.
         for (circuit_name, composed_cs) in &cs.circuit_css {
             let ComposedConstrainSystem {
-                zkvm_v1_css: cs,
-                gkr_circuit,
+                zkvm_v1_css: cs, ..
             } = &composed_cs;
-            let is_opcode = gkr_circuit.is_some();
+            let pi_mles = cs
+                .instance_openings
+                .iter()
+                .map(|instance| pi_mles[instance.0].clone())
+                .collect_vec();
+
+            // skip init table on non-first shard
+            if composed_cs.with_omc_init_only() && !shard_ctx.is_first_shard() {
+                wit_mles.insert(circuit_name.clone(), vec![]);
+                structural_wit_mles.insert(circuit_name.clone(), vec![]);
+                fixed_mles.insert(circuit_name.clone(), vec![]);
+                num_instances.insert(circuit_name.clone(), 0);
+                continue;
+            }
+
             let [witness, structural_witness] = witnesses
                 .get_opcode_witness(circuit_name)
                 .or_else(|| witnesses.get_table_witness(circuit_name))
@@ -1037,7 +1075,8 @@ Hints:
                 .map_or(vec![], |fixed| {
                     fixed.to_mles().into_iter().map(|f| f.into()).collect_vec()
                 });
-            if is_opcode {
+            // not lookup table
+            if cs.lk_table_expressions.is_empty() {
                 tracing::info!(
                     "Mock proving opcode {} with {} entries",
                     circuit_name,
@@ -1054,6 +1093,7 @@ Hints:
                     &witness,
                     &structural_witness,
                     &pi_mles,
+                    &pub_io_evals,
                     num_rows,
                     challenges,
                     lkm_from_assignments,
@@ -1079,12 +1119,13 @@ Hints:
                     let lk_table = wit_infer_by_expr(
                         &expr.values,
                         cs.num_witin,
-                        cs.num_structural_witin,
                         cs.num_fixed as WitnessId,
+                        cs.instance_openings.len(),
                         &fixed,
                         &witness,
                         &structural_witness,
                         &pi_mles,
+                        &pub_io_evals,
                         &challenges,
                     )
                     .get_ext_field_vec()
@@ -1093,12 +1134,13 @@ Hints:
                     let multiplicity = wit_infer_by_expr(
                         &expr.multiplicity,
                         cs.num_witin,
-                        cs.num_structural_witin,
                         cs.num_fixed as WitnessId,
+                        cs.instance_openings.len(),
                         &fixed,
                         &witness,
                         &structural_witness,
                         &pi_mles,
+                        &pub_io_evals,
                         &challenges,
                     )
                     .get_ext_field_vec()
@@ -1151,6 +1193,11 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
+                    let pi_mles = cs
+                        .instance_openings
+                        .iter()
+                        .map(|instance| pi_mles[instance.0].clone())
+                        .collect_vec();
 
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
@@ -1183,24 +1230,26 @@ Hints:
                         let ram_type_mle = wit_infer_by_expr(
                             ram_type_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             witness,
                             structural_witness,
                             &pi_mles,
+                            &pub_io_evals,
                             &challenges,
                         );
                         let ram_type_vec = ram_type_mle.get_ext_field_vec();
                         let write_rlc_records = wit_infer_by_expr(
                             w_rlc_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             witness,
                             structural_witness,
                             &pi_mles,
+                            &pub_io_evals,
                             &challenges,
                         );
                         let w_selector_vec = w_selector.get_base_field_vec();
@@ -1220,14 +1269,14 @@ Hints:
                             assert_eq!(
                                 writes_within_expr_dedup.insert(record_rlc),
                                 true,
-                                "within expression write duplicated on RAMType {:?} annotation {:?}",
+                                "circuit name {circuit_name} within expression write duplicated on RAMType {:?} annotation {:?} on row {row}",
                                 $ram_type,
                                 annotation
                             );
                             assert_eq!(
                                 writes.insert(record_rlc),
                                 true,
-                                "crossing-chip write duplicated on RAMType {:?} annotation {:?}",
+                                "circuit name {circuit_name} crossing-chip write duplicated on RAMType {:?} annotation {:?} on row {row}",
                                 $ram_type,
                                 annotation
                             );
@@ -1250,6 +1299,11 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
+                    let pi_mles = cs
+                        .instance_openings
+                        .iter()
+                        .map(|instance| pi_mles[instance.0].clone())
+                        .collect_vec();
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
                         continue;
@@ -1280,24 +1334,26 @@ Hints:
                         let ram_type_mle = wit_infer_by_expr(
                             ram_type_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             witness,
                             structural_witness,
                             &pi_mles,
+                            &pub_io_evals,
                             &challenges,
                         );
                         let ram_type_vec = ram_type_mle.get_ext_field_vec();
                         let read_records = wit_infer_by_expr(
                             r_rlc_expr,
                             cs.num_witin,
-                            cs.num_structural_witin,
                             cs.num_fixed as WitnessId,
+                            cs.instance_openings.len(),
                             fixed,
                             witness,
                             structural_witness,
                             &pi_mles,
+                            &pub_io_evals,
                             &challenges,
                         );
                         let r_selector_vec = r_selector.get_base_field_vec();
@@ -1319,12 +1375,13 @@ Hints:
                                     let v = wit_infer_by_expr(
                                         expr,
                                         cs.num_witin,
-                                        cs.num_structural_witin,
                                         cs.num_fixed as WitnessId,
+                                        cs.instance_openings.len(),
                                         fixed,
                                         witness,
                                         structural_witness,
                                         &pi_mles,
+                                        &pub_io_evals,
                                         &challenges,
                                     );
                                     filter_mle_by_selector_mle(v, r_selector.clone())
@@ -1346,14 +1403,14 @@ Hints:
                             assert_eq!(
                                 reads_within_expr_dedup.insert(record),
                                 true,
-                                "within expression read duplicated on RAMType {:?} annotation {:?}",
+                                "circuit name {circuit_name} within expression read duplicated on RAMType {:?} annotation {:?} on row {row}",
                                 $ram_type,
                                 annotation,
                             );
                             assert_eq!(
                                 reads.insert(record),
                                 true,
-                                "crossing-chip read duplicated on RAMType {:?} annotation {:?}",
+                                "circuit name {circuit_name} crossing-chip read duplicated on RAMType {:?} annotation {:?} on row {row}",
                                 $ram_type,
                                 annotation,
                             );
@@ -1459,14 +1516,34 @@ Hints:
         let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
         gs_rs.insert(
-            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_final)
-                .right()
-                .unwrap(),
+            eval_by_expr_with_instance(
+                &[],
+                &[],
+                &[],
+                &pub_io_evals
+                    .iter()
+                    .map(|v| v.right().unwrap())
+                    .collect_vec(),
+                &challenges,
+                &gs_final,
+            )
+            .right()
+            .unwrap(),
         );
         gs_ws.insert(
-            eval_by_expr_with_instance(&[], &[], &[], &instance, &challenges, &gs_init)
-                .right()
-                .unwrap(),
+            eval_by_expr_with_instance(
+                &[],
+                &[],
+                &[],
+                &pub_io_evals
+                    .iter()
+                    .map(|v| v.right().unwrap())
+                    .collect_vec(),
+                &challenges,
+                &gs_init,
+            )
+            .right()
+            .unwrap(),
         );
 
         // gs stores { (pc, timestamp) }

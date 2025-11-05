@@ -8,7 +8,7 @@ use ceno_zkvm::{
     scheme::{create_backend, create_prover},
 };
 mod alloc;
-use ceno_zkvm::e2e::Shards;
+use ceno_zkvm::e2e::MultiProver;
 use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
@@ -64,7 +64,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                             create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),
-                            Shards::default(),
+                            MultiProver::default(),
                             &hints,
                             &[],
                             max_steps,

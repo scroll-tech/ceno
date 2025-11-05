@@ -209,28 +209,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .collect::<Vec<_>>();
         exit_span!(span);
 
-        // `wit` := witin ++ fixed
+        // `wit` := witin ++ fixed ++ pubio
         // we concat eq in between `wit` := witin ++ eqs ++ fixed
         let all_witins = wit
             .iter()
-            .take(layer.n_witin)
+            .take(layer.n_witin + layer.n_fixed + layer.n_instance)
             .map(|mle| Either::Left(mle.as_ref()))
-            .chain(eqs.iter_mut().map(Either::Right))
             .chain(
-                // fixed, start after `n_witin`
+                // some non-selector structural witin
                 wit.iter()
-                    .skip(layer.n_witin + layer.n_structural_witin)
+                    .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
+                    .take(
+                        layer.n_structural_witin
+                            - layer.out_sel_and_eval_exprs.len()
+                            - layer
+                                .rotation_exprs
+                                .0
+                                .as_ref()
+                                .map(|_| ROTATION_OPENING_COUNT)
+                                .unwrap_or(0),
+                    )
                     .map(|mle| Either::Left(mle.as_ref())),
             )
+            .chain(eqs.iter_mut().map(Either::Right))
             .collect_vec();
+
         assert_eq!(
             all_witins.len(),
-            layer.n_witin + layer.n_structural_witin + layer.n_fixed,
-            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {}",
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {} + layer.n_instance {}",
             all_witins.len(),
             layer.n_witin,
             layer.n_structural_witin,
             layer.n_fixed,
+            layer.n_instance,
         );
 
         let builder =

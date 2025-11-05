@@ -22,12 +22,10 @@ use gkr_iop::{
     selector::SelectorType,
 };
 use itertools::{Itertools, chain};
-use multilinear_extensions::{
-    Expression, StructuralWitInType::EqualDistanceSequence, ToExpr, WitIn, util::max_usable_threads,
-};
+use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
 use p3::{
     field::{Field, FieldAlgebra},
-    matrix::dense::RowMajorMatrix,
+    matrix::{Matrix, dense::RowMajorMatrix},
     symmetric::Permutation,
 };
 use rayon::{
@@ -370,6 +368,21 @@ impl<E: ExtensionField> GlobalChip<E> {
 
         Ok(())
     }
+
+    pub fn extract_ec_sum(
+        config: &GlobalConfig<E>,
+        rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    ) -> Vec<<E as ExtensionField>::BaseField> {
+        assert!(rmm.height() >= 2);
+        let instance = &rmm[rmm.height() - 2];
+
+        config
+            .x
+            .iter()
+            .chain(config.y.iter())
+            .map(|witin| instance[witin.id as usize])
+            .collect_vec()
+    }
 }
 
 impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
@@ -395,36 +408,9 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
         param: &ProgramParams,
     ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), crate::error::ZKVMError> {
         // create three selectors: selector_r, selector_w, selector_zero
-        let selector_r = cb.create_structural_witin(
-            || "selector_r",
-            // this is just a placeholder, the actural type is SelectorType::Prefix()
-            EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
-        let selector_w = cb.create_structural_witin(
-            || "selector_w",
-            // this is just a placeholder, the actural type is SelectorType::Prefix()
-            EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
-        let selector_zero = cb.create_structural_witin(
-            || "selector_zero",
-            // this is just a placeholder, the actural type is SelectorType::Prefix()
-            EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let selector_r = cb.create_placeholder_structural_witin(|| "selector_r");
+        let selector_w = cb.create_placeholder_structural_witin(|| "selector_w");
+        let selector_zero = cb.create_placeholder_structural_witin(|| "selector_zero");
 
         let config = Self::construct_circuit(cb, param)?;
 
@@ -652,20 +638,23 @@ impl<E: ExtensionField> TableCircuit<E> for GlobalChip<E> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
+    use either::Either;
     use ff_ext::{BabyBearExt4, FromUniformBytes, PoseidonField};
     use itertools::Itertools;
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
     use p3::babybear::BabyBear;
     use rand::thread_rng;
+    use std::{ops::Index, sync::Arc};
     use tracing_forest::{ForestLayer, util::LevelFilter};
     use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
     use transcript::BasicTranscript;
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::global::{GlobalChip, GlobalChipInput, GlobalRecord},
+        instructions::{
+            global::{GlobalChip, GlobalChipInput, GlobalRecord},
+            riscv::constants::GLOBAL_RW_SUM_IDX,
+        },
         scheme::{
             PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
             septic_curve::SepticPoint, verifier::ZKVMVerifier,
@@ -779,6 +768,17 @@ mod tests {
         )
         .unwrap();
 
+        // api extract ec sum from rmm witness
+        assert_eq!(
+            public_value
+                .to_vec::<E>()
+                .into_iter()
+                .skip(GLOBAL_RW_SUM_IDX)
+                .flatten()
+                .collect_vec(),
+            GlobalChip::extract_ec_sum(&config, &witness[0])
+        );
+
         let composed_cs = ComposedConstrainSystem {
             zkvm_v1_css: cs,
             gkr_circuit,
@@ -801,11 +801,17 @@ mod tests {
             .into_iter()
             .map(|v| Arc::new(v.into_mle()))
             .collect_vec();
+        let pub_io_evals = public_value
+            .to_vec::<E>()
+            .into_iter()
+            .map(|v| Either::Right(E::from(*v.index(0))))
+            .collect_vec();
         let proof_input = ProofInput {
             witness: witness[0].to_mles().into_iter().map(Arc::new).collect(),
             structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
             fixed: vec![],
             public_input: public_input_mles.clone(),
+            pub_io_evals,
             num_instances: vec![n_global_writes as usize, n_global_reads as usize],
             has_ecc_ops: true,
         };
@@ -827,12 +833,13 @@ mod tests {
             .iter()
             .map(|mle| mle.evaluate(&point[..mle.num_vars()]))
             .collect_vec();
-        let vrf_point = verifier
-            .verify_opcode_proof(
+        let (vrf_point, _) = verifier
+            .verify_chip_proof(
                 "global",
                 &pk.vk,
                 &proof,
                 &pi_evals,
+                &public_value.to_vec::<E>(),
                 &mut transcript,
                 2,
                 &PointAndEval::default(),

@@ -96,12 +96,13 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub witin_namespace_map: Vec<String>,
 
     pub num_structural_witin: WitnessId,
+    pub structural_witins: Vec<StructuralWitIn>,
     pub structural_witin_namespace_map: Vec<String>,
 
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
-    pub instance_name_map: HashMap<Instance, String>,
+    pub instance_openings: Vec<Instance>,
 
     pub ec_point_exprs: Vec<Expression<E>>,
     pub ec_slope_exprs: Vec<Expression<E>>,
@@ -126,6 +127,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub r_table_expressions_namespace_map: Vec<String>,
     pub w_table_expressions: Vec<SetTableExpression<E>>,
     pub w_table_expressions_namespace_map: Vec<String>,
+    // specify whether constrains system cover only init_w
+    // as it imply w/r set and final_w might happen ACROSS shards
+    pub with_omc_init_only: bool,
 
     pub lk_selector: Option<SelectorType<E>>,
     /// lookup expression
@@ -166,11 +170,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             // platform,
             witin_namespace_map: vec![],
             num_structural_witin: 0,
+            structural_witins: vec![],
             structural_witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
-            instance_name_map: HashMap::new(),
+            instance_openings: vec![],
             ec_final_sum: vec![],
             ec_slope_exprs: vec![],
             ec_point_exprs: vec![],
@@ -186,6 +191,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             r_table_expressions_namespace_map: vec![],
             w_table_expressions: vec![],
             w_table_expressions_namespace_map: vec![],
+            with_omc_init_only: false,
             lk_selector: None,
             lk_expressions: vec![],
             lk_table_expressions: vec![],
@@ -227,12 +233,20 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             id: self.num_structural_witin,
             witin_type,
         };
+        self.structural_witins.push(wit_in);
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
         let path = self.ns.compute_path(n().into());
         self.structural_witin_namespace_map.push(path);
 
         wit_in
+    }
+
+    pub fn create_placeholder_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+    ) -> StructuralWitIn {
+        self.create_structural_witin(n, StructuralWitInType::Empty)
     }
 
     pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> Fixed {
@@ -245,17 +259,25 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         f
     }
 
-    pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn query_instance(&self, idx: usize) -> Result<Instance, CircuitBuilderError> {
+        let i = Instance(idx);
+        Ok(i)
+    }
+
+    pub fn query_instance_for_openings(
         &mut self,
-        n: N,
         idx: usize,
     ) -> Result<Instance, CircuitBuilderError> {
         let i = Instance(idx);
 
-        let name = n().into();
-        self.instance_name_map.insert(i, name);
+        assert!(
+            !self.instance_openings.contains(&i),
+            "query same pubio idx {idx} mle more than once",
+        );
+        self.instance_openings.push(i);
 
-        Ok(i)
+        // return instance only count
+        Ok(Instance(self.instance_openings.len() - 1))
     }
 
     pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {
@@ -524,6 +546,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         self.ns.pop_namespace();
         t
     }
+
+    pub fn set_omc_init_only(&mut self) {
+        self.with_omc_init_only = true;
+    }
 }
 
 impl<E: ExtensionField> ConstraintSystem<E> {
@@ -604,6 +630,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.create_structural_witin(name_fn, witin_type)
+    }
+
+    pub fn create_placeholder_structural_witin<NR, N>(&mut self, name_fn: N) -> StructuralWitIn
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.create_placeholder_structural_witin(name_fn)
     }
 
     pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Fixed
@@ -1278,6 +1312,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn rotate_and_assert_eq(&mut self, a: Expression<E>, b: Expression<E>) {
         self.cs.rotations.push((a, b));
+    }
+
+    pub fn set_omc_init_only(&mut self) {
+        self.cs.set_omc_init_only();
     }
 }
 

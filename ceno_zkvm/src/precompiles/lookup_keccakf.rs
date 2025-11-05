@@ -20,7 +20,7 @@ use gkr_iop::{
 use itertools::{Itertools, iproduct, izip, zip_eq};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
+    Expression, StructuralWitIn, ToExpr, WitIn,
     mle::PointAndEval,
     util::{ceil_log2, max_usable_threads},
 };
@@ -185,15 +185,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 //     cb.create_fixed(|| format!("keccak_fixed_{}", id))
                 // })),
                 array::from_fn(|id| {
-                    cb.create_structural_witin(
-                        || format!("keccak_eq_{}", id),
-                        StructuralWitInType::EqualDistanceSequence {
-                            max_len: 0,
-                            offset: 0,
-                            multi_factor: 0,
-                            descending: false,
-                        },
-                    )
+                    cb.create_placeholder_structural_witin(|| format!("keccak_eq_{}", id))
                 }),
             )
         };
@@ -992,8 +984,12 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
 
     let (out_evals, mut chip) = layout.finalize(&mut cb);
 
-    let layer =
-        Layer::from_circuit_builder(&cb, "Rounds".to_string(), layout.n_challenges, out_evals);
+    let layer = Layer::from_circuit_builder(
+        &cb,
+        "lookup_keccak".to_string(),
+        layout.n_challenges,
+        out_evals,
+    );
     chip.add_layer(layer);
 
     Ok((
@@ -1155,6 +1151,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         &structural_witness,
         &fixed,
         &[],
+        &[],
         &challenges,
     );
     exit_span!(span);
@@ -1264,6 +1261,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                     log2_num_instance_rounds,
                     gkr_proof.clone(),
                     &out_evals,
+                    &[],
                     &[],
                     &challenges,
                     &mut verifier_transcript,

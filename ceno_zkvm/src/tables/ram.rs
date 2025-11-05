@@ -1,5 +1,5 @@
 use ceno_emul::{Addr, VMState, WORD_SIZE};
-use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamCircuit};
+use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamInitCircuit};
 
 use crate::{
     instructions::riscv::constants::UINT_LIMBS,
@@ -10,9 +10,7 @@ mod ram_circuit;
 mod ram_impl;
 use crate::tables::ram::{
     ram_circuit::LocalFinalRamCircuit,
-    ram_impl::{
-        DynVolatileRamTableConfig, DynVolatileRamTableInitConfig, NonVolatileInitTableConfig,
-    },
+    ram_impl::{DynVolatileRamTableInitConfig, NonVolatileInitTableConfig},
 };
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
@@ -96,8 +94,8 @@ impl DynVolatileRamTable for HintsTable {
         "HintsTable"
     }
 }
-pub type HintsCircuit<E> =
-    DynVolatileRamCircuit<E, HintsTable, DynVolatileRamTableConfig<HintsTable>>;
+pub type HintsInitCircuit<E> =
+    DynVolatileRamCircuit<E, HintsTable, DynVolatileRamTableInitConfig<HintsTable>>;
 
 /// RegTable, fix size without offset
 #[derive(Clone)]
@@ -157,5 +155,5 @@ impl NonVolatileTable for PubIOTable {
     }
 }
 
-pub type PubIOCircuit<E> = PubIORamCircuit<E, PubIOTable>;
+pub type PubIOInitCircuit<E> = PubIORamInitCircuit<E, PubIOTable>;
 pub type LocalFinalCircuit<'a, E> = LocalFinalRamCircuit<'a, UINT_LIMBS, E>;

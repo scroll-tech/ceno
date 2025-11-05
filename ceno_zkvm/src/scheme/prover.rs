@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::scheme::{constants::SEPTIC_EXTENSION_DEGREE, hal::MainSumcheckEvals};
+use either::Either;
 use gkr_iop::hal::MultilinearPolynomial;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -28,6 +29,7 @@ use witness::RowMajorMatrix;
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 use crate::{
+    e2e::ShardContext,
     error::ZKVMError,
     scheme::{hal::ProofInput, utils::build_main_witness},
     structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
@@ -76,7 +78,8 @@ impl<
         level = "trace"
     )]
     pub fn create_proof(
-        &mut self,
+        &self,
+        shard_ctx: &ShardContext,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
         mut transcript: impl Transcript<E> + 'static,
@@ -97,7 +100,13 @@ impl<
 
         // commit to fixed commitment
         let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
-        if let Some(fixed_commit) = &self.pk.fixed_commit {
+        if let Some(fixed_commit) = &self.pk.fixed_commit
+            && shard_ctx.is_first_shard()
+        {
+            PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
+        } else if let Some(fixed_commit) = &self.pk.fixed_no_omc_init_commit
+            && !shard_ctx.is_first_shard()
+        {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
         exit_span!(span);
@@ -116,6 +125,10 @@ impl<
         let mut circuit_name_num_instances_mapping = BTreeMap::new();
         for (index, (circuit_name, ProvingKey { vk, .. })) in self.pk.circuit_pks.iter().enumerate()
         {
+            // skip omc init on >1 shard
+            if !shard_ctx.is_first_shard() && vk.get_cs().with_omc_init_only() {
+                continue;
+            }
             // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
                 .num_instances
@@ -191,7 +204,9 @@ impl<
 
         // transfer pk to device
         let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
-        let device_pk = self.device.transport_proving_key(self.pk.clone());
+        let device_pk = self
+            .device
+            .transport_proving_key(shard_ctx, self.pk.clone());
         let mut fixed_mles = device_pk.fixed_mles;
         exit_span!(transfer_pk_span);
 
@@ -215,6 +230,11 @@ impl<
                     .cloned()
                     .unwrap_or_default();
                 let cs = pk.get_cs();
+                if !shard_ctx.is_first_shard() && cs.with_omc_init_only() {
+                    assert!(num_instances.is_empty());
+                    // skip drain respective fixed because we use different set of fixed commitment
+                    return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points, evaluations));
+                }
                 if num_instances.is_empty() {
                     // we need to drain respective fixed when num_instances is 0
                     if cs.num_fixed() > 0 {
@@ -245,49 +265,32 @@ impl<
                     fixed,
                     structural_witness,
                     public_input: public_input.clone(),
+                    pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
                     num_instances: num_instances.clone(),
                     has_ecc_ops: cs.has_ecc_ops(),
                 };
 
-                if cs.is_opcode_circuit() {
-                    let (opcode_proof, _, input_opening_point) = self.create_chip_proof(
-                        circuit_name,
-                        pk,
-                        input,
-                        &mut transcript,
-                        &challenges,
-                    )?;
-                    tracing::trace!(
-                        "generated proof for opcode {} with num_instances={:?}",
-                        circuit_name,
-                        num_instances
-                    );
+                let (opcode_proof, pi_in_evals, input_opening_point) =
+                    self.create_chip_proof(circuit_name, pk, input, &mut transcript, &challenges)?;
+                tracing::trace!(
+                    "generated proof for opcode {} with num_instances={:?}",
+                    circuit_name,
+                    num_instances
+                );
+                if cs.num_witin() > 0 || cs.num_fixed() > 0 {
                     points.push(input_opening_point);
-                    evaluations.push(vec![opcode_proof.wits_in_evals.clone()]);
-                    chip_proofs.insert(index, opcode_proof);
+                    evaluations.push(vec![
+                        opcode_proof.wits_in_evals.clone(),
+                        opcode_proof.fixed_in_evals.clone(),
+                    ]);
                 } else {
-                    let (table_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
-                        circuit_name,
-                        pk,
-                        input,
-                        &mut transcript,
-                        &challenges,
-                    )?;
-                    if cs.num_witin() > 0 || cs.num_fixed() > 0 {
-                        points.push(input_opening_point);
-                        evaluations.push(vec![
-                            table_proof.wits_in_evals.clone(),
-                            table_proof.fixed_in_evals.clone(),
-                        ]);
-                    } else {
-                        assert!(table_proof.wits_in_evals.is_empty());
-                        assert!(table_proof.fixed_in_evals.is_empty());
-                    }
-                    chip_proofs.insert(index, table_proof);
-                    for (idx, eval) in pi_in_evals {
-                        pi_evals[idx] = eval;
-                    }
-                };
+                    assert!(opcode_proof.wits_in_evals.is_empty());
+                    assert!(opcode_proof.fixed_in_evals.is_empty());
+                }
+                chip_proofs.insert(index, opcode_proof);
+                for (idx, eval) in pi_in_evals {
+                    pi_evals[idx] = eval;
+                }
                 Ok((points, evaluations))
             },
         )?;
@@ -336,6 +339,7 @@ impl<
 
         // run ecc quark prover
         let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
+            let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
             let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
             assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
             let mut xs_ys = ec_point_exprs
@@ -356,27 +360,28 @@ impl<
                     _ => unreachable!("slope's expression must be WitIn"),
                 })
                 .collect_vec();
-            Some(self.device.prove_ec_sum_quark(
+            let ecc_proof = Some(self.device.prove_ec_sum_quark(
                 input.num_instances(),
                 xs,
                 ys,
                 slopes,
                 transcript,
-            )?)
+            )?);
+            exit_span!(span);
+            ecc_proof
         } else {
             None
         };
 
         // build main witness
-        let (records, is_padded) =
-            build_main_witness::<E, PCS, PB, PD>(&self.device, cs, &input, challenges);
+        let records = build_main_witness::<E, PCS, PB, PD>(cs, &input, challenges);
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
         // (internally calls build_tower_witness)
         let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) = self
             .device
-            .prove_tower_relation(cs, &input, &records, is_padded, challenges, transcript);
+            .prove_tower_relation(cs, &input, &records, challenges, transcript);
         exit_span!(span);
 
         assert_eq!(
@@ -407,9 +412,9 @@ impl<
 
         // evaluate pi if there is instance query
         let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
-        if !cs.instance_name_map().is_empty() {
+        if !cs.instance_openings().is_empty() {
             let span = entered_span!("pi::evals");
-            for &Instance(idx) in cs.instance_name_map().keys() {
+            for &Instance(idx) in cs.instance_openings() {
                 let poly = &input.public_input[idx];
                 pi_in_evals.insert(
                     idx,
