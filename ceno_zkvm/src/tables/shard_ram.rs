@@ -392,7 +392,7 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
     type WitnessInput = Vec<ShardRamInput<E>>;
 
     fn name() -> String {
-        "Global".to_string()
+        "ShardRamCircuit".to_string()
     }
 
     fn construct_circuit(
@@ -817,7 +817,7 @@ mod tests {
         let challenges = [E::random(&mut rng), E::random(&mut rng)];
         let (proof, _, point) = zkvm_prover
             .create_chip_proof(
-                "global chip",
+                ShardRamCircuit::<E>::name().as_str(),
                 &pk,
                 proof_input,
                 &mut transcript,
