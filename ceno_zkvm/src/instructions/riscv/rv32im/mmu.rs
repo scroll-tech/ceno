@@ -1,12 +1,11 @@
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::global::GlobalChip,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, HintsTable,
         LocalFinalCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOInitCircuit,
-        PubIOTable, RegTable, RegTableInitCircuit, StackInitCircuit, StackTable,
+        PubIOTable, RegTable, RegTableInitCircuit, ShardRamCircuit, StackInitCircuit, StackTable,
         StaticMemInitCircuit, StaticMemTable, TableCircuit,
     },
 };
@@ -32,7 +31,7 @@ pub struct MmuConfig<'a, E: ExtensionField> {
     /// finalized circuit for all MMIO
     pub local_final_circuit: <LocalFinalCircuit<'a, E> as TableCircuit<E>>::TableConfig,
     /// ram bus to deal with cross shard read/write
-    pub ram_bus_circuit: <GlobalChip<E> as TableCircuit<E>>::TableConfig,
+    pub ram_bus_circuit: <ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
@@ -48,7 +47,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         let stack_init_config = cs.register_table_circuit::<StackInitCircuit<E>>();
         let heap_init_config = cs.register_table_circuit::<HeapInitCircuit<E>>();
         let local_final_circuit = cs.register_table_circuit::<LocalFinalCircuit<E>>();
-        let ram_bus_circuit = cs.register_table_circuit::<GlobalChip<E>>();
+        let ram_bus_circuit = cs.register_table_circuit::<ShardRamCircuit<E>>();
 
         Self {
             reg_init_config,

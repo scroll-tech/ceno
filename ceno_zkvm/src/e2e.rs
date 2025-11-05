@@ -1,9 +1,6 @@
 use crate::{
     error::ZKVMError,
-    instructions::{
-        global::GlobalChip,
-        riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
-    },
+    instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
         constants::SEPTIC_EXTENSION_DEGREE,
@@ -18,7 +15,8 @@ use crate::{
         ZKVMWitnesses,
     },
     tables::{
-        MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig, TableCircuit,
+        MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig, ShardRamCircuit,
+        TableCircuit,
     },
 };
 use ceno_emul::{
@@ -1125,13 +1123,13 @@ pub fn generate_witness<'a, E: ExtensionField>(
         pi.end_pc = current_shard_end_pc;
         pi.end_cycle = current_shard_end_cycle;
         // set shard ram bus expected output to pi
-        let global_chip_withess = zkvm_witness.get_table_witness(&GlobalChip::<E>::name());
-        if let Some(global_chip_withess) = global_chip_withess
-            && global_chip_withess[0].num_instances() > 0
+        let shard_ram_witness = zkvm_witness.get_table_witness(&ShardRamCircuit::<E>::name());
+        if let Some(shard_ram_witness) = shard_ram_witness
+            && shard_ram_witness[0].num_instances() > 0
         {
-            for (f, v) in GlobalChip::<E>::extract_ec_sum(
+            for (f, v) in ShardRamCircuit::<E>::extract_ec_sum(
                 &system_config.mmu_config.ram_bus_circuit,
-                &global_chip_withess[0],
+                &shard_ram_witness[0],
             )
             .into_iter()
             .zip_eq(pi.global_sum.as_mut_slice())

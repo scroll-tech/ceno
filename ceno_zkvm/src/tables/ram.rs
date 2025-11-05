@@ -9,7 +9,7 @@ use crate::{
 mod ram_circuit;
 mod ram_impl;
 use crate::tables::ram::{
-    ram_circuit::{LocalFinalRamCircuit, RamBusCircuit},
+    ram_circuit::LocalFinalRamCircuit,
     ram_impl::{DynVolatileRamTableInitConfig, NonVolatileInitTableConfig},
 };
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
@@ -157,4 +157,3 @@ impl NonVolatileTable for PubIOTable {
 
 pub type PubIOInitCircuit<E> = PubIORamInitCircuit<E, PubIOTable>;
 pub type LocalFinalCircuit<'a, E> = LocalFinalRamCircuit<'a, UINT_LIMBS, E>;
-pub type RBCircuit<'a, E> = RamBusCircuit<'a, UINT_LIMBS, E>;

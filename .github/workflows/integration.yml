@@ -75,7 +75,7 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
-      # note: the global chip does not support goldilocks field yet
+      # note: the shard ram circuit does not support goldilocks field yet
       # - name: Run fibonacci (release + goldilocks)
       # env:
       #   RUSTFLAGS: "-C opt-level=3"
@@ -105,7 +105,7 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
-      # note: the global chip does not support goldilocks field yet
+      # note: the shard ram circuit does not support goldilocks field yet
       # - name: Run Guest Heap Alloc (release + goldilocks)
       # env:
       #   RUSTFLAGS: "-C opt-level=3"

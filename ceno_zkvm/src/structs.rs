@@ -2,13 +2,13 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::{
-        Instruction,
-        global::{GlobalChip, GlobalChipInput, GlobalPoint, GlobalRecord},
-    },
+    instructions::Instruction,
     scheme::septic_curve::SepticPoint,
     state::StateCircuit,
-    tables::{MemFinalRecord, RMMCollections, TableCircuit},
+    tables::{
+        GlobalPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput,
+        ShardRamRecord, TableCircuit,
+    },
 };
 use ceno_emul::{CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
@@ -437,7 +437,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             &ShardContext,
             &[(InstancePaddingStrategy, &[MemFinalRecord])],
         ),
-        config: &<GlobalChip<E> as TableCircuit<E>>::TableConfig,
+        config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
         let perm = <E::BaseField as PoseidonField>::get_default_perm();
         let waddr_first_access = if shard_ctx.is_first_shard() {
@@ -464,7 +464,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                         if !waddr_first_access.contains(&waddr)
                             && shard_ctx.after_current_shard_cycle(mem_record.cycle)
                         {
-                            let global_write = GlobalRecord {
+                            let global_write = ShardRamRecord {
                                 addr: match mem_record.ram_type {
                                     RAMType::Register => addr,
                                     RAMType::Memory => waddr.into(),
@@ -479,7 +479,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                                 is_to_write_set: true,
                             };
                             let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
-                            Some(GlobalChipInput {
+                            Some(ShardRamInput {
                                 record: global_write,
                                 ec_point,
                             })
@@ -500,9 +500,9 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             .flat_map_iter(|records| {
                 // global write -> local reads
                 records.iter().map(|(vma, record)| {
-                    let global_write: GlobalRecord = (vma, record, true).into();
+                    let global_write: ShardRamRecord = (vma, record, true).into();
                     let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
-                    GlobalChipInput {
+                    ShardRamInput {
                         record: global_write,
                         ec_point,
                     }
@@ -516,9 +516,9 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     .flat_map_iter(|records| {
                         // global read -> local write
                         records.iter().map(|(vma, record)| {
-                            let global_read: GlobalRecord = (vma, record, false).into();
+                            let global_read: ShardRamRecord = (vma, record, false).into();
                             let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
-                            GlobalChipInput {
+                            ShardRamInput {
                                 record: global_read,
                                 ec_point,
                             }
@@ -528,8 +528,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             .collect::<Vec<_>>();
 
         assert!(self.combined_lk_mlt.is_some());
-        let cs = cs.get_cs(&GlobalChip::<E>::name()).unwrap();
-        let witness = GlobalChip::assign_instances(
+        let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let witness = ShardRamCircuit::assign_instances(
             config,
             cs.zkvm_v1_css.num_witin as usize,
             cs.zkvm_v1_css.num_structural_witin as usize,
@@ -540,7 +540,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(
             self.num_instances
                 .insert(
-                    GlobalChip::<E>::name(),
+                    ShardRamCircuit::<E>::name(),
                     vec![
                         // global write -> local read
                         shard_ctx
@@ -561,13 +561,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         );
         assert!(
             self.witnesses_tables
-                .insert(GlobalChip::<E>::name(), witness)
+                .insert(ShardRamCircuit::<E>::name(), witness)
                 .is_none()
         );
         assert!(
             !self
                 .witnesses_opcodes
-                .contains_key(&GlobalChip::<E>::name())
+                .contains_key(&ShardRamCircuit::<E>::name())
         );
 
         Ok(())
