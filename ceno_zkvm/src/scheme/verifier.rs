@@ -338,7 +338,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     (input_opening_point.clone(), proof.fixed_in_evals.clone()),
                 ));
             }
-            // TODO for non first shard, excluding init prod_w related tables
             prod_w *= proof.w_out_evals.iter().flatten().copied().product::<E>();
             prod_r *= proof.r_out_evals.iter().flatten().copied().product::<E>();
             tracing::debug!(
