@@ -29,6 +29,7 @@ use witness::RowMajorMatrix;
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 use crate::{
+    e2e::ShardContext,
     error::ZKVMError,
     scheme::{hal::ProofInput, utils::build_main_witness},
     structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
@@ -77,7 +78,8 @@ impl<
         level = "trace"
     )]
     pub fn create_proof(
-        &mut self,
+        &self,
+        shard_ctx: &ShardContext,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
         mut transcript: impl Transcript<E> + 'static,
@@ -98,7 +100,13 @@ impl<
 
         // commit to fixed commitment
         let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
-        if let Some(fixed_commit) = &self.pk.fixed_commit {
+        if let Some(fixed_commit) = &self.pk.fixed_commit
+            && shard_ctx.is_first_shard()
+        {
+            PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
+        } else if let Some(fixed_commit) = &self.pk.fixed_no_omc_init_commit
+            && !shard_ctx.is_first_shard()
+        {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
         exit_span!(span);
@@ -117,6 +125,10 @@ impl<
         let mut circuit_name_num_instances_mapping = BTreeMap::new();
         for (index, (circuit_name, ProvingKey { vk, .. })) in self.pk.circuit_pks.iter().enumerate()
         {
+            // skip omc init on >1 shard
+            if !shard_ctx.is_first_shard() && vk.get_cs().with_omc_init_only() {
+                continue;
+            }
             // num_instance from witness might include rotation
             if let Some(num_instance) = witnesses
                 .num_instances
@@ -192,7 +204,9 @@ impl<
 
         // transfer pk to device
         let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
-        let device_pk = self.device.transport_proving_key(self.pk.clone());
+        let device_pk = self
+            .device
+            .transport_proving_key(shard_ctx, self.pk.clone());
         let mut fixed_mles = device_pk.fixed_mles;
         exit_span!(transfer_pk_span);
 
@@ -216,6 +230,11 @@ impl<
                     .cloned()
                     .unwrap_or_default();
                 let cs = pk.get_cs();
+                if !shard_ctx.is_first_shard() && cs.with_omc_init_only() {
+                    assert!(num_instances.is_empty());
+                    // skip drain respective fixed because we use different set of fixed commitment
+                    return Ok::<(Vec<_>, Vec<Vec<_>>), ZKVMError>((points, evaluations));
+                }
                 if num_instances.is_empty() {
                     // we need to drain respective fixed when num_instances is 0
                     if cs.num_fixed() > 0 {

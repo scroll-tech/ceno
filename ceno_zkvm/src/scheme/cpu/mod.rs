@@ -3,6 +3,7 @@ use super::hal::{
     TowerProver, TraceCommitter,
 };
 use crate::{
+    e2e::ShardContext,
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
@@ -190,7 +191,6 @@ impl CpuEccProver {
                 .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
-
         // zerocheck: 0 = s[1,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b]) with b != (1,...,1)
         exprs_add.extend(
             (s.clone() * (&x0 - &x3) - (&y0 + &y3))
@@ -211,7 +211,6 @@ impl CpuEccProver {
                 .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
-
         // 0 = (y[1,b] - y[b,0])
         exprs_bypass.extend(
             (&y3 - &y0)
@@ -232,7 +231,6 @@ impl CpuEccProver {
         let rt = state.collect_raw_challenges();
         let evals = state.get_mle_flatten_final_evaluations();
 
-        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
         // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
         assert_eq!(evals.len(), 2 + SEPTIC_EXTENSION_DEGREE * 7);
 
@@ -269,6 +267,7 @@ impl CpuEccProver {
                 assert_eq!(y3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 6 + i]);
             }
         }
+        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
 
         EccQuarkProof {
             zerocheck_proof,
@@ -506,7 +505,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
     for CpuProver<CpuBackend<E, PCS>>
 {
     fn commit_traces<'a>(
-        &mut self,
+        &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
         Vec<MultilinearExtension<'a, E>>,
@@ -943,6 +942,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
 {
     fn transport_proving_key(
         &self,
+        shard_ctx: &ShardContext,
         pk: Arc<
             crate::structs::ZKVMProvingKey<
                 <CpuBackend<E, PCS> as ProverBackend>::E,
@@ -950,9 +950,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
             >,
         >,
     ) -> DeviceProvingKey<'_, CpuBackend<E, PCS>> {
-        let pcs_data = pk.fixed_commit_wd.clone().unwrap();
-        let fixed_mles =
-            PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());
+        let pcs_data = if shard_ctx.is_first_shard() {
+            pk.fixed_commit_wd.clone().unwrap()
+        } else {
+            pk.fixed_no_omc_init_commit_wd.clone().unwrap()
+        };
+
+        let fixed_mles = PCS::get_arc_mle_witness_from_commitment(pcs_data.as_ref());
 
         DeviceProvingKey {
             pcs_data,

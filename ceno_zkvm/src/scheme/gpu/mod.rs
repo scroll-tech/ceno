@@ -45,7 +45,7 @@ use gkr_iop::gpu::gpu_prover::*;
 
 pub struct GpuTowerProver;
 
-use crate::scheme::constants::NUM_FANIN;
+use crate::{e2e::ShardContext, scheme::constants::NUM_FANIN};
 use gkr_iop::gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu};
 
 // Extract out_evals from GPU-built tower witnesses
@@ -706,6 +706,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
 {
     fn transport_proving_key(
         &self,
+        shard_ctx: &ShardContext,
         pk: Arc<
             crate::structs::ZKVMProvingKey<
                 <GpuBackend<E, PCS> as ProverBackend>::E,
@@ -713,7 +714,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
             >,
         >,
     ) -> DeviceProvingKey<'_, GpuBackend<E, PCS>> {
-        let pcs_data_original = pk.fixed_commit_wd.clone().unwrap();
+        let pcs_data_original = if shard_ctx.is_first_shard() {
+            pk.fixed_commit_wd.clone().unwrap()
+        } else {
+            pk.fixed_no_omc_init_commit_wd.clone().unwrap()
+        };
 
         // assert pcs match
         let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()

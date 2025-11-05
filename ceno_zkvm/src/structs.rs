@@ -8,22 +8,23 @@ use crate::{
     },
     scheme::septic_curve::SepticPoint,
     state::StateCircuit,
-    tables::{RMMCollections, TableCircuit},
+    tables::{MemFinalRecord, RMMCollections, TableCircuit},
 };
-use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
+use ceno_emul::{CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
 use sumcheck::structs::{IOPProof, IOPProverMessage};
-use witness::RowMajorMatrix;
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 /// proof that the sum of N=2^n EC points is equal to `sum`
 /// in one layer instead of GKR layered circuit approach
@@ -182,6 +183,10 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
             .rotation_params
             .as_ref()
             .map(|param| param.rotation_cyclic_subgroup_size)
+    }
+
+    pub fn with_omc_init_only(&self) -> bool {
+        self.zkvm_v1_css.with_omc_init_only
     }
 }
 
@@ -427,10 +432,68 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn assign_global_chip_circuit(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
-        shard_ctx: &ShardContext,
+        // shard_ctx: &ShardContext,
+        (shard_ctx, final_mem): &(
+            &ShardContext,
+            &[(InstancePaddingStrategy, &[MemFinalRecord])],
+        ),
         config: &<GlobalChip<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
         let perm = <E::BaseField as PoseidonField>::get_default_perm();
+        let waddr_first_access = if shard_ctx.is_first_shard() {
+            shard_ctx.get_addr_accessed_first_shard()
+        } else {
+            FxHashSet::default()
+        };
+
+        let non_first_shard_records = if shard_ctx.is_first_shard() {
+            final_mem
+                .par_iter()
+                .flat_map_iter(|(_, final_mem)| {
+                    final_mem.iter().filter_map(|mem_record| {
+                        // prepare global writes record for those record which not accessed in first record
+                        // but access in future shard
+                        let (waddr, addr): (WordAddr, u32) = match mem_record.ram_type {
+                            RAMType::Register => (
+                                Platform::register_vma(mem_record.addr as RegIdx).into(),
+                                mem_record.addr,
+                            ),
+                            RAMType::Memory => (mem_record.addr.into(), mem_record.addr),
+                            _ => unimplemented!(),
+                        };
+                        if !waddr_first_access.contains(&waddr)
+                            && shard_ctx.after_current_shard_cycle(mem_record.cycle)
+                        {
+                            let global_write = GlobalRecord {
+                                addr: match mem_record.ram_type {
+                                    RAMType::Register => addr,
+                                    RAMType::Memory => waddr.into(),
+                                    _ => unimplemented!(),
+                                },
+                                ram_type: mem_record.ram_type,
+                                // fill initial value to cancel initial record
+                                value: mem_record.init_value,
+                                shard: 0,
+                                local_clk: 0,
+                                global_clk: 0,
+                                is_to_write_set: true,
+                            };
+                            let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
+                            Some(GlobalChipInput {
+                                record: global_write,
+                                ec_point,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+        let non_first_shard_records_len = non_first_shard_records.len();
+
         let global_input = shard_ctx
             .write_records()
             .par_iter()
@@ -445,6 +508,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     }
                 })
             })
+            .chain(non_first_shard_records.into_par_iter())
             .chain(
                 shard_ctx
                     .read_records()
@@ -462,6 +526,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     }),
             )
             .collect::<Vec<_>>();
+
         assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&GlobalChip::<E>::name()).unwrap();
         let witness = GlobalChip::assign_instances(
@@ -482,7 +547,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                             .write_records()
                             .iter()
                             .map(|records| records.len())
-                            .sum(),
+                            .sum::<usize>()
+                            + non_first_shard_records_len,
                         // global read -> local write
                         shard_ctx
                             .read_records()
@@ -526,10 +592,26 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,
+    // entry program counter
+    pub entry_pc: u32,
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
+
+    // Fixed commitments are separated into two groups:
+    //
+    // 1. `fixed_commit_*`
+    //    - Used by the *main circuit* for offline memory check (OMC) table initialization.
+    //    - This initialization occurs **only in the first shard** (`shard_id = 0`).
+    //
+    // 2. `fixed_no_omc_init_commit_*`
+    //    - Used by subsequent shards (`shard_id > 0`), which **omit** OMC table initialization.
+    //    - All circuit components related to OMC init are skipped in these shards.
     pub fixed_commit_wd: Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    pub fixed_no_omc_init_commit_wd:
+        Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
+    pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+
     pub circuit_index_fixed_num_instances: BTreeMap<usize, usize>,
 
     // expression for global state in/out
@@ -542,18 +624,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
         Self {
             pp,
             vp,
+            entry_pc: 0,
             circuit_pks: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
             circuit_index_fixed_num_instances: BTreeMap::new(),
             fixed_commit_wd: None,
             fixed_commit: None,
+            fixed_no_omc_init_commit_wd: None,
+            fixed_no_omc_init_commit: None,
         }
     }
 
     pub(crate) fn commit_fixed(
         &mut self,
         fixed_traces: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+        fixed_traces_no_omc_init: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<(), ZKVMError> {
         if !fixed_traces.is_empty() {
             let fixed_commit_wd =
@@ -566,7 +652,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             self.fixed_commit_wd = None;
             self.fixed_commit = None;
         }
+
+        if !fixed_traces_no_omc_init.is_empty() {
+            let fixed_commit_wd = PCS::batch_commit(
+                &self.pp,
+                fixed_traces_no_omc_init.into_values().collect_vec(),
+            )
+            .map_err(ZKVMError::PCSError)?;
+            let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
+            self.fixed_no_omc_init_commit_wd = Some(Arc::new(fixed_commit_wd));
+            self.fixed_no_omc_init_commit = Some(fixed_commit);
+        } else {
+            self.fixed_no_omc_init_commit_wd = None;
+            self.fixed_no_omc_init_commit = None;
+        }
         Ok(())
+    }
+
+    pub(crate) fn set_program_entry_pc(&mut self, entry_pc: u32) {
+        self.entry_pc = entry_pc;
     }
 }
 
@@ -574,12 +678,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     pub fn get_vk_slow(&self) -> ZKVMVerifyingKey<E, PCS> {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
+            entry_pc: self.entry_pc,
             circuit_vks: self
                 .circuit_pks
                 .iter()
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
             fixed_commit: self.fixed_commit.clone(),
+            fixed_no_omc_init_commit: self.fixed_no_omc_init_commit.clone(),
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
             finalize_global_state_expr: self.finalize_global_state_expr.clone(),
@@ -600,9 +706,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 ))]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,
+    // entry program counter
+    pub entry_pc: u32,
     // vk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
     pub finalize_global_state_expr: Expression<E>,
