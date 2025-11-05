@@ -8,9 +8,7 @@ use ff_ext::{Instrumented, PoseidonField};
 use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
-    instructions::riscv::constants::{
-        END_PC_IDX, GLOBAL_RW_SUM_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX,
-    },
+    instructions::riscv::constants::{END_PC_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX},
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
@@ -20,6 +18,7 @@ use crate::{
         ZKVMVerifyingKey,
     },
 };
+use ceno_emul::Tracer;
 use gkr_iop::{
     self,
     selector::{SelectorContext, SelectorType},
@@ -65,7 +64,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         self.verify_proof_halt(vm_proof, transcript, true)
     }
 
-    #[tracing::instrument(skip_all, name = "verify_proof")]
+    #[tracing::instrument(skip_all, name = "verify_proofs")]
     pub fn verify_proofs(
         &self,
         vm_proofs: Vec<ZKVMProof<E, PCS>>,
@@ -110,8 +109,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             .into(),
                     ));
                 }
-                // check init cycle = 4
-                assert_eq!(vm_proof.pi_evals[INIT_CYCLE_IDX], E::from_canonical_usize(4));
+                // each shard set init cycle = Tracer::SUBCYCLES_PER_INSN
+                // to satisfy initial reads for all prev_cycle = 0 < init_cycle
+                assert_eq!(vm_proof.pi_evals[INIT_CYCLE_IDX], E::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN));
                 // check init_pc match prev end_pc
                 if let Some(prev_pc) = prev_pc {
                     assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], prev_pc);
@@ -502,7 +502,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert!(proof.ecc_proof.is_some());
             let ecc_proof = proof.ecc_proof.as_ref().unwrap();
 
-            let xy = cs
+            let expected_septic_xy = cs
                 .ec_final_sum
                 .iter()
                 .map(|expr| {
@@ -512,30 +512,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .unwrap()
                 })
                 .collect_vec();
-            let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
-            let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
+            let expected_septic_x: SepticExtension<E::BaseField> =
+                expected_septic_xy[0..SEPTIC_EXTENSION_DEGREE].into();
+            let expected_septic_y: SepticExtension<E::BaseField> =
+                expected_septic_xy[SEPTIC_EXTENSION_DEGREE..].into();
 
-            assert_eq!(&ecc_proof.sum.x, &x);
-            assert_eq!(&ecc_proof.sum.y, &y);
+            assert_eq!(&ecc_proof.sum.x, &expected_septic_x);
+            assert_eq!(&ecc_proof.sum.y, &expected_septic_y);
             assert!(!ecc_proof.sum.is_infinity);
-            // assert ec sum in public input matches that in ecc proof
-            let global_ec_sum = raw_pi
-                .iter()
-                .skip(GLOBAL_RW_SUM_IDX)
-                .take(SEPTIC_EXTENSION_DEGREE * 2)
-                .flatten()
-                .copied()
-                .collect_vec();
-            assert_eq!(global_ec_sum.len(), SEPTIC_EXTENSION_DEGREE * 2);
-            for (f, expected_f) in global_ec_sum.iter().zip_eq(x.0.iter().chain(y.0.iter())) {
-                assert_eq!(f, expected_f)
-            }
             EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
             tracing::debug!("ecc proof verified.");
-            Some(SepticPoint::from_affine(
-                SepticExtension::from(&global_ec_sum[0..SEPTIC_EXTENSION_DEGREE]),
-                SepticExtension::from(&global_ec_sum[SEPTIC_EXTENSION_DEGREE..]),
-            ))
+            Some(ecc_proof.sum.clone())
         } else {
             None
         };

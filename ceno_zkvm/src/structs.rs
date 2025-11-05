@@ -596,9 +596,18 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub entry_pc: u32,
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
+
+    // Fixed commitments are separated into two groups:
+    //
+    // 1. `fixed_commit_*`
+    //    - Used by the *main circuit* for offline memory check (OMC) table initialization.
+    //    - This initialization occurs **only in the first shard** (`shard_id = 0`).
+    //
+    // 2. `fixed_no_omc_init_commit_*`
+    //    - Used by subsequent shards (`shard_id > 0`), which **omit** OMC table initialization.
+    //    - All circuit components related to OMC init are skipped in these shards.
     pub fixed_commit_wd: Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
-
     pub fixed_no_omc_init_commit_wd:
         Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
     pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
