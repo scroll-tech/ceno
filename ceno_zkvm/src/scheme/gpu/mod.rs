@@ -397,6 +397,22 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
         let nv = first_layer[0].num_vars();
 
+        // // Verify all towers have the same num_vars and structure
+        // let mut expected_nv = None;
+        // for (i, last_layer) in logup_last_layers.iter().enumerate() {
+        //     assert_eq!(last_layer.len(), 4);
+
+        //     let nv = last_layer[0].num_vars();
+        //     for (j, poly) in last_layer.iter().enumerate() {
+        //         assert_eq!(poly.num_vars(), nv, "all polynomials in last_layer {} must have same num_vars, but poly {} has different num_vars", i, j);
+        //     }
+
+        //     match expected_nv {
+        //         None => expected_nv = Some(nv),
+        //         Some(expected) => assert_eq!(nv, expected, "all towers must have same num_vars, but tower {} has nv={}, expected {}", i, nv, expected),
+        //     }
+        // }
+
         // Allocate one big buffer for all towers and add it to big_buffers
         let tower_size = 2 * (1 << nv) * 4; // 2 * 4 * mle_len elements per tower
         let total_buffer_size = num_towers * tower_size;
