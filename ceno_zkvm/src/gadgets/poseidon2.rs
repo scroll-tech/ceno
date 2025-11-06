@@ -142,15 +142,6 @@ impl<
             }
             (7, 1) => {
                 let committed_x3: Expression<E> = sbox.0[0].clone();
-                let x3_is_zero = committed_x3.clone() - x.cube();
-                tracing::info!(
-                    "SBOX 7,1 x3 terms count: {}",
-                    x3_is_zero.get_monomial_terms().len()
-                );
-                // TODO: avoid x^3 as x may have ~STATE_WIDTH terms after the linear layer
-                //       we can allocate one more column to store x^2 (which has ~STATE_WIDTH^2 terms)
-                //       then x^3 = x * x^2
-                //       but this will increase the number of columns (by FULL_ROUNDS * STATE_WIDTH + PARTIAL_ROUNDS)
                 cb.require_zero(|| "x3 = x.cube()", committed_x3.clone() - x.cube())?;
                 committed_x3.square() * x.clone()
             }
@@ -171,7 +162,6 @@ impl<
     ) -> Result<(), CircuitBuilderError> {
         for (i, (s, r)) in state.iter_mut().zip_eq(round_constants.iter()).enumerate() {
             *s = s.clone() + r.expr();
-            tracing::info!("state[{i}] terms count: {}", s.get_monomial_terms().len());
             Self::eval_sbox(&full_round.sbox[i], s, cb)?;
         }
         Self::external_linear_layer(state);
@@ -196,11 +186,6 @@ impl<
             state[0].clone() + round_constant.expr(),
         )?;
         state[0] = post_linear_layer.expr();
-
-        tracing::info!(
-            "partial round state[0] terms count: {}",
-            state[0].get_monomial_terms().len()
-        );
 
         Self::eval_sbox(&partial_round.sbox, &mut state[0], cb)?;
 
