@@ -78,7 +78,8 @@ pub struct Poseidon2Config<
     const HALF_FULL_ROUNDS: usize,
     const PARTIAL_ROUNDS: usize,
 > {
-    cols: Vec<WitIn>,
+    p3_cols: Vec<WitIn>,                // columns in the plonky3-air
+    post_linear_layer_cols: Vec<WitIn>, /* additional columns to hold the state after linear layers */
     constants: RoundConstants<E::BaseField, STATE_WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>,
 }
 
@@ -141,10 +142,6 @@ impl<
             }
             (7, 1) => {
                 let committed_x3: Expression<E> = sbox.0[0].clone();
-                // TODO: avoid x^3 as x may have ~STATE_WIDTH terms after the linear layer
-                //       we can allocate one more column to store x^2 (which has ~STATE_WIDTH^2 terms)
-                //       then x^3 = x * x^2
-                //       but this will increase the number of columns (by FULL_ROUNDS * STATE_WIDTH + PARTIAL_ROUNDS)
                 cb.require_zero(|| "x3 = x.cube()", committed_x3.clone() - x.cube())?;
                 committed_x3.square() * x.clone()
             }
@@ -169,7 +166,7 @@ impl<
         }
         Self::external_linear_layer(state);
         for (state_i, post_i) in state.iter_mut().zip_eq(full_round.post.iter()) {
-            cb.require_zero(|| "post_i = state_i", state_i.clone() - post_i)?;
+            cb.require_equal(|| "post_i = state_i", state_i.clone(), post_i.clone())?;
             *state_i = post_i.clone();
         }
 
@@ -178,11 +175,18 @@ impl<
 
     fn eval_partial_round(
         state: &mut [Expression<E>; STATE_WIDTH],
+        post_linear_layer: &WitIn,
         partial_round: &PartialRound<Expression<E>, STATE_WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
         round_constant: &E::BaseField,
         cb: &mut CircuitBuilder<E>,
     ) -> Result<(), CircuitBuilderError> {
-        state[0] = state[0].clone() + round_constant.expr();
+        cb.require_equal(
+            || "post_linear_layer[0] = state[0]",
+            post_linear_layer.expr(),
+            state[0].clone() + round_constant.expr(),
+        )?;
+        state[0] = post_linear_layer.expr();
+
         Self::eval_sbox(&partial_round.sbox, &mut state[0], cb)?;
 
         cb.require_zero(
@@ -231,16 +235,39 @@ impl<
             PARTIAL_ROUNDS,
         >,
     ) -> Self {
-        let num_cols =
+        let num_p3_cols =
             num_cols::<STATE_WIDTH, SBOX_DEGREE, SBOX_REGISTERS, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>(
             );
-        let cols = from_fn(|| Some(cb.create_witin(|| "poseidon2 col")))
-            .take(num_cols)
+        let p3_cols = from_fn(|| Some(cb.create_witin(|| "poseidon2 col")))
+            .take(num_p3_cols)
             .collect::<Vec<_>>();
-        let mut col_exprs = cols
+        let mut col_exprs = p3_cols
             .iter()
             .map(|c| c.expr())
             .collect::<Vec<Expression<E>>>();
+
+        // allocate columns to cache the state after each linear layer
+        // 1. before 0th full round
+        let mut post_linear_layer_cols = (0..STATE_WIDTH)
+            .map(|j| {
+                cb.create_witin(|| format!("[before 0th full round] post linear layer col[{j}]"))
+            })
+            .collect::<Vec<WitIn>>();
+        // 2. before each partial round
+        for i in 0..PARTIAL_ROUNDS {
+            post_linear_layer_cols.push(cb.create_witin(|| {
+                format!("[round {}] post linear layer col", i + HALF_FULL_ROUNDS)
+            }));
+        }
+        // 3. before HALF_FULL_ROUNDS-th full round
+        post_linear_layer_cols.extend((0..STATE_WIDTH).map(|j| {
+            cb.create_witin(|| {
+                format!(
+                    "[before {}th full round] post linear layer col[{j}]",
+                    HALF_FULL_ROUNDS
+                )
+            })
+        }));
 
         let poseidon2_cols: &mut Poseidon2Cols<
             Expression<E>,
@@ -253,6 +280,23 @@ impl<
 
         // external linear layer
         Self::external_linear_layer(&mut poseidon2_cols.inputs);
+
+        // after linear layer, each state_i has ~STATE_WIDTH terms
+        // therefore, we want to reduce that to one as the number of terms
+        // after sbox(state_i + rc_i) = (state_i + rc_i)^d will explode
+        poseidon2_cols
+            .inputs
+            .iter_mut()
+            .zip_eq(post_linear_layer_cols[0..STATE_WIDTH].iter())
+            .for_each(|(input, post_linear)| {
+                cb.require_equal(
+                    || "post_linear_layer = input",
+                    post_linear.expr(),
+                    input.clone(),
+                )
+                .unwrap();
+                *input = post_linear.expr();
+            });
 
         // eval full round
         for round in 0..HALF_FULL_ROUNDS {
@@ -269,6 +313,7 @@ impl<
         for round in 0..PARTIAL_ROUNDS {
             Self::eval_partial_round(
                 &mut poseidon2_cols.inputs,
+                &post_linear_layer_cols[STATE_WIDTH + round],
                 &poseidon2_cols.partial_rounds[round],
                 &round_constants.partial_round_constants[round],
                 cb,
@@ -276,8 +321,19 @@ impl<
             .unwrap();
         }
 
-        // TODO: after the last partial round, each state_i has ~STATE_WIDTH terms
-        //       which will make the next full round to have many terms
+        poseidon2_cols
+            .inputs
+            .iter_mut()
+            .zip_eq(post_linear_layer_cols[STATE_WIDTH + PARTIAL_ROUNDS..].iter())
+            .for_each(|(input, post_linear)| {
+                cb.require_equal(
+                    || "post_linear_layer = input",
+                    post_linear.expr(),
+                    input.clone(),
+                )
+                .unwrap();
+                *input = post_linear.expr();
+            });
 
         // eval full round
         for round in 0..HALF_FULL_ROUNDS {
@@ -291,13 +347,14 @@ impl<
         }
 
         Poseidon2Config {
-            cols,
+            p3_cols,
+            post_linear_layer_cols,
             constants: round_constants,
         }
     }
 
     pub fn inputs(&self) -> Vec<Expression<E>> {
-        let col_exprs = self.cols.iter().map(|c| c.expr()).collect::<Vec<_>>();
+        let col_exprs = self.p3_cols.iter().map(|c| c.expr()).collect::<Vec<_>>();
 
         let poseidon2_cols: &Poseidon2Cols<
             Expression<E>,
@@ -312,7 +369,7 @@ impl<
     }
 
     pub fn output(&self) -> Vec<Expression<E>> {
-        let col_exprs = self.cols.iter().map(|c| c.expr()).collect::<Vec<_>>();
+        let col_exprs = self.p3_cols.iter().map(|c| c.expr()).collect::<Vec<_>>();
 
         let poseidon2_cols: &Poseidon2Cols<
             Expression<E>,
@@ -330,11 +387,21 @@ impl<
             .unwrap()
     }
 
+    fn num_p3_cols(&self) -> usize {
+        self.p3_cols.len()
+    }
+
+    pub fn num_cols(&self) -> usize {
+        self.p3_cols.len() + self.post_linear_layer_cols.len()
+    }
+
     pub fn assign_instance(
         &self,
         instance: &mut [E::BaseField],
         state: [E::BaseField; STATE_WIDTH],
     ) {
+        let (p3_cols, post_linear_layer_cols) = instance.split_at_mut(self.num_p3_cols());
+
         let poseidon2_cols: &mut Poseidon2Cols<
             E::BaseField,
             STATE_WIDTH,
@@ -342,7 +409,7 @@ impl<
             SBOX_REGISTERS,
             HALF_FULL_ROUNDS,
             PARTIAL_ROUNDS,
-        > = instance.borrow_mut();
+        > = p3_cols.borrow_mut();
 
         generate_trace_rows_for_perm::<
             E::BaseField,
@@ -352,7 +419,12 @@ impl<
             SBOX_REGISTERS,
             HALF_FULL_ROUNDS,
             PARTIAL_ROUNDS,
-        >(poseidon2_cols, state, &self.constants);
+        >(
+            poseidon2_cols,
+            post_linear_layer_cols,
+            state,
+            &self.constants,
+        );
     }
 }
 
@@ -376,6 +448,7 @@ fn generate_trace_rows_for_perm<
         HALF_FULL_ROUNDS,
         PARTIAL_ROUNDS,
     >,
+    post_linear_layers: &mut [F],
     mut state: [F; WIDTH],
     constants: &RoundConstants<F, WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>,
 ) {
@@ -389,6 +462,15 @@ fn generate_trace_rows_for_perm<
 
     LinearLayers::external_linear_layer(&mut state);
 
+    // 1. before 0th full round
+    // post_linear_layer[i] = state[i]
+    post_linear_layers[0..WIDTH]
+        .iter_mut()
+        .zip(state.iter())
+        .for_each(|(post, &x)| {
+            *post = x;
+        });
+
     for (full_round, constants) in perm
         .beginning_full_rounds
         .iter_mut()
@@ -399,17 +481,28 @@ fn generate_trace_rows_for_perm<
         );
     }
 
-    for (partial_round, constant) in perm
+    for (i, (partial_round, constant)) in perm
         .partial_rounds
         .iter_mut()
         .zip(&constants.partial_round_constants)
+        .enumerate()
     {
         generate_partial_round::<F, LinearLayers, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>(
             &mut state,
+            &mut post_linear_layers[WIDTH + i],
             partial_round,
             *constant,
         );
     }
+
+    // 3. before HALF_FULL_ROUNDS-th full round
+    // post_linear_layer[i] = state[i]
+    post_linear_layers[WIDTH + PARTIAL_ROUNDS..]
+        .iter_mut()
+        .zip(state.iter())
+        .for_each(|(post, &x)| {
+            *post = x;
+        });
 
     for (full_round, constants) in perm
         .ending_full_rounds
@@ -459,10 +552,12 @@ fn generate_partial_round<
     const SBOX_REGISTERS: usize,
 >(
     state: &mut [F; WIDTH],
+    post_linear_layer: &mut F,
     partial_round: &mut PartialRound<F, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
     round_constant: F,
 ) {
     state[0] += round_constant;
+    *post_linear_layer = state[0];
     generate_sbox(&mut partial_round.sbox, &mut state[0]);
     partial_round.post_sbox = state[0];
     LinearLayers::internal_linear_layer(state);
