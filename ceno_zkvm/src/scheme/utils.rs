@@ -326,23 +326,6 @@ pub fn build_main_witness<
     );
     assert_eq!(input.fixed.len(), cs.num_fixed);
 
-    // check all witness size are power of 2
-    assert!(
-        input
-            .witness
-            .iter()
-            .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
-    );
-
-    if !input.structural_witness.is_empty() {
-        assert!(
-            input
-                .structural_witness
-                .iter()
-                .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
-        );
-    }
-
     let Some(gkr_circuit) = gkr_circuit else {
         panic!("empty gkr-iop")
     };
@@ -364,6 +347,17 @@ pub fn build_main_witness<
         .iter()
         .map(|instance| input.public_input[instance.0].clone())
         .collect_vec();
+
+    // check all witness size are power of 2
+    assert!(
+        input
+            .witness
+            .iter()
+            .chain(&input.structural_witness)
+            .chain(&input.fixed)
+            .chain(&pub_io_mles)
+            .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
+    );
 
     let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
         gkr_circuit,

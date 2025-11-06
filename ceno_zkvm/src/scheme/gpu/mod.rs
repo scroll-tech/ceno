@@ -801,8 +801,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         std::mem::forget(pcs_data_basefold);
         let pcs_data = Arc::new(pcs_data);
 
-        let fixed_mles =
-            PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());
+        let fixed_mles = PCS::get_arc_mle_witness_from_commitment(pcs_data_original.as_ref());
         let fixed_mles = fixed_mles
             .iter()
             .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
