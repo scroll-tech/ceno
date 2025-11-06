@@ -390,17 +390,14 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
     let span_logup = entered_span!("build_logup_tower", logup_layers = logup_last_layers.len(), profiling_3 = true);
 
-    // Use batch processing for better performance when we have many towers
-    if logup_last_layers.len() > 1 {
-        // Batch processing path
+    // Use batch processing for all cases
+    if !logup_last_layers.is_empty() {
         let num_towers = logup_last_layers.len();
-        assert!(!logup_last_layers.is_empty(), "logup_last_layers should not be empty");
-
         let first_layer = &logup_last_layers[0];
         assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
         let nv = first_layer[0].num_vars();
 
-        // Allocate one big buffer for all towers and add it to logup_buffers
+        // Allocate one big buffer for all towers and add it to big_buffers
         let tower_size = 2 * (1 << nv) * 4; // 2 * 4 * mle_len elements per tower
         let total_buffer_size = num_towers * tower_size;
         let big_buffer = cuda_hal.alloc_ext_elems_on_device(total_buffer_size).unwrap();
@@ -419,22 +416,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
 
         logup_gpu_specs.extend(gpu_specs);
-    } else {
-        // Single tower path (fallback for compatibility)
-        for last_layer in logup_last_layers {
-            assert_eq!(last_layer.len(), 4, "logup last_layer must have 4 MLEs");
-            let nv = last_layer[0].num_vars();
-
-            let (current_buffer_slice, rest) = remaining_logup_buffers.split_at_mut(1);
-            remaining_logup_buffers = rest;
-
-            let gpu_spec = cuda_hal
-                .tower
-                .build_logup_tower_from_gpu_polys(nv, &last_layer, &mut current_buffer_slice[0])
-                .map_err(|e| format!("build_logup_tower_from_gpu_polys failed: {:?}", e))?;
-
-            logup_gpu_specs.push(gpu_spec);
-        }
     }
     exit_span!(span_logup);
 
