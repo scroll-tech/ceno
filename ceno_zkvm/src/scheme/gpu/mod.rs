@@ -386,7 +386,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     };
     exit_span!(span_malloc);
 
-    let span_logup = entered_span!("build_logup_tower", profiling_3 = true);
+    let span_logup = entered_span!("build_logup_tower", logup_layers = logup_last_layers.len(), profiling_3 = true);
     // Process all logup last_layers uniformly
     for last_layer in logup_last_layers {
         assert_eq!(last_layer.len(), 4, "logup last_layer must have 4 MLEs");
@@ -710,24 +710,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                         }
                     })
                     .collect_vec();
-            let span = entered_span!("circuit_wit", profiling_3 = true);
-            let circuit_wit = {
-                let circuit_wit = gkr::GKRCircuitWitness {
-                    layers: vec![LayerWitness(
-                        chain!(&input.witness, &input.structural_witness, &input.fixed)
-                            .cloned()
-                            .collect_vec(),
-                    )],
-                };
-            };
-            exit_span!(span);
             let GKRProverOutput {
                 gkr_proof,
                 opening_evaluations,
             } = gkr_circuit.prove::<GpuBackend<E, PCS>, GpuProver<_>>(
                 num_threads,
                 num_var_with_rotation,
-                circuit_wit,
+                gkr::GKRCircuitWitness {
+                    layers: vec![LayerWitness(
+                        chain!(&input.witness, &input.structural_witness, &input.fixed)
+                            .cloned()
+                            .collect_vec(),
+                    )],
+                },
                 // eval value doesnt matter as it wont be used by prover
                 &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
                 &pub_io_evals,
