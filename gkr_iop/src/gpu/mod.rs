@@ -14,6 +14,7 @@ use witness::RowMajorMatrix;
 
 use crate::cpu::default_backend_config;
 
+use either::Either;
 use itertools::{Itertools, izip};
 use std::marker::PhantomData;
 
@@ -338,7 +339,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     fn layer_witness<'a>(
         layer: &Layer<E>,
         layer_wits: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
-        pub_io_evals: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
+        pub_io_evals: &[Either<E::BaseField, E>],
         challenges: &[E],
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let span = entered_span!("preprocess", profiling_2 = true);
@@ -351,17 +352,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
             .collect();
-
-        // take public input from gpu to cpu for scalar evaluation
-        // assume public io is quite small, thus the cost is negligible
-        // evaluate all scalar terms first
-        // when instance was access in scalar, we only take its first item
-        // this operation is sound
-        let pub_io_evals = pub_io_evals
-            .iter()
-            .map(|mle| mle.inner_to_mle())
-            .map(|instance| instance.evaluations.index(0))
-            .collect_vec();
 
         // pre-process and flatten indices into friendly GPU format
         let (num_non_zero_expr, term_coefficients, mle_indices_per_term, mle_size_info) = layer

@@ -8,6 +8,7 @@ use crate::{
             zerocheck_layer::RotationPoints,
         },
     },
+    selector::SelectorContext,
     utils::{rotation_next_base_mle, rotation_selector},
 };
 use either::Either;
@@ -113,7 +114,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         pub_io_evals: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (
         LayerProof<<CpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<CpuBackend<E, PCS> as ProverBackend>::E>,
@@ -125,6 +126,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             "out eval length {} != with distinct out_point {}",
             layer.out_sel_and_eval_exprs.len(),
             out_points.len(),
+        );
+        assert_eq!(
+            layer.out_sel_and_eval_exprs.len(),
+            selector_ctxs.len(),
+            "selector_ctxs length {}",
+            selector_ctxs.len()
         );
 
         let (_, raw_rotation_exprs) = &layer.rotation_exprs;
@@ -168,12 +175,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             )
         )
         .collect_vec();
+
         // zero check eq || rotation eq
         let mut eqs = layer
             .out_sel_and_eval_exprs
             .par_iter()
             .zip(out_points.par_iter())
-            .filter_map(|((sel_type, _), point)| sel_type.compute(point, num_instances))
+            .zip(selector_ctxs.par_iter())
+            .filter_map(|(((sel_type, _), point), selector_ctx)| {
+                sel_type.compute(point, selector_ctx)
+            })
             // for rotation left point
             .chain(rotation_left.par_iter().map(|rotation_left| {
                 MultilinearExtension::from_evaluations_ext_vec(
@@ -198,38 +209,51 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .collect::<Vec<_>>();
         exit_span!(span);
 
-        // `wit` := witin ++ fixed
+        // `wit` := witin ++ fixed ++ pubio
         // we concat eq in between `wit` := witin ++ eqs ++ fixed
         let all_witins = wit
             .iter()
-            .take(layer.n_witin)
+            .take(layer.n_witin + layer.n_fixed + layer.n_instance)
             .map(|mle| Either::Left(mle.as_ref()))
-            .chain(eqs.iter_mut().map(Either::Right))
             .chain(
-                // fixed, start after `n_witin`
+                // some non-selector structural witin
                 wit.iter()
-                    .skip(layer.n_witin + layer.n_structural_witin)
+                    .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
+                    .take(
+                        layer.n_structural_witin
+                            - layer.out_sel_and_eval_exprs.len()
+                            - layer
+                                .rotation_exprs
+                                .0
+                                .as_ref()
+                                .map(|_| ROTATION_OPENING_COUNT)
+                                .unwrap_or(0),
+                    )
                     .map(|mle| Either::Left(mle.as_ref())),
             )
+            .chain(eqs.iter_mut().map(Either::Right))
             .collect_vec();
+
         assert_eq!(
             all_witins.len(),
-            layer.n_witin + layer.n_structural_witin + layer.n_fixed,
-            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {}",
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {} + layer.n_instance {}",
             all_witins.len(),
             layer.n_witin,
             layer.n_structural_witin,
             layer.n_fixed,
+            layer.n_instance,
         );
+
         let builder =
             VirtualPolynomialsBuilder::new_with_mles(num_threads, max_num_variables, all_witins);
 
         let span = entered_span!("IOPProverState::prove", profiling_4 = true);
         let (proof, prover_state) = IOPProverState::prove(
             builder.to_virtual_polys_with_monomial_terms(
-                &layer
+                layer
                     .main_sumcheck_expression_monomial_terms
-                    .clone()
+                    .as_ref()
                     .unwrap(),
                 pub_io_evals,
                 &main_sumcheck_challenges,

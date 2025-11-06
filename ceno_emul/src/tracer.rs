@@ -1,13 +1,13 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt, mem,
-};
+use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
+use std::{collections::BTreeMap, fmt, mem};
 
 use ceno_rt::WORD_SIZE;
 
 use crate::{
     CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
+    chunked_vec::ChunkedVec,
     encode_rv32,
     syscalls::{SyscallEffects, SyscallWitness},
 };
@@ -38,6 +38,10 @@ pub struct StepRecord {
 
     syscall: Option<SyscallWitness>,
 }
+
+pub type NextAccessPair = SmallVec<[(WordAddr, Cycle); 1]>;
+pub type NextCycleAccess = ChunkedVec<NextAccessPair>;
+const ACCESSED_CHUNK_SIZE: usize = 1 << 20;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MemOp<T> {
@@ -305,7 +309,13 @@ pub struct Tracer {
     // record each section max access address
     // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
-    latest_accesses: HashMap<WordAddr, Cycle>,
+
+    // keep track of each address that the cycle when they were last accessed.
+    latest_accesses: FxHashMap<WordAddr, Cycle>,
+
+    // keep track of each cycle that accessed addresses in the future with respective future cycles.
+    // format: [current cycle -> Vec<(WordAddr, Cycle)>]
+    next_accesses: NextCycleAccess,
 }
 
 impl Default for Tracer {
@@ -362,7 +372,8 @@ impl Tracer {
                 cycle: Self::SUBCYCLES_PER_INSN,
                 ..StepRecord::default()
             },
-            latest_accesses: HashMap::new(),
+            latest_accesses: FxHashMap::default(),
+            next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
         }
     }
 
@@ -471,14 +482,20 @@ impl Tracer {
     /// - Record the current instruction as the origin of the latest access.
     /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
     pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
-        self.latest_accesses
-            .insert(addr, self.record.cycle + subcycle)
-            .unwrap_or(0)
+        let cur_cycle = self.record.cycle + subcycle;
+        let prev_cycle = self.latest_accesses.insert(addr, cur_cycle).unwrap_or(0);
+        self.next_accesses
+            .get_or_create(prev_cycle as usize)
+            .push((addr, cur_cycle));
+        prev_cycle
     }
 
-    /// Return all the addresses that were accessed and the cycle when they were last accessed.
-    pub fn final_accesses(&self) -> &HashMap<WordAddr, Cycle> {
+    pub fn final_accesses(&self) -> &FxHashMap<WordAddr, Cycle> {
         &self.latest_accesses
+    }
+
+    pub fn next_accesses(self) -> NextCycleAccess {
+        self.next_accesses
     }
 
     /// Return the cycle of the pending instruction (after the last completed step).

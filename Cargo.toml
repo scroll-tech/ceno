@@ -23,16 +23,16 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [workspace.dependencies]
-ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", rev = "v1.0.0-alpha.9" }
-mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", rev = "v1.0.0-alpha.9" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", rev = "v1.0.0-alpha.9" }
-p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", rev = "v1.0.0-alpha.9" }
-poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", rev = "v1.0.0-alpha.9" }
-sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", rev = "v1.0.0-alpha.9" }
-sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", rev = "v1.0.0-alpha.9" }
-transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", rev = "v1.0.0-alpha.9" }
-whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", rev = "v1.0.0-alpha.9" }
-witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", rev = "v1.0.0-alpha.9" }
+ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", tag = "v1.0.0-alpha.13" }
+mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", tag = "v1.0.0-alpha.13" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", tag = "v1.0.0-alpha.13" }
+p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", tag = "v1.0.0-alpha.13" }
+poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", tag = "v1.0.0-alpha.13" }
+sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", tag = "v1.0.0-alpha.13" }
+sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", tag = "v1.0.0-alpha.13" }
+transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", tag = "v1.0.0-alpha.13" }
+whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", tag = "v1.0.0-alpha.13" }
+witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", tag = "v1.0.0-alpha.13" }
 
 alloy-primitives = "1.3"
 anyhow = { version = "1.0", default-features = false }
@@ -57,9 +57,17 @@ rand_chacha = { version = "0.3", features = ["serde1"] }
 rand_core = "0.6"
 rayon = "1.10"
 rkyv = { version = "0.8", features = ["pointer_width_32"] }
+rustc-hash = "2.0.0"
 secp = "0.4.1"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
+smallvec = { version = "1.13.2", features = [
+  "const_generics",
+  "const_new",
+  "serde",
+  "union",
+  "write",
+] }
 strum = "0.26"
 strum_macros = "0.26"
 substrate-bn = { version = "0.6.0" }
@@ -91,13 +99,14 @@ lto = "thin"
 # [patch."ssh://git@github.com/scroll-tech/ceno-gpu.git"]
 # ceno_gpu = { path = "../ceno-gpu/cuda_hal", package = "cuda_hal" }
 
-#[patch."https://github.com/scroll-tech/gkr-backend"]
-#ff_ext = { path = "../gkr-backend/crates/ff_ext", package = "ff_ext" }
-#mpcs = { path = "../gkr-backend/crates/mpcs", package = "mpcs" }
-#multilinear_extensions = { path = "../gkr-backend/crates/multilinear_extensions", package = "multilinear_extensions" }
-#p3 = { path = "../gkr-backend/crates/p3", package = "p3" }
-#poseidon = { path = "../gkr-backend/crates/poseidon", package = "poseidon" }
-#sumcheck = { path = "../gkr-backend/crates/sumcheck", package = "sumcheck" }
-#transcript = { path = "../gkr-backend/crates/transcript", package = "transcript" }
-#whir = { path = "../gkr-backend/crates/whir", package = "whir" }
-#witness = { path = "../gkr-backend/crates/witness", package = "witness" }
+# [patch."https://github.com/scroll-tech/gkr-backend"]
+# ff_ext = { path = "../gkr-backend/crates/ff_ext", package = "ff_ext" }
+# mpcs = { path = "../gkr-backend/crates/mpcs", package = "mpcs" }
+# multilinear_extensions = { path = "../gkr-backend/crates/multilinear_extensions", package = "multilinear_extensions" }
+# p3 = { path = "../gkr-backend/crates/p3", package = "p3" }
+# poseidon = { path = "../gkr-backend/crates/poseidon", package = "poseidon" }
+# sp1-curves = { path = "../gkr-backend/crates/curves", package = "sp1-curves" }
+# sumcheck = { path = "../gkr-backend/crates/sumcheck", package = "sumcheck" }
+# transcript = { path = "../gkr-backend/crates/transcript", package = "transcript" }
+# whir = { path = "../gkr-backend/crates/whir", package = "whir" }
+# witness = { path = "../gkr-backend/crates/witness", package = "witness" }

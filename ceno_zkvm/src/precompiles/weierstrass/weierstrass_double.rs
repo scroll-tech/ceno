@@ -36,12 +36,12 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     error::{BackendError, CircuitBuilderError},
     gkr::{GKRCircuit, GKRProof, GKRProverOutput, layer::Layer, mock::MockProver},
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
 };
 use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, StructuralWitInType, ToExpr, WitIn,
+    Expression, ToExpr, WitIn,
     util::{ceil_log2, max_usable_threads},
 };
 use num::BigUint;
@@ -64,6 +64,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     chip_handler::MemoryExpr,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::{FieldOperation, field_op::FieldOpCols},
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
@@ -133,20 +134,13 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
             slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
         };
 
-        let eq = cb.create_structural_witin(
-            || "weierstrass_double_eq",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
+        let eq = cb.create_placeholder_structural_witin(|| "weierstrass_double_eq");
+        let sel = SelectorType::Prefix(eq.expr());
         let selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_mem_write: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_lookup: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
-            sel_zero: SelectorType::Prefix(E::BaseField::ZERO, eq.expr()),
+            sel_mem_read: sel.clone(),
+            sel_mem_write: sel.clone(),
+            sel_lookup: sel.clone(),
+            sel_zero: sel.clone(),
         };
 
         let input32_exprs: GenericArray<
@@ -564,6 +558,7 @@ pub fn run_weierstrass_double<
     verify: bool,
     test_outputs: bool,
 ) -> Result<GKRProof<E>, BackendError> {
+    let mut shard_ctx = ShardContext::default();
     let num_instances = points.len();
     let log2_num_instance = ceil_log2(num_instances);
     let num_threads = optimal_sumcheck_threads(log2_num_instance);
@@ -593,9 +588,11 @@ pub fn run_weierstrass_double<
         InstancePaddingStrategy::Default,
     );
     let raw_witin_iter = phase1_witness.par_batch_iter_mut(num_instance_per_batch);
+    let shard_ctx_vec = shard_ctx.get_forked();
     raw_witin_iter
         .zip_eq(instances.par_chunks(num_instance_per_batch))
-        .for_each(|(instances, steps)| {
+        .zip(shard_ctx_vec)
+        .for_each(|((instances, steps), mut shard_ctx)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
                 .chunks_mut(num_witin as usize)
@@ -605,6 +602,7 @@ pub fn run_weierstrass_double<
                         .vm_state
                         .assign_instance(
                             instance,
+                            &shard_ctx,
                             &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
                         )
                         .expect("assign vm_state error");
@@ -612,6 +610,7 @@ pub fn run_weierstrass_double<
                         mem_config
                             .assign_op(
                                 instance,
+                                &mut shard_ctx,
                                 &mut lk_multiplicity,
                                 10,
                                 &MemOp {
@@ -708,6 +707,7 @@ pub fn run_weierstrass_double<
         &structural_witness,
         &fixed,
         &[],
+        &[],
         &challenges,
     );
     exit_span!(span);
@@ -748,6 +748,7 @@ pub fn run_weierstrass_double<
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
+    let selector_ctxs = vec![SelectorContext::new(0, num_instances, log2_num_instance); 1];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -757,7 +758,7 @@ pub fn run_weierstrass_double<
             &[],
             &challenges,
             &mut prover_transcript,
-            num_instances,
+            &selector_ctxs,
         )
         .expect("Failed to prove phase");
     exit_span!(span);
@@ -780,9 +781,10 @@ pub fn run_weierstrass_double<
                     gkr_proof.clone(),
                     &out_evals,
                     &[],
+                    &[],
                     &challenges,
                     &mut verifier_transcript,
-                    num_instances,
+                    &selector_ctxs,
                 )
                 .expect("GKR verify failed");
 

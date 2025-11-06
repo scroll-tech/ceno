@@ -7,8 +7,10 @@ use super::constants::UInt;
 use crate::{
     chip_handler::{RegisterChipOperations, RegisterExpr},
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
+    structs::RAMType,
     uint::Value,
     witness::LkMultiplicity,
 };
@@ -62,11 +64,15 @@ impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID
     pub fn assign_op(
         &self,
         instance: &mut [E::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,
     ) -> Result<(), ZKVMError> {
-        set_val!(instance, self.prev_ts, op.previous_cycle);
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let shard_cycle = cycle - current_shard_offset_cycle;
+        set_val!(instance, self.prev_ts, shard_prev_cycle);
 
         // Register state
         if let Some(prev_value) = self.prev_value.as_ref() {
@@ -76,17 +82,30 @@ impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID
             );
         }
 
+        let (shard_cycle, cycle) = if RW {
+            (
+                shard_cycle + Tracer::SUBCYCLE_RD,
+                cycle + Tracer::SUBCYCLE_RD,
+            )
+        } else {
+            (
+                shard_cycle + Tracer::SUBCYCLE_RS1,
+                cycle + Tracer::SUBCYCLE_RS1,
+            )
+        };
         // Register write
-        self.lt_cfg.assign_instance(
-            instance,
-            lk_multiplicity,
+        self.lt_cfg
+            .assign_instance(instance, lk_multiplicity, shard_prev_cycle, shard_cycle)?;
+
+        shard_ctx.send(
+            RAMType::Register,
+            op.addr,
+            REG_ID as u64,
+            cycle,
             op.previous_cycle,
-            if RW {
-                cycle + Tracer::SUBCYCLE_RD
-            } else {
-                cycle + Tracer::SUBCYCLE_RS1
-            },
-        )?;
+            op.value.after,
+            None,
+        );
 
         Ok(())
     }

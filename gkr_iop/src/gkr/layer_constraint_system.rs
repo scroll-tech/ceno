@@ -417,12 +417,15 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                 self.num_witin,
                 0,
                 self.num_fixed,
+                0,
                 expressions,
                 n_challenges,
                 in_eval_expr,
                 expr_evals,
                 ((None, vec![]), 0, 0),
                 expr_names,
+                vec![],
+                vec![],
             )
         } else {
             let Some(RotationParams {
@@ -439,6 +442,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                 self.num_witin,
                 0,
                 self.num_fixed,
+                0,
                 expressions,
                 n_challenges,
                 in_eval_expr,
@@ -449,6 +453,8 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                     rotation_cyclic_subgroup_size,
                 ),
                 expr_names,
+                vec![],
+                vec![],
             )
         }
     }

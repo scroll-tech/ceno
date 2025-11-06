@@ -9,6 +9,7 @@ use std::{fs, path::PathBuf, time::Duration};
 mod alloc;
 use criterion::*;
 
+use ceno_zkvm::e2e::MultiProver;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 use mpcs::BasefoldDefault;
@@ -65,6 +66,7 @@ fn fibonacci_witness(c: &mut Criterion) {
                         create_prover(backend.clone()),
                         program.clone(),
                         platform.clone(),
+                        MultiProver::default(),
                         &Vec::from(&hints),
                         &[],
                         max_steps,

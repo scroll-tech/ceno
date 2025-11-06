@@ -1,3 +1,4 @@
+use crate::structs::EccQuarkProof;
 use ff_ext::ExtensionField;
 use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
@@ -29,6 +30,7 @@ pub mod cpu;
 pub mod gpu;
 pub mod hal;
 pub mod prover;
+pub mod septic_curve;
 pub mod utils;
 pub mod verifier;
 
@@ -58,8 +60,10 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub gkr_iop_proof: Option<GKRProof<E>>,
 
     pub tower_proof: TowerProofs<E>,
+    pub ecc_proof: Option<EccQuarkProof<E>>,
 
-    pub num_instances: usize,
+    pub num_instances: Vec<usize>,
+
     pub fixed_in_evals: Vec<E>,
     pub wits_in_evals: Vec<E>,
 }
@@ -67,22 +71,27 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 /// each field will be interpret to (constant) polynomial
 #[derive(Default, Clone, Debug)]
 pub struct PublicValues {
-    exit_code: u32,
-    init_pc: u32,
-    init_cycle: u64,
-    end_pc: u32,
-    end_cycle: u64,
-    public_io: Vec<u32>,
+    pub exit_code: u32,
+    pub init_pc: u32,
+    pub init_cycle: u64,
+    pub end_pc: u32,
+    pub end_cycle: u64,
+    pub shard_id: u32,
+    pub public_io: Vec<u32>,
+    pub shard_rw_sum: Vec<u32>,
 }
 
 impl PublicValues {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         exit_code: u32,
         init_pc: u32,
         init_cycle: u64,
         end_pc: u32,
         end_cycle: u64,
+        shard_id: u32,
         public_io: Vec<u32>,
+        shard_rw_sum: Vec<u32>,
     ) -> Self {
         Self {
             exit_code,
@@ -90,7 +99,9 @@ impl PublicValues {
             init_cycle,
             end_pc,
             end_cycle,
+            shard_id,
             public_io,
+            shard_rw_sum,
         }
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
@@ -103,6 +114,7 @@ impl PublicValues {
             vec![E::BaseField::from_canonical_u64(self.init_cycle)],
             vec![E::BaseField::from_canonical_u32(self.end_pc)],
             vec![E::BaseField::from_canonical_u64(self.end_cycle)],
+            vec![E::BaseField::from_canonical_u32(self.shard_id)],
         ]
         .into_iter()
         .chain(
@@ -118,6 +130,12 @@ impl PublicValues {
                         })
                         .collect_vec()
                 })
+                .collect_vec(),
+        )
+        .chain(
+            self.shard_rw_sum
+                .iter()
+                .map(|value| vec![E::BaseField::from_canonical_u32(*value)])
                 .collect_vec(),
         )
         .collect::<Vec<_>>()
@@ -193,7 +211,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         let halt_instance_count = self
             .chip_proofs
             .get(&halt_circuit_index)
-            .map_or(0, |proof| proof.num_instances);
+            .map_or(0, |proof| proof.num_instances.iter().sum());
         if halt_instance_count > 0 {
             assert_eq!(
                 halt_instance_count, 1,
