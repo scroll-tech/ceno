@@ -33,7 +33,6 @@ use gkr_iop::{RAMType, hal::ProverBackend};
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use std::{
@@ -110,7 +109,9 @@ pub struct EmulationResult<'a> {
 
 pub struct RAMRecord {
     pub ram_type: RAMType,
-    pub id: u64,
+    // reg_id is the raw id of register, e.g. in riv32 it's range from [0, 32)
+    // meaningful when RAMType::Register
+    pub reg_id: u64,
     pub addr: WordAddr,
     // prev_cycle and cycle are global cycle
     pub prev_cycle: Cycle,
@@ -164,14 +165,13 @@ pub struct ShardContext<'a> {
     shard_id: usize,
     num_shards: usize,
     max_cycle: Cycle,
-    // TODO optimize this map as it's super huge
     addr_future_accesses: Arc<NextCycleAccess>,
     // this is only updated in first shard
     addr_accessed_thread_based_first_shard:
         Either<Vec<FxHashSet<WordAddr>>, &'a mut FxHashSet<WordAddr>>,
-    read_thread_based_record_storage:
+    read_records_tbs:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
-    write_thread_based_record_storage:
+    write_records_tbs:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     pub cur_shard_cycle_range: std::ops::Range<usize>,
     pub expected_inst_per_shard: usize,
@@ -183,23 +183,20 @@ impl<'a> Default for ShardContext<'a> {
         Self {
             shard_id: 0,
             num_shards: 1,
-            max_cycle: Cycle::default(),
+            max_cycle: Cycle::MAX,
             addr_future_accesses: Arc::new(Default::default()),
             addr_accessed_thread_based_first_shard: Either::Left(
                 (0..max_threads)
-                    .into_par_iter()
                     .map(|_| Default::default())
                     .collect::<Vec<_>>(),
             ),
-            read_thread_based_record_storage: Either::Left(
+            read_records_tbs: Either::Left(
                 (0..max_threads)
-                    .into_par_iter()
                     .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
-            write_thread_based_record_storage: Either::Left(
+            write_records_tbs: Either::Left(
                 (0..max_threads)
-                    .into_par_iter()
                     .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
@@ -309,21 +306,18 @@ impl<'a> ShardContext<'a> {
                     addr_future_accesses: addr_future_accesses.clone(),
                     addr_accessed_thread_based_first_shard: Either::Left(
                         (0..max_threads)
-                            .into_par_iter()
                             .map(|_| Default::default())
                             .collect::<Vec<_>>(),
                     ),
                     // TODO with_capacity optimisation
-                    read_thread_based_record_storage: Either::Left(
+                    read_records_tbs: Either::Left(
                         (0..max_threads)
-                            .into_par_iter()
                             .map(|_| BTreeMap::new())
                             .collect::<Vec<_>>(),
                     ),
                     // TODO with_capacity optimisation
-                    write_thread_based_record_storage: Either::Left(
+                    write_records_tbs: Either::Left(
                         (0..max_threads)
-                            .into_par_iter()
                             .map(|_| BTreeMap::new())
                             .collect::<Vec<_>>(),
                     ),
@@ -336,8 +330,8 @@ impl<'a> ShardContext<'a> {
 
     pub fn get_forked(&mut self) -> Vec<ShardContext<'_>> {
         match (
-            &mut self.read_thread_based_record_storage,
-            &mut self.write_thread_based_record_storage,
+            &mut self.read_records_tbs,
+            &mut self.write_records_tbs,
             &mut self.addr_accessed_thread_based_first_shard,
         ) {
             (
@@ -357,8 +351,8 @@ impl<'a> ShardContext<'a> {
                         addr_accessed_thread_based_first_shard: Either::Right(
                             addr_accessed_thread_based_first_shard,
                         ),
-                        read_thread_based_record_storage: Either::Right(read),
-                        write_thread_based_record_storage: Either::Right(write),
+                        read_records_tbs: Either::Right(read),
+                        write_records_tbs: Either::Right(write),
                         cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
                         expected_inst_per_shard: self.expected_inst_per_shard,
                     },
@@ -369,14 +363,14 @@ impl<'a> ShardContext<'a> {
     }
 
     pub fn read_records(&self) -> &[BTreeMap<WordAddr, RAMRecord>] {
-        match &self.read_thread_based_record_storage {
+        match &self.read_records_tbs {
             Either::Left(m) => m,
             Either::Right(_) => panic!("undefined behaviour"),
         }
     }
 
     pub fn write_records(&self) -> &[BTreeMap<WordAddr, RAMRecord>] {
-        match &self.write_thread_based_record_storage {
+        match &self.write_records_tbs {
             Either::Left(m) => m,
             Either::Right(_) => panic!("undefined behaviour"),
         }
@@ -393,7 +387,7 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
-    pub fn is_current_shard_cycle(&self, cycle: Cycle) -> bool {
+    pub fn is_in_current_shard(&self, cycle: Cycle) -> bool {
         self.cur_shard_cycle_range.contains(&(cycle as usize))
     }
 
@@ -408,7 +402,7 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
-    pub fn extract_prev_shard_id(&self, cycle: Cycle) -> usize {
+    pub fn extract_shard_id(&self, cycle: Cycle) -> usize {
         let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN;
         let per_shard_cycles =
             (self.expected_inst_per_shard as u64).saturating_mul(subcycle_per_insn);
@@ -434,6 +428,14 @@ impl<'a> ShardContext<'a> {
         (self.cur_shard_cycle_range.start as Cycle) - Tracer::SUBCYCLES_PER_INSN
     }
 
+    /// Finds the **next** future access cycle for the given address, starting from
+    /// the specified current cycle.
+    ///
+    /// Note that the returned cycle is simply the *next* access, not necessarily
+    /// the final (last) access of the address.
+    ///
+    /// For example, if address `0xabc` is accessed at cycles `4` and `8`,
+    /// then `find_future_next_access(0xabc, 4)` returns `8`.
     #[inline(always)]
     pub fn find_future_next_access(&self, cycle: Cycle, addr: WordAddr) -> Option<Cycle> {
         self.addr_future_accesses
@@ -466,12 +468,12 @@ impl<'a> ShardContext<'a> {
         // check read from external mem bus
         // exclude first shard
         if self.before_current_shard_cycle(prev_cycle)
-            && self.is_current_shard_cycle(cycle)
+            && self.is_in_current_shard(cycle)
             && !self.is_first_shard()
         {
-            let prev_shard_id = self.extract_prev_shard_id(prev_cycle);
+            let prev_shard_id = self.extract_shard_id(prev_cycle);
             let ram_record = self
-                .read_thread_based_record_storage
+                .read_records_tbs
                 .as_mut()
                 .right()
                 .expect("illegal type");
@@ -479,7 +481,7 @@ impl<'a> ShardContext<'a> {
                 addr,
                 RAMRecord {
                     ram_type,
-                    id,
+                    reg_id: id,
                     addr,
                     prev_cycle,
                     cycle,
@@ -494,11 +496,11 @@ impl<'a> ShardContext<'a> {
         // check write to external mem bus
         if let Some(future_touch_cycle) = self.find_future_next_access(cycle, addr)
             && self.after_current_shard_cycle(future_touch_cycle)
-            && self.is_current_shard_cycle(cycle)
+            && self.is_in_current_shard(cycle)
         {
             let shard_cycle = self.aligned_current_ts(cycle);
             let ram_record = self
-                .write_thread_based_record_storage
+                .write_records_tbs
                 .as_mut()
                 .right()
                 .expect("illegal type");
@@ -506,7 +508,7 @@ impl<'a> ShardContext<'a> {
                 addr,
                 RAMRecord {
                     ram_type,
-                    id,
+                    reg_id: id,
                     addr,
                     prev_cycle,
                     cycle,
@@ -1015,7 +1017,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
         let mut pi = pi.clone();
         let n = all_records
             .iter()
-            .take_while(|step| shard_ctx.is_current_shard_cycle(step.cycle()))
+            .take_while(|step| shard_ctx.is_in_current_shard(step.cycle()))
             .count();
         let mut filtered_steps = all_records.split_off(n); // moves pointer boundary, no mem shift
         std::mem::swap(&mut all_records, &mut filtered_steps);

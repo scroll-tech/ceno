@@ -1,7 +1,17 @@
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::ops::{Index, IndexMut};
 
-/// a chunked vector that grows in fixed-size chunks.
+/// A growable vector divided into fixed-size chunks.
+///
+/// This structure behaves similarly to a `Vec`, but allocates memory
+/// in discrete chunks of a fixed size rather than continuously.
+/// It is especially useful when the total number of elements is large
+/// or not known in advance, as it avoids repeated reallocations.
+///
+/// Conceptually, it can be seen as a "DENSE" map-like container where accessed
+/// keys are comparable indices and values are stored in chunked segments.
+///
+/// This layout is more cache-friendly when keys are accessed in increasing order.
 #[derive(Default, Debug, Clone)]
 pub struct ChunkedVec<T> {
     chunks: Vec<Vec<T>>,

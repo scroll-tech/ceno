@@ -309,7 +309,12 @@ pub struct Tracer {
     // record each section max access address
     // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
+
+    // keep track of each address that the cycle when they were last accessed.
     latest_accesses: FxHashMap<WordAddr, Cycle>,
+
+    // keep track of each cycle that accessed addresses in the future with respective future cycles.
+    // format: [current cycle -> Vec<(WordAddr, Cycle)>]
     next_accesses: NextCycleAccess,
 }
 
@@ -485,12 +490,10 @@ impl Tracer {
         prev_cycle
     }
 
-    /// Return all the addresses that were accessed and the cycle when they were last accessed.
     pub fn final_accesses(&self) -> &FxHashMap<WordAddr, Cycle> {
         &self.latest_accesses
     }
 
-    /// Return all the addresses that were accessed and the cycle when they were last accessed.
     pub fn next_accesses(self) -> NextCycleAccess {
         self.next_accesses
     }

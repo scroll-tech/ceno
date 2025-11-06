@@ -56,7 +56,7 @@ pub struct ShardRamRecord {
 impl From<(&WordAddr, &RAMRecord, bool)> for ShardRamRecord {
     fn from((vma, record, is_to_write_set): (&WordAddr, &RAMRecord, bool)) -> Self {
         let addr = match record.ram_type {
-            RAMType::Register => record.id as u32,
+            RAMType::Register => record.reg_id as u32,
             RAMType::Memory => (*vma).into(),
             _ => unreachable!(),
         };

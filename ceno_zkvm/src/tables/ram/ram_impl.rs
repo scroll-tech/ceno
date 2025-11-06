@@ -488,7 +488,7 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
 
         let is_current_shard_mem_record = |record: &&MemFinalRecord| -> bool {
             (shard_ctx.is_first_shard() && record.cycle == 0)
-                || shard_ctx.is_current_shard_cycle(record.cycle)
+                || shard_ctx.is_in_current_shard(record.cycle)
         };
 
         // collect each raw mem belong to this shard, BEFORE padding length
