@@ -6,8 +6,8 @@ use crate::{
     scheme::septic_curve::SepticPoint,
     state::StateCircuit,
     tables::{
-        GlobalPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput,
-        ShardRamRecord, TableCircuit,
+        ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
+        TableCircuit,
     },
 };
 use ceno_emul::{CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
@@ -451,7 +451,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 .par_iter()
                 .flat_map_iter(|(_, final_mem)| {
                     final_mem.iter().filter_map(|mem_record| {
-                        // prepare global writes record for those record which not accessed in first record
+                        // prepare cross shard writes record for those record which not accessed in first record
                         // but access in future shard
                         let (waddr, addr): (WordAddr, u32) = match mem_record.ram_type {
                             RAMType::Register => (
@@ -478,7 +478,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                                 global_clk: 0,
                                 is_to_write_set: true,
                             };
-                            let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
+                            let ec_point: ECPoint<E> = global_write.to_ec_point(&perm);
                             Some(ShardRamInput {
                                 record: global_write,
                                 ec_point,
@@ -501,7 +501,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 // global write -> local reads
                 records.iter().map(|(vma, record)| {
                     let global_write: ShardRamRecord = (vma, record, true).into();
-                    let ec_point: GlobalPoint<E> = global_write.to_ec_point(&perm);
+                    let ec_point: ECPoint<E> = global_write.to_ec_point(&perm);
                     ShardRamInput {
                         record: global_write,
                         ec_point,
@@ -517,7 +517,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                         // global read -> local write
                         records.iter().map(|(vma, record)| {
                             let global_read: ShardRamRecord = (vma, record, false).into();
-                            let ec_point: GlobalPoint<E> = global_read.to_ec_point(&perm);
+                            let ec_point: ECPoint<E> = global_read.to_ec_point(&perm);
                             ShardRamInput {
                                 record: global_read,
                                 ec_point,

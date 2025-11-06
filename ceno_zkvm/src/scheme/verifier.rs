@@ -120,7 +120,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], E::from_canonical_u32(self.vk.entry_pc));
                 }
                 let end_pc = vm_proof.pi_evals[END_PC_IDX];
-                // add to global shard ec
+                // add to shard ec sum
                 shard_ec_sum = shard_ec_sum + self.verify_proof_validity(shard_id, vm_proof, transcript)?;
                 Ok((Some(end_pc), shard_ec_sum))
             })?;
@@ -586,7 +586,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
             assert_eq!(proof.num_instances.len(), 1);
-            // it's not global chip
+            // it's not shard chip
             vec![
                 SelectorContext::new(0, num_instances, num_var_with_rotation);
                 gkr_circuit
@@ -597,7 +597,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ]
         } else {
             assert_eq!(proof.num_instances.len(), 2);
-            // it's global chip
+            // it's shard chip
             tracing::debug!(
                 "num_reads: {}, num_writes: {}, total: {}",
                 proof.num_instances[0],

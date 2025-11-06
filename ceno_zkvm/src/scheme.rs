@@ -78,7 +78,7 @@ pub struct PublicValues {
     pub end_cycle: u64,
     pub shard_id: u32,
     pub public_io: Vec<u32>,
-    pub global_sum: Vec<u32>,
+    pub shard_rw_sum: Vec<u32>,
 }
 
 impl PublicValues {
@@ -91,7 +91,7 @@ impl PublicValues {
         end_cycle: u64,
         shard_id: u32,
         public_io: Vec<u32>,
-        global_sum: Vec<u32>,
+        shard_rw_sum: Vec<u32>,
     ) -> Self {
         Self {
             exit_code,
@@ -101,7 +101,7 @@ impl PublicValues {
             end_cycle,
             shard_id,
             public_io,
-            global_sum,
+            shard_rw_sum,
         }
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
@@ -133,7 +133,7 @@ impl PublicValues {
                 .collect_vec(),
         )
         .chain(
-            self.global_sum
+            self.shard_rw_sum
                 .iter()
                 .map(|value| vec![E::BaseField::from_canonical_u32(*value)])
                 .collect_vec(),

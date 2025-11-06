@@ -1134,7 +1134,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 &shard_ram_witness[0],
             )
             .into_iter()
-            .zip_eq(pi.global_sum.as_mut_slice())
+            .zip_eq(pi.shard_rw_sum.as_mut_slice())
             {
                 *v = f.to_canonical_u64() as u32;
             }

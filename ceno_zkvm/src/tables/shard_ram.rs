@@ -93,10 +93,10 @@ impl From<(&WordAddr, &RAMRecord, bool)> for ShardRamRecord {
     }
 }
 
-/// An EC point corresponding to a global read/write record
+/// An EC point corresponding to a cross chunk read/write record
 /// whose x-coordinate is derived from Poseidon2 hash of the record
 #[derive(Clone, Debug)]
-pub struct GlobalPoint<E: ExtensionField> {
+pub struct ECPoint<E: ExtensionField> {
     pub nonce: u32,
     pub point: SepticPoint<E::BaseField>,
 }
@@ -105,7 +105,7 @@ impl ShardRamRecord {
     pub fn to_ec_point<E: ExtensionField, P: Permutation<Vec<E::BaseField>>>(
         &self,
         hasher: &P,
-    ) -> GlobalPoint<E> {
+    ) -> ECPoint<E> {
         let mut nonce = 0;
         let mut input = vec![
             E::BaseField::from_canonical_u32(self.addr),
@@ -144,7 +144,7 @@ impl ShardRamRecord {
 
                 let point = if negate { -p } else { p };
 
-                return GlobalPoint { nonce, point };
+                return ECPoint { nonce, point };
             } else {
                 // try again with different nonce
                 nonce += 1;
@@ -172,9 +172,9 @@ pub struct ShardRamConfig<E: ExtensionField> {
     global_clk: WitIn,
     local_clk: WitIn,
     nonce: WitIn,
-    // if it's a write to global set, then insert a local read record
+    // if it's write to global set, then insert a local read record
     // s.t. local offline memory checking can cancel out
-    // this serves as propagating local write to global.
+    // serves as propagating local write to global.
     is_global_write: WitIn,
     x: Vec<WitIn>,
     y: Vec<WitIn>,
@@ -306,7 +306,7 @@ pub struct ShardRamCircuit<E> {
 #[derive(Clone, Debug)]
 pub struct ShardRamInput<E: ExtensionField> {
     pub record: ShardRamRecord,
-    pub ec_point: GlobalPoint<E>,
+    pub ec_point: ECPoint<E>,
 }
 
 impl<E: ExtensionField> ShardRamCircuit<E> {
@@ -337,7 +337,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
         );
 
         // assign (x, y) and nonce
-        let GlobalPoint { nonce, point } = &input.ec_point;
+        let ECPoint { nonce, point } = &input.ec_point;
         set_val!(instance, config.nonce, *nonce as u64);
         config
             .x
@@ -652,7 +652,7 @@ mod tests {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::riscv::constants::GLOBAL_RW_SUM_IDX,
+        instructions::riscv::constants::SHARD_RW_SUM_IDX,
         scheme::{
             PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
             septic_curve::SepticPoint, verifier::ZKVMVerifier,
@@ -771,7 +771,7 @@ mod tests {
             public_value
                 .to_vec::<E>()
                 .into_iter()
-                .skip(GLOBAL_RW_SUM_IDX)
+                .skip(SHARD_RW_SUM_IDX)
                 .flatten()
                 .collect_vec(),
             ShardRamCircuit::extract_ec_sum(&config, &witness[0])
