@@ -11,6 +11,7 @@ use crate::{
 };
 use ceno_gpu::bb31::GpuPolynomialExt;
 use ff_ext::{ExtensionField, GoldilocksExt2};
+
 use gkr_iop::{
     gkr::{
         self, Evaluation, GKRProof, GKRProverOutput,
@@ -188,6 +189,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     cuda_hal: &CudaHalBB31,
     prod_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
+    big_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
 ) -> Result<
     (
         Vec<ceno_gpu::GpuProverSpec<'buf>>,
@@ -387,20 +389,52 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     exit_span!(span_malloc);
 
     let span_logup = entered_span!("build_logup_tower", logup_layers = logup_last_layers.len(), profiling_3 = true);
-    // Process all logup last_layers uniformly
-    for last_layer in logup_last_layers {
-        assert_eq!(last_layer.len(), 4, "logup last_layer must have 4 MLEs");
-        let nv = last_layer[0].num_vars();
 
-        let (current_buffer_slice, rest) = remaining_logup_buffers.split_at_mut(1);
-        remaining_logup_buffers = rest;
+    // Use batch processing for better performance when we have many towers
+    if logup_last_layers.len() > 1 {
+        // Batch processing path
+        let num_towers = logup_last_layers.len();
+        assert!(!logup_last_layers.is_empty(), "logup_last_layers should not be empty");
 
-        let gpu_spec = cuda_hal
+        let first_layer = &logup_last_layers[0];
+        assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
+        let nv = first_layer[0].num_vars();
+
+        // Allocate one big buffer for all towers and add it to logup_buffers
+        let tower_size = 2 * (1 << nv) * 4; // 2 * 4 * mle_len elements per tower
+        let total_buffer_size = num_towers * tower_size;
+        let big_buffer = cuda_hal.alloc_ext_elems_on_device(total_buffer_size).unwrap();
+        big_buffers.push(big_buffer);
+
+        // Get a mutable reference to the buffer we just added
+        let big_buffer = big_buffers.last_mut().unwrap();
+
+        // Convert last_layers to the expected format
+        let last_layers_refs: Vec<&[GpuPolynomialExt]> = logup_last_layers.iter().map(|v| v.as_slice()).collect();
+
+        // Build all towers in batch
+        let gpu_specs = cuda_hal
             .tower
-            .build_logup_tower_from_gpu_polys(nv, &last_layer, &mut current_buffer_slice[0])
-            .map_err(|e| format!("build_logup_tower_from_gpu_polys failed: {:?}", e))?;
+            .build_logup_tower_from_gpu_polys_batch(nv, &last_layers_refs, big_buffer, num_towers)
+            .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
 
-        logup_gpu_specs.push(gpu_spec);
+        logup_gpu_specs.extend(gpu_specs);
+    } else {
+        // Single tower path (fallback for compatibility)
+        for last_layer in logup_last_layers {
+            assert_eq!(last_layer.len(), 4, "logup last_layer must have 4 MLEs");
+            let nv = last_layer[0].num_vars();
+
+            let (current_buffer_slice, rest) = remaining_logup_buffers.split_at_mut(1);
+            remaining_logup_buffers = rest;
+
+            let gpu_spec = cuda_hal
+                .tower
+                .build_logup_tower_from_gpu_polys(nv, &last_layer, &mut current_buffer_slice[0])
+                .map_err(|e| format!("build_logup_tower_from_gpu_polys failed: {:?}", e))?;
+
+            logup_gpu_specs.push(gpu_spec);
+        }
     }
     exit_span!(span_logup);
 
@@ -473,6 +507,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             let span = entered_span!("build_tower_witness", profiling_2 = true);
             let mut _prod_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
+            let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
                 composed_cs,
                 input,
@@ -481,6 +516,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
                 &cuda_hal,
                 &mut _prod_buffers,
                 &mut _logup_buffers,
+                &mut _big_buffers,
             )
             .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
             .unwrap();
