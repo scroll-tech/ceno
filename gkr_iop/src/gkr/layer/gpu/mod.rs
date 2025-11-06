@@ -43,6 +43,7 @@ use crate::{
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
 pub mod utils;
+use crate::selector::SelectorContext;
 use utils::*;
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<GpuBackend<E, PCS>>
@@ -112,7 +113,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         pub_io_evals: &[<GpuBackend<E, PCS> as ProverBackend>::E],
         challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (
         LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<GpuBackend<E, PCS> as ProverBackend>::E>,
@@ -175,8 +176,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .out_sel_and_eval_exprs
             .iter()
             .zip(out_points.iter())
-            .map(|((sel_type, _), point)| {
-                build_eq_x_r_with_sel_gpu(&cuda_hal, point, num_instances, sel_type)
+            .zip(selector_ctxs.iter())
+            .map(|(((sel_type, _), point), selector_ctx)| {
+                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type)
             })
             // for rotation left point
             .chain(
