@@ -736,11 +736,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             let span = entered_span!("fixed::evals + witin::evals", profiling_3 = true);
             // In table proof, we always skip same point sumcheck for now
             // as tower sumcheck batch product argument/logup in same length
+            let cuda_hal = get_cuda_hal().unwrap();
             let mut evals = input
                 .witness
                 .iter()
                 .chain(input.fixed.iter())
-                .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
+                .map(|poly| poly.evaluate(&cuda_hal, &rt_tower[..poly.num_vars()]))
                 .collect::<Vec<_>>();
             println!("[prove_main_constraints] evals.len() = {}", evals.len());
             let fixed_in_evals = evals.split_off(input.witness.len());

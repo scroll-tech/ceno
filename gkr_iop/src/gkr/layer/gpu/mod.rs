@@ -417,7 +417,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
         .iter()
         .map(|(rotated_expr, _)| match rotated_expr {
             Expression::WitIn(source_wit_id) => {
-                wit[*source_wit_id as usize].evaluate(&left_point)
+                wit[*source_wit_id as usize].evaluate(&cuda_hal, &left_point)
             }
             _ => unreachable!(),
         })
@@ -446,7 +446,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
 
                 let expected_right_eval = match rotated_expr {
                     Expression::WitIn(source_wit_id) => {
-                        wit[*source_wit_id as usize].evaluate(&right_point)
+                        wit[*source_wit_id as usize].evaluate(&cuda_hal, &right_point)
                     }
                     _ => unreachable!(),
                 };

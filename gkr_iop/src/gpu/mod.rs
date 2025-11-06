@@ -124,7 +124,12 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu
     }
 
     fn eval(&self, point: Point<E>) -> E {
-        self.evaluate(&point)
+        // [gpu] eval: fallback to cpu, time = us level
+        //     let timer = std::time::Instant::now();
+        //     let res = self.inner_to_mle().evaluate(&point);
+        //     println!("[gpu] eval: fallback to cpu, time = {:?}", timer.elapsed());
+        //     res
+        self.inner_to_mle().evaluate(&point);
     }
 
     /// Get the length of evaluation data
@@ -184,17 +189,17 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Evaluate polynomial at given point
-    pub fn evaluate(&self, points: &[E]) -> E {
+    pub fn evaluate(&self, cuda_hal: &CudaHalBB31, points: &[E]) -> E {
         // self.inner_to_mle().evaluate(point)
-        println!("[gpu] evaluate");
-        let cuda_hal = get_cuda_hal().unwrap();
-        println!("  [gpu] cuda_hal");
+        // println!("[gpu] evaluate");
+        // let cuda_hal = get_cuda_hal().unwrap();
+        // println!("  [gpu] cuda_hal");
 
         let res: E = if std::any::TypeId::of::<E>() == std::any::TypeId::of::<BB31Ext>() {
             let points_bb31: &[BB31Ext] = unsafe { std::mem::transmute(points) };
             let res_bb31: BB31Ext = match &self.mle {
-                GpuFieldType::Base(poly) => poly.evaluate(&*cuda_hal, points_bb31),
-                GpuFieldType::Ext(poly) => poly.evaluate(&*cuda_hal, points_bb31),
+                GpuFieldType::Base(poly) => poly.evaluate(cuda_hal, points_bb31),
+                GpuFieldType::Ext(poly) => poly.evaluate(cuda_hal, points_bb31),
                 GpuFieldType::Unreachable => unreachable!(),
             };
             
