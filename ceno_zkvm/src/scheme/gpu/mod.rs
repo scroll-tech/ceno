@@ -234,6 +234,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     let mut r_set_gpu_chunks = Vec::new();
     let mut w_set_gpu_chunks = Vec::new();
 
+    let span = entered_span!("masked_mle_split_to_chunks", profiling_3 = true);
     // Process read set witnesses using GPU
     for wit in r_set_wit.iter() {
         let gpu_chunks = cuda_hal
@@ -300,9 +301,12 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for lk_d: {:?}", e))?;
         lk_denominator_gpu_chunks.push(gpu_chunks);
     }
+    exit_span!(span);
 
+    let span = entered_span!("build_tower_from_gpu_polys", profiling_3 = true);
     // First, allocate buffers based on original witness num_vars
     // This avoids the need to call build_tower_witness just to get buffer sizes
+    let span_malloc = entered_span!("malloc_buffers", profiling_3 = true);
     for wit in r_set_wit.iter().chain(w_set_wit.iter()) {
         let nv = wit.num_vars();
         let buf = cuda_hal
@@ -318,7 +322,9 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .map_err(|e| format!("Failed to allocate logup GPU buffer: {:?}", e))?;
         logup_buffers.push(buf);
     }
+    exit_span!(span_malloc);
 
+    let span_prod = entered_span!("build_prod_tower", profiling_3 = true);
     // Build product GpuProverSpecs using GPU polynomials directly
     let mut prod_gpu_specs = Vec::new();
     let mut remaining_prod_buffers = &mut prod_buffers[..];
@@ -338,7 +344,10 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
         prod_gpu_specs.push(gpu_spec);
     }
+    exit_span!(span_prod);
 
+
+    let span_malloc = entered_span!("malloc_logup_buffers", profiling_3 = true);
     // Build logup GpuProverSpecs using GPU polynomials directly
     let mut logup_gpu_specs = Vec::new();
     let mut remaining_logup_buffers = &mut logup_buffers[..];
@@ -375,7 +384,9 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             })
             .collect::<Vec<_>>()
     };
+    exit_span!(span_malloc);
 
+    let span_logup = entered_span!("build_logup_tower", profiling_3 = true);
     // Process all logup last_layers uniformly
     for last_layer in logup_last_layers {
         assert_eq!(last_layer.len(), 4, "logup last_layer must have 4 MLEs");
@@ -391,7 +402,9 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
         logup_gpu_specs.push(gpu_spec);
     }
+    exit_span!(span_logup);
 
+    exit_span!(span);
     Ok((prod_gpu_specs, logup_gpu_specs))
 }
 
@@ -720,7 +733,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 Some(gkr_proof),
             ))
         } else {
-            let span = entered_span!("fixed::evals + witin::evals");
+            let span = entered_span!("fixed::evals + witin::evals", profiling_3 = true);
             // In table proof, we always skip same point sumcheck for now
             // as tower sumcheck batch product argument/logup in same length
             let mut evals = input
@@ -729,6 +742,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 .chain(input.fixed.iter())
                 .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
                 .collect::<Vec<_>>();
+            println!("[prove_main_constraints] evals.len() = {}", evals.len());
             let fixed_in_evals = evals.split_off(input.witness.len());
             let wits_in_evals = evals;
             exit_span!(span);

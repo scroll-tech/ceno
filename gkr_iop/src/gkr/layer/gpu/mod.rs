@@ -155,12 +155,32 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     challenges,
                     transcript,
                 );
+                // let (
+                //     proof,
+                //     RotationPoints {
+                //         left,
+                //         right,
+                //         origin,
+                //     },
+                // ) = prove_rotation_gpu(
+                //     num_threads,
+                //     max_num_variables,
+                //     layer.rotation_cyclic_subgroup_size,
+                //     layer.rotation_cyclic_group_log2,
+                //     &wit,
+                //     raw_rotation_exprs,
+                //     rotation_sumcheck_expression.clone(),
+                //     rt,
+                //     challenges,
+                //     transcript,
+                // );
                 (Some(proof), Some(left), Some(right), Some(origin))
             } else {
                 (None, None, None, None)
             };
 
         // 2th sumcheck: batch rotation with other constrains
+        let span_eq = entered_span!("build eqs", profiling_2 = true);
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
             get_challenge_pows(
@@ -197,6 +217,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     .map(|rotation_point| build_eq_x_r_gpu(&cuda_hal, rotation_point)),
             )
             .collect::<Vec<_>>();
+        exit_span!(span_eq);
+
         let all_witins_gpu = wit
             .iter()
             .take(layer.n_witin)
@@ -226,6 +248,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .map(|indices| indices.len())
             .max()
             .unwrap_or(0);
+
 
         // Convert types for GPU function Call
         let basic_tr: &mut BasicTranscript<BB31Ext> =
@@ -298,6 +321,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     // rotated_mles is non-deterministic input, rotated from existing witness polynomial
     // we will reduce it to zero check, and finally reduce to committed polynomial opening
     let span = entered_span!("rotate_witin_selector", profiling_3 = true);
+    let span_build_rotation_mles = entered_span!("build_rotation_mles", profiling_3 = true);
     let rotated_mles_gpu = build_rotation_mles_gpu(
         &cuda_hal,
         raw_rotation_exprs,
@@ -305,6 +329,9 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
         &bh,
         rotation_cyclic_group_log2,
     );
+    exit_span!(span_build_rotation_mles);
+
+    let span_build_rotation_selector = entered_span!("build_rotation_selector", profiling_3 = true);
     let selector_gpu = build_rotation_selector_gpu(
         &cuda_hal,
         wit,
@@ -313,6 +340,8 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
         rotation_cyclic_subgroup_size,
         rotation_cyclic_group_log2,
     );
+    exit_span!(span_build_rotation_selector);
+
     let rotation_challenges = chain!(
         global_challenges.iter().copied(),
         get_challenge_pows(raw_rotation_exprs.len(), transcript)
@@ -379,24 +408,38 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     evals_gpu_e.truncate(raw_rotation_exprs.len() * 2);
     exit_span!(span);
 
-    let span = entered_span!("rotation derived left/right eval", profiling_3 = true);
+    println!("[rotation gpu] raw_rotation_exprs.len() = {}", raw_rotation_exprs.len());
+
+    let span = entered_span!("rotation derived left/right eval (left)", profiling_3 = true);
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
     let (left_point, right_point) = bh.get_rotation_points(&row_challenges_e);
+    let left_evals: Vec<E> = raw_rotation_exprs
+        .iter()
+        .map(|(rotated_expr, _)| match rotated_expr {
+            Expression::WitIn(source_wit_id) => {
+                wit[*source_wit_id as usize].evaluate(&left_point)
+            }
+            _ => unreachable!(),
+        })
+        .collect();
+    exit_span!(span);
+
+    let span = entered_span!("rotation derived left/right eval (rest)", profiling_3 = true);
     let evals = evals_gpu_e
         .chunks_exact(2)
         .zip_eq(raw_rotation_exprs.iter())
-        .flat_map(|(evals, (rotated_expr, _))| {
+        .zip_eq(left_evals.iter())
+        .flat_map(|((evals, (rotated_expr, _)), &left_eval)| {
             let [rotated_eval, target_eval] = evals else {
                 unreachable!()
             };
-            let left_eval = match rotated_expr {
-                Expression::WitIn(source_wit_id) => {
-                    wit[*source_wit_id as usize].evaluate(&left_point)
-                }
-                _ => unreachable!(),
-            };
-            let right_eval =
-                bh.get_rotation_right_eval_from_left(*rotated_eval, left_eval, &row_challenges_e);
+            
+            let right_eval = bh.get_rotation_right_eval_from_left(
+                *rotated_eval,
+                left_eval,
+                &row_challenges_e,
+            );
+            
             #[cfg(debug_assertions)]
             {
                 use multilinear_extensions::Expression;
@@ -412,11 +455,13 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
                     "rotation right eval mismatch: expected {expected_right_eval}, got {right_eval}"
                 );
             }
+            
             [left_eval, right_eval, *target_eval]
         })
         .collect::<Vec<E>>();
     exit_span!(span);
 
+    println!("[rotation gpu] evals.len() = {}", evals.len());
     (
         SumcheckLayerProof {
             proof: proof_gpu_e,

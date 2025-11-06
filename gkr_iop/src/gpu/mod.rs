@@ -184,8 +184,29 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Evaluate polynomial at given point
-    pub fn evaluate(&self, point: &[E]) -> E {
-        self.inner_to_mle().evaluate(point)
+    pub fn evaluate(&self, points: &[E]) -> E {
+        // self.inner_to_mle().evaluate(point)
+        println!("[gpu] evaluate");
+        let cuda_hal = get_cuda_hal().unwrap();
+        println!("  [gpu] cuda_hal");
+
+        let res: E = if std::any::TypeId::of::<E>() == std::any::TypeId::of::<BB31Ext>() {
+            let points_bb31: &[BB31Ext] = unsafe { std::mem::transmute(points) };
+            let res_bb31: BB31Ext = match &self.mle {
+                GpuFieldType::Base(poly) => poly.evaluate(&*cuda_hal, points_bb31),
+                GpuFieldType::Ext(poly) => poly.evaluate(&*cuda_hal, points_bb31),
+                GpuFieldType::Unreachable => unreachable!(),
+            };
+            
+            let res = unsafe { std::mem::transmute_copy(&res_bb31) }; // BB31Ext -> E
+            // std::mem::forget(res_bb31);
+            res
+        }
+        else {
+            panic!("GPU backend only supports BB31Ext");
+        };
+
+        res
     }
 
     /// Create GPU version from CPU version of MultilinearExtension

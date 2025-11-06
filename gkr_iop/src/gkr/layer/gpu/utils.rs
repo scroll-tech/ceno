@@ -9,7 +9,7 @@ use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     Expression, mle::Point, monomial::Term, utils::eval_by_expr_constant,
 };
-
+use sumcheck::macros::{entered_span, exit_span};
 use crate::selector::SelectorType;
 
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
@@ -156,6 +156,7 @@ pub fn build_rotation_mles_gpu<E: ExtensionField, PCS: PolynomialCommitmentSchem
     bh: &BooleanHypercube,
     rotation_cyclic_group_log2: usize,
 ) -> Vec<MultilinearExtensionGpu<'static, E>> {
+    println!("build_rotation_mles_gpu: raw_rotation_exprs.len() = {}", raw_rotation_exprs.len());
     raw_rotation_exprs
         .iter()
         .map(|rotation_expr| match rotation_expr {
@@ -172,13 +173,18 @@ pub fn build_rotation_mles_gpu<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     GpuFieldType::Ext(_) => panic!("should be base field"),
                     _ => panic!("unimplemented input mle"),
                 };
+
+                let span_malloc_output_buf = entered_span!("malloc_output_buf", profiling_3 = true);
+                // println!("malloc_output_buf: input_buf.len() = {}", input_buf.len());
                 let mut output_buf = cuda_hal.alloc_elems_on_device(input_buf.len()).unwrap();
+                exit_span!(span_malloc_output_buf);
 
                 // Safety: GPU buffers are actually 'static lifetime. We only read from input_buf
                 // during the GPU kernel execution, which completes synchronously before returning.
                 let input_buf_static: &BufferImpl<'static, BB31Base> =
                     unsafe { std::mem::transmute(input_buf) };
 
+                let span_rotation_next_base_mle = entered_span!("rotation_next_base_mle", profiling_3 = true);
                 rotation_next_base_mle_gpu::<CudaHalBB31, BB31Ext, BB31Base>(
                     &cuda_hal.inner,
                     &mut output_buf,
@@ -187,6 +193,8 @@ pub fn build_rotation_mles_gpu<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     cyclic_group_size,
                 )
                 .unwrap();
+                exit_span!(span_rotation_next_base_mle);
+
                 let output_mle = MultilinearExtensionGpu::from_ceno_gpu_base(GpuPolynomial::new(
                     output_buf,
                     input_mle.mle.num_vars(),
