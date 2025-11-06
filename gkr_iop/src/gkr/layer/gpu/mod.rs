@@ -178,7 +178,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .zip(out_points.iter())
             .zip(selector_ctxs.iter())
             .map(|(((sel_type, _), point), selector_ctx)| {
-                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx.num_instances, sel_type)
+                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type)
             })
             // for rotation left point
             .chain(
