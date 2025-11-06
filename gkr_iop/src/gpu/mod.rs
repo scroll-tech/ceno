@@ -35,6 +35,7 @@ pub mod gpu_prover {
     use cudarc::driver::{CudaContext, DriverError};
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex, MutexGuard};
+    use multilinear_extensions::macros::{entered_span, exit_span};
 
     pub type BB31Base = p3::babybear::BabyBear;
     pub type BB31Ext = ff_ext::BabyBearExt4;
@@ -57,17 +58,15 @@ pub mod gpu_prover {
     });
 
     pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalBB31>, String> {
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))?;
-        device
-            .bind_to_thread()
-            .map_err(|e| format!("Failed to bind device to thread: {:?}", e))?;
-
+        // let device = CUDA_DEVICE
+        //     .as_ref()
+        //     .map_err(|e| format!("Device not available: {:?}", e))?;
+        // device
+        //     .bind_to_thread()
+        //     .map_err(|e| format!("Failed to bind device to thread: {:?}", e))?;
         let hal_arc = CUDA_HAL
             .as_ref()
             .map_err(|e| format!("HAL not available: {:?}", e))?;
-
         hal_arc
             .lock()
             .map_err(|e| format!("Failed to lock HAL: {:?}", e))
@@ -129,7 +128,7 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu
         //     let res = self.inner_to_mle().evaluate(&point);
         //     println!("[gpu] eval: fallback to cpu, time = {:?}", timer.elapsed());
         //     res
-        self.inner_to_mle().evaluate(&point);
+        self.inner_to_mle().evaluate(&point)
     }
 
     /// Get the length of evaluation data

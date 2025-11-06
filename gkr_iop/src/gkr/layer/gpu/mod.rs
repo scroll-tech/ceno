@@ -180,7 +180,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             };
 
         // 2th sumcheck: batch rotation with other constrains
-        let span_eq = entered_span!("build eqs", profiling_2 = true);
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
             get_challenge_pows(

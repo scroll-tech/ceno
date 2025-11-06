@@ -684,27 +684,48 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                             1,
                             "doesnt support instance with evaluation length > 1"
                         );
-                        let mle_cpu = mle.inner_to_mle();
-                        match mle_cpu.evaluations() {
-                            FieldType::Base(smart_slice) => E::from(smart_slice[0]),
-                            FieldType::Ext(smart_slice) => smart_slice[0],
+                        // let mle_cpu = mle.inner_to_mle();
+                        // match mle_cpu.evaluations() {
+                        //     FieldType::Base(smart_slice) => E::from(smart_slice[0]),
+                        //     FieldType::Ext(smart_slice) => smart_slice[0],
+                        //     _ => unreachable!(),
+                        // }
+                        let cuda_hal = get_cuda_hal().unwrap();
+                        match mle.inner() {
+                            GpuFieldType::Base(poly) => {
+                                let elem_base_bb31 = poly.get_first_elem(&cuda_hal);
+                                let elem_base = unsafe { std::mem::transmute_copy(&elem_base_bb31) };
+                                E::from(elem_base)
+                            },
+                            GpuFieldType::Ext(poly) => {
+                                let elem_ext_bb31 = poly.get_first_elem(&cuda_hal);
+                                unsafe { std::mem::transmute_copy(&elem_ext_bb31) }
+                            },
                             _ => unreachable!(),
                         }
                     })
                     .collect_vec();
+            let span = entered_span!("circuit_wit", profiling_3 = true);
+            let circuit_wit = {
+                let cuda_hal = get_cuda_hal().unwrap();
+                let circuit_wit = gkr::GKRCircuitWitness {
+                    layers: vec![LayerWitness(
+                        chain!(&input.witness, &input.structural_witness, &input.fixed)
+                            .cloned()
+                            .collect_vec(),
+                    )],
+                };
+                cuda_hal.inner().synchronize().unwrap();
+                circuit_wit
+            };
+            exit_span!(span);
             let GKRProverOutput {
                 gkr_proof,
                 opening_evaluations,
             } = gkr_circuit.prove::<GpuBackend<E, PCS>, GpuProver<_>>(
                 num_threads,
                 num_var_with_rotation,
-                gkr::GKRCircuitWitness {
-                    layers: vec![LayerWitness(
-                        chain!(&input.witness, &input.structural_witness, &input.fixed)
-                            .cloned()
-                            .collect_vec(),
-                    )],
-                },
+                circuit_wit,
                 // eval value doesnt matter as it wont be used by prover
                 &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
                 &pub_io_evals,
