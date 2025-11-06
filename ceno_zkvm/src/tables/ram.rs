@@ -1,5 +1,5 @@
 use ceno_emul::{Addr, VMState, WORD_SIZE};
-use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamCircuit};
+use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamInitCircuit};
 
 use crate::{
     instructions::riscv::constants::UINT_LIMBS,
@@ -8,6 +8,10 @@ use crate::{
 
 mod ram_circuit;
 mod ram_impl;
+use crate::tables::ram::{
+    ram_circuit::LocalFinalRamCircuit,
+    ram_impl::{DynVolatileRamTableInitConfig, NonVolatileInitTableConfig},
+};
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
 #[derive(Clone)]
@@ -32,7 +36,8 @@ impl DynVolatileRamTable for HeapTable {
     }
 }
 
-pub type HeapCircuit<E> = DynVolatileRamCircuit<E, HeapTable>;
+pub type HeapInitCircuit<E> =
+    DynVolatileRamCircuit<E, HeapTable, DynVolatileRamTableInitConfig<HeapTable>>;
 
 #[derive(Clone)]
 pub struct StackTable;
@@ -66,7 +71,8 @@ impl DynVolatileRamTable for StackTable {
     }
 }
 
-pub type StackCircuit<E> = DynVolatileRamCircuit<E, StackTable>;
+pub type StackInitCircuit<E> =
+    DynVolatileRamCircuit<E, StackTable, DynVolatileRamTableInitConfig<StackTable>>;
 
 #[derive(Clone)]
 pub struct HintsTable;
@@ -88,7 +94,8 @@ impl DynVolatileRamTable for HintsTable {
         "HintsTable"
     }
 }
-pub type HintsCircuit<E> = DynVolatileRamCircuit<E, HintsTable>;
+pub type HintsInitCircuit<E> =
+    DynVolatileRamCircuit<E, HintsTable, DynVolatileRamTableInitConfig<HintsTable>>;
 
 /// RegTable, fix size without offset
 #[derive(Clone)]
@@ -108,7 +115,8 @@ impl NonVolatileTable for RegTable {
     }
 }
 
-pub type RegTableCircuit<E> = NonVolatileRamCircuit<E, RegTable>;
+pub type RegTableInitCircuit<E> =
+    NonVolatileRamCircuit<E, RegTable, NonVolatileInitTableConfig<RegTable>>;
 
 #[derive(Clone)]
 pub struct StaticMemTable;
@@ -127,7 +135,8 @@ impl NonVolatileTable for StaticMemTable {
     }
 }
 
-pub type StaticMemCircuit<E> = NonVolatileRamCircuit<E, StaticMemTable>;
+pub type StaticMemInitCircuit<E> =
+    NonVolatileRamCircuit<E, StaticMemTable, NonVolatileInitTableConfig<StaticMemTable>>;
 
 #[derive(Clone)]
 pub struct PubIOTable;
@@ -146,4 +155,5 @@ impl NonVolatileTable for PubIOTable {
     }
 }
 
-pub type PubIOCircuit<E> = PubIORamCircuit<E, PubIOTable>;
+pub type PubIOInitCircuit<E> = PubIORamInitCircuit<E, PubIOTable>;
+pub type LocalFinalCircuit<'a, E> = LocalFinalRamCircuit<'a, UINT_LIMBS, E>;

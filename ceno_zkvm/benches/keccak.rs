@@ -8,7 +8,7 @@ use ceno_zkvm::{
     scheme::{create_backend, create_prover},
 };
 mod alloc;
-use ceno_zkvm::scheme::verifier::ZKVMVerifier;
+use ceno_zkvm::{e2e::MultiProver, scheme::verifier::ZKVMVerifier};
 use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
@@ -51,12 +51,16 @@ fn keccak_prove(c: &mut Criterion) {
         create_prover(backend.clone()),
         program.clone(),
         platform.clone(),
+        MultiProver::default(),
         &Vec::from(&hints),
         &[],
         max_steps,
         Checkpoint::Complete,
     );
-    let proof = result.proof.expect("PrepSanityCheck do not provide proof");
+    let proof = result
+        .proofs
+        .expect("PrepSanityCheck do not provide proof")
+        .remove(0);
     let vk = result.vk.expect("PrepSanityCheck do not provide verifier");
 
     println!("e2e proof {}", proof);
@@ -85,6 +89,7 @@ fn keccak_prove(c: &mut Criterion) {
                         create_prover(backend.clone()),
                         program.clone(),
                         platform.clone(),
+                        MultiProver::default(),
                         &Vec::from(&hints),
                         &[],
                         max_steps,

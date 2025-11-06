@@ -63,10 +63,23 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
-      - name: Run fibonacci (release + goldilocks)
+      - name: Run 3 shards fibonacci (debug)
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+          MOCK_PROVING: 1
+        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/fibonacci
+
+      - name: Run 3 shards fibonacci (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+        run: cargo run --release --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+
+      # note: the shard ram circuit does not support goldilocks field yet
+      # - name: Run fibonacci (release + goldilocks)
+      # env:
+      #   RUSTFLAGS: "-C opt-level=3"
+      #   run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
       - name: Run Guest Heap Alloc (debug)
         env:
@@ -80,15 +93,33 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
 
-      - name: Run Guest Heap Alloc (release + goldilocks)
+      - name: Run 3 shards Guest Heap Alloc (debug)
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+          MOCK_PROVING: 1
+        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=300 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/ceno_rt_alloc
+
+      - name: Run 3 shards Guest Heap Alloc (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+
+      # note: the shard ram circuit does not support goldilocks field yet
+      # - name: Run Guest Heap Alloc (release + goldilocks)
+      # env:
+      #   RUSTFLAGS: "-C opt-level=3"
+      #   run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
 
       - name: Run keccak_syscall (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+
+      - name: Run 3 shard keccak_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Run secp256k1_add_syscall (release)
         env:

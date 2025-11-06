@@ -1,17 +1,26 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use ceno_emul::{Addr, Cycle, GetAddr, WORD_SIZE, Word};
-use ff_ext::ExtensionField;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
-
+use super::ram_impl::{
+    LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableInitConfig,
+};
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     structs::{ProgramParams, RAMType},
     tables::{RMMCollections, TableCircuit},
 };
-
-use super::ram_impl::{DynVolatileRamTableConfig, NonVolatileTableConfig, PubIOTableConfig};
+use ceno_emul::{Addr, Cycle, GetAddr, WORD_SIZE, Word};
+use ff_ext::{ExtensionField, SmallField};
+use gkr_iop::{
+    chip::Chip,
+    error::CircuitBuilderError,
+    gkr::{GKRCircuit, layer::Layer},
+    selector::SelectorType,
+};
+use itertools::Itertools;
+use multilinear_extensions::ToExpr;
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 #[derive(Clone, Debug)]
 pub struct MemInitRecord {
@@ -21,9 +30,14 @@ pub struct MemInitRecord {
 
 #[derive(Clone, Debug)]
 pub struct MemFinalRecord {
+    pub ram_type: RAMType,
     pub addr: Addr,
     pub cycle: Cycle,
     pub value: Word,
+    // initial state value
+    // same as `value` for read-only table
+    // probably different for rw table
+    pub init_value: Word,
 }
 
 impl GetAddr for MemInitRecord {
@@ -60,12 +74,15 @@ pub trait NonVolatileTable {
 /// - with fixed initial content,
 /// - with witnessed final content that the program wrote, if WRITABLE,
 /// - or final content equal to initial content, if not WRITABLE.
-pub struct NonVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
+pub struct NonVolatileRamCircuit<E, R, C>(PhantomData<(E, R, C)>);
 
-impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
-    for NonVolatileRamCircuit<E, NVRAM>
+impl<
+    E: ExtensionField,
+    NVRAM: NonVolatileTable + Send + Sync + Clone,
+    C: NonVolatileTableConfigTrait<NVRAM>,
+> TableCircuit<E> for NonVolatileRamCircuit<E, NVRAM, C>
 {
-    type TableConfig = NonVolatileTableConfig<NVRAM>;
+    type TableConfig = C::Config;
     type FixedInput = [MemInitRecord];
     type WitnessInput = [MemFinalRecord];
 
@@ -77,10 +94,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self::TableConfig, ZKVMError> {
-        Ok(cb.namespace(
-            || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb, params),
-        )?)
+        Ok(cb.namespace(|| Self::name(), |cb| C::construct_circuit(cb, params))?)
     }
 
     fn generate_fixed_traces(
@@ -89,7 +103,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         init_v: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField> {
         // assume returned table is well-formed include padding
-        config.gen_init_state(num_fixed, init_v)
+        C::gen_init_state(config, num_fixed, init_v)
     }
 
     fn assign_instances(
@@ -100,7 +114,12 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         final_v: &Self::WitnessInput,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
-        Ok(config.assign_instances(num_witin, num_structural_witin, final_v)?)
+        Ok(C::assign_instances(
+            config,
+            num_witin,
+            num_structural_witin,
+            final_v,
+        )?)
     }
 }
 
@@ -111,14 +130,14 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
 /// This circuit does not and cannot decide whether the memory is mutable or not.
 /// It supports LOAD where the program reads the public input,
 /// or STORE where the memory content must equal the public input after execution.
-pub struct PubIORamCircuit<E, R>(PhantomData<(E, R)>);
+pub struct PubIORamInitCircuit<E, R>(PhantomData<(E, R)>);
 
 impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
-    for PubIORamCircuit<E, NVRAM>
+    for PubIORamInitCircuit<E, NVRAM>
 {
-    type TableConfig = PubIOTableConfig<NVRAM>;
+    type TableConfig = PubIOTableInitConfig<NVRAM>;
     type FixedInput = [Addr];
-    type WitnessInput = [Cycle];
+    type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
@@ -128,6 +147,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self::TableConfig, ZKVMError> {
+        cb.set_omc_init_only();
         Ok(cb.namespace(
             || Self::name(),
             |cb| Self::TableConfig::construct_circuit(cb, params),
@@ -148,10 +168,10 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        final_cycles: &[Cycle],
+        final_mem: &[MemFinalRecord],
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed including padding
-        Ok(config.assign_instances(num_witin, num_structural_witin, final_cycles)?)
+        Ok(config.assign_instances(num_witin, num_structural_witin, final_mem)?)
     }
 }
 
@@ -189,6 +209,20 @@ pub trait DynVolatileRamTable {
     }
 }
 
+pub trait DynVolatileRamTableConfigTrait<DVRAM>: Sized + Send + Sync {
+    type Config: Sized + Send + Sync;
+    fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self::Config, CircuitBuilderError>;
+    fn assign_instances<F: SmallField>(
+        config: &Self::Config,
+        num_witin: usize,
+        num_structural_witin: usize,
+        final_mem: &[MemFinalRecord],
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError>;
+}
+
 /// DynVolatileRamCircuit initializes and finalizes memory
 /// - at witnessed addresses, in a contiguous range chosen by the prover,
 /// - with zeros as initial content if ZERO_INIT,
@@ -197,27 +231,27 @@ pub trait DynVolatileRamTable {
 /// If not ZERO_INIT:
 /// - The initial content is an unconstrained prover hint.
 /// - The final content is equal to this initial content.
-pub struct DynVolatileRamCircuit<E, R>(PhantomData<(E, R)>);
+pub struct DynVolatileRamCircuit<E, R, C>(PhantomData<(E, R, C)>);
 
-impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableCircuit<E>
-    for DynVolatileRamCircuit<E, DVRAM>
+impl<
+    E: ExtensionField,
+    DVRAM: DynVolatileRamTable + Send + Sync + Clone,
+    C: DynVolatileRamTableConfigTrait<DVRAM>,
+> TableCircuit<E> for DynVolatileRamCircuit<E, DVRAM, C>
 {
-    type TableConfig = DynVolatileRamTableConfig<DVRAM>;
+    type TableConfig = C::Config;
     type FixedInput = ();
     type WitnessInput = [MemFinalRecord];
 
     fn name() -> String {
-        format!("RAM_{:?}_{}", DVRAM::RAM_TYPE, DVRAM::name())
+        format!("{}_{:?}_RAM", DVRAM::name(), DVRAM::RAM_TYPE,)
     }
 
     fn construct_circuit(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self::TableConfig, ZKVMError> {
-        Ok(cb.namespace(
-            || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb, params),
-        )?)
+        Ok(cb.namespace(|| Self::name(), |cb| C::construct_circuit(cb, params))?)
     }
 
     fn generate_fixed_traces(
@@ -236,6 +270,100 @@ impl<E: ExtensionField, DVRAM: DynVolatileRamTable + Send + Sync + Clone> TableC
         final_v: &Self::WitnessInput,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
-        Ok(config.assign_instances(num_witin, num_structural_witin, final_v)?)
+        Ok(
+            <C as DynVolatileRamTableConfigTrait<DVRAM>>::assign_instances(
+                config,
+                num_witin,
+                num_structural_witin,
+                final_v,
+            )?,
+        )
+    }
+}
+
+/// This circuit is generalized version to handle all mmio records
+pub struct LocalFinalRamCircuit<'a, const V_LIMBS: usize, E>(PhantomData<(&'a (), E)>);
+
+impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
+    for LocalFinalRamCircuit<'a, V_LIMBS, E>
+{
+    type TableConfig = LocalFinalRAMTableConfig<V_LIMBS>;
+    type FixedInput = ();
+    type WitnessInput = (
+        &'a ShardContext<'a>,
+        &'a [(InstancePaddingStrategy, &'a [MemFinalRecord])],
+    );
+
+    fn name() -> String {
+        "LocalRAMTableFinal".to_string()
+    }
+
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self::TableConfig, ZKVMError> {
+        Ok(cb.namespace(
+            || Self::name(),
+            |cb| Self::TableConfig::construct_circuit(cb, params),
+        )?)
+    }
+
+    fn build_gkr_iop_circuit(
+        cb: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
+    ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
+        let config = Self::construct_circuit(cb, param)?;
+        let r_table_len = cb.cs.r_table_expressions.len();
+
+        let selector = cb.create_placeholder_structural_witin(|| "selector");
+        let selector_type = SelectorType::Prefix(selector.expr());
+
+        // all shared the same selector
+        let (out_evals, mut chip) = (
+            [
+                // r_record
+                (0..r_table_len).collect_vec(),
+                // w_record
+                vec![],
+                // lk_record
+                vec![],
+                // zero_record
+                vec![],
+            ],
+            Chip::new_from_cb(cb, 0),
+        );
+
+        // register selector to legacy constrain system
+        cb.cs.r_selector = Some(selector_type.clone());
+
+        let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
+        chip.add_layer(layer);
+
+        Ok((config, Some(chip.gkr_circuit())))
+    }
+
+    fn generate_fixed_traces(
+        _config: &Self::TableConfig,
+        _num_fixed: usize,
+        _init_v: &Self::FixedInput,
+    ) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
+    }
+
+    fn assign_instances(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        num_structural_witin: usize,
+        _multiplicity: &[HashMap<u64, usize>],
+        (shard_ctx, final_mem): &Self::WitnessInput,
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        // assume returned table is well-formed include padding
+        Ok(Self::TableConfig::assign_instances(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            final_mem,
+        )?)
     }
 }

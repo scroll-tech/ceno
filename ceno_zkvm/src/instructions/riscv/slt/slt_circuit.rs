@@ -1,5 +1,6 @@
 use crate::{
     Value,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::SignedLtConfig,
     instructions::{
@@ -92,11 +93,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [<E as ExtensionField>::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        config.r_insn.assign_instance(instance, lkm, step)?;
+        config
+            .r_insn
+            .assign_instance(instance, shard_ctx, lkm, step)?;
 
         let rs1 = step.rs1().unwrap().value;
         let rs2 = step.rs2().unwrap().value;

@@ -21,6 +21,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     chip_handler::general::InstFetch,
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -127,8 +128,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
         let (out_evals, mut chip) = layout.finalize(cb);
 
-        let layer =
-            Layer::from_circuit_builder(cb, "Rounds".to_string(), layout.n_challenges, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Self::name(), layout.n_challenges, out_evals);
         chip.add_layer(layer);
 
         let circuit = chip.gkr_circuit();
@@ -156,6 +156,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
     fn assign_instance(
         _config: &Self::InstructionConfig,
+        _shard_ctx: &mut ShardContext,
         _instance: &mut [<E as ExtensionField>::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
@@ -165,6 +166,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
     fn assign_instances(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
         steps: Vec<StepRecord>,
@@ -196,11 +198,13 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         // each instance are composed of KECCAK_ROUNDS.next_power_of_two()
         let raw_witin_iter = raw_witin
             .par_batch_iter_mut(num_instance_per_batch * KECCAK_ROUNDS.next_power_of_two());
+        let shard_ctx_vec = shard_ctx.get_forked();
 
         // 1st pass: assign witness outside of gkr-iop scope
         raw_witin_iter
             .zip_eq(steps.par_chunks(num_instance_per_batch))
-            .flat_map(|(instances, steps)| {
+            .zip(shard_ctx_vec)
+            .flat_map(|((instances, steps), mut shard_ctx)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
 
                 instances
@@ -218,10 +222,13 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                                 [round_index as usize * num_witin..][..num_witin];
 
                             // vm_state
-                            config.vm_state.assign_instance(instance, step)?;
+                            config
+                                .vm_state
+                                .assign_instance(instance, &shard_ctx, step)?;
 
                             config.ecall_id.assign_op(
                                 instance,
+                                &mut shard_ctx,
                                 &mut lk_multiplicity,
                                 step.cycle(),
                                 &WriteOp::new_register_op(
@@ -238,6 +245,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                             )?;
                             config.state_ptr.0.assign_op(
                                 instance,
+                                &mut shard_ctx,
                                 &mut lk_multiplicity,
                                 step.cycle(),
                                 &ops.reg_ops[0],
@@ -246,6 +254,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                             for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
                                 writer.assign_op(
                                     instance,
+                                    &mut shard_ctx,
                                     &mut lk_multiplicity,
                                     step.cycle(),
                                     op,

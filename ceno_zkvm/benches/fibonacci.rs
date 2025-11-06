@@ -13,7 +13,7 @@ use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 
-use ceno_zkvm::scheme::verifier::ZKVMVerifier;
+use ceno_zkvm::{e2e::MultiProver, scheme::verifier::ZKVMVerifier};
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 
@@ -54,12 +54,16 @@ fn fibonacci_prove(c: &mut Criterion) {
             create_prover(backend.clone()),
             program.clone(),
             platform.clone(),
+            MultiProver::default(),
             &Vec::from(&hints),
             &[],
             max_steps,
             Checkpoint::Complete,
         );
-        let proof = result.proof.expect("PrepSanityCheck do not provide proof");
+        let proof = result
+            .proofs
+            .expect("PrepSanityCheck do not provide proof")
+            .remove(0);
         let vk = result.vk.expect("PrepSanityCheck do not provide verifier");
 
         println!("e2e proof {}", proof);
@@ -91,6 +95,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                             create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),
+                            MultiProver::default(),
                             &Vec::from(&hints),
                             &[],
                             max_steps,

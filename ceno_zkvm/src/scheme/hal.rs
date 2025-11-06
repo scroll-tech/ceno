@@ -1,11 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc};
-
 use crate::{
-    circuit_builder::ConstraintSystem,
+    e2e::ShardContext,
     error::ZKVMError,
     scheme::cpu::TowerRelationOutput,
-    structs::{ComposedConstrainSystem, ZKVMProvingKey},
+    structs::{ComposedConstrainSystem, EccQuarkProof, ZKVMProvingKey},
 };
+use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     gkr::GKRProof,
@@ -13,6 +12,7 @@ use gkr_iop::{
 };
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
+use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::structs::IOPProverMessage;
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
@@ -24,6 +24,7 @@ pub trait ProverDevice<PB>:
     + OpeningProver<PB>
     + DeviceTransporter<PB>
     + ProtocolWitnessGeneratorProver<PB>
+    + EccQuarkProver<PB>
 // + FixedMLEPadder<PB>
 where
     PB: ProverBackend,
@@ -37,16 +38,31 @@ pub struct ProofInput<'a, PB: ProverBackend> {
     pub structural_witness: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub fixed: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub public_input: Vec<Arc<PB::MultilinearPoly<'a>>>,
-    pub num_instances: usize,
+    pub pub_io_evals: Vec<Either<<PB::E as ExtensionField>::BaseField, PB::E>>,
+    pub num_instances: Vec<usize>,
+    pub has_ecc_ops: bool,
 }
 
 impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
+    pub fn num_instances(&self) -> usize {
+        self.num_instances.iter().sum()
+    }
+
     #[inline]
     pub fn log2_num_instances(&self) -> usize {
-        ceil_log2(next_pow2_instance_padding(self.num_instances))
+        let num_instance = self.num_instances();
+        let log2 = ceil_log2(next_pow2_instance_padding(num_instance));
+        if self.has_ecc_ops {
+            // the mles have one extra variable to store
+            // the internal partial sums for ecc additions
+            log2 + 1
+        } else {
+            log2
+        }
     }
 }
 
+#[derive(Clone)]
 pub struct TowerProverSpec<'a, PB: ProverBackend> {
     pub witness: Vec<Vec<PB::MultilinearPoly<'a>>>,
 }
@@ -56,13 +72,30 @@ pub trait TraceCommitter<PB: ProverBackend> {
     // the traces in the form of multilinear polynomials
     #[allow(clippy::type_complexity)]
     fn commit_traces<'a>(
-        &mut self,
+        &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<<PB::E as ExtensionField>::BaseField>>,
     ) -> (
         Vec<PB::MultilinearPoly<'a>>,
         PB::PcsData,
         <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Commitment,
     );
+}
+
+/// Accumulate N (not necessarily power of 2) EC points into one EC point using affine coordinates
+/// in one layer which borrows ideas from the [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
+/// Note that these points are defined over the septic extension field of BabyBear.
+///
+/// The main constraint enforced in this quark layer is:
+///    p[1,b] = affine_add(p[b,0], p[b,1]) for all b < N
+pub trait EccQuarkProver<PB: ProverBackend> {
+    fn prove_ec_sum_quark<'a>(
+        &self,
+        num_instances: usize,
+        xs: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        ys: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        invs: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> Result<EccQuarkProof<PB::E>, ZKVMError>;
 }
 
 pub trait TowerProver<PB: ProverBackend> {
@@ -75,8 +108,6 @@ pub trait TowerProver<PB: ProverBackend> {
         cs: &ComposedConstrainSystem<PB::E>,
         input: &ProofInput<'a, PB>,
         records: &'c [Arc<PB::MultilinearPoly<'b>>],
-        is_padded: bool,
-        challenge: &[PB::E; 2],
     ) -> (
         Vec<Vec<Vec<PB::E>>>,
         Vec<TowerProverSpec<'c, PB>>,
@@ -94,7 +125,6 @@ pub trait TowerProver<PB: ProverBackend> {
         composed_cs: &ComposedConstrainSystem<PB::E>,
         input: &ProofInput<'a, PB>,
         records: &'c [Arc<PB::MultilinearPoly<'b>>],
-        is_padded: bool,
         challenges: &[PB::E; 2],
         transcript: &mut impl Transcript<PB::E>,
     ) -> TowerRelationOutput<PB::E>
@@ -109,13 +139,6 @@ pub struct MainSumcheckEvals<E: ExtensionField> {
 }
 
 pub trait MainSumcheckProver<PB: ProverBackend> {
-    fn table_witness<'a>(
-        &self,
-        input: &ProofInput<'a, PB>,
-        cs: &ConstraintSystem<PB::E>,
-        challenges: &[PB::E],
-    ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
-
     // this prover aims to achieve two goals:
     // 1. the validity of last layer in the tower tree is reduced to
     //    the validity of read/write/logup records through sumchecks;
@@ -147,9 +170,7 @@ pub trait OpeningProver<PB: ProverBackend> {
         witness_data: PB::PcsData,
         fixed_data: Option<Arc<PB::PcsData>>,
         points: Vec<Point<PB::E>>,
-        evals: Vec<Vec<PB::E>>,
-        circuit_num_polys: &[(usize, usize)],
-        num_instances: &[(usize, usize)],
+        evals: Vec<Vec<Vec<PB::E>>>,
         transcript: &mut (impl Transcript<PB::E> + 'static),
     ) -> <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Proof;
 }
@@ -162,6 +183,7 @@ pub struct DeviceProvingKey<'a, PB: ProverBackend> {
 pub trait DeviceTransporter<PB: ProverBackend> {
     fn transport_proving_key(
         &self,
+        shard_ctx: &ShardContext,
         proving_key: Arc<ZKVMProvingKey<PB::E, PB::Pcs>>,
     ) -> DeviceProvingKey<'_, PB>;
 

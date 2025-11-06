@@ -45,7 +45,7 @@ use gkr_iop::gpu::gpu_prover::*;
 
 pub struct GpuTowerProver;
 
-use crate::scheme::constants::NUM_FANIN;
+use crate::{e2e::ShardContext, scheme::constants::NUM_FANIN};
 use gkr_iop::gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu};
 
 // Extract out_evals from GPU-built tower witnesses
@@ -203,7 +203,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         zkvm_v1_css: cs, ..
     } = composed_cs;
     let num_instances_with_rotation =
-        input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
+        input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
     let chip_record_alpha = challenges[0];
 
     // TODO: safety ?
@@ -410,8 +410,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         _composed_cs: &ComposedConstrainSystem<E>,
         _input: &ProofInput<'a, GpuBackend<E, PCS>>,
         _records: &'c [ArcMultilinearExtensionGpu<'b, E>],
-        _is_padded: bool,
-        _challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
         Vec<TowerProverSpec<'c, GpuBackend<E, PCS>>>,
@@ -436,7 +434,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, GpuBackend<E, PCS>>,
         records: &'c [ArcMultilinearExtensionGpu<'b, E>],
-        _is_padded: bool,
         challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
     ) -> TowerRelationOutput<E>
@@ -509,122 +506,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
     for GpuProver<GpuBackend<E, PCS>>
 {
     #[allow(clippy::type_complexity)]
-    #[tracing::instrument(skip_all, name = "table_witness", fields(profiling_2), level = "trace")]
-    fn table_witness<'a>(
-        &self,
-        input: &ProofInput<'a, GpuBackend<E, PCS>>,
-        cs: &ConstraintSystem<<GpuBackend<E, PCS> as ProverBackend>::E>,
-        challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
-    ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
-        assert!(
-            !cs.lk_table_expressions.is_empty()
-                || !cs.r_table_expressions.is_empty()
-                || !cs.w_table_expressions.is_empty(),
-            "assert table circuit"
-        );
-
-        assert!(
-            cs.r_table_expressions
-                .iter()
-                .zip_eq(cs.w_table_expressions.iter())
-                .all(|(r, w)| r.table_spec.len == w.table_spec.len)
-        );
-
-        let span = entered_span!("preprocess", profiling_2 = true);
-        let layer_witin = input
-            .witness
-            .iter()
-            .chain(&input.structural_witness)
-            .chain(&input.fixed)
-            .chain(&input.public_input)
-            .map(|w| w.as_ref())
-            .collect_vec();
-        let num_vars = input.witness[0].num_vars();
-
-        // main constraint: lookup denominator and numerator record witness inference
-        let (num_non_zero_expr, term_coefficients, mle_indices_per_term, _) = cs
-            .r_table_expressions
-            .iter()
-            .map(|r| &r.expr)
-            .chain(cs.r_expressions.iter())
-            .chain(cs.w_table_expressions.iter().map(|w| &w.expr))
-            .chain(cs.w_expressions.iter())
-            .chain(cs.lk_table_expressions.iter().map(|lk| &lk.multiplicity))
-            .chain(cs.lk_table_expressions.iter().map(|lk| &lk.values))
-            .chain(cs.lk_expressions.iter())
-            .map(|expr| {
-                assert_eq!(expr.degree(), 1);
-
-                let monomial_term = monomialize_expr_to_wit_terms(
-                    expr,
-                    cs.num_witin as WitnessId,
-                    cs.num_structural_witin as WitnessId,
-                    cs.num_fixed as WitnessId,
-                );
-
-                let (coeffs, indices, size_info) = extract_mle_relationships_from_monomial_terms(
-                    &monomial_term,
-                    &layer_witin,
-                    &[],
-                    challenges,
-                );
-                let coeffs_gl64: Vec<BB31Ext> = unsafe { std::mem::transmute(coeffs) };
-                (coeffs_gl64, indices, size_info)
-            })
-            .fold(
-                (0, Vec::new(), Vec::new(), Vec::new()),
-                |(mut num_non_zero_expr, mut coeff_acc, mut indices_acc, mut size_acc),
-                 (coeffs, indices, size_info)| {
-                    num_non_zero_expr += 1;
-                    coeff_acc.push(coeffs);
-                    indices_acc.push(indices);
-                    size_acc.push(size_info);
-                    (num_non_zero_expr, coeff_acc, indices_acc, size_acc)
-                },
-            );
-        exit_span!(span);
-
-        let span = entered_span!("witness_infer", profiling_2 = true);
-        let cuda_hal = get_cuda_hal().unwrap();
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
-            unsafe { std::mem::transmute(layer_witin) };
-        let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
-
-        // buffer for output witness from gpu
-        let mut next_witness_buf = (0..num_non_zero_expr)
-            .map(|_| {
-                cuda_hal
-                    .alloc_ext_elems_on_device(1 << num_vars)
-                    .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-
-        cuda_hal
-            .witness_infer
-            .wit_infer_by_monomial_expr(
-                &cuda_hal,
-                all_witins_gpu_type_gl64,
-                &term_coefficients,
-                &mle_indices_per_term,
-                &mut next_witness_buf,
-            )
-            .unwrap();
-        exit_span!(span);
-
-        let next_mles = next_witness_buf
-            .into_iter()
-            .map(|buf| {
-                Arc::new(MultilinearExtensionGpu::from_ceno_gpu_ext(
-                    GpuPolynomialExt::new(buf, num_vars),
-                ))
-            })
-            .collect_vec();
-
-        next_mles
-    }
-
-    #[allow(clippy::type_complexity)]
     #[tracing::instrument(
         skip_all,
         name = "prove_main_constraints",
@@ -653,96 +534,69 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
             gkr_circuit,
         } = composed_cs;
 
-        let num_instances = input.num_instances;
-        let next_pow2_instances = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instances);
+        let log2_num_instances = input.log2_num_instances();
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
-        if let Some(gkr_circuit) = gkr_circuit {
-            let pub_io_evals = // get public io evaluations
-                cs.instance_name_map
-                    .keys()
-                    .sorted()
-                    .map(|Instance(inst_id)| {
-                        let mle = &input.public_input[*inst_id];
-                        assert_eq!(
-                            mle.evaluations_len(),
-                            1,
-                            "doesnt support instance with evaluation length > 1"
-                        );
-                        let mle_cpu = mle.inner_to_mle();
-                        match mle_cpu.evaluations() {
-                            FieldType::Base(smart_slice) => E::from(smart_slice[0]),
-                            FieldType::Ext(smart_slice) => smart_slice[0],
-                            _ => unreachable!(),
-                        }
-                    })
-                    .collect_vec();
-            let GKRProverOutput {
-                gkr_proof,
-                opening_evaluations,
-            } = gkr_circuit.prove::<GpuBackend<E, PCS>, GpuProver<_>>(
-                num_threads,
-                num_var_with_rotation,
-                gkr::GKRCircuitWitness {
-                    layers: vec![LayerWitness(
-                        chain!(&input.witness, &input.structural_witness, &input.fixed)
-                            .cloned()
-                            .collect_vec(),
-                    )],
-                },
-                // eval value doesnt matter as it wont be used by prover
-                &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
-                &pub_io_evals,
-                challenges,
-                transcript,
-                num_instances,
-            )?;
-            Ok((
-                opening_evaluations[0].point.clone(),
-                MainSumcheckEvals {
-                    wits_in_evals: opening_evaluations
-                        .iter()
-                        .take(cs.num_witin as usize)
-                        .map(|Evaluation { value, .. }| value)
-                        .copied()
-                        .collect_vec(),
-                    fixed_in_evals: opening_evaluations
-                        .iter()
-                        .skip((cs.num_witin + cs.num_structural_witin) as usize)
-                        .take(cs.num_fixed)
-                        .map(|Evaluation { value, .. }| value)
-                        .copied()
-                        .collect_vec(),
-                },
-                None,
-                Some(gkr_proof),
-            ))
-        } else {
-            let span = entered_span!("fixed::evals + witin::evals");
-            // In table proof, we always skip same point sumcheck for now
-            // as tower sumcheck batch product argument/logup in same length
-            let mut evals = input
-                .witness
-                .par_iter()
-                .chain(input.fixed.par_iter())
-                .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
-                .collect::<Vec<_>>();
-            let fixed_in_evals = evals.split_off(input.witness.len());
-            let wits_in_evals = evals;
-            exit_span!(span);
-
-            Ok((
-                rt_tower,
-                MainSumcheckEvals {
-                    wits_in_evals,
-                    fixed_in_evals,
-                },
-                None,
-                None,
-            ))
-        }
+        let Some(gkr_circuit) = gkr_circuit else {
+            panic!("empty gkr circuit")
+        };
+        let pub_io_mles = cs
+            .instance_openings
+            .iter()
+            .map(|instance| input.public_input[instance.0].clone())
+            .collect_vec();
+        let GKRProverOutput {
+            gkr_proof,
+            opening_evaluations,
+            mut rt,
+        } = gkr_circuit.prove::<GpuBackend<E, PCS>, GpuProver<_>>(
+            num_threads,
+            num_var_with_rotation,
+            gkr::GKRCircuitWitness {
+                layers: vec![LayerWitness(
+                    chain!(
+                        &input.witness,
+                        &input.fixed,
+                        &pub_io_mles,
+                        &input.structural_witness,
+                    )
+                    .cloned()
+                    .collect_vec(),
+                )],
+            },
+            // eval value doesnt matter as it wont be used by prover
+            &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
+            &input
+                .pub_io_evals
+                .iter()
+                .map(|v| v.map_either(E::from, |v| v).into_inner())
+                .collect_vec(),
+            challenges,
+            transcript,
+            num_instances,
+        )?;
+        assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
+        Ok((
+            rt.remove(0),
+            MainSumcheckEvals {
+                wits_in_evals: opening_evaluations
+                    .iter()
+                    .take(cs.num_witin as usize)
+                    .map(|Evaluation { value, .. }| value)
+                    .copied()
+                    .collect_vec(),
+                fixed_in_evals: opening_evaluations
+                    .iter()
+                    .skip(cs.num_witin as usize)
+                    .take(cs.num_fixed)
+                    .map(|Evaluation { value, .. }| value)
+                    .copied()
+                    .collect_vec(),
+            },
+            None,
+            Some(gkr_proof),
+        ))
     }
 }
 
@@ -754,9 +608,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         witness_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData,
         fixed_data: Option<Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData>>,
         points: Vec<Point<E>>,
-        mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
-        circuit_num_polys: &[(usize, usize)],
-        num_instances: &[(usize, usize)],
+        mut evals: Vec<Vec<Vec<E>>>, // where each inner Vec<E> = wit_evals + fixed_evals
         transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
@@ -764,32 +616,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         }
 
         let mut rounds = vec![];
-        rounds.push((
-            &witness_data,
-            points
-                .iter()
-                .zip_eq(evals.iter_mut())
-                .zip_eq(num_instances.iter())
-                .map(|((point, evals), (chip_idx, _))| {
-                    let (num_witin, _) = circuit_num_polys[*chip_idx];
-                    (point.clone(), evals.drain(..num_witin).collect_vec())
+        rounds.push((&witness_data, {
+            evals
+                .iter_mut()
+                .zip(&points)
+                .filter_map(|(evals, point)| {
+                    let witin_evals = evals.remove(0);
+                    if !witin_evals.is_empty() {
+                        Some((point.clone(), witin_evals))
+                    } else {
+                        None
+                    }
                 })
-                .collect_vec(),
-        ));
+                .collect_vec()
+        }));
         if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
-            rounds.push((
-                fixed_data,
-                points
-                    .iter()
-                    .zip_eq(evals.iter_mut())
-                    .zip_eq(num_instances.iter())
-                    .filter(|(_, (chip_idx, _))| {
-                        let (_, num_fixed) = circuit_num_polys[*chip_idx];
-                        num_fixed > 0
+            rounds.push((fixed_data, {
+                evals
+                    .iter_mut()
+                    .zip(points)
+                    .filter_map(|(evals, point)| {
+                        if !evals.is_empty() && !evals[0].is_empty() {
+                            Some((point.clone(), evals.remove(0)))
+                        } else {
+                            None
+                        }
                     })
-                    .map(|((point, evals), _)| (point.clone(), evals.to_vec()))
-                    .collect_vec(),
-            ));
+                    .collect_vec()
+            }));
         }
 
         // use ceno_gpu::{
@@ -852,6 +706,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
 {
     fn transport_proving_key(
         &self,
+        shard_ctx: &ShardContext,
         pk: Arc<
             crate::structs::ZKVMProvingKey<
                 <GpuBackend<E, PCS> as ProverBackend>::E,
@@ -859,7 +714,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
             >,
         >,
     ) -> DeviceProvingKey<'_, GpuBackend<E, PCS>> {
-        let pcs_data_original = pk.fixed_commit_wd.clone().unwrap();
+        let pcs_data_original = if shard_ctx.is_first_shard() {
+            pk.fixed_commit_wd.clone().unwrap()
+        } else {
+            pk.fixed_no_omc_init_commit_wd.clone().unwrap()
+        };
 
         // assert pcs match
         let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()

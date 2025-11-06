@@ -4,6 +4,7 @@ use ff_ext::GoldilocksExt2;
 use super::*;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     instructions::{
         Instruction,
         riscv::{arith::AddOp, branch::BeqOp, ecall::EcallDummy},
@@ -34,6 +35,7 @@ fn test_dummy_ecall() {
     let insn_code = step.insn();
     let (raw_witin, lkm) = EcallDummy::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
         vec![step],
@@ -63,6 +65,7 @@ fn test_dummy_keccak() {
     let (step, program) = ceno_emul::test_utils::keccak_step();
     let (raw_witin, lkm) = KeccakDummy::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
         vec![step],
@@ -90,6 +93,7 @@ fn test_dummy_r() {
     let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
     let (raw_witin, lkm) = AddDummy::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_r_instruction(
@@ -125,6 +129,7 @@ fn test_dummy_b() {
     let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, 8);
     let (raw_witin, lkm) = BeqDummy::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
         vec![StepRecord::new_b_instruction(

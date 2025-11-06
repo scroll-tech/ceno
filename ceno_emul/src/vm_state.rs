@@ -68,6 +68,10 @@ impl VMState {
         &self.tracer
     }
 
+    pub fn take_tracer(self) -> Tracer {
+        self.tracer
+    }
+
     pub fn platform(&self) -> &Platform {
         &self.platform
     }

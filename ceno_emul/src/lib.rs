@@ -7,7 +7,9 @@ mod platform;
 pub use platform::{CENO_PLATFORM, Platform};
 
 mod tracer;
-pub use tracer::{Change, MemOp, ReadOp, StepRecord, Tracer, WriteOp};
+pub use tracer::{
+    Change, MemOp, NextAccessPair, NextCycleAccess, ReadOp, StepRecord, Tracer, WriteOp,
+};
 
 mod vm_state;
 pub use vm_state::VMState;
@@ -44,4 +46,5 @@ pub mod utils;
 
 pub mod test_utils;
 
+mod chunked_vec;
 pub mod host_utils;

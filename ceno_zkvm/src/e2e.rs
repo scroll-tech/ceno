@@ -3,6 +3,7 @@ use crate::{
     instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
     scheme::{
         PublicValues, ZKVMProof,
+        constants::SEPTIC_EXTENSION_DEGREE,
         hal::ProverDevice,
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
@@ -13,25 +14,36 @@ use crate::{
         ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
         ZKVMWitnesses,
     },
-    tables::{MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig},
+    tables::{
+        MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig, ShardRamCircuit,
+        TableCircuit,
+    },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, EmuContext, InsnKind, IterAddresses, Platform, Program,
-    StepRecord, Tracer, VMState, WORD_SIZE, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, NextCycleAccess,
+    Platform, Program, StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr,
+    host_utils::read_all_messages,
 };
 use clap::ValueEnum;
-use ff_ext::ExtensionField;
+use either::Either;
+use ff_ext::{ExtensionField, SmallField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
-use gkr_iop::hal::ProverBackend;
+use gkr_iop::{RAMType, hal::ProverBackend};
 use itertools::{Itertools, MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
+use multilinear_extensions::util::max_usable_threads;
+use rustc_hash::FxHashSet;
 use serde::Serialize;
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
+use witness::next_pow2_instance_padding;
+
+pub const DEFAULT_MIN_CYCLE_PER_SHARDS: Cycle = 1 << 24;
+pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 27;
 
 /// The polynomial commitment scheme kind
 #[derive(
@@ -87,19 +99,519 @@ pub struct FullMemState<Record> {
 type InitMemState = FullMemState<MemInitRecord>;
 type FinalMemState = FullMemState<MemFinalRecord>;
 
-pub struct EmulationResult {
+pub struct EmulationResult<'a> {
     pub exit_code: Option<u32>,
     pub all_records: Vec<StepRecord>,
     pub final_mem_state: FinalMemState,
     pub pi: PublicValues,
+    pub shard_ctxs: Vec<ShardContext<'a>>,
 }
 
-pub fn emulate_program(
+pub struct RAMRecord {
+    pub ram_type: RAMType,
+    // reg_id is the raw id of register, e.g. in riv32 it's range from [0, 32)
+    // meaningful when RAMType::Register
+    pub reg_id: u64,
+    pub addr: WordAddr,
+    // prev_cycle and cycle are global cycle
+    pub prev_cycle: Cycle,
+    pub cycle: Cycle,
+    // shard_cycle is cycle in current local shard, which already offset by start cycle
+    pub shard_cycle: Cycle,
+    pub prev_value: Option<Word>,
+    pub value: Word,
+    // for global reads, `shard_id` refers to the shard that previously produced this value.
+    // for global write, `shard_id` refers to current shard.
+    pub shard_id: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct MultiProver {
+    pub prover_id: usize,
+    pub max_provers: usize,
+    pub min_cycle_per_shard: Cycle,
+    pub max_cycle_per_shard: Cycle,
+}
+
+impl MultiProver {
+    pub fn new(
+        prover_id: usize,
+        max_provers: usize,
+        min_cycle_per_shard: Cycle,
+        max_cycle_per_shard: Cycle,
+    ) -> Self {
+        assert!(prover_id < max_provers);
+        Self {
+            prover_id,
+            max_provers,
+            min_cycle_per_shard,
+            max_cycle_per_shard,
+        }
+    }
+}
+
+impl Default for MultiProver {
+    fn default() -> Self {
+        Self {
+            prover_id: 0,
+            max_provers: 1,
+            min_cycle_per_shard: DEFAULT_MIN_CYCLE_PER_SHARDS,
+            max_cycle_per_shard: DEFAULT_MAX_CYCLE_PER_SHARDS,
+        }
+    }
+}
+
+pub struct ShardContext<'a> {
+    shard_id: usize,
+    num_shards: usize,
+    max_cycle: Cycle,
+    addr_future_accesses: Arc<NextCycleAccess>,
+    // this is only updated in first shard
+    addr_accessed_thread_based_first_shard:
+        Either<Vec<FxHashSet<WordAddr>>, &'a mut FxHashSet<WordAddr>>,
+    read_records_tbs:
+        Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
+    write_records_tbs:
+        Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
+    pub cur_shard_cycle_range: std::ops::Range<usize>,
+    pub expected_inst_per_shard: usize,
+}
+
+impl<'a> Default for ShardContext<'a> {
+    fn default() -> Self {
+        let max_threads = max_usable_threads();
+        Self {
+            shard_id: 0,
+            num_shards: 1,
+            max_cycle: Cycle::MAX,
+            addr_future_accesses: Arc::new(Default::default()),
+            addr_accessed_thread_based_first_shard: Either::Left(
+                (0..max_threads)
+                    .map(|_| Default::default())
+                    .collect::<Vec<_>>(),
+            ),
+            read_records_tbs: Either::Left(
+                (0..max_threads)
+                    .map(|_| BTreeMap::new())
+                    .collect::<Vec<_>>(),
+            ),
+            write_records_tbs: Either::Left(
+                (0..max_threads)
+                    .map(|_| BTreeMap::new())
+                    .collect::<Vec<_>>(),
+            ),
+            cur_shard_cycle_range: Tracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
+            expected_inst_per_shard: usize::MAX,
+        }
+    }
+}
+
+/// `prover_id` and `num_provers` in MultiProver are exposed as arguments
+/// to specify the number of physical provers in a cluster,
+/// each mark with a prover_id.
+/// The overall trace data is divided into shards, which are distributed evenly among the provers.
+/// The number of shards are in general agnostic to number of provers.
+/// Each prover is assigned n shard where n can be even empty
+///
+/// Shard distribution follows a balanced allocation strategy
+/// for example, if there are 10 shards and 3 provers,
+/// the shard counts will be distributed as 3, 3, and 4, ensuring an even workload across all provers.
+impl<'a> ShardContext<'a> {
+    pub fn new(
+        multi_prover: MultiProver,
+        executed_instructions: usize,
+        addr_future_accesses: NextCycleAccess,
+    ) -> Vec<Self> {
+        let min_cycle_per_shard = multi_prover.min_cycle_per_shard;
+        let max_cycle_per_shard = multi_prover.max_cycle_per_shard;
+        assert!(
+            min_cycle_per_shard < max_cycle_per_shard,
+            "invalid input: min_cycle_per_shard {min_cycle_per_shard} >= max_cycle_per_shard {max_cycle_per_shard}"
+        );
+        let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN as usize;
+        let max_threads = max_usable_threads();
+
+        // strategies
+        // 0. set cur_num_shards = num_provers
+        // 1. split instructions evenly by cur_num_shards
+        // 2. stop if min_inst <= shard instructions < max_inst
+        // 3.1 if shard instructions >= max_inst, update cur_num_shards += 1 then goes to 1
+        // 3.2 if shard instructions < min_inst, update cur_num_shards -= 1 then goes to 1
+        const MAX_ITER: usize = 1000;
+        let mut num_shards = multi_prover.max_provers;
+        let mut last_shard_count = None;
+        let mut expected_inst_per_shard = 0;
+        for _ in 0..MAX_ITER {
+            expected_inst_per_shard = executed_instructions.div_ceil(num_shards);
+            let expected_cycle_per_shard = expected_inst_per_shard * subcycle_per_insn;
+            if (min_cycle_per_shard as usize..max_cycle_per_shard as usize)
+                .contains(&expected_cycle_per_shard)
+            {
+                break;
+            }
+
+            if expected_cycle_per_shard >= max_cycle_per_shard as usize {
+                num_shards += 1;
+            } else if expected_cycle_per_shard < min_cycle_per_shard as usize {
+                if num_shards == 1 {
+                    break;
+                }
+                num_shards -= 1;
+            }
+
+            // Detect oscillation (no progress)
+            if let Some(last_shard_count) = last_shard_count
+                && last_shard_count == num_shards
+            {
+                panic!(
+                    "no convergence detected: shard count stuck at {num_shards}, \
+                 per-shard={expected_inst_per_shard}"
+                );
+            }
+
+            last_shard_count = Some(num_shards);
+        }
+
+        // generated shards belong to this prover id
+        let prover_id_shards_mapping =
+            Self::distribute_shards_into_provers(num_shards, multi_prover.max_provers);
+        assert!(multi_prover.prover_id < prover_id_shards_mapping.len());
+
+        let max_cycle = (executed_instructions + 1) * subcycle_per_insn; // cycle start from subcycle_per_insn
+        let addr_future_accesses = Arc::new(addr_future_accesses);
+
+        // sum for all shards before prover id
+        let start = prover_id_shards_mapping
+            .iter()
+            .take(multi_prover.prover_id)
+            .sum::<usize>();
+        // length of shards belong to prover id
+        let shard_len = prover_id_shards_mapping[multi_prover.prover_id];
+        tracing::info!(
+            "total num_shards {num_shards}, num_shards belong to this prover: {shard_len}, multi-prover {:?}",
+            multi_prover
+        );
+        let end = start + shard_len;
+        (start..end)
+            .map(|shard_id| {
+                let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * subcycle_per_insn
+                    + subcycle_per_insn)
+                    ..((shard_id + 1) * expected_inst_per_shard * subcycle_per_insn
+                        + subcycle_per_insn)
+                        .min(max_cycle);
+                ShardContext {
+                    shard_id,
+                    num_shards,
+                    max_cycle: max_cycle as Cycle,
+                    addr_future_accesses: addr_future_accesses.clone(),
+                    addr_accessed_thread_based_first_shard: Either::Left(
+                        (0..max_threads)
+                            .map(|_| Default::default())
+                            .collect::<Vec<_>>(),
+                    ),
+                    // TODO with_capacity optimisation
+                    read_records_tbs: Either::Left(
+                        (0..max_threads)
+                            .map(|_| BTreeMap::new())
+                            .collect::<Vec<_>>(),
+                    ),
+                    // TODO with_capacity optimisation
+                    write_records_tbs: Either::Left(
+                        (0..max_threads)
+                            .map(|_| BTreeMap::new())
+                            .collect::<Vec<_>>(),
+                    ),
+                    cur_shard_cycle_range,
+                    expected_inst_per_shard,
+                }
+            })
+            .collect_vec()
+    }
+
+    pub fn get_forked(&mut self) -> Vec<ShardContext<'_>> {
+        match (
+            &mut self.read_records_tbs,
+            &mut self.write_records_tbs,
+            &mut self.addr_accessed_thread_based_first_shard,
+        ) {
+            (
+                Either::Left(read_thread_based_record_storage),
+                Either::Left(write_thread_based_record_storage),
+                Either::Left(addr_accessed_thread_based_first_shard),
+            ) => read_thread_based_record_storage
+                .iter_mut()
+                .zip(write_thread_based_record_storage.iter_mut())
+                .zip(addr_accessed_thread_based_first_shard.iter_mut())
+                .map(
+                    |((read, write), addr_accessed_thread_based_first_shard)| ShardContext {
+                        shard_id: self.shard_id,
+                        num_shards: self.num_shards,
+                        max_cycle: self.max_cycle,
+                        addr_future_accesses: self.addr_future_accesses.clone(),
+                        addr_accessed_thread_based_first_shard: Either::Right(
+                            addr_accessed_thread_based_first_shard,
+                        ),
+                        read_records_tbs: Either::Right(read),
+                        write_records_tbs: Either::Right(write),
+                        cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
+                        expected_inst_per_shard: self.expected_inst_per_shard,
+                    },
+                )
+                .collect_vec(),
+            _ => panic!("invalid type"),
+        }
+    }
+
+    pub fn read_records(&self) -> &[BTreeMap<WordAddr, RAMRecord>] {
+        match &self.read_records_tbs {
+            Either::Left(m) => m,
+            Either::Right(_) => panic!("undefined behaviour"),
+        }
+    }
+
+    pub fn write_records(&self) -> &[BTreeMap<WordAddr, RAMRecord>] {
+        match &self.write_records_tbs {
+            Either::Left(m) => m,
+            Either::Right(_) => panic!("undefined behaviour"),
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_first_shard(&self) -> bool {
+        self.shard_id == 0
+    }
+
+    #[inline(always)]
+    pub fn is_last_shard(&self) -> bool {
+        self.shard_id == self.num_shards - 1
+    }
+
+    #[inline(always)]
+    pub fn is_in_current_shard(&self, cycle: Cycle) -> bool {
+        self.cur_shard_cycle_range.contains(&(cycle as usize))
+    }
+
+    #[inline(always)]
+    pub fn before_current_shard_cycle(&self, cycle: Cycle) -> bool {
+        (cycle as usize) < self.cur_shard_cycle_range.start
+    }
+
+    #[inline(always)]
+    pub fn after_current_shard_cycle(&self, cycle: Cycle) -> bool {
+        (cycle as usize) >= self.cur_shard_cycle_range.end
+    }
+
+    #[inline(always)]
+    pub fn extract_shard_id(&self, cycle: Cycle) -> usize {
+        let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN;
+        let per_shard_cycles =
+            (self.expected_inst_per_shard as u64).saturating_mul(subcycle_per_insn);
+        ((cycle.saturating_sub(subcycle_per_insn)) / per_shard_cycles) as usize
+    }
+
+    #[inline(always)]
+    pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
+        let mut ts = prev_cycle.saturating_sub(self.current_shard_offset_cycle());
+        if ts < Tracer::SUBCYCLES_PER_INSN {
+            ts = 0
+        }
+        ts
+    }
+
+    #[inline(always)]
+    pub fn aligned_current_ts(&self, cycle: Cycle) -> Cycle {
+        cycle.saturating_sub(self.current_shard_offset_cycle())
+    }
+
+    pub fn current_shard_offset_cycle(&self) -> Cycle {
+        // cycle of each local shard start from Tracer::SUBCYCLES_PER_INSN
+        (self.cur_shard_cycle_range.start as Cycle) - Tracer::SUBCYCLES_PER_INSN
+    }
+
+    /// Finds the **next** future access cycle for the given address, starting from
+    /// the specified current cycle.
+    ///
+    /// Note that the returned cycle is simply the *next* access, not necessarily
+    /// the final (last) access of the address.
+    ///
+    /// For example, if address `0xabc` is accessed at cycles `4` and `8`,
+    /// then `find_future_next_access(0xabc, 4)` returns `8`.
+    #[inline(always)]
+    pub fn find_future_next_access(&self, cycle: Cycle, addr: WordAddr) -> Option<Cycle> {
+        self.addr_future_accesses
+            .get(cycle as usize)
+            .and_then(|res| {
+                if res.len() == 1 {
+                    Some(res[0].1)
+                } else if res.len() > 1 {
+                    res.iter()
+                        .find(|(m_addr, _)| *m_addr == addr)
+                        .map(|(_, cycle)| *cycle)
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn send(
+        &mut self,
+        ram_type: crate::structs::RAMType,
+        addr: WordAddr,
+        id: u64,
+        cycle: Cycle,
+        prev_cycle: Cycle,
+        value: Word,
+        prev_value: Option<Word>,
+    ) {
+        // check read from external mem bus
+        // exclude first shard
+        if self.before_current_shard_cycle(prev_cycle)
+            && self.is_in_current_shard(cycle)
+            && !self.is_first_shard()
+        {
+            let prev_shard_id = self.extract_shard_id(prev_cycle);
+            let ram_record = self
+                .read_records_tbs
+                .as_mut()
+                .right()
+                .expect("illegal type");
+            ram_record.insert(
+                addr,
+                RAMRecord {
+                    ram_type,
+                    reg_id: id,
+                    addr,
+                    prev_cycle,
+                    cycle,
+                    shard_cycle: 0,
+                    prev_value,
+                    value,
+                    shard_id: prev_shard_id,
+                },
+            );
+        }
+
+        // check write to external mem bus
+        if let Some(future_touch_cycle) = self.find_future_next_access(cycle, addr)
+            && self.after_current_shard_cycle(future_touch_cycle)
+            && self.is_in_current_shard(cycle)
+        {
+            let shard_cycle = self.aligned_current_ts(cycle);
+            let ram_record = self
+                .write_records_tbs
+                .as_mut()
+                .right()
+                .expect("illegal type");
+            ram_record.insert(
+                addr,
+                RAMRecord {
+                    ram_type,
+                    reg_id: id,
+                    addr,
+                    prev_cycle,
+                    cycle,
+                    shard_cycle,
+                    prev_value,
+                    value,
+                    shard_id: self.shard_id,
+                },
+            );
+        }
+
+        if self.is_first_shard() {
+            let addr_accessed = self
+                .addr_accessed_thread_based_first_shard
+                .as_mut()
+                .right()
+                .expect("illegal type");
+            addr_accessed.insert(addr);
+        }
+    }
+
+    /// merge map from different thread, which keep the largest cycle when matched same address
+    pub fn get_addr_accessed_first_shard(&self) -> FxHashSet<WordAddr> {
+        let mut merged = FxHashSet::default();
+        let addr_accessed_thread_based_first_shard =
+            match &self.addr_accessed_thread_based_first_shard {
+                Either::Left(addr_accessed_thread_based_first_shard) => {
+                    addr_accessed_thread_based_first_shard
+                }
+                Either::Right(_) => panic!("invalid type"),
+            };
+
+        for s in addr_accessed_thread_based_first_shard {
+            merged.extend(s);
+        }
+        merged
+    }
+
+    /// Splits a total count `num_shards` into up to `num_provers` non-empty parts, distributing as evenly as possible.
+    ///
+    /// # Behavior
+    ///
+    /// - If `num_shards == 0` or `num_provers == 0`, returns an empty vector `[]`.
+    /// - If `num_shards <= num_provers`, each part will have size `1`, and the total number of parts equals `num_shards`.
+    /// - Otherwise, divides `num_shards` evenly across `num_provers` parts so that:
+    ///   - The first `num_shards % num_provers` parts get `base + 1` elements,
+    ///   - The rest get `base` elements,
+    ///     where `base = num_shards / num_provers`.
+    ///
+    /// This ensures that:
+    /// - Every part is non-zero in size.
+    /// - The sum of all parts equals `num_shards`.
+    /// - The distribution is as balanced as possible (difference <= 1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() {
+    /// use ceno_zkvm::e2e::ShardContext;
+    /// assert_eq!(ShardContext::distribute_shards_into_provers(3, 2), vec![2, 1]);
+    /// assert_eq!(ShardContext::distribute_shards_into_provers(4, 2), vec![2, 2]);
+    /// assert_eq!(ShardContext::distribute_shards_into_provers(5, 2), vec![3, 2]);
+    /// assert_eq!(ShardContext::distribute_shards_into_provers(10, 3), vec![4, 3, 3]);
+    ///
+    /// // When n <= m, each item gets its own shard.
+    /// assert_eq!(ShardContext::distribute_shards_into_provers(1, 2), vec![1]);
+    /// assert_eq!(ShardContext::distribute_shards_into_provers(2, 3), vec![1, 1]);
+    /// assert_eq!(ShardContext::distribute_shards_into_provers(3, 4), vec![1, 1, 1]);
+    ///
+    /// // Edge cases
+    /// assert_eq!(ShardContext::distribute_shards_into_provers(0, 3), Vec::<usize>::new());
+    /// assert_eq!(ShardContext::distribute_shards_into_provers(5, 0), Vec::<usize>::new());
+    /// # }
+    /// ```
+    /// # Returns
+    ///
+    /// A `Vec<usize>` representing the size of each part, whose total sum equals `n`.
+    pub fn distribute_shards_into_provers(num_shards: usize, num_provers: usize) -> Vec<usize> {
+        if num_shards == 0 || num_provers == 0 {
+            return vec![];
+        }
+
+        // If there are more shards than items, just give each item its own shard
+        if num_shards <= num_provers {
+            return vec![1; num_shards];
+        }
+
+        let base = num_shards / num_provers;
+        let remainder = num_shards % num_provers;
+
+        (0..num_provers)
+            .map(|i| if i < remainder { base + 1 } else { base })
+            .collect()
+    }
+}
+
+pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
     init_mem_state: &InitMemState,
     platform: &Platform,
-) -> EmulationResult {
+    multi_prover: &MultiProver,
+) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
         io: io_init,
@@ -156,7 +668,9 @@ pub fn emulate_program(
         Tracer::SUBCYCLES_PER_INSN,
         vm.get_pc().into(),
         end_cycle,
+        multi_prover.prover_id as u32,
         io_init.iter().map(|rec| rec.value).collect_vec(),
+        vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );
 
     // Find the final register values and cycles.
@@ -167,15 +681,19 @@ pub fn emulate_program(
             if index < VMState::REG_COUNT {
                 let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
+                    ram_type: RAMType::Register,
                     addr: rec.addr,
                     value: vm.peek_register(index),
+                    init_value: rec.value,
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
             } else {
                 // The table is padded beyond the number of registers.
                 MemFinalRecord {
+                    ram_type: RAMType::Register,
                     addr: rec.addr,
                     value: 0,
+                    init_value: 0,
                     cycle: 0,
                 }
             }
@@ -188,8 +706,10 @@ pub fn emulate_program(
         .map(|rec| {
             let vma: WordAddr = rec.addr.into();
             MemFinalRecord {
+                ram_type: RAMType::Memory,
                 addr: rec.addr,
                 value: vm.peek_memory(vma),
+                init_value: rec.value,
                 cycle: *final_access.get(&vma).unwrap_or(&0),
             }
         })
@@ -199,8 +719,10 @@ pub fn emulate_program(
     let io_final = io_init
         .iter()
         .map(|rec| MemFinalRecord {
+            ram_type: RAMType::Memory,
             addr: rec.addr,
             value: rec.value,
+            init_value: rec.value,
             cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
         })
         .collect_vec();
@@ -209,8 +731,10 @@ pub fn emulate_program(
     let hints_final = hints_init
         .iter()
         .map(|rec| MemFinalRecord {
+            ram_type: RAMType::Memory,
             addr: rec.addr,
             value: rec.value,
+            init_value: rec.value,
             cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
         })
         .collect_vec();
@@ -226,8 +750,10 @@ pub fn emulate_program(
             .map(|vma| {
                 let byte_addr = vma.baddr();
                 MemFinalRecord {
+                    ram_type: RAMType::Memory,
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
+                    init_value: 0,
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
             })
@@ -249,8 +775,10 @@ pub fn emulate_program(
             .map(|vma| {
                 let byte_addr = vma.baddr();
                 MemFinalRecord {
+                    ram_type: RAMType::Memory,
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
+                    init_value: 0,
                     cycle: *final_access.get(&vma).unwrap_or(&0),
                 }
             })
@@ -270,10 +798,17 @@ pub fn emulate_program(
         ),
     );
 
+    let shard_ctxs = ShardContext::new(
+        multi_prover.clone(),
+        insts,
+        vm.take_tracer().next_accesses(),
+    );
+
     EmulationResult {
         pi,
         exit_code,
         all_records,
+        shard_ctxs,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,
@@ -389,17 +924,17 @@ pub fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
     program_addrs
 }
 
-pub struct ConstraintSystemConfig<E: ExtensionField> {
+pub struct ConstraintSystemConfig<'a, E: ExtensionField> {
     pub zkvm_cs: ZKVMConstraintSystem<E>,
     pub config: Rv32imConfig<E>,
-    pub mmu_config: MmuConfig<E>,
+    pub mmu_config: MmuConfig<'a, E>,
     pub dummy_config: DummyExtraConfig<E>,
     pub prog_config: ProgramTableConfig,
 }
 
-pub fn construct_configs<E: ExtensionField>(
+pub fn construct_configs<'a, E: ExtensionField>(
     program_params: ProgramParams,
-) -> ConstraintSystemConfig<E> {
+) -> ConstraintSystemConfig<'a, E> {
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
@@ -448,60 +983,165 @@ pub fn generate_fixed_traces<E: ExtensionField>(
     zkvm_fixed_traces
 }
 
-pub fn generate_witness<E: ExtensionField>(
+pub fn generate_witness<'a, E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
-    emul_result: EmulationResult,
+    mut emul_result: EmulationResult<'a>,
     program: &Program,
-) -> ZKVMWitnesses<E> {
-    let mut zkvm_witness = ZKVMWitnesses::default();
-    // assign opcode circuits
-    let dummy_records = system_config
-        .config
-        .assign_opcode_circuit(
-            &system_config.zkvm_cs,
-            &mut zkvm_witness,
-            emul_result.all_records,
-        )
-        .unwrap();
-    system_config
-        .dummy_config
-        .assign_opcode_circuit(&system_config.zkvm_cs, &mut zkvm_witness, dummy_records)
-        .unwrap();
-    zkvm_witness.finalize_lk_multiplicities();
+) -> impl Iterator<Item = (ZKVMWitnesses<E>, ShardContext<'a>, PublicValues)> {
+    let shard_ctxs = std::mem::take(&mut emul_result.shard_ctxs);
+    assert!(!shard_ctxs.is_empty());
+    let mut all_records = std::mem::take(&mut emul_result.all_records);
+    assert!(!all_records.is_empty());
 
-    // assign table circuits
-    system_config
-        .config
-        .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
-        .unwrap();
-    system_config
-        .mmu_config
-        .assign_table_circuit(
-            &system_config.zkvm_cs,
-            &mut zkvm_witness,
-            &emul_result.final_mem_state.reg,
-            &emul_result.final_mem_state.mem,
-            &emul_result
-                .final_mem_state
-                .io
-                .iter()
-                .map(|rec| rec.cycle)
-                .collect_vec(),
-            &emul_result.final_mem_state.hints,
-            &emul_result.final_mem_state.stack,
-            &emul_result.final_mem_state.heap,
-        )
-        .unwrap();
-    // assign program circuit
-    zkvm_witness
-        .assign_table_circuit::<ProgramTableCircuit<E>>(
-            &system_config.zkvm_cs,
-            &system_config.prog_config,
-            program,
-        )
-        .unwrap();
+    tracing::debug!(
+        "first shard cycle range {:?}",
+        shard_ctxs[0].cur_shard_cycle_range
+    );
+    // clean up all records before first shard start cycle, as it's not belong to current prover
+    let start = all_records.iter().position(|step| {
+        shard_ctxs[0]
+            .cur_shard_cycle_range
+            .contains(&(step.cycle() as usize))
+    });
 
-    zkvm_witness
+    if let Some(start) = start {
+        tracing::debug!("drop {} records as not belong to current shard", start);
+        // Drop everything before `start` efficiently
+        let tail = all_records.split_off(start);
+        all_records = tail;
+    }
+
+    let pi = std::mem::take(&mut emul_result.pi);
+    shard_ctxs.into_iter().map(move |mut shard_ctx| {
+        // assume public io clone low cost
+        let mut pi = pi.clone();
+        let n = all_records
+            .iter()
+            .take_while(|step| shard_ctx.is_in_current_shard(step.cycle()))
+            .count();
+        let mut filtered_steps = all_records.split_off(n); // moves pointer boundary, no mem shift
+        std::mem::swap(&mut all_records, &mut filtered_steps);
+
+        tracing::debug!("{}th shard collect {n} steps", shard_ctx.shard_id);
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let current_shard_end_cycle = filtered_steps.last().unwrap().cycle()
+            + Tracer::SUBCYCLES_PER_INSN
+            - current_shard_offset_cycle;
+        let current_shard_init_pc = if shard_ctx.is_first_shard() {
+            program.entry
+        } else {
+            filtered_steps[0].pc().before.0
+        };
+        let current_shard_end_pc = filtered_steps.last().unwrap().pc().after.0;
+
+        let mut zkvm_witness = ZKVMWitnesses::default();
+        // assign opcode circuits
+        let dummy_records = system_config
+            .config
+            .assign_opcode_circuit(
+                &system_config.zkvm_cs,
+                &mut shard_ctx,
+                &mut zkvm_witness,
+                filtered_steps,
+            )
+            .unwrap();
+        system_config
+            .dummy_config
+            .assign_opcode_circuit(
+                &system_config.zkvm_cs,
+                &mut shard_ctx,
+                &mut zkvm_witness,
+                dummy_records,
+            )
+            .unwrap();
+        zkvm_witness.finalize_lk_multiplicities();
+
+        // assign table circuits
+        system_config
+            .config
+            .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
+            .unwrap();
+
+        if shard_ctx.is_first_shard() {
+            // assign init table on first shard
+            system_config
+                .mmu_config
+                .assign_init_table_circuit(
+                    &system_config.zkvm_cs,
+                    &mut zkvm_witness,
+                    &emul_result.final_mem_state.reg,
+                    &emul_result.final_mem_state.mem,
+                    &emul_result.final_mem_state.io,
+                    &emul_result.final_mem_state.hints,
+                    &emul_result.final_mem_state.stack,
+                    &emul_result.final_mem_state.heap,
+                )
+                .unwrap();
+        } else {
+            // empty assignment
+            system_config
+                .mmu_config
+                .assign_init_table_circuit(
+                    &system_config.zkvm_cs,
+                    &mut zkvm_witness,
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                )
+                .unwrap();
+        }
+
+        // assign continuation circuit
+        system_config
+            .mmu_config
+            .assign_continuation_circuit(
+                &system_config.zkvm_cs,
+                &shard_ctx,
+                &mut zkvm_witness,
+                &emul_result.final_mem_state.reg,
+                &emul_result.final_mem_state.mem,
+                &emul_result.final_mem_state.io,
+                &emul_result.final_mem_state.hints,
+                &emul_result.final_mem_state.stack,
+                &emul_result.final_mem_state.heap,
+            )
+            .unwrap();
+
+        // assign program circuit
+        zkvm_witness
+            .assign_table_circuit::<ProgramTableCircuit<E>>(
+                &system_config.zkvm_cs,
+                &system_config.prog_config,
+                program,
+            )
+            .unwrap();
+
+        pi.init_pc = current_shard_init_pc;
+        pi.init_cycle = Tracer::SUBCYCLES_PER_INSN;
+        pi.shard_id = shard_ctx.shard_id as u32;
+        pi.end_pc = current_shard_end_pc;
+        pi.end_cycle = current_shard_end_cycle;
+        // set shard ram bus expected output to pi
+        let shard_ram_witness = zkvm_witness.get_table_witness(&ShardRamCircuit::<E>::name());
+        if let Some(shard_ram_witness) = shard_ram_witness
+            && shard_ram_witness[0].num_instances() > 0
+        {
+            for (f, v) in ShardRamCircuit::<E>::extract_ec_sum(
+                &system_config.mmu_config.ram_bus_circuit,
+                &shard_ram_witness[0],
+            )
+            .into_iter()
+            .zip_eq(pi.shard_rw_sum.as_mut_slice())
+            {
+                *v = f.to_canonical_u64() as u32;
+            }
+        }
+
+        (zkvm_witness, shard_ctx, pi)
+    })
 }
 
 // Encodes useful early return points of the e2e pipeline
@@ -519,12 +1159,13 @@ pub enum Checkpoint {
 pub type IntermediateState<E, PCS> = (Option<ZKVMProof<E, PCS>>, Option<ZKVMVerifyingKey<E, PCS>>);
 
 /// Context construct from a program and given platform
-pub struct E2EProgramCtx<E: ExtensionField> {
+pub struct E2EProgramCtx<'a, E: ExtensionField> {
     pub program: Arc<Program>,
     pub platform: Platform,
+    pub multi_prover: MultiProver,
     pub static_addrs: Vec<MemInitRecord>,
     pub pubio_len: usize,
-    pub system_config: ConstraintSystemConfig<E>,
+    pub system_config: ConstraintSystemConfig<'a, E>,
     pub reg_init: Vec<MemInitRecord>,
     pub io_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
@@ -533,7 +1174,7 @@ pub struct E2EProgramCtx<E: ExtensionField> {
 /// end-to-end pipeline result, stopping at a certain checkpoint
 pub struct E2ECheckpointResult<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     /// The proof generated by the pipeline, if any
-    pub proof: Option<ZKVMProof<E, PCS>>,
+    pub proofs: Option<Vec<ZKVMProof<E, PCS>>>,
     /// The verifying key generated by the pipeline, if any
     pub vk: Option<ZKVMVerifyingKey<E, PCS>>,
     /// The next step to run after the checkpoint
@@ -549,12 +1190,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> E2ECheckpointResult<
 }
 
 /// Set up a program with the given platform
-pub fn setup_program<E: ExtensionField>(program: Program, platform: Platform) -> E2EProgramCtx<E> {
+pub fn setup_program<'a, E: ExtensionField>(
+    program: Program,
+    platform: Platform,
+    multi_prover: MultiProver,
+) -> E2EProgramCtx<'a, E> {
     let static_addrs = init_static_addrs(&program);
     let pubio_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
         platform: platform.clone(),
-        program_size: program.instructions.len(),
+        program_size: next_pow2_instance_padding(program.instructions.len()),
         static_memory_len: static_addrs.len(),
         pubio_len,
     };
@@ -574,6 +1219,7 @@ pub fn setup_program<E: ExtensionField>(program: Program, platform: Platform) ->
     E2EProgramCtx {
         program: Arc::new(program),
         platform,
+        multi_prover,
         static_addrs,
         pubio_len,
         system_config,
@@ -583,7 +1229,7 @@ pub fn setup_program<E: ExtensionField>(program: Program, platform: Platform) ->
     }
 }
 
-impl<E: ExtensionField> E2EProgramCtx<E> {
+impl<E: ExtensionField> E2EProgramCtx<'_, E> {
     pub fn keygen<PCS: PolynomialCommitmentScheme<E> + 'static>(
         &self,
         max_num_variables: usize,
@@ -596,7 +1242,12 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
             .system_config
             .zkvm_cs
             .clone()
-            .key_gen::<PCS>(pp.clone(), vp.clone(), self.zkvm_fixed_traces.clone())
+            .key_gen::<PCS>(
+                pp.clone(),
+                vp.clone(),
+                self.program.entry,
+                self.zkvm_fixed_traces.clone(),
+            )
             .expect("keygen failed");
         let vk = pk.get_vk_slow();
         (pk, vk)
@@ -616,6 +1267,7 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
             .key_gen::<PCS>(
                 pb.get_pp().clone(),
                 pb.get_vp().clone(),
+                self.program.entry,
                 self.zkvm_fixed_traces.clone(),
             )
             .expect("keygen failed");
@@ -666,13 +1318,14 @@ pub fn run_e2e_with_checkpoint<
     device: PD,
     program: Program,
     platform: Platform,
+    multi_prover: MultiProver,
     hints: &[u32],
     public_io: &[u32],
     max_steps: usize,
     checkpoint: Checkpoint,
 ) -> E2ECheckpointResult<E, PCS> {
     let start = std::time::Instant::now();
-    let ctx = setup_program::<E>(program, platform);
+    let ctx = setup_program::<E>(program, platform, multi_prover);
     tracing::debug!("setup_program done in {:?}", start.elapsed());
 
     // Keygen
@@ -688,7 +1341,7 @@ pub fn run_e2e_with_checkpoint<
     let is_mock_proving = std::env::var("MOCK_PROVING").is_ok();
     if let Checkpoint::PrepE2EProving = checkpoint {
         return E2ECheckpointResult {
-            proof: None,
+            proofs: None,
             vk: Some(vk),
             next_step: Some(Box::new(move || {
                 _ = run_e2e_proof::<E, _, _, _>(
@@ -710,16 +1363,16 @@ pub fn run_e2e_with_checkpoint<
         max_steps,
         &init_full_mem,
         &ctx.platform,
+        &ctx.multi_prover,
     );
     tracing::debug!("emulate done in {:?}", start.elapsed());
 
     // Clone some emul_result fields before consuming
-    let pi = emul_result.pi.clone();
     let exit_code = emul_result.exit_code;
 
     if let Checkpoint::PrepWitnessGen = checkpoint {
         return E2ECheckpointResult {
-            proof: None,
+            proofs: None,
             vk: Some(vk),
             next_step: Some(Box::new(move || {
                 // When we run e2e and halt before generate_witness, this implies we are going to
@@ -730,48 +1383,58 @@ pub fn run_e2e_with_checkpoint<
         };
     }
 
+    let prover = ZKVMProver::new(pk, device);
+
     let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
 
-    let mut prover = ZKVMProver::new(pk, device);
+    let zkvm_proofs = zkvm_witness
+        .map(|(zkvm_witness, shard_ctx, pi)| {
+            if is_mock_proving {
+                MockProver::assert_satisfied_full(
+                    &shard_ctx,
+                    &ctx.system_config.zkvm_cs,
+                    ctx.zkvm_fixed_traces.clone(),
+                    &zkvm_witness,
+                    &pi,
+                    &ctx.program,
+                );
+                tracing::info!("Mock proving passed");
+            }
 
-    if is_mock_proving {
-        MockProver::assert_satisfied_full(
-            &ctx.system_config.zkvm_cs,
-            ctx.zkvm_fixed_traces.clone(),
-            &zkvm_witness,
-            &pi,
-            &ctx.program,
-        );
-        tracing::info!("Mock proving passed");
-    }
-
-    // Run proof phase
-    let transcript = Transcript::new(b"riscv");
-    let start = std::time::Instant::now();
-    let zkvm_proof = prover
-        .create_proof(zkvm_witness, pi, transcript)
-        .expect("create_proof failed");
-    tracing::debug!("proof created in {:?}", start.elapsed());
-    tracing::info!("e2e proof stat: {}", zkvm_proof);
+            // Run proof phase
+            let transcript = Transcript::new(b"riscv");
+            let start = std::time::Instant::now();
+            let zkvm_proof = prover
+                .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
+                .expect("create_proof failed");
+            tracing::debug!(
+                "{}th shard proof created in {:?}",
+                shard_ctx.shard_id,
+                start.elapsed()
+            );
+            tracing::info!("e2e proof stat: {}", zkvm_proof);
+            zkvm_proof
+        })
+        .collect_vec();
 
     let verifier = ZKVMVerifier::new(vk.clone());
 
     if let Checkpoint::PrepVerify = checkpoint {
         return E2ECheckpointResult {
-            proof: Some(zkvm_proof.clone()),
+            proofs: Some(zkvm_proofs.clone()),
             vk: Some(vk),
             next_step: Some(Box::new(move || {
-                run_e2e_verify(&verifier, zkvm_proof, exit_code, max_steps)
+                run_e2e_verify(&verifier, zkvm_proofs, exit_code, max_steps)
             })),
         };
     }
 
     let start = std::time::Instant::now();
-    run_e2e_verify(&verifier, zkvm_proof.clone(), exit_code, max_steps);
+    run_e2e_verify(&verifier, zkvm_proofs.clone(), exit_code, max_steps);
     tracing::debug!("verified in {:?}", start.elapsed());
 
     E2ECheckpointResult {
-        proof: Some(zkvm_proof),
+        proofs: Some(zkvm_proofs),
         vk: Some(vk),
         next_step: None,
     }
@@ -791,46 +1454,59 @@ pub fn run_e2e_proof<
     pk: ZKVMProvingKey<E, PCS>,
     max_steps: usize,
     is_mock_proving: bool,
-) -> ZKVMProof<E, PCS> {
+) -> Vec<ZKVMProof<E, PCS>> {
     // Emulate program
-    let emul_result = emulate_program(ctx.program.clone(), max_steps, init_full_mem, &ctx.platform);
-
-    // clone pi before consuming
-    let pi = emul_result.pi.clone();
+    let emul_result = emulate_program(
+        ctx.program.clone(),
+        max_steps,
+        init_full_mem,
+        &ctx.platform,
+        &ctx.multi_prover,
+    );
 
     // Generate witness
     let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
 
     // proving
-    let mut prover = ZKVMProver::new(pk, device);
+    let prover = ZKVMProver::new(pk, device);
 
-    if is_mock_proving {
-        MockProver::assert_satisfied_full(
-            &ctx.system_config.zkvm_cs,
-            ctx.zkvm_fixed_traces.clone(),
-            &zkvm_witness,
-            &pi,
-            &ctx.program,
-        );
-        tracing::info!("Mock proving passed");
-    }
+    zkvm_witness
+        .map(|(zkvm_witness, shard_ctx, pi)| {
+            if is_mock_proving {
+                if shard_ctx.num_shards > 1 {
+                    todo!("support mock proving on more than 1 shard")
+                }
+                MockProver::assert_satisfied_full(
+                    &shard_ctx,
+                    &ctx.system_config.zkvm_cs,
+                    ctx.zkvm_fixed_traces.clone(),
+                    &zkvm_witness,
+                    &pi,
+                    &ctx.program,
+                );
+                tracing::info!("Mock proving passed");
+            }
 
-    let transcript = Transcript::new(b"riscv");
-    prover
-        .create_proof(zkvm_witness, pi, transcript)
-        .expect("create_proof failed")
+            let transcript = Transcript::new(b"riscv");
+            prover
+                .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
+                .expect("create_proof failed")
+        })
+        .collect_vec()
 }
 
 pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     verifier: &ZKVMVerifier<E, PCS>,
-    zkvm_proof: ZKVMProof<E, PCS>,
+    zkvm_proofs: Vec<ZKVMProof<E, PCS>>,
     exit_code: Option<u32>,
     max_steps: usize,
 ) {
-    let transcript = Transcript::new(b"riscv");
+    let transcripts = (0..zkvm_proofs.len())
+        .map(|_| Transcript::new(b"riscv"))
+        .collect_vec();
     assert!(
         verifier
-            .verify_proof_halt(zkvm_proof, transcript, exit_code.is_some())
+            .verify_proofs_halt(zkvm_proofs, transcripts, exit_code.is_some())
             .expect("verify proof return with error"),
     );
     match exit_code {
@@ -887,19 +1563,18 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
 }
 
 pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Serialize>(
-    zkvm_proof: &ZKVMProof<E, PCS>,
+    zkvm_proofs: Vec<ZKVMProof<E, PCS>>,
     verifier: &ZKVMVerifier<E, PCS>,
 ) -> Result<(), ZKVMError> {
     #[cfg(debug_assertions)]
     {
         Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
     }
-    let transcript = Transcript::new(b"riscv");
-    verifier.verify_proof_halt(
-        zkvm_proof.clone(),
-        transcript,
-        zkvm_proof.has_halt(&verifier.vk),
-    )?;
+    let transcripts = (0..zkvm_proofs.len())
+        .map(|_| Transcript::new(b"riscv"))
+        .collect_vec();
+    let has_halt = zkvm_proofs.last().unwrap().has_halt(&verifier.vk);
+    verifier.verify_proofs_halt(zkvm_proofs, transcripts, has_halt)?;
     // print verification statistics such as hash count
     #[cfg(debug_assertions)]
     {
@@ -910,4 +1585,95 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::e2e::{MultiProver, ShardContext};
+    use ceno_emul::{Cycle, NextCycleAccess};
+
+    #[test]
+    fn test_single_prover_shard_ctx() {
+        for (name, max_cycle_per_shard, executed_instruction, expected_shard) in [
+            ("1 shard", 1 << 6, (1 << 6) / 4 - 1, 1),
+            (
+                "max inst + 10, split to 2 shard",
+                1 << 6,
+                (1 << 6) / 4 + 10,
+                2,
+            ),
+        ] {
+            test_single_shard_ctx_helper(
+                name,
+                max_cycle_per_shard,
+                executed_instruction,
+                expected_shard,
+            );
+        }
+    }
+
+    fn test_single_shard_ctx_helper(
+        name: &str,
+        max_cycle_per_shard: Cycle,
+        executed_instruction: usize,
+        expected_shard: usize,
+    ) {
+        let shard_ctx = ShardContext::new(
+            MultiProver::new(0, 1, 1 << 3, max_cycle_per_shard),
+            executed_instruction,
+            NextCycleAccess::default(),
+        );
+        assert_eq!(shard_ctx.len(), expected_shard, "{name} test case failed");
+        assert_eq!(
+            shard_ctx.first().unwrap().cur_shard_cycle_range.start,
+            4,
+            "{name} test case failed"
+        );
+        assert_eq!(
+            shard_ctx.last().unwrap().cur_shard_cycle_range.end,
+            executed_instruction * 4 + 4,
+            "{name} test case failed"
+        );
+        if shard_ctx.len() > 1 {
+            for pair in shard_ctx.windows(2) {
+                assert_eq!(
+                    pair[0].cur_shard_cycle_range.end, pair[1].cur_shard_cycle_range.start,
+                    "{name} test case failed"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_multi_prover_shard_ctx() {
+        for (name, num_shards, num_prover, expected_num_shards_of_provers) in [
+            ("2 provers", 7, 2, vec![4, 3]),
+            ("2 provers", 10, 3, vec![4, 3, 3]),
+        ] {
+            test_multi_shard_ctx_helper(
+                name,
+                num_shards,
+                num_prover,
+                expected_num_shards_of_provers,
+            );
+        }
+    }
+
+    fn test_multi_shard_ctx_helper(
+        name: &str,
+        num_shards: usize,
+        num_prover: usize,
+        expected_num_shards_of_provers: Vec<usize>,
+    ) {
+        let max_cycle_per_shard = (1 << 8) * 4;
+        let executed_instruction = (1 << 8) * num_shards - 10; // this will be split into num_shards
+        for (prover_id, expected_shard) in (0..num_prover).zip(expected_num_shards_of_provers) {
+            let shard_ctx = ShardContext::new(
+                MultiProver::new(prover_id, num_prover, 1 << 3, max_cycle_per_shard),
+                executed_instruction,
+                NextCycleAccess::default(),
+            );
+            assert_eq!(shard_ctx.len(), expected_shard, "{name} test case failed");
+        }
+    }
 }

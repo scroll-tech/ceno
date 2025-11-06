@@ -53,7 +53,7 @@ fn run_inner<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize>(
 ) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
 
-    let zkvm_proof: ZKVMProof<E, PCS> =
+    let zkvm_proofs: Vec<ZKVMProof<E, PCS>> =
         bincode::deserialize_from(File::open(&args.proof).context("Failed to open proof file")?)
             .context("Failed to deserialize proof file")?;
     print_cargo_message(
@@ -80,7 +80,7 @@ fn run_inner<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize>(
 
     let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk);
-    if let Err(e) = verify(&zkvm_proof, &verifier) {
+    if let Err(e) = verify(zkvm_proofs, &verifier) {
         bail!("Verification failed: {e:?}");
     }
 

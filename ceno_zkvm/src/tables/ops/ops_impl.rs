@@ -73,19 +73,31 @@ impl OpTableConfig {
         multiplicity: &HashMap<u64, usize>,
         length: usize,
     ) -> Result<RMMCollections<F>, CircuitBuilderError> {
-        assert_eq!(num_structural_witin, 0);
+        assert_eq!(num_structural_witin, 1);
+        let num_structural_witin = num_structural_witin.max(1);
+
         let mut witness =
             RowMajorMatrix::<F>::new(length, num_witin, InstancePaddingStrategy::Default);
+        let mut structural_witness = RowMajorMatrix::<F>::new(
+            length,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
 
         let mut mlts = vec![0; length];
         for (idx, mlt) in multiplicity {
             mlts[*idx as usize] = *mlt;
         }
 
-        witness.par_rows_mut().zip(mlts).for_each(|(row, mlt)| {
-            set_val!(row, self.mlt, F::from_v(mlt as u64));
-        });
+        witness
+            .par_rows_mut()
+            .zip_eq(structural_witness.par_rows_mut())
+            .zip(mlts)
+            .for_each(|((row, structural_row), mlt)| {
+                set_val!(row, self.mlt, F::from_v(mlt as u64));
+                *structural_row.last_mut().unwrap() = F::ONE;
+            });
 
-        Ok([witness, RowMajorMatrix::empty()])
+        Ok([witness, structural_witness])
     }
 }

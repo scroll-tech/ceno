@@ -30,7 +30,7 @@ use gkr_iop::{
         layer::Layer,
         layer_constraint_system::{LayerConstraintSystem, expansion_expr},
     },
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
     utils::{indices_arr_with_offset, lk_multiplicity::LkMultiplicity, wits_fixed_and_eqs},
 };
 
@@ -918,6 +918,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
         &[],
         &[],
         &[],
+        &[],
     );
     exit_span!(span);
 
@@ -963,6 +964,14 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
     };
 
     let span = entered_span!("prove", profiling_1 = true);
+    let selector_ctxs = vec![
+        SelectorContext::new(0, num_instances, log2_num_instances);
+        gkr_circuit
+            .layers
+            .first()
+            .map(|layer| layer.out_sel_and_eval_exprs.len())
+            .unwrap()
+    ];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -972,7 +981,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
             &[],
             &[],
             &mut prover_transcript,
-            num_instances,
+            &selector_ctxs,
         )
         .expect("Failed to prove phase");
     exit_span!(span);
@@ -992,8 +1001,9 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
                     &out_evals,
                     &[],
                     &[],
+                    &[],
                     &mut verifier_transcript,
-                    num_instances,
+                    &selector_ctxs,
                 )
                 .expect("GKR verify failed");
 

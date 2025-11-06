@@ -55,7 +55,7 @@ fn bench_add(c: &mut Criterion) {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp, vp, 0, zkvm_fixed_traces)
         .expect("keygen failed");
 
     let (max_num_variables, security_level) = default_backend_config();
@@ -111,7 +111,9 @@ fn bench_add(c: &mut Criterion) {
                             witness: polys,
                             structural_witness: vec![],
                             public_input: vec![],
-                            num_instances,
+                            pub_io_evals: vec![],
+                            num_instances: vec![num_instances],
+                            has_ecc_ops: false,
                         };
                         let _ = prover
                             .create_chip_proof(
