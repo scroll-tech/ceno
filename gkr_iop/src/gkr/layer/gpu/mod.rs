@@ -189,6 +189,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         )
         .collect_vec();
 
+        let span_eq = entered_span!("build eqs", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
         let eqs_gpu = layer
             .out_sel_and_eval_exprs

@@ -370,7 +370,7 @@ impl<
         // evaluate pi if there is instance query
         let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
         if !cs.instance_name_map().is_empty() {
-            let span = entered_span!("pi::evals");
+            let span = entered_span!("pi::evals", profiling_2 = true);
             for &Instance(idx) in cs.instance_name_map().keys() {
                 let poly = &input.public_input[idx];
                 pi_in_evals.insert(
