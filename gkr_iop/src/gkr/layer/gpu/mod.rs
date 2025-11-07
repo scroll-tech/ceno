@@ -15,7 +15,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression,
+    Expression, Instance,
     mle::{MultilinearExtension, Point},
     monomial::Term,
     utils::eval_by_expr_constant,
@@ -245,19 +245,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         // format: pub_io ++ challenge ++ constant
         let term_coefficients = instance_scalar_expr
             .iter()
-            .map(|s| pub_io_evals[s.id])
-            .copied()
+            .map(|Instance(id)| pub_io_evals[*id])
             .chain(
                 challenges_expr
                     .iter()
-                    .map(|c| eval_by_expr_constant(pub_io_evals, challenges, c))
+                    .map(|c| {
+                        eval_by_expr_constant(
+                            &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
+                            &main_sumcheck_challenges,
+                            c,
+                        )
+                    })
                     .chain(constant_expr.iter().copied())
                     .map(|either_v| match either_v {
                         Either::Left(base_field_val) => E::from(base_field_val),
                         Either::Right(ext_field_val) => ext_field_val,
                     }),
             )
-            .chain()
             .collect_vec();
 
         // Calculate max_num_var and max_degree from the extracted relationships
@@ -283,14 +287,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
             .sumcheck
-            .prove_generic_sumcheck_gpu(
+            .prove_generic_sumcheck_gpu_v2(
                 &cuda_hal,
                 dag,
-                max_dag_depth,
+                *max_dag_depth,
                 all_witins_gpu_type_gl64,
                 &term_coefficients_gl64,
                 max_num_var,
-                max_degree,
+                *max_degree,
                 basic_tr,
             )
             .unwrap();
