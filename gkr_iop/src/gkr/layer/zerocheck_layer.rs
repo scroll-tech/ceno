@@ -168,9 +168,49 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             self.n_instance,
         );
         self.main_sumcheck_expression = Some(zero_expr);
-        self.main_sumcheck_expression_dag = Some(expr_compression_to_dag(
-            self.main_sumcheck_expression.as_ref().unwrap(),
-        ));
+        self.main_sumcheck_expression_dag = Some({
+            let (
+                dag,
+                instance_scalar_expr,
+                challenges_expr,
+                constant_expr,
+                (max_degree, max_dag_depth),
+            ) = expr_compression_to_dag(self.main_sumcheck_expression.as_ref().unwrap());
+
+            let mut traverse_dag_id = 0;
+            let mut num_add = 0;
+            let mut num_mul = 0;
+            while traverse_dag_id < dag.len() {
+                match dag[traverse_dag_id] {
+                    0 => traverse_dag_id += 2, // skip wit index
+                    1 => traverse_dag_id += 2, // skip scalar index
+                    2 => {
+                        num_add += 1;
+                        traverse_dag_id += 1;
+                    }
+                    3 => {
+                        num_mul += 1;
+                        traverse_dag_id += 1;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+
+            tracing::debug!(
+                "layer name {} dag got num_add {num_add} num_mul {num_mul} max_degree {max_degree} \
+                max_dag_depth {max_dag_depth} num_scalar {}",
+                self.name,
+                instance_scalar_expr.len() + challenges_expr.len() + constant_expr.len(),
+            );
+
+            (
+                dag,
+                instance_scalar_expr,
+                challenges_expr,
+                constant_expr,
+                (max_degree, max_dag_depth),
+            )
+        });
         self.main_sumcheck_expression_monomial_terms = self
             .main_sumcheck_expression
             .as_ref()
