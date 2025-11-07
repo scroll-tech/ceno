@@ -18,6 +18,7 @@ use multilinear_extensions::{
     Expression,
     mle::{MultilinearExtension, Point},
     monomial::Term,
+    utils::eval_by_expr_constant,
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
@@ -232,23 +233,45 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             layer.n_fixed,
             layer.n_instance,
         );
-        // Calculate max_num_var and max_degree from the extracted relationships
-        let (term_coefficients, mle_indices_per_term, mle_size_info) =
-            extract_mle_relationships_from_monomial_terms(
-                &layer
-                    .main_sumcheck_expression_monomial_terms
-                    .clone()
-                    .unwrap(),
-                &all_witins_gpu,
-                &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
-                &main_sumcheck_challenges,
-            );
-        let max_num_var = max_num_variables;
-        let max_degree = mle_indices_per_term
+
+        let (
+            dag,
+            instance_scalar_expr,
+            challenges_expr,
+            constant_expr,
+            (max_degree, max_dag_depth),
+        ) = layer.main_sumcheck_expression_dag.as_ref().unwrap();
+
+        // format: pub_io ++ challenge ++ constant
+        let term_coefficients = instance_scalar_expr
             .iter()
-            .map(|indices| indices.len())
-            .max()
-            .unwrap_or(0);
+            .map(|s| pub_io_evals[s.id])
+            .copied()
+            .chain(
+                challenges_expr
+                    .iter()
+                    .map(|c| eval_by_expr_constant(pub_io_evals, challenges, c))
+                    .chain(constant_expr.iter().copied())
+                    .map(|either_v| match either_v {
+                        Either::Left(base_field_val) => E::from(base_field_val),
+                        Either::Right(ext_field_val) => ext_field_val,
+                    }),
+            )
+            .chain()
+            .collect_vec();
+
+        // Calculate max_num_var and max_degree from the extracted relationships
+        // let (term_coefficients, mle_indices_per_term, mle_size_info) =
+        //     extract_mle_relationships_from_monomial_terms(
+        //         &layer
+        //             .main_sumcheck_expression_monomial_terms
+        //             .clone()
+        //             .unwrap(),
+        //         &all_witins_gpu,
+        //         &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
+        //         &main_sumcheck_challenges,
+        //     );
+        let max_num_var = max_num_variables;
 
         // Convert types for GPU function Call
         let basic_tr: &mut BasicTranscript<BB31Ext> =
@@ -262,10 +285,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .sumcheck
             .prove_generic_sumcheck_gpu(
                 &cuda_hal,
+                dag,
+                max_dag_depth,
                 all_witins_gpu_type_gl64,
-                &mle_size_info,
                 &term_coefficients_gl64,
-                &mle_indices_per_term,
                 max_num_var,
                 max_degree,
                 basic_tr,

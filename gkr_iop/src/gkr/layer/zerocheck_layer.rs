@@ -5,7 +5,9 @@ use multilinear_extensions::{
     macros::{entered_span, exit_span},
     mle::{IntoMLE, Point},
     monomialize_expr_to_wit_terms,
-    utils::{eval_by_expr, eval_by_expr_with_instance, expr_convert_to_witins},
+    utils::{
+        eval_by_expr, eval_by_expr_with_instance, expr_compression_to_dag, expr_convert_to_witins,
+    },
     virtual_poly::VPAuxInfo,
 };
 use p3::field::{FieldAlgebra, dot_product};
@@ -166,6 +168,11 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             self.n_instance,
         );
         self.main_sumcheck_expression = Some(zero_expr);
+        self.main_sumcheck_expression_dag = Some(expr_compression_to_dag(
+            self.main_sumcheck_expression.as_ref().unwrap(),
+            self.n_instance,
+            self.n_instance + 2, // global challenges: alpha, beta
+        ));
         self.main_sumcheck_expression_monomial_terms = self
             .main_sumcheck_expression
             .as_ref()

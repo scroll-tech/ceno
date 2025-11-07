@@ -103,6 +103,15 @@ pub struct Layer<E: ExtensionField> {
     pub main_sumcheck_expression_monomial_terms: Option<Vec<Term<Expression<E>, Expression<E>>>>,
     pub main_sumcheck_expression: Option<Expression<E>>,
 
+    // flatten computation dag
+    pub main_sumcheck_expression_dag: Option<(
+        Vec<u32>,
+        Vec<Instance>,
+        Vec<Expression<E>>,
+        Vec<Either<E::BaseField, E>>,
+        (usize, usize),
+    )>,
+
     // rotation sumcheck expression, only optionally valid for zerocheck
     // store in 2 forms: expression & monomial
     pub rotation_sumcheck_expression_monomial_terms:
@@ -175,6 +184,7 @@ impl<E: ExtensionField> Layer<E> {
                     expr_names,
                     main_sumcheck_expression_monomial_terms: None,
                     main_sumcheck_expression: None,
+                    main_sumcheck_expression_dag: None,
                     rotation_sumcheck_expression_monomial_terms: None,
                     rotation_sumcheck_expression: None,
                 };
