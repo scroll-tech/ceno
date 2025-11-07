@@ -188,7 +188,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     challenges: &[E; 2],
     cuda_hal: &CudaHalBB31,
     prod_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
-    logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
+    // logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     big_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
 ) -> Result<
     (
@@ -317,14 +317,14 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         prod_buffers.push(buf);
     }
     // Allocate logup buffers based on original witness num_vars
-    for wit in lk_n_wit.iter().chain(lk_d_wit.iter()) {
-        let nv = wit.num_vars();
-        let buf = cuda_hal
-            .alloc_ext_elems_on_device(1 << (nv + 3))
-            .map_err(|e| format!("Failed to allocate logup GPU buffer: {:?}", e))?;
-        logup_buffers.push(buf);
-    }
-    exit_span!(span_malloc);
+    // for wit in lk_n_wit.iter().chain(lk_d_wit.iter()) {
+    //     let nv = wit.num_vars();
+    //     let buf = cuda_hal
+    //         .alloc_ext_elems_on_device(1 << (nv + 3))
+    //         .map_err(|e| format!("Failed to allocate logup GPU buffer: {:?}", e))?;
+    //     logup_buffers.push(buf);
+    // }
+    // exit_span!(span_malloc);
 
     let span_prod = entered_span!("build_prod_tower", profiling_3 = true);
     // Build product GpuProverSpecs using GPU polynomials directly
@@ -352,7 +352,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     let span_malloc = entered_span!("malloc_logup_buffers", profiling_3 = true);
     // Build logup GpuProverSpecs using GPU polynomials directly
     let mut logup_gpu_specs = Vec::new();
-    let mut remaining_logup_buffers = &mut logup_buffers[..];
 
     // Prepare last_layer for all logup cases
     let logup_last_layers = if !lk_numerator_gpu_chunks.is_empty() {
@@ -503,7 +502,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             // build_tower_witness_gpu will allocate buffers and build GPU specs
             let span = entered_span!("build_tower_witness", profiling_2 = true);
             let mut _prod_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
-            let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
+            // let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
                 composed_cs,
@@ -512,7 +511,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
                 challenges,
                 &cuda_hal,
                 &mut _prod_buffers,
-                &mut _logup_buffers,
+                // &mut _logup_buffers,
                 &mut _big_buffers,
             )
             .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
