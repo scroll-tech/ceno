@@ -170,10 +170,6 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         self.main_sumcheck_expression = Some(zero_expr);
         self.main_sumcheck_expression_dag = Some(expr_compression_to_dag(
             self.main_sumcheck_expression.as_ref().unwrap(),
-            self.n_instance,
-            self.n_instance
-                + 2 /* global challenges: alpha, beta */
-                + alpha_pows_expr.len(),
         ));
         self.main_sumcheck_expression_monomial_terms = self
             .main_sumcheck_expression

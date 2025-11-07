@@ -264,17 +264,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             )
             .collect_vec();
 
-        // Calculate max_num_var and max_degree from the extracted relationships
-        // let (term_coefficients, mle_indices_per_term, mle_size_info) =
-        //     extract_mle_relationships_from_monomial_terms(
-        //         &layer
-        //             .main_sumcheck_expression_monomial_terms
-        //             .clone()
-        //             .unwrap(),
-        //         &all_witins_gpu,
-        //         &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
-        //         &main_sumcheck_challenges,
-        //     );
         let max_num_var = max_num_variables;
 
         // Convert types for GPU function Call
