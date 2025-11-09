@@ -8,7 +8,7 @@ use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::arch::VirtualMachine;
 use openvm_circuit::arch::VmConfig;
 use openvm_circuit::{
-    arch::{instructions::program::Program, SystemConfig},
+    arch::{instructions::program::Program, SystemConfig, instructions::exe::VmExe},
     system::memory::tree::public_values::PUBLIC_VALUES_ADDRESS_SPACE_OFFSET,
 };
 use openvm_continuations::verifier::{
@@ -31,17 +31,30 @@ use openvm_sdk::{
 use openvm_stark_backend::{proof::Proof, Chip};
 use serde::{Deserialize, Serialize};
 use openvm_stark_sdk::{
-        config::FriParameters, engine::StarkFriEngine,
-        config::baby_bear_poseidon2::BabyBearPoseidon2Engine,
-        config::baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
-        openvm_stark_backend::{
-            config::{Com, StarkGenericConfig},
-            keygen::types::MultiStarkVerifyingKey,
-        },
-        p3_bn254_fr::Bn254Fr,
-    };
-    use std::io::Write;
-    use std::time::Instant;
+    config::FriParameters, engine::StarkFriEngine,
+    config::baby_bear_poseidon2::BabyBearPoseidon2Engine,
+    config::baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
+    openvm_stark_backend::{
+        config::{Com, StarkGenericConfig},
+        keygen::types::MultiStarkVerifyingKey,
+    },
+    p3_bn254_fr::Bn254Fr,
+};
+use openvm_sdk::Sdk;
+use std::io::Write;
+use std::time::Instant;
+use openvm_circuit::system::program::trace::VmCommittedExe;
+use openvm_circuit::{
+    arch::{
+        ExecutionBridge, InitFileGenerator, MemoryConfig, SystemPort, VmExtension, VmInventory,
+        VmInventoryBuilder, VmInventoryError,
+    },
+    system::phantom::PhantomChip,
+};
+use openvm_continuations::verifier::common::types::VmVerifierPvs;
+use openvm_continuations::verifier::internal::types::InternalVmVerifierInput;
+use openvm_continuations::verifier::internal::types::InternalVmVerifierPvs;
+use openvm_continuations::verifier::internal::InternalVmVerifierConfig;
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 
 const LEAF_LOG_BLOWUP: usize = 1;
@@ -107,14 +120,8 @@ pub fn compress_to_root_proof(
     vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
 ) {
     // Construct zkvm proof input
-    // let zkvm_proof_input = parse_zkvm_proof_import(zkvm_proof, &vk);
     let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs.into_iter().map(|p| ZKVMProofInput::from(p)).collect();
 
-    let mut witness_stream: Vec<Vec<F>> = Vec::new();
-    witness_stream.extend(zkvm_proof_inputs[0].write());
-
-
-    /* _debug: aggregation
     let aggregation_start_timestamp = Instant::now();
     let sdk = Sdk::new();
 
@@ -155,16 +162,25 @@ pub fn compress_to_root_proof(
         leaf_committed_exe,
     );
 
-    println!(
-        "Aggregation - Start leaf proof at: {:?}",
-        aggregation_start_timestamp.elapsed()
-    );
-    let leaf_proof = SingleSegmentVmProver::prove(&leaf_prover, witness_stream);
-    println!(
-        "Aggregation - Completed leaf proof at: {:?}",
-        aggregation_start_timestamp.elapsed()
-    );
+    let leaf_proofs = zkvm_proof_inputs.into_iter().enumerate().map(|(proof_idx, p)| {
+        println!(
+            "Aggregation - Start leaf proof (idx: {:?}) at: {:?}",
+            proof_idx,
+            aggregation_start_timestamp.elapsed()
+        );
+        let mut witness_stream: Vec<Vec<F>> = Vec::new();
+        witness_stream.extend(p.write());
+        let leaf_proof = SingleSegmentVmProver::prove(&leaf_prover, witness_stream);
+        println!(
+            "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}",
+            proof_idx,
+            aggregation_start_timestamp.elapsed()
+        );
 
+        leaf_proof
+    }).collect::<Vec<_>>();
+
+    /* _debug: aggregation
     // _debug: export leaf proof
     let json = serde_json::to_string(&leaf_proof).unwrap();
     let mut file =
@@ -310,42 +326,15 @@ mod tests {
     use ceno_zkvm::scheme::ZKVMProof;
     use ceno_zkvm::structs::ZKVMVerifyingKey;
     use mpcs::{Basefold, BasefoldRSParams};
-    use openvm_circuit::arch::{instructions::exe::VmExe, SystemConfig};
-    use openvm_native_circuit::NativeConfig;
-    use openvm_native_compiler::conversion::CompilerOptions;
-    use openvm_native_recursion::hints::Hintable;
-    use openvm_sdk::Sdk;
-    use openvm_stark_sdk::config::{baby_bear_poseidon2::BabyBearPoseidon2Engine, FriParameters};
+    
     use std::fs::File;
-    use std::sync::Arc;
+    
     /* _debug: single proof verification
     use openvm_stark_sdk::engine::StarkFriEngine;
     use openvm_circuit::arch::verify_single;
     use openvm_circuit::arch::VirtualMachine;
     use openvm_native_circuit::{Native, NativeConfig};
     */
-    use openvm_circuit::arch::VirtualMachine;
-    use openvm_circuit::system::program::trace::VmCommittedExe;
-    use openvm_circuit::{
-        arch::{
-            ExecutionBridge, InitFileGenerator, MemoryConfig, SystemPort, VmExtension, VmInventory,
-            VmInventoryBuilder, VmInventoryError,
-        },
-        system::phantom::PhantomChip,
-    };
-    use openvm_continuations::verifier::common::types::VmVerifierPvs;
-    use openvm_continuations::verifier::internal::types::InternalVmVerifierInput;
-    use openvm_continuations::verifier::internal::types::InternalVmVerifierPvs;
-    use openvm_continuations::verifier::internal::InternalVmVerifierConfig;
-    use openvm_sdk::prover::vm::types::VmProvingKey;
-    use openvm_sdk::{
-        config::AggregationTreeConfig,
-        prover::{
-            vm::{local::VmLocalProver, SingleSegmentVmProver},
-            RootVerifierLocalProver,
-        },
-        NonRootCommittedExe, RootSC, SC,
-    };
     use openvm_stark_sdk::config::setup_tracing_with_log_level;
 
     pub fn aggregation_inner_thread() {

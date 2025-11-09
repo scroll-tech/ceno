@@ -10,8 +10,10 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+ceno-examples = { path = "../examples-builder" }
 ceno_zkvm = { path = "../ceno_zkvm" }
 ceno_emul = { path = "../ceno_emul" }
+ceno_host = { path = "../ceno_host" }
 gkr_iop = { path = "../gkr_iop" }
 multilinear_extensions.workspace = true
 sumcheck.workspace = true
@@ -21,12 +23,16 @@ mpcs.workspace = true
 ff_ext.workspace = true
 whir.workspace = true
 rand.workspace = true
-tracing.workspace = true
 itertools.workspace = true
 bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 p3.workspace = true
+clap.workspace = true
+parse-size = "1.1"
+tracing.workspace = true
+tracing-forest.workspace = true
+tracing-subscriber.workspace = true
 openvm = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
 openvm-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false, features = ["bench-metrics"] }
 openvm-native-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
