@@ -450,6 +450,10 @@ pub fn verify_opcode_proof<C: Config>(
     vk: &VerifyingKey<E>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
 ) -> Array<C, Ext<C::F, C::EF>> {
+    // _debug: placeholder
+    builder.dyn_array(0)
+
+    /* _debug: verifier program
     let cs = vk.get_cs();
     let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
 
@@ -468,7 +472,7 @@ pub fn verify_opcode_proof<C: Config>(
 
     let num_var_with_rotation: Usize<C::N> = Usize::Var(Var::uninit(builder));
     builder
-        .if_eq(opcode_proof.has_gkr_proof.clone(), Usize::from(1))
+        .if_eq(opcode_proof.has_gkr_iop_proof.clone(), Usize::from(1))
         .then_or_else(
             |builder| {
                 builder.assign(
@@ -492,8 +496,8 @@ pub fn verify_opcode_proof<C: Config>(
 
     let prod_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>> = concat(
         builder,
-        &opcode_proof.record_r_out_evals,
-        &opcode_proof.record_w_out_evals,
+        &opcode_proof.r_out_evals,
+        &opcode_proof.w_out_evals,
     );
 
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
@@ -503,7 +507,7 @@ pub fn verify_opcode_proof<C: Config>(
         builder,
         challenger,
         prod_out_evals,
-        &opcode_proof.record_lk_out_evals,
+        &opcode_proof.lk_out_evals,
         num_variables,
         num_fanin,
         num_var_with_rotation.clone(),
@@ -561,6 +565,7 @@ pub fn verify_opcode_proof<C: Config>(
     builder.cycle_tracker_end("Verify GKR Circuit");
 
     builder.eval(opening_evaluations[0].point.fs.clone())
+    */
 }
 
 pub fn verify_gkr_circuit<C: Config>(
@@ -598,6 +603,7 @@ pub fn verify_gkr_circuit<C: Config>(
             has_rotation,
         } = layer_proof;
 
+        /* _debug: verifier program
         builder.if_eq(has_rotation, Usize::from(1)).then(|builder| {
             let first = builder.get(&eval_and_dedup_points, 0);
             builder.assert_usize_eq(first.has_point, Usize::from(1)); // Rotation proof should have at least one point
@@ -660,6 +666,7 @@ pub fn verify_gkr_circuit<C: Config>(
                 },
             );
         });
+        */
 
         let rotation_exprs_len = layer.rotation_exprs.1.len();
         transcript_observe_label(builder, challenger, b"combine subset evals");
@@ -693,9 +700,15 @@ pub fn verify_gkr_circuit<C: Config>(
 
         // sigma = \sum_b sel(b) * zero_expr(b)
         let max_degree = builder.constant(C::F::from_canonical_usize(layer.max_expr_degree + 1));
+
+        // _debug: placeholder
+        let max_num_variables = builder.constant(C::F::ONE);
+
+        /* _debug: verifier program
         let max_num_variables =
             builder.unsafe_cast_var_to_felt(gkr_proof.num_var_with_rotation.get_var());
-
+        */
+        
         let (in_point, expected_evaluation) = iop_verifier_state_verify(
             builder,
             challenger,
@@ -944,19 +957,26 @@ pub fn evaluate_selector<C: Config>(
             let zero = builder.constant(C::EF::ZERO);
             (expr, eq_eval(builder, out_point, in_point, one, zero))
         }
-        SelectorType::Prefix(expr) => (
-            expr,
-            eq_eval_less_or_equal_than(
-                builder,
-                &opcode_proof.num_instances_minus_one_bit_decomposition,
-                out_point,
-                in_point,
-            ),
-        ),
+        SelectorType::Prefix(expr) => {
+            return
+            /* _debug: verifier program
+            (
+                expr,
+                eq_eval_less_or_equal_than(
+                    builder,
+                    &opcode_proof.num_instances_minus_one_bit_decomposition,
+                    out_point,
+                    in_point,
+                ),
+            )
+            */
+        }
         SelectorType::OrderedSparse32 {
             indices,
             expression,
         } => {
+            return
+            /* _debug: verifier program
             let out_point_slice = out_point.slice(builder, 0, 5);
             let in_point_slice = in_point.slice(builder, 0, 5);
             let out_subgroup_eq = build_eq_x_r_vec_sequential(builder, &out_point_slice);
@@ -981,6 +1001,7 @@ pub fn evaluate_selector<C: Config>(
             builder.assign(&eval, eval * sel);
 
             (expression, eval)
+            */
         }
         _ => {
             unreachable!()
@@ -1004,8 +1025,11 @@ pub fn evaluate_ecc_selector<C: Config>(
     proof: &EccQuarkProofVariable<C>,
     offset_eq_id: usize,
 ) {
+    /* _debug: verifier program
     let (expr, eval) = match sel_type {
         SelectorType::QuarkBinaryTreeLessThan(expr) => {
+            return
+            
             builder.assert_nonzero(&proof.num_instances);
             // assert!(ctx.num_instances <= (1 << out_point.len()));
             builder.assert_nonzero(&out_point.len());
@@ -1072,6 +1096,7 @@ pub fn evaluate_ecc_selector<C: Config>(
     };
     let wit_id = wit_id.clone() as usize + offset_eq_id;
     builder.set(evals, wit_id, eval);
+    */
 }
 
 // TODO: make this as a function of BooleanHypercube
@@ -1307,6 +1332,8 @@ pub fn verify_table_proof<C: Config>(
 
     let r_expected_rounds: Array<C, Usize<C::N>> =
         builder.dyn_array(cs.zkvm_v1_css.r_table_expressions.len() * 2);
+
+    /* _debug: verifier program
     cs
         // only iterate r set, as read/write set round should match
         .zkvm_v1_css
@@ -1331,9 +1358,12 @@ pub fn verify_table_proof<C: Config>(
             builder.set(&r_expected_rounds, idx * 2, num_vars.clone());
             builder.set(&r_expected_rounds, idx * 2 + 1, num_vars.clone());
         });
+    */
 
     let lk_expected_rounds: Array<C, Usize<C::N>> =
         builder.dyn_array(cs.zkvm_v1_css.lk_table_expressions.len());
+
+    /* _debug: verifier program
     cs.zkvm_v1_css
         .lk_table_expressions
         .iter()
@@ -1355,6 +1385,8 @@ pub fn verify_table_proof<C: Config>(
 
             builder.set(&lk_expected_rounds, idx, num_vars);
         });
+    */
+
     let expected_rounds = concat(builder, &r_expected_rounds, &lk_expected_rounds);
     let max_expected_rounds = max_usize_arr(builder, &expected_rounds);
 
@@ -1362,8 +1394,8 @@ pub fn verify_table_proof<C: Config>(
     let max_num_variables: Usize<C::N> = Usize::from(max_expected_rounds);
     let prod_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>> = concat(
         builder,
-        &table_proof.record_r_out_evals,
-        &table_proof.record_w_out_evals,
+        &table_proof.r_out_evals,
+        &table_proof.w_out_evals,
     );
 
     builder.cycle_tracker_start("verify tower proof");
@@ -1372,7 +1404,7 @@ pub fn verify_table_proof<C: Config>(
             builder,
             challenger,
             prod_out_evals,
-            &table_proof.record_lk_out_evals,
+            &table_proof.lk_out_evals,
             expected_rounds,
             num_fanin,
             max_num_variables,

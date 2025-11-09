@@ -29,10 +29,25 @@ use openvm_sdk::{
     NonRootCommittedExe, RootSC, SC,
 };
 use openvm_stark_backend::{proof::Proof, Chip};
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
-use openvm_stark_sdk::{config::FriParameters, engine::StarkFriEngine};
 use serde::{Deserialize, Serialize};
+use openvm_stark_sdk::{
+        config::FriParameters, engine::StarkFriEngine,
+        config::baby_bear_poseidon2::BabyBearPoseidon2Engine,
+        config::baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
+        openvm_stark_backend::{
+            config::{Com, StarkGenericConfig},
+            keygen::types::MultiStarkVerifyingKey,
+        },
+        p3_bn254_fr::Bn254Fr,
+    };
+    use std::io::Write;
+    use std::time::Instant;
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
+
+const LEAF_LOG_BLOWUP: usize = 1;
+const INTERNAL_LOG_BLOWUP: usize = 2;
+const ROOT_LOG_BLOWUP: usize = 3;
+const SBOX_SIZE: usize = 7;
 
 /// Config to generate leaf VM verifier program.
 pub struct CenoLeafVmVerifierConfig {
@@ -91,12 +106,15 @@ pub fn compress_to_root_proof(
     zkvm_proofs: Vec<ZKVMProof<E, RecPcs>>,
     vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
 ) {
-    /* _debug: aggregation
     // Construct zkvm proof input
     // let zkvm_proof_input = parse_zkvm_proof_import(zkvm_proof, &vk);
-    let mut witness_stream: Vec<Vec<F>> = Vec::new();
-    witness_stream.extend(zkvm_proof_input.write());
+    let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs.into_iter().map(|p| ZKVMProofInput::from(p)).collect();
 
+    let mut witness_stream: Vec<Vec<F>> = Vec::new();
+    witness_stream.extend(zkvm_proof_inputs[0].write());
+
+
+    /* _debug: aggregation
     let aggregation_start_timestamp = Instant::now();
     let sdk = Sdk::new();
 
@@ -329,24 +347,6 @@ mod tests {
         NonRootCommittedExe, RootSC, SC,
     };
     use openvm_stark_sdk::config::setup_tracing_with_log_level;
-    use openvm_stark_sdk::{
-        config::baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
-        engine::StarkFriEngine,
-        openvm_stark_backend::{
-            config::{Com, StarkGenericConfig},
-            keygen::types::MultiStarkVerifyingKey,
-            proof::Proof,
-            Chip,
-        },
-        p3_bn254_fr::Bn254Fr,
-    };
-    use std::io::Write;
-    use std::time::Instant;
-
-    const LEAF_LOG_BLOWUP: usize = 1;
-    const INTERNAL_LOG_BLOWUP: usize = 2;
-    const ROOT_LOG_BLOWUP: usize = 3;
-    const SBOX_SIZE: usize = 7;
 
     pub fn aggregation_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);

@@ -2,10 +2,14 @@ use crate::arithmetics::next_pow2_instance_padding;
 use crate::basefold_verifier::basefold::{
     BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
 };
-
+use ceno_zkvm::scheme::{ZKVMChipProof, ZKVMProof};
+use ceno_zkvm::structs::{EccQuarkProof, TowerProofs};
+use gkr_iop::gkr::GKRProof;
+use gkr_iop::gkr::layer::sumcheck_layer::LayerProof;
+use mpcs::{Basefold, BasefoldRSParams};
+use p3::field::FieldExtensionAlgebra;
 use crate::tower_verifier::binding::{
-    IOPProverMessageVariable, IOPProverMessageVec, IOPProverMessageVecVariable,
-    ThreeDimensionalVecVariable, ThreeDimensionalVector,
+    IOPProverMessage, IOPProverMessageVariable, IOPProverMessageVec, IOPProverMessageVecVariable, ThreeDimensionalVecVariable, ThreeDimensionalVector
 };
 use crate::{arithmetics::ceil_log2, tower_verifier::binding::PointVariable};
 use itertools::Itertools;
@@ -18,9 +22,13 @@ use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::hints::{Hintable, VecAutoHintable};
 use openvm_stark_backend::p3_field::{extension::BinomialExtensionField, FieldAlgebra};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
+use multilinear_extensions::mle::Point;
+use sumcheck::structs::IOPProof;
+use ceno_zkvm::scheme::septic_curve::{SepticExtension, SepticPoint};
 
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, 4>;
+pub type RecPcs = Basefold<E, BasefoldRSParams>;
 pub type InnerConfig = AsmConfig<F, E>;
 
 #[derive(DslVariable, Clone)]
@@ -47,331 +55,27 @@ pub struct TowerProofInputVariable<C: Config> {
     pub logup_specs_eval: ThreeDimensionalVecVariable<C>,
 }
 
-#[derive(DslVariable, Clone)]
-pub struct ZKVMChipProofInputVariable<C: Config> {
-    pub idx: Usize<C::N>,
-    pub idx_felt: Felt<C::F>,
-    pub num_instances: Usize<C::N>,
-    pub num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
-    pub log2_num_instances: Usize<C::N>,
-
-    pub record_r_out_evals_len: Usize<C::N>,
-    pub record_w_out_evals_len: Usize<C::N>,
-    pub record_lk_out_evals_len: Usize<C::N>,
-
-    pub record_r_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    pub record_w_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    pub record_lk_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-
-    pub tower_proof: TowerProofInputVariable<C>,
-
-    pub main_sel_sumcheck_proofs: IOPProverMessageVecVariable<C>,
-    pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
-    pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
-
-    pub has_gkr_proof: Usize<C::N>,
-    pub gkr_iop_proof: GKRProofVariable<C>,
-}
-
 pub(crate) struct ZKVMProofInput {
     pub raw_pi: Vec<Vec<F>>,
     // Evaluation of raw_pi.
     pub pi_evals: Vec<E>,
     pub chip_proofs: Vec<ZKVMChipProofInput>,
     pub witin_commit: BasefoldCommitment,
-    pub pcs_proof: BasefoldProof,
+    pub opening_proof: BasefoldProof,
 }
 
-// pub fn parse_zkvm_proof_import(
-//     zkvm_proof: ZKVMProof<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>>,
-//     vk: &ZKVMVerifyingKey<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>>,
-// ) -> ZKVMProofInput {
-//     let raw_pi = zkvm_proof
-//         .raw_pi
-//         .iter()
-//         .map(|m_vec| {
-//             m_vec
-//                 .iter()
-//                 .map(|m| {
-//                     let f_v: F =
-//                         serde_json::from_value(serde_json::to_value(m.clone()).unwrap()).unwrap();
-//                     f_v
-//                 })
-//                 .collect::<Vec<F>>()
-//         })
-//         .collect::<Vec<Vec<F>>>();
-
-//     let pi_evals = zkvm_proof
-//         .pi_evals
-//         .iter()
-//         .map(|e| {
-//             let e_v: E = serde_json::from_value(serde_json::to_value(e.clone()).unwrap()).unwrap();
-//             e_v
-//         })
-//         .collect::<Vec<E>>();
-
-//     let mut chip_proofs: Vec<ZKVMChipProofInput> = vec![];
-//     for (chip_id, chip_proof) in &zkvm_proof.chip_proofs {
-//         let mut record_r_out_evals: Vec<Vec<E>> = vec![];
-//         let mut record_w_out_evals: Vec<Vec<E>> = vec![];
-//         let mut record_lk_out_evals: Vec<Vec<E>> = vec![];
-
-//         let record_r_out_evals_len: usize = chip_proof.r_out_evals.len();
-//         for v_vec in &chip_proof.r_out_evals {
-//             let mut arr: Vec<E> = vec![];
-//             for v in v_vec {
-//                 let v_e: E =
-//                     serde_json::from_value(serde_json::to_value(v.clone()).unwrap()).unwrap();
-//                 arr.push(v_e);
-//             }
-//             record_r_out_evals.push(arr);
-//         }
-//         let record_w_out_evals_len: usize = chip_proof.w_out_evals.len();
-//         for v_vec in &chip_proof.w_out_evals {
-//             let mut arr: Vec<E> = vec![];
-//             for v in v_vec {
-//                 let v_e: E =
-//                     serde_json::from_value(serde_json::to_value(v.clone()).unwrap()).unwrap();
-//                 arr.push(v_e);
-//             }
-//             record_w_out_evals.push(arr);
-//         }
-//         let record_lk_out_evals_len: usize = chip_proof.lk_out_evals.len();
-//         for v_vec in &chip_proof.lk_out_evals {
-//             let mut arr: Vec<E> = vec![];
-//             for v in v_vec {
-//                 let v_e: E =
-//                     serde_json::from_value(serde_json::to_value(v.clone()).unwrap()).unwrap();
-//                 arr.push(v_e);
-//             }
-//             record_lk_out_evals.push(arr);
-//         }
-
-//         // Tower proof
-//         let mut tower_proof = TowerProofInput::default();
-//         let mut proofs: Vec<IOPProverMessageVec> = vec![];
-
-//         for proof in &chip_proof.tower_proof.proofs {
-//             let mut proof_messages: Vec<E> = vec![];
-//             let mut prover_message_size = None;
-//             for m in proof {
-//                 let mut evaluations_vec: Vec<E> = vec![];
-
-//                 for v in &m.evaluations {
-//                     let v_e: E =
-//                         serde_json::from_value(serde_json::to_value(v.clone()).unwrap()).unwrap();
-//                     evaluations_vec.push(v_e);
-//                 }
-//                 if let Some(size) = prover_message_size {
-//                     assert_eq!(size, evaluations_vec.len());
-//                 } else {
-//                     prover_message_size = Some(evaluations_vec.len());
-//                 }
-//                 proof_messages.extend_from_slice(&evaluations_vec);
-//             }
-//             proofs.push(IOPProverMessageVec {
-//                 prover_message_size: prover_message_size.unwrap(),
-//                 data: proof_messages,
-//             });
-//         }
-//         tower_proof.num_proofs = proofs.len();
-//         tower_proof.proofs = proofs;
-
-//         let mut prod_specs_eval: Vec<Vec<Vec<E>>> = vec![];
-//         for inner_val in &chip_proof.tower_proof.prod_specs_eval {
-//             let mut inner_v: Vec<Vec<E>> = vec![];
-//             for inner_evals_val in inner_val {
-//                 let mut inner_evals_v: Vec<E> = vec![];
-
-//                 for v in inner_evals_val {
-//                     let v_e: E =
-//                         serde_json::from_value(serde_json::to_value(v.clone()).unwrap()).unwrap();
-//                     inner_evals_v.push(v_e);
-//                 }
-//                 inner_v.push(inner_evals_v);
-//             }
-//             prod_specs_eval.push(inner_v);
-//         }
-//         tower_proof.num_prod_specs = prod_specs_eval.len();
-//         tower_proof.prod_specs_eval = prod_specs_eval.into();
-
-//         let mut logup_specs_eval: Vec<Vec<Vec<E>>> = vec![];
-//         for inner_val in &chip_proof.tower_proof.logup_specs_eval {
-//             let mut inner_v: Vec<Vec<E>> = vec![];
-//             for inner_evals_val in inner_val {
-//                 let mut inner_evals_v: Vec<E> = vec![];
-
-//                 for v in inner_evals_val {
-//                     let v_e: E =
-//                         serde_json::from_value(serde_json::to_value(v.clone()).unwrap()).unwrap();
-//                     inner_evals_v.push(v_e);
-//                 }
-//                 inner_v.push(inner_evals_v);
-//             }
-//             logup_specs_eval.push(inner_v);
-//         }
-//         tower_proof.num_logup_specs = logup_specs_eval.len();
-//         tower_proof.logup_specs_eval = logup_specs_eval.into();
-
-//         // main constraint and select sumcheck proof
-//         let main_sumcheck_proofs = if chip_proof.main_sumcheck_proofs.is_some() {
-//             let mut main_sumcheck_proofs: Vec<E> = vec![];
-//             let mut prover_message_size = None;
-//             for m in chip_proof.main_sumcheck_proofs.as_ref().unwrap() {
-//                 let mut evaluations_vec: Vec<E> = vec![];
-//                 for v in &m.evaluations {
-//                     let v_e: E =
-//                         serde_json::from_value(serde_json::to_value(v.clone()).unwrap()).unwrap();
-//                     evaluations_vec.push(v_e);
-//                 }
-//                 main_sumcheck_proofs.extend_from_slice(&evaluations_vec);
-//                 if let Some(size) = prover_message_size {
-//                     assert_eq!(size, evaluations_vec.len());
-//                 } else {
-//                     prover_message_size = Some(evaluations_vec.len());
-//                 }
-//             }
-//             IOPProverMessageVec {
-//                 prover_message_size: prover_message_size.unwrap(),
-//                 data: main_sumcheck_proofs,
-//             }
-//         } else {
-//             IOPProverMessageVec {
-//                 prover_message_size: 0,
-//                 data: vec![],
-//             }
-//         };
-
-//         let mut wits_in_evals: Vec<E> = vec![];
-//         for v in &chip_proof.wits_in_evals {
-//             let v_e: E = serde_json::from_value(serde_json::to_value(v.clone()).unwrap()).unwrap();
-//             wits_in_evals.push(v_e);
-//         }
-
-//         let mut fixed_in_evals: Vec<E> = vec![];
-//         for v in &chip_proof.fixed_in_evals {
-//             let v_e: E = serde_json::from_value(serde_json::to_value(v.clone()).unwrap()).unwrap();
-//             fixed_in_evals.push(v_e);
-//         }
-
-//         let circuit_name = &vk.circuit_index_to_name[chip_id];
-//         let circuit_vk = &vk.circuit_vks[circuit_name];
-
-//         let composed_cs = circuit_vk.get_cs();
-//         let num_instances = chip_proof.num_instances;
-//         let next_pow2_instance = num_instances.next_power_of_two().max(2);
-//         let log2_num_instances = ceil_log2(next_pow2_instance);
-//         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
-
-//         let has_gkr_proof = chip_proof.gkr_iop_proof.is_some();
-//         let mut gkr_iop_proof = GKRProofInput {
-//             num_var_with_rotation,
-//             num_instances,
-//             layer_proofs: vec![],
-//         };
-
-//         if has_gkr_proof {
-//             let gkr_proof = chip_proof.gkr_iop_proof.clone().unwrap();
-
-//             for layer_proof in gkr_proof.0 {
-//                 // rotation
-//                 let (has_rotation, rotation): (usize, SumcheckLayerProofInput) = if let Some(p) =
-//                     layer_proof.rotation
-//                 {
-//                     let mut iop_messages: Vec<IOPProverMessage> = vec![];
-//                     for m in p.proof.proofs {
-//                         let mut evaluations: Vec<E> = vec![];
-//                         for e in m.evaluations {
-//                             let v_e: E =
-//                                 serde_json::from_value(serde_json::to_value(e.clone()).unwrap())
-//                                     .unwrap();
-//                             evaluations.push(v_e);
-//                         }
-//                         iop_messages.push(IOPProverMessage { evaluations });
-//                     }
-//                     let mut evals: Vec<E> = vec![];
-//                     for e in p.evals {
-//                         let v_e: E =
-//                             serde_json::from_value(serde_json::to_value(e.clone()).unwrap())
-//                                 .unwrap();
-//                         evals.push(v_e);
-//                     }
-//                     (
-//                         1,
-//                         SumcheckLayerProofInput {
-//                             proof: iop_messages.into(),
-//                             evals,
-//                         },
-//                     )
-//                 } else {
-//                     (0, SumcheckLayerProofInput::default())
-//                 };
-
-//                 // main sumcheck
-//                 let mut iop_messages: Vec<IOPProverMessage> = vec![];
-//                 let mut evals: Vec<E> = vec![];
-//                 for m in layer_proof.main.proof.proofs {
-//                     let mut evaluations: Vec<E> = vec![];
-//                     for e in m.evaluations {
-//                         let v_e: E =
-//                             serde_json::from_value(serde_json::to_value(e.clone()).unwrap())
-//                                 .unwrap();
-//                         evaluations.push(v_e);
-//                     }
-//                     iop_messages.push(IOPProverMessage { evaluations });
-//                 }
-//                 for e in layer_proof.main.evals {
-//                     let v_e: E =
-//                         serde_json::from_value(serde_json::to_value(e.clone()).unwrap()).unwrap();
-//                     evals.push(v_e);
-//                 }
-
-//                 let main = SumcheckLayerProofInput {
-//                     proof: iop_messages.into(),
-//                     evals,
-//                 };
-
-//                 gkr_iop_proof.layer_proofs.push(LayerProofInput {
-//                     has_rotation,
-//                     rotation,
-//                     main,
-//                 });
-//             }
-//         }
-
-//         chip_proofs.push(ZKVMChipProofInput {
-//             idx: chip_id.clone(),
-//             num_instances: chip_proof.num_instances,
-//             num_vars: num_var_with_rotation,
-//             record_r_out_evals_len,
-//             record_w_out_evals_len,
-//             record_lk_out_evals_len,
-//             record_r_out_evals,
-//             record_w_out_evals,
-//             record_lk_out_evals,
-//             tower_proof,
-//             main_sumcheck_proofs,
-//             wits_in_evals,
-//             fixed_in_evals,
-//             has_gkr_proof,
-//             gkr_iop_proof,
-//         });
-//     }
-
-//     let witin_commit: mpcs::BasefoldCommitment<BabyBearExt4> =
-//         serde_json::from_value(serde_json::to_value(zkvm_proof.witin_commit).unwrap()).unwrap();
-//     let witin_commit: BasefoldCommitment = witin_commit.into();
-
-//     let pcs_proof = zkvm_proof.opening_proof.into();
-
-//     ZKVMProofInput {
-//         raw_pi,
-//         pi_evals,
-//         chip_proofs,
-//         witin_commit,
-//         pcs_proof,
-//     }
-// }
+impl From<ZKVMProof<E, RecPcs>> for ZKVMProofInput {
+    fn from(p: ZKVMProof<E, RecPcs>) -> Self {
+        
+        ZKVMProofInput { 
+            raw_pi: p.raw_pi, 
+            pi_evals: p.pi_evals, 
+            chip_proofs: p.chip_proofs.into_iter().map(|c| ZKVMChipProofInput::from(c)).collect::<Vec<ZKVMChipProofInput>>(),
+            witin_commit: p.witin_commit.into(), 
+            opening_proof: p.opening_proof.into(),
+        }
+    }
+}
 
 impl Hintable<InnerConfig> for ZKVMProofInput {
     type HintVariable = ZKVMProofInputVariable<InnerConfig>;
@@ -384,7 +88,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let max_num_var = usize::read(builder);
         let max_width = usize::read(builder);
         let witin_commit = BasefoldCommitment::read(builder);
-        let witin_perm = Vec::<usize>::read(builder);
+        let witin_perm: Array<AsmConfig<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>, BinomialExtensionField<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>, 4>>, Var<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>>> = Vec::<usize>::read(builder);
         let fixed_perm = Vec::<usize>::read(builder);
         let pcs_proof = BasefoldProof::read(builder);
 
@@ -412,7 +116,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let witin_num_vars = self
             .chip_proofs
             .iter()
-            .map(|proof| proof.num_vars)
+            .map(|proof| proof.sum_num_instances)
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
@@ -423,7 +127,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .chip_proofs
             .iter()
             .filter(|proof| proof.fixed_in_evals.len() > 0)
-            .map(|proof| proof.num_vars)
+            .map(|proof| proof.sum_num_instances)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
@@ -464,7 +168,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         stream.extend(self.witin_commit.write());
         stream.extend(witin_perm.write());
         stream.extend(fixed_perm.write());
-        stream.extend(self.pcs_proof.write());
+        stream.extend(self.opening_proof.write());
 
         stream
     }
@@ -480,6 +184,22 @@ pub struct TowerProofInput {
     // specs -> layers -> evals
     pub num_logup_specs: usize,
     pub logup_specs_eval: ThreeDimensionalVector,
+}
+
+impl From<TowerProofs<E>> for TowerProofInput {
+    fn from(p: TowerProofs<E>) -> Self {
+        let proofs: Vec<IOPProverMessageVec> = p.proofs.iter().map(|vec| {
+            IOPProverMessageVec::from(vec.iter().map(|p| IOPProverMessage { evaluations: p.evaluations.clone() }).collect::<Vec<IOPProverMessage>>())
+        }).collect();
+        Self { 
+            num_proofs: p.proofs.len(), 
+            proofs,
+            num_prod_specs: p.prod_spec_size(), 
+            prod_specs_eval: ThreeDimensionalVector::from(p.prod_specs_eval.clone()),
+            num_logup_specs: p.logup_spec_size(), 
+            logup_specs_eval: ThreeDimensionalVector::from(p.logup_specs_eval),
+        }
+    }
 }
 
 impl Hintable<InnerConfig> for TowerProofInput {
@@ -530,126 +250,207 @@ impl Hintable<InnerConfig> for TowerProofInput {
 }
 
 pub struct ZKVMChipProofInput {
+    // _debug: binding
     pub idx: usize,
-    // this is the number of instructions before padding
-    // it's possible that an instruction has multiple rows.
-    pub num_instances: usize,
-    // this is the number of variables of each polynomial in the witness matrix
-    pub num_vars: usize,
+    pub sum_num_instances: usize,
 
     // product constraints
-    pub record_r_out_evals_len: usize,
-    pub record_w_out_evals_len: usize,
-    pub record_lk_out_evals_len: usize,
-    pub record_r_out_evals: Vec<Vec<E>>,
-    pub record_w_out_evals: Vec<Vec<E>>,
-    pub record_lk_out_evals: Vec<Vec<E>>,
+    pub r_out_evals_len: usize,
+    pub w_out_evals_len: usize,
+    pub lk_out_evals_len: usize,
+    pub r_out_evals: Vec<Vec<E>>,
+    pub w_out_evals: Vec<Vec<E>>,
+    pub lk_out_evals: Vec<Vec<E>>,
 
     pub tower_proof: TowerProofInput,
 
     // main constraint and select sumcheck proof
+    pub has_main_sumcheck_proofs: usize,
     pub main_sumcheck_proofs: IOPProverMessageVec,
+    
+    // gkr proof
+    pub has_gkr_proof: usize,
+    pub gkr_iop_proof: GKRProofInput,
+
+    // ecc proof
+    pub has_ecc_proof: usize,
+    pub ecc_proof: EccQuarkProofInput,
+
+    pub num_instances: Vec<usize>,
+
     pub wits_in_evals: Vec<E>,
     pub fixed_in_evals: Vec<E>,
-
-    // gkr proof
-    pub has_gkr_proof: bool,
-    pub gkr_iop_proof: GKRProofInput,
 }
-
 impl VecAutoHintable for ZKVMChipProofInput {}
 
+impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
+    fn from(d: (usize, ZKVMChipProof<E>)) -> Self {
+        let idx = d.0;
+        let p = d.1;
+        let sum_num_instances = p.num_instances.iter().sum();
+
+        Self { 
+            idx,
+            sum_num_instances,
+            r_out_evals_len: p.r_out_evals.len(), 
+            w_out_evals_len: p.w_out_evals.len(), 
+            lk_out_evals_len: p.lk_out_evals.len(), 
+            r_out_evals: p.r_out_evals, 
+            w_out_evals: p.w_out_evals, 
+            lk_out_evals: p.lk_out_evals, 
+            tower_proof: p.tower_proof.into(), 
+            has_main_sumcheck_proofs: if p.main_sumcheck_proofs.is_some() { 1 } else { 0 },
+            main_sumcheck_proofs: if p.main_sumcheck_proofs.is_some() {
+                let r = p.main_sumcheck_proofs.unwrap();
+                r.iter().map(|p| IOPProverMessage { evaluations: p.evaluations.clone() }).collect::<Vec<IOPProverMessage>>().into()
+            } else {
+                IOPProverMessageVec::default()
+            },
+            has_gkr_proof: if p.gkr_iop_proof.is_some() { 1 } else { 0 },
+            gkr_iop_proof: if p.gkr_iop_proof.is_some() {
+                p.gkr_iop_proof.unwrap().into()
+            } else {
+                GKRProofInput::default()
+            },
+            has_ecc_proof: if p.ecc_proof.is_some() { 1 } else { 0 },
+            ecc_proof: if p.ecc_proof.is_some() {
+                p.ecc_proof.unwrap().into()
+            } else {
+                EccQuarkProofInput::dummy()
+            }, 
+            num_instances: p.num_instances,
+            wits_in_evals: p.wits_in_evals, 
+            fixed_in_evals: p.fixed_in_evals,
+        }
+    }
+}
+
+#[derive(DslVariable, Clone)]
+pub struct ZKVMChipProofInputVariable<C: Config> {
+    pub idx: Usize<C::N>,
+    pub idx_felt: Felt<C::F>,
+
+    pub sum_num_instances: Usize<C::N>,
+    pub num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
+    pub log2_num_instances: Usize<C::N>,
+
+    pub r_out_evals_len: Usize<C::N>,
+    pub w_out_evals_len: Usize<C::N>,
+    pub lk_out_evals_len: Usize<C::N>,
+
+    pub r_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
+    pub w_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
+    pub lk_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
+
+    pub has_main_sumcheck_proofs: Usize<C::N>,
+    pub main_sumcheck_proofs: IOPProverMessageVecVariable<C>,
+    pub has_gkr_iop_proof: Usize<C::N>,
+    pub gkr_iop_proof: GKRProofVariable<C>,
+    pub tower_proof: TowerProofInputVariable<C>,
+    pub has_ecc_proof: Usize<C::N>,
+    pub ecc_proof: EccQuarkProofVariable<C>,
+    pub num_instances: Array<C, Var<C::N>>,
+    pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
+    pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
+}
 impl Hintable<InnerConfig> for ZKVMChipProofInput {
     type HintVariable = ZKVMChipProofInputVariable<InnerConfig>;
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let idx = Usize::Var(usize::read(builder));
         let idx_felt = F::read(builder);
-        let num_instances = Usize::Var(usize::read(builder));
+
+        let sum_num_instances = Usize::Var(usize::read(builder));
         let num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
         let log2_num_instances = Usize::Var(usize::read(builder));
 
-        let record_r_out_evals_len = Usize::Var(usize::read(builder));
-        let record_w_out_evals_len = Usize::Var(usize::read(builder));
-        let record_lk_out_evals_len = Usize::Var(usize::read(builder));
+        let r_out_evals_len = Usize::Var(usize::read(builder));
+        let w_out_evals_len = Usize::Var(usize::read(builder));
+        let lk_out_evals_len = Usize::Var(usize::read(builder));
 
-        let record_r_out_evals = Vec::<Vec<E>>::read(builder);
-        let record_w_out_evals = Vec::<Vec<E>>::read(builder);
-        let record_lk_out_evals = Vec::<Vec<E>>::read(builder);
+        let r_out_evals = Vec::<Vec<E>>::read(builder);
+        let w_out_evals = Vec::<Vec<E>>::read(builder);
+        let lk_out_evals = Vec::<Vec<E>>::read(builder);
 
         let tower_proof = TowerProofInput::read(builder);
-        let main_sel_sumcheck_proofs = IOPProverMessageVec::read(builder);
-        let wits_in_evals = Vec::<E>::read(builder);
-        let fixed_in_evals = Vec::<E>::read(builder);
-
-        let has_gkr_proof = Usize::Var(usize::read(builder));
+        let has_main_sumcheck_proofs = Usize::Var(usize::read(builder));
+        let main_sumcheck_proofs = IOPProverMessageVec::read(builder);
+        let has_gkr_iop_proof = Usize::Var(usize::read(builder));
         let gkr_iop_proof = GKRProofInput::read(builder);
+        let has_ecc_proof = Usize::Var(usize::read(builder));
+        let ecc_proof = EccQuarkProofInput::read(builder);
+
+        let num_instances = Vec::<usize>::read(builder);
+        let fixed_in_evals = Vec::<E>::read(builder);
+        let wits_in_evals = Vec::<E>::read(builder);
 
         ZKVMChipProofInputVariable {
             idx,
             idx_felt,
-            num_instances,
+            sum_num_instances,
             num_instances_minus_one_bit_decomposition,
             log2_num_instances,
-            record_r_out_evals_len,
-            record_w_out_evals_len,
-            record_lk_out_evals_len,
-            record_r_out_evals,
-            record_w_out_evals,
-            record_lk_out_evals,
-            tower_proof,
-            main_sel_sumcheck_proofs,
-            wits_in_evals,
-            fixed_in_evals,
-            has_gkr_proof,
+            r_out_evals_len,
+            w_out_evals_len,
+            lk_out_evals_len,
+            r_out_evals,
+            w_out_evals,
+            lk_out_evals,
+            has_main_sumcheck_proofs,
+            main_sumcheck_proofs,
+            has_gkr_iop_proof,
             gkr_iop_proof,
+            tower_proof,
+            has_ecc_proof,
+            ecc_proof,
+            num_instances,
+            fixed_in_evals,
+            wits_in_evals,
         }
     }
 
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.idx));
 
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.idx));
         let idx_u32: F = F::from_canonical_u32(self.idx as u32);
         stream.extend(idx_u32.write());
 
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.num_instances));
-
-        let eq_instance = self.num_instances - 1;
+        let sum_num_instances = self.num_instances.iter().sum();
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&sum_num_instances));
+        let eq_instance = sum_num_instances - 1;
         let mut bit_decomp: Vec<F> = vec![];
         for i in 0..32usize {
             bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
         }
         stream.extend(bit_decomp.write());
-
-        let next_pow2_instance = next_pow2_instance_padding(self.num_instances);
+        let next_pow2_instance = next_pow2_instance_padding(sum_num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instance);
         stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
 
-        stream.extend(<usize as Hintable<InnerConfig>>::write(
-            &self.record_r_out_evals_len,
-        ));
-        stream.extend(<usize as Hintable<InnerConfig>>::write(
-            &self.record_w_out_evals_len,
-        ));
-        stream.extend(<usize as Hintable<InnerConfig>>::write(
-            &self.record_lk_out_evals_len,
-        ));
+        let r_out_evals_len = self.r_out_evals.len();
+        let w_out_evals_len = self.w_out_evals.len();
+        let lk_out_evals_len = self.lk_out_evals.len();
 
-        stream.extend(self.record_r_out_evals.write());
-        stream.extend(self.record_w_out_evals.write());
-        stream.extend(self.record_lk_out_evals.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&r_out_evals_len));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&w_out_evals_len));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&lk_out_evals_len));
+
+        stream.extend(self.r_out_evals.write());
+        stream.extend(self.w_out_evals.write());
+        stream.extend(self.lk_out_evals.write());
 
         stream.extend(self.tower_proof.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_main_sumcheck_proofs));
         stream.extend(self.main_sumcheck_proofs.write());
-        stream.extend(self.wits_in_evals.write());
-        stream.extend(self.fixed_in_evals.write());
-        if self.has_gkr_proof {
-            stream.extend(<usize as Hintable<InnerConfig>>::write(&1));
-        } else {
-            stream.extend(<usize as Hintable<InnerConfig>>::write(&0));
-        }
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_gkr_proof));
         stream.extend(self.gkr_iop_proof.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
+        stream.extend(self.ecc_proof.write());
+
+        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(&self.num_instances));
+        stream.extend(self.fixed_in_evals.write());
+        stream.extend(self.wits_in_evals.write());
 
         stream
     }
@@ -695,6 +496,32 @@ pub struct LayerProofInput {
     pub rotation: SumcheckLayerProofInput,
     pub main: SumcheckLayerProofInput,
 }
+
+impl From<LayerProof<E>> for LayerProofInput {
+    fn from(p: LayerProof<E>) -> Self {
+        Self { 
+            has_rotation: if p.rotation.is_some() { 1 } else { 0 },
+            rotation: if p.rotation.is_some() {
+                let r = p.rotation.unwrap();
+                SumcheckLayerProofInput { 
+                    proof: IOPProverMessageVec::from(
+                        r.proof.proofs.iter().map(|p| IOPProverMessage { evaluations: p.evaluations.clone() }).collect::<Vec<IOPProverMessage>>()
+                    ),
+                    evals: r.evals,
+                }
+            } else {
+                SumcheckLayerProofInput::default()
+            }, 
+            main: SumcheckLayerProofInput { 
+                proof: IOPProverMessageVec::from(
+                    p.main.proof.proofs.iter().map(|p| IOPProverMessage { evaluations: p.evaluations.clone() }).collect::<Vec<IOPProverMessage>>()
+                ),
+                evals: p.main.evals,
+            }
+        }
+    }
+}
+
 #[derive(DslVariable, Clone)]
 pub struct LayerProofVariable<C: Config> {
     pub has_rotation: Usize<C::N>,
@@ -726,41 +553,52 @@ impl Hintable<InnerConfig> for LayerProofInput {
 }
 #[derive(Default)]
 pub struct GKRProofInput {
-    pub num_var_with_rotation: usize,
-    pub num_instances: usize,
+    // _debug: binding
+    // pub num_var_with_rotation: usize,
+    // pub num_instances: usize,
     pub layer_proofs: Vec<LayerProofInput>,
 }
+
+impl From<GKRProof<E>> for GKRProofInput {
+    fn from(p: GKRProof<E>) -> Self {
+        Self { layer_proofs: p.0.into_iter().map(|p| { LayerProofInput::from(p) }).collect::<Vec<LayerProofInput>>() }
+    }
+}
+
 #[derive(DslVariable, Clone)]
 pub struct GKRProofVariable<C: Config> {
-    pub num_var_with_rotation: Usize<C::N>,
-    pub num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
+    // _debug: binding
+    // pub num_var_with_rotation: Usize<C::N>,
+    // pub num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
     pub layer_proofs: Array<C, LayerProofVariable<C>>,
 }
 impl Hintable<InnerConfig> for GKRProofInput {
     type HintVariable = GKRProofVariable<InnerConfig>;
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        let num_var_with_rotation = Usize::Var(usize::read(builder));
-        let num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
+        // let num_var_with_rotation = Usize::Var(usize::read(builder));
+        // let num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
         let layer_proofs = Vec::<LayerProofInput>::read(builder);
         Self::HintVariable {
-            num_var_with_rotation,
-            num_instances_minus_one_bit_decomposition,
+            // _debug: binding
+            // num_var_with_rotation,
+            // num_instances_minus_one_bit_decomposition,
             layer_proofs,
         }
     }
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        stream.extend(<usize as Hintable<InnerConfig>>::write(
-            &self.num_var_with_rotation,
-        ));
+        // _debug: binding
+        // stream.extend(<usize as Hintable<InnerConfig>>::write(
+        //     &self.num_var_with_rotation,
+        // ));
 
-        let eq_instance = self.num_instances - 1;
-        let mut bit_decomp: Vec<F> = vec![];
-        for i in 0..32usize {
-            bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-        }
-        stream.extend(bit_decomp.write());
+        // let eq_instance = self.num_instances - 1;
+        // let mut bit_decomp: Vec<F> = vec![];
+        // for i in 0..32usize {
+        //     bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
+        // }
+        // stream.extend(bit_decomp.write());
         stream.extend(self.layer_proofs.write());
         stream
     }
@@ -801,11 +639,57 @@ impl<C: Config> From<Array<C, Ext<C::F, C::EF>>> for SepticExtensionVariable<C> 
     }
 }
 
+pub struct SepticPointInput {
+    x: SepticExtensionInput,
+    y: SepticExtensionInput,
+    is_infinity: bool,
+}
+
 #[derive(DslVariable, Clone)]
 pub struct SepticPointVariable<C: Config> {
     x: SepticExtensionVariable<C>,
     y: SepticExtensionVariable<C>,
     is_infinity: Usize<C::N>,
+}
+
+pub(crate) struct EccQuarkProofInput {
+    pub zerocheck_proof: IOPProof<E>,
+    pub num_instances: usize,
+    pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[0,rt], y[0,rt], s[0,rt]
+    pub rt: Point<E>,
+    pub sum: SepticPointInput,
+}
+
+impl EccQuarkProofInput {
+    pub fn dummy() -> Self {
+        Self {
+            zerocheck_proof: IOPProof { proofs: Vec::new() },
+            num_instances: 0,
+            evals: Vec::new(),
+            rt: Vec::new().into(),
+            sum: SepticPointInput {
+                x: SepticExtensionInput { v: [F::ZERO; 7] },
+                y: SepticExtensionInput { v: [F::ZERO; 7] },
+                is_infinity: false
+            },
+        }
+    }
+}
+
+impl From<EccQuarkProof<E>> for EccQuarkProofInput {
+    fn from(proof: EccQuarkProof<E>) -> Self {
+        Self {
+            zerocheck_proof: proof.zerocheck_proof,
+            num_instances: proof.num_instances,
+            evals: proof.evals,
+            rt: proof.rt,
+            sum: SepticPointInput { 
+                x: SepticExtensionInput { v: proof.sum.x.0 }, 
+                y: SepticExtensionInput { v: proof.sum.y.0 },
+                is_infinity: proof.sum.is_infinity, 
+            },
+        }
+    }
 }
 
 #[derive(DslVariable, Clone)]
@@ -817,5 +701,104 @@ pub struct EccQuarkProofVariable<C: Config> {
     pub evals: Array<C, Ext<C::F, C::EF>>,
     pub rt: PointVariable<C>,
     pub sum: SepticPointVariable<C>,
-    pub prefix_one_seq: Array<C, Usize<C::N>>,
+    // _debug: hintable
+    // pub prefix_one_seq: Array<C, Usize<C::N>>,
+}
+
+impl Hintable<InnerConfig> for EccQuarkProofInput {
+    type HintVariable = EccQuarkProofVariable<InnerConfig>;
+
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let zerocheck_proof = IOPProverMessageVec::read(builder);
+        let num_instances = Usize::Var(usize::read(builder));
+        let num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
+        let num_vars = Usize::Var(usize::read(builder));
+        let evals = Vec::<E>::read(builder);
+        let rt_vec = Vec::<E>::read(builder);
+        let rt = PointVariable { fs: rt_vec };
+        let sum = SepticPointInput::read(builder);
+
+        EccQuarkProofVariable {
+            zerocheck_proof,
+            num_instances,
+            num_instances_minus_one_bit_decomposition,
+            num_vars,
+            evals,
+            rt,
+            sum,
+        }
+    }
+
+    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
+        let mut stream = Vec::new();
+
+        let p_vec = IOPProverMessageVec::from(self.zerocheck_proof.proofs.clone().into_iter().map(|p| IOPProverMessage { evaluations: p.evaluations }).collect::<Vec<IOPProverMessage>>());
+        stream.extend(p_vec.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.num_instances));
+
+        let eq_instance = if self.num_instances > 0 { self.num_instances - 1 } else { 0 };
+        let mut bit_decomp: Vec<F> = vec![];
+        for i in 0..32usize {
+            bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
+        }
+        stream.extend(bit_decomp.write());
+
+        let num_vars = next_pow2_instance_padding(self.num_instances).ilog2() as usize;
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&num_vars));
+        stream.extend(self.evals.write());
+        stream.extend(self.rt.write());
+        stream.extend(self.sum.write());
+
+        stream
+    }
+}
+
+pub struct SepticExtensionInput {
+    v: [F; 7]
+}
+
+impl Hintable<InnerConfig> for SepticExtensionInput {
+    type HintVariable = SepticExtensionVariable<InnerConfig>;
+
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let f_vec = Vec::<E>::read(builder);
+
+        SepticExtensionVariable {
+            vs: f_vec
+        }
+    }
+
+    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
+        let mut stream = Vec::new();
+        let f_vec = self.v.to_vec();
+        let e_vec: Vec<E> = f_vec.into_iter().map(|n| E::from_base(n)).collect();
+        stream.extend(e_vec.write());
+        stream
+    }
+}
+
+impl Hintable<InnerConfig> for SepticPointInput {
+    type HintVariable = SepticPointVariable<InnerConfig>;
+
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let x = SepticExtensionInput::read(builder);
+        let y = SepticExtensionInput::read(builder);
+        let is_infinity = Usize::Var(usize::read(builder));
+
+        SepticPointVariable { x, y, is_infinity }
+    }
+
+    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
+        let mut stream = Vec::new();
+        stream.extend(self.x.write());
+        stream.extend(self.y.write());
+
+        if self.is_infinity {
+            stream.extend(<usize as Hintable<InnerConfig>>::write(&1usize));
+        } else {
+            stream.extend(<usize as Hintable<InnerConfig>>::write(&0usize));
+        }
+
+        stream
+    }
 }
