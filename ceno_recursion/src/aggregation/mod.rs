@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use crate::zkvm_verifier::binding::{ZKVMProofInput, E, F};
 use crate::zkvm_verifier::verifier::verify_zkvm_proof;
 use ceno_zkvm::scheme::ZKVMProof;
@@ -173,6 +172,12 @@ pub fn compress_to_root_proof(
         let mut witness_stream: Vec<Vec<F>> = Vec::new();
         witness_stream.extend(p.write());
         let leaf_proof = SingleSegmentVmProver::prove(&leaf_prover, witness_stream);
+
+        // _debug: export leaf proof
+        let mut file =
+            File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
+        bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
+
         println!(
             "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}",
             proof_idx,
@@ -181,12 +186,6 @@ pub fn compress_to_root_proof(
 
         leaf_proof
     }).collect::<Vec<_>>();
-
-    // _debug: export leaf proof
-    // let json = serde_json::to_string(&leaf_proof).unwrap();
-    // let mut file =
-    //     File::create(format!("leaf_proof_{:?}.json", 0)).expect("Create export proof file");
-    // file.write_all(json.as_bytes()).expect("Export proof");
 
     // Internal engine and config
     let internal_engine = BabyBearPoseidon2Engine::new(internal_fri_params);
@@ -261,13 +260,12 @@ pub fn compress_to_root_proof(
                 println!("Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}", internal_node_idx, internal_node_height, aggregation_start_timestamp.elapsed());
 
                 // _debug: export
-                // let json = serde_json::to_string(&internal_proof).unwrap();
-                // let mut file = File::create(format!(
-                //     "internal_proof_{:?}_height_{:?}.json",
-                //     internal_node_idx, internal_node_height
-                // ))
-                // .expect("Create export proof file");
-                // file.write_all(json.as_bytes()).expect("Export proof");
+                let mut file = File::create(format!(
+                    "internal_proof_{:?}_height_{:?}.bin",
+                    internal_node_idx, internal_node_height
+                ))
+                .expect("Create export proof file");
+                bincode::serialize_into(file, &internal_proof).expect("failed to serialize internal proof");
 
                 internal_proof
             })
