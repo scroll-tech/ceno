@@ -7,5 +7,4 @@ pub mod zkvm_verifier;
 
 pub mod aggregation;
 #[allow(dead_code)]
-mod e2e;
 mod extensions;
