@@ -239,6 +239,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             instance_scalar_expr,
             challenges_expr,
             constant_expr,
+            stack_top,
             (max_degree, max_dag_depth),
         ) = layer.main_sumcheck_expression_dag.as_ref().unwrap();
 
@@ -284,6 +285,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 &term_coefficients_gl64,
                 max_num_var,
                 *max_degree,
+                *stack_top,
                 basic_tr,
             )
             .unwrap();

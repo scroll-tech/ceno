@@ -174,6 +174,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 instance_scalar_expr,
                 challenges_expr,
                 constant_expr,
+                stack_top,
                 (max_degree, max_dag_depth),
             ) = expr_compression_to_dag(self.main_sumcheck_expression.as_ref().unwrap());
 
@@ -181,7 +182,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             let mut num_add = 0;
             let mut num_mul = 0;
             while traverse_dag_id < dag.len() {
-                match dag[traverse_dag_id] {
+                match dag[traverse_dag_id].op {
                     0 => traverse_dag_id += 2, // skip wit index
                     1 => traverse_dag_id += 2, // skip scalar index
                     2 => {
@@ -208,6 +209,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 instance_scalar_expr,
                 challenges_expr,
                 constant_expr,
+                stack_top,
                 (max_degree, max_dag_depth),
             )
         });

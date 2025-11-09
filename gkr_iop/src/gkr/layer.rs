@@ -6,6 +6,7 @@ use multilinear_extensions::{
     Expression, Instance, StructuralWitIn, ToExpr,
     mle::{Point, PointAndEval},
     monomial::Term,
+    utils::Node,
 };
 use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
@@ -105,10 +106,11 @@ pub struct Layer<E: ExtensionField> {
 
     // flatten computation dag
     pub main_sumcheck_expression_dag: Option<(
-        Vec<u32>,
+        Vec<Node>,
         Vec<Instance>,
         Vec<Expression<E>>,
         Vec<Either<E::BaseField, E>>,
+        u32,
         (usize, usize),
     )>,
 
