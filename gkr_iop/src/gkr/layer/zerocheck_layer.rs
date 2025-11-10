@@ -167,6 +167,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             self.n_fixed as WitnessId,
             self.n_instance,
         );
+        tracing::debug!("main sumcheck degree: {}", zero_expr.degree());
         self.main_sumcheck_expression = Some(zero_expr);
         self.main_sumcheck_expression_dag = Some({
             let (
@@ -215,6 +216,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .main_sumcheck_expression
             .as_ref()
             .map(|expr| expr.get_monomial_terms());
+        tracing::debug!(
+            "main sumcheck monomial terms count: {}",
+            self.main_sumcheck_expression_monomial_terms
+                .as_ref()
+                .map_or(0, |terms| terms.len()),
+        );
         exit_span!(span);
     }
 
