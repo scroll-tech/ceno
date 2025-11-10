@@ -1,10 +1,11 @@
+use std::fmt::Error;
 use std::sync::Arc;
 use crate::zkvm_verifier::binding::{ZKVMProofInput, E, F};
 use crate::zkvm_verifier::verifier::verify_zkvm_proof;
 use ceno_zkvm::scheme::ZKVMProof;
 use ceno_zkvm::structs::ZKVMVerifyingKey;
 use mpcs::{Basefold, BasefoldRSParams};
-use openvm_circuit::arch::VirtualMachine;
+use openvm_circuit::arch::{VirtualMachine, VmComplexTraceHeights};
 use openvm_circuit::arch::VmConfig;
 use openvm_circuit::{
     arch::{instructions::program::Program, SystemConfig, instructions::exe::VmExe},
@@ -41,6 +42,7 @@ use openvm_stark_sdk::{
     },
     p3_bn254_fr::Bn254Fr,
 };
+use openvm_stark_backend::engine::StarkEngine;
 use openvm_sdk::Sdk;
 use std::io::Write;
 use std::time::Instant;
@@ -53,13 +55,27 @@ use openvm_circuit::{
     },
     system::phantom::PhantomChip,
 };
+use std::borrow::Borrow;
+use openvm_sdk::keygen::perm::AirIdPermutation;
 use openvm_circuit::arch::verify_single;
 use openvm_continuations::verifier::common::types::VmVerifierPvs;
 use openvm_continuations::verifier::internal::types::InternalVmVerifierInput;
 use openvm_continuations::verifier::internal::types::InternalVmVerifierPvs;
 use openvm_continuations::verifier::internal::InternalVmVerifierConfig;
 use openvm_sdk::keygen::RootVerifierProvingKey;
+use openvm_sdk::commit::AppExecutionCommit;
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
+use openvm_circuit::{
+    arch::{
+        hasher::{poseidon2::vm_poseidon2_hasher, Hasher},
+        CONNECTOR_AIR_ID, PROGRAM_AIR_ID,
+        PROGRAM_CACHED_TRACE_INDEX, PUBLIC_VALUES_AIR_ID,
+    },
+    system::{
+        memory::CHUNK,
+        program::trace::compute_exe_commit,
+    },
+};
 
 const LEAF_LOG_BLOWUP: usize = 1;
 const INTERNAL_LOG_BLOWUP: usize = 2;
@@ -91,32 +107,10 @@ impl CenoLeafVmVerifierConfig {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct RecursionProvingKeys {
+pub struct CenoRecursionKeys {
     pub ceno_leaf_vm_pk: Arc<VmProvingKey<SC, NativeConfig>>,
-    // pub internal_vm_pk: Arc<VmProvingKey<SC, NativeConfig>>,
-    // pub internal_committed_exe: Arc<NonRootCommittedExe>,
-    // pub root_verifier_pk: RootVerifierProvingKey,
-}
-
-impl RecursionProvingKeys {
-    pub fn keygen(leaf_fri_params: FriParameters, leaf_vm_config: NativeConfig) -> Self {
-        // let internal_vm_config = config.internal_vm_config();
-        // let root_vm_config = config.root_verifier_vm_config();
-
-        let ceno_leaf_engine = BabyBearPoseidon2Engine::new(leaf_fri_params);
-        let ceno_leaf_vm_pk = Arc::new({
-            let vm = VirtualMachine::new(ceno_leaf_engine, leaf_vm_config.clone());
-            let vm_pk = vm.keygen();
-            assert!(vm_pk.max_constraint_degree <= leaf_fri_params.max_constraint_degree());
-            VmProvingKey {
-                fri_params: leaf_fri_params,
-                vm_config: leaf_vm_config,
-                vm_pk,
-            }
-        });
-
-        Self { ceno_leaf_vm_pk }
-    }
+    pub internal_vm_pk: Arc<VmProvingKey<SC, NativeConfig>>,
+    pub internal_commit: [F; CHUNK],
 }
 
 pub fn compress_to_root_proof(
@@ -160,9 +154,22 @@ pub fn compress_to_root_proof(
         ))
     };
 
-    let recursion_proving_keys = RecursionProvingKeys::keygen(leaf_fri_params, leaf_vm_config);
+    // let recursion_proving_keys = RecursionProvingKeys::keygen(leaf_fri_params, leaf_vm_config);
+
+    let ceno_leaf_engine = BabyBearPoseidon2Engine::new(leaf_fri_params);
+    let ceno_leaf_vm_pk = Arc::new({
+        let vm = VirtualMachine::new(ceno_leaf_engine, leaf_vm_config.clone());
+        let vm_pk = vm.keygen();
+        assert!(vm_pk.max_constraint_degree <= leaf_fri_params.max_constraint_degree());
+        VmProvingKey {
+            fri_params: leaf_fri_params,
+            vm_config: leaf_vm_config,
+            vm_pk,
+        }
+    });
+
     let leaf_prover = VmLocalProver::<SC, NativeConfig, BabyBearPoseidon2Engine>::new(
-        recursion_proving_keys.ceno_leaf_vm_pk.clone(),
+        ceno_leaf_vm_pk.clone(),
         leaf_committed_exe,
     );
 
@@ -226,7 +233,7 @@ pub fn compress_to_root_proof(
         compiler_options: CompilerOptions::default(),
     }
     .build_program(
-        &recursion_proving_keys.ceno_leaf_vm_pk.vm_pk.get_vk(),
+        &ceno_leaf_vm_pk.vm_pk.get_vk(),
         &internal_vm_vk,
     );
     let internal_committed_exe = Arc::new(VmCommittedExe::<SC>::commit(
@@ -283,7 +290,7 @@ pub fn compress_to_root_proof(
     );
     println!("Aggregation - Final height: {:?}", internal_node_height);
     
-    // Export e2e stark proof and the aggregation key (used in Sdk::verify_e2e_stark_proof)
+    // Export e2e stark proof (used in verify_e2e_stark_proof)
     let root_stark_proof = VmStarkProof {
         proof: proofs.pop().unwrap(),
         user_public_values: zkvm_proof_inputs.iter().flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>()).collect(),
@@ -292,27 +299,121 @@ pub fn compress_to_root_proof(
         .expect("Create export proof file");
         bincode::serialize_into(file, &root_stark_proof).expect("failed to serialize internal proof");
 
-    // Generate a dummy key for root verifier DSL program that's not used in veriying stark e2e proof
-    let (dummy_pk, _dummy) =
-            AggStarkProvingKey::dummy_proof_and_keygen(AggStarkConfig::default());
-
-    let agg_pk = AggStarkProvingKey {
-        leaf_vm_pk: recursion_proving_keys.ceno_leaf_vm_pk,
+    // Export aggregation key (used in verify_e2e_stark_proof)
+    let ceno_keys = CenoRecursionKeys {
+        ceno_leaf_vm_pk: ceno_leaf_vm_pk,
         internal_vm_pk,
-        internal_committed_exe,
-        // Note: This is not used in verifying the stark e2e proof and is only a dummy key. 
-        root_verifier_pk: dummy_pk.root_verifier_pk,    
+        internal_commit: internal_committed_exe.get_program_commit().into(),
     };
-    let file = File::create("agg_pk.bin")
-        .expect("Create export proof file");
-        bincode::serialize_into(file, &agg_pk).expect("failed to serialize internal proof");
 
-    sdk.verify_e2e_stark_proof(
-        &agg_pk, 
+    let file = File::create("ceno_keys.bin")
+        .expect("Create export proof file");
+        bincode::serialize_into(file, &ceno_keys).expect("failed to serialize internal proof");
+
+    verify_e2e_stark_proof(
+        &ceno_keys, 
         &root_stark_proof, 
+        // _debug
         &Bn254Fr::ZERO, 
         &Bn254Fr::ZERO
     ).expect("Verify e2e stark proof should pass");
+}
+
+// Source from OpenVm SDK::verify_e2e_stark_proof with abridged key
+// See: https://github.com/openvm-org/openvm
+pub fn verify_e2e_stark_proof(
+    k: &CenoRecursionKeys,
+    proof: &VmStarkProof<SC>,
+    expected_exe_commit: &Bn254Fr,
+    expected_vm_commit: &Bn254Fr,
+) -> Result<AppExecutionCommit, String> {
+    if proof.proof.per_air.len() < 3 {
+        return Err("Invalid number of AIRs: expected at least 3".into());
+    } else if proof.proof.per_air[0].air_id != PROGRAM_AIR_ID {
+        return Err("Missing program AIR".into());
+    } else if proof.proof.per_air[1].air_id != CONNECTOR_AIR_ID {
+        return Err("Missing connector AIR".into());
+    } else if proof.proof.per_air[2].air_id != PUBLIC_VALUES_AIR_ID {
+        return Err("Missing public values AIR".into());
+    }
+    let public_values_air_proof_data = &proof.proof.per_air[2];
+
+    let program_commit =
+        proof.proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref();
+    let internal_commit: &[_; CHUNK] = &k.internal_commit;
+
+    let (vm_pk, vm_commit) = if program_commit == internal_commit {
+        let internal_pvs: &InternalVmVerifierPvs<_> = public_values_air_proof_data
+            .public_values
+            .as_slice()
+            .borrow();
+        if internal_commit != &internal_pvs.extra_pvs.internal_program_commit {
+            return Err(format!("Invalid internal program commit: expected {:?}, got {:?}", internal_commit, internal_pvs.extra_pvs.internal_program_commit));
+        }
+        (
+            &k.internal_vm_pk,
+            internal_pvs.extra_pvs.leaf_verifier_commit,
+        )
+    } else {
+        (&k.ceno_leaf_vm_pk, *program_commit)
+    };
+    let e = BabyBearPoseidon2Engine::new(vm_pk.fri_params);
+    e.verify(&vm_pk.vm_pk.get_vk(), &proof.proof).expect("stark e2e proof verification should pass");
+
+    let pvs: &VmVerifierPvs<_> =
+        public_values_air_proof_data.public_values[..VmVerifierPvs::<u8>::width()].borrow();
+
+    /* _debug: AIR ordering
+    if let Some(exit_code) = pvs.connector.exit_code() {
+        if exit_code != 0 {
+            return Err(format!(
+                "Invalid exit code: expected 0, got {}",
+                exit_code
+            ));
+        }
+    } else {
+        return Err(format!("Program did not terminate"));
+    }
+    */
+
+    let hasher = vm_poseidon2_hasher();
+    let public_values_root = hasher.merkle_root(&proof.user_public_values);
+    /* _debug: Public value commitment
+    if public_values_root != pvs.public_values_commit {
+        return Err(format!(
+            "Invalid public values root: expected {:?}, got {:?}",
+            pvs.public_values_commit,
+            public_values_root
+        ));
+    }
+    */
+
+    let exe_commit = compute_exe_commit(
+        &hasher,
+        &pvs.app_commit,
+        &pvs.memory.initial_root,
+        pvs.connector.initial_pc,
+    );
+    let app_commit = AppExecutionCommit::from_field_commit(exe_commit, vm_commit);
+    let exe_commit_bn254 = app_commit.app_exe_commit.to_bn254();
+    let vm_commit_bn254 = app_commit.app_vm_commit.to_bn254();
+
+    /* _debug: execution commit checks
+    if exe_commit_bn254 != *expected_exe_commit {
+        return Err(eyre::eyre!(
+            "Invalid app exe commit: expected {:?}, got {:?}",
+            expected_exe_commit,
+            exe_commit_bn254
+        ));
+    } else if vm_commit_bn254 != *expected_vm_commit {
+        return Err(eyre::eyre!(
+            "Invalid app vm commit: expected {:?}, got {:?}",
+            expected_vm_commit,
+            vm_commit_bn254
+        ));
+    }
+    */
+    Ok(app_commit)
 }
 
 /// Build Ceno's zkVM verifier program from vk in OpenVM's eDSL
