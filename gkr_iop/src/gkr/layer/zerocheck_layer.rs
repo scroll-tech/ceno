@@ -178,22 +178,20 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 (max_degree, max_dag_depth),
             ) = expr_compression_to_dag(self.main_sumcheck_expression.as_ref().unwrap());
 
-            let mut traverse_dag_id = 0;
             let mut num_add = 0;
             let mut num_mul = 0;
-            while traverse_dag_id < dag.len() {
-                match dag[traverse_dag_id].op {
-                    0 => traverse_dag_id += 2, // skip wit index
-                    1 => traverse_dag_id += 2, // skip scalar index
+
+            for node in &dag {
+                match node.op {
+                    0 => (), // skip wit index
+                    1 => (), // skip scalar index
                     2 => {
                         num_add += 1;
-                        traverse_dag_id += 1;
                     }
                     3 => {
                         num_mul += 1;
-                        traverse_dag_id += 1;
                     }
-                    _ => unreachable!(),
+                    op => panic!("unknown op {op}"),
                 }
             }
 

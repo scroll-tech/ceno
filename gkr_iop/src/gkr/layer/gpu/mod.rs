@@ -234,61 +234,106 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             layer.n_instance,
         );
 
-        let (
-            dag,
-            instance_scalar_expr,
-            challenges_expr,
-            constant_expr,
-            stack_top,
-            (max_degree, max_dag_depth),
-        ) = layer.main_sumcheck_expression_dag.as_ref().unwrap();
-
-        // format: pub_io ++ challenge ++ constant
-        let term_coefficients = instance_scalar_expr
-            .iter()
-            .map(|Instance(id)| pub_io_evals[*id])
-            .chain(
-                challenges_expr
-                    .iter()
-                    .map(|c| {
-                        eval_by_expr_constant(
-                            &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
-                            &main_sumcheck_challenges,
-                            c,
-                        )
-                    })
-                    .chain(constant_expr.iter().copied())
-                    .map(|either_v| match either_v {
-                        Either::Left(base_field_val) => E::from(base_field_val),
-                        Either::Right(ext_field_val) => ext_field_val,
-                    }),
-            )
-            .collect_vec();
-
-        let max_num_var = max_num_variables;
-
-        // Convert types for GPU function Call
-        let basic_tr: &mut BasicTranscript<BB31Ext> =
-            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
-        let term_coefficients_gl64: Vec<BB31Ext> =
-            unsafe { std::mem::transmute(term_coefficients) };
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
-            unsafe { std::mem::transmute(all_witins_gpu) };
-        let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
-        let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
-            .sumcheck
-            .prove_generic_sumcheck_gpu_v2(
-                &cuda_hal,
+        let (proof_gpu, evals_gpu, challenges_gpu) = if layer.exprs.len() > 200 {
+            let (
                 dag,
-                *max_dag_depth,
-                all_witins_gpu_type_gl64,
-                &term_coefficients_gl64,
-                max_num_var,
-                *max_degree,
-                *stack_top,
-                basic_tr,
-            )
-            .unwrap();
+                instance_scalar_expr,
+                challenges_expr,
+                constant_expr,
+                stack_top,
+                (max_degree, max_dag_depth),
+            ) = layer.main_sumcheck_expression_dag.as_ref().unwrap();
+
+            // format: pub_io ++ challenge ++ constant
+            let term_coefficients = instance_scalar_expr
+                .iter()
+                .map(|Instance(id)| pub_io_evals[*id])
+                .chain(
+                    challenges_expr
+                        .iter()
+                        .map(|c| {
+                            eval_by_expr_constant(
+                                &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
+                                &main_sumcheck_challenges,
+                                c,
+                            )
+                        })
+                        .chain(constant_expr.iter().copied())
+                        .map(|either_v| match either_v {
+                            Either::Left(base_field_val) => E::from(base_field_val),
+                            Either::Right(ext_field_val) => ext_field_val,
+                        }),
+                )
+                .collect_vec();
+
+            let max_num_var = max_num_variables;
+
+            // Convert types for GPU function Call
+            let basic_tr: &mut BasicTranscript<BB31Ext> =
+                unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
+            let term_coefficients_gl64: Vec<BB31Ext> =
+                unsafe { std::mem::transmute(term_coefficients) };
+            let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
+                unsafe { std::mem::transmute(all_witins_gpu) };
+            let all_witins_gpu_type_gl64 =
+                all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+            cuda_hal
+                .sumcheck
+                .prove_generic_sumcheck_gpu_v2(
+                    &cuda_hal,
+                    dag,
+                    *max_dag_depth,
+                    all_witins_gpu_type_gl64,
+                    &term_coefficients_gl64,
+                    max_num_var,
+                    *max_degree,
+                    *stack_top,
+                    basic_tr,
+                )
+                .unwrap()
+        } else {
+            // Calculate max_num_var and max_degree from the extracted relationships
+            let (term_coefficients, mle_indices_per_term, mle_size_info) =
+                extract_mle_relationships_from_monomial_terms(
+                    &layer
+                        .main_sumcheck_expression_monomial_terms
+                        .clone()
+                        .unwrap(),
+                    &all_witins_gpu,
+                    &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
+                    &main_sumcheck_challenges,
+                );
+            let max_num_var = max_num_variables;
+            let max_degree = mle_indices_per_term
+                .iter()
+                .map(|indices| indices.len())
+                .max()
+                .unwrap_or(0);
+
+            // Convert types for GPU function Call
+            let basic_tr: &mut BasicTranscript<BB31Ext> =
+                unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
+            let term_coefficients_gl64: Vec<BB31Ext> =
+                unsafe { std::mem::transmute(term_coefficients) };
+            let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
+                unsafe { std::mem::transmute(all_witins_gpu) };
+            let all_witins_gpu_type_gl64 =
+                all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+            cuda_hal
+                .sumcheck
+                .prove_generic_sumcheck_gpu(
+                    &cuda_hal,
+                    all_witins_gpu_type_gl64,
+                    &mle_size_info,
+                    &term_coefficients_gl64,
+                    &mle_indices_per_term,
+                    max_num_var,
+                    max_degree,
+                    basic_tr,
+                )
+                .unwrap()
+        };
+
         let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
         let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
 
