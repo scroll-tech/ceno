@@ -25,6 +25,7 @@ pub mod gpu_prover {
             CudaHalBB31, GpuDigestLayer, GpuFieldType, GpuMatrix, GpuPolynomial, GpuPolynomialExt,
         },
         common::{
+            get_ceno_gpu_device_id,
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
             mle::{
@@ -33,38 +34,25 @@ pub mod gpu_prover {
             },
         },
     };
-    use cudarc::driver::{CudaContext, DriverError};
+
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex, MutexGuard};
 
     pub type BB31Base = p3::babybear::BabyBear;
     pub type BB31Ext = ff_ext::BabyBearExt4;
 
-    pub static CUDA_DEVICE: Lazy<Result<Arc<CudaContext>, DriverError>> =
-        Lazy::new(|| CudaContext::new(0));
-
     #[allow(clippy::type_complexity)]
     pub static CUDA_HAL: Lazy<
         Result<Arc<Mutex<CudaHalBB31>>, Box<dyn std::error::Error + Send + Sync>>,
     > = Lazy::new(|| {
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device init failed: {:?}", e))?;
-        device.bind_to_thread()?;
-
-        CudaHalBB31::new()
+        // can be overridden by env variable `CENO_GPU_DEVICE_ID`
+        let device_id: usize = get_ceno_gpu_device_id(0);
+        CudaHalBB31::new(device_id)
             .map(|hal| Arc::new(Mutex::new(hal)))
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     });
 
     pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalBB31>, String> {
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))?;
-        device
-            .bind_to_thread()
-            .map_err(|e| format!("Failed to bind device to thread: {:?}", e))?;
-
         let hal_arc = CUDA_HAL
             .as_ref()
             .map_err(|e| format!("HAL not available: {:?}", e))?;
