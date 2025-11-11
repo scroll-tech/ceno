@@ -6,7 +6,7 @@ use mpcs::PolynomialCommitmentScheme;
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     fmt::{self, Debug},
     ops::Div,
     rc::Rc,
@@ -156,7 +156,8 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub raw_pi: Vec<Vec<E::BaseField>>,
     // the evaluation of raw_pi.
     pub pi_evals: Vec<E>,
-    pub chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+    // each circuit may have multiple proof instances
+    pub chip_proofs: Vec<(usize, ZKVMChipProof<E>)>,
     pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub opening_proof: PCS::Proof,
 }
@@ -165,7 +166,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
         raw_pi: Vec<Vec<E::BaseField>>,
         pi_evals: Vec<E>,
-        chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
+        chip_proofs: Vec<(usize, ZKVMChipProof<E>)>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         opening_proof: PCS::Proof,
     ) -> Self {
@@ -210,8 +211,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
             .expect("halt circuit not exist");
         let halt_instance_count = self
             .chip_proofs
-            .get(&halt_circuit_index)
-            .map_or(0, |proof| proof.num_instances.iter().sum());
+            .iter()
+            .filter(|(circuit_index, _)| *circuit_index == halt_circuit_index)
+            .map(|(_, proof)| proof.num_instances[0])
+            .sum::<usize>();
         if halt_instance_count > 0 {
             assert_eq!(
                 halt_instance_count, 1,

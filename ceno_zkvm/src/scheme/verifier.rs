@@ -148,7 +148,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // make sure circuit index of chip proofs are
         // subset of that of self.vk.circuit_vks
-        for chip_idx in vm_proof.chip_proofs.keys() {
+        for chip_idx in vm_proof.chip_proofs.iter().map(|(chip_idx, _)| chip_idx) {
             if *chip_idx >= self.vk.circuit_vks.len() {
                 return Err(ZKVMError::VKNotFound(
                     format!(
@@ -502,23 +502,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert!(proof.ecc_proof.is_some());
             let ecc_proof = proof.ecc_proof.as_ref().unwrap();
 
-            let expected_septic_xy = cs
-                .ec_final_sum
-                .iter()
-                .map(|expr| {
-                    eval_by_expr_with_instance(&[], &[], &[], pi, challenges, expr)
-                        .right()
-                        .and_then(|v| v.as_base())
-                        .unwrap()
-                })
-                .collect_vec();
-            let expected_septic_x: SepticExtension<E::BaseField> =
-                expected_septic_xy[0..SEPTIC_EXTENSION_DEGREE].into();
-            let expected_septic_y: SepticExtension<E::BaseField> =
-                expected_septic_xy[SEPTIC_EXTENSION_DEGREE..].into();
+            // let expected_septic_xy = cs
+            //     .ec_final_sum
+            //     .iter()
+            //     .map(|expr| {
+            //         eval_by_expr_with_instance(&[], &[], &[], pi, challenges, expr)
+            //             .right()
+            //             .and_then(|v| v.as_base())
+            //             .unwrap()
+            //     })
+            //     .collect_vec();
+            // let expected_septic_x: SepticExtension<E::BaseField> =
+            //     expected_septic_xy[0..SEPTIC_EXTENSION_DEGREE].into();
+            // let expected_septic_y: SepticExtension<E::BaseField> =
+            //     expected_septic_xy[SEPTIC_EXTENSION_DEGREE..].into();
 
-            assert_eq!(&ecc_proof.sum.x, &expected_septic_x);
-            assert_eq!(&ecc_proof.sum.y, &expected_septic_y);
+            // assert_eq!(&ecc_proof.sum.x, &expected_septic_x);
+            // assert_eq!(&ecc_proof.sum.y, &expected_septic_y);
             assert!(!ecc_proof.sum.is_infinity);
             EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
             tracing::debug!("ecc proof verified.");

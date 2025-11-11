@@ -154,7 +154,7 @@ fn test_rw_lk_expression_combination() {
         // get proof
         let prover = ZKVMProver::new(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
-        let mut rmm = zkvm_witness.into_iter_sorted().next().unwrap().1;
+        let mut rmm: Vec<_> = zkvm_witness.into_iter_sorted().next().unwrap().witness_rmms.into();
         let (rmm, structural_rmm) = (rmm.remove(0), rmm.remove(0));
         let wits_in = rmm.to_mles();
         let structural_wits_in = structural_rmm.to_mles();

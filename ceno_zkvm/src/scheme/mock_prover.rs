@@ -1018,7 +1018,10 @@ Hints:
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
         // Process all circuits.
-        for (circuit_name, composed_cs) in &cs.circuit_css {
+        for circuit_input in witnesses.iter_sorted() {
+            let circuit_name = &circuit_input.name;
+            let composed_cs = cs.circuit_css.get(circuit_name).unwrap();
+            // for (circuit_name, composed_cs) in &cs.circuit_css {
             let ComposedConstrainSystem {
                 zkvm_v1_css: cs, ..
             } = &composed_cs;
@@ -1037,10 +1040,7 @@ Hints:
                 continue;
             }
 
-            let [witness, structural_witness] = witnesses
-                .get_opcode_witness(circuit_name)
-                .or_else(|| witnesses.get_table_witness(circuit_name))
-                .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
+            let [witness, structural_witness] = &circuit_input.witness_rmms;
             let num_rows = if witness.num_instances() > 0 {
                 witness.num_instances()
             } else if structural_witness.num_instances() > 0 {
