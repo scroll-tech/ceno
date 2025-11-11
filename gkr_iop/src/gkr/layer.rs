@@ -105,14 +105,8 @@ pub struct Layer<E: ExtensionField> {
     pub main_sumcheck_expression: Option<Expression<E>>,
 
     // flatten computation dag
-    pub main_sumcheck_expression_dag: Option<(
-        Vec<Node>,
-        Vec<Instance>,
-        Vec<Expression<E>>,
-        Vec<Either<E::BaseField, E>>,
-        u32,
-        (usize, usize),
-    )>,
+    // (dag, coeffs, final_out_index, max_dag_depth, max_degree)
+    pub main_sumcheck_expression_dag: Option<(Vec<Node>, Vec<Expression<E>>, u32, usize, usize)>,
 
     // rotation sumcheck expression, only optionally valid for zerocheck
     // store in 2 forms: expression & monomial

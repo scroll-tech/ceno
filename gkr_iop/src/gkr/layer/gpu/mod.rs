@@ -15,7 +15,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, Instance,
+    Expression,
     mle::{MultilinearExtension, Point},
     monomial::Term,
     utils::eval_by_expr_constant,
@@ -235,35 +235,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         );
 
         let (proof_gpu, evals_gpu, challenges_gpu) = if layer.exprs.len() > 200 {
-            let (
-                dag,
-                instance_scalar_expr,
-                challenges_expr,
-                constant_expr,
-                stack_top,
-                (max_degree, max_dag_depth),
-            ) = layer.main_sumcheck_expression_dag.as_ref().unwrap();
+            // (dag, coeffs, final_out_index, max_dag_depth, max_degree)
+            let (dag, coeffs, stack_top, max_dag_depth, max_degree) =
+                layer.main_sumcheck_expression_dag.as_ref().unwrap();
 
+            let pub_io_eval_scalar = pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec();
             // format: pub_io ++ challenge ++ constant
-            let term_coefficients = instance_scalar_expr
+            let term_coefficients = coeffs
                 .iter()
-                .map(|Instance(id)| pub_io_evals[*id])
-                .chain(
-                    challenges_expr
-                        .iter()
-                        .map(|c| {
-                            eval_by_expr_constant(
-                                &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
-                                &main_sumcheck_challenges,
-                                c,
-                            )
-                        })
-                        .chain(constant_expr.iter().copied())
-                        .map(|either_v| match either_v {
-                            Either::Left(base_field_val) => E::from(base_field_val),
-                            Either::Right(ext_field_val) => ext_field_val,
-                        }),
-                )
+                .map(|c| eval_by_expr_constant(&pub_io_eval_scalar, &main_sumcheck_challenges, c))
+                .map(|either_v| match either_v {
+                    Either::Left(base_field_val) => E::from(base_field_val),
+                    Either::Right(ext_field_val) => ext_field_val,
+                })
                 .collect_vec();
 
             let max_num_var = max_num_variables;
