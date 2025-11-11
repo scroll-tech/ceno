@@ -107,9 +107,11 @@ impl CenoLeafVmVerifierConfig {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct CenoRecursionKeys {
-    pub ceno_leaf_vm_pk: Arc<VmProvingKey<SC, NativeConfig>>,
-    pub internal_vm_pk: Arc<VmProvingKey<SC, NativeConfig>>,
+pub struct CenoRecursionVerifierKeys {
+    pub ceno_leaf_vm_vk: MultiStarkVerifyingKey<SC>,
+    pub ceno_leaf_fri_params: FriParameters,
+    pub internal_vm_vk: MultiStarkVerifyingKey<SC>,
+    pub ceno_internal_fri_params: FriParameters,
     pub internal_commit: [F; CHUNK],
 }
 
@@ -300,18 +302,20 @@ pub fn compress_to_root_proof(
         bincode::serialize_into(file, &root_stark_proof).expect("failed to serialize internal proof");
 
     // Export aggregation key (used in verify_e2e_stark_proof)
-    let ceno_keys = CenoRecursionKeys {
-        ceno_leaf_vm_pk: ceno_leaf_vm_pk,
-        internal_vm_pk,
+    let ceno_vk = CenoRecursionVerifierKeys {
+        ceno_leaf_vm_vk: ceno_leaf_vm_pk.vm_pk.get_vk(),
+        ceno_leaf_fri_params: ceno_leaf_vm_pk.fri_params,
+        internal_vm_vk: internal_vm_pk.vm_pk.get_vk(),
+        ceno_internal_fri_params: internal_vm_pk.fri_params,
         internal_commit: internal_committed_exe.get_program_commit().into(),
     };
 
-    let file = File::create("ceno_keys.bin")
+    let file = File::create("ceno_vk.bin")
         .expect("Create export proof file");
-        bincode::serialize_into(file, &ceno_keys).expect("failed to serialize internal proof");
+        bincode::serialize_into(file, &ceno_vk).expect("failed to serialize internal proof");
 
     verify_e2e_stark_proof(
-        &ceno_keys, 
+        &ceno_vk, 
         &root_stark_proof, 
         // _debug
         &Bn254Fr::ZERO, 
@@ -322,7 +326,7 @@ pub fn compress_to_root_proof(
 // Source from OpenVm SDK::verify_e2e_stark_proof with abridged key
 // See: https://github.com/openvm-org/openvm
 pub fn verify_e2e_stark_proof(
-    k: &CenoRecursionKeys,
+    k: &CenoRecursionVerifierKeys,
     proof: &VmStarkProof<SC>,
     expected_exe_commit: &Bn254Fr,
     expected_vm_commit: &Bn254Fr,
@@ -342,7 +346,7 @@ pub fn verify_e2e_stark_proof(
         proof.proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref();
     let internal_commit: &[_; CHUNK] = &k.internal_commit;
 
-    let (vm_pk, vm_commit) = if program_commit == internal_commit {
+    let (vm_vk, fri_params, vm_commit) = if program_commit == internal_commit {
         let internal_pvs: &InternalVmVerifierPvs<_> = public_values_air_proof_data
             .public_values
             .as_slice()
@@ -351,14 +355,15 @@ pub fn verify_e2e_stark_proof(
             return Err(format!("Invalid internal program commit: expected {:?}, got {:?}", internal_commit, internal_pvs.extra_pvs.internal_program_commit));
         }
         (
-            &k.internal_vm_pk,
+            &k.internal_vm_vk,
+            k.ceno_internal_fri_params,
             internal_pvs.extra_pvs.leaf_verifier_commit,
         )
     } else {
-        (&k.ceno_leaf_vm_pk, *program_commit)
+        (&k.ceno_leaf_vm_vk, k.ceno_leaf_fri_params, *program_commit)
     };
-    let e = BabyBearPoseidon2Engine::new(vm_pk.fri_params);
-    e.verify(&vm_pk.vm_pk.get_vk(), &proof.proof).expect("stark e2e proof verification should pass");
+    let e = BabyBearPoseidon2Engine::new(fri_params);
+    e.verify(&vm_vk, &proof.proof).expect("stark e2e proof verification should pass");
 
     let pvs: &VmVerifierPvs<_> =
         public_values_air_proof_data.public_values[..VmVerifierPvs::<u8>::width()].borrow();
