@@ -111,15 +111,6 @@ impl<
         }
         exit_span!(span);
 
-        // keep track of circuit name to index mapping
-        let circuit_name_index_mapping = self
-            .pk
-            .circuit_pks
-            .keys()
-            .enumerate()
-            .map(|(k, v)| (v, k))
-            .collect::<BTreeMap<_, _>>();
-
         // only keep track of circuits that have non-zero instances
 
         for chip_input in witnesses.iter_sorted() {
@@ -131,7 +122,7 @@ impl<
                     format!("proving key for circuit {} not found", chip_input.name).into(),
                 ))?;
 
-            assert_eq!(pk.get_cs().is_static_circuit(), false);
+            assert!(!pk.get_cs().is_static_circuit());
             // include omc init tables iff it's in first shard
             if !shard_ctx.is_first_shard() && pk.get_cs().with_omc_init_only() {
                 continue;
@@ -157,8 +148,8 @@ impl<
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
         let mut wits_rmms = BTreeMap::new();
-        let mut structural_wits = BTreeMap::new();
 
+        let mut structural_rmms = Vec::with_capacity(chips.len());
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for chip_input in witnesses.into_iter_sorted() {
             let mut rmm: Vec<_> = chip_input.witness_rmms.into();
@@ -175,7 +166,7 @@ impl<
                 wits_rmms.insert(*chip_idx, witness_rmm);
             }
             if structural_witness_rmm.num_instances() > 0 {
-                structural_wits.insert(*chip_idx, structural_witness_rmm);
+                structural_rmms.push(structural_witness_rmm);
             }
         }
 
@@ -207,9 +198,14 @@ impl<
 
         let mut points = Vec::new();
         let mut evaluations = Vec::new();
-        for (circuit_name, num_instances) in chips {
-            let circuit_idx = *circuit_name_index_mapping
+        for ((circuit_name, num_instances), structural_rmm) in
+            chips.into_iter().zip_eq(structural_rmms.into_iter())
+        {
+            let circuit_idx = self
+                .pk
+                .circuit_name_to_index
                 .get(&circuit_name)
+                .cloned()
                 .expect("invalid circuit {} not exist in ceno zkvm");
             let pk = self.pk.circuit_pks.get(&circuit_name).unwrap();
             let cs = pk.get_cs();
@@ -234,10 +230,7 @@ impl<
                 .collect_vec();
 
             let structural_witness_span = entered_span!("structural_witness", profiling_2 = true);
-            let structural_mles = structural_wits
-                .remove(&circuit_idx)
-                .map(|rmm| rmm.to_mles())
-                .unwrap_or(vec![]);
+            let structural_mles = structural_rmm.to_mles();
             let structural_witness = self.device.transport_mles(&structural_mles);
             exit_span!(structural_witness_span);
 

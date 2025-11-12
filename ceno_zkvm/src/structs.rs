@@ -343,19 +343,14 @@ impl<E: ExtensionField> ChipInput<E> {
 
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    witnesses_opcodes: BTreeMap<String, Vec<ChipInput<E>>>,
-    witnesses_tables: BTreeMap<String, Vec<ChipInput<E>>>,
+    circuits: BTreeMap<String, Vec<ChipInput<E>>>,
     lk_mlts: BTreeMap<String, Multiplicity<u64>>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
-    // pub fn get_opcode_witness(&self, name: &String) -> Option<&Vec<RMMCollections<E::BaseField>>> {
-    //     self.witnesses_opcodes.get(name)
-    // }
-
-    pub fn get_table_witness(&self, name: &String) -> Option<&Vec<ChipInput<E>>> {
-        self.witnesses_tables.get(name)
+    pub fn get_circuit_witness(&self, name: &String) -> Option<&Vec<ChipInput<E>>> {
+        self.circuits.get(name)
     }
 
     pub fn get_lk_mlt(&self, name: &String) -> Option<&Multiplicity<u64>> {
@@ -372,6 +367,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(self.combined_lk_mlt.is_none());
 
         let cs = cs.get_cs(&OC::name()).unwrap();
+        if records.is_empty() {
+            tracing::trace!("no records for opcode circuit {}", OC::name());
+            return Ok(());
+        }
         let (witness, logup_multiplicity) = OC::assign_instances(
             config,
             shard_ctx,
@@ -381,12 +380,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         )?;
         let num_instances = vec![witness[0].num_instances()];
         let input = ChipInput::new(OC::name(), witness, num_instances);
-        assert!(
-            self.witnesses_opcodes
-                .insert(OC::name(), vec![input])
-                .is_none()
-        );
-        assert!(!self.witnesses_tables.contains_key(&OC::name()));
+        assert!(self.circuits.insert(OC::name(), vec![input]).is_none());
         assert!(
             self.lk_mlts
                 .insert(OC::name(), logup_multiplicity)
@@ -439,12 +433,17 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             input,
         )?;
         let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
-        let input = ChipInput::new(TC::name(), witness, vec![num_instances]);
-        assert!(
-            self.witnesses_tables
-                .insert(TC::name(), vec![input])
-                .is_none()
+        tracing::debug!(
+            "assigned table circuit {} with {} instances",
+            TC::name(),
+            num_instances
         );
+        if num_instances == 0 {
+            tracing::trace!("no instances for table circuit {}", TC::name());
+            return Ok(());
+        }
+        let input = ChipInput::new(TC::name(), witness, vec![num_instances]);
+        assert!(self.circuits.insert(TC::name(), vec![input]).is_none());
 
         Ok(())
     }
@@ -512,8 +511,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         } else {
             vec![]
         };
-        let non_first_shard_records_len = non_first_shard_records.len();
-
         let global_input = shard_ctx
             .write_records()
             .par_iter()
@@ -557,7 +554,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     cs.zkvm_v1_css.num_witin as usize,
                     cs.zkvm_v1_css.num_structural_witin as usize,
                     self.combined_lk_mlt.as_ref().unwrap(),
-                    &shard_accesses,
+                    shard_accesses,
                 )?;
                 let num_reads = shard_accesses
                     .iter()
@@ -577,23 +574,17 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             .collect::<Result<Vec<_>, ZKVMError>>()?;
         // set num_read, num_write as separate instance
         assert!(
-            self.witnesses_tables
-                .insert(ShardRamCircuit::<E>::name(), circuit_inputs,)
+            self.circuits
+                .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
                 .is_none()
-        );
-        assert!(
-            !self
-                .witnesses_opcodes
-                .contains_key(&ShardRamCircuit::<E>::name())
         );
 
         Ok(())
     }
 
     pub fn get_chip_meta_infos(&self) -> Vec<(String, Vec<usize>)> {
-        self.witnesses_opcodes
+        self.circuits
             .iter()
-            .chain(self.witnesses_tables.iter())
             .flat_map(|(_, chip_inputs)| {
                 chip_inputs
                     .iter()
@@ -603,17 +594,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     }
 
     pub fn iter_sorted(&self) -> impl Iterator<Item = &ChipInput<E>> {
-        self.witnesses_opcodes
+        self.circuits
             .iter()
-            .chain(self.witnesses_tables.iter())
             .flat_map(|(_, chip_input)| chip_input.iter())
     }
 
     /// Iterate opcode/table circuits, sorted by alphabetical order.
     pub fn into_iter_sorted(self) -> impl Iterator<Item = ChipInput<E>> {
-        self.witnesses_opcodes
+        self.circuits
             .into_iter()
-            .chain(self.witnesses_tables.into_iter())
             .flat_map(|(_, chip_inputs)| chip_inputs.into_iter())
     }
 }
