@@ -12,7 +12,7 @@ version.workspace = true
 [dependencies]
 bincode.workspace = true
 ceno_gpu = { workspace = true, optional = true }
-cudarc =  { workspace = true, optional = true }
+cudarc = { workspace = true, optional = true }
 either.workspace = true
 ff_ext.workspace = true
 itertools.workspace = true

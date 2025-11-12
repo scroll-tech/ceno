@@ -15,7 +15,7 @@ ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
 ceno_gpu = { workspace = true, optional = true }
 ceno_host = { path = "../ceno_host" }
-cudarc =  { workspace = true, optional = true }
+cudarc = { workspace = true, optional = true }
 either.workspace = true
 ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
