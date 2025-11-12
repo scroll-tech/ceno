@@ -39,6 +39,7 @@ pub type InnerConfig = AsmConfig<F, E>;
 
 #[derive(DslVariable, Clone)]
 pub struct ZKVMProofInputVariable<C: Config> {
+    pub shard_id: Usize<C::N>,
     pub raw_pi: Array<C, Array<C, Felt<C::F>>>,
     pub raw_pi_num_variables: Array<C, Var<C::N>>,
     pub pi_evals: Array<C, Ext<C::F, C::EF>>,
@@ -62,6 +63,7 @@ pub struct TowerProofInputVariable<C: Config> {
 }
 
 pub(crate) struct ZKVMProofInput {
+    pub shard_id: usize,
     pub raw_pi: Vec<Vec<F>>,
     // Evaluation of raw_pi.
     pub pi_evals: Vec<E>,
@@ -93,6 +95,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
     type HintVariable = ZKVMProofInputVariable<InnerConfig>;
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let shard_id = Usize::Var(usize::read(builder));
         let raw_pi = Vec::<Vec<F>>::read(builder);
         let raw_pi_num_variables = Vec::<usize>::read(builder);
         let pi_evals = Vec::<E>::read(builder);
@@ -114,6 +117,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let pcs_proof = BasefoldProof::read(builder);
 
         ZKVMProofInputVariable {
+            shard_id,
             raw_pi,
             raw_pi_num_variables,
             pi_evals,
@@ -180,6 +184,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let witin_perm = get_perm(witin_num_vars);
         let fixed_perm = get_perm(fixed_num_vars);
 
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.shard_id));
         stream.extend(self.raw_pi.write());
         stream.extend(raw_pi_num_variables.write());
         stream.extend(self.pi_evals.write());
@@ -710,9 +715,9 @@ pub struct SepticPointInput {
 
 #[derive(DslVariable, Clone)]
 pub struct SepticPointVariable<C: Config> {
-    x: SepticExtensionVariable<C>,
-    y: SepticExtensionVariable<C>,
-    is_infinity: Usize<C::N>,
+    pub x: SepticExtensionVariable<C>,
+    pub y: SepticExtensionVariable<C>,
+    pub is_infinity: Usize<C::N>,
 }
 
 pub(crate) struct EccQuarkProofInput {

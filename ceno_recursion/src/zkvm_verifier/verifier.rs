@@ -18,8 +18,7 @@ use crate::basefold_verifier::verifier::batch_verify;
 use crate::tower_verifier::program::verify_tower_proof;
 use crate::transcript::transcript_observe_label;
 use crate::zkvm_verifier::binding::{
-    EccQuarkProofVariable, GKRProofVariable, LayerProofVariable, SepticExtensionVariable,
-    SumcheckLayerProofVariable,
+    EccQuarkProofVariable, GKRProofVariable, LayerProofVariable, SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable
 };
 use crate::{
     arithmetics::{
@@ -104,17 +103,39 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 ) {
     let mut challenger = DuplexChallengerVariable::new(builder);
     transcript_observe_label(builder, &mut challenger, b"riscv");
-
-    /* _debug: verifier logic
+    
     let prod_r: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let prod_w: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
 
+    /* _debug: check
+    // make sure circuit index of chip proofs are
+    // subset of that of self.vk.circuit_vks
+    for chip_idx in vm_proof.chip_proofs.keys() {
+        if *chip_idx >= self.vk.circuit_vks.len() {
+            return Err(ZKVMError::VKNotFound(
+                format!(
+                    "{shard_id}th shard chip index {chip_idx} not found in vk set [0..{})",
+                    self.vk.circuit_vks.len()
+                )
+                .into(),
+            ));
+        }
+    }
+    */
+
     iter_zip!(builder, zkvm_proof_input.raw_pi).for_each(|ptr_vec, builder| {
         let v = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
-
         challenger_multi_observe(builder, &mut challenger, &v);
     });
+
+    /* _debug
+    // check shard id
+    assert_eq!(
+        vm_proof.raw_pi[SHARD_ID_IDX],
+        vec![E::BaseField::from_canonical_usize(shard_id)]
+    );
+    */
 
     iter_zip!(builder, zkvm_proof_input.raw_pi, zkvm_proof_input.pi_evals).for_each(
         |ptr_vec, builder| {
@@ -129,47 +150,46 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
-    let fixed_commit = if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-        let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-        let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
-        commit.value.into_iter().enumerate().for_each(|(i, v)| {
-            let v = builder.constant(v);
-            // TODO: put fixed commit to public values
-            // builder.commit_public_value(v);
+    if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
+        builder.if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
+            let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+            let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+            commit.value.into_iter().enumerate().for_each(|(i, v)| {
+                let v = builder.constant(v);
+                // TODO: put fixed commit to public values
+                // builder.commit_public_value(v);
 
-            builder.set_value(&commit_array, i, v);
+                builder.set_value(&commit_array, i, v);
+            });
+            challenger_multi_observe(builder, &mut challenger, &commit_array);
         });
-        challenger_multi_observe(builder, &mut challenger, &commit_array);
+    } else if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
+        builder.if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
+            let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+            let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+            commit.value.into_iter().enumerate().for_each(|(i, v)| {
+                let v = builder.constant(v);
+                // TODO: put fixed commit to public values
+                // builder.commit_public_value(v);
 
-        // FIXME: do not hardcode this in the program
-        let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
-            fixed_commit.log2_max_codeword_size,
-        ));
-        let log2_max_codeword_size: Var<C::N> = builder.constant(C::N::from_canonical_usize(
-            fixed_commit.log2_max_codeword_size,
-        ));
-
-        challenger.observe(builder, log2_max_codeword_size_felt);
-
-        Some(BasefoldCommitmentVariable {
-            commit: MmcsCommitmentVariable {
-                value: commit_array,
-            },
-            log2_max_codeword_size: log2_max_codeword_size.into(),
-        })
-    } else {
-        None
-    };
+                builder.set_value(&commit_array, i, v);
+            });
+            challenger_multi_observe(builder, &mut challenger, &commit_array);
+        });
+    }
 
     let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
     iter_zip!(builder, zkvm_proof_input.chip_proofs).for_each(|ptr_vec, builder| {
         let chip_proof = builder.iter_ptr_get(&zkvm_proof_input.chip_proofs, ptr_vec[0]);
-        let num_instances = builder.unsafe_cast_var_to_felt(chip_proof.num_instances.get_var());
-
         challenger.observe(builder, chip_proof.idx_felt);
         challenger.observe(builder, zero_f);
-        challenger.observe(builder, num_instances);
-        challenger.observe(builder, zero_f);
+
+        iter_zip!(builder, chip_proof.num_instances).for_each(|ptr_vec, builder| {
+            let num_instance = builder.iter_ptr_get(&chip_proof.num_instances, ptr_vec[0]);
+            let num_instance = builder.unsafe_cast_var_to_felt(num_instance);
+            challenger.observe(builder, num_instance);
+            challenger.observe(builder, zero_f);
+        });
     });
 
     challenger_multi_observe(
@@ -177,15 +197,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         &mut challenger,
         &zkvm_proof_input.witin_commit.commit.value,
     );
-    {
-        let log2_max_codeword_size = builder.unsafe_cast_var_to_felt(
-            zkvm_proof_input
-                .witin_commit
-                .log2_max_codeword_size
-                .get_var(),
-        );
-        challenger.observe(builder, log2_max_codeword_size);
-    }
 
     let alpha = challenger.sample_ext(builder);
     let beta = challenger.sample_ext(builder);
@@ -194,22 +205,27 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     builder.set(&challenges, 0, alpha.clone());
     builder.set(&challenges, 1, beta.clone());
 
-    let mut unipoly_extrapolator = UniPolyExtrapolator::new(builder);
-    let mut poly_evaluator = PolyEvaluator::new(builder);
-
-    let dummy_table_item = alpha.clone();
-    let dummy_table_item_multiplicity: Var<C::N> = builder.constant(C::N::ZERO);
-
     let num_fixed_opening = vk
         .circuit_vks
         .values()
         .filter(|c| c.get_cs().num_fixed() > 0)
         .count();
 
+    let mut unipoly_extrapolator = UniPolyExtrapolator::new(builder);
+    let mut poly_evaluator = PolyEvaluator::new(builder);
+
+    let dummy_table_item = alpha.clone();
+    let dummy_table_item_multiplicity: Var<C::N> = builder.constant(C::N::ZERO);
+    
     let witin_openings: Array<C, RoundOpeningVariable<C>> =
         builder.dyn_array(zkvm_proof_input.chip_proofs.len());
     let fixed_openings: Array<C, RoundOpeningVariable<C>> =
-        builder.dyn_array(Usize::from(num_fixed_opening));
+        builder.dyn_array(zkvm_proof_input.chip_proofs.len());
+    let mut shard_ec_sum = SepticPointVariable {
+        x: SepticExtensionVariable { vs: builder.dyn_array(7) },
+        y: SepticExtensionVariable { vs: builder.dyn_array(7) },
+        is_infinity: Usize::from(0),
+    };
 
     let num_chips_verified: Usize<C::N> = builder.eval(C::N::ZERO);
     let num_chips_have_fixed: Usize<C::N> = builder.eval(C::N::ZERO);
@@ -225,14 +241,19 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
         // _debug
-        println!("=> circuit_name: {:?}", circuit_name);
-
+        // println!("=> circuit_name: {:?}", circuit_name);
+        let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
+
+        let with_omc_init_only = circuit_vk.get_cs().with_omc_init_only() as usize;
 
         builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
             let chip_proof =
                 builder.get(&zkvm_proof_input.chip_proofs, num_chips_verified.get_var());
-            let circuit_vk = &vk.circuit_vks[circuit_name];
+            
+            builder.if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
+                builder.assert_usize_eq(Usize::from(with_omc_init_only), Usize::from(0));
+            });
 
             builder.assert_usize_eq(
                 chip_proof.wits_in_evals.len(),
@@ -243,21 +264,21 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 Usize::from(circuit_vk.get_cs().num_fixed()),
             );
             builder.assert_usize_eq(
-                chip_proof.record_r_out_evals.len(),
+                chip_proof.r_out_evals.len(),
                 Usize::from(circuit_vk.get_cs().num_reads()),
             );
             builder.assert_usize_eq(
-                chip_proof.record_w_out_evals.len(),
+                chip_proof.w_out_evals.len(),
                 Usize::from(circuit_vk.get_cs().num_writes()),
             );
             builder.assert_usize_eq(
-                chip_proof.record_lk_out_evals.len(),
+                chip_proof.lk_out_evals.len(),
                 Usize::from(circuit_vk.get_cs().num_lks()),
             );
 
             let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-            iter_zip!(builder, chip_proof.record_lk_out_evals).for_each(|ptr_vec, builder| {
-                let evals = builder.iter_ptr_get(&chip_proof.record_lk_out_evals, ptr_vec[0]);
+            iter_zip!(builder, chip_proof.lk_out_evals).for_each(|ptr_vec, builder| {
+                let evals = builder.iter_ptr_get(&chip_proof.lk_out_evals, ptr_vec[0]);
                 let p1 = builder.get(&evals, 0);
                 let p2 = builder.get(&evals, 1);
                 let q1 = builder.get(&evals, 2);
@@ -268,8 +289,10 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             });
             challenger.observe(builder, chip_proof.idx_felt);
 
-            builder.cycle_tracker_start("Verify chip proof");
-            let input_opening_point = if chip_vk.get_cs().is_static_circuit() {
+            if circuit_vk.get_cs().is_with_lk_table() {
+                builder.assign(&logup_sum, logup_sum - chip_logup_sum);
+            } else {
+                
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks: Var<C::N> =
                     builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
@@ -278,7 +301,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 let next_pow2_instance: Var<C::N> =
                     pow_2(builder, chip_proof.log2_num_instances.get_var());
                 let num_padded_instance: Var<C::N> =
-                    builder.eval(next_pow2_instance - chip_proof.num_instances.clone());
+                    builder.eval(next_pow2_instance - chip_proof.sum_num_instances.clone());
                 let rotation_var: Var<C::N> = builder.constant(C::N::from_canonical_usize(
                     1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0),
                 ));
@@ -290,7 +313,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
                 // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
                 let num_instance_non_selected: Var<C::N> = builder.eval(
-                    chip_proof.num_instances.clone()
+                    chip_proof.sum_num_instances.clone()
                         * (rotation_var - rotation_subgroup_size - C::N::ONE),
                 );
                 let new_multiplicity: Var<C::N> =
@@ -301,30 +324,18 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
 
                 builder.assign(&logup_sum, logup_sum + chip_logup_sum);
-                verify_opcode_proof(
-                    builder,
-                    &mut challenger,
-                    &chip_proof,
-                    &zkvm_proof_input.pi_evals,
-                    &challenges,
-                    &chip_vk,
-                    &mut unipoly_extrapolator,
-                )
-            } else {
-                builder.assign(&logup_sum, logup_sum - chip_logup_sum);
-                verify_table_proof(
-                    builder,
-                    &mut challenger,
-                    &chip_proof,
-                    &zkvm_proof_input.raw_pi,
-                    &zkvm_proof_input.raw_pi_num_variables,
-                    &zkvm_proof_input.pi_evals,
-                    &challenges,
-                    &chip_vk,
-                    &mut unipoly_extrapolator,
-                    &mut poly_evaluator,
-                )
-            };
+            }
+
+            builder.cycle_tracker_start("Verify chip proof");
+            let input_opening_point = verify_chip_proof(
+                builder,
+                &mut challenger,
+                &chip_proof,
+                &zkvm_proof_input.pi_evals,
+                &challenges,
+                &chip_vk,
+                &mut unipoly_extrapolator,
+            );
             builder.cycle_tracker_end("Verify chip proof");
 
             let point_clone: Array<C, Ext<C::F, C::EF>> = builder.eval(input_opening_point.clone());
@@ -337,7 +348,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             });
             builder.set_value(&witin_openings, num_chips_verified.get_var(), witin_round);
 
-            if chip_vk.get_cs().num_fixed() > 0 {
+            if circuit_vk.get_cs().num_fixed() > 0 {
                 let fixed_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
                     num_var: input_opening_point.len().get_var(),
                     point_and_evals: PointAndEvalsVariable {
@@ -349,22 +360,27 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 });
 
                 builder.set_value(&fixed_openings, num_chips_have_fixed.get_var(), fixed_round);
-
                 builder.inc(&num_chips_have_fixed);
             }
 
-            let record_r_out_evals_prod = nested_product(builder, &chip_proof.record_r_out_evals);
-            builder.assign(&prod_r, prod_r * record_r_out_evals_prod);
+            let r_out_evals_prod = nested_product(builder, &chip_proof.r_out_evals);
+            builder.assign(&prod_r, prod_r * r_out_evals_prod);
 
-            let record_w_out_evals_prod = nested_product(builder, &chip_proof.record_w_out_evals);
-            builder.assign(&prod_w, prod_w * record_w_out_evals_prod);
+            let w_out_evals_prod = nested_product(builder, &chip_proof.w_out_evals);
+            builder.assign(&prod_w, prod_w * w_out_evals_prod);
 
             builder.inc(&num_chips_verified);
+
+            /* _debug: chip_shard_ec_sum
+            if let Some(chip_shard_ec_sum) = chip_shard_ec_sum {
+                shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
+            }
+            */
         });
     }
-
-    builder.assert_usize_eq(num_chips_have_fixed, Usize::from(num_fixed_opening));
-    builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
+    
+    // _debug: check
+    // builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
 
     let dummy_table_item_multiplicity =
         builder.unsafe_cast_var_to_felt(dummy_table_item_multiplicity);
@@ -388,16 +404,54 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
-    if num_fixed_opening > 0 {
-        builder.set(
-            &rounds,
-            1,
-            RoundVariable {
-                commit: fixed_commit.unwrap(),
-                openings: fixed_openings,
-                perm: zkvm_proof_input.fixed_perm,
-            },
-        );
+    if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
+        builder.if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
+            let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+            let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+
+            let log2_max_codeword_size: Var<C::N> = builder.constant(C::N::from_canonical_usize(
+                fixed_commit.log2_max_codeword_size,
+            ));
+
+            builder.set(
+                &rounds,
+                1,
+                RoundVariable {
+                    commit: BasefoldCommitmentVariable {
+                        commit: MmcsCommitmentVariable {
+                            value: commit_array,
+                        },
+                        log2_max_codeword_size: log2_max_codeword_size.into(),
+                    },
+                    openings: fixed_openings.clone(),
+                    perm: zkvm_proof_input.fixed_perm.clone(),
+                },
+            );
+        });
+    } else if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
+        builder.if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
+            let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+            let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+
+            let log2_max_codeword_size: Var<C::N> = builder.constant(C::N::from_canonical_usize(
+                fixed_commit.log2_max_codeword_size,
+            ));
+
+            builder.set(
+                &rounds,
+                1,
+                RoundVariable {
+                    commit: BasefoldCommitmentVariable {
+                        commit: MmcsCommitmentVariable {
+                            value: commit_array,
+                        },
+                        log2_max_codeword_size: log2_max_codeword_size.into(),
+                    },
+                    openings: fixed_openings.clone(),
+                    perm: zkvm_proof_input.fixed_perm.clone(),
+                },
+            );
+        });
     }
 
     batch_verify(
@@ -438,13 +492,12 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // logup check
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     builder.assert_ext_eq(logup_sum, zero);
-    */
 }
 
-pub fn verify_opcode_proof<C: Config>(
+pub fn verify_chip_proof<C: Config>(
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
-    opcode_proof: &ZKVMChipProofInputVariable<C>,
+    chip_proof: &ZKVMChipProofInputVariable<C>,
     pi_evals: &Array<C, Ext<C::F, C::EF>>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     vk: &VerifyingKey<E>,

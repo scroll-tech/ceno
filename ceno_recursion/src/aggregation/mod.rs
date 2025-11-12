@@ -118,9 +118,9 @@ pub struct CenoRecursionVerifierKeys {
 pub fn compress_to_root_proof(
     zkvm_proofs: Vec<ZKVMProof<E, RecPcs>>,
     vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
-) {
+) -> (CenoRecursionVerifierKeys, VmStarkProof<SC>) {
     // Construct zkvm proof input
-    let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs.into_iter().map(|p| ZKVMProofInput::from(p)).collect();
+    let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs.into_iter().enumerate().map(|(shard_id, p)| ZKVMProofInput::from((shard_id, p))).collect();
 
     let aggregation_start_timestamp = Instant::now();
     let sdk = Sdk::new();
@@ -314,13 +314,7 @@ pub fn compress_to_root_proof(
         .expect("Create export proof file");
         bincode::serialize_into(file, &ceno_vk).expect("failed to serialize internal proof");
 
-    verify_e2e_stark_proof(
-        &ceno_vk, 
-        &root_stark_proof, 
-        // _debug
-        &Bn254Fr::ZERO, 
-        &Bn254Fr::ZERO
-    ).expect("Verify e2e stark proof should pass");
+    (ceno_vk, root_stark_proof)
 }
 
 // Source from OpenVm SDK::verify_e2e_stark_proof with abridged key
@@ -450,7 +444,7 @@ pub fn verify_proofs(
 ) {
     let program = build_zkvm_verifier_program(&vk);
     if zkvm_proofs.len() > 0 {
-        let zkvm_proof_input = ZKVMProofInput::from(zkvm_proofs[0].clone());
+        let zkvm_proof_input = ZKVMProofInput::from((0usize, zkvm_proofs[0].clone()));
 
         // Pass in witness stream
         let mut witness_stream: Vec<Vec<F>> = Vec::new();
@@ -486,6 +480,11 @@ mod tests {
     use mpcs::{Basefold, BasefoldRSParams};
     use std::fs::File;
     use openvm_stark_sdk::config::setup_tracing_with_log_level;
+    use super::verify_e2e_stark_proof;
+    use openvm_stark_sdk::p3_bn254_fr::Bn254Fr;
+    use ceno_zkvm::scheme::verifier::ZKVMVerifier;
+    use ceno_zkvm::e2e::verify;
+    use p3::field::FieldAlgebra;
 
     pub fn aggregation_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);
@@ -501,7 +500,15 @@ mod tests {
             bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
                 .expect("Failed to deserialize vk file");
 
-        compress_to_root_proof(zkvm_proofs, vk);
+        let (vk, root_stark_proof) = compress_to_root_proof(zkvm_proofs, vk);
+
+        verify_e2e_stark_proof(
+            &vk, 
+            &root_stark_proof, 
+            // _debug
+            &Bn254Fr::ZERO, 
+            &Bn254Fr::ZERO
+        ).expect("Verify e2e stark proof should pass");
     }
 
     pub fn verify_single_inner_thread() {
@@ -519,6 +526,24 @@ mod tests {
                 .expect("Failed to deserialize vk file");
 
         verify_proofs(zkvm_proofs, vk);
+    }
+
+    pub fn verify_single_rust_verifier_inner_thread() {
+        setup_tracing_with_log_level(tracing::Level::WARN);
+
+        let proof_path = "./src/imported/proof.bin";
+        let vk_path = "./src/imported/vk.bin";
+
+        let zkvm_proofs: Vec<ZKVMProof<E, Basefold<E, BasefoldRSParams>>> =
+            bincode::deserialize_from(File::open(proof_path).expect("Failed to open proof file"))
+                .expect("Failed to deserialize proof file");
+
+        let vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>> =
+            bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
+                .expect("Failed to deserialize vk file");
+
+        let verifier = ZKVMVerifier::new(vk);
+        verify(zkvm_proofs.clone(), &verifier).expect("Verification failed");
     }
 
     #[test]
@@ -540,6 +565,18 @@ mod tests {
         let handler = std::thread::Builder::new()
             .stack_size(stack_size)
             .spawn(verify_single_inner_thread)
+            .expect("Failed to spawn thread");
+
+        handler.join().expect("Thread panicked");
+    }
+
+    #[test]
+    pub fn test_single_rust_verifier() {
+        let stack_size = 256 * 1024 * 1024; // 64 MB
+
+        let handler = std::thread::Builder::new()
+            .stack_size(stack_size)
+            .spawn(verify_single_rust_verifier_inner_thread)
             .expect("Failed to spawn thread");
 
         handler.join().expect("Thread panicked");
