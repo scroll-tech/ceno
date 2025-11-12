@@ -151,23 +151,13 @@ impl<
 
         let mut structural_rmms = Vec::with_capacity(chips.len());
         // commit to opcode circuits first and then commit to table circuits, sorted by name
-        for chip_input in witnesses.into_iter_sorted() {
-            let mut rmm: Vec<_> = chip_input.witness_rmms.into();
-            let witness_rmm = rmm.remove(0);
-            // only table got structural witness
-            let structural_witness_rmm = if !rmm.is_empty() {
-                rmm.remove(0)
-            } else {
-                RowMajorMatrix::empty()
-            };
+        for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
+            let [witness_rmm, structural_witness_rmm] = chip_input.witness_rmms;
 
-            let chip_idx = self.pk.circuit_name_to_index.get(&chip_input.name).unwrap();
             if witness_rmm.num_instances() > 0 {
-                wits_rmms.insert(*chip_idx, witness_rmm);
+                wits_rmms.insert(i, witness_rmm);
             }
-            if structural_witness_rmm.num_instances() > 0 {
-                structural_rmms.push(structural_witness_rmm);
-            }
+            structural_rmms.push(structural_witness_rmm);
         }
 
         // commit to witness traces in batch

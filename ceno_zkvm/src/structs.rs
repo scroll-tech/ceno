@@ -433,17 +433,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             input,
         )?;
         let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
-        tracing::debug!(
-            "assigned table circuit {} with {} instances",
-            TC::name(),
-            num_instances
-        );
-        if num_instances == 0 {
-            tracing::trace!("no instances for table circuit {}", TC::name());
-            return Ok(());
+        if num_instances > 0 {
+            tracing::debug!(
+                "assigned table circuit {} with {} instances",
+                TC::name(),
+                num_instances
+            );
+            let input = ChipInput::new(TC::name(), witness, vec![num_instances]);
+            assert!(self.circuits.insert(TC::name(), vec![input]).is_none());
         }
-        let input = ChipInput::new(TC::name(), witness, vec![num_instances]);
-        assert!(self.circuits.insert(TC::name(), vec![input]).is_none());
 
         Ok(())
     }
@@ -565,10 +563,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 Ok(ChipInput::new(
                     ShardRamCircuit::<E>::name(),
                     witness,
-                    vec![
-                        num_reads, num_writes,
-                        // shard_accesses.len(),
-                    ],
+                    vec![num_reads, num_writes],
                 ))
             })
             .collect::<Result<Vec<_>, ZKVMError>>()?;
