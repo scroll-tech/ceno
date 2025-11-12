@@ -24,17 +24,21 @@ use gkr_iop::{
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Expression,
+    Expression, ToExpr,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
-    virtual_poly::build_eq_x_r_vec,
+    virtual_poly::{build_eq_x_r_vec, eq_eval},
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    iter::{once, repeat_n},
+    sync::Arc,
+};
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProverMessage, IOPProverState},
@@ -75,9 +79,9 @@ impl CpuEccProver {
         let out_rt = transcript.sample_and_append_vec(b"ecc", n);
         let num_threads = optimal_sumcheck_threads(out_rt.len());
 
-        // expression with add (3 zero constrains) and bypass (2 zero constrains)
+        // expression with add (3 zero constraints), bypass (2 zero constraints), export (2 zero constraints)
         let alpha_pows = transcript.sample_and_append_challenge_pows(
-            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2,
+            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2 + SEPTIC_EXTENSION_DEGREE * 2,
             b"ecc_alpha",
         );
         let mut alpha_pows_iter = alpha_pows.iter();
@@ -92,6 +96,17 @@ impl CpuEccProver {
         };
         let mut sel_add_mle: MultilinearExtension<'_, E> =
             sel_add.compute(&out_rt, &sel_add_ctx).unwrap();
+
+        // [1,1,...,1,0]
+        let last_evaluation_index = (1 << n) - 2;
+        let lsi_on_hypercube = repeat_n(E::ONE, n - 1).chain(once(E::ZERO)).collect_vec();
+        let mut sel_export = (0..(1 << n))
+            .into_par_iter()
+            .map(|_| E::ZERO)
+            .collect::<Vec<_>>();
+        sel_export[last_evaluation_index] = eq_eval(&out_rt, lsi_on_hypercube.as_slice());
+        let mut sel_export_mle = sel_export.into_mle();
+
         // we construct sel_bypass witness here
         // verifier can derive it via `sel_bypass = eq - sel_add - sel_last_onehot`
         let mut sel_bypass_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
@@ -110,6 +125,7 @@ impl CpuEccProver {
         let mut sel_bypass_mle = sel_bypass_mle.into_mle();
         let sel_add_expr = expr_builder.lift(sel_add_mle.to_either());
         let sel_bypass_expr = expr_builder.lift(sel_bypass_mle.to_either());
+        let sel_export_expr = expr_builder.lift(sel_export_mle.to_either());
 
         let mut exprs_add = vec![];
         let mut exprs_bypass = vec![];
@@ -219,12 +235,35 @@ impl CpuEccProver {
                 .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
-        assert!(alpha_pows_iter.next().is_none());
+
+        // export x[1,...,1,0], y[1,...,1,0] for final result
+        let xp = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+        let yp = ys.iter().map(|y| y.as_view_slice(2, 1)).collect_vec();
+        let final_sum_x: SepticExtension<E::BaseField> = (xp.iter())
+            .map(|x| x.get_base_field_vec()[last_evaluation_index]) // x[1,...,1,0]
+            .collect_vec()
+            .into();
+        let final_sum_y: SepticExtension<E::BaseField> = (yp.iter())
+            .map(|y| y.get_base_field_vec()[last_evaluation_index]) // x[1,...,1,0]
+            .collect_vec()
+            .into();
+        // 0 = sel_export * (x[1,b] - final_sum.x)
+        // 0 = sel_export * (y[1,b] - final_sum.y)
+        let export_expr =
+            x3.0.iter()
+                .zip_eq(final_sum_x.0.iter())
+                // .chain(y3.0.iter().zip_eq(final_sum_y.0.iter()))
+                .map(|(x, final_x)| x - final_x.expr())
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha)))
+                .sum::<Expression<E>>()
+                * sel_export_expr;
+        // assert!(alpha_pows_iter.next().is_none());
 
         let exprs_bypass = exprs_bypass.into_iter().sum::<Expression<E>>() * sel_bypass_expr;
 
         let (zerocheck_proof, state) = IOPProverState::prove(
-            expr_builder.to_virtual_polys(&[exprs_add + exprs_bypass], &[]),
+            expr_builder.to_virtual_polys(&[exprs_add + exprs_bypass + export_expr], &[]),
             transcript,
         );
 
@@ -232,20 +271,7 @@ impl CpuEccProver {
         let evals = state.get_mle_flatten_final_evaluations();
 
         // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
-        assert_eq!(evals.len(), 2 + SEPTIC_EXTENSION_DEGREE * 7);
-
-        let last_evaluation_index = (1 << n) - 1;
-        let x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
-        let y3 = ys.iter().map(|y| y.as_view_slice(2, 1)).collect_vec();
-        let final_sum_x: SepticExtension<E::BaseField> = (x3.iter())
-            .map(|x| x.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
-            .collect_vec()
-            .into();
-        let final_sum_y: SepticExtension<E::BaseField> = (y3.iter())
-            .map(|y| y.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
-            .collect_vec()
-            .into();
-        let final_sum = SepticPoint::from_affine(final_sum_x, final_sum_y);
+        assert_eq!(evals.len(), 3 + SEPTIC_EXTENSION_DEGREE * 7);
 
         #[cfg(feature = "sanity-check")]
         {
@@ -254,8 +280,10 @@ impl CpuEccProver {
             let y0 = filter_bj(&ys, 0);
             let x1 = filter_bj(&xs, 1);
             let y1 = filter_bj(&ys, 1);
+            let sel_export = eq_eval(&out_rt, &lsi_on_hypercube) * eq_eval(&rt, &lsi_on_hypercube);
+            assert_eq!(sel_export, evals[2]);
 
-            let evals = &evals[2..];
+            let evals = &evals[3..];
             // check evaluations
             for i in 0..SEPTIC_EXTENSION_DEGREE {
                 assert_eq!(s[i].evaluate(&rt), evals[i]);
@@ -263,10 +291,11 @@ impl CpuEccProver {
                 assert_eq!(y0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 2 + i]);
                 assert_eq!(x1[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 3 + i]);
                 assert_eq!(y1[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 4 + i]);
-                assert_eq!(x3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 5 + i]);
-                assert_eq!(y3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 6 + i]);
+                assert_eq!(xp[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 5 + i]);
+                assert_eq!(yp[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 6 + i]);
             }
         }
+        let final_sum = SepticPoint::from_affine(final_sum_x, final_sum_y);
         assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
 
         EccQuarkProof {
