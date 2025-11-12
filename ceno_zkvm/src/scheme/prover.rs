@@ -25,7 +25,6 @@ use sumcheck::{
     structs::IOPProverMessage,
 };
 use transcript::Transcript;
-use witness::RowMajorMatrix;
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 use crate::{
