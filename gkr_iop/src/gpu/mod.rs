@@ -25,9 +25,9 @@ pub mod gpu_prover {
             CudaHalBB31, GpuDigestLayer, GpuFieldType, GpuMatrix, GpuPolynomial, GpuPolynomialExt,
         },
         common::{
-            get_ceno_gpu_device_id,
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
+            get_ceno_gpu_device_id,
             mle::{
                 build_mle_as_ceno, ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu,
                 rotation_selector_gpu,
