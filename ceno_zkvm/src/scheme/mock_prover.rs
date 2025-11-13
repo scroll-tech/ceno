@@ -34,7 +34,7 @@ use p3::field::{Field, FieldAlgebra};
 use rand::thread_rng;
 use std::{
     cmp::max,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Debug,
     fs::File,
     hash::Hash,
@@ -1004,21 +1004,14 @@ Hints:
         let mut fixed_mles = HashMap::new();
         let mut num_instances = HashMap::new();
 
-        let circuit_index_fixed_num_instances: BTreeMap<String, usize> = fixed_trace
-            .circuit_fixed_traces
-            .iter()
-            .map(|(circuit_name, rmm)| {
-                (
-                    circuit_name.clone(),
-                    rmm.as_ref().map(|rmm| rmm.num_instances()).unwrap_or(0),
-                )
-            })
-            .collect();
         let mut lkm_tables = LkMultiplicityRaw::<E>::default();
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
         // Process all circuits.
-        for (circuit_name, composed_cs) in &cs.circuit_css {
+        for circuit_input in witnesses.iter_sorted() {
+            let circuit_name = &circuit_input.name;
+            let composed_cs = cs.circuit_css.get(circuit_name).unwrap();
+            // for (circuit_name, composed_cs) in &cs.circuit_css {
             let ComposedConstrainSystem {
                 zkvm_v1_css: cs, ..
             } = &composed_cs;
@@ -1037,19 +1030,11 @@ Hints:
                 continue;
             }
 
-            let [witness, structural_witness] = witnesses
-                .get_opcode_witness(circuit_name)
-                .or_else(|| witnesses.get_table_witness(circuit_name))
-                .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
+            let [witness, structural_witness] = &circuit_input.witness_rmms;
             let num_rows = if witness.num_instances() > 0 {
                 witness.num_instances()
             } else if structural_witness.num_instances() > 0 {
                 structural_witness.num_instances()
-            } else if composed_cs.is_static_circuit() {
-                circuit_index_fixed_num_instances
-                    .get(circuit_name)
-                    .copied()
-                    .unwrap_or(0)
             } else {
                 0
             };

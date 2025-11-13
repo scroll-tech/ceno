@@ -7,6 +7,7 @@ use crate::{
         hal::ProverDevice,
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
+        septic_curve::SepticPoint,
         verifier::ZKVMVerifier,
     },
     state::GlobalState,
@@ -44,6 +45,7 @@ use witness::next_pow2_instance_padding;
 
 pub const DEFAULT_MIN_CYCLE_PER_SHARDS: Cycle = 1 << 24;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 27;
+pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
 
 /// The polynomial commitment scheme kind
 #[derive(
@@ -175,11 +177,16 @@ pub struct ShardContext<'a> {
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     pub cur_shard_cycle_range: std::ops::Range<usize>,
     pub expected_inst_per_shard: usize,
+    pub max_num_cross_shard_accesses: usize,
 }
 
 impl<'a> Default for ShardContext<'a> {
     fn default() -> Self {
         let max_threads = max_usable_threads();
+        let max_num_cross_shard_accesses = std::env::var("CENO_CROSS_SHARD_LIMIT")
+            .map(|v| v.parse().unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT))
+            .unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT);
+
         Self {
             shard_id: 0,
             num_shards: 1,
@@ -202,6 +209,7 @@ impl<'a> Default for ShardContext<'a> {
             ),
             cur_shard_cycle_range: Tracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
             expected_inst_per_shard: usize::MAX,
+            max_num_cross_shard_accesses,
         }
     }
 }
@@ -230,6 +238,10 @@ impl<'a> ShardContext<'a> {
         );
         let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN as usize;
         let max_threads = max_usable_threads();
+
+        let max_num_cross_shard_accesses = std::env::var("CENO_CROSS_SHARD_LIMIT")
+            .map(|v| v.parse().unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT))
+            .unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT);
 
         // strategies
         // 0. set cur_num_shards = num_provers
@@ -323,6 +335,7 @@ impl<'a> ShardContext<'a> {
                     ),
                     cur_shard_cycle_range,
                     expected_inst_per_shard,
+                    max_num_cross_shard_accesses,
                 }
             })
             .collect_vec()
@@ -355,6 +368,7 @@ impl<'a> ShardContext<'a> {
                         write_records_tbs: Either::Right(write),
                         cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
                         expected_inst_per_shard: self.expected_inst_per_shard,
+                        max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
                     },
                 )
                 .collect_vec(),
@@ -1125,17 +1139,26 @@ pub fn generate_witness<'a, E: ExtensionField>(
         pi.end_pc = current_shard_end_pc;
         pi.end_cycle = current_shard_end_cycle;
         // set shard ram bus expected output to pi
-        let shard_ram_witness = zkvm_witness.get_table_witness(&ShardRamCircuit::<E>::name());
-        if let Some(shard_ram_witness) = shard_ram_witness
-            && shard_ram_witness[0].num_instances() > 0
-        {
-            for (f, v) in ShardRamCircuit::<E>::extract_ec_sum(
-                &system_config.mmu_config.ram_bus_circuit,
-                &shard_ram_witness[0],
-            )
-            .into_iter()
-            .zip_eq(pi.shard_rw_sum.as_mut_slice())
-            {
+        let shard_ram_witnesses = zkvm_witness.get_witness(&ShardRamCircuit::<E>::name());
+
+        if let Some(shard_ram_witnesses) = shard_ram_witnesses {
+            let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
+                .iter()
+                .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
+                .map(|shard_ram_witness| {
+                    ShardRamCircuit::<E>::extract_ec_sum(
+                        &system_config.mmu_config.ram_bus_circuit,
+                        &shard_ram_witness.witness_rmms[0],
+                    )
+                })
+                .sum();
+
+            let xy = shard_ram_ec_sum
+                .x
+                .0
+                .iter()
+                .chain(shard_ram_ec_sum.y.0.iter());
+            for (f, v) in xy.zip_eq(pi.shard_rw_sum.as_mut_slice()) {
                 *v = f.to_canonical_u64() as u32;
             }
         }

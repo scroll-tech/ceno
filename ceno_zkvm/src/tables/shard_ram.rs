@@ -373,23 +373,28 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
     pub fn extract_ec_sum(
         config: &ShardRamConfig<E>,
         rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
-    ) -> Vec<<E as ExtensionField>::BaseField> {
+    ) -> SepticPoint<<E as ExtensionField>::BaseField> {
         assert!(rmm.height() >= 2);
         let instance = &rmm[rmm.height() - 2];
 
-        config
+        let xy = config
             .x
             .iter()
             .chain(config.y.iter())
             .map(|witin| instance[witin.id as usize])
-            .collect_vec()
+            .collect_vec();
+
+        let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
+        let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
+
+        SepticPoint::from_affine(x, y)
     }
 }
 
 impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
     type TableConfig = ShardRamConfig<E>;
     type FixedInput = ();
-    type WitnessInput = Vec<ShardRamInput<E>>;
+    type WitnessInput = [ShardRamInput<E>];
 
     fn name() -> String {
         "ShardRamCircuit".to_string()
@@ -652,7 +657,6 @@ mod tests {
 
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::riscv::constants::SHARD_RW_SUM_IDX,
         scheme::{
             PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
             septic_curve::SepticPoint, verifier::ZKVMVerifier,
@@ -768,12 +772,7 @@ mod tests {
 
         // api extract ec sum from rmm witness
         assert_eq!(
-            public_value
-                .to_vec::<E>()
-                .into_iter()
-                .skip(SHARD_RW_SUM_IDX)
-                .flatten()
-                .collect_vec(),
+            global_ec_sum,
             ShardRamCircuit::extract_ec_sum(&config, &witness[0])
         );
 
