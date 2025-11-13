@@ -1,5 +1,6 @@
 use either::Either;
 use ff_ext::ExtensionField;
+use sp1_curves::polynomial::Polynomial;
 use std::{iter, marker::PhantomData};
 
 #[cfg(debug_assertions)]
@@ -24,7 +25,7 @@ use gkr_iop::{
     selector::{SelectorContext, SelectorType},
 };
 use itertools::{Itertools, chain, interleave, izip};
-use mpcs::{Point, PolynomialCommitmentScheme};
+use mpcs::{Basefold, Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression, StructuralWitIn,
     StructuralWitInType::StackedConstantSequence,
@@ -33,7 +34,7 @@ use multilinear_extensions::{
     utils::eval_by_expr_with_instance,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
-use p3::field::FieldAlgebra;
+use p3::{commit, field::FieldAlgebra};
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState},
     util::get_challenge_pows,
@@ -193,10 +194,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         if let Some(fixed_commit) = self.vk.fixed_commit.as_ref()
             && shard_id == 0
         {
+            // _debug
+            println!("=> 100");
+
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         } else if let Some(fixed_commit) = self.vk.fixed_no_omc_init_commit.as_ref()
             && shard_id > 0
         {
+            // _debug
+            println!("=> 101");
+
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
@@ -227,9 +234,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         ];
 
         // _debug
-        println!("=> 999");
-        println!("=> alpha: {:?}", challenges[0]);
-        println!("=> beta: {:?}", challenges[1]);
+        // println!("=> 999");
+        // println!("=> alpha: {:?}", challenges[0]);
+        // println!("=> beta: {:?}", challenges[1]);
 
         tracing::trace!(
             "{shard_id}th shard challenges in verifier: {:?}",
@@ -320,7 +327,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 })
                 .sum::<E>();
 
+            // _debug
+            // println!("=> chip_logup_sum: {:?}", chip_logup_sum);
+
             transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
+            
             if circuit_vk.get_cs().is_with_lk_table() {
                 logup_sum -= chip_logup_sum;
             } else {
@@ -338,6 +349,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
                 logup_sum += chip_logup_sum;
             };
+
+            // _debug
+            // println!("=> logup_sum: {:?}", logup_sum);
+            // println!("=> dummy_table_item_multiplicity: {:?}", dummy_table_item_multiplicity);
+
+            // _DEBUG: CENO
+            // let test = transcript.read_challenge();
+            // println!("=> test challenge: {:?}", test);
+
             let (input_opening_point, chip_shard_ec_sum) = self.verify_chip_proof(
                 circuit_name,
                 circuit_vk,
@@ -349,6 +369,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &point_eval,
                 &challenges,
             )?;
+
+
+
             if circuit_vk.get_cs().num_witin() > 0 {
                 witin_openings.push((
                     input_opening_point.len(),
@@ -370,10 +393,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             if let Some(chip_shard_ec_sum) = chip_shard_ec_sum {
                 shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
             }
-        }
+
+        // _debug
+        // }
+
+
         logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
             * dummy_table_item.inverse();
 
+
+        /* _debug: program
         #[cfg(debug_assertions)]
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
@@ -438,6 +467,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ));
         }
 
+        */
+
+        // _debug
+        let mut shard_ec_sum = SepticPoint::<E::BaseField>::default();
         Ok(shard_ec_sum)
     }
 
@@ -525,20 +558,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert!(proof.ecc_proof.is_some());
             let ecc_proof = proof.ecc_proof.as_ref().unwrap();
 
-            // let expected_septic_xy = cs
-            //     .ec_final_sum
-            //     .iter()
-            //     .map(|expr| {
-            //         eval_by_expr_with_instance(&[], &[], &[], pi, challenges, expr)
-            //             .right()
-            //             .and_then(|v| v.as_base())
-            //             .unwrap()
-            //     })
-            //     .collect_vec();
-            // let expected_septic_x: SepticExtension<E::BaseField> =
-            //     expected_septic_xy[0..SEPTIC_EXTENSION_DEGREE].into();
-            // let expected_septic_y: SepticExtension<E::BaseField> =
-            //     expected_septic_xy[SEPTIC_EXTENSION_DEGREE..].into();
+            let expected_septic_xy = cs
+                .ec_final_sum
+                .iter()
+                .map(|expr| {
+                    eval_by_expr_with_instance(&[], &[], &[], pi, challenges, expr)
+                        .right()
+                        .and_then(|v| v.as_base())
+                        .unwrap()
+                })
+                .collect_vec();
+
+            // _debug
+            println!("=> expeted_septic_xy: {:?}", expected_septic_xy);
+
+            let expected_septic_x: SepticExtension<E::BaseField> =
+                expected_septic_xy[0..SEPTIC_EXTENSION_DEGREE].into();
+            let expected_septic_y: SepticExtension<E::BaseField> =
+                expected_septic_xy[SEPTIC_EXTENSION_DEGREE..].into();
 
             // assert_eq!(&ecc_proof.sum.x, &expected_septic_x);
             // assert_eq!(&ecc_proof.sum.y, &expected_septic_y);
@@ -605,6 +642,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .chain(&logup_q_evals)
             .cloned()
             .collect_vec();
+
+        // _debug
+        // println!("=> 777 - evals: {:?}", evals.iter().map(|cpt| cpt.eval).collect::<Vec<E>>());
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
         let selector_ctxs = if cs.ec_final_sum.is_empty() {

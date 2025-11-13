@@ -15,21 +15,21 @@ use openvm_stark_backend::p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 type E = BabyBearExt4;
 const MAX_NUM_VARS: usize = 25;
 
-pub fn _print_ext_arr<C: Config>(builder: &mut Builder<C>, arr: &Array<C, Ext<C::F, C::EF>>) {
+pub fn print_ext_arr<C: Config>(builder: &mut Builder<C>, arr: &Array<C, Ext<C::F, C::EF>>) {
     iter_zip!(builder, arr).for_each(|ptr_vec, builder| {
         let e = builder.iter_ptr_get(arr, ptr_vec[0]);
         builder.print_e(e);
     });
 }
 
-pub fn _print_felt_arr<C: Config>(builder: &mut Builder<C>, arr: &Array<C, Felt<C::F>>) {
+pub fn print_felt_arr<C: Config>(builder: &mut Builder<C>, arr: &Array<C, Felt<C::F>>) {
     iter_zip!(builder, arr).for_each(|ptr_vec, builder| {
         let f = builder.iter_ptr_get(arr, ptr_vec[0]);
         builder.print_f(f);
     });
 }
 
-pub fn _print_usize_arr<C: Config>(builder: &mut Builder<C>, arr: &Array<C, Usize<C::N>>) {
+pub fn print_usize_arr<C: Config>(builder: &mut Builder<C>, arr: &Array<C, Usize<C::N>>) {
     iter_zip!(builder, arr).for_each(|ptr_vec, builder| {
         let n = builder.iter_ptr_get(arr, ptr_vec[0]);
         builder.print_v(n.get_var());

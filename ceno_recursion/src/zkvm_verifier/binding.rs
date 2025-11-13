@@ -881,3 +881,11 @@ impl Hintable<InnerConfig> for SepticPointInput {
         stream
     }
 }
+
+#[derive(DslVariable, Clone)]
+pub struct SelectorContextVariable<C: Config> {
+    pub offset: Usize<C::N>,
+    pub num_instances: Usize<C::N>,
+    pub num_vars: Usize<C::N>,
+
+}

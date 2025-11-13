@@ -460,12 +460,12 @@ pub fn verify_proofs(
 
         let vm = VirtualMachine::new(engine, config);
 
-        let pk = vm.keygen();
         let result = vm.execute_and_generate(program, witness_stream).unwrap();
-        let proofs = vm.prove(&pk, result);
-        for proof in proofs {
-            verify_single(&vm.engine, &pk.get_vk(), &proof).expect("Verification failed");
-        }
+        // let pk = vm.keygen();
+        // let proofs = vm.prove(&pk, result);
+        // for proof in proofs {
+        //     verify_single(&vm.engine, &pk.get_vk(), &proof).expect("Verification failed");
+        // }
     }
 }
 

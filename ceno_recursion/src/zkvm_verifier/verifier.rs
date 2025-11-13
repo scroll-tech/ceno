@@ -18,19 +18,20 @@ use crate::basefold_verifier::verifier::batch_verify;
 use crate::tower_verifier::program::verify_tower_proof;
 use crate::transcript::transcript_observe_label;
 use crate::zkvm_verifier::binding::{
-    EccQuarkProofVariable, GKRProofVariable, LayerProofVariable, SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable
+    EccQuarkProofVariable, GKRProofVariable, LayerProofVariable, SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable, SelectorContextVariable,
 };
 use crate::{
     arithmetics::{
         build_eq_x_r_vec_sequential, ceil_log2, concat, dot_product as ext_dot_product,
         eq_eval_less_or_equal_than, eval_wellform_address_vec, gen_alpha_pows, max_usize_arr,
-        max_usize_vec, nested_product,
+        max_usize_vec, nested_product, evaluate_ceno_expr,
     },
     tower_verifier::{
         binding::{PointAndEvalVariable, PointVariable},
         program::iop_verifier_state_verify,
     },
 };
+use gkr_iop::selector::SelectorContext;
 use multilinear_extensions::expression::{Expression, Instance, StructuralWitIn};
 use multilinear_extensions::StructuralWitInType::{
     EqualDistanceSequence, InnerRepeatingIncrementalSequence, OuterRepeatingIncrementalSequence,
@@ -54,6 +55,8 @@ use openvm_native_recursion::challenger::{
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
 use p3::babybear::BabyBear;
+// _debug
+use crate::arithmetics::{print_ext_arr, print_felt_arr, print_usize_arr};
 
 type F = BabyBear;
 type E = BabyBearExt4;
@@ -104,6 +107,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let mut challenger = DuplexChallengerVariable::new(builder);
     transcript_observe_label(builder, &mut challenger, b"riscv");
     
+    
     let prod_r: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let prod_w: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
@@ -150,10 +154,15 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
+    // _debug
+    // builder.print_debug(888);
+    // builder.print_v(zkvm_proof_input.shard_id.get_var());
+
     if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
         builder.if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
             let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
             let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+
             commit.value.into_iter().enumerate().for_each(|(i, v)| {
                 let v = builder.constant(v);
                 // TODO: put fixed commit to public values
@@ -162,11 +171,18 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 builder.set_value(&commit_array, i, v);
             });
             challenger_multi_observe(builder, &mut challenger, &commit_array);
+
+            let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
+                fixed_commit.log2_max_codeword_size,
+            ));
+
+            challenger.observe(builder, log2_max_codeword_size_felt);
         });
     } else if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
         builder.if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
             let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
             let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+
             commit.value.into_iter().enumerate().for_each(|(i, v)| {
                 let v = builder.constant(v);
                 // TODO: put fixed commit to public values
@@ -175,6 +191,12 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 builder.set_value(&commit_array, i, v);
             });
             challenger_multi_observe(builder, &mut challenger, &commit_array);
+
+            let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
+                fixed_commit.log2_max_codeword_size,
+            ));
+
+            challenger.observe(builder, log2_max_codeword_size_felt);
         });
     }
 
@@ -197,9 +219,16 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         &mut challenger,
         &zkvm_proof_input.witin_commit.commit.value,
     );
+    let log2_max_codeword_size_felt = builder.unsafe_cast_var_to_felt(zkvm_proof_input.witin_commit.log2_max_codeword_size.get_var());
+    challenger.observe(builder, log2_max_codeword_size_felt);
 
     let alpha = challenger.sample_ext(builder);
     let beta = challenger.sample_ext(builder);
+
+    // _debug
+    // builder.print_debug(999);
+    // builder.print_e(alpha);
+    // builder.print_e(beta);
 
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(2);
     builder.set(&challenges, 0, alpha.clone());
@@ -239,12 +268,14 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             builder.set(&chip_indices, i, chip_proof.idx);
         });
 
-    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+    // _debug
+    // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(1) {
         // _debug
         // println!("=> circuit_name: {:?}", circuit_name);
+
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
-
         let with_omc_init_only = circuit_vk.get_cs().with_omc_init_only() as usize;
 
         builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
@@ -292,7 +323,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             if circuit_vk.get_cs().is_with_lk_table() {
                 builder.assign(&logup_sum, logup_sum - chip_logup_sum);
             } else {
-                
+                // _debug: this branch is not tested
+
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks: Var<C::N> =
                     builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
@@ -326,8 +358,13 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 builder.assign(&logup_sum, logup_sum + chip_logup_sum);
             }
 
+            // _debug
+            // builder.print_debug(999);
+            // builder.print_e(logup_sum);
+            // builder.print_v(dummy_table_item_multiplicity);
+
             builder.cycle_tracker_start("Verify chip proof");
-            let input_opening_point = verify_chip_proof(
+            let (input_opening_point, chip_shard_ec_sum) = verify_chip_proof(
                 builder,
                 &mut challenger,
                 &chip_proof,
@@ -337,6 +374,12 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 &mut unipoly_extrapolator,
             );
             builder.cycle_tracker_end("Verify chip proof");
+
+            /* _debug
+            // _DEBUG: CENO RECURSION VERIFIER 
+            let test = challenger.sample_ext(builder);
+            builder.print_debug(171);
+            builder.print_e(test);
 
             let point_clone: Array<C, Ext<C::F, C::EF>> = builder.eval(input_opening_point.clone());
             let witin_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
@@ -376,6 +419,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
             }
             */
+
+            */
         });
     }
     
@@ -388,6 +433,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         &logup_sum,
         logup_sum - dummy_table_item_multiplicity * dummy_table_item.inverse(),
     );
+
+    /* _debug: program
 
     let rounds: Array<C, RoundVariable<C>> = if num_fixed_opening > 0 {
         builder.dyn_array(2)
@@ -492,6 +539,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // logup check
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     builder.assert_ext_eq(logup_sum, zero);
+    */
 }
 
 pub fn verify_chip_proof<C: Config>(
@@ -502,18 +550,17 @@ pub fn verify_chip_proof<C: Config>(
     challenges: &Array<C, Ext<C::F, C::EF>>,
     vk: &VerifyingKey<E>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
-) -> Array<C, Ext<C::F, C::EF>> {
-    // _debug: placeholder
-    builder.dyn_array(0)
-
-    /* _debug: verifier program
-    let cs = vk.get_cs();
+) -> (Array<C, Ext<C::F, C::EF>>, SepticPointVariable<C>) {
+    let composed_cs = vk.get_cs();
+        let ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit,
+        } = &composed_cs;
     let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
 
-    let r_len = cs.zkvm_v1_css.r_expressions.len();
-    let w_len = cs.zkvm_v1_css.w_expressions.len();
-    let lk_len = cs.zkvm_v1_css.lk_expressions.len();
-
+    let r_len = cs.r_expressions.len() + cs.r_table_expressions.len();
+    let w_len = cs.w_expressions.len() + cs.w_table_expressions.len();
+    let lk_len = cs.lk_expressions.len() + cs.lk_table_expressions.len();
     let num_batched = r_len + w_len + lk_len;
 
     let r_counts_per_instance: Usize<C::N> = Usize::from(r_len);
@@ -521,25 +568,105 @@ pub fn verify_chip_proof<C: Config>(
     let lk_counts_per_instance: Usize<C::N> = Usize::from(lk_len);
     let num_batched: Usize<C::N> = Usize::from(num_batched);
 
-    let log2_num_instances = opcode_proof.log2_num_instances.clone();
-
+    let log2_num_instances = chip_proof.log2_num_instances.clone();
+    if composed_cs.has_ecc_ops() {
+        builder.assign(&log2_num_instances, log2_num_instances.clone() + Usize::from(1));
+    }
     let num_var_with_rotation: Usize<C::N> = Usize::Var(Var::uninit(builder));
-    builder
-        .if_eq(opcode_proof.has_gkr_iop_proof.clone(), Usize::from(1))
-        .then_or_else(
-            |builder| {
-                builder.assign(
-                    &num_var_with_rotation,
-                    opcode_proof.gkr_iop_proof.num_var_with_rotation.clone(),
+    builder.assign(&num_var_with_rotation, log2_num_instances.clone() + Usize::from(composed_cs.rotation_vars().unwrap_or(0)));
+
+    // _debug: constraint
+    // // constrain log2_num_instances within max length
+    // cs.r_table_expressions
+    //     .iter()
+    //     .chain(&cs.w_table_expressions)
+    //     .for_each(|set_table_expr| {
+    //         // iterate through structural witins and collect max round.
+    //         let num_vars = set_table_expr
+    //             .table_spec
+    //             .len
+    //             .map(ceil_log2)
+    //             .unwrap_or_else(|| {
+    //                 set_table_expr
+    //                     .table_spec
+    //                     .structural_witins
+    //                     .iter()
+    //                     .map(|StructuralWitIn { witin_type, .. }| {
+    //                         let hint_num_vars = log2_num_instances;
+    //                         assert!((1 << hint_num_vars) <= witin_type.max_len());
+    //                         hint_num_vars
+    //                     })
+    //                     .max()
+    //                     .unwrap_or(log2_num_instances)
+    //             });
+    //         assert_eq!(num_vars, log2_num_instances);
+    //     });
+    // cs.lk_table_expressions.iter().for_each(|l| {
+    //     // iterate through structural witins and collect max round.
+    //     let num_vars = l.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
+    //         l.table_spec
+    //             .structural_witins
+    //             .iter()
+    //             .map(|StructuralWitIn { witin_type, .. }| {
+    //                 let hint_num_vars = log2_num_instances;
+    //                 assert!((1 << hint_num_vars) <= witin_type.max_len());
+    //                 hint_num_vars
+    //             })
+    //             .max()
+    //             .unwrap_or(log2_num_instances)
+    //     });
+    //     assert_eq!(num_vars, log2_num_instances);
+    // });
+
+    let shard_ec_sum = SepticPointVariable {
+        x: SepticExtensionVariable { vs: builder.dyn_array(7) },
+        y: SepticExtensionVariable { vs: builder.dyn_array(7) },
+        is_infinity: Usize::from(0),
+    };
+    if composed_cs.has_ecc_ops() {
+        builder.assert_nonzero(&chip_proof.has_ecc_proof);
+        let ecc_proof = &chip_proof.ecc_proof;
+
+        // _debug
+        builder.print_debug(233);
+
+        let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
+        let expected_septic_xy = cs
+            .ec_final_sum
+            .iter()
+            .map(|expr| {
+                let e = eval_ceno_expr_with_instance(
+                    builder, 
+                    &empty_arr, 
+                    &empty_arr, 
+                    &empty_arr, 
+                    pi_evals, 
+                    challenges, 
+                    expr
                 );
-            },
-            |builder| {
-                builder.assign(&num_var_with_rotation, log2_num_instances.clone());
-            },
-        );
 
-    let tower_proof = &opcode_proof.tower_proof;
+                // _debug
+                builder.print_e(e);
 
+                e
+            })
+            .collect_vec();
+
+        // _debug: check ecc
+        // let expected_septic_x: SepticExtension<E::BaseField> =
+        //     expected_septic_xy[0..SEPTIC_EXTENSION_DEGREE].into();
+        // let expected_septic_y: SepticExtension<E::BaseField> =
+        //     expected_septic_xy[SEPTIC_EXTENSION_DEGREE..].into();
+
+        // assert_eq!(&ecc_proof.sum.x, &expected_septic_x);
+        // assert_eq!(&ecc_proof.sum.y, &expected_septic_y);
+        // assert!(!ecc_proof.sum.is_infinity);
+        // EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
+        // tracing::debug!("ecc proof verified.");
+        // Some(ecc_proof.sum.clone())
+    }
+
+    let tower_proof = &chip_proof.tower_proof;
     let num_variables: Array<C, Usize<C::N>> = builder.dyn_array(num_batched);
     builder
         .range(0, num_variables.len())
@@ -549,8 +676,8 @@ pub fn verify_chip_proof<C: Config>(
 
     let prod_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>> = concat(
         builder,
-        &opcode_proof.r_out_evals,
-        &opcode_proof.w_out_evals,
+        &chip_proof.r_out_evals,
+        &chip_proof.w_out_evals,
     );
 
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
@@ -560,7 +687,7 @@ pub fn verify_chip_proof<C: Config>(
         builder,
         challenger,
         prod_out_evals,
-        &opcode_proof.lk_out_evals,
+        &chip_proof.lk_out_evals,
         num_variables,
         num_fanin,
         num_var_with_rotation.clone(),
@@ -569,33 +696,58 @@ pub fn verify_chip_proof<C: Config>(
     );
     builder.cycle_tracker_end("verify tower proof for opcode");
 
-    let logup_p_eval = builder.get(&logup_p_evals, 0).eval;
-    builder.assert_ext_eq(logup_p_eval, one);
+    if cs.lk_table_expressions.is_empty() {
+        builder.range(0, logup_p_evals.len()).for_each(|idx_vec, builder| {
+            let eval = builder.get(&logup_p_evals, idx_vec[0]).eval;
+            builder.assert_ext_eq(eval, one);
+        });
+    }
 
-    // verify zero statement (degree > 1) + sel sumcheck
-    let _rt = builder.get(&record_evals, 0);
+    // _debug
+    // debug_assert!(
+    //     chain!(&record_evals, &logup_p_evals, &logup_q_evals)
+    //         .map(|e| &e.point)
+    //         .all_equal()
+    // );
+
     let num_rw_records: Usize<C::N> = builder.eval(r_counts_per_instance + w_counts_per_instance);
     builder.assert_usize_eq(record_evals.len(), num_rw_records.clone());
     builder.assert_usize_eq(logup_p_evals.len(), lk_counts_per_instance.clone());
     builder.assert_usize_eq(logup_q_evals.len(), lk_counts_per_instance.clone());
 
-    let composed_cs = vk.get_cs();
-    let ComposedConstrainSystem {
-        zkvm_v1_css: _,
-        gkr_circuit,
-    } = &composed_cs;
-    let gkr_circuit = gkr_circuit.clone().unwrap();
-
-    let out_evals_len: Usize<C::N> = builder.eval(record_evals.len() + logup_q_evals.len());
+    
+    // GKR circuit
+    let out_evals_len: Usize<C::N> = if cs.lk_table_expressions.is_empty() {
+        builder.eval(record_evals.len() + logup_q_evals.len())
+    } else {
+        builder.eval(record_evals.len() + logup_p_evals.len() + logup_q_evals.len())
+    };
+    
     let out_evals: Array<C, PointAndEvalVariable<C>> = builder.dyn_array(out_evals_len.clone());
-    // TODO: find a better way to concat two arrays
+    
     builder
         .range(0, record_evals.len())
         .for_each(|idx_vec, builder| {
             let cpt = builder.get(&record_evals, idx_vec[0]);
             builder.set(&out_evals, idx_vec[0], cpt);
         });
-    let q_slice = out_evals.slice(builder, record_evals.len(), out_evals_len);
+    
+    let end: Usize<C::N> = Usize::uninit(builder);
+    if !cs.lk_table_expressions.is_empty() {
+        builder.assign(&end, record_evals.len() + logup_p_evals.len());
+        let p_slice = out_evals.slice(builder, record_evals.len(), end.clone());
+
+        builder
+            .range(0, logup_p_evals.len())
+            .for_each(|idx_vec, builder| {
+                let cpt = builder.get(&logup_q_evals, idx_vec[0]);
+                builder.set(&p_slice, idx_vec[0], cpt);
+            });
+    } else {
+        builder.assign(&end, record_evals.len());
+    }
+
+    let q_slice = out_evals.slice(builder, end, out_evals_len);
     builder
         .range(0, logup_q_evals.len())
         .for_each(|idx_vec, builder| {
@@ -603,22 +755,77 @@ pub fn verify_chip_proof<C: Config>(
             builder.set(&q_slice, idx_vec[0], cpt);
         });
 
+    // _debug
+    builder.print_debug(777);
+    builder.range(0, out_evals.len()).for_each(|idx_vec, builder| {
+        let cpt = builder.get(&out_evals, idx_vec[0]);
+        builder.print_e(cpt.eval);
+    });
+
+    let gkr_circuit = gkr_circuit.clone().unwrap();
+    let selector_ctxs: Vec<SelectorContextVariable<C>> = if cs.ec_final_sum.is_empty() {
+        builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(1));
+
+        vec![
+            SelectorContextVariable {
+                offset: Usize::from(0),
+                num_instances: chip_proof.sum_num_instances.clone(),
+                num_vars: num_var_with_rotation,
+            };
+            gkr_circuit
+                .layers
+                .first()
+                .map(|layer| layer.out_sel_and_eval_exprs.len())
+                .unwrap_or(0)
+        ]
+    } else {
+        builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(2));
+        let n_inst_sum = Usize::uninit(builder);
+        let n_inst_left = builder.get(&chip_proof.num_instances, 0);
+        let n_inst_right = builder.get(&chip_proof.num_instances, 1);
+        builder.assign(&n_inst_sum, n_inst_left + n_inst_right);
+
+        vec![
+            SelectorContextVariable {
+                offset: Usize::from(0),
+                num_instances: Usize::Var(n_inst_left),
+                num_vars: num_var_with_rotation.clone(),
+            },
+            SelectorContextVariable {
+                offset: Usize::Var(n_inst_left),
+                num_instances: Usize::Var(n_inst_right),
+                num_vars: num_var_with_rotation.clone(),
+            },
+            SelectorContextVariable {
+                offset: Usize::from(0),
+                num_instances: n_inst_sum,
+                num_vars: num_var_with_rotation.clone(),
+            },
+        ]
+    };
+
     builder.cycle_tracker_start("Verify GKR Circuit");
     let opening_evaluations = verify_gkr_circuit(
         builder,
         challenger,
         gkr_circuit,
-        &opcode_proof.gkr_iop_proof,
+        &chip_proof.gkr_iop_proof,
         challenges,
         pi_evals,
         &out_evals,
-        opcode_proof,
+        chip_proof,
+        selector_ctxs,
         unipoly_extrapolator,
     );
     builder.cycle_tracker_end("Verify GKR Circuit");
 
+
+    /* _debug: verifier program
     builder.eval(opening_evaluations[0].point.fs.clone())
     */
+
+    // _debug: placeholder
+    (builder.dyn_array(0), shard_ec_sum)
 }
 
 pub fn verify_gkr_circuit<C: Config>(
@@ -629,7 +836,8 @@ pub fn verify_gkr_circuit<C: Config>(
     challenges: &Array<C, Ext<C::F, C::EF>>,
     pub_io_evals: &Array<C, Ext<C::F, C::EF>>,
     claims: &Array<C, PointAndEvalVariable<C>>,
-    opcode_proof: &ZKVMChipProofInputVariable<C>,
+    chip_proof: &ZKVMChipProofInputVariable<C>,
+    selector_ctxs: Vec<SelectorContextVariable<C>>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
 ) -> Vec<GKRClaimEvaluation<C>> {
     for (i, layer) in gkr_circuit.layers.iter().enumerate() {
@@ -785,7 +993,7 @@ pub fn verify_gkr_circuit<C: Config>(
                     &main_evals,
                     &out_point,
                     &in_point,
-                    opcode_proof,
+                    chip_proof,
                     layer.n_witin,
                 );
             });
@@ -1000,7 +1208,7 @@ pub fn evaluate_selector<C: Config>(
     evals: &Array<C, Ext<C::F, C::EF>>,
     out_point: &Array<C, Ext<C::F, C::EF>>,
     in_point: &Array<C, Ext<C::F, C::EF>>,
-    opcode_proof: &ZKVMChipProofInputVariable<C>,
+    chip_proof: &ZKVMChipProofInputVariable<C>,
     offset_eq_id: usize,
 ) {
     let (expr, eval) = match sel_type {
@@ -1017,7 +1225,7 @@ pub fn evaluate_selector<C: Config>(
                 expr,
                 eq_eval_less_or_equal_than(
                     builder,
-                    &opcode_proof.num_instances_minus_one_bit_decomposition,
+                    &chip_proof.num_instances_minus_one_bit_decomposition,
                     out_point,
                     in_point,
                 ),
@@ -1047,7 +1255,7 @@ pub fn evaluate_selector<C: Config>(
 
             let sel = eq_eval_less_or_equal_than(
                 builder,
-                &opcode_proof.num_instances_minus_one_bit_decomposition,
+                &chip_proof.num_instances_minus_one_bit_decomposition,
                 &out_point_slice,
                 &in_point_slice,
             );
