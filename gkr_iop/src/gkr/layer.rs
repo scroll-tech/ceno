@@ -262,6 +262,8 @@ impl<E: ExtensionField> Layer<E> {
                 selector_ctxs,
             )?,
             LayerType::Linear => {
+                // _debug
+                println!("=> linear layer");
                 assert_eq!(eval_and_dedup_points.len(), 1);
                 let (sigmas, point) = eval_and_dedup_points.remove(0);
                 <Layer<_> as LinearLayer<E>>::verify(

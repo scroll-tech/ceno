@@ -770,7 +770,7 @@ pub fn verify_chip_proof<C: Config>(
             SelectorContextVariable {
                 offset: Usize::from(0),
                 num_instances: chip_proof.sum_num_instances.clone(),
-                num_vars: num_var_with_rotation,
+                num_vars: num_var_with_rotation.clone(),
             };
             gkr_circuit
                 .layers
@@ -808,6 +808,7 @@ pub fn verify_chip_proof<C: Config>(
     let opening_evaluations = verify_gkr_circuit(
         builder,
         challenger,
+        num_var_with_rotation,
         gkr_circuit,
         &chip_proof.gkr_iop_proof,
         challenges,
@@ -831,6 +832,7 @@ pub fn verify_chip_proof<C: Config>(
 pub fn verify_gkr_circuit<C: Config>(
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
+    max_num_variables: Usize<C::N>,
     gkr_circuit: GKRCircuit<E>,
     gkr_proof: &GKRProofVariable<C>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
@@ -851,6 +853,7 @@ pub fn verify_gkr_circuit<C: Config>(
             &layer_challenges,
             &layer_proof.has_rotation,
         );
+        builder.assert_usize_eq(Usize::from(layer.out_sel_and_eval_exprs.len()), eval_and_dedup_points.len());
 
         // ZeroCheckLayer verification (might include other layer types in the future)
         let LayerProofVariable {
@@ -864,7 +867,9 @@ pub fn verify_gkr_circuit<C: Config>(
             has_rotation,
         } = layer_proof;
 
-        /* _debug: verifier program
+        let expected_main_evals_len = Usize::from(layer.n_witin + layer.n_fixed + layer.n_instance + layer.n_structural_witin);
+        builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
+
         builder.if_eq(has_rotation, Usize::from(1)).then(|builder| {
             let first = builder.get(&eval_and_dedup_points, 0);
             builder.assert_usize_eq(first.has_point, Usize::from(1)); // Rotation proof should have at least one point
@@ -879,11 +884,14 @@ pub fn verify_gkr_circuit<C: Config>(
                 origin_point,
             } = verify_rotation(
                 builder,
-                gkr_proof.num_var_with_rotation.clone(),
+                max_num_variables.clone(),
+                layer.rotation_exprs.1.len(),
+                layer.rotation_sumcheck_expression.as_ref().unwrap(),
                 &rotation_proof,
                 layer.rotation_cyclic_subgroup_size,
                 layer.rotation_cyclic_group_log2,
                 rt,
+                challenges,
                 challenger,
                 unipoly_extrapolator,
             );
@@ -927,7 +935,6 @@ pub fn verify_gkr_circuit<C: Config>(
                 },
             );
         });
-        */
 
         let rotation_exprs_len = layer.rotation_exprs.1.len();
         transcript_observe_label(builder, challenger, b"combine subset evals");
@@ -1065,10 +1072,13 @@ pub fn verify_gkr_circuit<C: Config>(
 pub fn verify_rotation<C: Config>(
     builder: &mut Builder<C>,
     max_num_variables: Usize<C::N>,
+    num_rotations: usize,
+    rotation_sumcheck_expression: &Expression<E>,
     rotation_proof: &SumcheckLayerProofVariable<C>,
     rotation_cyclic_subgroup_size: usize,
     rotation_cyclic_group_log2: usize,
     rt: Array<C, Ext<C::F, C::EF>>,
+    challenges: &Array<C, Ext<C::F, C::EF>>,
     challenger: &mut DuplexChallengerVariable<C>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
 ) -> RotationClaim<C> {
@@ -1081,14 +1091,13 @@ pub fn verify_rotation<C: Config>(
 
     let rotation_expr_len = Usize::Var(rotation_expr_len.clone());
     transcript_observe_label(builder, challenger, b"combine subset evals");
-    let rotation_alpha_pows = gen_alpha_pows(builder, challenger, rotation_expr_len.clone());
+    let rotation_alpha_pows = gen_alpha_pows(builder, challenger, Usize::from(num_rotations));
+    let rotation_challenges = concat(builder, challenges, &rotation_alpha_pows);
     let sigma: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
 
     let max_num_variables = builder.unsafe_cast_var_to_felt(max_num_variables.get_var());
     let max_degree: Felt<C::F> = builder.constant(C::F::TWO);
 
-    // 0 = \sum_b alpha^i * sel(rx, b) * in(next(b)) - out(b)
-    // in(next(b)) = (1-b4) * in(0,b0,...) + b4 * in(1,b0,1-b1,b2,...)
     let (origin_point, expected_evaluation) = iop_verifier_state_verify(
         builder,
         challenger,
@@ -1111,9 +1120,14 @@ pub fn verify_rotation<C: Config>(
     // check the final evaluations.
     let left_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(rotation_expr_len.clone());
     let right_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(rotation_expr_len.clone());
-    let target_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(rotation_expr_len);
+    let target_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(rotation_expr_len.clone());
 
-    let got_claim: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    let witness_len = Usize::uninit(builder);
+    builder.assign(&witness_len, rotation_expr_len.clone() * Usize::from(2) + Usize::from(1));
+    let witnesses: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(witness_len);
+
+    let rvar3 = RVar::from(3);
+    let rvar2 = RVar::from(2);
     let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let last_origin = if rotation_cyclic_group_log2 > 0 {
         builder.get(&origin_point, rotation_cyclic_group_log2 - 1)
@@ -1121,30 +1135,43 @@ pub fn verify_rotation<C: Config>(
         one.clone()
     };
 
-    builder
-        .range(0, rotation_alpha_pows.len())
-        .for_each(|idx_vec, builder| {
-            let alpha = builder.get(&rotation_alpha_pows, idx_vec[0]);
+    builder.range(0, rotation_expr_len).for_each(|idx_vec, builder| {
+        let left_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar3);
+        let right_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar3 + RVar::from(1));
+        let target_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar3 + RVar::from(2));
 
-            let rvar3 = RVar::from(3);
-            let left_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar3);
-            let right_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar3 + RVar::from(1));
-            let target_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar3 + RVar::from(2));
+        let left = builder.get(&evals, left_idx);
+        let right = builder.get(&evals, right_idx);
+        let target = builder.get(&evals, target_idx);
 
-            let left = builder.get(&evals, left_idx);
-            let right = builder.get(&evals, right_idx);
-            let target = builder.get(&evals, target_idx);
+        builder.set(&left_evals, idx_vec[0], left);
+        builder.set(&right_evals, idx_vec[0], right);
+        builder.set(&target_evals, idx_vec[0], target);
 
-            builder.set(&left_evals, idx_vec[0], left);
-            builder.set(&right_evals, idx_vec[0], right);
-            builder.set(&target_evals, idx_vec[0], target);
+        let claim_witness_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar2);
+        let target_witness_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar2 + RVar::from(1));
 
-            builder.assign(
-                &got_claim,
-                got_claim + alpha * ((one - last_origin) * left + last_origin * right - target),
-            );
-        });
-    builder.assign(&got_claim, got_claim * selector_eval);
+        let claim: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+        builder.assign(&claim, (one - last_origin) * left + last_origin * right);
+
+        builder.set(&witnesses, claim_witness_idx, claim);
+        builder.set(&witnesses, target_witness_idx, target);
+    });
+    let last_idx = Usize::uninit(builder);
+    builder.assign(&last_idx, witnesses.len() - Usize::from(1));
+    builder.set(&witnesses, last_idx, selector_eval);
+    
+    let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
+    let got_claim = eval_ceno_expr_with_instance(
+        builder,
+        &empty_arr,
+        &witnesses,
+        &empty_arr,
+        &empty_arr,
+        challenges,
+        rotation_sumcheck_expression
+    );
+
     builder.assert_ext_eq(got_claim, expected_evaluation);
 
     let (left_point, right_point) =

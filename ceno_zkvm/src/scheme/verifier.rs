@@ -250,8 +250,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut fixed_openings = Vec::with_capacity(vm_proof.chip_proofs.len());
         let mut shard_ec_sum = SepticPoint::<E::BaseField>::default();
 
-        // check num proofs
-        for (index, proofs) in &vm_proof.chip_proofs {
+        // _debug
+        for (index, proof) in &vm_proof.chip_proofs {
+        // let index = &0usize;
+        // let proof = &vm_proof.chip_proofs[index];
+            // println!("=> index: {:?}", index);
+
+            let num_instance: usize = proof.num_instances.iter().sum();
+            assert!(num_instance > 0);
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
             if shard_id > 0 && circuit_vk.get_cs().with_omc_init_only() {
@@ -395,7 +401,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
 
         // _debug
-        // }
+        }
 
 
         logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
