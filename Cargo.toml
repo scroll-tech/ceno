@@ -82,6 +82,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uint = "0.8"
 
 ceno_gpu = { path = "utils/cuda_hal", package = "cuda_hal" }
+cudarc = { version = "0.17.3", features = ["driver", "cuda-version-from-build-system"] }
 
 [profile.dev]
 lto = "thin"
