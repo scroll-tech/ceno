@@ -34,7 +34,7 @@ use p3::field::{Field, FieldAlgebra};
 use rand::thread_rng;
 use std::{
     cmp::max,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Debug,
     fs::File,
     hash::Hash,
@@ -1004,21 +1004,13 @@ Hints:
         let mut fixed_mles = HashMap::new();
         let mut num_instances = HashMap::new();
 
-        let circuit_index_fixed_num_instances: BTreeMap<String, usize> = fixed_trace
-            .circuit_fixed_traces
-            .iter()
-            .map(|(circuit_name, rmm)| {
-                (
-                    circuit_name.clone(),
-                    rmm.as_ref().map(|rmm| rmm.num_instances()).unwrap_or(0),
-                )
-            })
-            .collect();
         let mut lkm_tables = LkMultiplicityRaw::<E>::default();
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
         // Process all circuits.
-        for (circuit_name, composed_cs) in &cs.circuit_css {
+        for (circuit_name, chip_inputs) in &witnesses.witnesses {
+            let composed_cs = cs.circuit_css.get(circuit_name).unwrap();
+            // for (circuit_name, composed_cs) in &cs.circuit_css {
             let ComposedConstrainSystem {
                 zkvm_v1_css: cs, ..
             } = &composed_cs;
@@ -1037,30 +1029,21 @@ Hints:
                 continue;
             }
 
-            let [witness, structural_witness] = witnesses
-                .get_opcode_witness(circuit_name)
-                .or_else(|| witnesses.get_table_witness(circuit_name))
-                .unwrap_or_else(|| panic!("witness for {} should not be None", circuit_name));
-            let num_rows = if witness.num_instances() > 0 {
-                witness.num_instances()
-            } else if structural_witness.num_instances() > 0 {
-                structural_witness.num_instances()
-            } else if composed_cs.is_static_circuit() {
-                circuit_index_fixed_num_instances
-                    .get(circuit_name)
-                    .copied()
-                    .unwrap_or(0)
-            } else {
-                0
-            };
+            assert!(chip_inputs.len() <= 1, "TODO support > 1 chip_inputs");
+            let chip_input = chip_inputs.first().filter(|ci| ci.num_instances() > 0);
 
-            if num_rows == 0 {
+            if chip_input.is_none() {
                 wit_mles.insert(circuit_name.clone(), vec![]);
                 structural_wit_mles.insert(circuit_name.clone(), vec![]);
                 fixed_mles.insert(circuit_name.clone(), vec![]);
                 num_instances.insert(circuit_name.clone(), 0);
                 continue;
             }
+
+            let chip_input = chip_input.unwrap();
+            let num_rows = chip_input.num_instances();
+
+            let [witness, structural_witness] = &chip_input.witness_rmms;
             let mut witness = witness
                 .to_mles()
                 .into_iter()

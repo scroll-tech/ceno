@@ -39,6 +39,9 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
                 fixed_traces.insert(circuit_index, fixed_trace_rmm);
             }
 
+            vm_pk
+                .circuit_name_to_index
+                .insert(c_name.clone(), circuit_index);
             let circuit_pk = cs.key_gen();
             assert!(vm_pk.circuit_pks.insert(c_name, circuit_pk).is_none());
         }
