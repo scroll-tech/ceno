@@ -423,52 +423,57 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         } = composed_cs;
         let r_set_len = cs.r_expressions.len() + cs.r_table_expressions.len();
 
-        // GPU optimization: Use build_tower_witness_gpu which handles buffer allocation internally
-        let mut _prod_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
-        let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
-
-        // Call build_tower_witness_gpu which will allocate buffers and build GPU specs
-        let span = entered_span!("build_tower_witness", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
-        let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
-            composed_cs,
-            input,
-            records,
-            challenges,
-            &cuda_hal,
-            &mut _prod_buffers,
-            &mut _logup_buffers,
-        )
-        .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
-        .unwrap();
-        exit_span!(span);
+        let (point, proof, lk_out_evals, w_out_evals, r_out_evals) = {
+            // build_tower_witness_gpu will allocate buffers and build GPU specs
+            let span = entered_span!("build_tower_witness", profiling_2 = true);
+            let mut _prod_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
+            let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
+            let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
+                composed_cs,
+                input,
+                records,
+                challenges,
+                &cuda_hal,
+                &mut _prod_buffers,
+                &mut _logup_buffers,
+            )
+            .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
+            .unwrap();
+            exit_span!(span);
 
-        // GPU optimization: Extract out_evals from GPU-built towers before consuming them
-        // This is the true optimization - using GPU tower results instead of CPU inference
-        let span = entered_span!("extract_out_evals_from_gpu_towers", profiling_2 = true);
-        let (r_out_evals, w_out_evals, lk_out_evals) =
-            extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
-        exit_span!(span);
+            // GPU optimization: Extract out_evals from GPU-built towers before consuming them
+            // This is the true optimization - using GPU tower results instead of CPU inference
+            let span = entered_span!("extract_out_evals_from_gpu_towers", profiling_2 = true);
+            let (r_out_evals, w_out_evals, lk_out_evals) =
+                extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
+            exit_span!(span);
 
-        // transcript >>> BasicTranscript<E>
-        let basic_tr: &mut BasicTranscript<BB31Ext> =
-            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
+            // transcript >>> BasicTranscript<E>
+            let basic_tr: &mut BasicTranscript<BB31Ext> =
+                unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
 
-        let input = ceno_gpu::TowerInput {
-            prod_specs: prod_gpu,
-            logup_specs: logup_gpu,
+            let input = ceno_gpu::TowerInput {
+                prod_specs: prod_gpu,
+                logup_specs: logup_gpu,
+            };
+
+            let span = entered_span!("prove_tower_relation", profiling_2 = true);
+            let (point_gl, proof_gpu) = cuda_hal
+                .tower
+                .create_proof(&cuda_hal, &input, NUM_FANIN, basic_tr)
+                .expect("gpu tower create_proof failed");
+            exit_span!(span);
+
+            // TowerProofs
+            let point: Point<E> = unsafe { std::mem::transmute(point_gl) };
+            let proof: TowerProofs<E> = unsafe { std::mem::transmute(proof_gpu) };
+            (point, proof, lk_out_evals, w_out_evals, r_out_evals)
         };
 
-        let span = entered_span!("prove_tower_relation", profiling_2 = true);
-        let (point_gl, proof_gpu) = cuda_hal
-            .tower
-            .create_proof(&cuda_hal, &input, NUM_FANIN, basic_tr)
-            .expect("gpu tower create_proof failed");
-        exit_span!(span);
-
-        // TowerProofs
-        let point: Point<E> = unsafe { std::mem::transmute(point_gl) };
-        let proof: TowerProofs<E> = unsafe { std::mem::transmute(proof_gpu) };
+        let span_sync = entered_span!("wait for GPU to finish (free buffers)", profiling_3 = true);
+        cuda_hal.inner().synchronize().unwrap();
+        exit_span!(span_sync);
 
         (point, proof, lk_out_evals, w_out_evals, r_out_evals)
     }
