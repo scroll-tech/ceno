@@ -142,7 +142,22 @@ impl<
 
         // extract chip meta info before consuming witnesses
         // (circuit_name, num_instances)
-        let name_and_instances = witnesses.get_witnesses_name_instance();
+        let name_and_instances = witnesses
+            .get_witnesses_name_instance()
+            .into_iter()
+            .map(|(name, instances)| {
+                let pk = self.pk.circuit_pks.get(&name).unwrap();
+                (
+                    name,
+                    instances
+                        .into_iter()
+                        .map(|num_instance| {
+                            num_instance >> pk.get_cs().rotation_vars().unwrap_or(0)
+                        })
+                        .collect_vec(),
+                )
+            })
+            .collect_vec();
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
         let mut wits_rmms = BTreeMap::new();
