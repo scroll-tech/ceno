@@ -140,11 +140,6 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.num_fixed
     }
 
-    /// static circuit means there is only fixed column
-    pub fn is_static_circuit(&self) -> bool {
-        (self.num_witin() + self.num_structural_witin()) == 0 && self.num_fixed() > 0
-    }
-
     pub fn num_reads(&self) -> usize {
         self.zkvm_v1_css.r_expressions.len() + self.zkvm_v1_css.r_table_expressions.len()
     }

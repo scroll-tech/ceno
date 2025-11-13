@@ -34,7 +34,7 @@ use p3::field::{Field, FieldAlgebra};
 use rand::thread_rng;
 use std::{
     cmp::max,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Debug,
     fs::File,
     hash::Hash,
@@ -1004,16 +1004,6 @@ Hints:
         let mut fixed_mles = HashMap::new();
         let mut num_instances = HashMap::new();
 
-        let circuit_index_fixed_num_instances: BTreeMap<String, usize> = fixed_trace
-            .circuit_fixed_traces
-            .iter()
-            .map(|(circuit_name, rmm)| {
-                (
-                    circuit_name.clone(),
-                    rmm.as_ref().map(|rmm| rmm.num_instances()).unwrap_or(0),
-                )
-            })
-            .collect();
         let mut lkm_tables = LkMultiplicityRaw::<E>::default();
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
 
@@ -1045,11 +1035,6 @@ Hints:
                 witness.num_instances()
             } else if structural_witness.num_instances() > 0 {
                 structural_witness.num_instances()
-            } else if composed_cs.is_static_circuit() {
-                circuit_index_fixed_num_instances
-                    .get(circuit_name)
-                    .copied()
-                    .unwrap_or(0)
             } else {
                 0
             };

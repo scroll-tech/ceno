@@ -121,7 +121,6 @@ impl<
                     format!("proving key for circuit {} not found", chip_input.name).into(),
                 ))?;
 
-            assert!(!pk.get_cs().is_static_circuit());
             // include omc init tables iff it's in first shard
             if !shard_ctx.is_first_shard() && pk.get_cs().with_omc_init_only() {
                 continue;
