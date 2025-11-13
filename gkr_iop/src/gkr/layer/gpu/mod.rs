@@ -236,7 +236,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 
         // process dag
         // (dag, coeffs, final_out_index, max_dag_depth, max_degree)
-        let (dag, dag_coeffs, stack_top, max_dag_depth, max_degree) =
+        let (dag, dag_coeffs, final_out_index, max_dag_depth, max_degree) =
             layer.main_sumcheck_expression_dag.as_ref().unwrap();
 
         let pub_io_eval_scalar = pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec();
@@ -290,7 +290,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 dag,
                 *max_dag_depth,
                 &dag_coeffs,
-                *stack_top,
+                *final_out_index,
                 basic_tr,
             )
             .unwrap();

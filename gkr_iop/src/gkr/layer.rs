@@ -49,6 +49,8 @@ pub enum LayerType {
     Linear,
 }
 
+pub type DagInfo<E> = (Vec<Node>, Vec<Expression<E>>, u32, usize, usize);
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
@@ -106,7 +108,7 @@ pub struct Layer<E: ExtensionField> {
 
     // flatten computation dag
     // (dag, coeffs, final_out_index, max_dag_depth, max_degree)
-    pub main_sumcheck_expression_dag: Option<(Vec<Node>, Vec<Expression<E>>, u32, usize, usize)>,
+    pub main_sumcheck_expression_dag: Option<DagInfo<E>>,
 
     // rotation sumcheck expression, only optionally valid for zerocheck
     // store in 2 forms: expression & monomial
