@@ -51,14 +51,6 @@ jobs:
       - name: Install m4
         run: sudo apt-get install -y m4
 
-      - name: Run fibonacci (release) in 3 shards
-        env:
-          RUST_LOG: debug
-          RUSTFLAGS: "-C opt-level=3"
-          MOCK_PROVING: 1
-          CENO_CROSS_SHARD_LIMIT: 32
-        run: cargo run --release --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
-
       - name: Run fibonacci (debug)
         env:
           RUST_LOG: debug
@@ -148,6 +140,15 @@ jobs:
         env:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_curve_syscalls
+
+      - name: Run fibonacci (release) in 3 shards with CENO_CROSS_SHARD_LIMIT
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+          MOCK_PROVING: 1
+          CENO_CROSS_SHARD_LIMIT: 32
+        run: cargo run --release --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+
 
       - name: Install cargo make
         run: |

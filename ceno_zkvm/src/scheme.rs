@@ -5,7 +5,13 @@ use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{collections::{BTreeMap, HashMap}, fmt::{self, Debug}, iter, ops::Div, rc::Rc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::{self, Debug},
+    iter,
+    ops::Div,
+    rc::Rc,
+};
 use sumcheck::structs::IOPProverMessage;
 
 use crate::{
@@ -208,7 +214,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
             .chip_proofs
             .get(&halt_circuit_index)
             .map_or(0, |proofs| {
-                proofs.iter().flat_map(|proof| &proof.num_instances).copied().sum()
+                proofs
+                    .iter()
+                    .flat_map(|proof| &proof.num_instances)
+                    .copied()
+                    .sum()
             });
         if halt_instance_count > 0 {
             assert_eq!(

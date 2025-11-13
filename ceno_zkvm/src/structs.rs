@@ -562,7 +562,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     shard_accesses,
                 )?;
                 let num_reads = shard_accesses
-                    .iter()
+                    .par_iter()
                     .filter(|access| access.record.is_to_write_set)
                     .count();
                 let num_writes = shard_accesses.len() - num_reads;
