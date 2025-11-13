@@ -1904,7 +1904,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "once_cell",
  "p3",
@@ -2716,7 +2716,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "bincode",
  "clap",
@@ -2740,7 +2740,7 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "either",
  "ff_ext",
@@ -3061,7 +3061,7 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "p3-air",
  "p3-baby-bear",
@@ -3498,7 +3498,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "ff_ext",
  "p3",
@@ -4482,7 +4482,7 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -4604,7 +4604,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "either",
  "ff_ext",
@@ -4622,7 +4622,7 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "itertools 0.13.0",
  "p3",
@@ -5017,7 +5017,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -5289,7 +5289,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "bincode",
  "clap",
@@ -5576,7 +5576,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Farithmetics#e5f7c87175efd581cf38a86da38b38978b278b2c"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.14#08462f562a091792262ddb63eb5b774f9896be77"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",
