@@ -337,6 +337,10 @@ impl<E: ExtensionField> ChipInput<E> {
             num_instances,
         }
     }
+
+    pub fn num_instances(&self) -> usize {
+        self.num_instances.iter().sum()
+    }
 }
 
 #[derive(Default, Clone)]
@@ -365,10 +369,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(self.combined_lk_mlt.is_none());
 
         let cs = cs.get_cs(&OC::name()).unwrap();
-        if records.is_empty() {
-            tracing::trace!("no records for opcode circuit {}", OC::name());
-            return Ok(());
-        }
         let (witness, logup_multiplicity) = OC::assign_instances(
             config,
             shard_ctx,
@@ -377,7 +377,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             records,
         )?;
         let num_instances = vec![witness[0].num_instances()];
-        let input = ChipInput::new(OC::name(), witness, num_instances);
+        let input = ChipInput::new(
+            OC::name(),
+            witness,
+            if num_instances[0] > 0 {
+                num_instances
+            } else {
+                vec![]
+            },
+        );
         assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
         assert!(
             self.lk_mlts
@@ -431,15 +439,16 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             input,
         )?;
         let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
-        if num_instances > 0 {
-            tracing::debug!(
-                "assigned table circuit {} with {} instances",
-                TC::name(),
-                num_instances
-            );
-            let input = ChipInput::new(TC::name(), witness, vec![num_instances]);
-            assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
-        }
+        let input = ChipInput::new(
+            TC::name(),
+            witness,
+            if num_instances > 0 {
+                vec![num_instances]
+            } else {
+                vec![]
+            },
+        );
+        assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
 
         Ok(())
     }

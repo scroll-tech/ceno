@@ -126,6 +126,10 @@ impl<
                 continue;
             }
 
+            if chip_input.num_instances() == 0 {
+                continue;
+            }
+
             // num_instance from witness might include rotation
             let num_instances = chip_input
                 .num_instances

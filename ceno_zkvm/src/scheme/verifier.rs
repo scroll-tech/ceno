@@ -203,6 +203,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // write (circuit_idx, num_instance) to transcript
         for (circuit_idx, proof) in &vm_proof.chip_proofs {
             transcript.append_message(&circuit_idx.to_le_bytes());
+            // length of proof.num_instances will be constrained in verify_chip_proof
             for num_instance in &proof.num_instances {
                 transcript.append_message(&num_instance.to_le_bytes());
             }
