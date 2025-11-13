@@ -85,7 +85,7 @@ impl<
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let raw_pi = pi.to_vec::<E>();
         let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
-        let mut chip_proofs = Vec::new();
+        let mut chip_proofs = BTreeMap::new();
 
         let span = entered_span!("commit_to_pi", profiling_1 = true);
         // including raw public input to transcript
@@ -260,7 +260,10 @@ impl<
                 assert!(opcode_proof.wits_in_evals.is_empty());
                 assert!(opcode_proof.fixed_in_evals.is_empty());
             }
-            chip_proofs.push((circuit_idx, opcode_proof));
+            chip_proofs
+                .entry(circuit_idx)
+                .or_insert(vec![])
+                .push(opcode_proof);
             for (idx, eval) in pi_in_evals {
                 pi_evals[idx] = eval;
             }
