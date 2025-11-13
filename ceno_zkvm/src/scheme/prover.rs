@@ -85,7 +85,7 @@ impl<
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         let raw_pi = pi.to_vec::<E>();
         let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
-        let mut chip_proofs = Vec::new();
+        let mut chip_proofs = BTreeMap::new();
 
         let span = entered_span!("commit_to_pi", profiling_1 = true);
         // including raw public input to transcript
@@ -121,9 +121,12 @@ impl<
                     format!("proving key for circuit {} not found", chip_input.name).into(),
                 ))?;
 
-            assert!(!pk.get_cs().is_static_circuit());
             // include omc init tables iff it's in first shard
             if !shard_ctx.is_first_shard() && pk.get_cs().with_omc_init_only() {
+                continue;
+            }
+
+            if chip_input.num_instances() == 0 {
                 continue;
             }
 
@@ -143,12 +146,12 @@ impl<
 
         // extract chip meta info before consuming witnesses
         // (circuit_name, num_instances)
-        let chips = witnesses.get_chip_meta_infos();
+        let name_and_instances = witnesses.get_witnesses_name_instance();
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
         let mut wits_rmms = BTreeMap::new();
 
-        let mut structural_rmms = Vec::with_capacity(chips.len());
+        let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
             let [witness_rmm, structural_witness_rmm] = chip_input.witness_rmms;
@@ -187,8 +190,9 @@ impl<
 
         let mut points = Vec::new();
         let mut evaluations = Vec::new();
-        for ((circuit_name, num_instances), structural_rmm) in
-            chips.into_iter().zip_eq(structural_rmms.into_iter())
+        for ((circuit_name, num_instances), structural_rmm) in name_and_instances
+            .into_iter()
+            .zip_eq(structural_rmms.into_iter())
         {
             let circuit_idx = self
                 .pk
@@ -256,7 +260,10 @@ impl<
                 assert!(opcode_proof.wits_in_evals.is_empty());
                 assert!(opcode_proof.fixed_in_evals.is_empty());
             }
-            chip_proofs.push((circuit_idx, opcode_proof));
+            chip_proofs
+                .entry(circuit_idx)
+                .or_insert(vec![])
+                .push(opcode_proof);
             for (idx, eval) in pi_in_evals {
                 pi_evals[idx] = eval;
             }

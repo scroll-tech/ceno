@@ -1139,10 +1139,10 @@ pub fn generate_witness<'a, E: ExtensionField>(
         pi.end_pc = current_shard_end_pc;
         pi.end_cycle = current_shard_end_cycle;
         // set shard ram bus expected output to pi
-        let shard_ram_witnesses = zkvm_witness.get_circuit_witness(&ShardRamCircuit::<E>::name());
+        let shard_ram_witnesses = zkvm_witness.get_witness(&ShardRamCircuit::<E>::name());
 
         if let Some(shard_ram_witnesses) = shard_ram_witnesses {
-            let shard_ram_digest: SepticPoint<E::BaseField> = shard_ram_witnesses
+            let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
                 .iter()
                 .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
                 .map(|shard_ram_witness| {
@@ -1153,11 +1153,11 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 })
                 .sum();
 
-            let xy = shard_ram_digest
+            let xy = shard_ram_ec_sum
                 .x
                 .0
                 .iter()
-                .chain(shard_ram_digest.y.0.iter());
+                .chain(shard_ram_ec_sum.y.0.iter());
             for (f, v) in xy.zip_eq(pi.shard_rw_sum.as_mut_slice()) {
                 *v = f.to_canonical_u64() as u32;
             }
