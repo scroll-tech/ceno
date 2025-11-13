@@ -345,7 +345,7 @@ impl<E: ExtensionField> ChipInput<E> {
 
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    witnesses: BTreeMap<String, Vec<ChipInput<E>>>,
+    pub witnesses: BTreeMap<String, Vec<ChipInput<E>>>,
     lk_mlts: BTreeMap<String, Multiplicity<u64>>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
@@ -593,12 +593,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     .map(|chip_input| (chip_input.name.clone(), chip_input.num_instances.clone()))
             })
             .collect_vec()
-    }
-
-    pub fn iter_sorted(&self) -> impl Iterator<Item = &ChipInput<E>> {
-        self.witnesses
-            .iter()
-            .flat_map(|(_, chip_input)| chip_input.iter())
     }
 
     /// Iterate opcode/table circuits, sorted by alphabetical order.

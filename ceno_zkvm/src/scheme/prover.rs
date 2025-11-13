@@ -111,32 +111,28 @@ impl<
         exit_span!(span);
 
         // only keep track of circuits that have non-zero instances
-
-        for chip_input in witnesses.iter_sorted() {
-            let pk = self
-                .pk
-                .circuit_pks
-                .get(&chip_input.name)
-                .ok_or(ZKVMError::VKNotFound(
-                    format!("proving key for circuit {} not found", chip_input.name).into(),
-                ))?;
+        for (name, chip_inputs) in &witnesses.witnesses {
+            let pk = self.pk.circuit_pks.get(name).ok_or(ZKVMError::VKNotFound(
+                format!("proving key for circuit {} not found", name).into(),
+            ))?;
 
             // include omc init tables iff it's in first shard
             if !shard_ctx.is_first_shard() && pk.get_cs().with_omc_init_only() {
                 continue;
             }
 
-            if chip_input.num_instances() == 0 {
+            // num_instance from witness might include rotation
+            let num_instances = chip_inputs
+                .iter()
+                .flat_map(|chip_input| &chip_input.num_instances)
+                .map(|num_instance| num_instance >> pk.get_cs().rotation_vars().unwrap_or(0))
+                .collect_vec();
+
+            if num_instances.is_empty() {
                 continue;
             }
 
-            // num_instance from witness might include rotation
-            let num_instances = chip_input
-                .num_instances
-                .iter()
-                .map(|num_instance| num_instance >> pk.get_cs().rotation_vars().unwrap_or(0))
-                .collect_vec();
-            let circuit_idx = self.pk.circuit_name_to_index.get(&chip_input.name).unwrap();
+            let circuit_idx = self.pk.circuit_name_to_index.get(name).unwrap();
             // write (circuit_idx, num_var) to transcript
             transcript.append_message(&circuit_idx.to_le_bytes());
             for num_instance in num_instances {
