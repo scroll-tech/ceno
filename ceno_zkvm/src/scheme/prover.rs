@@ -142,12 +142,12 @@ impl<
 
         // extract chip meta info before consuming witnesses
         // (circuit_name, num_instances)
-        let chips = witnesses.get_chip_meta_infos();
+        let name_and_instances = witnesses.get_witnesses_name_instance();
 
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
         let mut wits_rmms = BTreeMap::new();
 
-        let mut structural_rmms = Vec::with_capacity(chips.len());
+        let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
         // commit to opcode circuits first and then commit to table circuits, sorted by name
         for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
             let [witness_rmm, structural_witness_rmm] = chip_input.witness_rmms;
@@ -186,8 +186,9 @@ impl<
 
         let mut points = Vec::new();
         let mut evaluations = Vec::new();
-        for ((circuit_name, num_instances), structural_rmm) in
-            chips.into_iter().zip_eq(structural_rmms.into_iter())
+        for ((circuit_name, num_instances), structural_rmm) in name_and_instances
+            .into_iter()
+            .zip_eq(structural_rmms.into_iter())
         {
             let circuit_idx = self
                 .pk

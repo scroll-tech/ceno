@@ -1139,7 +1139,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
         pi.end_pc = current_shard_end_pc;
         pi.end_cycle = current_shard_end_cycle;
         // set shard ram bus expected output to pi
-        let shard_ram_witnesses = zkvm_witness.get_circuit_witness(&ShardRamCircuit::<E>::name());
+        let shard_ram_witnesses = zkvm_witness.get_witness(&ShardRamCircuit::<E>::name());
 
         if let Some(shard_ram_witnesses) = shard_ram_witnesses {
             let shard_ram_digest: SepticPoint<E::BaseField> = shard_ram_witnesses

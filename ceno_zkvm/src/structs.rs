@@ -16,7 +16,10 @@ use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Mult
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::{
+    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    prelude::ParallelSlice,
+};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -338,14 +341,14 @@ impl<E: ExtensionField> ChipInput<E> {
 
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    circuits: BTreeMap<String, Vec<ChipInput<E>>>,
+    witnesses: BTreeMap<String, Vec<ChipInput<E>>>,
     lk_mlts: BTreeMap<String, Multiplicity<u64>>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
-    pub fn get_circuit_witness(&self, name: &String) -> Option<&Vec<ChipInput<E>>> {
-        self.circuits.get(name)
+    pub fn get_witness(&self, name: &String) -> Option<&Vec<ChipInput<E>>> {
+        self.witnesses.get(name)
     }
 
     pub fn get_lk_mlt(&self, name: &String) -> Option<&Multiplicity<u64>> {
@@ -375,7 +378,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         )?;
         let num_instances = vec![witness[0].num_instances()];
         let input = ChipInput::new(OC::name(), witness, num_instances);
-        assert!(self.circuits.insert(OC::name(), vec![input]).is_none());
+        assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
         assert!(
             self.lk_mlts
                 .insert(OC::name(), logup_multiplicity)
@@ -435,13 +438,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 num_instances
             );
             let input = ChipInput::new(TC::name(), witness, vec![num_instances]);
-            assert!(self.circuits.insert(TC::name(), vec![input]).is_none());
+            assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
         }
 
         Ok(())
     }
 
-    pub fn assign_global_chip_circuit(
+    pub fn assign_shared_circuit(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         // shard_ctx: &ShardContext,
@@ -540,7 +543,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
         let circuit_inputs = global_input
-            .chunks(shard_ctx.max_num_cross_shard_accesses)
+            .par_chunks(shard_ctx.max_num_cross_shard_accesses)
             .map(|shard_accesses| {
                 let witness = ShardRamCircuit::assign_instances(
                     config,
@@ -564,7 +567,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             .collect::<Result<Vec<_>, ZKVMError>>()?;
         // set num_read, num_write as separate instance
         assert!(
-            self.circuits
+            self.witnesses
                 .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
                 .is_none()
         );
@@ -572,8 +575,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         Ok(())
     }
 
-    pub fn get_chip_meta_infos(&self) -> Vec<(String, Vec<usize>)> {
-        self.circuits
+    pub fn get_witnesses_name_instance(&self) -> Vec<(String, Vec<usize>)> {
+        self.witnesses
             .iter()
             .flat_map(|(_, chip_inputs)| {
                 chip_inputs
@@ -584,14 +587,14 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     }
 
     pub fn iter_sorted(&self) -> impl Iterator<Item = &ChipInput<E>> {
-        self.circuits
+        self.witnesses
             .iter()
             .flat_map(|(_, chip_input)| chip_input.iter())
     }
 
     /// Iterate opcode/table circuits, sorted by alphabetical order.
     pub fn into_iter_sorted(self) -> impl Iterator<Item = ChipInput<E>> {
-        self.circuits
+        self.witnesses
             .into_iter()
             .flat_map(|(_, chip_inputs)| chip_inputs.into_iter())
     }
