@@ -98,7 +98,7 @@ pub trait Instruction<E: ExtensionField> {
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<StepRecord>,
+        steps: Vec<&StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         // TODO: selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector

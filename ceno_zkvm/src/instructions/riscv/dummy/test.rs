@@ -38,7 +38,7 @@ fn test_dummy_ecall() {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![step],
+        vec![&step],
     )
     .unwrap();
 
@@ -68,7 +68,7 @@ fn test_dummy_keccak() {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![step],
+        vec![&step],
     )
     .unwrap();
 
@@ -96,7 +96,7 @@ fn test_dummy_r() {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_r_instruction(
+        vec![&StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
             insn_code,
@@ -132,7 +132,7 @@ fn test_dummy_b() {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + 8_usize),
             insn_code,
