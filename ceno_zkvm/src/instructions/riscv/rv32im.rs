@@ -407,14 +407,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &());
     }
 
-    pub fn assign_opcode_circuit(
+    pub fn assign_opcode_circuit<'a>(
         &self,
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
         witness: &mut ZKVMWitnesses<E>,
-        steps: Vec<StepRecord>,
-    ) -> Result<GroupedSteps, ZKVMError> {
-        let mut all_records: BTreeMap<InsnKind, Vec<StepRecord>> = InsnKind::iter()
+        steps: &'a [StepRecord],
+    ) -> Result<GroupedSteps<'a>, ZKVMError> {
+        let mut all_records: BTreeMap<InsnKind, Vec<&StepRecord>> = InsnKind::iter()
             .map(|insn_kind| (insn_kind, Vec::new()))
             .collect();
         let mut halt_records = Vec::new();
@@ -425,7 +425,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut secp256k1_double_records = Vec::new();
         let mut secp256k1_decompress_records = Vec::new();
 
-        steps.into_iter().for_each(|record| {
+        steps.iter().for_each(|record| {
             let insn_kind = record.insn.kind;
             match insn_kind {
                 // ecall / halt
@@ -607,7 +607,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 }
 
 /// Opaque type to pass unimplemented instructions from Rv32imConfig to DummyExtraConfig.
-pub struct GroupedSteps(BTreeMap<InsnKind, Vec<StepRecord>>);
+pub struct GroupedSteps<'a>(BTreeMap<InsnKind, Vec<&'a StepRecord>>);
 
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {

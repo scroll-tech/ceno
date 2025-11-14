@@ -37,6 +37,7 @@ use multilinear_extensions::util::max_usable_threads;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
@@ -1004,51 +1005,57 @@ pub fn generate_witness<'a, E: ExtensionField>(
 ) -> impl Iterator<Item = (ZKVMWitnesses<E>, ShardContext<'a>, PublicValues)> {
     let shard_ctxs = std::mem::take(&mut emul_result.shard_ctxs);
     assert!(!shard_ctxs.is_empty());
-    let mut all_records = std::mem::take(&mut emul_result.all_records);
+    let all_records = std::mem::take(&mut emul_result.all_records);
     assert!(!all_records.is_empty());
 
     tracing::debug!(
         "first shard cycle range {:?}",
         shard_ctxs[0].cur_shard_cycle_range
     );
+    let time = std::time::Instant::now();
     // clean up all records before first shard start cycle, as it's not belong to current prover
-    let start = all_records.iter().position(|step| {
-        shard_ctxs[0]
-            .cur_shard_cycle_range
-            .contains(&(step.cycle() as usize))
-    });
-
-    if let Some(start) = start {
-        tracing::debug!("drop {} records as not belong to current shard", start);
-        // Drop everything before `start` efficiently
-        let tail = all_records.split_off(start);
-        all_records = tail;
-    }
+    let mut start = all_records
+        .iter()
+        .position(|step| {
+            shard_ctxs[0]
+                .cur_shard_cycle_range
+                .contains(&(step.cycle() as usize))
+        })
+        .unwrap_or(all_records.len());
+    tracing::debug!(
+        "skip {} records as not belong to current shard take {:?}",
+        start,
+        time.elapsed()
+    );
 
     let pi = std::mem::take(&mut emul_result.pi);
     shard_ctxs.into_iter().map(move |mut shard_ctx| {
         let time = std::time::Instant::now();
         // assume public io clone low cost
         let mut pi = pi.clone();
-        let n = all_records
-            .iter()
-            .take_while(|step| shard_ctx.is_in_current_shard(step.cycle()))
-            .count();
-        let mut filtered_steps = all_records.split_off(n); // moves pointer boundary, no mem shift
-        std::mem::swap(&mut all_records, &mut filtered_steps);
+        let n = all_records[start..]
+            .binary_search_by(|step| {
+                if shard_ctx.is_in_current_shard(step.cycle()) {
+                    Ordering::Less // continue right
+                } else {
+                    Ordering::Greater // stop here
+                }
+            })
+            .unwrap_or_else(|idx| idx);
+        let end = start + n;
         tracing::debug!("collect filter step in {:?}", time.elapsed());
 
         tracing::debug!("{}th shard collect {n} steps", shard_ctx.shard_id);
         let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
-        let current_shard_end_cycle = filtered_steps.last().unwrap().cycle()
+        let current_shard_end_cycle = all_records[start..end].last().unwrap().cycle()
             + Tracer::SUBCYCLES_PER_INSN
             - current_shard_offset_cycle;
         let current_shard_init_pc = if shard_ctx.is_first_shard() {
             program.entry
         } else {
-            filtered_steps[0].pc().before.0
+            all_records[start..end][0].pc().before.0
         };
-        let current_shard_end_pc = filtered_steps.last().unwrap().pc().after.0;
+        let current_shard_end_pc = all_records[start..end].last().unwrap().pc().after.0;
 
         let mut zkvm_witness = ZKVMWitnesses::default();
         let time = std::time::Instant::now();
@@ -1059,7 +1066,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 &system_config.zkvm_cs,
                 &mut shard_ctx,
                 &mut zkvm_witness,
-                filtered_steps,
+                &all_records[start..end],
             )
             .unwrap();
         tracing::debug!("assign_opcode_circuit finish in {:?}", time.elapsed());
@@ -1177,6 +1184,9 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 *v = f.to_canonical_u64() as u32;
             }
             tracing::debug!("update pi shard_rw_sum finish in {:?}", time.elapsed());
+
+            // update next round start
+            start = end;
         }
 
         (zkvm_witness, shard_ctx, pi)

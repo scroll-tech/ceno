@@ -169,7 +169,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<StepRecord>,
+        steps: Vec<&StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
         if steps.is_empty() {
