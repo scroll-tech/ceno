@@ -1027,6 +1027,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
     let pi = std::mem::take(&mut emul_result.pi);
     shard_ctxs.into_iter().map(move |mut shard_ctx| {
+        let time = std::time::Instant::now();
         // assume public io clone low cost
         let mut pi = pi.clone();
         let n = all_records
@@ -1035,6 +1036,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             .count();
         let mut filtered_steps = all_records.split_off(n); // moves pointer boundary, no mem shift
         std::mem::swap(&mut all_records, &mut filtered_steps);
+        tracing::debug!("collect filter step in {:?}", time.elapsed());
 
         tracing::debug!("{}th shard collect {n} steps", shard_ctx.shard_id);
         let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
@@ -1049,6 +1051,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
         let current_shard_end_pc = filtered_steps.last().unwrap().pc().after.0;
 
         let mut zkvm_witness = ZKVMWitnesses::default();
+        let time = std::time::Instant::now();
         // assign opcode circuits
         let dummy_records = system_config
             .config
@@ -1059,6 +1062,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 filtered_steps,
             )
             .unwrap();
+        tracing::debug!("assign_opcode_circuit finish in {:?}", time.elapsed());
+        let time = std::time::Instant::now();
         system_config
             .dummy_config
             .assign_opcode_circuit(
@@ -1068,16 +1073,20 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 dummy_records,
             )
             .unwrap();
+        tracing::debug!("assign_dummy_config finish in {:?}", time.elapsed());
         zkvm_witness.finalize_lk_multiplicities();
 
         // assign table circuits
+        let time = std::time::Instant::now();
         system_config
             .config
             .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
             .unwrap();
+        tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
 
         if shard_ctx.is_first_shard() {
             // assign init table on first shard
+            let time = std::time::Instant::now();
             system_config
                 .mmu_config
                 .assign_init_table_circuit(
@@ -1091,6 +1100,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     &emul_result.final_mem_state.heap,
                 )
                 .unwrap();
+            tracing::debug!("assign_init_table_circuit finish in {:?}", time.elapsed());
         } else {
             // empty assignment
             system_config
@@ -1108,6 +1118,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 .unwrap();
         }
 
+        let time = std::time::Instant::now();
         // assign continuation circuit
         system_config
             .mmu_config
@@ -1123,7 +1134,9 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 &emul_result.final_mem_state.heap,
             )
             .unwrap();
+        tracing::debug!("assign_continuation_circuit finish in {:?}", time.elapsed());
 
+        let time = std::time::Instant::now();
         // assign program circuit
         zkvm_witness
             .assign_table_circuit::<ProgramTableCircuit<E>>(
@@ -1132,6 +1145,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 program,
             )
             .unwrap();
+        tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
 
         pi.init_pc = current_shard_init_pc;
         pi.init_cycle = Tracer::SUBCYCLES_PER_INSN;
@@ -1142,6 +1156,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
         let shard_ram_witnesses = zkvm_witness.get_witness(&ShardRamCircuit::<E>::name());
 
         if let Some(shard_ram_witnesses) = shard_ram_witnesses {
+            let time = std::time::Instant::now();
             let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
                 .iter()
                 .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
@@ -1161,6 +1176,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             for (f, v) in xy.zip_eq(pi.shard_rw_sum.as_mut_slice()) {
                 *v = f.to_canonical_u64() as u32;
             }
+            tracing::debug!("update pi shard_rw_sum finish in {:?}", time.elapsed());
         }
 
         (zkvm_witness, shard_ctx, pi)
