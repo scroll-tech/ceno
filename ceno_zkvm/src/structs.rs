@@ -364,7 +364,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
         config: &OC::InstructionConfig,
-        records: Vec<StepRecord>,
+        records: Vec<&StepRecord>,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
 

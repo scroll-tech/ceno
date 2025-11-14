@@ -147,7 +147,7 @@ fn test_rw_lk_expression_combination() {
                 &zkvm_cs,
                 &mut shard_ctx,
                 &config,
-                vec![StepRecord::default(); num_instances],
+                vec![&StepRecord::default(); num_instances],
             )
             .unwrap();
 
@@ -330,7 +330,7 @@ fn test_single_add_instance_e2e() {
         .collect::<Vec<_>>();
     let mut add_records = vec![];
     let mut halt_records = vec![];
-    all_records.into_iter().for_each(|record| {
+    all_records.iter().for_each(|record| {
         let kind = record.insn().kind;
         match kind {
             ADD => add_records.push(record),
