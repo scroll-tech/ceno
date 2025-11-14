@@ -1,18 +1,25 @@
-use crate::arithmetics::next_pow2_instance_padding;
-use crate::basefold_verifier::basefold::{
-    BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
+use crate::{
+    arithmetics::{ceil_log2, next_pow2_instance_padding},
+    basefold_verifier::basefold::{
+        BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
+    },
+    tower_verifier::binding::{
+        IOPProverMessage, IOPProverMessageVariable, IOPProverMessageVec,
+        IOPProverMessageVecVariable, PointVariable, ThreeDimensionalVecVariable,
+        ThreeDimensionalVector,
+    },
 };
-use ceno_zkvm::scheme::{ZKVMChipProof, ZKVMProof};
-use ceno_zkvm::structs::{EccQuarkProof, TowerProofs};
-use gkr_iop::gkr::GKRProof;
-use gkr_iop::gkr::layer::sumcheck_layer::LayerProof;
-use mpcs::{Basefold, BasefoldRSParams};
-use p3::field::FieldExtensionAlgebra;
-use crate::tower_verifier::binding::{
-    IOPProverMessage, IOPProverMessageVariable, IOPProverMessageVec, IOPProverMessageVecVariable, ThreeDimensionalVecVariable, ThreeDimensionalVector
+use ceno_zkvm::{
+    scheme::{
+        ZKVMChipProof, ZKVMProof,
+        septic_curve::{SepticExtension, SepticPoint},
+    },
+    structs::{EccQuarkProof, TowerProofs},
 };
-use crate::{arithmetics::ceil_log2, tower_verifier::binding::PointVariable};
+use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::LayerProof};
 use itertools::Itertools;
+use mpcs::{Basefold, BasefoldRSParams};
+use multilinear_extensions::mle::Point;
 use openvm_native_compiler::{
     asm::AsmConfig,
     ir::{Array, Builder, Config, Felt},
@@ -20,11 +27,10 @@ use openvm_native_compiler::{
 };
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::hints::{Hintable, VecAutoHintable};
-use openvm_stark_backend::p3_field::{extension::BinomialExtensionField, FieldAlgebra};
+use openvm_stark_backend::p3_field::{FieldAlgebra, extension::BinomialExtensionField};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
-use multilinear_extensions::mle::Point;
+use p3::field::FieldExtensionAlgebra;
 use sumcheck::structs::IOPProof;
-use ceno_zkvm::scheme::septic_curve::{SepticExtension, SepticPoint};
 
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, 4>;
@@ -66,12 +72,18 @@ pub(crate) struct ZKVMProofInput {
 
 impl From<ZKVMProof<E, RecPcs>> for ZKVMProofInput {
     fn from(p: ZKVMProof<E, RecPcs>) -> Self {
-        
-        ZKVMProofInput { 
-            raw_pi: p.raw_pi, 
-            pi_evals: p.pi_evals, 
-            chip_proofs: p.chip_proofs.into_iter().map(|c| ZKVMChipProofInput::from(c)).collect::<Vec<ZKVMChipProofInput>>(),
-            witin_commit: p.witin_commit.into(), 
+        ZKVMProofInput {
+            raw_pi: p.raw_pi,
+            pi_evals: p.pi_evals,
+            chip_proofs: p
+                .chip_proofs
+                .into_iter()
+                .map(|(chip_idx, mut proofs)| {
+                    assert_eq!(proofs.len(), 1, "TODO support > 1 proofs per chip");
+                    ZKVMChipProofInput::from((chip_idx, proofs.remove(0)))
+                })
+                .collect::<Vec<ZKVMChipProofInput>>(),
+            witin_commit: p.witin_commit.into(),
             opening_proof: p.opening_proof.into(),
         }
     }
@@ -88,7 +100,16 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let max_num_var = usize::read(builder);
         let max_width = usize::read(builder);
         let witin_commit = BasefoldCommitment::read(builder);
-        let witin_perm: Array<AsmConfig<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>, BinomialExtensionField<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>, 4>>, Var<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>>> = Vec::<usize>::read(builder);
+        let witin_perm: Array<
+            AsmConfig<
+                p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>,
+                BinomialExtensionField<
+                    p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>,
+                    4,
+                >,
+            >,
+            Var<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>>,
+        > = Vec::<usize>::read(builder);
         let fixed_perm = Vec::<usize>::read(builder);
         let pcs_proof = BasefoldProof::read(builder);
 
@@ -188,15 +209,25 @@ pub struct TowerProofInput {
 
 impl From<TowerProofs<E>> for TowerProofInput {
     fn from(p: TowerProofs<E>) -> Self {
-        let proofs: Vec<IOPProverMessageVec> = p.proofs.iter().map(|vec| {
-            IOPProverMessageVec::from(vec.iter().map(|p| IOPProverMessage { evaluations: p.evaluations.clone() }).collect::<Vec<IOPProverMessage>>())
-        }).collect();
-        Self { 
-            num_proofs: p.proofs.len(), 
+        let proofs: Vec<IOPProverMessageVec> = p
+            .proofs
+            .iter()
+            .map(|vec| {
+                IOPProverMessageVec::from(
+                    vec.iter()
+                        .map(|p| IOPProverMessage {
+                            evaluations: p.evaluations.clone(),
+                        })
+                        .collect::<Vec<IOPProverMessage>>(),
+                )
+            })
+            .collect();
+        Self {
+            num_proofs: p.proofs.len(),
             proofs,
-            num_prod_specs: p.prod_spec_size(), 
+            num_prod_specs: p.prod_spec_size(),
             prod_specs_eval: ThreeDimensionalVector::from(p.prod_specs_eval.clone()),
-            num_logup_specs: p.logup_spec_size(), 
+            num_logup_specs: p.logup_spec_size(),
             logup_specs_eval: ThreeDimensionalVector::from(p.logup_specs_eval),
         }
     }
@@ -267,7 +298,7 @@ pub struct ZKVMChipProofInput {
     // main constraint and select sumcheck proof
     pub has_main_sumcheck_proofs: usize,
     pub main_sumcheck_proofs: IOPProverMessageVec,
-    
+
     // gkr proof
     pub has_gkr_proof: usize,
     pub gkr_iop_proof: GKRProofInput,
@@ -289,20 +320,29 @@ impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
         let p = d.1;
         let sum_num_instances = p.num_instances.iter().sum();
 
-        Self { 
+        Self {
             idx,
             sum_num_instances,
-            r_out_evals_len: p.r_out_evals.len(), 
-            w_out_evals_len: p.w_out_evals.len(), 
-            lk_out_evals_len: p.lk_out_evals.len(), 
-            r_out_evals: p.r_out_evals, 
-            w_out_evals: p.w_out_evals, 
-            lk_out_evals: p.lk_out_evals, 
-            tower_proof: p.tower_proof.into(), 
-            has_main_sumcheck_proofs: if p.main_sumcheck_proofs.is_some() { 1 } else { 0 },
+            r_out_evals_len: p.r_out_evals.len(),
+            w_out_evals_len: p.w_out_evals.len(),
+            lk_out_evals_len: p.lk_out_evals.len(),
+            r_out_evals: p.r_out_evals,
+            w_out_evals: p.w_out_evals,
+            lk_out_evals: p.lk_out_evals,
+            tower_proof: p.tower_proof.into(),
+            has_main_sumcheck_proofs: if p.main_sumcheck_proofs.is_some() {
+                1
+            } else {
+                0
+            },
             main_sumcheck_proofs: if p.main_sumcheck_proofs.is_some() {
                 let r = p.main_sumcheck_proofs.unwrap();
-                r.iter().map(|p| IOPProverMessage { evaluations: p.evaluations.clone() }).collect::<Vec<IOPProverMessage>>().into()
+                r.iter()
+                    .map(|p| IOPProverMessage {
+                        evaluations: p.evaluations.clone(),
+                    })
+                    .collect::<Vec<IOPProverMessage>>()
+                    .into()
             } else {
                 IOPProverMessageVec::default()
             },
@@ -317,9 +357,9 @@ impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
                 p.ecc_proof.unwrap().into()
             } else {
                 EccQuarkProofInput::dummy()
-            }, 
+            },
             num_instances: p.num_instances,
-            wits_in_evals: p.wits_in_evals, 
+            wits_in_evals: p.wits_in_evals,
             fixed_in_evals: p.fixed_in_evals,
         }
     }
@@ -441,14 +481,18 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(self.lk_out_evals.write());
 
         stream.extend(self.tower_proof.write());
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_main_sumcheck_proofs));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.has_main_sumcheck_proofs,
+        ));
         stream.extend(self.main_sumcheck_proofs.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_gkr_proof));
         stream.extend(self.gkr_iop_proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());
 
-        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(&self.num_instances));
+        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
+            &self.num_instances,
+        ));
         stream.extend(self.fixed_in_evals.write());
         stream.extend(self.wits_in_evals.write());
 
@@ -499,25 +543,38 @@ pub struct LayerProofInput {
 
 impl From<LayerProof<E>> for LayerProofInput {
     fn from(p: LayerProof<E>) -> Self {
-        Self { 
+        Self {
             has_rotation: if p.rotation.is_some() { 1 } else { 0 },
             rotation: if p.rotation.is_some() {
                 let r = p.rotation.unwrap();
-                SumcheckLayerProofInput { 
+                SumcheckLayerProofInput {
                     proof: IOPProverMessageVec::from(
-                        r.proof.proofs.iter().map(|p| IOPProverMessage { evaluations: p.evaluations.clone() }).collect::<Vec<IOPProverMessage>>()
+                        r.proof
+                            .proofs
+                            .iter()
+                            .map(|p| IOPProverMessage {
+                                evaluations: p.evaluations.clone(),
+                            })
+                            .collect::<Vec<IOPProverMessage>>(),
                     ),
                     evals: r.evals,
                 }
             } else {
                 SumcheckLayerProofInput::default()
-            }, 
-            main: SumcheckLayerProofInput { 
+            },
+            main: SumcheckLayerProofInput {
                 proof: IOPProverMessageVec::from(
-                    p.main.proof.proofs.iter().map(|p| IOPProverMessage { evaluations: p.evaluations.clone() }).collect::<Vec<IOPProverMessage>>()
+                    p.main
+                        .proof
+                        .proofs
+                        .iter()
+                        .map(|p| IOPProverMessage {
+                            evaluations: p.evaluations.clone(),
+                        })
+                        .collect::<Vec<IOPProverMessage>>(),
                 ),
                 evals: p.main.evals,
-            }
+            },
         }
     }
 }
@@ -561,7 +618,13 @@ pub struct GKRProofInput {
 
 impl From<GKRProof<E>> for GKRProofInput {
     fn from(p: GKRProof<E>) -> Self {
-        Self { layer_proofs: p.0.into_iter().map(|p| { LayerProofInput::from(p) }).collect::<Vec<LayerProofInput>>() }
+        Self {
+            layer_proofs: p
+                .0
+                .into_iter()
+                .map(|p| LayerProofInput::from(p))
+                .collect::<Vec<LayerProofInput>>(),
+        }
     }
 }
 
@@ -670,7 +733,7 @@ impl EccQuarkProofInput {
             sum: SepticPointInput {
                 x: SepticExtensionInput { v: [F::ZERO; 7] },
                 y: SepticExtensionInput { v: [F::ZERO; 7] },
-                is_infinity: false
+                is_infinity: false,
             },
         }
     }
@@ -683,10 +746,10 @@ impl From<EccQuarkProof<E>> for EccQuarkProofInput {
             num_instances: proof.num_instances,
             evals: proof.evals,
             rt: proof.rt,
-            sum: SepticPointInput { 
-                x: SepticExtensionInput { v: proof.sum.x.0 }, 
+            sum: SepticPointInput {
+                x: SepticExtensionInput { v: proof.sum.x.0 },
                 y: SepticExtensionInput { v: proof.sum.y.0 },
-                is_infinity: proof.sum.is_infinity, 
+                is_infinity: proof.sum.is_infinity,
             },
         }
     }
@@ -732,11 +795,24 @@ impl Hintable<InnerConfig> for EccQuarkProofInput {
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
 
-        let p_vec = IOPProverMessageVec::from(self.zerocheck_proof.proofs.clone().into_iter().map(|p| IOPProverMessage { evaluations: p.evaluations }).collect::<Vec<IOPProverMessage>>());
+        let p_vec = IOPProverMessageVec::from(
+            self.zerocheck_proof
+                .proofs
+                .clone()
+                .into_iter()
+                .map(|p| IOPProverMessage {
+                    evaluations: p.evaluations,
+                })
+                .collect::<Vec<IOPProverMessage>>(),
+        );
         stream.extend(p_vec.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.num_instances));
 
-        let eq_instance = if self.num_instances > 0 { self.num_instances - 1 } else { 0 };
+        let eq_instance = if self.num_instances > 0 {
+            self.num_instances - 1
+        } else {
+            0
+        };
         let mut bit_decomp: Vec<F> = vec![];
         for i in 0..32usize {
             bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
@@ -754,7 +830,7 @@ impl Hintable<InnerConfig> for EccQuarkProofInput {
 }
 
 pub struct SepticExtensionInput {
-    v: [F; 7]
+    v: [F; 7],
 }
 
 impl Hintable<InnerConfig> for SepticExtensionInput {
@@ -763,9 +839,7 @@ impl Hintable<InnerConfig> for SepticExtensionInput {
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let f_vec = Vec::<E>::read(builder);
 
-        SepticExtensionVariable {
-            vs: f_vec
-        }
+        SepticExtensionVariable { vs: f_vec }
     }
 
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
