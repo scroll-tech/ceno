@@ -763,13 +763,15 @@ pub fn verify_chip_proof<C: Config>(
     });
 
     let gkr_circuit = gkr_circuit.clone().unwrap();
+    let zero_decomp = builder.dyn_array(32);
     let selector_ctxs: Vec<SelectorContextVariable<C>> = if cs.ec_final_sum.is_empty() {
         builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(1));
-
         vec![
             SelectorContextVariable {
                 offset: Usize::from(0),
+                offset_bit_decomp: zero_decomp.clone(),
                 num_instances: chip_proof.sum_num_instances.clone(),
+                num_instances_bit_decomp: chip_proof.sum_num_instances_minus_one_bit_decomposition.clone(),
                 num_vars: num_var_with_rotation.clone(),
             };
             gkr_circuit
@@ -788,17 +790,23 @@ pub fn verify_chip_proof<C: Config>(
         vec![
             SelectorContextVariable {
                 offset: Usize::from(0),
+                offset_bit_decomp: zero_decomp.clone(),
                 num_instances: Usize::Var(n_inst_left),
+                num_instances_bit_decomp: chip_proof.num_instances_bit_decompositions.slice(builder, 0, 32),
                 num_vars: num_var_with_rotation.clone(),
             },
             SelectorContextVariable {
                 offset: Usize::Var(n_inst_left),
+                offset_bit_decomp: chip_proof.num_instances_bit_decompositions.slice(builder, 0, 32),
                 num_instances: Usize::Var(n_inst_right),
+                num_instances_bit_decomp: chip_proof.num_instances_bit_decompositions.slice(builder, 32, 64),
                 num_vars: num_var_with_rotation.clone(),
             },
             SelectorContextVariable {
                 offset: Usize::from(0),
+                offset_bit_decomp: zero_decomp.clone(),
                 num_instances: n_inst_sum,
+                num_instances_bit_decomp: chip_proof.num_instances_bit_decompositions.slice(builder, 64, 96),
                 num_vars: num_var_with_rotation.clone(),
             },
         ]
@@ -969,23 +977,20 @@ pub fn verify_gkr_circuit<C: Config>(
         // sigma = \sum_b sel(b) * zero_expr(b)
         let max_degree = builder.constant(C::F::from_canonical_usize(layer.max_expr_degree + 1));
 
-        // _debug: placeholder
-        let max_num_variables = builder.constant(C::F::ONE);
-
-        /* _debug: verifier program
-        let max_num_variables =
-            builder.unsafe_cast_var_to_felt(gkr_proof.num_var_with_rotation.get_var());
-        */
+        let max_num_variables_f =
+            builder.unsafe_cast_var_to_felt(max_num_variables.get_var());
         
         let (in_point, expected_evaluation) = iop_verifier_state_verify(
             builder,
             challenger,
             &sigma,
             &proof,
-            max_num_variables,
+            max_num_variables_f,
             max_degree,
             unipoly_extrapolator,
         );
+
+        let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
 
         // check selector evaluations
         layer
@@ -994,6 +999,8 @@ pub fn verify_gkr_circuit<C: Config>(
             .enumerate()
             .for_each(|(idx, (sel_type, _))| {
                 let out_point = builder.get(&eval_and_dedup_points, idx).point.fs;
+                let selector_ctx = &selector_ctxs[idx];
+
                 evaluate_selector(
                     builder,
                     sel_type,
@@ -1002,6 +1009,7 @@ pub fn verify_gkr_circuit<C: Config>(
                     &in_point,
                     chip_proof,
                     layer.n_witin,
+                    selector_ctx,
                 );
             });
 
@@ -1237,6 +1245,7 @@ pub fn evaluate_selector<C: Config>(
     in_point: &Array<C, Ext<C::F, C::EF>>,
     chip_proof: &ZKVMChipProofInputVariable<C>,
     offset_eq_id: usize,
+    ctx: &SelectorContextVariable<C>,
 ) {
     let (expr, eval) = match sel_type {
         SelectorType::None => return,
@@ -1246,25 +1255,24 @@ pub fn evaluate_selector<C: Config>(
             (expr, eq_eval(builder, out_point, in_point, one, zero))
         }
         SelectorType::Prefix(expr) => {
-            return
-            /* _debug: verifier program
-            (
-                expr,
-                eq_eval_less_or_equal_than(
-                    builder,
-                    &chip_proof.num_instances_minus_one_bit_decomposition,
-                    out_point,
-                    in_point,
-                ),
-            )
-            */
+            builder.assert_usize_eq(in_point.len(), out_point.len());
+
+            let sel: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+            builder.if_ne(ctx.num_instances.clone(), Usize::from(0)).then(|builder| {
+                let eq_end = eq_eval_less_or_equal_than(builder, &ctx.offset_bit_decomp, out_point, in_point);
+                builder.assign(&sel, eq_end);
+                builder.if_ne(ctx.offset.clone(), Usize::from(0)).then(|builder| {
+                    let eq_start =  eq_eval_less_or_equal_than(builder, &ctx.num_instances_bit_decomp, out_point, in_point);
+                    builder.assign(&sel, sel.clone() - eq_start);
+                });
+            });
+
+            (expr, sel)
         }
         SelectorType::OrderedSparse32 {
             indices,
             expression,
         } => {
-            return
-            /* _debug: verifier program
             let out_point_slice = out_point.slice(builder, 0, 5);
             let in_point_slice = in_point.slice(builder, 0, 5);
             let out_subgroup_eq = build_eq_x_r_vec_sequential(builder, &out_point_slice);
@@ -1279,52 +1287,25 @@ pub fn evaluate_selector<C: Config>(
 
             let out_point_slice = out_point.slice(builder, 5, out_point.len());
             let in_point_slice = in_point.slice(builder, 5, in_point.len());
-
+            
             let sel = eq_eval_less_or_equal_than(
                 builder,
-                &chip_proof.num_instances_minus_one_bit_decomposition,
+                &ctx.num_instances_bit_decomp,
                 &out_point_slice,
                 &in_point_slice,
             );
             builder.assign(&eval, eval * sel);
 
             (expression, eval)
-            */
         }
-        _ => {
-            unreachable!()
-        }
-    };
-
-    // TODO: just return eval and check it with respect to evals
-    let Expression::StructuralWitIn(wit_id, _) = expr else {
-        panic!("Wrong selector expression format");
-    };
-    let wit_id = wit_id.clone() as usize + offset_eq_id;
-    builder.set(evals, wit_id, eval);
-}
-
-pub fn evaluate_ecc_selector<C: Config>(
-    builder: &mut Builder<C>,
-    sel_type: &SelectorType<E>,
-    evals: &Array<C, Ext<C::F, C::EF>>,
-    out_point: &Array<C, Ext<C::F, C::EF>>,
-    in_point: &Array<C, Ext<C::F, C::EF>>,
-    proof: &EccQuarkProofVariable<C>,
-    offset_eq_id: usize,
-) {
-    /* _debug: verifier program
-    let (expr, eval) = match sel_type {
         SelectorType::QuarkBinaryTreeLessThan(expr) => {
-            return
-            
-            builder.assert_nonzero(&proof.num_instances);
+            builder.assert_nonzero(&ctx.num_instances);
             // assert!(ctx.num_instances <= (1 << out_point.len()));
             builder.assert_nonzero(&out_point.len());
             builder.assert_usize_eq(out_point.len(), in_point.len());
             let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
 
-            let prefix_one_seq = reverse(builder, &proof.prefix_one_seq);
+            let prefix_one_seq = reverse(builder, &chip_proof.prefix_one_seq);
 
             let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let prefix_one_seq_0 = builder.get(&prefix_one_seq, 0);
@@ -1384,7 +1365,6 @@ pub fn evaluate_ecc_selector<C: Config>(
     };
     let wit_id = wit_id.clone() as usize + offset_eq_id;
     builder.set(evals, wit_id, eval);
-    */
 }
 
 // TODO: make this as a function of BooleanHypercube

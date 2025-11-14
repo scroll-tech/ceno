@@ -376,7 +376,7 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub idx_felt: Felt<C::F>,
 
     pub sum_num_instances: Usize<C::N>,
-    pub num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
+    pub sum_num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
     pub log2_num_instances: Usize<C::N>,
 
     pub r_out_evals_len: Usize<C::N>,
@@ -395,6 +395,7 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub has_ecc_proof: Usize<C::N>,
     pub ecc_proof: EccQuarkProofVariable<C>,
     pub num_instances: Array<C, Var<C::N>>,
+    pub num_instances_bit_decompositions: Array<C, Felt<C::F>>,     // len = 96
     pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
     pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
 }
@@ -406,7 +407,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let idx_felt = F::read(builder);
 
         let sum_num_instances = Usize::Var(usize::read(builder));
-        let num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
+        let sum_num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
         let log2_num_instances = Usize::Var(usize::read(builder));
 
         let r_out_evals_len = Usize::Var(usize::read(builder));
@@ -426,6 +427,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let ecc_proof = EccQuarkProofInput::read(builder);
 
         let num_instances = Vec::<usize>::read(builder);
+        let num_instances_bit_decompositions = Vec::<F>::read(builder);
         let fixed_in_evals = Vec::<E>::read(builder);
         let wits_in_evals = Vec::<E>::read(builder);
 
@@ -433,7 +435,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             idx,
             idx_felt,
             sum_num_instances,
-            num_instances_minus_one_bit_decomposition,
+            sum_num_instances_minus_one_bit_decomposition,
             log2_num_instances,
             r_out_evals_len,
             w_out_evals_len,
@@ -449,6 +451,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             has_ecc_proof,
             ecc_proof,
             num_instances,
+            num_instances_bit_decompositions,
             fixed_in_evals,
             wits_in_evals,
         }
@@ -495,9 +498,30 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());
 
-        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
-            &self.num_instances,
-        ));
+        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(&self.num_instances));
+        
+        let mut sum: usize = 0;
+        let mut bit_decomp: Vec<F> = vec![];
+        if self.num_instances.len() > 0 {
+            let eq_instance = self.num_instances[0] - 1;
+            for i in 0..32usize {
+                bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
+            }
+            sum += self.num_instances[0];
+        }
+        if self.num_instances.len() > 1 {
+            let eq_instance = self.num_instances[1] - 1;
+            for i in 0..32usize {
+                bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
+            }
+            sum += self.num_instances[1];
+        }
+        let eq_instance = sum - 1;
+        for i in 0..32usize {
+            bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
+        }
+        stream.extend(bit_decomp.write());
+        
         stream.extend(self.fixed_in_evals.write());
         stream.extend(self.wits_in_evals.write());
 
@@ -885,7 +909,8 @@ impl Hintable<InnerConfig> for SepticPointInput {
 #[derive(DslVariable, Clone)]
 pub struct SelectorContextVariable<C: Config> {
     pub offset: Usize<C::N>,
+    pub offset_bit_decomp: Array<C, Felt<C::F>>,
     pub num_instances: Usize<C::N>,
+    pub num_instances_bit_decomp: Array<C, Felt<C::F>>,
     pub num_vars: Usize<C::N>,
-
 }
