@@ -224,74 +224,27 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         &records[offset..][..cs.lk_expressions.len()]
     };
 
-    // Use GPU version of masked_mle_split_to_chunks to avoid CPU-GPU data transfers
+    // prod
     let mut r_set_gpu_chunks = Vec::new();
     let mut w_set_gpu_chunks = Vec::new();
-
-    // Process read set witnesses using GPU
     for wit in r_set_wit.iter() {
-        let gpu_chunks = cuda_hal
-            .tower
-            .masked_mle_split_to_chunks(
-                &cuda_hal,
-                wit.as_ceno_gpu_ext(),
-                num_instances_with_rotation,
-                NUM_FANIN,
-                BB31Ext::ONE,
-            )
-            .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for r_set: {:?}", e))?;
+        let gpu_chunks = wit.as_view_chunks(NUM_FANIN);
         r_set_gpu_chunks.push(gpu_chunks);
     }
-
-    // Process write set witnesses using GPU
     for wit in w_set_wit.iter() {
-        let gpu_chunks = cuda_hal
-            .tower
-            .masked_mle_split_to_chunks(
-                &cuda_hal,
-                wit.as_ceno_gpu_ext(),
-                num_instances_with_rotation,
-                NUM_FANIN,
-                BB31Ext::ONE,
-            )
-            .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for w_set: {:?}", e))?;
+        let gpu_chunks = wit.as_view_chunks(NUM_FANIN);
         w_set_gpu_chunks.push(gpu_chunks);
     }
 
-    // Process logup witnesses using GPU
+    // logup
     let mut lk_numerator_gpu_chunks = Vec::new();
     let mut lk_denominator_gpu_chunks = Vec::new();
-
     for wit in lk_n_wit.iter() {
-        let gpu_chunks = cuda_hal
-            .tower
-            .masked_mle_split_to_chunks(
-                &cuda_hal,
-                wit.as_ceno_gpu_ext(),
-                num_instances_with_rotation,
-                NUM_FANIN_LOGUP,
-                BB31Ext::ONE,
-            )
-            .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for lk_n: {:?}", e))?;
+        let gpu_chunks = wit.as_view_chunks(NUM_FANIN_LOGUP);
         lk_numerator_gpu_chunks.push(gpu_chunks);
     }
-
     for wit in lk_d_wit.iter() {
-        // For GPU backend, E must be GoldilocksExt2. This is ensured by the caller.
-        let chip_record_alpha_gl: BB31Ext = unsafe {
-            assert_eq!(std::mem::size_of::<E>(), std::mem::size_of::<BB31Ext>());
-            std::mem::transmute_copy(&chip_record_alpha)
-        };
-        let gpu_chunks = cuda_hal
-            .tower
-            .masked_mle_split_to_chunks(
-                &cuda_hal,
-                wit.as_ceno_gpu_ext(),
-                num_instances_with_rotation,
-                NUM_FANIN_LOGUP,
-                chip_record_alpha_gl,
-            )
-            .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for lk_d: {:?}", e))?;
+        let gpu_chunks = wit.as_view_chunks(NUM_FANIN_LOGUP);
         lk_denominator_gpu_chunks.push(gpu_chunks);
     }
 
