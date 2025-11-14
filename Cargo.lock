@@ -1366,8 +1366,11 @@ dependencies = [
 [[package]]
 name = "cuda_hal"
 version = "0.1.0"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=feat%2Fgpu_split_by_chunk#3ca63eae34d771da537f4762078949b6ac29573b"
 dependencies = [
  "anyhow",
+ "cudarc",
+ "downcast-rs",
  "ff_ext",
  "itertools 0.13.0",
  "mpcs",
@@ -1375,8 +1378,10 @@ dependencies = [
  "p3",
  "rand 0.8.5",
  "rayon",
+ "sppark",
+ "sppark_plug",
  "sumcheck",
- "thiserror 2.0.12",
+ "thiserror 1.0.69",
  "tracing",
  "transcript",
  "witness",
@@ -2187,6 +2192,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "home"
+version = "0.5.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
+dependencies = [
+ "windows-sys 0.61.1",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2641,6 +2655,12 @@ dependencies = [
  "pkg-config",
  "vcpkg",
 ]
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "linux-raw-sys"
@@ -4120,6 +4140,19 @@ dependencies = [
 
 [[package]]
 name = "rustix"
+version = "0.38.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys 0.4.15",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "rustix"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c71e83d6afe7ff64890ec6b71d6a69bb8a610ab78ce364b3352876bb4c801266"
@@ -4127,7 +4160,7 @@ dependencies = [
  "bitflags",
  "errno",
  "libc",
- "linux-raw-sys",
+ "linux-raw-sys 0.9.4",
  "windows-sys 0.59.0",
 ]
 
@@ -4518,6 +4551,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "sppark"
+version = "0.1.11"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=feat%2Fgpu_split_by_chunk#3ca63eae34d771da537f4762078949b6ac29573b"
+dependencies = [
+ "cc",
+ "which",
+]
+
+[[package]]
+name = "sppark_plug"
+version = "0.1.0"
+source = "git+ssh://git@github.com/scroll-tech/ceno-gpu.git?branch=feat%2Fgpu_split_by_chunk#3ca63eae34d771da537f4762078949b6ac29573b"
+dependencies = [
+ "cc",
+ "ff_ext",
+ "itertools 0.13.0",
+ "p3",
+ "sppark",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4703,7 +4757,7 @@ dependencies = [
  "fastrand",
  "getrandom 0.3.2",
  "once_cell",
- "rustix",
+ "rustix 1.0.7",
  "windows-sys 0.59.0",
 ]
 
@@ -5287,6 +5341,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "which"
+version = "4.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
+dependencies = [
+ "either",
+ "home",
+ "once_cell",
+ "rustix 0.38.44",
+]
+
+[[package]]
 name = "whir"
 version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
@@ -5415,6 +5481,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2f500e4d28234f72040990ec9d39e3a6b950f9f22d3dba18416c35882612bcb"
 dependencies = [
  "windows-targets 0.53.4",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.61.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f109e41dd4a3c848907eb83d5a42ea98b3769495597450cf6d153507b166f0f"
+dependencies = [
+ "windows-link",
 ]
 
 [[package]]
