@@ -202,6 +202,11 @@ pub fn verify_tower_proof<C: Config>(
 
     transcript_observe_label(builder, challenger, b"combine subset evals");
     let alpha = challenger.sample_ext(builder);
+
+    // _debug
+    builder.print_debug(545);
+    builder.print_e(alpha);
+
     let alpha_acc: Ext<C::F, C::EF> = builder.eval(zero + one);
 
     // initial_claim = \sum_j alpha^j * out_j[rt]
@@ -306,6 +311,11 @@ pub fn verify_tower_proof<C: Config>(
             builder.assign(&alpha_acc, alpha_acc * alpha);
         });
     builder.cycle_tracker_end("initial sum");
+
+    // _debug
+    builder.print_debug(535);
+    builder.print_e(initial_claim);
+
 
     let curr_pt = initial_rt.clone();
     let curr_eval = initial_claim.clone();

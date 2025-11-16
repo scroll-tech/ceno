@@ -841,6 +841,9 @@ mod tests {
                 2,
                 &PointAndEval::default(),
                 &challenges,
+
+                // _debug
+                0,
             )
             .expect("verify global chip proof");
         assert_eq!(vrf_point, point);

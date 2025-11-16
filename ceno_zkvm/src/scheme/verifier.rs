@@ -358,6 +358,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 NUM_FANIN,
                 &point_eval,
                 &challenges,
+
+                // _debug
+                *index,
             )?;
 
             // _debug
@@ -472,7 +475,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
+        // _debug
+        chip_idx: usize,
     ) -> Result<(Point<E>, Option<SepticPoint<E::BaseField>>), ZKVMError> {
+        // _debug
+        if chip_idx == 69 {
+            // _DEBUG: CENO
+            let test = transcript.read_challenge();
+            println!("=> 171 - test challenge: {:?}", test);
+        }
+        
         let composed_cs = circuit_vk.get_cs();
         let ComposedConstrainSystem {
             zkvm_v1_css: cs,
@@ -570,7 +582,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
-
         let (_, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
             proof
                 .r_out_evals
@@ -726,6 +737,11 @@ impl TowerVerify {
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
+
+        // _debug
+        println!("=> 545 - TowerVerify::verify alpha_pows: {:?}", alpha_pows);
+
+
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])
@@ -768,6 +784,11 @@ impl TowerVerify {
             )
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
             .sum::<E>();
+
+
+        // _debug
+        println!("=> 535 - initial claim: {:?}", initial_claim);
+
 
         let max_num_variables = num_variables.iter().max().unwrap();
 

@@ -270,7 +270,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     // _debug
     // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
-    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(69) {
+    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(70) {
         // _debug
         // println!("=> circuit_name: {:?}", circuit_name);
 
@@ -636,32 +636,32 @@ pub fn verify_chip_proof<C: Config>(
         is_infinity: Usize::from(0),
     };
 
-    /* _debug: ecc
+    // _debug
     if composed_cs.has_ecc_ops() {
         builder.assert_nonzero(&chip_proof.has_ecc_proof);
         let ecc_proof = &chip_proof.ecc_proof;
 
-        let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
-        let expected_septic_xy = cs
-            .ec_final_sum
-            .iter()
-            .map(|expr| {
-                let e = eval_ceno_expr_with_instance(
-                    builder, 
-                    &empty_arr, 
-                    &empty_arr, 
-                    &empty_arr, 
-                    pi_evals, 
-                    challenges, 
-                    expr
-                );
+        // let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
+        // let expected_septic_xy = cs
+        //     .ec_final_sum
+        //     .iter()
+        //     .map(|expr| {
+        //         let e = eval_ceno_expr_with_instance(
+        //             builder, 
+        //             &empty_arr, 
+        //             &empty_arr, 
+        //             &empty_arr, 
+        //             pi_evals, 
+        //             challenges, 
+        //             expr
+        //         );
 
-                // _debug
-                builder.print_e(e);
+        //         // _debug
+        //         builder.print_e(e);
 
-                e
-            })
-            .collect_vec();
+        //         e
+        //     })
+        //     .collect_vec();
 
         // _debug: check ecc
         // let expected_septic_x: SepticExtension<E::BaseField> =
@@ -672,10 +672,14 @@ pub fn verify_chip_proof<C: Config>(
         // assert_eq!(&ecc_proof.sum.x, &expected_septic_x);
         // assert_eq!(&ecc_proof.sum.y, &expected_septic_y);
         // assert!(!ecc_proof.sum.is_infinity);
-        // EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
+
+        verify_ecc_proof(builder, challenger, ecc_proof, unipoly_extrapolator);
+
         // tracing::debug!("ecc proof verified.");
         // Some(ecc_proof.sum.clone())
     }
+
+    /* _debug: ecc
     */
 
     let tower_proof = &chip_proof.tower_proof;
@@ -706,6 +710,9 @@ pub fn verify_chip_proof<C: Config>(
         unipoly_extrapolator,
     );
     builder.cycle_tracker_end("verify tower proof for opcode");
+
+    // _debug
+    // builder.print_debug(525);
 
     // _debug: export
     // builder.print_debug(747);
@@ -1734,13 +1741,11 @@ pub fn generate_layer_challenges<C: Config>(
 pub fn verify_ecc_proof<C: Config>(
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
-    proof: EccQuarkProofVariable<C>,
+    proof: &EccQuarkProofVariable<C>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
 ) {
     let num_vars = proof.num_vars.clone();
-    let one = builder.constant(C::EF::ONE);
-    let zero = builder.constant(C::EF::ZERO);
-
+    
     // Derive out_rt
     transcript_observe_label(builder, challenger, b"ecc");
     let out_rt: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(num_vars.clone());
@@ -1772,7 +1777,10 @@ pub fn verify_ecc_proof<C: Config>(
         unipoly_extrapolator,
     );
 
+    /* _debug: ecc
     // Calculate v1, v2, v3, v4, v5
+    // let one = builder.constant(C::EF::ONE);
+    // let zero = builder.constant(C::EF::ZERO);
     let cord_slice = proof.evals.slice(builder, 2, proof.evals.len());
     let s0: SepticExtensionVariable<C> =
         cord_slice.slice(builder, 0, SEPTIC_EXTENSION_DEGREE).into();
@@ -1919,6 +1927,7 @@ pub fn verify_ecc_proof<C: Config>(
         add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass,
     );
     builder.assert_ext_eq(expected_evaluation, calculated_evaluation);
+    */
 }
 
 pub fn septic_ext_squared<C: Config>(
