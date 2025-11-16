@@ -503,20 +503,34 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let mut sum: usize = 0;
         let mut bit_decomp: Vec<F> = vec![];
         if self.num_instances.len() > 0 {
-            let eq_instance = self.num_instances[0] - 1;
+            let eq_instance = if self.num_instances[0] > 0 {
+                self.num_instances[0] - 1
+            } else {
+                0
+            };
+            
             for i in 0..32usize {
                 bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
             }
             sum += self.num_instances[0];
         }
         if self.num_instances.len() > 1 {
-            let eq_instance = self.num_instances[1] - 1;
+            let eq_instance = if self.num_instances[1] > 0 {
+                self.num_instances[1] - 1
+            } else {
+                0
+            };
+
             for i in 0..32usize {
                 bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
             }
             sum += self.num_instances[1];
         }
-        let eq_instance = sum - 1;
+        let eq_instance = if sum > 0 { 
+            sum - 1
+        } else {
+            0
+        };
         for i in 0..32usize {
             bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
         }

@@ -249,6 +249,10 @@ impl<E: ExtensionField> Layer<E> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
+        // _debug
+        // println!("=> 777");
+        // println!("=> eval_and_dedup_points: {:?}", eval_and_dedup_points);
+
         let LayerClaims { in_point, evals } = match self.ty {
             LayerType::Zerocheck => <Layer<_> as ZerocheckLayer<E>>::verify(
                 self,
@@ -296,6 +300,11 @@ impl<E: ExtensionField> Layer<E> {
                         eval
                     })
                     .collect_vec();
+
+                // _debug
+                // println!("=> 909 - extract_claim_and_point: {:?}", evals);
+
+
                 // within same group, all the point should be the same
                 // so we assume only take first point as representative
                 let point = out_evals.first().map(|out_eval| {

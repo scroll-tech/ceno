@@ -226,9 +226,9 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let beta = challenger.sample_ext(builder);
 
     // _debug
-    // builder.print_debug(999);
-    // builder.print_e(alpha);
-    // builder.print_e(beta);
+    builder.print_debug(999);
+    builder.print_e(alpha);
+    builder.print_e(beta);
 
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(2);
     builder.set(&challenges, 0, alpha.clone());
@@ -270,7 +270,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     // _debug
     // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
-    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(1) {
+    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(68) {
         // _debug
         // println!("=> circuit_name: {:?}", circuit_name);
 
@@ -282,9 +282,11 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             let chip_proof =
                 builder.get(&zkvm_proof_input.chip_proofs, num_chips_verified.get_var());
             
+            /* _debug: multi shard
             builder.if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
                 builder.assert_usize_eq(Usize::from(with_omc_init_only), Usize::from(0));
             });
+            */
 
             builder.assert_usize_eq(
                 chip_proof.wits_in_evals.len(),
@@ -359,7 +361,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             }
 
             // _debug
-            // builder.print_debug(999);
+            builder.print_debug(888);
             // builder.print_e(logup_sum);
             // builder.print_v(dummy_table_item_multiplicity);
 
@@ -375,22 +377,24 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             );
             builder.cycle_tracker_end("Verify chip proof");
 
-            /* _debug
-            // _DEBUG: CENO RECURSION VERIFIER 
-            let test = challenger.sample_ext(builder);
-            builder.print_debug(171);
-            builder.print_e(test);
-
+            // _debug
+            builder.print_debug(777);
+            let e = builder.get(&input_opening_point, 0);
+            // print_ext_arr(builder, &input_opening_point);
+            builder.print_e(e);
+            
             let point_clone: Array<C, Ext<C::F, C::EF>> = builder.eval(input_opening_point.clone());
-            let witin_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
-                num_var: input_opening_point.len().get_var(),
-                point_and_evals: PointAndEvalsVariable {
-                    point: PointVariable { fs: point_clone },
-                    evals: chip_proof.wits_in_evals,
-                },
-            });
-            builder.set_value(&witin_openings, num_chips_verified.get_var(), witin_round);
 
+            if circuit_vk.get_cs().num_witin() > 0 {
+                let witin_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
+                    num_var: input_opening_point.len().get_var(),
+                    point_and_evals: PointAndEvalsVariable {
+                        point: PointVariable { fs: point_clone },
+                        evals: chip_proof.wits_in_evals,
+                    },
+                });
+                builder.set_value(&witin_openings, num_chips_verified.get_var(), witin_round);
+            }
             if circuit_vk.get_cs().num_fixed() > 0 {
                 let fixed_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
                     num_var: input_opening_point.len().get_var(),
@@ -418,23 +422,31 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             if let Some(chip_shard_ec_sum) = chip_shard_ec_sum {
                 shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
             }
-            */
-
-            */
+            */             
         });
     }
+
+
+               /* _debug
+            // _DEBUG: CENO RECURSION VERIFIER 
+            let test = challenger.sample_ext(builder);
+            builder.print_debug(171);
+            builder.print_e(test);
+
+
+            */
     
     // _debug: check
     // builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
 
+
+    /* _debug: program
     let dummy_table_item_multiplicity =
         builder.unsafe_cast_var_to_felt(dummy_table_item_multiplicity);
     builder.assign(
         &logup_sum,
         logup_sum - dummy_table_item_multiplicity * dummy_table_item.inverse(),
     );
-
-    /* _debug: program
 
     let rounds: Array<C, RoundVariable<C>> = if num_fixed_opening > 0 {
         builder.dyn_array(2)
@@ -623,12 +635,11 @@ pub fn verify_chip_proof<C: Config>(
         y: SepticExtensionVariable { vs: builder.dyn_array(7) },
         is_infinity: Usize::from(0),
     };
+
+    /* _debug: ecc
     if composed_cs.has_ecc_ops() {
         builder.assert_nonzero(&chip_proof.has_ecc_proof);
         let ecc_proof = &chip_proof.ecc_proof;
-
-        // _debug
-        builder.print_debug(233);
 
         let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
         let expected_septic_xy = cs
@@ -665,6 +676,7 @@ pub fn verify_chip_proof<C: Config>(
         // tracing::debug!("ecc proof verified.");
         // Some(ecc_proof.sum.clone())
     }
+    */
 
     let tower_proof = &chip_proof.tower_proof;
     let num_variables: Array<C, Usize<C::N>> = builder.dyn_array(num_batched);
@@ -679,7 +691,6 @@ pub fn verify_chip_proof<C: Config>(
         &chip_proof.r_out_evals,
         &chip_proof.w_out_evals,
     );
-
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
 
     builder.cycle_tracker_start("verify tower proof for opcode");
@@ -696,6 +707,24 @@ pub fn verify_chip_proof<C: Config>(
     );
     builder.cycle_tracker_end("verify tower proof for opcode");
 
+    // _debug: export
+    // builder.print_debug(747);
+    // iter_zip!(builder, record_evals).for_each(|ptr_vec, builder| {
+    //     let pct = builder.iter_ptr_get(&record_evals, ptr_vec[0]);
+    //     let e = pct.eval;
+    //     builder.print_e(e);
+    // });
+    // iter_zip!(builder, logup_p_evals).for_each(|ptr_vec, builder| {
+    //     let pct = builder.iter_ptr_get(&logup_p_evals, ptr_vec[0]);
+    //     let e = pct.eval;
+    //     builder.print_e(e);
+    // });
+    // iter_zip!(builder, logup_q_evals).for_each(|ptr_vec, builder| {
+    //     let pct = builder.iter_ptr_get(&logup_q_evals, ptr_vec[0]);
+    //     let e = pct.eval;
+    //     builder.print_e(e);
+    // });
+
     if cs.lk_table_expressions.is_empty() {
         builder.range(0, logup_p_evals.len()).for_each(|idx_vec, builder| {
             let eval = builder.get(&logup_p_evals, idx_vec[0]).eval;
@@ -703,7 +732,7 @@ pub fn verify_chip_proof<C: Config>(
         });
     }
 
-    // _debug
+    // _debug: constraint
     // debug_assert!(
     //     chain!(&record_evals, &logup_p_evals, &logup_q_evals)
     //         .map(|e| &e.point)
@@ -714,7 +743,6 @@ pub fn verify_chip_proof<C: Config>(
     builder.assert_usize_eq(record_evals.len(), num_rw_records.clone());
     builder.assert_usize_eq(logup_p_evals.len(), lk_counts_per_instance.clone());
     builder.assert_usize_eq(logup_q_evals.len(), lk_counts_per_instance.clone());
-
     
     // GKR circuit
     let out_evals_len: Usize<C::N> = if cs.lk_table_expressions.is_empty() {
@@ -724,7 +752,14 @@ pub fn verify_chip_proof<C: Config>(
     };
     
     let out_evals: Array<C, PointAndEvalVariable<C>> = builder.dyn_array(out_evals_len.clone());
-    
+
+    // _debug
+    // builder.print_debug(686);
+    // builder.print_v(out_evals_len.get_var());
+    // builder.print_v(record_evals.len().get_var());
+    // builder.print_v(logup_p_evals.len().get_var());
+    // builder.print_v(logup_q_evals.len().get_var());
+
     builder
         .range(0, record_evals.len())
         .for_each(|idx_vec, builder| {
@@ -740,7 +775,7 @@ pub fn verify_chip_proof<C: Config>(
         builder
             .range(0, logup_p_evals.len())
             .for_each(|idx_vec, builder| {
-                let cpt = builder.get(&logup_q_evals, idx_vec[0]);
+                let cpt = builder.get(&logup_p_evals, idx_vec[0]);
                 builder.set(&p_slice, idx_vec[0], cpt);
             });
     } else {
@@ -756,15 +791,19 @@ pub fn verify_chip_proof<C: Config>(
         });
 
     // _debug
-    builder.print_debug(777);
-    builder.range(0, out_evals.len()).for_each(|idx_vec, builder| {
-        let cpt = builder.get(&out_evals, idx_vec[0]);
-        builder.print_e(cpt.eval);
-    });
+    // builder.print_debug(676);
+    // builder.range(0, out_evals.len()).for_each(|idx_vec, builder| {
+    //     let cpt = builder.get(&out_evals, idx_vec[0]);
+    //     builder.print_e(cpt.eval);
+    // });
 
     let gkr_circuit = gkr_circuit.clone().unwrap();
+    
+    // _debug
+    let selector_ctxs: Vec<SelectorContextVariable<C>> = vec![];
+    /* _debug: selector
     let zero_decomp = builder.dyn_array(32);
-    let selector_ctxs: Vec<SelectorContextVariable<C>> = if cs.ec_final_sum.is_empty() {
+    if cs.ec_final_sum.is_empty() {
         builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(1));
         vec![
             SelectorContextVariable {
@@ -811,9 +850,10 @@ pub fn verify_chip_proof<C: Config>(
             },
         ]
     };
+    */
 
     builder.cycle_tracker_start("Verify GKR Circuit");
-    let opening_evaluations = verify_gkr_circuit(
+    let rt = verify_gkr_circuit(
         builder,
         challenger,
         num_var_with_rotation,
@@ -828,13 +868,7 @@ pub fn verify_chip_proof<C: Config>(
     );
     builder.cycle_tracker_end("Verify GKR Circuit");
 
-
-    /* _debug: verifier program
-    builder.eval(opening_evaluations[0].point.fs.clone())
-    */
-
-    // _debug: placeholder
-    (builder.dyn_array(0), shard_ec_sum)
+    (rt.fs, shard_ec_sum)
 }
 
 pub fn verify_gkr_circuit<C: Config>(
@@ -849,7 +883,11 @@ pub fn verify_gkr_circuit<C: Config>(
     chip_proof: &ZKVMChipProofInputVariable<C>,
     selector_ctxs: Vec<SelectorContextVariable<C>>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
-) -> Vec<GKRClaimEvaluation<C>> {
+// _debug
+// ) -> Vec<GKRClaimEvaluation<C>> {
+) -> PointVariable<C> {
+    let rt = PointVariable { fs: builder.dyn_array(0) };
+
     for (i, layer) in gkr_circuit.layers.iter().enumerate() {
         let layer_proof = builder.get(&gkr_proof.layer_proofs, i);
         let layer_challenges: Array<C, Ext<C::F, C::EF>> =
@@ -861,7 +899,15 @@ pub fn verify_gkr_circuit<C: Config>(
             &layer_challenges,
             &layer_proof.has_rotation,
         );
-        builder.assert_usize_eq(Usize::from(layer.out_sel_and_eval_exprs.len()), eval_and_dedup_points.len());
+        // _debug
+        // builder.assert_usize_eq(Usize::from(layer.out_sel_and_eval_exprs.len()), eval_and_dedup_points.len());
+
+        // _debug
+        // builder.print_debug(777);
+        // iter_zip!(builder, eval_and_dedup_points).for_each(|ptr_vec, builder| {
+        //     let cpt = builder.iter_ptr_get(&eval_and_dedup_points, ptr_vec[0]);
+        //     print_ext_arr(builder, &cpt.evals);
+        // });
 
         // ZeroCheckLayer verification (might include other layer types in the future)
         let LayerProofVariable {
@@ -875,75 +921,83 @@ pub fn verify_gkr_circuit<C: Config>(
             has_rotation,
         } = layer_proof;
 
-        let expected_main_evals_len = Usize::from(layer.n_witin + layer.n_fixed + layer.n_instance + layer.n_structural_witin);
+        let expected_main_evals_len: Usize<C::N> = Usize::from(layer.n_witin + layer.n_fixed + layer.n_instance + layer.n_structural_witin);
         builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
 
-        builder.if_eq(has_rotation, Usize::from(1)).then(|builder| {
-            let first = builder.get(&eval_and_dedup_points, 0);
-            builder.assert_usize_eq(first.has_point, Usize::from(1)); // Rotation proof should have at least one point
-            let rt = builder.eval(first.point.fs.clone());
+        // _debug
+        // builder.print_debug(838);
 
-            let RotationClaim {
-                left_evals,
-                right_evals,
-                target_evals,
-                left_point,
-                right_point,
-                origin_point,
-            } = verify_rotation(
-                builder,
-                max_num_variables.clone(),
-                layer.rotation_exprs.1.len(),
-                layer.rotation_sumcheck_expression.as_ref().unwrap(),
-                &rotation_proof,
-                layer.rotation_cyclic_subgroup_size,
-                layer.rotation_cyclic_group_log2,
-                rt,
-                challenges,
-                challenger,
-                unipoly_extrapolator,
-            );
+        if layer.rotation_sumcheck_expression.is_some() {
+            builder.if_eq(has_rotation, Usize::from(1)).then(|builder| {
+                // _debug
+                // builder.print_debug(898);
+            
+                let first = builder.get(&eval_and_dedup_points, 0);
+                builder.assert_usize_eq(first.has_point, Usize::from(1)); // Rotation proof should have at least one point
+                let rt = builder.eval(first.point.fs.clone());
 
-            // extend eval_and_dedup_points by
-            //  [
-            //     (left_evals, left_point),
-            //     (right_evals, right_point),
-            //     (target_evals, origin_point),
-            //  ]
-            let last_idx: Usize<C::N> = builder.eval(eval_and_dedup_points.len() - Usize::from(1));
-            builder.set(
-                &eval_and_dedup_points,
-                last_idx.clone(),
-                ClaimAndPoint {
-                    evals: target_evals,
-                    has_point: Usize::from(1),
-                    point: PointVariable { fs: origin_point },
-                },
-            );
+                let RotationClaim {
+                    left_evals,
+                    right_evals,
+                    target_evals,
+                    left_point,
+                    right_point,
+                    origin_point,
+                } = verify_rotation(
+                    builder,
+                    challenger,
+                    max_num_variables.clone(),
+                    layer.rotation_exprs.1.len(),
+                    layer.rotation_sumcheck_expression.as_ref().unwrap(),
+                    &rotation_proof,
+                    layer.rotation_cyclic_subgroup_size,
+                    layer.rotation_cyclic_group_log2,
+                    rt,
+                    challenges,
+                    unipoly_extrapolator,
+                );
 
-            builder.assign(&last_idx, last_idx.clone() - Usize::from(1));
-            builder.set(
-                &eval_and_dedup_points,
-                last_idx.clone(),
-                ClaimAndPoint {
-                    evals: right_evals,
-                    has_point: Usize::from(1),
-                    point: PointVariable { fs: right_point },
-                },
-            );
+                // extend eval_and_dedup_points by
+                //  [
+                //     (left_evals, left_point),
+                //     (right_evals, right_point),
+                //     (target_evals, origin_point),
+                //  ]
+                let last_idx: Usize<C::N> = builder.eval(eval_and_dedup_points.len() - Usize::from(1));
+                builder.set(
+                    &eval_and_dedup_points,
+                    last_idx.clone(),
+                    ClaimAndPoint {
+                        evals: target_evals,
+                        has_point: Usize::from(1),
+                        point: PointVariable { fs: origin_point },
+                    },
+                );
 
-            builder.assign(&last_idx, last_idx.clone() - Usize::from(1));
-            builder.set(
-                &eval_and_dedup_points,
-                last_idx.clone(),
-                ClaimAndPoint {
-                    evals: left_evals,
-                    has_point: Usize::from(1),
-                    point: PointVariable { fs: left_point },
-                },
-            );
-        });
+                builder.assign(&last_idx, last_idx.clone() - Usize::from(1));
+                builder.set(
+                    &eval_and_dedup_points,
+                    last_idx.clone(),
+                    ClaimAndPoint {
+                        evals: right_evals,
+                        has_point: Usize::from(1),
+                        point: PointVariable { fs: right_point },
+                    },
+                );
 
+                builder.assign(&last_idx, last_idx.clone() - Usize::from(1));
+                builder.set(
+                    &eval_and_dedup_points,
+                    last_idx.clone(),
+                    ClaimAndPoint {
+                        evals: left_evals,
+                        has_point: Usize::from(1),
+                        point: PointVariable { fs: left_point },
+                    },
+                );
+            });
+        }
+        
         let rotation_exprs_len = layer.rotation_exprs.1.len();
         transcript_observe_label(builder, challenger, b"combine subset evals");
         let alpha_pows = gen_alpha_pows(
@@ -951,6 +1005,10 @@ pub fn verify_gkr_circuit<C: Config>(
             challenger,
             Usize::from(layer.exprs.len() + rotation_exprs_len * ROTATION_OPENING_COUNT),
         );
+
+        // _debug
+        // builder.print_debug(838);
+        // print_ext_arr(builder, &alpha_pows);
 
         let sigma: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
         let alpha_idx: Usize<C::N> = Usize::Var(Var::uninit(builder));
@@ -980,6 +1038,12 @@ pub fn verify_gkr_circuit<C: Config>(
         let max_num_variables_f =
             builder.unsafe_cast_var_to_felt(max_num_variables.get_var());
         
+        // _debug
+        // builder.print_debug(626);
+        // builder.print_e(sigma);
+        // builder.print_f(max_num_variables_f);
+        // builder.print_f(max_degree);
+
         let (in_point, expected_evaluation) = iop_verifier_state_verify(
             builder,
             challenger,
@@ -990,6 +1054,11 @@ pub fn verify_gkr_circuit<C: Config>(
             unipoly_extrapolator,
         );
 
+        // _debug
+        // builder.print_debug(636);
+        // print_ext_arr(builder, &in_point);
+
+        /* _debug: ecc
         let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
 
         // check selector evaluations
@@ -1012,6 +1081,66 @@ pub fn verify_gkr_circuit<C: Config>(
                     selector_ctx,
                 );
             });
+
+        // check structural witin
+        for StructuralWitIn { id, witin_type } in &self.structural_witins {
+            let wit_id = *id as usize + structural_witin_offset;
+            let expected_eval = match witin_type {
+                StructuralWitInType::EqualDistanceSequence {
+                    offset,
+                    multi_factor,
+                    descending,
+                    ..
+                } => eval_wellform_address_vec(
+                    *offset as u64,
+                    *multi_factor as u64,
+                    &in_point,
+                    *descending,
+                ),
+                StructuralWitInType::StackedIncrementalSequence { .. } => {
+                    eval_stacked_wellform_address_vec(&in_point)
+                }
+
+                StructuralWitInType::StackedConstantSequence { .. } => {
+                    eval_stacked_constant_vec(&in_point)
+                }
+                StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
+                    eval_inner_repeated_incremental_vec(*k as u64, &in_point)
+                }
+                StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
+                    eval_outer_repeated_incremental_vec(*k as u64, &in_point)
+                }
+                StructuralWitInType::Empty => continue,
+            };
+            if expected_eval != main_evals[wit_id] {
+                return Err(BackendError::LayerVerificationFailed(
+                    format!("layer {} structural witin mismatch", self.name.clone()).into(),
+                    VerifierError::ClaimNotMatch(
+                        format!("{}", expected_eval).into(),
+                        format!("{}", main_evals[wit_id]).into(),
+                    ),
+                ));
+            }
+        }
+
+        // check pub-io
+        // assume public io is tiny vector, so we evaluate it directly without PCS
+        let pubio_offset = self.n_witin + self.n_fixed;
+        for (index, instance) in self.instance_openings.iter().enumerate() {
+            let index: usize = pubio_offset + index;
+            let poly = raw_pi[instance.0].to_vec().into_mle();
+            let expected_eval = poly.evaluate(&in_point[..poly.num_vars()]);
+            if expected_eval != main_evals[index] {
+                return Err(BackendError::LayerVerificationFailed(
+                    format!("layer {} pi mismatch", self.name.clone()).into(),
+                    VerifierError::ClaimNotMatch(
+                        format!("{}", expected_eval).into(),
+                        format!("{}", main_evals[index]).into(),
+                    ),
+                ));
+            }
+        }
+        */
 
         // TODO: we should store alpha_pows in a bigger array to avoid concatenating them
         let main_sumcheck_challenges_len: Usize<C::N> =
@@ -1058,6 +1187,8 @@ pub fn verify_gkr_circuit<C: Config>(
                 });
                 builder.set_value(&claims, *pos, new_point_eval);
             });
+
+        builder.assign(&rt.fs, in_point);
     }
 
     // GKR Claim
@@ -1074,11 +1205,14 @@ pub fn verify_gkr_circuit<C: Config>(
                 poly: Usize::from(poly),
             }
         })
-        .collect_vec()
+        .collect_vec();
+
+    rt
 }
 
 pub fn verify_rotation<C: Config>(
     builder: &mut Builder<C>,
+    challenger: &mut DuplexChallengerVariable<C>,
     max_num_variables: Usize<C::N>,
     num_rotations: usize,
     rotation_sumcheck_expression: &Expression<E>,
@@ -1087,7 +1221,6 @@ pub fn verify_rotation<C: Config>(
     rotation_cyclic_group_log2: usize,
     rt: Array<C, Ext<C::F, C::EF>>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
-    challenger: &mut DuplexChallengerVariable<C>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
 ) -> RotationClaim<C> {
     builder.cycle_tracker_start("Verify rotation");
@@ -1168,7 +1301,7 @@ pub fn verify_rotation<C: Config>(
     let last_idx = Usize::uninit(builder);
     builder.assign(&last_idx, witnesses.len() - Usize::from(1));
     builder.set(&witnesses, last_idx, selector_eval);
-    
+
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     let got_claim = eval_ceno_expr_with_instance(
         builder,
@@ -1176,7 +1309,7 @@ pub fn verify_rotation<C: Config>(
         &witnesses,
         &empty_arr,
         &empty_arr,
-        challenges,
+        &rotation_challenges,
         rotation_sumcheck_expression
     );
 
@@ -1510,9 +1643,7 @@ pub fn extract_claim_and_point<C: Config>(
         &r_len,
         has_rotation.clone() * Usize::from(3) + Usize::from(layer.out_sel_and_eval_exprs.len()),
     );
-
     let r = builder.dyn_array(r_len);
-
     layer
         .out_sel_and_eval_exprs
         .iter()
@@ -1520,14 +1651,29 @@ pub fn extract_claim_and_point<C: Config>(
         .for_each(|(i, (_, out_evals))| {
             let evals = out_evals
                 .iter()
-                .map(|out_eval| evaluate_gkr_expression(builder, out_eval, claims, challenges))
+                .map(|out_eval| {
+                    // _debug
+                    // println!("=> 1010 - out_eval: {:?}", out_eval);
+
+                    let e = evaluate_gkr_expression(builder, out_eval, claims, challenges);
+
+                    e
+                })
                 .collect_vec();
+
+            // _debug
+            // builder.print_debug(919);
+            // evals.iter().for_each(|cpt| builder.print_e(cpt.eval));
 
             let point = evals.first().map(|claim| builder.eval(claim.point.clone()));
             let evals_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(evals.len());
             for (j, e) in evals.iter().enumerate() {
                 builder.set_value(&evals_arr, j, e.eval);
             }
+
+            // _debug
+            // builder.print_debug(909);
+            // print_ext_arr(builder, &evals_arr);
 
             if point.is_some() {
                 builder.set(
@@ -1583,283 +1729,6 @@ pub fn generate_layer_challenges<C: Config>(
     }
 
     r
-}
-
-pub fn verify_table_proof<C: Config>(
-    builder: &mut Builder<C>,
-    challenger: &mut DuplexChallengerVariable<C>,
-    table_proof: &ZKVMChipProofInputVariable<C>,
-    raw_pi: &Array<C, Array<C, Felt<C::F>>>,
-    raw_pi_num_variables: &Array<C, Var<C::N>>,
-    pi_evals: &Array<C, Ext<C::F, C::EF>>,
-    challenges: &Array<C, Ext<C::F, C::EF>>,
-    vk: &VerifyingKey<E>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
-    poly_evaluator: &mut PolyEvaluator<C>,
-) -> Array<C, Ext<C::F, C::EF>> {
-    let cs = vk.get_cs();
-    let tower_proof: &super::binding::TowerProofInputVariable<C> = &table_proof.tower_proof;
-
-    let r_expected_rounds: Array<C, Usize<C::N>> =
-        builder.dyn_array(cs.zkvm_v1_css.r_table_expressions.len() * 2);
-
-    /* _debug: verifier program
-    cs
-        // only iterate r set, as read/write set round should match
-        .zkvm_v1_css
-        .r_table_expressions
-        .iter()
-        .enumerate()
-        .for_each(|(idx, expr)| {
-            let num_vars: Usize<C::N> = match expr.table_spec.len {
-                Some(l) => Usize::from(ceil_log2(l)),
-                None => {
-                    let var_vec = expr
-                        .table_spec
-                        .structural_witins
-                        .iter()
-                        .map(|StructuralWitIn { .. }| table_proof.log2_num_instances.clone())
-                        .collect::<Vec<Usize<C::N>>>();
-
-                    max_usize_vec(builder, var_vec)
-                }
-            };
-
-            builder.set(&r_expected_rounds, idx * 2, num_vars.clone());
-            builder.set(&r_expected_rounds, idx * 2 + 1, num_vars.clone());
-        });
-    */
-
-    let lk_expected_rounds: Array<C, Usize<C::N>> =
-        builder.dyn_array(cs.zkvm_v1_css.lk_table_expressions.len());
-
-    /* _debug: verifier program
-    cs.zkvm_v1_css
-        .lk_table_expressions
-        .iter()
-        .enumerate()
-        .for_each(|(idx, expr)| {
-            let num_vars: Usize<C::N> = match expr.table_spec.len {
-                Some(l) => Usize::from(ceil_log2(l)),
-                None => {
-                    let var_vec = expr
-                        .table_spec
-                        .structural_witins
-                        .iter()
-                        .map(|StructuralWitIn { .. }| table_proof.log2_num_instances.clone())
-                        .collect::<Vec<Usize<C::N>>>();
-
-                    max_usize_vec(builder, var_vec)
-                }
-            };
-
-            builder.set(&lk_expected_rounds, idx, num_vars);
-        });
-    */
-
-    let expected_rounds = concat(builder, &r_expected_rounds, &lk_expected_rounds);
-    let max_expected_rounds = max_usize_arr(builder, &expected_rounds);
-
-    let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
-    let max_num_variables: Usize<C::N> = Usize::from(max_expected_rounds);
-    let prod_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>> = concat(
-        builder,
-        &table_proof.r_out_evals,
-        &table_proof.w_out_evals,
-    );
-
-    builder.cycle_tracker_start("verify tower proof");
-    let (rt_tower, prod_point_and_eval, logup_p_point_and_eval, logup_q_point_and_eval) =
-        verify_tower_proof(
-            builder,
-            challenger,
-            prod_out_evals,
-            &table_proof.lk_out_evals,
-            expected_rounds,
-            num_fanin,
-            max_num_variables,
-            tower_proof,
-            unipoly_extrapolator,
-        );
-    builder.cycle_tracker_end("verify tower proof");
-
-    builder.assert_usize_eq(
-        logup_q_point_and_eval.len(),
-        Usize::from(cs.zkvm_v1_css.lk_table_expressions.len()),
-    );
-    builder.assert_usize_eq(
-        logup_p_point_and_eval.len(),
-        Usize::from(cs.zkvm_v1_css.lk_table_expressions.len()),
-    );
-    builder.assert_usize_eq(
-        prod_point_and_eval.len(),
-        Usize::from(
-            cs.zkvm_v1_css.r_table_expressions.len() + cs.zkvm_v1_css.w_table_expressions.len(),
-        ),
-    );
-
-    // in table proof, we always skip same point sumcheck for now
-    // as tower sumcheck batch product argument/logup in same length
-    let _is_skip_same_point_sumcheck = true;
-
-    // evaluate structural witness from verifier
-    let set_table_exprs = cs
-        .zkvm_v1_css
-        .r_table_expressions
-        .iter()
-        .map(|r| &r.table_spec)
-        .chain(
-            cs.zkvm_v1_css
-                .lk_table_expressions
-                .iter()
-                .map(|r| &r.table_spec),
-        )
-        .collect::<Vec<&SetTableSpec>>();
-    let structural_witnesses_vec: Vec<Ext<C::F, C::EF>> = set_table_exprs
-        .iter()
-        .flat_map(|table_spec| {
-            table_spec
-                .structural_witins
-                .iter()
-                .map(|StructuralWitIn { id: _, witin_type }| {
-                    match witin_type {
-                        EqualDistanceSequence {
-                            max_len: _,
-                            offset,
-                            multi_factor,
-                            descending,
-                        } => {
-                            // TODO: Remove modulo field prime
-                            // OpenVM Config cannot automatically accept u32 exceeding its prime limit
-                            // Use Babybear prime defined as p = 15 * 2^27 + 1
-                            let babybear_prime: u32 = 0x78000001;
-                            let offset = if *offset > babybear_prime {
-                                *offset - babybear_prime
-                            } else {
-                                *offset
-                            };
-                            let multi_factor = if *multi_factor > babybear_prime as usize {
-                                *multi_factor - babybear_prime as usize
-                            } else {
-                                *multi_factor
-                            };
-
-                            eval_wellform_address_vec(
-                                builder,
-                                offset as u32,
-                                multi_factor as u32,
-                                &rt_tower.fs,
-                                *descending,
-                            )
-                        }
-                        InnerRepeatingIncrementalSequence { k, n } => {
-                            let r_s = rt_tower.fs.slice(builder, *k, *n);
-                            eval_wellform_address_vec(builder, 0, 1, &r_s, false)
-                        }
-                        OuterRepeatingIncrementalSequence { k, n: _ } => {
-                            let r_s = rt_tower.fs.slice(builder, 0, *k);
-                            eval_wellform_address_vec(builder, 0, 1, &r_s, false)
-                        }
-                        StackedIncrementalSequence { max_bits: _ } => {
-                            eval_stacked_wellform_address_vec(builder, &rt_tower.fs)
-                        }
-                        StackedConstantSequence { max_value: _ } => {
-                            eval_stacked_constant(builder, &rt_tower.fs)
-                        }
-                        Empty => { builder.constant(C::EF::ZERO) }
-                    }
-                })
-                .collect::<Vec<Ext<C::F, C::EF>>>()
-        })
-        .collect::<Vec<Ext<C::F, C::EF>>>();
-    let structural_witnesses: Array<C, Ext<C::F, C::EF>> =
-        builder.dyn_array(structural_witnesses_vec.len());
-    structural_witnesses_vec
-        .into_iter()
-        .enumerate()
-        .for_each(|(idx, e)| {
-            builder.set(&structural_witnesses, idx, e);
-        });
-
-    let in_evals_len: Usize<C::N> = builder.eval(
-        prod_point_and_eval.len() + logup_p_point_and_eval.len() + logup_q_point_and_eval.len(),
-    );
-    let in_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(in_evals_len);
-    builder
-        .range(0, prod_point_and_eval.len())
-        .for_each(|idx_vec, builder| {
-            let e = builder.get(&prod_point_and_eval, idx_vec[0]).eval;
-            builder.set(&in_evals, idx_vec[0], e);
-        });
-    builder
-        .range(0, logup_p_point_and_eval.len())
-        .for_each(|idx_vec, builder| {
-            let p_e = builder.get(&logup_p_point_and_eval, idx_vec[0]).eval;
-            let q_e = builder.get(&logup_q_point_and_eval, idx_vec[0]).eval;
-
-            let p_idx: Usize<C::N> =
-                builder.eval(prod_point_and_eval.len() + idx_vec[0] * Usize::from(2));
-            let q_idx: Usize<C::N> = builder
-                .eval(prod_point_and_eval.len() + idx_vec[0] * Usize::from(2) + Usize::from(1));
-
-            builder.set(&in_evals, p_idx, p_e);
-            builder.set(&in_evals, q_idx, q_e);
-        });
-
-    // verify records (degree = 1) statement, thus no sumcheck
-    let expected_evals_vec: Vec<Ext<C::F, C::EF>> = interleave(
-        &cs.zkvm_v1_css.r_table_expressions, // r
-        &cs.zkvm_v1_css.w_table_expressions, // w
-    )
-    .map(|rw| &rw.expr)
-    .chain(
-        cs.zkvm_v1_css
-            .lk_table_expressions
-            .iter()
-            .flat_map(|lk| vec![&lk.multiplicity, &lk.values]), // p, q
-    )
-    .enumerate()
-    .map(|(_, expr)| {
-        eval_ceno_expr_with_instance(
-            builder,
-            &table_proof.fixed_in_evals,
-            &table_proof.wits_in_evals,
-            &structural_witnesses,
-            pi_evals,
-            challenges,
-            expr,
-        )
-    })
-    .collect_vec();
-
-    let expected_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(expected_evals_vec.len());
-    expected_evals_vec
-        .into_iter()
-        .enumerate()
-        .for_each(|(idx, e)| {
-            builder.set(&expected_evals, idx, e);
-        });
-
-    iter_zip!(builder, in_evals, expected_evals).for_each(|ptr_vec, builder| {
-        let eval = builder.iter_ptr_get(&in_evals, ptr_vec[0]);
-        let expected = builder.iter_ptr_get(&expected_evals, ptr_vec[1]);
-        builder.assert_ext_eq(eval, expected);
-    });
-
-    // assume public io is tiny vector, so we evaluate it directly without PCS
-    /* _debug: verifier
-    for &Instance(idx) in cs.instance_name_map().keys() {
-        let poly = builder.get(raw_pi, idx);
-        let poly_num_vars = builder.get(raw_pi_num_variables, idx);
-        let eval_point = rt_tower.fs.slice(builder, 0, poly_num_vars);
-        let expected_eval = poly_evaluator.evaluate_base_poly_at_point(builder, &poly, &eval_point);
-        let eval = builder.get(&pi_evals, idx);
-
-        builder.assert_ext_eq(eval, expected_eval);
-    }
-    */
-
-    rt_tower.fs
 }
 
 pub fn verify_ecc_proof<C: Config>(

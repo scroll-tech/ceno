@@ -279,6 +279,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         )
         .collect_vec();
 
+        // _debug
+        // println!("=> 838 - main_sumcheck_challenges: {:?}", main_sumcheck_challenges);
+
         let sigma = dot_product(
             main_sumcheck_challenges.iter().skip(2).copied(), // skip first 2 global challenges
             eval_and_dedup_points
@@ -286,6 +289,11 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 .flat_map(|(sigmas, _)| sigmas)
                 .copied(),
         );
+
+        // _debug
+        // println!("=> 626 - sigma: {:?}", sigma);
+        // println!("=> 626 - max_num_variables: {:?}", max_num_variables);
+        // println!("=> 626 - max_degree: {:?}", self.max_expr_degree + 1);
 
         let SumCheckSubClaim {
             point: in_point,
@@ -301,6 +309,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             transcript,
         );
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
+
+        // _debug
+        // println!("=> 636 - GKR Layer in_point: {:?}", in_point);
 
         let structural_witin_offset = self.n_witin + self.n_fixed + self.n_instance;
         // eval selector and set to respective witin
@@ -363,7 +374,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         // assume public io is tiny vector, so we evaluate it directly without PCS
         let pubio_offset = self.n_witin + self.n_fixed;
         for (index, instance) in self.instance_openings.iter().enumerate() {
-            let index = pubio_offset + index;
+            let index: usize = pubio_offset + index;
             let poly = raw_pi[instance.0].to_vec().into_mle();
             let expected_eval = poly.evaluate(&in_point[..poly.num_vars()]);
             if expected_eval != main_evals[index] {
@@ -452,6 +463,8 @@ fn verify_rotation<E: ExtensionField>(
         rotation_cyclic_group_log2,
     );
 
+
+    
     // check the final evaluations.
     let mut left_evals = Vec::with_capacity(evals.len() / 3);
     let mut right_evals = Vec::with_capacity(evals.len() / 3);
