@@ -30,7 +30,10 @@ use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    scheme::{hal::ProofInput, utils::build_main_witness},
+    scheme::{
+        hal::{DeviceProvingKey, ProofInput},
+        utils::build_main_witness,
+    },
     structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
@@ -39,34 +42,81 @@ type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
 pub type ZkVMCpuProver<E, PCS> =
     ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
 
-pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB, PD> {
+pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, PD>
+{
     pub pk: Arc<ZKVMProvingKey<E, PCS>>,
     device: PD,
+    // device_pk might be none if there is no fixed commitment
+    device_first_shard_pk: Option<DeviceProvingKey<'static, PB>>,
+    device_non_first_shard_pk: Option<DeviceProvingKey<'static, PB>>,
     _marker: PhantomData<PB>,
 }
 
 impl<
     E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E>,
-    PB: ProverBackend<E = E, Pcs = PCS>,
-    PD: ProverDevice<PB>,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB> + 'static,
 > ZKVMProver<E, PCS, PB, PD>
 {
-    pub fn new(pk: ZKVMProvingKey<E, PCS>, device: PD) -> Self {
+    pub fn new_with_single_shard(pk: ZKVMProvingKey<E, PCS>, device: PD) -> Self {
         let pk = Arc::new(pk);
+        let device_first_shard_pk = if pk.as_ref().is_fixed_commitment() {
+            // transport first shard proving key
+            Some(device.transport_proving_key(true, pk.clone()))
+        } else {
+            None
+        };
+
         ZKVMProver {
             pk,
             device,
+            device_first_shard_pk,
+            device_non_first_shard_pk: None,
             _marker: PhantomData,
+        }
+    }
+
+    pub fn new(pk: ZKVMProvingKey<E, PCS>, device: PD) -> Self {
+        let pk = Arc::new(pk);
+        // transport first shard proving key
+        let (device_first_shard_pk, device_non_first_shard_pk) =
+            if pk.as_ref().is_fixed_commitment() {
+                // transport first shard proving key
+                (
+                    Some(device.transport_proving_key(true, pk.clone())),
+                    Some(device.transport_proving_key(false, pk.clone())),
+                )
+            } else {
+                (None, None)
+            };
+
+        ZKVMProver {
+            pk,
+            device,
+            device_first_shard_pk,
+            device_non_first_shard_pk,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn get_device_proving_key(
+        &self,
+        shard_ctx: &ShardContext,
+    ) -> Option<&DeviceProvingKey<'static, PB>> {
+        if shard_ctx.is_first_shard() {
+            self.device_first_shard_pk.as_ref()
+        } else {
+            self.device_non_first_shard_pk.as_ref()
         }
     }
 }
 
 impl<
     E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E>,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
-    PD: ProverDevice<PB>,
+    PD: ProverDevice<PB> + 'static,
 > ZKVMProver<E, PCS, PB, PD>
 {
     /// create proof for zkvm execution
@@ -180,10 +230,10 @@ impl<
 
         // transfer pk to device
         let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
-        let device_pk = self
-            .device
-            .transport_proving_key(shard_ctx, self.pk.clone());
-        let mut fixed_mles = device_pk.fixed_mles;
+        let mut fixed_mles = self
+            .get_device_proving_key(shard_ctx)
+            .map(|dpk| dpk.fixed_mles.clone())
+            .unwrap_or_default();
         exit_span!(transfer_pk_span);
 
         // squeeze two challenges from transcript
@@ -286,7 +336,8 @@ impl<
         let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
         let mpcs_opening_proof = self.device.open(
             witness_data,
-            Some(device_pk.pcs_data),
+            self.get_device_proving_key(shard_ctx)
+                .map(|dpk| dpk.pcs_data.clone()),
             points,
             evaluations,
             &mut transcript,

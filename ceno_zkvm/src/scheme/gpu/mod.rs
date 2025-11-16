@@ -34,7 +34,6 @@ use gkr_iop::gpu::gpu_prover::*;
 pub struct GpuTowerProver;
 
 use crate::{
-    e2e::ShardContext,
     scheme::{constants::NUM_FANIN, cpu::CpuEccProver},
     structs::EccQuarkProof,
 };
@@ -764,15 +763,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
 {
     fn transport_proving_key(
         &self,
-        shard_ctx: &ShardContext,
+        is_first_shard: bool,
         pk: Arc<
             crate::structs::ZKVMProvingKey<
                 <GpuBackend<E, PCS> as ProverBackend>::E,
                 <GpuBackend<E, PCS> as ProverBackend>::Pcs,
             >,
         >,
-    ) -> DeviceProvingKey<'_, GpuBackend<E, PCS>> {
-        let pcs_data_original = if shard_ctx.is_first_shard() {
+    ) -> DeviceProvingKey<'static, GpuBackend<E, PCS>> {
+        let pcs_data_original = if is_first_shard {
             pk.fixed_commit_wd.clone().unwrap()
         } else {
             pk.fixed_no_omc_init_commit_wd.clone().unwrap()
