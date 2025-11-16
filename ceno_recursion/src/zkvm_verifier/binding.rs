@@ -72,11 +72,12 @@ pub(crate) struct ZKVMProofInput {
     pub opening_proof: BasefoldProof,
 }
 
-impl From<ZKVMProof<E, RecPcs>> for ZKVMProofInput {
-    fn from(p: ZKVMProof<E, RecPcs>) -> Self {
+impl From<(usize, ZKVMProof<E, RecPcs>)> for ZKVMProofInput {
+    fn from(d: (usize, ZKVMProof<E, RecPcs>)) -> Self {
         ZKVMProofInput {
-            raw_pi: p.raw_pi,
-            pi_evals: p.pi_evals,
+            shard_id: d.0,
+            raw_pi: d.1.raw_pi,
+            pi_evals: d.1.pi_evals,
             chip_proofs: p
                 .chip_proofs
                 .into_iter()
@@ -85,8 +86,8 @@ impl From<ZKVMProof<E, RecPcs>> for ZKVMProofInput {
                     ZKVMChipProofInput::from((chip_idx, proofs.remove(0)))
                 })
                 .collect::<Vec<ZKVMChipProofInput>>(),
-            witin_commit: p.witin_commit.into(),
-            opening_proof: p.opening_proof.into(),
+            witin_commit: d.1.witin_commit.into(),
+            opening_proof: d.1.opening_proof.into(),
         }
     }
 }
