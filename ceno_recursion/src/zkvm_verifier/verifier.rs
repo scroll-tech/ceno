@@ -270,7 +270,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     // _debug
     // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
-    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(68) {
+    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(69) {
         // _debug
         // println!("=> circuit_name: {:?}", circuit_name);
 
