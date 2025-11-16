@@ -6,6 +6,7 @@ members = [
   "ceno_rt",
   "ceno_syscall",
   "ceno_zkvm",
+  "ceno_recursion",
   "derive",
   "examples-builder",
   "examples",
