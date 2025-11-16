@@ -269,8 +269,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         });
 
     // _debug
-    // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
-    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(70) {
+    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+    // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(120) {
         // _debug
         // println!("=> circuit_name: {:?}", circuit_name);
 
@@ -678,9 +678,6 @@ pub fn verify_chip_proof<C: Config>(
         // tracing::debug!("ecc proof verified.");
         // Some(ecc_proof.sum.clone())
     }
-
-    /* _debug: ecc
-    */
 
     let tower_proof = &chip_proof.tower_proof;
     let num_variables: Array<C, Usize<C::N>> = builder.dyn_array(num_batched);

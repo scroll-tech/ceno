@@ -478,13 +478,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // _debug
         chip_idx: usize,
     ) -> Result<(Point<E>, Option<SepticPoint<E::BaseField>>), ZKVMError> {
-        // _debug
-        if chip_idx == 69 {
-            // _DEBUG: CENO
-            let test = transcript.read_challenge();
-            println!("=> 171 - test challenge: {:?}", test);
-        }
-        
         let composed_cs = circuit_vk.get_cs();
         let ComposedConstrainSystem {
             zkvm_v1_css: cs,
