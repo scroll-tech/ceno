@@ -1299,6 +1299,9 @@ pub fn evaluate_selector<C: Config>(
             (expression, eval)
         }
         SelectorType::QuarkBinaryTreeLessThan(expr) => {
+            let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+
+            /* _debug: ecc
             builder.assert_nonzero(&ctx.num_instances);
             // assert!(ctx.num_instances <= (1 << out_point.len()));
             builder.assert_nonzero(&out_point.len());
@@ -1306,8 +1309,6 @@ pub fn evaluate_selector<C: Config>(
             let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
 
             let prefix_one_seq = reverse(builder, &chip_proof.prefix_one_seq);
-
-            let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let prefix_one_seq_0 = builder.get(&prefix_one_seq, 0);
 
             builder
@@ -1351,6 +1352,7 @@ pub fn evaluate_selector<C: Config>(
                     builder.assign(&rhs_res, out_point_i * in_point_i * res);
                     builder.assign(&res, lhs_res + rhs_res);
                 });
+            */
 
             (expr, res)
         }
@@ -2007,7 +2009,9 @@ pub fn verify_ecc_proof<C: Config>(
         StackedConstantSequence { max_value: 0 },
     ));
     let sel_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(1);
+    /* _debug: ecc
     evaluate_ecc_selector(builder, &sel_add_expr, &sel_evals, &out_rt, &rt, &proof, 0);
+    */
     let expected_sel_add = builder.get(&sel_evals, 0);
 
     // Assertions

@@ -78,8 +78,7 @@ impl From<(usize, ZKVMProof<E, RecPcs>)> for ZKVMProofInput {
             shard_id: d.0,
             raw_pi: d.1.raw_pi,
             pi_evals: d.1.pi_evals,
-            chip_proofs: p
-                .chip_proofs
+            chip_proofs: d.1.chip_proofs
                 .into_iter()
                 .map(|(chip_idx, mut proofs)| {
                     assert_eq!(proofs.len(), 1, "TODO support > 1 proofs per chip");
