@@ -43,7 +43,7 @@ fn impl_opcode_beq(equal: bool) {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
             insn_code,
@@ -84,7 +84,7 @@ fn impl_opcode_bne(equal: bool) {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
             insn_code,
@@ -128,7 +128,7 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -173,7 +173,7 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -225,7 +225,7 @@ fn impl_blt_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -277,7 +277,7 @@ fn impl_bge_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,

@@ -35,7 +35,7 @@ fn test_opcode_and() {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_r_instruction(
+        vec![&StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
             insn_code,
@@ -78,7 +78,7 @@ fn test_opcode_or() {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_r_instruction(
+        vec![&StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
             insn_code,
@@ -121,7 +121,7 @@ fn test_opcode_xor() {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_r_instruction(
+        vec![&StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
             insn_code,
