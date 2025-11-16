@@ -1382,6 +1382,9 @@ pub fn run_e2e_with_checkpoint<
     let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
     tracing::debug!("keygen done in {:?}", start.elapsed());
 
+    // New with prover
+    let prover = ZKVMProver::new(pk, device);
+
     let start = std::time::Instant::now();
     let init_full_mem = ctx.setup_init_mem(hints, public_io);
     tracing::debug!("setup_init_mem done in {:?}", start.elapsed());
@@ -1395,9 +1398,8 @@ pub fn run_e2e_with_checkpoint<
             next_step: Some(Box::new(move || {
                 _ = run_e2e_proof::<E, _, _, _>(
                     &ctx,
-                    device,
+                    &prover,
                     &init_full_mem,
-                    pk,
                     max_steps,
                     is_mock_proving,
                 )
@@ -1431,8 +1433,6 @@ pub fn run_e2e_with_checkpoint<
             })),
         };
     }
-
-    let prover = ZKVMProver::new(pk, device);
 
     let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
 
@@ -1495,12 +1495,11 @@ pub fn run_e2e_proof<
     E: ExtensionField + LkMultiplicityKey,
     PCS: PolynomialCommitmentScheme<E> + 'static,
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
-    PD: ProverDevice<PB>,
+    PD: ProverDevice<PB> + 'static,
 >(
     ctx: &E2EProgramCtx<E>,
-    device: PD,
+    prover: &ZKVMProver<E, PCS, PB, PD>,
     init_full_mem: &InitMemState,
-    pk: ZKVMProvingKey<E, PCS>,
     max_steps: usize,
     is_mock_proving: bool,
 ) -> Vec<ZKVMProof<E, PCS>> {
@@ -1515,9 +1514,6 @@ pub fn run_e2e_proof<
 
     // Generate witness
     let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
-
-    // proving
-    let prover = ZKVMProver::new(pk, device);
 
     zkvm_witness
         .map(|(zkvm_witness, shard_ctx, pi)| {
