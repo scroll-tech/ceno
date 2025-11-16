@@ -3,7 +3,6 @@ use super::hal::{
     TowerProver, TraceCommitter,
 };
 use crate::{
-    e2e::ShardContext,
     error::ZKVMError,
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
@@ -942,15 +941,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
 {
     fn transport_proving_key(
         &self,
-        shard_ctx: &ShardContext,
+        is_first_shard: bool,
         pk: Arc<
             crate::structs::ZKVMProvingKey<
                 <CpuBackend<E, PCS> as ProverBackend>::E,
                 <CpuBackend<E, PCS> as ProverBackend>::Pcs,
             >,
         >,
-    ) -> DeviceProvingKey<'_, CpuBackend<E, PCS>> {
-        let pcs_data = if shard_ctx.is_first_shard() {
+    ) -> DeviceProvingKey<'static, CpuBackend<E, PCS>> {
+        let pcs_data = if is_first_shard {
             pk.fixed_commit_wd.clone().unwrap()
         } else {
             pk.fixed_no_omc_init_commit_wd.clone().unwrap()
