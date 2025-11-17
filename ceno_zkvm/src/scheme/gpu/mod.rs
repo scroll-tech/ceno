@@ -257,7 +257,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     let requested_prod_buffers = r_set_wit
         .iter()
         .chain(w_set_wit.iter())
-        .map(|wit| 1 << (wit.num_vars() + 2))
+        .map(|wit| 1 << (wit.num_vars() + 1))
         .sum::<usize>();
     let requested_prod_buffers_mb =
         (requested_prod_buffers * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0);
@@ -278,7 +278,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     for wit in r_set_wit.iter().chain(w_set_wit.iter()) {
         let nv = wit.num_vars();
         let buf = cuda_hal
-            .alloc_ext_elems_on_device(1 << (nv + 2))
+            .alloc_ext_elems_on_device(1 << (nv + 1))
             .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))?;
         prod_buffers.push(buf);
     }
@@ -306,7 +306,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
         let gpu_spec = cuda_hal
             .tower
-            .build_prod_tower_from_gpu_polys(nv, &gpu_chunks, &mut current_buffer_slice[0])
+            .build_prod_tower_from_gpu_polys(cuda_hal, nv, &gpu_chunks, &mut current_buffer_slice[0])
             .map_err(|e| format!("build_prod_tower_from_gpu_polys failed: {:?}", e))?;
 
         prod_gpu_specs.push(gpu_spec);
