@@ -1490,6 +1490,7 @@ pub fn run_e2e_with_checkpoint<
 }
 
 // Runs program emulation + witness generation + proving
+#[tracing::instrument(skip_all, name = "run_e2e_proof", fields(profiling_1), level = "trace")]
 #[allow(clippy::too_many_arguments)]
 pub fn run_e2e_proof<
     E: ExtensionField + LkMultiplicityKey,

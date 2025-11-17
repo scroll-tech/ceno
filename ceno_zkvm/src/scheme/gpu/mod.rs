@@ -251,6 +251,29 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
     // First, allocate buffers based on original witness num_vars
     // This avoids the need to call build_tower_witness just to get buffer sizes
+
+    // request prod buffers
+    let requested_prod_buffers = r_set_wit
+        .iter()
+        .chain(w_set_wit.iter())
+        .map(|wit| 1 << (wit.num_vars() + 2))
+        .sum::<usize>();
+    let requested_prod_buffers_mb =
+        (requested_prod_buffers * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0);
+    let requested_logup_buffers = lk_n_wit
+        .iter()
+        .chain(lk_d_wit.iter())
+        .map(|wit| 1 << (wit.num_vars() + 3))
+        .sum::<usize>();
+    let requested_logup_buffers_mb =
+        (requested_logup_buffers * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0);
+    println!(
+        "  [build_tower_witness_gpu] request buffers: prod = {:.2} MB, logup = {:.2} MB, total = {:.2} MB",
+        requested_prod_buffers_mb,
+        requested_logup_buffers_mb,
+        requested_prod_buffers_mb + requested_logup_buffers_mb
+    );
+    cuda_hal.print_mem_info().unwrap();
     for wit in r_set_wit.iter().chain(w_set_wit.iter()) {
         let nv = wit.num_vars();
         let buf = cuda_hal
@@ -266,6 +289,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .map_err(|e| format!("Failed to allocate logup GPU buffer: {:?}", e))?;
         logup_buffers.push(buf);
     }
+    cuda_hal.print_mem_info().unwrap();
 
     // Build product GpuProverSpecs using GPU polynomials directly
     let mut prod_gpu_specs = Vec::new();

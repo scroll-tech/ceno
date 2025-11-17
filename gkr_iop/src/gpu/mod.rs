@@ -150,8 +150,8 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
 
     pub fn as_view_chunks(&self, num_fanin: usize) -> Vec<GpuPolynomialExt<'a>> {
         match &self.mle {
-            GpuFieldType::Base(poly) => panic!("not supported yet"),
-            GpuFieldType::Ext(poly) => poly.as_view_chunk(num_fanin),            
+            GpuFieldType::Base(_) => panic!("not supported yet"),
+            GpuFieldType::Ext(poly) => poly.as_view_chunk(num_fanin),
             // .into_iter().map(|chunk| Self {
             //     mle: GpuFieldType::Ext(chunk),
             //     _phantom: PhantomData,
