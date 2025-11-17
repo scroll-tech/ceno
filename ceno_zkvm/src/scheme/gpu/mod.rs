@@ -358,7 +358,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
 
         // Allocate one big buffer for all towers and add it to big_buffers
-        let tower_size = 2 * (1 << num_vars) * 4; // 2 * 4 * mle_len elements per tower
+        let tower_size = 1 << (num_vars + 2); // 2 * 4 * mle_len elements per tower
         let total_buffer_size = num_towers * tower_size;
         let big_buffer = cuda_hal.alloc_ext_elems_on_device(total_buffer_size).unwrap();
         big_buffers.push(big_buffer);
@@ -370,14 +370,15 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let last_layers_refs: Vec<&[GpuPolynomialExt]> = logup_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = cuda_hal
             .tower
-            .build_logup_tower_from_gpu_polys_batch(big_buffer, &last_layers_refs, num_vars, num_towers)
+            .build_logup_tower_from_gpu_polys_batch(cuda_hal, big_buffer, &last_layers_refs, num_vars, num_towers)
             .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
 
         logup_gpu_specs.extend(gpu_specs);
         exit_span!(span_logup);
-
     }
     
+    println!("[build_tower_witness_gpu] logup_gpu_specs: {:?}", logup_gpu_specs.len());
+
     Ok((prod_gpu_specs, logup_gpu_specs))
 }
 
