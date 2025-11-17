@@ -184,6 +184,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     prod_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     // logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     big_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
+    view_last_layers: &mut Vec<Vec<Vec<GpuPolynomialExt<'static>>>>,
 ) -> Result<
     (
         Vec<ceno_gpu::GpuProverSpec<'buf>>,
@@ -198,9 +199,9 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     let ComposedConstrainSystem {
         zkvm_v1_css: cs, ..
     } = composed_cs;
-    let num_instances_with_rotation =
+    let _num_instances_with_rotation =
         input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
-    let chip_record_alpha = challenges[0];
+    let _chip_record_alpha = challenges[0];
 
     // TODO: safety ?
     let records = unsafe {
@@ -350,9 +351,11 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
     // Use batch processing for all cases
     if !logup_last_layers.is_empty() {
-        let first_layer = &logup_last_layers[0];
+        view_last_layers.push(logup_last_layers);
+        let stored_last_layers = view_last_layers.last().expect("stored last layers exist");
+        let first_layer = &stored_last_layers[0];
         let num_vars = first_layer[0].num_vars();
-        let num_towers = logup_last_layers.len();
+        let num_towers = stored_last_layers.len();
 
         // Comprehensive checks are performed in the backend function `build_logup_tower_from_gpu_polys_batch`
         assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
@@ -365,9 +368,14 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         cuda_hal.print_mem_info().unwrap();
 
         // Build all towers in batch
-        let span_logup = entered_span!("build_logup_tower", logup_layers = logup_last_layers.len(), profiling_3 = true);
+        let span_logup = entered_span!(
+            "build_logup_tower",
+            logup_layers = stored_last_layers.len(),
+            profiling_3 = true
+        );
         let big_buffer = big_buffers.last_mut().unwrap();
-        let last_layers_refs: Vec<&[GpuPolynomialExt]> = logup_last_layers.iter().map(|v| v.as_slice()).collect();
+        let last_layers_refs: Vec<&[GpuPolynomialExt]> =
+            stored_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = cuda_hal
             .tower
             .build_logup_tower_from_gpu_polys_batch(cuda_hal, big_buffer, &last_layers_refs, num_vars, num_towers)
@@ -445,6 +453,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             let mut _prod_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             // let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
+            let mut _view_last_layers: Vec<Vec<Vec<ceno_gpu::bb31::GpuPolynomialExt<'static>>>> =
+                Vec::new();
             let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
                 composed_cs,
                 input,
@@ -454,6 +464,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
                 &mut _prod_buffers,
                 // &mut _logup_buffers,
                 &mut _big_buffers,
+                &mut _view_last_layers,
             )
             .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
             .unwrap();
