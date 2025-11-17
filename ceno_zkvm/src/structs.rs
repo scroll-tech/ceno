@@ -687,6 +687,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     pub(crate) fn set_program_entry_pc(&mut self, entry_pc: u32) {
         self.entry_pc = entry_pc;
     }
+
+    pub fn has_fixed_commitment(&self) -> bool {
+        self.fixed_commit_wd.is_some() || self.fixed_no_omc_init_commit_wd.is_some()
+    }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
