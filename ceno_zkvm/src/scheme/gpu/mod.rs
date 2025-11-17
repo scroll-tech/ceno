@@ -282,14 +282,14 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))?;
         prod_buffers.push(buf);
     }
-    // Allocate logup buffers based on original witness num_vars
-    for wit in lk_n_wit.iter().chain(lk_d_wit.iter()) {
-        let nv = wit.num_vars();
-        let buf = cuda_hal
-            .alloc_ext_elems_on_device(1 << (nv + 3))
-            .map_err(|e| format!("Failed to allocate logup GPU buffer: {:?}", e))?;
-        logup_buffers.push(buf);
-    }
+    // // Allocate logup buffers based on original witness num_vars
+    // for wit in lk_n_wit.iter().chain(lk_d_wit.iter()) {
+    //     let nv = wit.num_vars();
+    //     let buf = cuda_hal
+    //         .alloc_ext_elems_on_device(1 << (nv + 3))
+    //         .map_err(|e| format!("Failed to allocate logup GPU buffer: {:?}", e))?;
+    //     logup_buffers.push(buf);
+    // }
     cuda_hal.print_mem_info().unwrap();
 
     // Build product GpuProverSpecs using GPU polynomials directly
@@ -348,8 +348,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .collect::<Vec<_>>()
     };
 
-    let span_logup = entered_span!("build_logup_tower", logup_layers = logup_last_layers.len(), profiling_3 = true);
-
     // Use batch processing for all cases
     if !logup_last_layers.is_empty() {
         let first_layer = &logup_last_layers[0];
@@ -364,8 +362,10 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let total_buffer_size = num_towers * tower_size;
         let big_buffer = cuda_hal.alloc_ext_elems_on_device(total_buffer_size).unwrap();
         big_buffers.push(big_buffer);
+        cuda_hal.print_mem_info().unwrap();
 
         // Build all towers in batch
+        let span_logup = entered_span!("build_logup_tower", logup_layers = logup_last_layers.len(), profiling_3 = true);
         let big_buffer = big_buffers.last_mut().unwrap();
         let last_layers_refs: Vec<&[GpuPolynomialExt]> = logup_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = cuda_hal
@@ -374,8 +374,10 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
 
         logup_gpu_specs.extend(gpu_specs);
-    }
+        exit_span!(span_logup);
 
+    }
+    
     Ok((prod_gpu_specs, logup_gpu_specs))
 }
 
