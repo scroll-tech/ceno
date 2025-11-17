@@ -332,7 +332,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
                 logup_sum += chip_logup_sum;
             };
-
             let (input_opening_point, chip_shard_ec_sum) = self.verify_chip_proof(
                 circuit_name,
                 circuit_vk,
@@ -344,7 +343,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &point_eval,
                 &challenges,
             )?;
-
             if circuit_vk.get_cs().num_witin() > 0 {
                 witin_openings.push((
                     input_opening_point.len(),
@@ -367,7 +365,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
             }
         }
-
         logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
             * dummy_table_item.inverse();
 
@@ -549,6 +546,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
+
         let (_, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
             proof
                 .r_out_evals
@@ -654,7 +652,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         Ok((rt, shard_ec_sum))
     }
 }
-
 pub struct TowerVerify;
 
 pub type TowerVerifyResult<E> = Result<
@@ -696,7 +693,6 @@ impl TowerVerify {
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
             transcript,
         );
-
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])
