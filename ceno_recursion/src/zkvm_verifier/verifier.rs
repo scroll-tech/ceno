@@ -55,8 +55,6 @@ use openvm_native_recursion::challenger::{
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
 use p3::babybear::BabyBear;
-// _debug
-use crate::arithmetics::{print_ext_arr, print_felt_arr, print_usize_arr};
 
 type F = BabyBear;
 type E = BabyBearExt4;
@@ -154,10 +152,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
-    // _debug
-    // builder.print_debug(888);
-    // builder.print_v(zkvm_proof_input.shard_id.get_var());
-
     if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
         builder.if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
             let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
@@ -225,11 +219,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let alpha = challenger.sample_ext(builder);
     let beta = challenger.sample_ext(builder);
 
-    // _debug
-    builder.print_debug(999);
-    builder.print_e(alpha);
-    builder.print_e(beta);
-
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(2);
     builder.set(&challenges, 0, alpha.clone());
     builder.set(&challenges, 1, beta.clone());
@@ -268,12 +257,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             builder.set(&chip_indices, i, chip_proof.idx);
         });
 
-    // _debug
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
-    // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(120) {
-        // _debug
-        // println!("=> circuit_name: {:?}", circuit_name);
-
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
         let with_omc_init_only = circuit_vk.get_cs().with_omc_init_only() as usize;
@@ -325,8 +309,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             if circuit_vk.get_cs().is_with_lk_table() {
                 builder.assign(&logup_sum, logup_sum - chip_logup_sum);
             } else {
-                // _debug: this branch is not tested
-
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks: Var<C::N> =
                     builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
@@ -360,11 +342,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 builder.assign(&logup_sum, logup_sum + chip_logup_sum);
             }
 
-            // _debug
-            builder.print_debug(888);
-            // builder.print_e(logup_sum);
-            // builder.print_v(dummy_table_item_multiplicity);
-
             builder.cycle_tracker_start("Verify chip proof");
             let (input_opening_point, chip_shard_ec_sum) = verify_chip_proof(
                 builder,
@@ -376,12 +353,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 &mut unipoly_extrapolator,
             );
             builder.cycle_tracker_end("Verify chip proof");
-
-            // _debug
-            builder.print_debug(777);
-            let e = builder.get(&input_opening_point, 0);
-            // print_ext_arr(builder, &input_opening_point);
-            builder.print_e(e);
             
             let point_clone: Array<C, Ext<C::F, C::EF>> = builder.eval(input_opening_point.clone());
 
@@ -426,16 +397,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         });
     }
 
-
-               /* _debug
-            // _DEBUG: CENO RECURSION VERIFIER 
-            let test = challenger.sample_ext(builder);
-            builder.print_debug(171);
-            builder.print_e(test);
-
-
-            */
-    
     // _debug: check
     // builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
 
@@ -708,27 +669,6 @@ pub fn verify_chip_proof<C: Config>(
     );
     builder.cycle_tracker_end("verify tower proof for opcode");
 
-    // _debug
-    // builder.print_debug(525);
-
-    // _debug: export
-    // builder.print_debug(747);
-    // iter_zip!(builder, record_evals).for_each(|ptr_vec, builder| {
-    //     let pct = builder.iter_ptr_get(&record_evals, ptr_vec[0]);
-    //     let e = pct.eval;
-    //     builder.print_e(e);
-    // });
-    // iter_zip!(builder, logup_p_evals).for_each(|ptr_vec, builder| {
-    //     let pct = builder.iter_ptr_get(&logup_p_evals, ptr_vec[0]);
-    //     let e = pct.eval;
-    //     builder.print_e(e);
-    // });
-    // iter_zip!(builder, logup_q_evals).for_each(|ptr_vec, builder| {
-    //     let pct = builder.iter_ptr_get(&logup_q_evals, ptr_vec[0]);
-    //     let e = pct.eval;
-    //     builder.print_e(e);
-    // });
-
     if cs.lk_table_expressions.is_empty() {
         builder.range(0, logup_p_evals.len()).for_each(|idx_vec, builder| {
             let eval = builder.get(&logup_p_evals, idx_vec[0]).eval;
@@ -754,15 +694,7 @@ pub fn verify_chip_proof<C: Config>(
     } else {
         builder.eval(record_evals.len() + logup_p_evals.len() + logup_q_evals.len())
     };
-    
     let out_evals: Array<C, PointAndEvalVariable<C>> = builder.dyn_array(out_evals_len.clone());
-
-    // _debug
-    // builder.print_debug(686);
-    // builder.print_v(out_evals_len.get_var());
-    // builder.print_v(record_evals.len().get_var());
-    // builder.print_v(logup_p_evals.len().get_var());
-    // builder.print_v(logup_q_evals.len().get_var());
 
     builder
         .range(0, record_evals.len())
@@ -793,14 +725,6 @@ pub fn verify_chip_proof<C: Config>(
             let cpt = builder.get(&logup_q_evals, idx_vec[0]);
             builder.set(&q_slice, idx_vec[0], cpt);
         });
-
-    // _debug
-    // builder.print_debug(676);
-    // builder.range(0, out_evals.len()).for_each(|idx_vec, builder| {
-    //     let cpt = builder.get(&out_evals, idx_vec[0]);
-    //     builder.print_e(cpt.eval);
-    // });
-
     let gkr_circuit = gkr_circuit.clone().unwrap();
     
     // _debug
@@ -887,8 +811,6 @@ pub fn verify_gkr_circuit<C: Config>(
     chip_proof: &ZKVMChipProofInputVariable<C>,
     selector_ctxs: Vec<SelectorContextVariable<C>>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
-// _debug
-// ) -> Vec<GKRClaimEvaluation<C>> {
 ) -> PointVariable<C> {
     let rt = PointVariable { fs: builder.dyn_array(0) };
 
@@ -906,13 +828,6 @@ pub fn verify_gkr_circuit<C: Config>(
         // _debug
         // builder.assert_usize_eq(Usize::from(layer.out_sel_and_eval_exprs.len()), eval_and_dedup_points.len());
 
-        // _debug
-        // builder.print_debug(777);
-        // iter_zip!(builder, eval_and_dedup_points).for_each(|ptr_vec, builder| {
-        //     let cpt = builder.iter_ptr_get(&eval_and_dedup_points, ptr_vec[0]);
-        //     print_ext_arr(builder, &cpt.evals);
-        // });
-
         // ZeroCheckLayer verification (might include other layer types in the future)
         let LayerProofVariable {
             main:
@@ -928,14 +843,8 @@ pub fn verify_gkr_circuit<C: Config>(
         let expected_main_evals_len: Usize<C::N> = Usize::from(layer.n_witin + layer.n_fixed + layer.n_instance + layer.n_structural_witin);
         builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
 
-        // _debug
-        // builder.print_debug(838);
-
         if layer.rotation_sumcheck_expression.is_some() {
             builder.if_eq(has_rotation, Usize::from(1)).then(|builder| {
-                // _debug
-                // builder.print_debug(898);
-            
                 let first = builder.get(&eval_and_dedup_points, 0);
                 builder.assert_usize_eq(first.has_point, Usize::from(1)); // Rotation proof should have at least one point
                 let rt = builder.eval(first.point.fs.clone());
@@ -1010,10 +919,6 @@ pub fn verify_gkr_circuit<C: Config>(
             Usize::from(layer.exprs.len() + rotation_exprs_len * ROTATION_OPENING_COUNT),
         );
 
-        // _debug
-        // builder.print_debug(838);
-        // print_ext_arr(builder, &alpha_pows);
-
         let sigma: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
         let alpha_idx: Usize<C::N> = Usize::Var(Var::uninit(builder));
         builder.assign(&alpha_idx, C::N::from_canonical_usize(0));
@@ -1041,12 +946,6 @@ pub fn verify_gkr_circuit<C: Config>(
 
         let max_num_variables_f =
             builder.unsafe_cast_var_to_felt(max_num_variables.get_var());
-        
-        // _debug
-        // builder.print_debug(626);
-        // builder.print_e(sigma);
-        // builder.print_f(max_num_variables_f);
-        // builder.print_f(max_degree);
 
         let (in_point, expected_evaluation) = iop_verifier_state_verify(
             builder,
@@ -1057,10 +956,6 @@ pub fn verify_gkr_circuit<C: Config>(
             max_degree,
             unipoly_extrapolator,
         );
-
-        // _debug
-        // builder.print_debug(636);
-        // print_ext_arr(builder, &in_point);
 
         /* _debug: ecc
         let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
@@ -1656,28 +1551,17 @@ pub fn extract_claim_and_point<C: Config>(
             let evals = out_evals
                 .iter()
                 .map(|out_eval| {
-                    // _debug
-                    // println!("=> 1010 - out_eval: {:?}", out_eval);
-
                     let e = evaluate_gkr_expression(builder, out_eval, claims, challenges);
 
                     e
                 })
                 .collect_vec();
 
-            // _debug
-            // builder.print_debug(919);
-            // evals.iter().for_each(|cpt| builder.print_e(cpt.eval));
-
             let point = evals.first().map(|claim| builder.eval(claim.point.clone()));
             let evals_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(evals.len());
             for (j, e) in evals.iter().enumerate() {
                 builder.set_value(&evals_arr, j, e.eval);
             }
-
-            // _debug
-            // builder.print_debug(909);
-            // print_ext_arr(builder, &evals_arr);
 
             if point.is_some() {
                 builder.set(

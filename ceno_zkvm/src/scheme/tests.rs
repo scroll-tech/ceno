@@ -245,9 +245,6 @@ fn test_rw_lk_expression_combination() {
                 NUM_FANIN,
                 &PointAndEval::default(),
                 &verifier_challenges,
-
-                // _debug
-                0,
             )
             .expect("verifier failed");
         #[cfg(debug_assertions)]

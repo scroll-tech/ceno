@@ -230,9 +230,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             challenges
         );
 
-        // _debug
-        println!("=> challenges: {:?}", challenges);
-
         let dummy_table_item = challenges[0];
         let mut dummy_table_item_multiplicity = 0;
         let point_eval = PointAndEval::default();
@@ -261,20 +258,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         for (index, proof) in vm_proof
             .chip_proofs
             .iter()
-            // _debug
-            // .flat_map(|(index, proofs)| iter::repeat_n(index, proofs.len()).zip(proofs)).take(5)
             .flat_map(|(index, proofs)| iter::repeat_n(index, proofs.len()).zip(proofs))
         {
-            // _debug
-            println!("");
-            println!("=== NEW CHIP ===");
             let num_instance: usize = proof.num_instances.iter().sum();
             assert!(num_instance > 0);
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
-
-            // _debug
-            println!("=> circuit_name: {:?}", circuit_name);
 
             // check chip proof is well-formed
             if proof.wits_in_evals.len() != circuit_vk.get_cs().num_witin()
@@ -344,10 +333,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 logup_sum += chip_logup_sum;
             };
 
-            // _debug
-            println!("=> logup_sum: {:?}", logup_sum);
-            println!("=> dummy_table_item_multiplicity: {:?}", dummy_table_item_multiplicity);
-
             let (input_opening_point, chip_shard_ec_sum) = self.verify_chip_proof(
                 circuit_name,
                 circuit_vk,
@@ -358,14 +343,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 NUM_FANIN,
                 &point_eval,
                 &challenges,
-
-                // _debug
-                *index,
             )?;
 
-            // _debug
-            println!("=> 777 - input_opening_point[0]: {:?}", input_opening_point[0]);
-            
             if circuit_vk.get_cs().num_witin() > 0 {
                 witin_openings.push((
                     input_opening_point.len(),
@@ -475,8 +454,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
-        // _debug
-        chip_idx: usize,
     ) -> Result<(Point<E>, Option<SepticPoint<E::BaseField>>), ZKVMError> {
         let composed_cs = circuit_vk.get_cs();
         let ComposedConstrainSystem {
@@ -589,11 +566,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript,
         )?;
 
-        // _debug
-        // println!("=> 747 - verify_tower_proof output: {:?}", record_evals.iter().map(|peval| peval.eval).collect::<Vec<E>>());
-        // println!("=> 747 - logup_p_evals: {:?}", logup_p_evals.iter().map(|peval| peval.eval).collect::<Vec<E>>());
-        // println!("=> 747 - logup_q_evals: {:?}", logup_q_evals.iter().map(|peval| peval.eval).collect::<Vec<E>>());
-
         if cs.lk_table_expressions.is_empty() {
             // verify LogUp witness nominator p(x) ?= constant vector 1
             logup_p_evals
@@ -632,9 +604,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .chain(&logup_q_evals)
             .cloned()
             .collect_vec();
-
-        // _debug
-        // println!("=> 676 - gkr input evals: {:?}", evals.iter().map(|peval| peval.eval).collect::<Vec<E>>());
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
@@ -731,10 +700,6 @@ impl TowerVerify {
             transcript,
         );
 
-        // _debug
-        println!("=> 545 - TowerVerify::verify alpha_pows: {:?}", alpha_pows);
-
-
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])
@@ -777,11 +742,6 @@ impl TowerVerify {
             )
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
             .sum::<E>();
-
-
-        // _debug
-        println!("=> 535 - initial claim: {:?}", initial_claim);
-
 
         let max_num_variables = num_variables.iter().max().unwrap();
 
