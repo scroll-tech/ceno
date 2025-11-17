@@ -396,12 +396,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             */             
         });
     }
+    builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
 
-    // _debug: check
-    // builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
-
-
-    /* _debug: program
     let dummy_table_item_multiplicity =
         builder.unsafe_cast_var_to_felt(dummy_table_item_multiplicity);
     builder.assign(
@@ -474,6 +470,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         });
     }
 
+    /* _debug
     batch_verify(
         builder,
         zkvm_proof_input.max_num_var,
@@ -482,7 +479,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         zkvm_proof_input.pcs_proof,
         &mut challenger,
     );
-
+    */
+    
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     let initial_global_state = eval_ceno_expr_with_instance(
         builder,
@@ -512,7 +510,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // logup check
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     builder.assert_ext_eq(logup_sum, zero);
-    */
 }
 
 pub fn verify_chip_proof<C: Config>(
