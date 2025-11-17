@@ -163,7 +163,7 @@ impl Default for MultiProver {
         Self {
             prover_id: 0,
             max_provers: 1,
-            max_cell_per_shard: DEFAULT_MAX_CELLS_PER_SHARDS,
+            max_cell_per_shard: u64::MAX,
             max_cycle_per_shard: DEFAULT_MAX_CYCLE_PER_SHARDS,
         }
     }
