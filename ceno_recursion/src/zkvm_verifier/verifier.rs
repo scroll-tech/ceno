@@ -3,9 +3,7 @@ use super::binding::{
     ZKVMProofInputVariable,
 };
 use crate::arithmetics::{
-    arr_product, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance,
-    eval_stacked_constant, eval_stacked_wellform_address_vec, mask_arr, reverse, PolyEvaluator,
-    UniPolyExtrapolator,
+    PolyEvaluator, UniPolyExtrapolator, arr_product, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_stacked_constant, eval_stacked_wellform_address_vec, mask_arr, print_ext_arr, reverse
 };
 use crate::basefold_verifier::basefold::{
     BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable,
@@ -105,26 +103,9 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let mut challenger = DuplexChallengerVariable::new(builder);
     transcript_observe_label(builder, &mut challenger, b"riscv");
     
-    
     let prod_r: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let prod_w: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-
-    /* _debug: check
-    // make sure circuit index of chip proofs are
-    // subset of that of self.vk.circuit_vks
-    for chip_idx in vm_proof.chip_proofs.keys() {
-        if *chip_idx >= self.vk.circuit_vks.len() {
-            return Err(ZKVMError::VKNotFound(
-                format!(
-                    "{shard_id}th shard chip index {chip_idx} not found in vk set [0..{})",
-                    self.vk.circuit_vks.len()
-                )
-                .into(),
-            ));
-        }
-    }
-    */
 
     iter_zip!(builder, zkvm_proof_input.raw_pi).for_each(|ptr_vec, builder| {
         let v = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
@@ -260,17 +241,10 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
-        let with_omc_init_only = circuit_vk.get_cs().with_omc_init_only() as usize;
 
         builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
             let chip_proof =
                 builder.get(&zkvm_proof_input.chip_proofs, num_chips_verified.get_var());
-            
-            /* _debug: multi shard
-            builder.if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
-                builder.assert_usize_eq(Usize::from(with_omc_init_only), Usize::from(0));
-            });
-            */
 
             builder.assert_usize_eq(
                 chip_proof.wits_in_evals.len(),
@@ -545,53 +519,11 @@ pub fn verify_chip_proof<C: Config>(
     let num_var_with_rotation: Usize<C::N> = Usize::Var(Var::uninit(builder));
     builder.assign(&num_var_with_rotation, log2_num_instances.clone() + Usize::from(composed_cs.rotation_vars().unwrap_or(0)));
 
-    // _debug: constraint
-    // // constrain log2_num_instances within max length
-    // cs.r_table_expressions
-    //     .iter()
-    //     .chain(&cs.w_table_expressions)
-    //     .for_each(|set_table_expr| {
-    //         // iterate through structural witins and collect max round.
-    //         let num_vars = set_table_expr
-    //             .table_spec
-    //             .len
-    //             .map(ceil_log2)
-    //             .unwrap_or_else(|| {
-    //                 set_table_expr
-    //                     .table_spec
-    //                     .structural_witins
-    //                     .iter()
-    //                     .map(|StructuralWitIn { witin_type, .. }| {
-    //                         let hint_num_vars = log2_num_instances;
-    //                         assert!((1 << hint_num_vars) <= witin_type.max_len());
-    //                         hint_num_vars
-    //                     })
-    //                     .max()
-    //                     .unwrap_or(log2_num_instances)
-    //             });
-    //         assert_eq!(num_vars, log2_num_instances);
-    //     });
-    // cs.lk_table_expressions.iter().for_each(|l| {
-    //     // iterate through structural witins and collect max round.
-    //     let num_vars = l.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
-    //         l.table_spec
-    //             .structural_witins
-    //             .iter()
-    //             .map(|StructuralWitIn { witin_type, .. }| {
-    //                 let hint_num_vars = log2_num_instances;
-    //                 assert!((1 << hint_num_vars) <= witin_type.max_len());
-    //                 hint_num_vars
-    //             })
-    //             .max()
-    //             .unwrap_or(log2_num_instances)
-    //     });
-    //     assert_eq!(num_vars, log2_num_instances);
-    // });
 
     let shard_ec_sum = SepticPointVariable {
         x: SepticExtensionVariable { vs: builder.dyn_array(7) },
         y: SepticExtensionVariable { vs: builder.dyn_array(7) },
-        is_infinity: Usize::from(0),
+        is_infinity: Usize::uninit(builder),
     };
 
     // _debug
@@ -599,29 +531,16 @@ pub fn verify_chip_proof<C: Config>(
         builder.assert_nonzero(&chip_proof.has_ecc_proof);
         let ecc_proof = &chip_proof.ecc_proof;
 
-        // let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
         // let expected_septic_xy = cs
         //     .ec_final_sum
         //     .iter()
         //     .map(|expr| {
-        //         let e = eval_ceno_expr_with_instance(
-        //             builder, 
-        //             &empty_arr, 
-        //             &empty_arr, 
-        //             &empty_arr, 
-        //             pi_evals, 
-        //             challenges, 
-        //             expr
-        //         );
-
-        //         // _debug
-        //         builder.print_e(e);
-
-        //         e
+        //         eval_by_expr_with_instance(&[], &[], &[], pi, challenges, expr)
+        //             .right()
+        //             .and_then(|v| v.as_base())
+        //             .unwrap()
         //     })
         //     .collect_vec();
-
-        // _debug: check ecc
         // let expected_septic_x: SepticExtension<E::BaseField> =
         //     expected_septic_xy[0..SEPTIC_EXTENSION_DEGREE].into();
         // let expected_septic_y: SepticExtension<E::BaseField> =
@@ -629,12 +548,10 @@ pub fn verify_chip_proof<C: Config>(
 
         // assert_eq!(&ecc_proof.sum.x, &expected_septic_x);
         // assert_eq!(&ecc_proof.sum.y, &expected_septic_y);
-        // assert!(!ecc_proof.sum.is_infinity);
 
+        builder.assert_usize_eq(ecc_proof.sum.is_infinity.clone(), Usize::from(0));
         verify_ecc_proof(builder, challenger, ecc_proof, unipoly_extrapolator);
-
-        // tracing::debug!("ecc proof verified.");
-        // Some(ecc_proof.sum.clone())
+        builder.assign(&shard_ec_sum, ecc_proof.sum.clone());
     }
 
     let tower_proof = &chip_proof.tower_proof;
@@ -1655,8 +1572,6 @@ pub fn verify_ecc_proof<C: Config>(
         unipoly_extrapolator,
     );
 
-    /* _debug: ecc
-    // Calculate v1, v2, v3, v4, v5
     // let one = builder.constant(C::EF::ONE);
     // let zero = builder.constant(C::EF::ZERO);
     let cord_slice = proof.evals.slice(builder, 2, proof.evals.len());
@@ -1711,24 +1626,39 @@ pub fn verify_ecc_proof<C: Config>(
     let v3: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let v4: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let v5: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
+    let x0_x1: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
+    let x0_x3: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
 
     for i in 0..SEPTIC_EXTENSION_DEGREE {
-        let s0_i = builder.get(&s0.vs, i);
         let x0_i = builder.get(&x0.vs, i);
         let x1_i = builder.get(&x1.vs, i);
         let x3_i = builder.get(&x3.vs, i);
         let y0_i = builder.get(&y0.vs, i);
-        let y1_i = builder.get(&y1.vs, i);
         let y3_i = builder.get(&y3.vs, i);
         let s0_squared_i = builder.get(&s0_squared.vs, i);
 
-        builder.set(&v1.vs, i, s0_i * (x0_i - x1_i) - (y0_i - y1_i));
+        builder.set(&x0_x1.vs, i, x0_i - x1_i);
+        builder.set(&x0_x3.vs, i, x0_i - x3_i);
         builder.set(&v2.vs, i, s0_squared_i - x0_i - x1_i - x3_i);
-        builder.set(&v3.vs, i, s0_i * (x0_i - x3_i) - (y0_i + y3_i));
         builder.set(&v4.vs, i, x3_i - x0_i);
         builder.set(&v5.vs, i, y3_i - y0_i);
     }
 
+    let s0_x0_x1 = septic_ext_mul(builder, &s0, &x0_x1);
+    let s0_x0_x3 = septic_ext_mul(builder, &s0, &x0_x3);
+
+    for i in 0..SEPTIC_EXTENSION_DEGREE {
+        let s0_x0_x1_i = builder.get(&s0_x0_x1.vs, i);
+        let s0_x0_x3_i = builder.get(&s0_x0_x3.vs, i);
+        let y0_i = builder.get(&y0.vs, i);
+        let y1_i = builder.get(&y1.vs, i);
+        let y3_i = builder.get(&y3.vs, i);
+
+        builder.set(&v1.vs, i, s0_x0_x1_i - (y0_i - y1_i));
+        builder.set(&v3.vs, i, s0_x0_x3_i - (y0_i + y3_i));
+    }
+
+    /* _debug: ecc
     let mask1 = alpha_pows.slice(builder, 0, SEPTIC_EXTENSION_DEGREE);
     let mask2 = alpha_pows.slice(
         builder,
@@ -1826,6 +1756,84 @@ pub fn septic_ext_squared<C: Config>(
 
             let term: Ext<C::F, C::EF> = builder.uninit();
             builder.assign(&term, two_ext * i_term * j_term);
+
+            if index < 7 {
+                let r_v = builder.get(&r, index);
+                builder.set(&r, index, r_v + term);
+            } else {
+                index -= 7;
+                // x^7 = 2x + 5
+                let r_v_i = builder.get(&r, index);
+                let r_v_i_1 = builder.get(&r, index + 1);
+
+                builder.set(&r, index, r_v_i + five_ext * term);
+                builder.set(&r, index + 1, r_v_i_1 + two_ext * term);
+            }
+        }
+    }
+
+    // i == j: i \in [0, 3]
+    let r_0 = builder.get(&r, 0);
+    let a_0 = builder.get(&a.vs, 0);
+    builder.set(&r, 0, r_0 + a_0 * a_0);
+
+    let r_2 = builder.get(&r, 2);
+    let a_1 = builder.get(&a.vs, 1);
+    builder.set(&r, 2, r_2 + a_1 * a_1);
+
+    let r_4 = builder.get(&r, 4);
+    let a_2 = builder.get(&a.vs, 2);
+    builder.set(&r, 4, r_4 + a_2 * a_2);
+
+    let r_6 = builder.get(&r, 6);
+    let a_3 = builder.get(&a.vs, 3);
+    builder.set(&r, 6, r_6 + a_3 * a_3);
+
+    // a4^2 * x^8 = a4^2 * (2x + 5)x = 5a4^2 * x + 2a4^2 * x^2
+    let a_4 = builder.get(&a.vs, 4);
+    let term: Ext<C::F, C::EF> = builder.eval(a_4 * a_4);
+    let r_1 = builder.get(&r, 1);
+    let r_2 = builder.get(&r, 2);
+    builder.set(&r, 1, r_1 + five_ext * term);
+    builder.set(&r, 2, r_2 + two_ext * term);
+
+    // a5^2 * x^10 = a5^2 * (2x + 5)x^3 = 5a5^2 * x^3 + 2a5^2 * x^4
+    let a_5 = builder.get(&a.vs, 5);
+    let term: Ext<C::F, C::EF> = builder.eval(a_5 * a_5);
+    let r_3 = builder.get(&r, 3);
+    let r_4 = builder.get(&r, 4);
+    builder.set(&r, 3, r_3 + five_ext * term);
+    builder.set(&r, 4, r_4 + two_ext * term);
+
+    // a6^2 * x^12 = a6^2 * (2x + 5)x^5 = 5a6^2 * x^5 + 2a6^2 * x^6
+    let a_6 = builder.get(&a.vs, 6);
+    let term: Ext<C::F, C::EF> = builder.eval(a_6 * a_6);
+    let r_5 = builder.get(&r, 5);
+    let r_6 = builder.get(&r, 6);
+    builder.set(&r, 5, r_5 + five_ext * term);
+    builder.set(&r, 6, r_6 + two_ext * term);
+
+    r.into()
+}
+
+pub fn septic_ext_mul<C: Config>(
+    builder: &mut Builder<C>,
+    a: &SepticExtensionVariable<C>,
+    b: &SepticExtensionVariable<C>,
+) -> SepticExtensionVariable<C> {
+    let r: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
+    let two_ext: Ext<C::F, C::EF> = builder.constant(C::EF::TWO);
+    let five_ext: Ext<C::F, C::EF> = builder.constant(C::EF::from_canonical_u32(5));
+
+    for i in 0..SEPTIC_EXTENSION_DEGREE {
+        for j in 0..SEPTIC_EXTENSION_DEGREE {
+            let mut index = i + j;
+
+            let a_term = builder.get(&a.vs, i);
+            let b_term = builder.get(&b.vs, j);
+
+            let term: Ext<C::F, C::EF> = builder.uninit();
+            builder.assign(&term, a_term * b_term);
 
             if index < 7 {
                 let r_v = builder.get(&r, index);
