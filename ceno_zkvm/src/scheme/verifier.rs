@@ -368,8 +368,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        // _debug
-        /* _debug
         logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
             * dummy_table_item.inverse();
 
@@ -436,7 +434,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 format!("{shard_id}th logup_sum({:?}) != 0", logup_sum).into(),
             ));
         }
-        */
 
         Ok(shard_ec_sum)
     }
