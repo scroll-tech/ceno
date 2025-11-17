@@ -61,8 +61,7 @@ impl<
 {
     pub fn new_with_single_shard(pk: ZKVMProvingKey<E, PCS>, device: PD) -> Self {
         let pk = Arc::new(pk);
-        let device_first_shard_pk = if pk.as_ref().is_fixed_commitment() {
-            // transport first shard proving key
+        let device_first_shard_pk = if pk.as_ref().has_fixed_commitment() {
             Some(device.transport_proving_key(true, pk.clone()))
         } else {
             None
@@ -79,10 +78,8 @@ impl<
 
     pub fn new(pk: ZKVMProvingKey<E, PCS>, device: PD) -> Self {
         let pk = Arc::new(pk);
-        // transport first shard proving key
         let (device_first_shard_pk, device_non_first_shard_pk) =
-            if pk.as_ref().is_fixed_commitment() {
-                // transport first shard proving key
+            if pk.as_ref().has_fixed_commitment() {
                 (
                     Some(device.transport_proving_key(true, pk.clone())),
                     Some(device.transport_proving_key(false, pk.clone())),
