@@ -182,7 +182,8 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     challenges: &[E; 2],
     cuda_hal: &CudaHalBB31,
     prod_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
-    logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
+    // logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
+    big_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
 ) -> Result<
     (
         Vec<ceno_gpu::GpuProverSpec<'buf>>,
@@ -313,7 +314,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
     // Build logup GpuProverSpecs using GPU polynomials directly
     let mut logup_gpu_specs = Vec::new();
-    let mut remaining_logup_buffers = &mut logup_buffers[..];
 
     // Prepare last_layer for all logup cases
     let logup_last_layers = if !lk_numerator_gpu_chunks.is_empty() {
@@ -348,20 +348,32 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .collect::<Vec<_>>()
     };
 
-    // Process all logup last_layers uniformly
-    for last_layer in logup_last_layers {
-        assert_eq!(last_layer.len(), 4, "logup last_layer must have 4 MLEs");
-        let nv = last_layer[0].num_vars();
+    let span_logup = entered_span!("build_logup_tower", logup_layers = logup_last_layers.len(), profiling_3 = true);
 
-        let (current_buffer_slice, rest) = remaining_logup_buffers.split_at_mut(1);
-        remaining_logup_buffers = rest;
+    // Use batch processing for all cases
+    if !logup_last_layers.is_empty() {
+        let first_layer = &logup_last_layers[0];
+        let num_vars = first_layer[0].num_vars();
+        let num_towers = logup_last_layers.len();
 
-        let gpu_spec = cuda_hal
+        // Comprehensive checks are performed in the backend function `build_logup_tower_from_gpu_polys_batch`
+        assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
+
+        // Allocate one big buffer for all towers and add it to big_buffers
+        let tower_size = 2 * (1 << num_vars) * 4; // 2 * 4 * mle_len elements per tower
+        let total_buffer_size = num_towers * tower_size;
+        let big_buffer = cuda_hal.alloc_ext_elems_on_device(total_buffer_size).unwrap();
+        big_buffers.push(big_buffer);
+
+        // Build all towers in batch
+        let big_buffer = big_buffers.last_mut().unwrap();
+        let last_layers_refs: Vec<&[GpuPolynomialExt]> = logup_last_layers.iter().map(|v| v.as_slice()).collect();
+        let gpu_specs = cuda_hal
             .tower
-            .build_logup_tower_from_gpu_polys(nv, &last_layer, &mut current_buffer_slice[0])
-            .map_err(|e| format!("build_logup_tower_from_gpu_polys failed: {:?}", e))?;
+            .build_logup_tower_from_gpu_polys_batch(big_buffer, &last_layers_refs, num_vars, num_towers)
+            .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
 
-        logup_gpu_specs.push(gpu_spec);
+        logup_gpu_specs.extend(gpu_specs);
     }
 
     Ok((prod_gpu_specs, logup_gpu_specs))
@@ -428,7 +440,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             // build_tower_witness_gpu will allocate buffers and build GPU specs
             let span = entered_span!("build_tower_witness", profiling_2 = true);
             let mut _prod_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
-            let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
+            // let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
+            let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
                 composed_cs,
                 input,
@@ -436,7 +449,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
                 challenges,
                 &cuda_hal,
                 &mut _prod_buffers,
-                &mut _logup_buffers,
+                // &mut _logup_buffers,
+                &mut _big_buffers,
             )
             .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
             .unwrap();
@@ -471,7 +485,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             (point, proof, lk_out_evals, w_out_evals, r_out_evals)
         };
 
-        let span_sync = entered_span!("wait for GPU to finish (free buffers)", profiling_3 = true);
+        let span_sync = entered_span!("wait for GPU to free memory", profiling_3 = true);
         cuda_hal.inner().synchronize().unwrap();
         exit_span!(span_sync);
 
