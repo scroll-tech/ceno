@@ -219,6 +219,15 @@ impl<
             }
             structural_rmms.push(structural_witness_rmm);
         }
+        println!(
+            "total size of rmm in {} MB",
+            wits_rmms
+                .iter()
+                .map(|(k, v)| v.values.len() * 4)
+                .sum::<usize>() as f64
+                * 2f64  // 2 is log blowup
+                / (1024.0 * 1024.0)
+        );
 
         // commit to witness traces in batch
         let (mut witness_mles, witness_data, witin_commit) = self.device.commit_traces(wits_rmms);
