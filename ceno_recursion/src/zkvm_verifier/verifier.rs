@@ -220,7 +220,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         .count();
 
     let mut unipoly_extrapolator = UniPolyExtrapolator::new(builder);
-    let poly_evaluator = PolyEvaluator::new(builder);
+    let _poly_evaluator = PolyEvaluator::new(builder);
 
     let dummy_table_item = alpha;
     let dummy_table_item_multiplicity: Var<C::N> = builder.constant(C::N::ZERO);
@@ -229,7 +229,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         builder.dyn_array(zkvm_proof_input.chip_proofs.len());
     let fixed_openings: Array<C, RoundOpeningVariable<C>> =
         builder.dyn_array(zkvm_proof_input.chip_proofs.len());
-    let shard_ec_sum = SepticPointVariable {
+    let _shard_ec_sum = SepticPointVariable {
         x: SepticExtensionVariable {
             vs: builder.dyn_array(7),
         },
@@ -330,7 +330,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             }
 
             builder.cycle_tracker_start("Verify chip proof");
-            let (input_opening_point, chip_shard_ec_sum) = verify_chip_proof(
+            let (input_opening_point, _chip_shard_ec_sum) = verify_chip_proof(
                 builder,
                 &mut challenger,
                 &chip_proof,
@@ -744,8 +744,8 @@ pub fn verify_gkr_circuit<C: Config>(
     challenges: &Array<C, Ext<C::F, C::EF>>,
     pub_io_evals: &Array<C, Ext<C::F, C::EF>>,
     claims: &Array<C, PointAndEvalVariable<C>>,
-    chip_proof: &ZKVMChipProofInputVariable<C>,
-    selector_ctxs: Vec<SelectorContextVariable<C>>,
+    _chip_proof: &ZKVMChipProofInputVariable<C>,
+    _selector_ctxs: Vec<SelectorContextVariable<C>>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
 ) -> PointVariable<C> {
     let rt = PointVariable {
@@ -1215,14 +1215,14 @@ pub fn rotation_selector_eval<C: Config>(
 pub fn evaluate_ecc_selector<C: Config>(
     builder: &mut Builder<C>,
     sel_type: &SelectorType<E>,
-    out_point: &Array<C, Ext<C::F, C::EF>>,
-    in_point: &Array<C, Ext<C::F, C::EF>>,
+    _out_point: &Array<C, Ext<C::F, C::EF>>,
+    _in_point: &Array<C, Ext<C::F, C::EF>>,
     // ctx: &SelectorContext,
 ) {
     // builder.assert_usize_eq(in_point.fs.len(), Usize::from(ctx.num_vars));
     // builder.assert_usize_eq(out_point.fs.len(), Usize::from(ctx.num_vars));
 
-    let (expr, eval) = match sel_type {
+    let (_expr, _eval) = match sel_type {
         SelectorType::QuarkBinaryTreeLessThan(expr) => {
             let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
 
@@ -1293,7 +1293,7 @@ pub fn evaluate_selector<C: Config>(
     evals: &Array<C, Ext<C::F, C::EF>>,
     out_point: &Array<C, Ext<C::F, C::EF>>,
     in_point: &Array<C, Ext<C::F, C::EF>>,
-    chip_proof: &ZKVMChipProofInputVariable<C>,
+    _chip_proof: &ZKVMChipProofInputVariable<C>,
     offset_eq_id: usize,
     ctx: &SelectorContextVariable<C>,
 ) {
@@ -1622,7 +1622,7 @@ pub fn verify_ecc_proof<C: Config>(
     let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let three_f: Felt<C::F> = builder.constant(C::F::from_canonical_u32(3));
     let num_vars_f = builder.unsafe_cast_var_to_felt(num_vars.get_var());
-    let (rt, expected_evaluation) = iop_verifier_state_verify(
+    let (rt, _expected_evaluation) = iop_verifier_state_verify(
         builder,
         challenger,
         &zero_ext,
@@ -1749,7 +1749,7 @@ pub fn verify_ecc_proof<C: Config>(
         StackedConstantSequence { max_value: 0 },
     ));
 
-    let sel_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(1);
+    let _sel_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(1);
     evaluate_ecc_selector(builder, &sel_add_expr, &out_rt, &rt);
     // let expected_sel_add = builder.get(&sel_evals, 0);
 
