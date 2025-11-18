@@ -49,7 +49,7 @@ num-derive = "0.4"
 num-traits = "0.2"
 
 num = "*"
-num-bigint = "*"
+num-bigint = "0.4.6"
 pprof2 = { version = "0.13", features = ["flamegraph"] }
 prettytable-rs = "^0.10"
 proptest = "1"
