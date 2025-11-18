@@ -185,7 +185,7 @@ pub mod tests {
 
     type F = BabyBear;
     type E = BabyBearExt4;
-    type PCS = BasefoldDefault<E>;
+    type Pcs = BasefoldDefault<E>;
 
     use super::{BasefoldProof, BasefoldProofVariable, InnerConfig, RoundVariable, batch_verify};
     use crate::{
@@ -272,15 +272,15 @@ pub mod tests {
         let mut rng = thread_rng();
 
         // setup PCS
-        let pp = PCS::setup(1 << 22, mpcs::SecurityLevel::Conjecture100bits).unwrap();
-        let (pp, vp) = pcs_trim::<E, PCS>(pp, 1 << 22).unwrap();
+        let pp = Pcs::setup(1 << 22, mpcs::SecurityLevel::Conjecture100bits).unwrap();
+        let (pp, vp) = pcs_trim::<E, Pcs>(pp, 1 << 22).unwrap();
 
         let rounds = dimensions
             .iter()
             .map(|dimensions| {
                 let mut num_total_polys = 0;
                 let (matrices, mles): (Vec<_>, Vec<_>) = dimensions
-                    .into_iter()
+                    .iter()
                     .map(|(num_vars, width)| {
                         let m = witness::RowMajorMatrix::<F>::rand(&mut rng, 1 << num_vars, *width);
                         let mles = m.to_mles();
@@ -291,7 +291,7 @@ pub mod tests {
                     .unzip();
 
                 // commit to matrices
-                let pcs_data = pcs_batch_commit::<E, PCS>(&pp, matrices).unwrap();
+                let pcs_data = pcs_batch_commit::<E, Pcs>(&pp, matrices).unwrap();
 
                 let point_and_evals = mles
                     .iter()
@@ -326,7 +326,7 @@ pub mod tests {
             .iter()
             .map(|round| {
                 (
-                    PCS::get_pure_commitment(&round.0),
+                    Pcs::get_pure_commitment(&round.0),
                     round
                         .1
                         .iter()
@@ -338,11 +338,11 @@ pub mod tests {
 
         // batch open
         let mut transcript = BasicTranscript::<E>::new(&[]);
-        let opening_proof = PCS::batch_open(&pp, prover_rounds, &mut transcript).unwrap();
+        let opening_proof = Pcs::batch_open(&pp, prover_rounds, &mut transcript).unwrap();
 
         // batch verify
         let mut transcript = BasicTranscript::<E>::new(&[]);
-        PCS::batch_verify(
+        Pcs::batch_verify(
             &vp,
             verifier_rounds.clone(),
             &opening_proof,

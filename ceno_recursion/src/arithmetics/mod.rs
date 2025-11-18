@@ -1062,7 +1062,7 @@ mod tests {
 
         // eval_stacked_wellform_address_vec
         let r = builder.dyn_array(4);
-        let expected = vec![0, 0, 0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7];
+        let expected = [0, 0, 0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7];
 
         for i in 0..16 {
             for b in 0..4 {
