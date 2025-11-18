@@ -181,7 +181,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     records: &[ArcMultilinearExtensionGpu<'_, E>],
     challenges: &[E; 2],
     cuda_hal: &CudaHalBB31,
-    // logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     big_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     view_last_layers: &mut Vec<Vec<Vec<GpuPolynomialExt<'static>>>>,
 ) -> Result<
@@ -228,8 +227,10 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
     cuda_hal.inner().synchronize().unwrap();
     cuda_hal.print_mem_info().unwrap();
+    assert_eq!(big_buffers.len(), 0, "expect no big buffers");
 
     // prod: last layes & buffer
+    let mut is_prod_buffer_exists = false;
     let prod_last_layers = r_set_wit
         .iter()
         .chain(w_set_wit.iter())
@@ -250,11 +251,13 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .alloc_ext_elems_on_device(total_buffer_size)
             .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))?;
         big_buffers.push(big_buffer);
+        is_prod_buffer_exists = true;
         cuda_hal.inner().synchronize().unwrap();
         cuda_hal.print_mem_info().unwrap();
     }
 
     // logup: last layes
+    let mut is_logup_buffer_exists = false;
     let lk_numerator_last_layer = lk_n_wit
         .iter()
         .map(|wit| wit.as_view_chunks(NUM_FANIN_LOGUP))
@@ -307,23 +310,38 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         println!("logup tower request buffer size: {:.2} MB", (total_buffer_size * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0));
         let big_buffer = cuda_hal.alloc_ext_elems_on_device(total_buffer_size).unwrap();
         big_buffers.push(big_buffer);
+        is_logup_buffer_exists = true;
         cuda_hal.inner().synchronize().unwrap();
         cuda_hal.print_mem_info().unwrap();
     }
-    let (_, newly_pushed) = big_buffers.split_at_mut(0);
-    assert_eq!(newly_pushed.len(), 2, "expect two fresh GPU buffers");
-    let (prod_slice, logup_slice) = newly_pushed.split_at_mut(1);
-    let prod_big_buffer = &mut prod_slice[0];
-    let logup_big_buffer = &mut logup_slice[0];
+
+    let (_, pushed_big_buffers) = big_buffers.split_at_mut(0);
+    let (prod_big_buffer, logup_big_buffer) = match (is_prod_buffer_exists, is_logup_buffer_exists, pushed_big_buffers) {
+        (false, false, []) => (None, None),
+        (true, false, [prod]) => (Some(prod), None),
+        (false, true, [logup]) => (None, Some(logup)),
+        (true, true, [prod, logup]) => (Some(prod), Some(logup)),
+        (prod_flag, logup_flag, slice) => {
+            panic!(
+                "unexpected state: prod={}, logup={}, newly_pushed_len={}",
+                prod_flag,
+                logup_flag,
+                slice.len()
+            );
+        }
+    };
 
     // Build product GpuProverSpecs
     let mut prod_gpu_specs = Vec::new();
-    let prod_last_layers = &view_last_layers[0];
-    if !prod_last_layers.is_empty() {
+    if is_prod_buffer_exists {
+        let prod_last_layers = &view_last_layers[0];
         let first_layer = &prod_last_layers[0];
         assert_eq!(first_layer.len(), 2, "prod last_layer must have 2 MLEs");
         let num_vars = first_layer[0].num_vars();
         let num_towers = prod_last_layers.len();
+        let Some(prod_big_buffer) = prod_big_buffer else {
+            panic!("prod big buffer not found");
+        };
 
         let span_prod = entered_span!(
             "build_prod_tower",
@@ -350,12 +368,15 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
     // Build logup GpuProverSpecs
     let mut logup_gpu_specs = Vec::new();
-    let logup_last_layers = &view_last_layers[1];
-    if !logup_last_layers.is_empty() {
+    if is_logup_buffer_exists {
+        let logup_last_layers = view_last_layers.last().unwrap();
         let first_layer = &logup_last_layers[0];
+        assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
         let num_vars = first_layer[0].num_vars();
         let num_towers = logup_last_layers.len();
-        assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
+        let Some(logup_big_buffer) = logup_big_buffer else {
+            panic!("logup big buffer not found");
+        };
 
         let span_logup = entered_span!(
             "build_logup_tower",
@@ -435,7 +456,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         let (point, proof, lk_out_evals, w_out_evals, r_out_evals) = {
             // build_tower_witness_gpu will allocate buffers and build GPU specs
             let span = entered_span!("build_tower_witness", profiling_2 = true);
-            // let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let mut _view_last_layers: Vec<Vec<Vec<ceno_gpu::bb31::GpuPolynomialExt<'static>>>> =
                 Vec::new();
