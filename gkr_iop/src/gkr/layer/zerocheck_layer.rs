@@ -363,7 +363,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         // assume public io is tiny vector, so we evaluate it directly without PCS
         let pubio_offset = self.n_witin + self.n_fixed;
         for (index, instance) in self.instance_openings.iter().enumerate() {
-            let index: usize = pubio_offset + index;
+            let index = pubio_offset + index;
             let poly = raw_pi[instance.0].to_vec().into_mle();
             let expected_eval = poly.evaluate(&in_point[..poly.num_vars()]);
             if expected_eval != main_evals[index] {

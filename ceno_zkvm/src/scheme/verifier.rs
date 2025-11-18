@@ -652,6 +652,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         Ok((rt, shard_ec_sum))
     }
 }
+
 pub struct TowerVerify;
 
 pub type TowerVerifyResult<E> = Result<
