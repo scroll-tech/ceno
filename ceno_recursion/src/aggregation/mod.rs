@@ -6,7 +6,7 @@ use ceno_zkvm::{scheme::ZKVMProof, structs::ZKVMVerifyingKey};
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{
     arch::{
-        MemoryConfig, SystemConfig, VirtualMachine, VmConfig, VmExtension,
+        MemoryConfig, SystemConfig, VirtualMachine,
         instructions::program::Program,
     },
     system::program::trace::VmCommittedExe,
@@ -46,7 +46,7 @@ use openvm_stark_sdk::{
     p3_bn254_fr::Bn254Fr,
 };
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, fs::File, io::Write, sync::Arc, time::Instant};
+use std::{borrow::Borrow, fs::File, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use openvm_circuit::{
     arch::{

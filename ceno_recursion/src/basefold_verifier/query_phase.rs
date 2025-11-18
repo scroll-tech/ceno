@@ -1,5 +1,3 @@
-// Note: check all XXX comments!
-
 use ff_ext::{BabyBearExt4, ExtensionField, PoseidonField};
 use mpcs::basefold::structure::QueryOpeningProof as InnerQueryOpeningProof;
 use openvm_native_compiler::{asm::AsmConfig, prelude::*};

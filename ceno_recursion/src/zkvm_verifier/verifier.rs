@@ -62,7 +62,6 @@ type Pcs = Basefold<E, BasefoldRSParams>;
 
 const NUM_FANIN: usize = 2;
 const SEPTIC_EXTENSION_DEGREE: usize = 7;
-const SEPTIC_JACOBIAN_NUM_MLES: usize = 3 * SEPTIC_EXTENSION_DEGREE;
 
 pub fn transcript_group_observe_label<C: Config>(
     builder: &mut Builder<C>,

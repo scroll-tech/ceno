@@ -1,3 +1,7 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+
 use ceno_zkvm::structs::{ChallengeId, WitnessId};
 use ff_ext::{BabyBearExt4, ExtensionField, SmallField};
 use itertools::Either;

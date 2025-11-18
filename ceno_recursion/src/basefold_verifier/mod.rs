@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
 pub(crate) mod basefold;
 pub(crate) mod extension_mmcs;
 pub(crate) mod hash;

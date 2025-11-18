@@ -1,5 +1,4 @@
 // Note: check all XXX comments!
-
 use std::{cell::RefCell, collections::BTreeMap};
 
 use openvm_native_compiler::{asm::AsmConfig, prelude::*};
