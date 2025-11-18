@@ -90,13 +90,13 @@ pub fn mmcs_verify_batch<C: Config>(builder: &mut Builder<C>, input: MmcsVerifie
 
 #[cfg(test)]
 pub mod tests {
-    use openvm_circuit::arch::{instructions::program::Program, SystemConfig, VmExecutor};
+    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::asm::AsmBuilder;
     use openvm_native_recursion::hints::Hintable;
     use p3::field::FieldAlgebra;
 
-    use super::{mmcs_verify_batch, MmcsCommitment, MmcsVerifierInput, E, F};
+    use super::{E, F, MmcsCommitment, MmcsVerifierInput, mmcs_verify_batch};
 
     /// The witness in this test is produced by:
     /// https://github.com/Jiangkm3/Plonky3 branch cyte/mmcs-poseidon2-constants

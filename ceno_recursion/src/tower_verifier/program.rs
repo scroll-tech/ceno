@@ -1,17 +1,19 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
-use crate::arithmetics::{
-    challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend, exts_to_felts,
-    fixed_dot_product, reverse, UniPolyExtrapolator,
+use crate::{
+    arithmetics::{
+        UniPolyExtrapolator, challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend,
+        exts_to_felts, fixed_dot_product, reverse,
+    },
+    tower_verifier::binding::IOPProverMessageVecVariable,
+    transcript::transcript_observe_label,
+    zkvm_verifier::binding::TowerProofInputVariable,
 };
-use crate::tower_verifier::binding::IOPProverMessageVecVariable;
-use crate::transcript::transcript_observe_label;
-use crate::zkvm_verifier::binding::TowerProofInputVariable;
 use ceno_zkvm::scheme::constants::NUM_FANIN;
 use itertools::izip;
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{
-    duplex::DuplexChallengerVariable, CanObserveVariable, FeltChallenger,
+    CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
 
@@ -534,333 +536,331 @@ pub fn verify_tower_proof<C: Config>(
     )
 }
 
-/*
-#[cfg(test)]
-mod tests {
-    use crate::arithmetics::UniPolyExtrapolator;
-    use crate::tower_verifier::binding::IOPProverMessage;
-    use crate::tower_verifier::binding::TowerVerifierInput;
-    use crate::tower_verifier::program::iop_verifier_state_verify;
-    use crate::tower_verifier::program::verify_tower_proof;
-    use ceno_mle::mle::ArcMultilinearExtension;
-    use ceno_mle::mle::{IntoMLE, MultilinearExtension};
-    use ceno_mle::virtual_polys::VirtualPolynomials;
-    use ceno_sumcheck::structs::IOPProverState;
-    use ceno_transcript::BasicTranscript;
-    use ceno_zkvm::scheme::constants::NUM_FANIN;
-    use ceno_zkvm::scheme::hal::TowerProver;
-    use ceno_zkvm::scheme::hal::TowerProverSpec;
-    use ff_ext::BabyBearExt4;
-    use ff_ext::FieldFrom;
-    use ff_ext::FromUniformBytes;
-    use itertools::Itertools;
-    use openvm_circuit::arch::SystemConfig;
-    use openvm_circuit::arch::VmExecutor;
-    use openvm_native_circuit::Native;
-    use openvm_native_circuit::NativeConfig;
-    use openvm_native_compiler::asm::AsmCompiler;
-    use openvm_native_compiler::asm::{AsmBuilder, AsmConfig};
-    use openvm_native_compiler::conversion::convert_program;
-    use openvm_native_compiler::conversion::CompilerOptions;
-    use openvm_native_compiler::ir::Array;
-    use openvm_native_compiler::ir::Ext;
-    use openvm_native_compiler::prelude::Felt;
-    use openvm_native_recursion::challenger::duplex::DuplexChallengerVariable;
-    use openvm_native_recursion::hints::Hintable;
-    use openvm_stark_sdk::config::setup_tracing_with_log_level;
-    use p3_baby_bear::BabyBear;
-    use p3_field::extension::BinomialExtensionField;
-    use p3_field::Field;
-    use p3_field::FieldAlgebra;
-    use rand::thread_rng;
-
-    type F = BabyBear;
-    type E = BabyBearExt4;
-    type EF = BinomialExtensionField<BabyBear, 4>;
-    type C = AsmConfig<F, EF>;
-
-    #[test]
-    fn test_simple_sumcheck() {
-        setup_tracing_with_log_level(tracing::Level::WARN);
-
-        let nv = 5;
-        let degree = 3;
-
-        let mut builder = AsmBuilder::<F, EF>::default();
-
-        let out_claim = EF::read(&mut builder);
-        let prover_msgs = Vec::<IOPProverMessage>::read(&mut builder);
-
-        let max_num_variables: Felt<F> = builder.constant(F::from_canonical_u32(nv as u32));
-        let max_degree: Felt<F> = builder.constant(F::from_canonical_u32(degree as u32));
-
-        let mut challenger: DuplexChallengerVariable<C> =
-            DuplexChallengerVariable::new(&mut builder);
-
-        let mut uni_p = UniPolyExtrapolator::new(&mut builder);
-
-        builder.cycle_tracker_start("sumcheck verify");
-        iop_verifier_state_verify(
-            &mut builder,
-            &mut challenger,
-            &out_claim,
-            &prover_msgs,
-            max_num_variables,
-            max_degree,
-            &mut uni_p,
-        );
-        builder.cycle_tracker_end("sumcheck verify");
-
-        builder.halt();
-
-        // get the assembly code
-        let options = CompilerOptions::default().with_cycle_tracker();
-        let mut compiler = AsmCompiler::new(options.word_size);
-        compiler.build(builder.operations);
-        let asm_code = compiler.code();
-        println!("asm code");
-        println!("{asm_code}");
-
-        // run sumcheck prover to get sumcheck proof
-        let mut rng = thread_rng();
-        let (mles, expected_sum) = MultilinearExtension::<E>::random_mle_list(nv, degree, &mut rng);
-        let mles: Vec<ceno_mle::mle::ArcMultilinearExtension<E>> =
-            mles.into_iter().map(|mle| mle as _).collect_vec();
-        let mut virtual_poly: VirtualPolynomials<'_, E> = VirtualPolynomials::new(1, nv);
-        virtual_poly.add_mle_list(mles.iter().collect_vec(), E::from_v(1));
-
-        let mut transcript = BasicTranscript::new(&[]);
-        let (sumcheck_proof, _) = IOPProverState::prove(virtual_poly, &mut transcript);
-        let mut input_stream = Vec::new();
-
-        // hacky way: convert E to EF but actually they are the same
-        let expected_sum: EF = cast_vec(vec![expected_sum])[0];
-        input_stream.extend(expected_sum.write());
-        input_stream.extend(
-            sumcheck_proof
-                .proofs
-                .into_iter()
-                .map(|msg| {
-                    let evaluations: Vec<EF> = cast_vec(msg.evaluations);
-                    IOPProverMessage { evaluations }
-                })
-                .collect_vec()
-                .write(),
-        );
-
-        // get execution result
-        let program = convert_program(asm_code, options);
-        let system_config = SystemConfig::default()
-            .with_public_values(4)
-            .with_max_segment_len((1 << 25) - 100)
-            .with_profiling();
-        let config = NativeConfig::new(system_config, Native);
-        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
-
-        let res = executor
-            .execute_and_then(program, input_stream, |_, seg| Ok(seg), |err| err)
-            .unwrap();
-
-        for (i, seg) in res.iter().enumerate() {
-            #[cfg(feature = "bench-metrics")]
-            {
-                println!(
-                    "=> segment {} metrics.cycle_count: {:?}",
-                    i, seg.metrics.cycle_count
-                );
-                for (insn, count) in seg.metrics.counts.iter() {
-                    println!("insn: {:?}, count: {:?}", insn, count);
-                }
-                println!(
-                    "=> segment {} #(insns): {}",
-                    i,
-                    seg.metrics
-                        .counts
-                        .values()
-                        .copied()
-                        .into_iter()
-                        .sum::<usize>()
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_prod_tower() {
-        let nv = 5;
-        let num_prod_specs = 2;
-        let num_logup_specs = 1;
-        let mut rng = thread_rng();
-
-        setup_tracing_with_log_level(tracing::Level::WARN);
-
-        let records: Vec<MultilinearExtension<E>> = (0..num_prod_specs)
-            .map(|_| {
-                MultilinearExtension::from_evaluations_ext_vec(
-                    nv - 1,
-                    E::random_vec(1 << (nv - 1), &mut rng),
-                )
-            })
-            .collect_vec();
-        let denom_records = (0..num_logup_specs)
-            .map(|_| {
-                MultilinearExtension::from_evaluations_ext_vec(nv, E::random_vec(1 << nv, &mut rng))
-            })
-            .collect_vec();
-
-        let prod_specs = records
-            .into_iter()
-            .map(|record| {
-                let (first, second) = record
-                    .get_ext_field_vec()
-                    .split_at(record.evaluations().len() / 2);
-                let last_layer: Vec<ArcMultilinearExtension<E>> = vec![
-                    first.to_vec().into_mle().into(),
-                    second.to_vec().into_mle().into(),
-                ];
-                assert_eq!(last_layer.len(), NUM_FANIN);
-                ceno_zkvm::structs::TowerProverSpec {
-                    witness: infer_tower_product_witness(nv - 1, last_layer, NUM_FANIN),
-                }
-            })
-            .collect_vec();
-
-        let prod_out_evals = prod_specs
-            .iter()
-            .map(|spec| {
-                spec.witness[0]
-                    .iter()
-                    .map(|mle| cast_vec(mle.get_ext_field_vec().to_vec())[0])
-                    .collect_vec()
-            })
-            .collect_vec();
-
-        let logup_specs = denom_records
-            .into_iter()
-            .map(|record| {
-                let (first, second) = record
-                    .get_ext_field_vec()
-                    .split_at(record.evaluations().len() / 2);
-                let last_layer: Vec<ArcMultilinearExtension<E>> = vec![
-                    first.to_vec().into_mle().into(),
-                    second.to_vec().into_mle().into(),
-                ];
-                TowerProverSpec {
-                    witness: infer_tower_logup_witness(None, last_layer),
-                }
-            })
-            .collect_vec();
-
-        let logup_out_evals = logup_specs
-            .iter()
-            .map(|spec| {
-                spec.witness[0]
-                    .iter()
-                    .map(|mle| cast_vec(mle.get_ext_field_vec().to_vec())[0])
-                    .collect_vec()
-            })
-            .collect_vec();
-
-        let num_variables = prod_specs
-            .iter()
-            .chain(logup_specs.iter())
-            .map(|spec| spec.witness.len())
-            .collect_vec();
-
-        let mut transcript = BasicTranscript::new(&[]);
-        let (_, tower_proof) =
-            TowerProver::create_proof(prod_specs, logup_specs, NUM_FANIN, &mut transcript);
-
-        // build program
-        let mut builder = AsmBuilder::<F, EF>::default();
-
-        let mut challenger: DuplexChallengerVariable<C> =
-            DuplexChallengerVariable::new(&mut builder);
-
-        // construct extrapolation weights
-        let mut uni_p = UniPolyExtrapolator::new(&mut builder);
-
-        assert_eq!(tower_proof.proofs.len(), nv - 1);
-        let tower_verifier_input_var = TowerVerifierInput::read(&mut builder);
-        let tower_verifier_input = TowerVerifierInput {
-            prod_out_evals,
-            logup_out_evals,
-            num_variables,
-            num_fanin: NUM_FANIN,
-            num_proofs: nv - 1,
-            num_prod_specs,
-            num_logup_specs,
-            _max_num_variables: nv,
-            proofs: tower_proof
-                .proofs
-                .iter()
-                .map(|layer| {
-                    layer
-                        .iter()
-                        .map(|round| IOPProverMessage {
-                            evaluations: cast_vec(round.evaluations.clone()),
-                        })
-                        .collect_vec()
-                })
-                .collect_vec(),
-            prod_specs_eval: tower_proof
-                .prod_specs_eval
-                .iter()
-                .map(|spec| {
-                    spec.iter()
-                        .map(|layer| cast_vec(layer.clone()))
-                        .collect_vec()
-                })
-                .collect_vec(),
-            logup_specs_eval: tower_proof
-                .logup_specs_eval
-                .iter()
-                .map(|spec| {
-                    spec.iter()
-                        .map(|layer| cast_vec(layer.clone()))
-                        .collect_vec()
-                })
-                .collect_vec(),
-        };
-        verify_tower_proof(
-            &mut builder,
-            &mut challenger,
-            tower_verifier_input_var,
-            &mut uni_p,
-        );
-
-        builder.halt();
-
-        // prepare input
-        let mut input_stream = Vec::new();
-        input_stream.extend(tower_verifier_input.write());
-
-        // get the assembly code
-        let options = CompilerOptions::default().with_cycle_tracker();
-        let program = builder.compile_isa_with_options(options);
-        let system_config = SystemConfig::default()
-            .with_public_values(4)
-            .with_max_segment_len((1 << 25) - 100)
-            .with_profiling();
-        let config = NativeConfig::new(system_config, Native);
-        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
-        executor
-            .execute_and_then(program, input_stream, |_, seg| Ok(seg), |err| err)
-            .unwrap();
-    }
-
-    fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
-        let length = vec.len();
-        let capacity = vec.capacity();
-        let ptr = vec.as_mut_ptr();
-        // Prevent `vec` from dropping its contents
-        std::mem::forget(vec);
-
-        // Convert the pointer to the new type
-        let new_ptr = ptr as *mut B;
-
-        // Create a new vector with the same length and capacity, but different type
-        unsafe { Vec::from_raw_parts(new_ptr, length, capacity) }
-    }
-}
-*/
+// #[cfg(test)]
+// mod tests {
+// use crate::arithmetics::UniPolyExtrapolator;
+// use crate::tower_verifier::binding::IOPProverMessage;
+// use crate::tower_verifier::binding::TowerVerifierInput;
+// use crate::tower_verifier::program::iop_verifier_state_verify;
+// use crate::tower_verifier::program::verify_tower_proof;
+// use ceno_mle::mle::ArcMultilinearExtension;
+// use ceno_mle::mle::{IntoMLE, MultilinearExtension};
+// use ceno_mle::virtual_polys::VirtualPolynomials;
+// use ceno_sumcheck::structs::IOPProverState;
+// use ceno_transcript::BasicTranscript;
+// use ceno_zkvm::scheme::constants::NUM_FANIN;
+// use ceno_zkvm::scheme::hal::TowerProver;
+// use ceno_zkvm::scheme::hal::TowerProverSpec;
+// use ff_ext::BabyBearExt4;
+// use ff_ext::FieldFrom;
+// use ff_ext::FromUniformBytes;
+// use itertools::Itertools;
+// use openvm_circuit::arch::SystemConfig;
+// use openvm_circuit::arch::VmExecutor;
+// use openvm_native_circuit::Native;
+// use openvm_native_circuit::NativeConfig;
+// use openvm_native_compiler::asm::AsmCompiler;
+// use openvm_native_compiler::asm::{AsmBuilder, AsmConfig};
+// use openvm_native_compiler::conversion::convert_program;
+// use openvm_native_compiler::conversion::CompilerOptions;
+// use openvm_native_compiler::ir::Array;
+// use openvm_native_compiler::ir::Ext;
+// use openvm_native_compiler::prelude::Felt;
+// use openvm_native_recursion::challenger::duplex::DuplexChallengerVariable;
+// use openvm_native_recursion::hints::Hintable;
+// use openvm_stark_sdk::config::setup_tracing_with_log_level;
+// use p3_baby_bear::BabyBear;
+// use p3_field::extension::BinomialExtensionField;
+// use p3_field::Field;
+// use p3_field::FieldAlgebra;
+// use rand::thread_rng;
+//
+// type F = BabyBear;
+// type E = BabyBearExt4;
+// type EF = BinomialExtensionField<BabyBear, 4>;
+// type C = AsmConfig<F, EF>;
+//
+// #[test]
+// fn test_simple_sumcheck() {
+// setup_tracing_with_log_level(tracing::Level::WARN);
+//
+// let nv = 5;
+// let degree = 3;
+//
+// let mut builder = AsmBuilder::<F, EF>::default();
+//
+// let out_claim = EF::read(&mut builder);
+// let prover_msgs = Vec::<IOPProverMessage>::read(&mut builder);
+//
+// let max_num_variables: Felt<F> = builder.constant(F::from_canonical_u32(nv as u32));
+// let max_degree: Felt<F> = builder.constant(F::from_canonical_u32(degree as u32));
+//
+// let mut challenger: DuplexChallengerVariable<C> =
+// DuplexChallengerVariable::new(&mut builder);
+//
+// let mut uni_p = UniPolyExtrapolator::new(&mut builder);
+//
+// builder.cycle_tracker_start("sumcheck verify");
+// iop_verifier_state_verify(
+// &mut builder,
+// &mut challenger,
+// &out_claim,
+// &prover_msgs,
+// max_num_variables,
+// max_degree,
+// &mut uni_p,
+// );
+// builder.cycle_tracker_end("sumcheck verify");
+//
+// builder.halt();
+//
+// get the assembly code
+// let options = CompilerOptions::default().with_cycle_tracker();
+// let mut compiler = AsmCompiler::new(options.word_size);
+// compiler.build(builder.operations);
+// let asm_code = compiler.code();
+// println!("asm code");
+// println!("{asm_code}");
+//
+// run sumcheck prover to get sumcheck proof
+// let mut rng = thread_rng();
+// let (mles, expected_sum) = MultilinearExtension::<E>::random_mle_list(nv, degree, &mut rng);
+// let mles: Vec<ceno_mle::mle::ArcMultilinearExtension<E>> =
+// mles.into_iter().map(|mle| mle as _).collect_vec();
+// let mut virtual_poly: VirtualPolynomials<'_, E> = VirtualPolynomials::new(1, nv);
+// virtual_poly.add_mle_list(mles.iter().collect_vec(), E::from_v(1));
+//
+// let mut transcript = BasicTranscript::new(&[]);
+// let (sumcheck_proof, _) = IOPProverState::prove(virtual_poly, &mut transcript);
+// let mut input_stream = Vec::new();
+//
+// hacky way: convert E to EF but actually they are the same
+// let expected_sum: EF = cast_vec(vec![expected_sum])[0];
+// input_stream.extend(expected_sum.write());
+// input_stream.extend(
+// sumcheck_proof
+// .proofs
+// .into_iter()
+// .map(|msg| {
+// let evaluations: Vec<EF> = cast_vec(msg.evaluations);
+// IOPProverMessage { evaluations }
+// })
+// .collect_vec()
+// .write(),
+// );
+//
+// get execution result
+// let program = convert_program(asm_code, options);
+// let system_config = SystemConfig::default()
+// .with_public_values(4)
+// .with_max_segment_len((1 << 25) - 100)
+// .with_profiling();
+// let config = NativeConfig::new(system_config, Native);
+// let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
+//
+// let res = executor
+// .execute_and_then(program, input_stream, |_, seg| Ok(seg), |err| err)
+// .unwrap();
+//
+// for (i, seg) in res.iter().enumerate() {
+// #[cfg(feature = "bench-metrics")]
+// {
+// println!(
+// "=> segment {} metrics.cycle_count: {:?}",
+// i, seg.metrics.cycle_count
+// );
+// for (insn, count) in seg.metrics.counts.iter() {
+// println!("insn: {:?}, count: {:?}", insn, count);
+// }
+// println!(
+// "=> segment {} #(insns): {}",
+// i,
+// seg.metrics
+// .counts
+// .values()
+// .copied()
+// .into_iter()
+// .sum::<usize>()
+// );
+// }
+// }
+// }
+//
+// #[test]
+// fn test_prod_tower() {
+// let nv = 5;
+// let num_prod_specs = 2;
+// let num_logup_specs = 1;
+// let mut rng = thread_rng();
+//
+// setup_tracing_with_log_level(tracing::Level::WARN);
+//
+// let records: Vec<MultilinearExtension<E>> = (0..num_prod_specs)
+// .map(|_| {
+// MultilinearExtension::from_evaluations_ext_vec(
+// nv - 1,
+// E::random_vec(1 << (nv - 1), &mut rng),
+// )
+// })
+// .collect_vec();
+// let denom_records = (0..num_logup_specs)
+// .map(|_| {
+// MultilinearExtension::from_evaluations_ext_vec(nv, E::random_vec(1 << nv, &mut rng))
+// })
+// .collect_vec();
+//
+// let prod_specs = records
+// .into_iter()
+// .map(|record| {
+// let (first, second) = record
+// .get_ext_field_vec()
+// .split_at(record.evaluations().len() / 2);
+// let last_layer: Vec<ArcMultilinearExtension<E>> = vec![
+// first.to_vec().into_mle().into(),
+// second.to_vec().into_mle().into(),
+// ];
+// assert_eq!(last_layer.len(), NUM_FANIN);
+// ceno_zkvm::structs::TowerProverSpec {
+// witness: infer_tower_product_witness(nv - 1, last_layer, NUM_FANIN),
+// }
+// })
+// .collect_vec();
+//
+// let prod_out_evals = prod_specs
+// .iter()
+// .map(|spec| {
+// spec.witness[0]
+// .iter()
+// .map(|mle| cast_vec(mle.get_ext_field_vec().to_vec())[0])
+// .collect_vec()
+// })
+// .collect_vec();
+//
+// let logup_specs = denom_records
+// .into_iter()
+// .map(|record| {
+// let (first, second) = record
+// .get_ext_field_vec()
+// .split_at(record.evaluations().len() / 2);
+// let last_layer: Vec<ArcMultilinearExtension<E>> = vec![
+// first.to_vec().into_mle().into(),
+// second.to_vec().into_mle().into(),
+// ];
+// TowerProverSpec {
+// witness: infer_tower_logup_witness(None, last_layer),
+// }
+// })
+// .collect_vec();
+//
+// let logup_out_evals = logup_specs
+// .iter()
+// .map(|spec| {
+// spec.witness[0]
+// .iter()
+// .map(|mle| cast_vec(mle.get_ext_field_vec().to_vec())[0])
+// .collect_vec()
+// })
+// .collect_vec();
+//
+// let num_variables = prod_specs
+// .iter()
+// .chain(logup_specs.iter())
+// .map(|spec| spec.witness.len())
+// .collect_vec();
+//
+// let mut transcript = BasicTranscript::new(&[]);
+// let (_, tower_proof) =
+// TowerProver::create_proof(prod_specs, logup_specs, NUM_FANIN, &mut transcript);
+//
+// build program
+// let mut builder = AsmBuilder::<F, EF>::default();
+//
+// let mut challenger: DuplexChallengerVariable<C> =
+// DuplexChallengerVariable::new(&mut builder);
+//
+// construct extrapolation weights
+// let mut uni_p = UniPolyExtrapolator::new(&mut builder);
+//
+// assert_eq!(tower_proof.proofs.len(), nv - 1);
+// let tower_verifier_input_var = TowerVerifierInput::read(&mut builder);
+// let tower_verifier_input = TowerVerifierInput {
+// prod_out_evals,
+// logup_out_evals,
+// num_variables,
+// num_fanin: NUM_FANIN,
+// num_proofs: nv - 1,
+// num_prod_specs,
+// num_logup_specs,
+// _max_num_variables: nv,
+// proofs: tower_proof
+// .proofs
+// .iter()
+// .map(|layer| {
+// layer
+// .iter()
+// .map(|round| IOPProverMessage {
+// evaluations: cast_vec(round.evaluations.clone()),
+// })
+// .collect_vec()
+// })
+// .collect_vec(),
+// prod_specs_eval: tower_proof
+// .prod_specs_eval
+// .iter()
+// .map(|spec| {
+// spec.iter()
+// .map(|layer| cast_vec(layer.clone()))
+// .collect_vec()
+// })
+// .collect_vec(),
+// logup_specs_eval: tower_proof
+// .logup_specs_eval
+// .iter()
+// .map(|spec| {
+// spec.iter()
+// .map(|layer| cast_vec(layer.clone()))
+// .collect_vec()
+// })
+// .collect_vec(),
+// };
+// verify_tower_proof(
+// &mut builder,
+// &mut challenger,
+// tower_verifier_input_var,
+// &mut uni_p,
+// );
+//
+// builder.halt();
+//
+// prepare input
+// let mut input_stream = Vec::new();
+// input_stream.extend(tower_verifier_input.write());
+//
+// get the assembly code
+// let options = CompilerOptions::default().with_cycle_tracker();
+// let program = builder.compile_isa_with_options(options);
+// let system_config = SystemConfig::default()
+// .with_public_values(4)
+// .with_max_segment_len((1 << 25) - 100)
+// .with_profiling();
+// let config = NativeConfig::new(system_config, Native);
+// let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
+// executor
+// .execute_and_then(program, input_stream, |_, seg| Ok(seg), |err| err)
+// .unwrap();
+// }
+//
+// fn cast_vec<A, B>(mut vec: Vec<A>) -> Vec<B> {
+// let length = vec.len();
+// let capacity = vec.capacity();
+// let ptr = vec.as_mut_ptr();
+// Prevent `vec` from dropping its contents
+// std::mem::forget(vec);
+//
+// Convert the pointer to the new type
+// let new_ptr = ptr as *mut B;
+//
+// Create a new vector with the same length and capacity, but different type
+// unsafe { Vec::from_raw_parts(new_ptr, length, capacity) }
+// }
+// }

@@ -451,7 +451,7 @@ fn verify_rotation<E: ExtensionField>(
         rotation_cyclic_subgroup_size,
         rotation_cyclic_group_log2,
     );
-    
+
     // check the final evaluations.
     let mut left_evals = Vec::with_capacity(evals.len() / 3);
     let mut right_evals = Vec::with_capacity(evals.len() / 3);

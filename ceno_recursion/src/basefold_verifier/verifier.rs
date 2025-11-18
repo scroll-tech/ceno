@@ -1,5 +1,5 @@
 use crate::{
-    basefold_verifier::query_phase::{batch_verifier_query_phase, QueryPhaseVerifierInputVariable},
+    basefold_verifier::query_phase::{QueryPhaseVerifierInputVariable, batch_verifier_query_phase},
     transcript::{transcript_check_pow_witness, transcript_observe_label},
 };
 
@@ -9,8 +9,8 @@ use openvm_native_compiler::{asm::AsmConfig, ir::FromConstant, prelude::*};
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::{
     challenger::{
-        duplex::DuplexChallengerVariable, CanObserveDigest, CanObserveVariable,
-        CanSampleBitsVariable, CanSampleVariable, FeltChallenger,
+        CanObserveDigest, CanObserveVariable, CanSampleBitsVariable, CanSampleVariable,
+        FeltChallenger, duplex::DuplexChallengerVariable,
     },
     hints::{Hintable, VecAutoHintable},
     vars::HintSlice,
@@ -170,40 +170,33 @@ pub fn batch_verify<C: Config>(
 pub mod tests {
     use std::{cmp::Reverse, collections::BTreeMap, iter::once};
 
-    use multilinear_extensions::mle::MultilinearExtension;
-    use transcript::{BasicTranscript, Transcript};
     use ff_ext::{BabyBearExt4, FromUniformBytes};
     use itertools::Itertools;
     use mpcs::{
+        BasefoldDefault, BasefoldRSParams, BasefoldSpec, PCSFriParam, PolynomialCommitmentScheme,
         pcs_batch_commit, pcs_setup, pcs_trim, util::hash::write_digest_to_transcript,
-        BasefoldDefault, PolynomialCommitmentScheme,
     };
-    use mpcs::{BasefoldRSParams, BasefoldSpec, PCSFriParam};
-    use openvm_circuit::arch::{instructions::program::Program, SystemConfig, VmExecutor};
+    use multilinear_extensions::mle::MultilinearExtension;
+    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
     use openvm_native_circuit::{Native, NativeConfig};
-    use openvm_native_compiler::asm::AsmBuilder;
-    use openvm_native_compiler::conversion::CompilerOptions;
-    use openvm_native_recursion::challenger::duplex::DuplexChallengerVariable;
-    use openvm_native_recursion::hints::Hintable;
+    use openvm_native_compiler::{asm::AsmBuilder, conversion::CompilerOptions};
+    use openvm_native_recursion::{challenger::duplex::DuplexChallengerVariable, hints::Hintable};
     use openvm_stark_backend::p3_challenger::GrindingChallenger;
-    use openvm_stark_sdk::config::baby_bear_poseidon2::Challenger;
-    use openvm_stark_sdk::p3_baby_bear::BabyBear;
-    use p3::field::Field;
-    use p3::field::FieldAlgebra;
+    use openvm_stark_sdk::{config::baby_bear_poseidon2::Challenger, p3_baby_bear::BabyBear};
+    use p3::field::{Field, FieldAlgebra};
     use rand::thread_rng;
     use serde::Deserialize;
+    use transcript::{BasicTranscript, Transcript};
 
     type F = BabyBear;
     type E = BabyBearExt4;
     type PCS = BasefoldDefault<E>;
 
-    use super::{batch_verify, BasefoldProof, BasefoldProofVariable, InnerConfig, RoundVariable};
-    use crate::basefold_verifier::basefold::{Round, RoundOpening};
-    use crate::basefold_verifier::query_phase::PointAndEvals;
+    use super::{BasefoldProof, BasefoldProofVariable, InnerConfig, RoundVariable, batch_verify};
     use crate::{
         basefold_verifier::{
-            basefold::BasefoldCommitment,
-            query_phase::{BatchOpening, CommitPhaseProofStep, QueryOpeningProof},
+            basefold::{BasefoldCommitment, Round, RoundOpening},
+            query_phase::{BatchOpening, CommitPhaseProofStep, PointAndEvals, QueryOpeningProof},
         },
         tower_verifier::binding::{Point, PointAndEval},
     };
@@ -294,11 +287,7 @@ pub mod tests {
                 let (matrices, mles): (Vec<_>, Vec<_>) = dimensions
                     .into_iter()
                     .map(|(num_vars, width)| {
-                        let m = witness::RowMajorMatrix::<F>::rand(
-                            &mut rng,
-                            1 << num_vars,
-                            *width,
-                        );
+                        let m = witness::RowMajorMatrix::<F>::rand(&mut rng, 1 << num_vars, *width);
                         let mles = m.to_mles();
                         num_total_polys += width;
 

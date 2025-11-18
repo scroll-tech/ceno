@@ -78,7 +78,9 @@ impl From<(usize, ZKVMProof<E, RecPcs>)> for ZKVMProofInput {
             shard_id: d.0,
             raw_pi: d.1.raw_pi,
             pi_evals: d.1.pi_evals,
-            chip_proofs: d.1.chip_proofs
+            chip_proofs: d
+                .1
+                .chip_proofs
                 .into_iter()
                 .map(|(chip_idx, mut proofs)| {
                     assert_eq!(proofs.len(), 1, "TODO support > 1 proofs per chip");
@@ -395,7 +397,7 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub has_ecc_proof: Usize<C::N>,
     pub ecc_proof: EccQuarkProofVariable<C>,
     pub num_instances: Array<C, Var<C::N>>,
-    pub num_instances_bit_decompositions: Array<C, Felt<C::F>>,     // len = 96
+    pub num_instances_bit_decompositions: Array<C, Felt<C::F>>, // len = 96
     pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
     pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
 }
@@ -498,8 +500,10 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());
 
-        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(&self.num_instances));
-        
+        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
+            &self.num_instances,
+        ));
+
         let mut sum: usize = 0;
         let mut bit_decomp: Vec<F> = vec![];
         if self.num_instances.len() > 0 {
@@ -508,7 +512,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             } else {
                 0
             };
-            
+
             for i in 0..32usize {
                 bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
             }
@@ -526,16 +530,12 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             }
             sum += self.num_instances[1];
         }
-        let eq_instance = if sum > 0 { 
-            sum - 1
-        } else {
-            0
-        };
+        let eq_instance = if sum > 0 { sum - 1 } else { 0 };
         for i in 0..32usize {
             bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
         }
         stream.extend(bit_decomp.write());
-        
+
         stream.extend(self.fixed_in_evals.write());
         stream.extend(self.wits_in_evals.write());
 

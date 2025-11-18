@@ -1,16 +1,19 @@
-use crate::tower_verifier::binding::PointAndEvalVariable;
-use crate::zkvm_verifier::binding::ZKVMChipProofInputVariable;
-use multilinear_extensions::StructuralWitInType::{
-    EqualDistanceSequence, InnerRepeatingIncrementalSequence, OuterRepeatingIncrementalSequence,
+use crate::{
+    tower_verifier::binding::PointAndEvalVariable,
+    zkvm_verifier::binding::ZKVMChipProofInputVariable,
 };
-use multilinear_extensions::{Expression, Fixed, Instance};
 use ceno_zkvm::structs::{ChallengeId, WitnessId};
-use ff_ext::ExtensionField;
-use ff_ext::{BabyBearExt4, SmallField};
+use ff_ext::{BabyBearExt4, ExtensionField, SmallField};
 use itertools::Either;
+use multilinear_extensions::{
+    Expression, Fixed, Instance,
+    StructuralWitInType::{
+        EqualDistanceSequence, InnerRepeatingIncrementalSequence, OuterRepeatingIncrementalSequence,
+    },
+};
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::challenger::{duplex::DuplexChallengerVariable, FeltChallenger};
+use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
 use openvm_stark_backend::p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 type E = BabyBearExt4;
 const MAX_NUM_VARS: usize = 25;
@@ -1057,15 +1060,14 @@ pub fn extend<C: Config>(
 #[cfg(test)]
 mod tests {
     use ff_ext::BabyBearExt4;
-    use openvm_circuit::arch::{instructions::program::Program, SystemConfig, VmExecutor};
+    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::{
         asm::{AsmBuilder, AsmCompiler},
-        conversion::{convert_program, CompilerOptions},
+        conversion::{CompilerOptions, convert_program},
         ir::Ext,
     };
-    use p3::babybear::BabyBear;
-    use p3::field::FieldAlgebra;
+    use p3::{babybear::BabyBear, field::FieldAlgebra};
 
     use crate::arithmetics::eval_stacked_wellform_address_vec;
 

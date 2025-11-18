@@ -1,5 +1,6 @@
 use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
+use ceno_recursion::aggregation::compress_to_root_proof;
 #[cfg(all(feature = "jemalloc", unix, not(test)))]
 use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
@@ -28,7 +29,6 @@ use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 use transcript::BasicTranscript as Transcript;
-use ceno_recursion::aggregation::compress_to_root_proof;
 
 // Use jemalloc as global allocator for performance
 #[cfg(all(feature = "jemalloc", unix, not(test)))]
@@ -266,16 +266,17 @@ fn main() {
 
     let backend = create_backend(args.max_num_variables, args.security_level);
     let prover = create_prover(backend);
-    let result = run_e2e_with_checkpoint::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, _, _>(
-        prover,
-        program,
-        platform,
-        multi_prover,
-        &hints,
-        &public_io,
-        max_steps,
-        Checkpoint::Complete,
-    );
+    let result =
+        run_e2e_with_checkpoint::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, _, _>(
+            prover,
+            program,
+            platform,
+            multi_prover,
+            &hints,
+            &public_io,
+            max_steps,
+            Checkpoint::Complete,
+        );
 
     let zkvm_proofs = result
         .proofs

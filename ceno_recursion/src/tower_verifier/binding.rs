@@ -175,10 +175,12 @@ impl From<Vec<IOPProverMessage>> for IOPProverMessageVec {
     fn from(messages: Vec<IOPProverMessage>) -> Self {
         if messages.len() > 0 {
             let prover_message_size = messages[0].evaluations.len();
-            assert!(messages
-                .iter()
-                .map(|message| message.evaluations.len())
-                .all_equal());
+            assert!(
+                messages
+                    .iter()
+                    .map(|message| message.evaluations.len())
+                    .all_equal()
+            );
             let data = messages
                 .into_iter()
                 .flat_map(|msg| msg.evaluations)

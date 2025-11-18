@@ -1,20 +1,23 @@
 #[cfg(test)]
 mod tests {
-    use crate::arithmetics::{challenger_multi_observe, exts_to_felts};
-    use crate::zkvm_verifier::binding::F;
-    use openvm_circuit::arch::SystemConfig;
-    use openvm_circuit::arch::VmExecutor;
-    use openvm_native_circuit::Native;
-    use openvm_native_circuit::NativeConfig;
-    use openvm_native_compiler::conversion::convert_program;
-    use openvm_native_compiler::prelude::*;
-    use openvm_native_compiler::{asm::AsmBuilder, conversion::CompilerOptions};
-    use openvm_native_recursion::challenger::CanSampleVariable;
-    use openvm_native_recursion::challenger::{
-        duplex::DuplexChallengerVariable, CanObserveVariable,
+    use crate::{
+        arithmetics::{challenger_multi_observe, exts_to_felts},
+        zkvm_verifier::binding::F,
     };
-    use openvm_stark_backend::config::StarkGenericConfig;
-    use openvm_stark_backend::p3_field::{Field, FieldAlgebra};
+    use openvm_circuit::arch::{SystemConfig, VmExecutor};
+    use openvm_native_circuit::{Native, NativeConfig};
+    use openvm_native_compiler::{
+        asm::AsmBuilder,
+        conversion::{CompilerOptions, convert_program},
+        prelude::*,
+    };
+    use openvm_native_recursion::challenger::{
+        CanObserveVariable, CanSampleVariable, duplex::DuplexChallengerVariable,
+    };
+    use openvm_stark_backend::{
+        config::StarkGenericConfig,
+        p3_field::{Field, FieldAlgebra},
+    };
     use openvm_stark_sdk::{
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,
     };

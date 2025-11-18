@@ -9,8 +9,10 @@ use openvm_native_recursion::{
     vars::HintSlice,
 };
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
-use p3::commit::ExtensionMmcs;
-use p3::field::{Field, FieldAlgebra};
+use p3::{
+    commit::ExtensionMmcs,
+    field::{Field, FieldAlgebra},
+};
 use serde::Deserialize;
 
 use super::{basefold::*, extension_mmcs::*, mmcs::*, rs::*, utils::*};
@@ -23,8 +25,9 @@ pub type F = BabyBear;
 pub type E = BabyBearExt4;
 pub type InnerConfig = AsmConfig<F, E>;
 
-use p3::fri::BatchOpening as InnerBatchOpening;
-use p3::fri::CommitPhaseProofStep as InnerCommitPhaseProofStep;
+use p3::fri::{
+    BatchOpening as InnerBatchOpening, CommitPhaseProofStep as InnerCommitPhaseProofStep,
+};
 
 /// We have to define a struct similar to p3_fri::BatchOpening as
 /// the trait `Hintable` is defined in another crate inside OpenVM
@@ -803,31 +806,34 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
 #[cfg(test)]
 pub mod tests {
-    use transcript::{BasicTranscript, Transcript};
     use ff_ext::{BabyBearExt4, FromUniformBytes};
     use itertools::Itertools;
     use mpcs::{
-        pcs_batch_commit, pcs_trim, util::hash::write_digest_to_transcript, BasefoldDefault,
-        PolynomialCommitmentScheme,
+        BasefoldDefault, BasefoldRSParams, BasefoldSpec, PCSFriParam, PolynomialCommitmentScheme,
+        pcs_batch_commit, pcs_trim, util::hash::write_digest_to_transcript,
     };
-    use mpcs::{BasefoldRSParams, BasefoldSpec, PCSFriParam};
-    use openvm_circuit::arch::{instructions::program::Program, SystemConfig, VmExecutor};
+    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::asm::AsmBuilder;
     use openvm_native_recursion::hints::Hintable;
     use openvm_stark_backend::p3_challenger::GrindingChallenger;
     use openvm_stark_sdk::p3_baby_bear::BabyBear;
     use rand::thread_rng;
+    use transcript::{BasicTranscript, Transcript};
 
     type F = BabyBear;
     type E = BabyBearExt4;
     type PCS = BasefoldDefault<E>;
 
-    use crate::basefold_verifier::basefold::{Round, RoundOpening};
-    use crate::basefold_verifier::query_phase::PointAndEvals;
-    use crate::tower_verifier::binding::Point;
+    use crate::{
+        basefold_verifier::{
+            basefold::{Round, RoundOpening},
+            query_phase::PointAndEvals,
+        },
+        tower_verifier::binding::Point,
+    };
 
-    use super::{batch_verifier_query_phase, QueryPhaseVerifierInput};
+    use super::{QueryPhaseVerifierInput, batch_verifier_query_phase};
 
     pub fn build_batch_verifier_query_phase(
         input: QueryPhaseVerifierInput,

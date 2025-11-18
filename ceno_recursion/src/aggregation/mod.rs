@@ -1,80 +1,73 @@
-use std::fmt::Error;
-use std::sync::Arc;
-use crate::zkvm_verifier::binding::{ZKVMProofInput, E, F};
-use crate::zkvm_verifier::verifier::verify_zkvm_proof;
-use ceno_zkvm::scheme::ZKVMProof;
-use ceno_zkvm::structs::ZKVMVerifyingKey;
+use crate::zkvm_verifier::{
+    binding::{E, F, ZKVMProofInput},
+    verifier::verify_zkvm_proof,
+};
+use ceno_zkvm::{scheme::ZKVMProof, structs::ZKVMVerifyingKey};
 use mpcs::{Basefold, BasefoldRSParams};
-use openvm_circuit::arch::{VirtualMachine, VmComplexTraceHeights};
-use openvm_circuit::arch::VmConfig;
 use openvm_circuit::{
-    arch::{instructions::program::Program, SystemConfig, instructions::exe::VmExe},
-    system::memory::tree::public_values::PUBLIC_VALUES_ADDRESS_SPACE_OFFSET,
-};
-use openvm_continuations::verifier::{
-    internal::types::VmStarkProof, root::types::RootVmVerifierInput,
-};
-use openvm_continuations::C;
-use openvm_native_circuit::NativeConfig;
-use openvm_native_compiler::{asm::AsmBuilder, conversion::{convert_program, CompilerOptions}, prelude::*};
-use openvm_native_recursion::hints::Hintable;
-use openvm_sdk::config::AggStarkConfig;
-use openvm_sdk::prover::vm::types::VmProvingKey;
-use openvm_sdk::{
-    config::AggregationTreeConfig,
-    keygen::AggStarkProvingKey,
-    prover::{
-        vm::{local::VmLocalProver, SingleSegmentVmProver},
-        RootVerifierLocalProver,
+    arch::{
+        ExecutionBridge, InitFileGenerator, MemoryConfig, SystemConfig, SystemPort, VirtualMachine,
+        VmComplexTraceHeights, VmConfig, VmExtension, VmInventory, VmInventoryBuilder,
+        VmInventoryError,
+        instructions::{exe::VmExe, program::Program},
+        verify_single,
     },
-    NonRootCommittedExe, RootSC, SC,
+    system::{
+        memory::tree::public_values::PUBLIC_VALUES_ADDRESS_SPACE_OFFSET, phantom::PhantomChip,
+        program::trace::VmCommittedExe,
+    },
 };
-use openvm_stark_backend::{proof::Proof, Chip};
-use p3::field::FieldAlgebra;
-use serde::{Deserialize, Serialize};
+use openvm_continuations::{
+    C,
+    verifier::{
+        common::types::VmVerifierPvs,
+        internal::{
+            InternalVmVerifierConfig,
+            types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
+        },
+        root::types::RootVmVerifierInput,
+    },
+};
+use openvm_native_circuit::NativeConfig;
+use openvm_native_compiler::{
+    asm::AsmBuilder,
+    conversion::{CompilerOptions, convert_program},
+    prelude::*,
+};
+use openvm_native_recursion::hints::Hintable;
+use openvm_sdk::{
+    NonRootCommittedExe, RootSC, SC, Sdk,
+    commit::AppExecutionCommit,
+    config::{AggStarkConfig, AggregationTreeConfig},
+    keygen::{AggStarkProvingKey, RootVerifierProvingKey, perm::AirIdPermutation},
+    prover::{
+        RootVerifierLocalProver,
+        vm::{SingleSegmentVmProver, local::VmLocalProver, types::VmProvingKey},
+    },
+};
+use openvm_stark_backend::{Chip, engine::StarkEngine, proof::Proof};
 use openvm_stark_sdk::{
-    config::FriParameters, engine::StarkFriEngine,
-    config::baby_bear_poseidon2::BabyBearPoseidon2Engine,
-    config::baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
+    config::{
+        FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Engine,
+        baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
+    },
+    engine::StarkFriEngine,
     openvm_stark_backend::{
         config::{Com, StarkGenericConfig},
         keygen::types::MultiStarkVerifyingKey,
     },
     p3_bn254_fr::Bn254Fr,
 };
-use openvm_stark_backend::engine::StarkEngine;
-use openvm_sdk::Sdk;
-use std::io::Write;
-use std::time::Instant;
-use std::fs::File;
-use openvm_circuit::system::program::trace::VmCommittedExe;
-use openvm_circuit::{
-    arch::{
-        ExecutionBridge, InitFileGenerator, MemoryConfig, SystemPort, VmExtension, VmInventory,
-        VmInventoryBuilder, VmInventoryError,
-    },
-    system::phantom::PhantomChip,
-};
-use std::borrow::Borrow;
-use openvm_sdk::keygen::perm::AirIdPermutation;
-use openvm_circuit::arch::verify_single;
-use openvm_continuations::verifier::common::types::VmVerifierPvs;
-use openvm_continuations::verifier::internal::types::InternalVmVerifierInput;
-use openvm_continuations::verifier::internal::types::InternalVmVerifierPvs;
-use openvm_continuations::verifier::internal::InternalVmVerifierConfig;
-use openvm_sdk::keygen::RootVerifierProvingKey;
-use openvm_sdk::commit::AppExecutionCommit;
+use p3::field::FieldAlgebra;
+use serde::{Deserialize, Serialize};
+use std::{borrow::Borrow, fmt::Error, fs::File, io::Write, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use openvm_circuit::{
     arch::{
-        hasher::{poseidon2::vm_poseidon2_hasher, Hasher},
-        CONNECTOR_AIR_ID, PROGRAM_AIR_ID,
-        PROGRAM_CACHED_TRACE_INDEX, PUBLIC_VALUES_AIR_ID,
+        CONNECTOR_AIR_ID, PROGRAM_AIR_ID, PROGRAM_CACHED_TRACE_INDEX, PUBLIC_VALUES_AIR_ID,
+        hasher::{Hasher, poseidon2::vm_poseidon2_hasher},
     },
-    system::{
-        memory::CHUNK,
-        program::trace::compute_exe_commit,
-    },
+    system::{memory::CHUNK, program::trace::compute_exe_commit},
 };
 
 const LEAF_LOG_BLOWUP: usize = 1;
@@ -120,7 +113,11 @@ pub fn compress_to_root_proof(
     vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
 ) -> (CenoRecursionVerifierKeys, VmStarkProof<SC>) {
     // Construct zkvm proof input
-    let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs.into_iter().enumerate().map(|(shard_id, p)| ZKVMProofInput::from((shard_id, p))).collect();
+    let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs
+        .into_iter()
+        .enumerate()
+        .map(|(shard_id, p)| ZKVMProofInput::from((shard_id, p)))
+        .collect();
 
     let aggregation_start_timestamp = Instant::now();
     let sdk = Sdk::new();
@@ -175,30 +172,33 @@ pub fn compress_to_root_proof(
         leaf_committed_exe,
     );
 
-    let leaf_proofs = zkvm_proof_inputs.iter().enumerate().map(|(proof_idx, p)| {
-        println!(
-            "Aggregation - Start leaf proof (idx: {:?}) at: {:?}",
-            proof_idx,
-            aggregation_start_timestamp.elapsed()
-        );
-        let mut witness_stream: Vec<Vec<F>> = Vec::new();
-        witness_stream.extend(p.write());
-        let leaf_proof = SingleSegmentVmProver::prove(&leaf_prover, witness_stream);
+    let leaf_proofs = zkvm_proof_inputs
+        .iter()
+        .enumerate()
+        .map(|(proof_idx, p)| {
+            println!(
+                "Aggregation - Start leaf proof (idx: {:?}) at: {:?}",
+                proof_idx,
+                aggregation_start_timestamp.elapsed()
+            );
+            let mut witness_stream: Vec<Vec<F>> = Vec::new();
+            witness_stream.extend(p.write());
+            let leaf_proof = SingleSegmentVmProver::prove(&leaf_prover, witness_stream);
 
-        /* _debug: export
-        let file =
-            File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
-        bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
-        */
+            // _debug: export
+            // let file =
+            // File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
+            // bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
 
-        println!(
-            "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}",
-            proof_idx,
-            aggregation_start_timestamp.elapsed()
-        );
+            println!(
+                "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}",
+                proof_idx,
+                aggregation_start_timestamp.elapsed()
+            );
 
-        leaf_proof
-    }).collect::<Vec<_>>();
+            leaf_proof
+        })
+        .collect::<Vec<_>>();
 
     // Internal engine and config
     let internal_engine = BabyBearPoseidon2Engine::new(internal_fri_params);
@@ -234,10 +234,7 @@ pub fn compress_to_root_proof(
         internal_fri_params: internal_fri_params,
         compiler_options: CompilerOptions::default(),
     }
-    .build_program(
-        &ceno_leaf_vm_pk.vm_pk.get_vk(),
-        &internal_vm_vk,
-    );
+    .build_program(&ceno_leaf_vm_pk.vm_pk.get_vk(), &internal_vm_vk);
     let internal_committed_exe = Arc::new(VmCommittedExe::<SC>::commit(
         internal_program.into(),
         internal_vm.engine.config.pcs(),
@@ -268,18 +265,21 @@ pub fn compress_to_root_proof(
             .into_iter()
             .map(|input| {
                 internal_node_idx += 1;
-                let internal_proof =
-                    SingleSegmentVmProver::prove(&internal_prover, input.write());
-                println!("Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}", internal_node_idx, internal_node_height, aggregation_start_timestamp.elapsed());
+                let internal_proof = SingleSegmentVmProver::prove(&internal_prover, input.write());
+                println!(
+                    "Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}",
+                    internal_node_idx,
+                    internal_node_height,
+                    aggregation_start_timestamp.elapsed()
+                );
 
-                /* _debug: export
-                let file = File::create(format!(
-                    "internal_proof_{:?}_height_{:?}.bin",
-                    internal_node_idx, internal_node_height
-                ))
-                .expect("Create export proof file");
-                bincode::serialize_into(file, &internal_proof).expect("failed to serialize internal proof");
-                */
+                // _debug: export
+                // let file = File::create(format!(
+                // "internal_proof_{:?}_height_{:?}.bin",
+                // internal_node_idx, internal_node_height
+                // ))
+                // .expect("Create export proof file");
+                // bincode::serialize_into(file, &internal_proof).expect("failed to serialize internal proof");
 
                 internal_proof
             })
@@ -291,15 +291,17 @@ pub fn compress_to_root_proof(
         aggregation_start_timestamp.elapsed()
     );
     println!("Aggregation - Final height: {:?}", internal_node_height);
-    
+
     // Export e2e stark proof (used in verify_e2e_stark_proof)
     let root_stark_proof = VmStarkProof {
         proof: proofs.pop().unwrap(),
-        user_public_values: zkvm_proof_inputs.iter().flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>()).collect(),
+        user_public_values: zkvm_proof_inputs
+            .iter()
+            .flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>())
+            .collect(),
     };
-    let file = File::create("root_stark_proof.bin")
-        .expect("Create export proof file");
-        bincode::serialize_into(file, &root_stark_proof).expect("failed to serialize internal proof");
+    let file = File::create("root_stark_proof.bin").expect("Create export proof file");
+    bincode::serialize_into(file, &root_stark_proof).expect("failed to serialize internal proof");
 
     // Export aggregation key (used in verify_e2e_stark_proof)
     let ceno_vk = CenoRecursionVerifierKeys {
@@ -310,9 +312,8 @@ pub fn compress_to_root_proof(
         internal_commit: internal_committed_exe.get_program_commit().into(),
     };
 
-    let file = File::create("ceno_vk.bin")
-        .expect("Create export proof file");
-        bincode::serialize_into(file, &ceno_vk).expect("failed to serialize internal proof");
+    let file = File::create("ceno_vk.bin").expect("Create export proof file");
+    bincode::serialize_into(file, &ceno_vk).expect("failed to serialize internal proof");
 
     (ceno_vk, root_stark_proof)
 }
@@ -336,8 +337,7 @@ pub fn verify_e2e_stark_proof(
     }
     let public_values_air_proof_data = &proof.proof.per_air[2];
 
-    let program_commit =
-        proof.proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref();
+    let program_commit = proof.proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref();
     let internal_commit: &[_; CHUNK] = &k.internal_commit;
 
     let (vm_vk, fri_params, vm_commit) = if program_commit == internal_commit {
@@ -346,7 +346,10 @@ pub fn verify_e2e_stark_proof(
             .as_slice()
             .borrow();
         if internal_commit != &internal_pvs.extra_pvs.internal_program_commit {
-            return Err(format!("Invalid internal program commit: expected {:?}, got {:?}", internal_commit, internal_pvs.extra_pvs.internal_program_commit));
+            return Err(format!(
+                "Invalid internal program commit: expected {:?}, got {:?}",
+                internal_commit, internal_pvs.extra_pvs.internal_program_commit
+            ));
         }
         (
             &k.internal_vm_vk,
@@ -357,35 +360,34 @@ pub fn verify_e2e_stark_proof(
         (&k.ceno_leaf_vm_vk, k.ceno_leaf_fri_params, *program_commit)
     };
     let e = BabyBearPoseidon2Engine::new(fri_params);
-    e.verify(&vm_vk, &proof.proof).expect("stark e2e proof verification should pass");
+    e.verify(&vm_vk, &proof.proof)
+        .expect("stark e2e proof verification should pass");
 
     let pvs: &VmVerifierPvs<_> =
         public_values_air_proof_data.public_values[..VmVerifierPvs::<u8>::width()].borrow();
 
-    /* _debug: AIR ordering
-    if let Some(exit_code) = pvs.connector.exit_code() {
-        if exit_code != 0 {
-            return Err(format!(
-                "Invalid exit code: expected 0, got {}",
-                exit_code
-            ));
-        }
-    } else {
-        return Err(format!("Program did not terminate"));
-    }
-    */
+    // _debug: AIR ordering
+    // if let Some(exit_code) = pvs.connector.exit_code() {
+    // if exit_code != 0 {
+    // return Err(format!(
+    // "Invalid exit code: expected 0, got {}",
+    // exit_code
+    // ));
+    // }
+    // } else {
+    // return Err(format!("Program did not terminate"));
+    // }
 
     let hasher = vm_poseidon2_hasher();
     let public_values_root = hasher.merkle_root(&proof.user_public_values);
-    /* _debug: Public value commitment
-    if public_values_root != pvs.public_values_commit {
-        return Err(format!(
-            "Invalid public values root: expected {:?}, got {:?}",
-            pvs.public_values_commit,
-            public_values_root
-        ));
-    }
-    */
+    // _debug: Public value commitment
+    // if public_values_root != pvs.public_values_commit {
+    // return Err(format!(
+    // "Invalid public values root: expected {:?}, got {:?}",
+    // pvs.public_values_commit,
+    // public_values_root
+    // ));
+    // }
 
     let exe_commit = compute_exe_commit(
         &hasher,
@@ -397,21 +399,20 @@ pub fn verify_e2e_stark_proof(
     let exe_commit_bn254 = app_commit.app_exe_commit.to_bn254();
     let vm_commit_bn254 = app_commit.app_vm_commit.to_bn254();
 
-    /* _debug: execution commit checks
-    if exe_commit_bn254 != *expected_exe_commit {
-        return Err(eyre::eyre!(
-            "Invalid app exe commit: expected {:?}, got {:?}",
-            expected_exe_commit,
-            exe_commit_bn254
-        ));
-    } else if vm_commit_bn254 != *expected_vm_commit {
-        return Err(eyre::eyre!(
-            "Invalid app vm commit: expected {:?}, got {:?}",
-            expected_vm_commit,
-            vm_commit_bn254
-        ));
-    }
-    */
+    // _debug: execution commit checks
+    // if exe_commit_bn254 != *expected_exe_commit {
+    // return Err(eyre::eyre!(
+    // "Invalid app exe commit: expected {:?}, got {:?}",
+    // expected_exe_commit,
+    // exe_commit_bn254
+    // ));
+    // } else if vm_commit_bn254 != *expected_vm_commit {
+    // return Err(eyre::eyre!(
+    // "Invalid app vm commit: expected {:?}, got {:?}",
+    // expected_vm_commit,
+    // vm_commit_bn254
+    // ));
+    // }
     Ok(app_commit)
 }
 
@@ -471,20 +472,20 @@ pub fn verify_proofs(
 
 #[cfg(test)]
 mod tests {
-    use crate::aggregation::{compress_to_root_proof, verify_proofs};
+    use super::verify_e2e_stark_proof;
     use crate::{
+        aggregation::{compress_to_root_proof, verify_proofs},
         zkvm_verifier::binding::{E, F},
     };
-    use ceno_zkvm::scheme::ZKVMProof;
-    use ceno_zkvm::structs::ZKVMVerifyingKey;
+    use ceno_zkvm::{
+        e2e::verify,
+        scheme::{ZKVMProof, verifier::ZKVMVerifier},
+        structs::ZKVMVerifyingKey,
+    };
     use mpcs::{Basefold, BasefoldRSParams};
-    use std::fs::File;
-    use openvm_stark_sdk::config::setup_tracing_with_log_level;
-    use super::verify_e2e_stark_proof;
-    use openvm_stark_sdk::p3_bn254_fr::Bn254Fr;
-    use ceno_zkvm::scheme::verifier::ZKVMVerifier;
-    use ceno_zkvm::e2e::verify;
+    use openvm_stark_sdk::{config::setup_tracing_with_log_level, p3_bn254_fr::Bn254Fr};
     use p3::field::FieldAlgebra;
+    use std::fs::File;
 
     pub fn aggregation_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);
@@ -503,12 +504,13 @@ mod tests {
         let (vk, root_stark_proof) = compress_to_root_proof(zkvm_proofs, vk);
 
         verify_e2e_stark_proof(
-            &vk, 
-            &root_stark_proof, 
+            &vk,
+            &root_stark_proof,
             // _debug
-            &Bn254Fr::ZERO, 
-            &Bn254Fr::ZERO
-        ).expect("Verify e2e stark proof should pass");
+            &Bn254Fr::ZERO,
+            &Bn254Fr::ZERO,
+        )
+        .expect("Verify e2e stark proof should pass");
     }
 
     pub fn verify_single_inner_thread() {

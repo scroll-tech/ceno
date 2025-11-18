@@ -5,12 +5,10 @@ use std::{cell::RefCell, collections::BTreeMap};
 use openvm_native_compiler::{asm::AsmConfig, prelude::*};
 use openvm_native_recursion::hints::Hintable;
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
-use p3::field::extension::BinomialExtensionField;
-use p3::field::FieldAlgebra;
+use p3::field::{FieldAlgebra, extension::BinomialExtensionField};
 use serde::Deserialize;
 
-use super::structs::*;
-use super::utils::pow_felt_bits;
+use super::{structs::*, utils::pow_felt_bits};
 
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, DEGREE>;
@@ -150,37 +148,35 @@ pub struct Radix2DitVariable<C: Config> {
     pub twiddles: Array<C, Ext<C::F, C::EF>>,
 }
 
-/*
-impl<C: Config> Radix2DitVariable<C> {
-    fn dft_batch(
-        &self,
-        builder: &mut Builder<C>,
-        mat: RowMajorMatrixVariable<C>
-    ) -> RowMajorMatrixVariable<C> {
-        let h = mat.height(builder);
-        let log_h = builder.hint_var();
-        let log_h_minus_1: Var<C::N> = builder.eval(log_h - Usize::from(1));
-        let purported_h_lower_bound = pow_2(builder, log_h_minus_1);
-        let purported_h_upper_bound = pow_2(builder, log_h);
-        builder.assert_less_than_slow_small_rhs(purported_h_lower_bound, h);
-        builder.assert_less_than_slow_small_rhs(h, purported_h_upper_bound);
-
-        // TODO: support memoization
-        // Compute twiddle factors, or take memoized ones if already available.
-        let twiddles = {
-            let root = F::two_adic_generator(log_h);
-            root.powers().take(1 << log_h).collect()
-        };
-
-        // DIT butterfly
-        reverse_matrix_index_bits(&mut mat);
-        for layer in 0..log_h {
-            dit_layer(&mut mat.as_view_mut(), layer, twiddles);
-        }
-        mat
-    }
-}
-*/
+// impl<C: Config> Radix2DitVariable<C> {
+// fn dft_batch(
+// &self,
+// builder: &mut Builder<C>,
+// mat: RowMajorMatrixVariable<C>
+// ) -> RowMajorMatrixVariable<C> {
+// let h = mat.height(builder);
+// let log_h = builder.hint_var();
+// let log_h_minus_1: Var<C::N> = builder.eval(log_h - Usize::from(1));
+// let purported_h_lower_bound = pow_2(builder, log_h_minus_1);
+// let purported_h_upper_bound = pow_2(builder, log_h);
+// builder.assert_less_than_slow_small_rhs(purported_h_lower_bound, h);
+// builder.assert_less_than_slow_small_rhs(h, purported_h_upper_bound);
+//
+// TODO: support memoization
+// Compute twiddle factors, or take memoized ones if already available.
+// let twiddles = {
+// let root = F::two_adic_generator(log_h);
+// root.powers().take(1 << log_h).collect()
+// };
+//
+// DIT butterfly
+// reverse_matrix_index_bits(&mut mat);
+// for layer in 0..log_h {
+// dit_layer(&mut mat.as_view_mut(), layer, twiddles);
+// }
+// mat
+// }
+// }
 
 #[derive(Deserialize)]
 pub struct RSCodeVerifierParameters {
@@ -192,22 +188,20 @@ pub struct RSCodeVerifierParametersVariable<C: Config> {
     pub full_message_size_log: Usize<C::N>,
 }
 
-/*
-pub(crate) fn encode_small<C: Config>(
-    builder: &mut Builder<C>,
-    vp: RSCodeVerifierParametersVariable<C>,
-    rmm: RowMajorMatrixVariable<C>,
-) -> RowMajorMatrixVariable<C> {
-    let m = rmm;
-    // Add current setup this is unnecessary
-    let old_height = m.height(builder);
-    let new_height = builder.eval_expr(
-        old_height * Usize::from(1 << get_rate_log())
-    );
-    m.pad_to_height(builder, new_height, Ext::new(0));
-    m
-}
-*/
+// pub(crate) fn encode_small<C: Config>(
+// builder: &mut Builder<C>,
+// vp: RSCodeVerifierParametersVariable<C>,
+// rmm: RowMajorMatrixVariable<C>,
+// ) -> RowMajorMatrixVariable<C> {
+// let m = rmm;
+// Add current setup this is unnecessary
+// let old_height = m.height(builder);
+// let new_height = builder.eval_expr(
+// old_height * Usize::from(1 << get_rate_log())
+// );
+// m.pad_to_height(builder, new_height, Ext::new(0));
+// m
+// }
 
 /// Encode the last message sent from the prover to the verifier
 /// in the commit phase. Currently, for simplicity, we drop the
@@ -232,16 +226,15 @@ pub(crate) fn encode_small<C: Config>(
 }
 
 pub mod tests {
-    use openvm_circuit::arch::{instructions::program::Program, SystemConfig, VmExecutor};
+    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
     use openvm_native_circuit::{Native, NativeConfig};
-    use openvm_native_compiler::asm::AsmBuilder;
-    use openvm_native_compiler::prelude::*;
+    use openvm_native_compiler::{asm::AsmBuilder, prelude::*};
     use openvm_native_recursion::hints::Hintable;
     use openvm_stark_backend::config::StarkGenericConfig;
     use openvm_stark_sdk::{
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,
     };
-    use p3::field::{extension::BinomialExtensionField, FieldAlgebra};
+    use p3::field::{FieldAlgebra, extension::BinomialExtensionField};
     type SC = BabyBearPoseidon2Config;
 
     type F = BabyBear;

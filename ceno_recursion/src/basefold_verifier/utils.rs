@@ -1,7 +1,6 @@
 use openvm_native_compiler::ir::*;
 use openvm_native_recursion::vars::HintSlice;
-use p3::babybear::BabyBear;
-use p3::field::FieldAlgebra;
+use p3::{babybear::BabyBear, field::FieldAlgebra};
 
 use crate::basefold_verifier::mmcs::MmcsProof;
 
