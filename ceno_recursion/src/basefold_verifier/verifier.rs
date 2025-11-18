@@ -8,9 +8,9 @@ use ff_ext::BabyBearExt4;
 use openvm_native_compiler::{asm::AsmConfig, ir::FromConstant, prelude::*};
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{
-        CanObserveDigest, CanObserveVariable, CanSampleBitsVariable,
-        FeltChallenger, duplex::DuplexChallengerVariable,
-    };
+    CanObserveDigest, CanObserveVariable, CanSampleBitsVariable, FeltChallenger,
+    duplex::DuplexChallengerVariable,
+};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldAlgebra;
 
@@ -88,8 +88,7 @@ pub fn batch_verify<C: Config>(
             builder.range_check_var(diff, 5);
             builder.assign(&diff_product_num_var, diff_product_num_var * diff);
 
-            let diff: Var<C::N> =
-                builder.eval(max_width - opening.point_and_evals.evals.len());
+            let diff: Var<C::N> = builder.eval(max_width - opening.point_and_evals.evals.len());
             // width is always smaller than 2^14.
             builder.range_check_var(diff, 14);
             builder.assign(&diff_product_width, diff_product_width * diff);

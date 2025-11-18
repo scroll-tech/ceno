@@ -5,8 +5,7 @@ use super::binding::{
 use crate::{
     arithmetics::{
         PolyEvaluator, UniPolyExtrapolator, challenger_multi_observe, eq_eval,
-        eval_ceno_expr_with_instance,
-        mask_arr,
+        eval_ceno_expr_with_instance, mask_arr,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -45,8 +44,7 @@ use gkr_iop::{
 use itertools::{Itertools, izip};
 use mpcs::{Basefold, BasefoldRSParams};
 use multilinear_extensions::{
-    StructuralWitInType::StackedConstantSequence,
-    expression::Expression,
+    StructuralWitInType::StackedConstantSequence, expression::Expression,
 };
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
@@ -1524,11 +1522,7 @@ pub fn extract_claim_and_point<C: Config>(
         .for_each(|(i, (_, out_evals))| {
             let evals = out_evals
                 .iter()
-                .map(|out_eval| {
-                    
-
-                    evaluate_gkr_expression(builder, out_eval, claims, challenges)
-                })
+                .map(|out_eval| evaluate_gkr_expression(builder, out_eval, claims, challenges))
                 .collect_vec();
 
             let point = evals.first().map(|claim| builder.eval(claim.point.clone()));

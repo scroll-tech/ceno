@@ -322,208 +322,203 @@ pub fn verify_tower_proof<C: Config>(
     let next_layer_evals: Array<C, Ext<C::F, C::EF>> =
         builder.dyn_array(next_layer_evals_output_len);
 
-    builder
-        .range(0, op_range)
-        .for_each(|i_vec, builder| {
-            let round_var = i_vec[0];
-            let out_rt = &curr_pt;
-            let out_claim = &curr_eval;
-            let prover_messages = builder.get(&proof.proofs, round_var);
+    builder.range(0, op_range).for_each(|i_vec, builder| {
+        let round_var = i_vec[0];
+        let out_rt = &curr_pt;
+        let out_claim = &curr_eval;
+        let prover_messages = builder.get(&proof.proofs, round_var);
 
-            let max_num_variables: Felt<C::F> = builder.constant(C::F::ONE);
-            builder.assign(&max_num_variables, max_num_variables + round);
+        let max_num_variables: Felt<C::F> = builder.constant(C::F::ONE);
+        builder.assign(&max_num_variables, max_num_variables + round);
 
-            let max_degree = builder.constant(C::F::from_canonical_usize(3));
+        let max_degree = builder.constant(C::F::from_canonical_usize(3));
 
-            builder.cycle_tracker_start("sumcheck verify");
-            let (sub_rt, sub_e) = iop_verifier_state_verify(
-                builder,
-                challenger,
-                out_claim,
-                &prover_messages,
-                max_num_variables,
-                max_degree,
-                unipoly_extrapolator,
-            );
-            builder.cycle_tracker_end("sumcheck verify");
+        builder.cycle_tracker_start("sumcheck verify");
+        let (sub_rt, sub_e) = iop_verifier_state_verify(
+            builder,
+            challenger,
+            out_claim,
+            &prover_messages,
+            max_num_variables,
+            max_degree,
+            unipoly_extrapolator,
+        );
+        builder.cycle_tracker_end("sumcheck verify");
 
-            builder.cycle_tracker_start("check expected evaluation");
-            let eq_e = eq_eval(builder, out_rt, &sub_rt, one, zero);
+        builder.cycle_tracker_start("check expected evaluation");
+        let eq_e = eq_eval(builder, out_rt, &sub_rt, one, zero);
 
-            let input_ctx_len: Usize<C::N> = Usize::Var(builder.uninit());
-            let num_variables_len = num_variables.len();
-            builder.assign(&input_ctx_len, Usize::from(8) + num_variables_len.clone());
-            let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(input_ctx_len);
+        let input_ctx_len: Usize<C::N> = Usize::Var(builder.uninit());
+        let num_variables_len = num_variables.len();
+        builder.assign(&input_ctx_len, Usize::from(8) + num_variables_len.clone());
+        let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(input_ctx_len);
 
-            builder.set(&input_ctx, 0, round_var);
-            builder.set(&input_ctx, 1, num_prod_spec.clone());
-            builder.set(&input_ctx, 2, num_logup_spec.clone());
-            builder.set(
-                &input_ctx,
-                3,
-                Usize::from(proof.prod_specs_eval.inner_length),
-            );
-            builder.set(
-                &input_ctx,
-                4,
-                Usize::from(proof.prod_specs_eval.inner_inner_length),
-            );
-            builder.set(
-                &input_ctx,
-                5,
-                Usize::from(proof.logup_specs_eval.inner_length),
-            );
-            builder.set(
-                &input_ctx,
-                6,
-                Usize::from(proof.logup_specs_eval.inner_inner_length),
-            );
-            builder.set(&input_ctx, 7, Usize::from(1));
+        builder.set(&input_ctx, 0, round_var);
+        builder.set(&input_ctx, 1, num_prod_spec.clone());
+        builder.set(&input_ctx, 2, num_logup_spec.clone());
+        builder.set(
+            &input_ctx,
+            3,
+            Usize::from(proof.prod_specs_eval.inner_length),
+        );
+        builder.set(
+            &input_ctx,
+            4,
+            Usize::from(proof.prod_specs_eval.inner_inner_length),
+        );
+        builder.set(
+            &input_ctx,
+            5,
+            Usize::from(proof.logup_specs_eval.inner_length),
+        );
+        builder.set(
+            &input_ctx,
+            6,
+            Usize::from(proof.logup_specs_eval.inner_inner_length),
+        );
+        builder.set(&input_ctx, 7, Usize::from(1));
 
-            let input_ctx_variables_slice = input_ctx.slice(builder, 8, input_ctx.len());
-            iter_zip!(builder, input_ctx_variables_slice, num_variables).for_each(
-                |ptr_vec, builder| {
-                    let n_v = builder.iter_ptr_get(&num_variables, ptr_vec[1]);
-                    builder.iter_ptr_set(&input_ctx_variables_slice, ptr_vec[0], n_v);
-                },
-            );
+        let input_ctx_variables_slice = input_ctx.slice(builder, 8, input_ctx.len());
+        iter_zip!(builder, input_ctx_variables_slice, num_variables).for_each(
+            |ptr_vec, builder| {
+                let n_v = builder.iter_ptr_get(&num_variables, ptr_vec[1]);
+                builder.iter_ptr_set(&input_ctx_variables_slice, ptr_vec[0], n_v);
+            },
+        );
 
-            let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
-            builder.set(&challenges, 0, alpha);
+        let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
+        builder.set(&challenges, 0, alpha);
 
-            builder.sumcheck_layer_eval(
-                &input_ctx,
-                &challenges,
-                &proof.prod_specs_eval.data,
-                &proof.logup_specs_eval.data,
-                &next_layer_evals,
-            );
-            let expected_evaluation = builder.get(&next_layer_evals, 0);
+        builder.sumcheck_layer_eval(
+            &input_ctx,
+            &challenges,
+            &proof.prod_specs_eval.data,
+            &proof.logup_specs_eval.data,
+            &next_layer_evals,
+        );
+        let expected_evaluation = builder.get(&next_layer_evals, 0);
 
-            builder.assign(&expected_evaluation, expected_evaluation * eq_e);
-            builder.assert_ext_eq(expected_evaluation, sub_e);
-            builder.cycle_tracker_end("check expected evaluation");
+        builder.assign(&expected_evaluation, expected_evaluation * eq_e);
+        builder.assert_ext_eq(expected_evaluation, sub_e);
+        builder.cycle_tracker_end("check expected evaluation");
 
-            builder.cycle_tracker_start("derive next layer's expected sum");
-            // derive single eval
-            // rt' = r_merge || rt
-            // r_merge.len() == ceil_log2(num_product_fanin)
-            transcript_observe_label(builder, challenger, b"merge");
+        builder.cycle_tracker_start("derive next layer's expected sum");
+        // derive single eval
+        // rt' = r_merge || rt
+        // r_merge.len() == ceil_log2(num_product_fanin)
+        transcript_observe_label(builder, challenger, b"merge");
 
-            builder.cycle_tracker_start("derive rt_prime");
-            let r_merge = challenger.sample_ext(builder);
+        builder.cycle_tracker_start("derive rt_prime");
+        let r_merge = challenger.sample_ext(builder);
 
-            let c1: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(one - r_merge);
-            let c2: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(r_merge);
+        let c1: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(one - r_merge);
+        let c2: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(r_merge);
 
-            let rt_prime = extend(builder, &sub_rt, &r_merge);
-            builder.cycle_tracker_end("derive rt_prime");
+        let rt_prime = extend(builder, &sub_rt, &r_merge);
+        builder.cycle_tracker_end("derive rt_prime");
 
-            // generate next round challenge
-            transcript_observe_label(builder, challenger, b"combine subset evals");
-            let new_alpha = challenger.sample_ext(builder);
-            builder.assign(&alpha, new_alpha);
+        // generate next round challenge
+        transcript_observe_label(builder, challenger, b"combine subset evals");
+        let new_alpha = challenger.sample_ext(builder);
+        builder.assign(&alpha, new_alpha);
 
-            // Use native opcode
-            builder.set(&input_ctx, 7, Usize::from(0)); // Turn `in_round` off
-            builder.set(&challenges, 0, new_alpha);
-            builder.set(&challenges, 1, c1);
-            builder.set(&challenges, 2, c2);
+        // Use native opcode
+        builder.set(&input_ctx, 7, Usize::from(0)); // Turn `in_round` off
+        builder.set(&challenges, 0, new_alpha);
+        builder.set(&challenges, 1, c1);
+        builder.set(&challenges, 2, c2);
 
-            builder.sumcheck_layer_eval(
-                &input_ctx,
-                &challenges,
-                &proof.prod_specs_eval.data,
-                &proof.logup_specs_eval.data,
-                &next_layer_evals,
-            );
+        builder.sumcheck_layer_eval(
+            &input_ctx,
+            &challenges,
+            &proof.prod_specs_eval.data,
+            &proof.logup_specs_eval.data,
+            &next_layer_evals,
+        );
 
-            let next_round = builder.eval_expr(round_var + RVar::from(1));
-            builder
-                .range(0, num_prod_spec.clone())
-                .for_each(|i_vec, builder| {
-                    let spec_index = i_vec[0];
-                    let skip = builder.get(&should_skip, spec_index);
-                    let max_round = builder.get(&num_variables, spec_index);
-                    let round_limit: RVar<C::N> = builder.eval_expr(max_round - RVar::from(1));
+        let next_round = builder.eval_expr(round_var + RVar::from(1));
+        builder
+            .range(0, num_prod_spec.clone())
+            .for_each(|i_vec, builder| {
+                let spec_index = i_vec[0];
+                let skip = builder.get(&should_skip, spec_index);
+                let max_round = builder.get(&num_variables, spec_index);
+                let round_limit: RVar<C::N> = builder.eval_expr(max_round - RVar::from(1));
 
-                    // now skip is 0 if and only if current round_var is smaller than round_limit.
-                    builder.if_eq(skip, var_zero).then(|builder| {
-                        builder.if_eq(next_round, round_limit).then(|builder| {
-                            let evals_idx: Usize<C::N> = builder.eval(spec_index + Usize::from(1));
-                            let evals = builder.get(&next_layer_evals, evals_idx);
+                // now skip is 0 if and only if current round_var is smaller than round_limit.
+                builder.if_eq(skip, var_zero).then(|builder| {
+                    builder.if_eq(next_round, round_limit).then(|builder| {
+                        let evals_idx: Usize<C::N> = builder.eval(spec_index + Usize::from(1));
+                        let evals = builder.get(&next_layer_evals, evals_idx);
 
-                            let point_and_eval: PointAndEvalVariable<C> =
-                                builder.eval(PointAndEvalVariable {
-                                    point: PointVariable {
-                                        fs: rt_prime.clone(),
-                                    },
-                                    eval: evals,
-                                });
-                            builder.set_value(&prod_spec_point_n_eval, spec_index, point_and_eval);
-                        });
+                        let point_and_eval: PointAndEvalVariable<C> =
+                            builder.eval(PointAndEvalVariable {
+                                point: PointVariable {
+                                    fs: rt_prime.clone(),
+                                },
+                                eval: evals,
+                            });
+                        builder.set_value(&prod_spec_point_n_eval, spec_index, point_and_eval);
                     });
                 });
+            });
 
-            let logup_num_variables_slice =
-                num_variables.slice(builder, num_prod_spec.clone(), num_variables_len.clone());
+        let logup_num_variables_slice =
+            num_variables.slice(builder, num_prod_spec.clone(), num_variables_len.clone());
 
-            builder
-                .range(0, num_logup_spec.clone())
-                .for_each(|i_vec, builder| {
-                    let spec_index = i_vec[0];
-                    let max_round = builder.get(&logup_num_variables_slice, spec_index);
-                    let round_limit: RVar<C::N> = builder.eval_expr(max_round - RVar::from(1));
-                    let idx: Var<C::N> =
-                        builder.eval(spec_index.variable() + num_prod_spec.get_var());
-                    let skip = builder.get(&should_skip, idx);
+        builder
+            .range(0, num_logup_spec.clone())
+            .for_each(|i_vec, builder| {
+                let spec_index = i_vec[0];
+                let max_round = builder.get(&logup_num_variables_slice, spec_index);
+                let round_limit: RVar<C::N> = builder.eval_expr(max_round - RVar::from(1));
+                let idx: Var<C::N> = builder.eval(spec_index.variable() + num_prod_spec.get_var());
+                let skip = builder.get(&should_skip, idx);
 
-                    // now skip is 0 if and only if current round_var is smaller than round_limit.
-                    builder.if_eq(skip, var_zero).then(|builder| {
-                        builder.if_eq(next_round, round_limit).then(|builder| {
-                            let p_idx: Usize<C::N> = builder.eval(idx + Usize::from(1));
-                            let q_idx: Usize<C::N> =
-                                builder.eval(idx + Usize::from(1) + num_logup_spec.clone());
-                            let p_eval = builder.get(&next_layer_evals, p_idx);
-                            let q_eval = builder.get(&next_layer_evals, q_idx);
+                // now skip is 0 if and only if current round_var is smaller than round_limit.
+                builder.if_eq(skip, var_zero).then(|builder| {
+                    builder.if_eq(next_round, round_limit).then(|builder| {
+                        let p_idx: Usize<C::N> = builder.eval(idx + Usize::from(1));
+                        let q_idx: Usize<C::N> =
+                            builder.eval(idx + Usize::from(1) + num_logup_spec.clone());
+                        let p_eval = builder.get(&next_layer_evals, p_idx);
+                        let q_eval = builder.get(&next_layer_evals, q_idx);
 
-                            let p_eval: PointAndEvalVariable<C> =
-                                builder.eval(PointAndEvalVariable {
-                                    point: PointVariable {
-                                        fs: rt_prime.clone(),
-                                    },
-                                    eval: p_eval,
-                                });
-                            let q_eval: PointAndEvalVariable<C> =
-                                builder.eval(PointAndEvalVariable {
-                                    point: PointVariable {
-                                        fs: rt_prime.clone(),
-                                    },
-                                    eval: q_eval,
-                                });
-                            builder.set_value(&logup_spec_p_point_n_eval, spec_index, p_eval);
-                            builder.set_value(&logup_spec_q_point_n_eval, spec_index, q_eval);
+                        let p_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                            point: PointVariable {
+                                fs: rt_prime.clone(),
+                            },
+                            eval: p_eval,
                         });
+                        let q_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                            point: PointVariable {
+                                fs: rt_prime.clone(),
+                            },
+                            eval: q_eval,
+                        });
+                        builder.set_value(&logup_spec_p_point_n_eval, spec_index, p_eval);
+                        builder.set_value(&logup_spec_q_point_n_eval, spec_index, q_eval);
                     });
                 });
+            });
 
-            let output_eval = builder.get(&next_layer_evals, 0);
-            builder.assign(&curr_pt, rt_prime.clone());
-            builder.assign(&curr_eval, output_eval);
-            builder.assign(&round, round + C::F::ONE);
+        let output_eval = builder.get(&next_layer_evals, 0);
+        builder.assign(&curr_pt, rt_prime.clone());
+        builder.assign(&curr_eval, output_eval);
+        builder.assign(&round, round + C::F::ONE);
 
-            builder.cycle_tracker_end("derive next layer's expected sum");
+        builder.cycle_tracker_end("derive next layer's expected sum");
 
-            builder.assign(
-                &next_rt,
-                PointAndEvalVariable {
-                    point: PointVariable {
-                        fs: rt_prime.clone(),
-                    },
-                    eval: curr_eval,
+        builder.assign(
+            &next_rt,
+            PointAndEvalVariable {
+                point: PointVariable {
+                    fs: rt_prime.clone(),
                 },
-            );
-        });
+                eval: curr_eval,
+            },
+        );
+    });
 
     (
         next_rt.point,

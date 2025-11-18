@@ -4,15 +4,12 @@ use crate::{
         BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
     },
     tower_verifier::binding::{
-        IOPProverMessage, IOPProverMessageVec,
-        IOPProverMessageVecVariable, PointVariable, ThreeDimensionalVecVariable,
-        ThreeDimensionalVector,
+        IOPProverMessage, IOPProverMessageVec, IOPProverMessageVecVariable, PointVariable,
+        ThreeDimensionalVecVariable, ThreeDimensionalVector,
     },
 };
 use ceno_zkvm::{
-    scheme::{
-        ZKVMChipProof, ZKVMProof,
-    },
+    scheme::{ZKVMChipProof, ZKVMProof},
     structs::{EccQuarkProof, TowerProofs},
 };
 use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::LayerProof};
@@ -164,7 +161,8 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let max_num_var = witin_num_vars.iter().copied().max().unwrap_or(0);
         let max_width = witin_max_widths
             .iter()
-            .chain(fixed_max_widths.iter()).copied()
+            .chain(fixed_max_widths.iter())
+            .copied()
             .max()
             .unwrap_or(0);
         let get_perm = |v: Vec<usize>| {

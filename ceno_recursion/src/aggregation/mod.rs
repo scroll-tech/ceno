@@ -5,10 +5,7 @@ use crate::zkvm_verifier::{
 use ceno_zkvm::{scheme::ZKVMProof, structs::ZKVMVerifyingKey};
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{
-    arch::{
-        MemoryConfig, SystemConfig, VirtualMachine,
-        instructions::program::Program,
-    },
+    arch::{MemoryConfig, SystemConfig, VirtualMachine, instructions::program::Program},
     system::program::trace::VmCommittedExe,
 };
 use openvm_continuations::{
@@ -35,14 +32,9 @@ use openvm_sdk::{
 };
 use openvm_stark_backend::engine::StarkEngine;
 use openvm_stark_sdk::{
-    config::{
-        FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Engine,
-    },
+    config::{FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Engine},
     engine::StarkFriEngine,
-    openvm_stark_backend::{
-        config::StarkGenericConfig,
-        keygen::types::MultiStarkVerifyingKey,
-    },
+    openvm_stark_backend::{config::StarkGenericConfig, keygen::types::MultiStarkVerifyingKey},
     p3_bn254_fr::Bn254Fr,
 };
 use serde::{Deserialize, Serialize};

@@ -565,8 +565,8 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                         builder.set_value(&perm_opened_values, permuted_j, mat_j);
                     });
                     // i >>= (log2_max_codeword_size - commit.log2_max_codeword_size);
-                    let bits_shift: Var<C::N> = builder
-                        .eval(log2_max_codeword_size - round.commit.log2_max_codeword_size);
+                    let bits_shift: Var<C::N> =
+                        builder.eval(log2_max_codeword_size - round.commit.log2_max_codeword_size);
                     let reduced_idx_bits = idx_bits.slice(builder, bits_shift, idx_bits.len());
 
                     // verify input mmcs

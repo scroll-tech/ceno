@@ -47,17 +47,13 @@ impl<C: Config> DenseMatrixVariable<C> {
     pub fn height(&self, builder: &mut Builder<C>) -> Var<C::N> {
         // Supply height as hint
         let height = builder.hint_var();
-        builder
-            .if_eq(self.width, Usize::from(0))
-            .then(|builder| {
-                builder.assert_usize_eq(height, Usize::from(0));
-            });
-        builder
-            .if_ne(self.width, Usize::from(0))
-            .then(|builder| {
-                // XXX: check that width * height is not a field multiplication
-                builder.assert_usize_eq(self.width * height, self.values.len());
-            });
+        builder.if_eq(self.width, Usize::from(0)).then(|builder| {
+            builder.assert_usize_eq(height, Usize::from(0));
+        });
+        builder.if_ne(self.width, Usize::from(0)).then(|builder| {
+            // XXX: check that width * height is not a field multiplication
+            builder.assert_usize_eq(self.width * height, self.values.len());
+        });
         height
     }
 
@@ -225,7 +221,8 @@ pub(crate) fn encode_small<C: Config>(
 }
 
 pub mod tests {
-    use openvm_circuit::arch::{instructions::program::Program, SystemConfig, VmExecutor};
+    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::{asm::AsmBuilder, prelude::*};
     use openvm_native_recursion::hints::Hintable;
     use openvm_stark_backend::config::StarkGenericConfig;
@@ -233,7 +230,6 @@ pub mod tests {
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,
     };
     use p3::field::{FieldAlgebra, extension::BinomialExtensionField};
-    use openvm_native_circuit::{Native, NativeConfig};
 
     type SC = BabyBearPoseidon2Config;
 

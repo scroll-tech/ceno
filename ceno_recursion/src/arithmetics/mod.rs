@@ -5,9 +5,7 @@
 use ceno_zkvm::structs::{ChallengeId, WitnessId};
 use ff_ext::{BabyBearExt4, ExtensionField, SmallField};
 use itertools::Either;
-use multilinear_extensions::{
-    Expression, Fixed, Instance,
-};
+use multilinear_extensions::{Expression, Fixed, Instance};
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
@@ -520,22 +518,10 @@ pub fn eval_ceno_expr_with_instance<C: Config>(
     evaluate_ceno_expr::<C, Ext<C::F, C::EF>>(
         builder,
         expr,
-        &|builder, f: &Fixed| {
-            
-            builder.get(fixed, f.0)
-        },
-        &|builder, witness_id: WitnessId| {
-            
-            builder.get(witnesses, witness_id as usize)
-        },
-        &|builder, witness_id, _, _, _| {
-            
-            builder.get(structural_witnesses, witness_id as usize)
-        },
-        &|builder, i| {
-            
-            builder.get(instance, i.0)
-        },
+        &|builder, f: &Fixed| builder.get(fixed, f.0),
+        &|builder, witness_id: WitnessId| builder.get(witnesses, witness_id as usize),
+        &|builder, witness_id, _, _, _| builder.get(structural_witnesses, witness_id as usize),
+        &|builder, i| builder.get(instance, i.0),
         &|builder, scalar| {
             let scalar_base_slice = scalar
                 .as_bases()
@@ -566,22 +552,11 @@ pub fn eval_ceno_expr_with_instance<C: Config>(
             let offset_ext: Ext<C::F, C::EF> =
                 builder.constant(C::EF::from_base_slice(&offset_base_slice));
 
-            
-
             builder.eval(challenge_exp * scalar_ext + offset_ext)
         },
-        &|builder, a, b| {
-            
-            builder.eval(a + b)
-        },
-        &|builder, a, b| {
-            
-            builder.eval(a * b)
-        },
-        &|builder, x, a, b| {
-            
-            builder.eval(a * x + b)
-        },
+        &|builder, a, b| builder.eval(a + b),
+        &|builder, a, b| builder.eval(a * b),
+        &|builder, x, a, b| builder.eval(a * x + b),
     )
 }
 
@@ -798,10 +773,7 @@ pub fn eval_stacked_wellform_address_vec<C: Config>(
         builder.assign(&pow_two, pow_two * two);
 
         // res = res * (1-ri) + ri * (\sum_{j < i} 2^j * rj)
-        builder.assign(
-            &res,
-            res * (one - ri) + ri * well_formed_inc,
-        );
+        builder.assign(&res, res * (one - ri) + ri * well_formed_inc);
     });
 
     res

@@ -6,15 +6,11 @@ use ceno_zkvm::{
         Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
         setup_platform, setup_platform_debug,
     },
-    scheme::{
-        constants::MAX_NUM_VARIABLES, create_backend, create_prover,
-    },
+    scheme::{constants::MAX_NUM_VARIABLES, create_backend, create_prover},
 };
 use clap::Parser;
 use ff_ext::BabyBearExt4;
-use mpcs::{
-    Basefold, BasefoldRSParams, SecurityLevel,
-};
+use mpcs::{Basefold, BasefoldRSParams, SecurityLevel};
 use std::{fs, path::PathBuf};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
