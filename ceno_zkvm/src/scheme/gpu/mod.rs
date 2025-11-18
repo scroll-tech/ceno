@@ -227,28 +227,22 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     };
 
     // prod
-    let mut r_set_gpu_chunks = Vec::new();
-    let mut w_set_gpu_chunks = Vec::new();
-    for wit in r_set_wit.iter() {
-        let gpu_chunks = wit.as_view_chunks(NUM_FANIN);
-        r_set_gpu_chunks.push(gpu_chunks);
-    }
-    for wit in w_set_wit.iter() {
-        let gpu_chunks = wit.as_view_chunks(NUM_FANIN);
-        w_set_gpu_chunks.push(gpu_chunks);
-    }
+    let prod_last_layers = r_set_wit
+        .iter()
+        .chain(w_set_wit.iter())
+        .map(|wit| wit.as_view_chunks(NUM_FANIN))
+        .collect::<Vec<_>>();
 
     // logup
-    let mut lk_numerator_gpu_chunks = Vec::new();
-    let mut lk_denominator_gpu_chunks = Vec::new();
-    for wit in lk_n_wit.iter() {
-        let gpu_chunks = wit.as_view_chunks(NUM_FANIN_LOGUP);
-        lk_numerator_gpu_chunks.push(gpu_chunks);
-    }
-    for wit in lk_d_wit.iter() {
-        let gpu_chunks = wit.as_view_chunks(NUM_FANIN_LOGUP);
-        lk_denominator_gpu_chunks.push(gpu_chunks);
-    }
+
+    let lk_numerator_last_layer = lk_n_wit
+        .iter()
+        .map(|wit| wit.as_view_chunks(NUM_FANIN_LOGUP))
+        .collect::<Vec<_>>();
+    let lk_denominator_last_layer = lk_d_wit
+        .iter()
+        .map(|wit| wit.as_view_chunks(NUM_FANIN_LOGUP))
+        .collect::<Vec<_>>();
 
     // First, allocate buffers based on original witness num_vars
     // This avoids the need to call build_tower_witness just to get buffer sizes
@@ -277,11 +271,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     cuda_hal.print_mem_info().unwrap();
     // Build product GpuProverSpecs using GPU polynomials directly (batched)
     let mut prod_gpu_specs = Vec::new();
-    let prod_last_layers = r_set_gpu_chunks
-        .into_iter()
-        .chain(w_set_gpu_chunks)
-        .collect::<Vec<_>>();
-
     if !prod_last_layers.is_empty() {
         view_last_layers.push(prod_last_layers);
         let stored_last_layers = view_last_layers
@@ -329,12 +318,12 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     let mut logup_gpu_specs = Vec::new();
 
     // Prepare last_layer for all logup cases
-    let logup_last_layers = if !lk_numerator_gpu_chunks.is_empty() {
+    let logup_last_layers = if !lk_numerator_last_layer.is_empty() {
         // Case when we have both numerator and denominator
         // Combine [p1, p2] from numerator and [q1, q2] from denominator
-        lk_numerator_gpu_chunks
+        lk_numerator_last_layer
             .into_iter()
-            .zip(lk_denominator_gpu_chunks)
+            .zip(lk_denominator_last_layer)
             .map(|(lk_n_chunks, lk_d_chunks)| {
                 let mut last_layer = lk_n_chunks;
                 last_layer.extend(lk_d_chunks);
@@ -343,7 +332,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .collect::<Vec<_>>()
     } else {
         // Case when numerator is empty - create GPU polynomials with scalar E::ONE
-        lk_denominator_gpu_chunks
+        lk_denominator_last_layer
             .into_iter()
             .map(|lk_d_chunks| {
                 let nv = lk_d_chunks[0].num_vars();
