@@ -181,7 +181,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     records: &[ArcMultilinearExtensionGpu<'_, E>],
     challenges: &[E; 2],
     cuda_hal: &CudaHalBB31,
-    prod_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     // logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     big_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     view_last_layers: &mut Vec<Vec<Vec<GpuPolynomialExt<'static>>>>,
@@ -276,41 +275,54 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         requested_prod_buffers_mb + requested_logup_buffers_mb
     );
     cuda_hal.print_mem_info().unwrap();
-    for wit in r_set_wit.iter().chain(w_set_wit.iter()) {
-        let nv = wit.num_vars();
-        let buf = cuda_hal
-            .alloc_ext_elems_on_device(1 << (nv + 1))
-            .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))?;
-        prod_buffers.push(buf);
-    }
-    // // Allocate logup buffers based on original witness num_vars
-    // for wit in lk_n_wit.iter().chain(lk_d_wit.iter()) {
-    //     let nv = wit.num_vars();
-    //     let buf = cuda_hal
-    //         .alloc_ext_elems_on_device(1 << (nv + 3))
-    //         .map_err(|e| format!("Failed to allocate logup GPU buffer: {:?}", e))?;
-    //     logup_buffers.push(buf);
-    // }
-    cuda_hal.print_mem_info().unwrap();
-
-    // Build product GpuProverSpecs using GPU polynomials directly
+    // Build product GpuProverSpecs using GPU polynomials directly (batched)
     let mut prod_gpu_specs = Vec::new();
-    let mut remaining_prod_buffers = &mut prod_buffers[..];
+    let prod_last_layers = r_set_gpu_chunks
+        .into_iter()
+        .chain(w_set_gpu_chunks)
+        .collect::<Vec<_>>();
 
-    // Process all product chunks (r_set and w_set) uniformly
-    for gpu_chunks in r_set_gpu_chunks.into_iter().chain(w_set_gpu_chunks) {
-        assert_eq!(gpu_chunks.len(), 2, "prod_spec must have 2 MLEs");
-        let nv = gpu_chunks[0].num_vars();
+    if !prod_last_layers.is_empty() {
+        view_last_layers.push(prod_last_layers);
+        let stored_last_layers = view_last_layers
+            .last()
+            .expect("stored prod last layers exist");
+        let first_layer = &stored_last_layers[0];
+        assert_eq!(first_layer.len(), 2, "prod last_layer must have 2 MLEs");
+        let num_vars = first_layer[0].num_vars();
+        let num_towers = stored_last_layers.len();
 
-        let (current_buffer_slice, rest) = remaining_prod_buffers.split_at_mut(1);
-        remaining_prod_buffers = rest;
+        // Allocate one big buffer for all product towers and add it to big_buffers
+        let tower_size = 1 << (num_vars + 1); // 2 * mle_len elements per tower
+        let total_buffer_size = num_towers * tower_size;
+        let big_buffer = cuda_hal
+            .alloc_ext_elems_on_device(total_buffer_size)
+            .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))?;
+        big_buffers.push(big_buffer);
+        cuda_hal.print_mem_info().unwrap();
 
-        let gpu_spec = cuda_hal
-            .tower
-            .build_prod_tower_from_gpu_polys(cuda_hal, nv, &gpu_chunks, &mut current_buffer_slice[0])
-            .map_err(|e| format!("build_prod_tower_from_gpu_polys failed: {:?}", e))?;
-
-        prod_gpu_specs.push(gpu_spec);
+        let span_prod = entered_span!(
+            "build_prod_tower",
+            prod_layers = stored_last_layers.len(),
+            profiling_3 = true
+        );
+        let last_layers_refs: Vec<&[GpuPolynomialExt]> =
+            stored_last_layers.iter().map(|v| v.as_slice()).collect();
+        let gpu_specs = {
+            let big_buffer = big_buffers.last_mut().unwrap();
+            cuda_hal
+                .tower
+                .build_prod_tower_from_gpu_polys_batch(
+                    cuda_hal,
+                    big_buffer,
+                    &last_layers_refs,
+                    num_vars,
+                    num_towers,
+                )
+        }
+        .map_err(|e| format!("build_prod_tower_from_gpu_polys_batch failed: {:?}", e))?;
+        prod_gpu_specs.extend(gpu_specs);
+        exit_span!(span_prod);
     }
 
     // Build logup GpuProverSpecs using GPU polynomials directly
@@ -381,12 +393,10 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .build_logup_tower_from_gpu_polys_batch(cuda_hal, big_buffer, &last_layers_refs, num_vars, num_towers)
             .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
 
+        drop(big_buffer); // ensure mutable borrow does not leak
         logup_gpu_specs.extend(gpu_specs);
         exit_span!(span_logup);
     }
-    
-    println!("[build_tower_witness_gpu] logup_gpu_specs: {:?}", logup_gpu_specs.len());
-
     Ok((prod_gpu_specs, logup_gpu_specs))
 }
 
@@ -450,7 +460,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         let (point, proof, lk_out_evals, w_out_evals, r_out_evals) = {
             // build_tower_witness_gpu will allocate buffers and build GPU specs
             let span = entered_span!("build_tower_witness", profiling_2 = true);
-            let mut _prod_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             // let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let mut _view_last_layers: Vec<Vec<Vec<ceno_gpu::bb31::GpuPolynomialExt<'static>>>> =
@@ -461,7 +470,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
                 records,
                 challenges,
                 &cuda_hal,
-                &mut _prod_buffers,
                 // &mut _logup_buffers,
                 &mut _big_buffers,
                 &mut _view_last_layers,
