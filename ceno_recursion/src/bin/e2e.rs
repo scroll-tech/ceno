@@ -1,8 +1,6 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_recursion::aggregation::compress_to_root_proof;
-#[cfg(all(feature = "jemalloc", unix, not(test)))]
-use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
         Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
@@ -23,12 +21,6 @@ use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
-
-// Use jemalloc as global allocator for performance
-#[cfg(all(feature = "jemalloc", unix, not(test)))]
-#[global_allocator]
-static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
 fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
     parse_size::Config::new()
         .with_binary()
