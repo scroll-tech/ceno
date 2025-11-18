@@ -254,9 +254,7 @@ impl ThreeDimensionalVector {
 
 impl From<Vec<Vec<Vec<E>>>> for ThreeDimensionalVector {
     fn from(data: Vec<Vec<Vec<E>>>) -> Self {
-        let inner_inner_length = if data.is_empty() {
-            0
-        } else if data[0].is_empty() {
+        let inner_inner_length = if data.is_empty() || data[0].is_empty() {
             0
         } else {
             data[0][0].len()

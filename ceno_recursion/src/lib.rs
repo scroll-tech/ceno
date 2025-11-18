@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
 mod arithmetics;
 mod basefold_verifier;
 pub mod constants;

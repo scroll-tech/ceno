@@ -85,7 +85,7 @@ pub fn transcript_group_observe_f<C: Config>(
 
 pub fn transcript_group_sample_ext<C: Config>(
     builder: &mut Builder<C>,
-    challenger_group: &mut Vec<DuplexChallengerVariable<C>>,
+    challenger_group: &mut [DuplexChallengerVariable<C>],
 ) -> Ext<C::F, C::EF> {
     let e: Ext<C::F, C::EF> = challenger_group[0].sample_ext(builder);
 
@@ -1537,14 +1537,14 @@ pub fn extract_claim_and_point<C: Config>(
                 builder.set_value(&evals_arr, j, e.eval);
             }
 
-            if point.is_some() {
+            if let Some(point) = point {
                 builder.set(
                     &r,
                     i,
                     ClaimAndPoint {
                         evals: evals_arr,
                         has_point: Usize::from(1),
-                        point: point.unwrap(),
+                        point,
                     },
                 );
             } else {
