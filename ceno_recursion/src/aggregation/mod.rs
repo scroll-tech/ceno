@@ -112,7 +112,8 @@ pub fn compress_to_root_proof(
             },
             VmVerifierPvs::<u8>::width(),
         )
-        .with_max_segment_len((1 << 24) - 100),
+        .with_max_segment_len((1 << 24) - 100)
+        .with_profiling(),
         native: Default::default(),
     };
 
@@ -120,7 +121,7 @@ pub fn compress_to_root_proof(
         let leaf_engine = BabyBearPoseidon2Engine::new(leaf_fri_params);
         let leaf_program = CenoLeafVmVerifierConfig {
             vk,
-            compiler_options: CompilerOptions::default(),
+            compiler_options: CompilerOptions::default().with_cycle_tracker(),
         }
         .build_program();
 
