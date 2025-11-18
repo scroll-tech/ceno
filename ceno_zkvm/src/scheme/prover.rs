@@ -219,13 +219,13 @@ impl<
             }
             structural_rmms.push(structural_witness_rmm);
         }
+
         tracing::debug!(
-            "expected size of witness rmm after batch commit {} MB",
+            "witness rmm in {} MB",
             wits_rmms
                 .iter()
-                .map(|(_, v)| v.values.len() * 4) // 4 bytes
+                .map(|(_, v)| v.values.len() * std::mem::size_of::<E::BaseField>())
                 .sum::<usize>() as f64
-                * (2 + 1) as f64  // (2 log blowup + 1 column oriented)
                 / (1024.0 * 1024.0)
         );
 

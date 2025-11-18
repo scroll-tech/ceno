@@ -151,6 +151,8 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub ecall_table_cells_map: HashMap<String, u64>,
 }
 
+const KECCAK_CELL_BLOWUP_FACTOR: u64 = 2;
+
 impl<E: ExtensionField> Rv32imConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let mut inst_cells_map = vec![0; InsnKind::COUNT];
@@ -260,7 +262,31 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             }};
         }
         let halt_config = register_ecall_circuit!(HaltInstruction<E>, ecall_table_cells_map);
-        let keccak_config = register_ecall_circuit!(KeccakInstruction<E>, ecall_table_cells_map);
+
+        // Keccak precompile is a known hotspot for peak memory.
+        // Its heavy read/write/LK activity inflates tower-witness usage, causing
+        // substantial memory overhead which not reflected on basic column count.
+        //
+        // We estimate this effect by applying an extra scaling factor that models
+        // tower-witness blowup proportional to the number of base columns.
+        let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
+        assert!(
+            ecall_table_cells_map
+                .insert(
+                    <KeccakInstruction<E>>::name(),
+                    cs.get_cs(&<KeccakInstruction<E>>::name())
+                        .as_ref()
+                        .map(|cs| {
+                            (cs.zkvm_v1_css.num_witin as u64
+                                + cs.zkvm_v1_css.num_structural_witin as u64
+                                + cs.zkvm_v1_css.num_fixed as u64)
+                                * (1 << cs.rotation_vars().unwrap_or(0))
+                                * KECCAK_CELL_BLOWUP_FACTOR
+                        })
+                        .unwrap_or_default(),
+                )
+                .is_none()
+        );
         let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_table_cells_map);
         let bn254_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>, ecall_table_cells_map);
         let secp256k1_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>, ecall_table_cells_map);
