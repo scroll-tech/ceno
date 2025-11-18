@@ -296,7 +296,6 @@ impl<E: ExtensionField> Layer<E> {
                         eval
                     })
                     .collect_vec();
-
                 // within same group, all the point should be the same
                 // so we assume only take first point as representative
                 let point = out_evals.first().map(|out_eval| {
