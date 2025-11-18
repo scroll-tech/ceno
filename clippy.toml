@@ -20,5 +20,5 @@ allowed-duplicate-crates = [
   "toml_datetime",
   "winnow",
   "generic-array",
-  "num-bigint"
+  "num-bigint",
 ]
