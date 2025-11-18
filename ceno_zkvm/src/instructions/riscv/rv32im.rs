@@ -63,6 +63,8 @@ use strum::{EnumCount, IntoEnumIterator};
 
 pub mod mmu;
 
+const ECALL_HALT: u32 = Platform::ecall_halt();
+
 pub struct Rv32imConfig<E: ExtensionField> {
     // ALU Opcodes.
     pub add_config: <AddInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -148,7 +150,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub inst_cells_map: Vec<u64>,
     // record opcode name -> cells
     // serve ecall/table for no InsnKind
-    pub ecall_table_cells_map: HashMap<String, u64>,
+    pub ecall_cells_map: HashMap<String, u64>,
 }
 
 const KECCAK_CELL_BLOWUP_FACTOR: u64 = 2;
@@ -156,7 +158,7 @@ const KECCAK_CELL_BLOWUP_FACTOR: u64 = 2;
 impl<E: ExtensionField> Rv32imConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let mut inst_cells_map = vec![0; InsnKind::COUNT];
-        let mut ecall_table_cells_map = HashMap::new();
+        let mut ecall_cells_map = HashMap::new();
 
         macro_rules! register_opcode_circuit {
             ($insn_kind:ident, $instruction:ty, $inst_cells_map:ident) => {{
@@ -237,12 +239,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // ecall opcodes
         macro_rules! register_ecall_circuit {
-            ($instruction:ty, $ecall_table_cells_map:ident) => {{
+            ($instruction:ty, $ecall_cells_map:ident) => {{
                 let config = cs.register_opcode_circuit::<$instruction>();
 
                 // update estimated cell
                 assert!(
-                    $ecall_table_cells_map
+                    $ecall_cells_map
                         .insert(
                             <$instruction>::name(),
                             cs.get_cs(&<$instruction>::name())
@@ -261,7 +263,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 config
             }};
         }
-        let halt_config = register_ecall_circuit!(HaltInstruction<E>, ecall_table_cells_map);
+        let halt_config = register_ecall_circuit!(HaltInstruction<E>, ecall_cells_map);
 
         // Keccak precompile is a known hotspot for peak memory.
         // Its heavy read/write/LK activity inflates tower-witness usage, causing
@@ -271,7 +273,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // tower-witness blowup proportional to the number of base columns.
         let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
         assert!(
-            ecall_table_cells_map
+            ecall_cells_map
                 .insert(
                     <KeccakInstruction<E>>::name(),
                     cs.get_cs(&<KeccakInstruction<E>>::name())
@@ -287,46 +289,22 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 )
                 .is_none()
         );
-        let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_table_cells_map);
-        let bn254_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>, ecall_table_cells_map);
-        let secp256k1_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>, ecall_table_cells_map);
-        let secp256k1_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>, ecall_table_cells_map);
-        let secp256k1_decompress_config = register_ecall_circuit!(WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>, ecall_table_cells_map);
+        let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
+        let bn254_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
+        let secp256k1_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
+        let secp256k1_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
+        let secp256k1_decompress_config = register_ecall_circuit!(WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
 
         // tables
-        macro_rules! register_table_circuit {
-            ($instruction:ty, $ecall_table_cells_map:ident) => {{
-                let config = cs.register_table_circuit::<$instruction>();
-
-                // update estimated cell
-                assert!(
-                    $ecall_table_cells_map
-                        .insert(
-                            <$instruction>::name(),
-                            cs.get_cs(&<$instruction>::name())
-                                .as_ref()
-                                .map(|cs| {
-                                    cs.zkvm_v1_css.num_witin as u64
-                                        + cs.zkvm_v1_css.num_structural_witin as u64
-                                        + cs.zkvm_v1_css.num_fixed as u64
-                                })
-                                .unwrap_or_default(),
-                        )
-                        .is_none()
-                );
-
-                config
-            }};
-        }
-        let dynamic_range_config = register_table_circuit!(DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>, ecall_table_cells_map);
-        let double_u8_range_config =
-            register_table_circuit!(DoubleU8TableCircuit<E>, ecall_table_cells_map);
-        let and_table_config = register_table_circuit!(AndTableCircuit<E>, ecall_table_cells_map);
-        let or_table_config = register_table_circuit!(OrTableCircuit<E>, ecall_table_cells_map);
-        let xor_table_config = register_table_circuit!(XorTableCircuit<E>, ecall_table_cells_map);
-        let ltu_config = register_table_circuit!(LtuTableCircuit<E>, ecall_table_cells_map);
+        let dynamic_range_config =
+            cs.register_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>();
+        let double_u8_range_config = cs.register_table_circuit::<DoubleU8TableCircuit<E>>();
+        let and_table_config = cs.register_table_circuit::<AndTableCircuit<E>>();
+        let or_table_config = cs.register_table_circuit::<OrTableCircuit<E>>();
+        let xor_table_config = cs.register_table_circuit::<XorTableCircuit<E>>();
+        let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
         #[cfg(not(feature = "u16limb_circuit"))]
-        let pow_config = register_table_circuit!(PowTableCircuit<E>, ecall_table_cells_map);
+        let pow_config = cs.register_table_circuit::<PowTableCircuit<E>>();
 
         Self {
             // alu opcodes
@@ -399,7 +377,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             #[cfg(not(feature = "u16limb_circuit"))]
             pow_config,
             inst_cells_map,
-            ecall_table_cells_map,
+            ecall_cells_map,
         }
     }
 
@@ -872,38 +850,36 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
             return self.inst_cells_map[insn_kind as usize];
         }
         // deal with ecall logic
-        match insn_kind {
+        match record.rs1().unwrap().value {
             // ecall / halt
-            InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => *self
-                .ecall_table_cells_map
+            ECALL_HALT => *self
+                .ecall_cells_map
                 .get(&HaltInstruction::<E>::name())
                 .expect("unable to find name"),
-            InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => *self
-                .ecall_table_cells_map
+            KeccakSpec::CODE => *self
+                .ecall_cells_map
                 .get(&KeccakInstruction::<E>::name())
                 .expect("unable to find name"),
-            InsnKind::ECALL if record.rs1().unwrap().value == Bn254AddSpec::CODE => *self
-                .ecall_table_cells_map
+            Bn254AddSpec::CODE => *self
+                .ecall_cells_map
                 .get(&WeierstrassAddAssignInstruction::<E, SwCurve<Bn254>>::name())
                 .expect("unable to find name"),
-            InsnKind::ECALL if record.rs1().unwrap().value == Bn254DoubleSpec::CODE => *self
-                .ecall_table_cells_map
+            Bn254DoubleSpec::CODE => *self
+                .ecall_cells_map
                 .get(&WeierstrassDoubleAssignInstruction::<E, SwCurve<Bn254>>::name())
                 .expect("unable to find name"),
-            InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1AddSpec::CODE => *self
-                .ecall_table_cells_map
+            Secp256k1AddSpec::CODE => *self
+                .ecall_cells_map
                 .get(&WeierstrassAddAssignInstruction::<E, SwCurve<Secp256k1>>::name())
                 .expect("unable to find name"),
-            InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DoubleSpec::CODE => *self
-                .ecall_table_cells_map
+            Secp256k1DoubleSpec::CODE => *self
+                .ecall_cells_map
                 .get(&WeierstrassDoubleAssignInstruction::<E, SwCurve<Secp256k1>>::name())
                 .expect("unable to find name"),
-            InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DecompressSpec::CODE => {
-                *self
-                    .ecall_table_cells_map
-                    .get(&WeierstrassDecompressInstruction::<E, SwCurve<Secp256k1>>::name())
-                    .expect("unable to find name")
-            }
+            Secp256k1DecompressSpec::CODE => *self
+                .ecall_cells_map
+                .get(&WeierstrassDecompressInstruction::<E, SwCurve<Secp256k1>>::name())
+                .expect("unable to find name"),
             // other type of ecalls are handled by dummy ecall instruction
             _ => unreachable!("unknow match record {:?}", record),
         }
