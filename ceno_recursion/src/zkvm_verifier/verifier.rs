@@ -131,51 +131,50 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
-    if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-        builder
-            .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+    builder.if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
+        if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
+            let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+            let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
 
-                commit.value.into_iter().enumerate().for_each(|(i, v)| {
-                    let v = builder.constant(v);
-                    // TODO: put fixed commit to public values
-                    // builder.commit_public_value(v);
+            commit.value.into_iter().enumerate().for_each(|(i, v)| {
+                let v = builder.constant(v);
+                // TODO: put fixed commit to public values
+                // builder.commit_public_value(v);
 
-                    builder.set_value(&commit_array, i, v);
-                });
-                challenger_multi_observe(builder, &mut challenger, &commit_array);
-
-                let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
-                    fixed_commit.log2_max_codeword_size,
-                ));
-
-                challenger.observe(builder, log2_max_codeword_size_felt);
+                builder.set_value(&commit_array, i, v);
             });
-    } else if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
-        builder
-            .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
 
-                commit.value.into_iter().enumerate().for_each(|(i, v)| {
-                    let v = builder.constant(v);
-                    // TODO: put fixed commit to public values
-                    // builder.commit_public_value(v);
+            challenger_multi_observe(builder, &mut challenger, &commit_array);
 
-                    builder.set_value(&commit_array, i, v);
-                });
-                challenger_multi_observe(builder, &mut challenger, &commit_array);
+            let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
+                fixed_commit.log2_max_codeword_size,
+            ));
 
-                let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
-                    fixed_commit.log2_max_codeword_size,
-                ));
+            challenger.observe(builder, log2_max_codeword_size_felt);
+        }
+    });
 
-                challenger.observe(builder, log2_max_codeword_size_felt);
+    builder.if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0)).then(|builder| {
+        if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
+            let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+            let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+
+            commit.value.into_iter().enumerate().for_each(|(i, v)| {
+                let v = builder.constant(v);
+                // TODO: put fixed commit to public values
+                // builder.commit_public_value(v);
+
+                builder.set_value(&commit_array, i, v);
             });
-    }
+            challenger_multi_observe(builder, &mut challenger, &commit_array);
+
+            let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
+                fixed_commit.log2_max_codeword_size,
+            ));
+
+            challenger.observe(builder, log2_max_codeword_size_felt);
+        }
+    });
 
     let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
     iter_zip!(builder, zkvm_proof_input.chip_proofs).for_each(|ptr_vec, builder| {
