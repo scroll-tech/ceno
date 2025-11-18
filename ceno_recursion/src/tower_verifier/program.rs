@@ -190,7 +190,6 @@ pub fn verify_tower_proof<C: Config>(
     );
 
     let var_zero: Var<C::N> = builder.constant(C::N::ZERO);
-    let var_one: Var<C::N> = builder.constant(C::N::ONE);
     let num_specs: Var<C::N> = builder.eval(num_prod_spec.get_var() + num_logup_spec.get_var());
     let should_skip: Array<C, Var<C::N>> = builder.dyn_array(num_specs);
     builder.range(0, num_specs).for_each(|i_vec, builder| {

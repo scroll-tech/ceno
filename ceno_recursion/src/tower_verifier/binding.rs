@@ -103,6 +103,7 @@ impl Hintable<InnerConfig> for Point {
 }
 impl VecAutoHintable for Point {}
 
+#[allow(dead_code)]
 pub struct PointAndEval {
     pub point: Point,
     pub eval: E,
