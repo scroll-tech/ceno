@@ -821,7 +821,7 @@ pub mod tests {
 
     type F = BabyBear;
     type E = BabyBearExt4;
-    type PCS = BasefoldDefault<E>;
+    type Pcs = BasefoldDefault<E>;
 
     use crate::{
         basefold_verifier::{
@@ -854,8 +854,8 @@ pub mod tests {
         let mut rng = thread_rng();
 
         // setup PCS
-        let pp = PCS::setup(1 << 20, mpcs::SecurityLevel::Conjecture100bits).unwrap();
-        let (pp, vp) = pcs_trim::<E, PCS>(pp, 1 << 20).unwrap();
+        let pp = Pcs::setup(1 << 20, mpcs::SecurityLevel::Conjecture100bits).unwrap();
+        let (pp, vp) = pcs_trim::<E, Pcs>(pp, 1 << 20).unwrap();
 
         let mut num_total_polys = 0;
         let (matrices, mles): (Vec<_>, Vec<_>) = dimensions
@@ -870,8 +870,8 @@ pub mod tests {
             .unzip();
 
         // commit to matrices
-        let pcs_data = pcs_batch_commit::<E, PCS>(&pp, matrices).unwrap();
-        let comm = PCS::get_pure_commitment(&pcs_data);
+        let pcs_data = pcs_batch_commit::<E, Pcs>(&pp, matrices).unwrap();
+        let comm = Pcs::get_pure_commitment(&pcs_data);
 
         let point_and_evals = mles
             .iter()
@@ -886,7 +886,7 @@ pub mod tests {
         // batch open
         let mut transcript = BasicTranscript::<E>::new(&[]);
         let rounds = vec![(&pcs_data, point_and_evals.clone())];
-        let opening_proof = PCS::batch_open(&pp, rounds, &mut transcript).unwrap();
+        let opening_proof = Pcs::batch_open(&pp, rounds, &mut transcript).unwrap();
 
         // batch verify
         let mut transcript = BasicTranscript::<E>::new(&[]);
@@ -897,7 +897,7 @@ pub mod tests {
                 .map(|(point, evals)| (point.len(), (point.clone(), evals.clone())))
                 .collect_vec(),
         )];
-        PCS::batch_verify(&vp, rounds.clone(), &opening_proof, &mut transcript)
+        Pcs::batch_verify(&vp, rounds.clone(), &opening_proof, &mut transcript)
             .expect("Native verification failed");
 
         let mut transcript = BasicTranscript::<E>::new(&[]);
