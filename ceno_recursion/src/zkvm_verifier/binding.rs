@@ -4,7 +4,7 @@ use crate::{
         BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
     },
     tower_verifier::binding::{
-        IOPProverMessage, IOPProverMessageVariable, IOPProverMessageVec,
+        IOPProverMessage, IOPProverMessageVec,
         IOPProverMessageVecVariable, PointVariable, ThreeDimensionalVecVariable,
         ThreeDimensionalVector,
     },
@@ -12,7 +12,6 @@ use crate::{
 use ceno_zkvm::{
     scheme::{
         ZKVMChipProof, ZKVMProof,
-        septic_curve::{SepticExtension, SepticPoint},
     },
     structs::{EccQuarkProof, TowerProofs},
 };
@@ -153,20 +152,19 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let fixed_num_vars = self
             .chip_proofs
             .iter()
-            .filter(|proof| proof.fixed_in_evals.len() > 0)
+            .filter(|proof| !proof.fixed_in_evals.is_empty())
             .map(|proof| proof.sum_num_instances)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
             .iter()
-            .filter(|proof| proof.fixed_in_evals.len() > 0)
+            .filter(|proof| !proof.fixed_in_evals.is_empty())
             .map(|proof| proof.fixed_in_evals.len())
             .collect::<Vec<_>>();
-        let max_num_var = witin_num_vars.iter().map(|x| *x).max().unwrap_or(0);
+        let max_num_var = witin_num_vars.iter().copied().max().unwrap_or(0);
         let max_width = witin_max_widths
             .iter()
-            .chain(fixed_max_widths.iter())
-            .map(|x| *x)
+            .chain(fixed_max_widths.iter()).copied()
             .max()
             .unwrap_or(0);
         let get_perm = |v: Vec<usize>| {
@@ -506,7 +504,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
 
         let mut sum: usize = 0;
         let mut bit_decomp: Vec<F> = vec![];
-        if self.num_instances.len() > 0 {
+        if !self.num_instances.is_empty() {
             let eq_instance = if self.num_instances[0] > 0 {
                 self.num_instances[0] - 1
             } else {
@@ -665,7 +663,7 @@ impl From<GKRProof<E>> for GKRProofInput {
             layer_proofs: p
                 .0
                 .into_iter()
-                .map(|p| LayerProofInput::from(p))
+                .map(LayerProofInput::from)
                 .collect::<Vec<LayerProofInput>>(),
         }
     }
@@ -772,7 +770,7 @@ impl EccQuarkProofInput {
             zerocheck_proof: IOPProof { proofs: Vec::new() },
             num_instances: 0,
             evals: Vec::new(),
-            rt: Vec::new().into(),
+            rt: Vec::new(),
             sum: SepticPointInput {
                 x: SepticExtensionInput { v: [F::ZERO; 7] },
                 y: SepticExtensionInput { v: [F::ZERO; 7] },
@@ -888,7 +886,7 @@ impl Hintable<InnerConfig> for SepticExtensionInput {
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
         let f_vec = self.v.to_vec();
-        let e_vec: Vec<E> = f_vec.into_iter().map(|n| E::from_base(n)).collect();
+        let e_vec: Vec<E> = f_vec.into_iter().map(E::from_base).collect();
         stream.extend(e_vec.write());
         stream
     }

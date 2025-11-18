@@ -4,9 +4,9 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        PolyEvaluator, UniPolyExtrapolator, arr_product, challenger_multi_observe, eq_eval,
-        eval_ceno_expr_with_instance, eval_stacked_constant, eval_stacked_wellform_address_vec,
-        mask_arr, print_ext_arr, reverse,
+        PolyEvaluator, UniPolyExtrapolator, challenger_multi_observe, eq_eval,
+        eval_ceno_expr_with_instance,
+        mask_arr,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -18,11 +18,9 @@ use crate::{
 // use crate::basefold_verifier::verifier::batch_verify;
 use crate::{
     arithmetics::{
-        build_eq_x_r_vec_sequential, ceil_log2, concat, dot_product as ext_dot_product,
-        eq_eval_less_or_equal_than, eval_wellform_address_vec, evaluate_ceno_expr, gen_alpha_pows,
-        max_usize_arr, max_usize_vec, nested_product,
+        build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
+        eq_eval_less_or_equal_than, gen_alpha_pows, nested_product,
     },
-    basefold_verifier::verifier::batch_verify,
     tower_verifier::{
         binding::{PointAndEvalVariable, PointVariable},
         program::{iop_verifier_state_verify, verify_tower_proof},
@@ -33,10 +31,7 @@ use crate::{
         SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable,
     },
 };
-use ceno_zkvm::{
-    circuit_builder::SetTableSpec,
-    structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey},
-};
+use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
 use gkr_iop::{
     evaluation::EvalExpression,
@@ -45,16 +40,13 @@ use gkr_iop::{
         booleanhypercube::BooleanHypercube,
         layer::{Layer, ROTATION_OPENING_COUNT},
     },
-    selector::{SelectorContext, SelectorType},
+    selector::SelectorType,
 };
-use itertools::{Itertools, interleave, izip};
+use itertools::{Itertools, izip};
 use mpcs::{Basefold, BasefoldRSParams};
 use multilinear_extensions::{
-    StructuralWitInType::{
-        Empty, EqualDistanceSequence, InnerRepeatingIncrementalSequence,
-        OuterRepeatingIncrementalSequence, StackedConstantSequence, StackedIncrementalSequence,
-    },
-    expression::{Expression, Instance, StructuralWitIn},
+    StructuralWitInType::StackedConstantSequence,
+    expression::Expression,
 };
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
@@ -98,7 +90,7 @@ pub fn transcript_group_sample_ext<C: Config>(
 ) -> Ext<C::F, C::EF> {
     let e: Ext<C::F, C::EF> = challenger_group[0].sample_ext(builder);
 
-    challenger_group.into_iter().skip(1).for_each(|c| {
+    challenger_group.iter_mut().skip(1).for_each(|c| {
         c.sample_ext(builder);
     });
 
@@ -219,8 +211,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let beta = challenger.sample_ext(builder);
 
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(2);
-    builder.set(&challenges, 0, alpha.clone());
-    builder.set(&challenges, 1, beta.clone());
+    builder.set(&challenges, 0, alpha);
+    builder.set(&challenges, 1, beta);
 
     let num_fixed_opening = vk
         .circuit_vks
@@ -229,16 +221,16 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         .count();
 
     let mut unipoly_extrapolator = UniPolyExtrapolator::new(builder);
-    let mut poly_evaluator = PolyEvaluator::new(builder);
+    let poly_evaluator = PolyEvaluator::new(builder);
 
-    let dummy_table_item = alpha.clone();
+    let dummy_table_item = alpha;
     let dummy_table_item_multiplicity: Var<C::N> = builder.constant(C::N::ZERO);
 
     let witin_openings: Array<C, RoundOpeningVariable<C>> =
         builder.dyn_array(zkvm_proof_input.chip_proofs.len());
     let fixed_openings: Array<C, RoundOpeningVariable<C>> =
         builder.dyn_array(zkvm_proof_input.chip_proofs.len());
-    let mut shard_ec_sum = SepticPointVariable {
+    let shard_ec_sum = SepticPointVariable {
         x: SepticExtensionVariable {
             vs: builder.dyn_array(7),
         },
@@ -345,7 +337,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 &chip_proof,
                 &zkvm_proof_input.pi_evals,
                 &challenges,
-                &chip_vk,
+                chip_vk,
                 &mut unipoly_extrapolator,
             );
             builder.cycle_tracker_end("Verify chip proof");
@@ -764,11 +756,11 @@ pub fn verify_gkr_circuit<C: Config>(
     for (i, layer) in gkr_circuit.layers.iter().enumerate() {
         let layer_proof = builder.get(&gkr_proof.layer_proofs, i);
         let layer_challenges: Array<C, Ext<C::F, C::EF>> =
-            generate_layer_challenges(builder, challenger, &challenges, layer.n_challenges);
+            generate_layer_challenges(builder, challenger, challenges, layer.n_challenges);
         let eval_and_dedup_points: Array<C, ClaimAndPoint<C>> = extract_claim_and_point(
             builder,
             layer,
-            &claims,
+            claims,
             &layer_challenges,
             &layer_proof.has_rotation,
         );
@@ -884,7 +876,7 @@ pub fn verify_gkr_circuit<C: Config>(
                     alpha_pows.slice(builder, alpha_idx.clone(), end_idx.clone());
 
                 let sub_sum = ext_dot_product(builder, &evals, &alpha_slice);
-                builder.assign(&sigma, sigma.clone() + sub_sum);
+                builder.assign(&sigma, sigma + sub_sum);
                 builder.assign(&alpha_idx, end_idx);
             });
 
@@ -993,8 +985,8 @@ pub fn verify_gkr_circuit<C: Config>(
             builder.eval(alpha_pows.len() + Usize::from(2));
         let main_sumcheck_challenges: Array<C, Ext<C::F, C::EF>> =
             builder.dyn_array(main_sumcheck_challenges_len.clone());
-        let alpha = builder.get(&challenges, 0);
-        let beta = builder.get(&challenges, 1);
+        let alpha = builder.get(challenges, 0);
+        let beta = builder.get(challenges, 1);
         builder.set(&main_sumcheck_challenges, 0, alpha);
         builder.set(&main_sumcheck_challenges, 1, beta);
         let challenge_slice =
@@ -1012,7 +1004,7 @@ pub fn verify_gkr_circuit<C: Config>(
             &empty_arr,
             &main_evals,
             &empty_arr,
-            &pub_io_evals,
+            pub_io_evals,
             &main_sumcheck_challenges,
             layer.main_sumcheck_expression.as_ref().unwrap(),
         );
@@ -1031,7 +1023,7 @@ pub fn verify_gkr_circuit<C: Config>(
                     point: PointVariable { fs: new_point },
                     eval: val,
                 });
-                builder.set_value(&claims, *pos, new_point_eval);
+                builder.set_value(claims, *pos, new_point_eval);
             });
 
         builder.assign(&rt.fs, in_point);
@@ -1044,7 +1036,7 @@ pub fn verify_gkr_circuit<C: Config>(
         .iter()
         .enumerate()
         .map(|(poly, pos)| {
-            let PointAndEvalVariable { point, eval } = builder.get(&claims, *pos);
+            let PointAndEvalVariable { point, eval } = builder.get(claims, *pos);
             GKRClaimEvaluation {
                 value: eval,
                 point,
@@ -1076,7 +1068,7 @@ pub fn verify_rotation<C: Config>(
         evals_len_div_3: rotation_expr_len,
     } = rotation_proof;
 
-    let rotation_expr_len = Usize::Var(rotation_expr_len.clone());
+    let rotation_expr_len = Usize::Var(*rotation_expr_len);
     transcript_observe_label(builder, challenger, b"combine subset evals");
     let rotation_alpha_pows = gen_alpha_pows(builder, challenger, Usize::from(num_rotations));
     let rotation_challenges = concat(builder, challenges, &rotation_alpha_pows);
@@ -1122,7 +1114,7 @@ pub fn verify_rotation<C: Config>(
     let last_origin = if rotation_cyclic_group_log2 > 0 {
         builder.get(&origin_point, rotation_cyclic_group_log2 - 1)
     } else {
-        one.clone()
+        one
     };
 
     builder
@@ -1132,9 +1124,9 @@ pub fn verify_rotation<C: Config>(
             let right_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar3 + RVar::from(1));
             let target_idx: Var<C::N> = builder.eval(idx_vec[0] * rvar3 + RVar::from(2));
 
-            let left = builder.get(&evals, left_idx);
-            let right = builder.get(&evals, right_idx);
-            let target = builder.get(&evals, target_idx);
+            let left = builder.get(evals, left_idx);
+            let right = builder.get(evals, right_idx);
+            let target = builder.get(evals, target_idx);
 
             builder.set(&left_evals, idx_vec[0], left);
             builder.set(&right_evals, idx_vec[0], right);
@@ -1336,7 +1328,7 @@ pub fn evaluate_selector<C: Config>(
                                 out_point,
                                 in_point,
                             );
-                            builder.assign(&sel, sel.clone() - eq_start);
+                            builder.assign(&sel, sel - eq_start);
                         });
                 });
 
@@ -1380,7 +1372,7 @@ pub fn evaluate_selector<C: Config>(
     let Expression::StructuralWitIn(wit_id, _) = expr else {
         panic!("Wrong selector expression format");
     };
-    let wit_id = wit_id.clone() as usize + offset_eq_id;
+    let wit_id = *wit_id as usize + offset_eq_id;
     builder.set(evals, wit_id, eval);
 }
 
@@ -1534,9 +1526,9 @@ pub fn extract_claim_and_point<C: Config>(
             let evals = out_evals
                 .iter()
                 .map(|out_eval| {
-                    let e = evaluate_gkr_expression(builder, out_eval, claims, challenges);
+                    
 
-                    e
+                    evaluate_gkr_expression(builder, out_eval, claims, challenges)
                 })
                 .collect_vec();
 

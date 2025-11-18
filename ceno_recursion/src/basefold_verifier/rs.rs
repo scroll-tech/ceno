@@ -49,15 +49,15 @@ impl<C: Config> DenseMatrixVariable<C> {
         // Supply height as hint
         let height = builder.hint_var();
         builder
-            .if_eq(self.width.clone(), Usize::from(0))
+            .if_eq(self.width, Usize::from(0))
             .then(|builder| {
                 builder.assert_usize_eq(height, Usize::from(0));
             });
         builder
-            .if_ne(self.width.clone(), Usize::from(0))
+            .if_ne(self.width, Usize::from(0))
             .then(|builder| {
                 // XXX: check that width * height is not a field multiplication
-                builder.assert_usize_eq(self.width.clone() * height, self.values.len());
+                builder.assert_usize_eq(self.width * height, self.values.len());
             });
         height
     }
@@ -72,7 +72,7 @@ impl<C: Config> DenseMatrixVariable<C> {
         // XXX: Not necessary, only for testing purpose
         let old_height = self.height(builder);
         builder.assert_less_than_slow_small_rhs(old_height, new_height + RVar::from(1));
-        let new_size = builder.eval_expr(self.width.clone() * new_height.clone());
+        let new_size = builder.eval_expr(self.width * new_height);
         let evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(new_size);
         builder
             .range(0, self.values.len())
@@ -226,8 +226,7 @@ pub(crate) fn encode_small<C: Config>(
 }
 
 pub mod tests {
-    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
-    use openvm_native_circuit::{Native, NativeConfig};
+    use openvm_circuit::arch::{instructions::program::Program, SystemConfig, VmExecutor};
     use openvm_native_compiler::{asm::AsmBuilder, prelude::*};
     use openvm_native_recursion::hints::Hintable;
     use openvm_stark_backend::config::StarkGenericConfig;
@@ -235,6 +234,8 @@ pub mod tests {
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,
     };
     use p3::field::{FieldAlgebra, extension::BinomialExtensionField};
+    use openvm_native_circuit::{Native, NativeConfig};
+
     type SC = BabyBearPoseidon2Config;
 
     type F = BabyBear;

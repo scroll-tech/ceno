@@ -2,14 +2,12 @@ use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
     arithmetics::{
         UniPolyExtrapolator, challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend,
-        exts_to_felts, fixed_dot_product, reverse,
+        exts_to_felts, reverse,
     },
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::transcript_observe_label,
     zkvm_verifier::binding::TowerProofInputVariable,
 };
-use ceno_zkvm::scheme::constants::NUM_FANIN;
-use itertools::izip;
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{
@@ -59,10 +57,10 @@ pub(crate) fn interpolate_uni_poly<C: Config>(
     let idx_rev = reverse(builder, &idx_vec);
     let res = builder.constant(C::EF::ZERO);
 
-    let len_f = idx_val.clone();
+    let len_f = idx_val;
     let neg_one: Ext<C::F, C::EF> = builder.constant(C::EF::NEG_ONE);
     let evals_rev = reverse(builder, &evals);
-    let p_i_rev = reverse(builder, &p_i);
+    let p_i_rev = reverse(builder, p_i);
 
     let mut idx_pos: RVar<C::N> = builder.eval_expr(len.clone() - RVar::from(1));
     iter_zip!(builder, idx_rev, evals_rev, p_i_rev).for_each(|ptr_vec, builder| {
@@ -79,7 +77,7 @@ pub(crate) fn interpolate_uni_poly<C: Config>(
         idx_pos = builder.eval_expr(idx_pos - RVar::from(1));
     });
 
-    let p_i_0 = builder.get(&p_i, 0);
+    let p_i_0 = builder.get(p_i, 0);
     let eval_0 = builder.get(&evals, 0);
     let up_eval_inv: Ext<C::F, C::EF> = builder.eval(denom_up * eval_0);
     builder.assign(&up_eval_inv, up_eval_inv.inverse());
@@ -105,7 +103,7 @@ pub fn iop_verifier_state_verify<C: Config>(
     let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
 
     let max_num_variables_usize: Usize<C::N> =
-        Usize::from(builder.cast_felt_to_var(max_num_variables.clone()));
+        Usize::from(builder.cast_felt_to_var(max_num_variables));
     challenger.observe(builder, max_num_variables);
     challenger.observe(builder, zero_f);
     challenger.observe(builder, max_degree);
@@ -114,7 +112,7 @@ pub fn iop_verifier_state_verify<C: Config>(
     builder.assert_var_eq(max_num_variables_usize.get_var(), prover_messages.len());
 
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(max_num_variables_usize.clone());
-    let expected: Ext<C::F, C::EF> = builder.eval(out_claim.clone() + zero);
+    let expected: Ext<C::F, C::EF> = builder.eval(*out_claim + zero);
 
     builder.cycle_tracker_start("IOPVerifierState::verify_round_and_update_state");
     builder
@@ -183,7 +181,7 @@ pub fn verify_tower_proof<C: Config>(
     builder.assert_usize_eq(proof.logup_specs_eval.len(), num_logup_spec.clone());
     iter_zip!(builder, logup_out_evals).for_each(|ptr_vec, builder| {
         let ptr = ptr_vec[0];
-        let evals = builder.iter_ptr_get(&logup_out_evals, ptr);
+        let evals = builder.iter_ptr_get(logup_out_evals, ptr);
         builder.assert_usize_eq(evals.len(), RVar::from(4));
     });
     builder.assert_usize_eq(
@@ -199,7 +197,7 @@ pub fn verify_tower_proof<C: Config>(
         let i = i_vec[0];
 
         // all specs should not be skipped initially
-        builder.set_value(&should_skip, i, var_zero.clone());
+        builder.set_value(&should_skip, i, var_zero);
     });
 
     transcript_observe_label(builder, challenger, b"combine subset evals");
@@ -311,7 +309,7 @@ pub fn verify_tower_proof<C: Config>(
     builder.cycle_tracker_end("initial sum");
 
     let curr_pt = initial_rt.clone();
-    let curr_eval = initial_claim.clone();
+    let curr_eval = initial_claim;
     let op_range: RVar<C::N> = builder.eval_expr(max_num_variables - Usize::from(1));
     let round: Felt<C::F> = builder.constant(C::F::ZERO);
 
@@ -326,7 +324,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.dyn_array(next_layer_evals_output_len);
 
     builder
-        .range(0, op_range.clone())
+        .range(0, op_range)
         .for_each(|i_vec, builder| {
             let round_var = i_vec[0];
             let out_rt = &curr_pt;
@@ -351,7 +349,7 @@ pub fn verify_tower_proof<C: Config>(
             builder.cycle_tracker_end("sumcheck verify");
 
             builder.cycle_tracker_start("check expected evaluation");
-            let eq_e = eq_eval(builder, &out_rt, &sub_rt, one, zero);
+            let eq_e = eq_eval(builder, out_rt, &sub_rt, one, zero);
 
             let input_ctx_len: Usize<C::N> = Usize::Var(builder.uninit());
             let num_variables_len = num_variables.len();
@@ -392,7 +390,7 @@ pub fn verify_tower_proof<C: Config>(
             );
 
             let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
-            builder.set(&challenges, 0, alpha.clone());
+            builder.set(&challenges, 0, alpha);
 
             builder.sumcheck_layer_eval(
                 &input_ctx,
@@ -416,8 +414,8 @@ pub fn verify_tower_proof<C: Config>(
             builder.cycle_tracker_start("derive rt_prime");
             let r_merge = challenger.sample_ext(builder);
 
-            let c1: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(one - r_merge.clone());
-            let c2: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(r_merge.clone());
+            let c1: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(one - r_merge);
+            let c2: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(r_merge);
 
             let rt_prime = extend(builder, &sub_rt, &r_merge);
             builder.cycle_tracker_end("derive rt_prime");
@@ -429,9 +427,9 @@ pub fn verify_tower_proof<C: Config>(
 
             // Use native opcode
             builder.set(&input_ctx, 7, Usize::from(0)); // Turn `in_round` off
-            builder.set(&challenges, 0, new_alpha.clone());
-            builder.set(&challenges, 1, c1.clone());
-            builder.set(&challenges, 2, c2.clone());
+            builder.set(&challenges, 0, new_alpha);
+            builder.set(&challenges, 1, c1);
+            builder.set(&challenges, 2, c2);
 
             builder.sumcheck_layer_eval(
                 &input_ctx,
@@ -446,12 +444,12 @@ pub fn verify_tower_proof<C: Config>(
                 .range(0, num_prod_spec.clone())
                 .for_each(|i_vec, builder| {
                     let spec_index = i_vec[0];
-                    let skip = builder.get(&should_skip, spec_index.clone());
-                    let max_round = builder.get(&num_variables, spec_index.clone());
+                    let skip = builder.get(&should_skip, spec_index);
+                    let max_round = builder.get(&num_variables, spec_index);
                     let round_limit: RVar<C::N> = builder.eval_expr(max_round - RVar::from(1));
 
                     // now skip is 0 if and only if current round_var is smaller than round_limit.
-                    builder.if_eq(skip, var_zero.clone()).then(|builder| {
+                    builder.if_eq(skip, var_zero).then(|builder| {
                         builder.if_eq(next_round, round_limit).then(|builder| {
                             let evals_idx: Usize<C::N> = builder.eval(spec_index + Usize::from(1));
                             let evals = builder.get(&next_layer_evals, evals_idx);
@@ -523,7 +521,7 @@ pub fn verify_tower_proof<C: Config>(
                     point: PointVariable {
                         fs: rt_prime.clone(),
                     },
-                    eval: curr_eval.clone(),
+                    eval: curr_eval,
                 },
             );
         });

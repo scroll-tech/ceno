@@ -6,16 +6,10 @@ use ceno_zkvm::{scheme::ZKVMProof, structs::ZKVMVerifyingKey};
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{
     arch::{
-        ExecutionBridge, InitFileGenerator, MemoryConfig, SystemConfig, SystemPort, VirtualMachine,
-        VmComplexTraceHeights, VmConfig, VmExtension, VmInventory, VmInventoryBuilder,
-        VmInventoryError,
-        instructions::{exe::VmExe, program::Program},
-        verify_single,
+        MemoryConfig, SystemConfig, VirtualMachine, VmConfig, VmExtension,
+        instructions::program::Program,
     },
-    system::{
-        memory::tree::public_values::PUBLIC_VALUES_ADDRESS_SPACE_OFFSET, phantom::PhantomChip,
-        program::trace::VmCommittedExe,
-    },
+    system::program::trace::VmCommittedExe,
 };
 use openvm_continuations::{
     C,
@@ -25,7 +19,6 @@ use openvm_continuations::{
             InternalVmVerifierConfig,
             types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
         },
-        root::types::RootVmVerifierInput,
     },
 };
 use openvm_native_circuit::NativeConfig;
@@ -36,31 +29,24 @@ use openvm_native_compiler::{
 };
 use openvm_native_recursion::hints::Hintable;
 use openvm_sdk::{
-    NonRootCommittedExe, RootSC, SC, Sdk,
+    SC, Sdk,
     commit::AppExecutionCommit,
-    config::{AggStarkConfig, AggregationTreeConfig},
-    keygen::{AggStarkProvingKey, RootVerifierProvingKey, perm::AirIdPermutation},
-    prover::{
-        RootVerifierLocalProver,
-        vm::{SingleSegmentVmProver, local::VmLocalProver, types::VmProvingKey},
-    },
+    prover::vm::{SingleSegmentVmProver, local::VmLocalProver, types::VmProvingKey},
 };
-use openvm_stark_backend::{Chip, engine::StarkEngine, proof::Proof};
+use openvm_stark_backend::engine::StarkEngine;
 use openvm_stark_sdk::{
     config::{
         FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Engine,
-        baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
     },
     engine::StarkFriEngine,
     openvm_stark_backend::{
-        config::{Com, StarkGenericConfig},
+        config::StarkGenericConfig,
         keygen::types::MultiStarkVerifyingKey,
     },
     p3_bn254_fr::Bn254Fr,
 };
-use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, fmt::Error, fs::File, io::Write, sync::Arc, time::Instant};
+use std::{borrow::Borrow, fs::File, io::Write, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use openvm_circuit::{
     arch::{
@@ -230,8 +216,8 @@ pub fn compress_to_root_proof(
 
     // Commit internal program
     let internal_program = InternalVmVerifierConfig {
-        leaf_fri_params: leaf_fri_params,
-        internal_fri_params: internal_fri_params,
+        leaf_fri_params,
+        internal_fri_params,
         compiler_options: CompilerOptions::default(),
     }
     .build_program(&ceno_leaf_vm_pk.vm_pk.get_vk(), &internal_vm_vk);
@@ -360,7 +346,7 @@ pub fn verify_e2e_stark_proof(
         (&k.ceno_leaf_vm_vk, k.ceno_leaf_fri_params, *program_commit)
     };
     let e = BabyBearPoseidon2Engine::new(fri_params);
-    e.verify(&vm_vk, &proof.proof)
+    e.verify(vm_vk, &proof.proof)
         .expect("stark e2e proof verification should pass");
 
     let pvs: &VmVerifierPvs<_> =
@@ -444,7 +430,7 @@ pub fn verify_proofs(
     vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
 ) {
     let program = build_zkvm_verifier_program(&vk);
-    if zkvm_proofs.len() > 0 {
+    if !zkvm_proofs.is_empty() {
         let zkvm_proof_input = ZKVMProofInput::from((0usize, zkvm_proofs[0].clone()));
 
         // Pass in witness stream

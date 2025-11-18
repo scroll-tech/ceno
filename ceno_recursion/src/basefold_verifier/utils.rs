@@ -77,7 +77,7 @@ pub fn next_power_of_two<C: Config>(builder: &mut Builder<C>, value: Var<C::N>) 
         builder.assert_less_than_slow_bit_decomp(ret, value);
         let two: Var<C::N> = builder.constant(C::N::from_canonical_usize(2));
         builder.assign(&ret, ret * two);
-        let ret_plus_one = builder.eval(ret.clone() + Usize::from(1));
+        let ret_plus_one = builder.eval(ret + Usize::from(1));
         builder.assert_less_than_slow_bit_decomp(value, ret_plus_one);
     });
     ret
@@ -195,17 +195,17 @@ where
     let entries_sort_surjective: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(len.clone());
     builder.range(0, len.clone()).for_each(|i_vec, builder| {
         let i = i_vec[0];
-        builder.set(&entries_sort_surjective, i, zero.clone());
+        builder.set(&entries_sort_surjective, i, zero);
     });
 
     let entries_order = builder.dyn_array(len.clone());
     let next_order = builder.hint_var();
     // Check surjection
     let surjective = builder.get(&entries_sort_surjective, next_order);
-    builder.assert_ext_eq(surjective, zero.clone());
-    builder.set(&entries_sort_surjective, next_order, one.clone());
+    builder.assert_ext_eq(surjective, zero);
+    builder.set(&entries_sort_surjective, next_order, one);
     builder.set_value(&entries_order, 0, next_order);
-    let last_entry = ind(builder.get(&list, next_order));
+    let last_entry = ind(builder.get(list, next_order));
 
     let last_unique_entry_index: Var<C::N> = builder.eval(Usize::from(0));
     let last_count_per_unique_entry: Var<C::N> = builder.eval(Usize::from(1));
@@ -214,10 +214,10 @@ where
         let next_order = builder.hint_var();
         // Check surjection
         let surjective = builder.get(&entries_sort_surjective, next_order);
-        builder.assert_ext_eq(surjective, zero.clone());
-        builder.set(&entries_sort_surjective, next_order, one.clone());
+        builder.assert_ext_eq(surjective, zero);
+        builder.set(&entries_sort_surjective, next_order, one);
         // Check entries
-        let next_entry = ind(builder.get(&list, next_order));
+        let next_entry = ind(builder.get(list, next_order));
         builder
             .if_eq(last_entry.clone(), next_entry.clone())
             .then(|builder| {

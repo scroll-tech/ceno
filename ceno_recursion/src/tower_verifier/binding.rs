@@ -173,7 +173,7 @@ impl IOPProverMessageVec {
 
 impl From<Vec<IOPProverMessage>> for IOPProverMessageVec {
     fn from(messages: Vec<IOPProverMessage>) -> Self {
-        if messages.len() > 0 {
+        if !messages.is_empty() {
             let prover_message_size = messages[0].evaluations.len();
             assert!(
                 messages
@@ -216,7 +216,7 @@ impl Hintable<InnerConfig> for IOPProverMessageVec {
             &self.prover_message_size,
         ));
         stream.extend(<usize as Hintable<InnerConfig>>::write(
-            &if self.data.len() == 0 {
+            &if self.data.is_empty() {
                 0
             } else {
                 self.data.len() / self.prover_message_size
@@ -253,16 +253,14 @@ impl ThreeDimensionalVector {
 
 impl From<Vec<Vec<Vec<E>>>> for ThreeDimensionalVector {
     fn from(data: Vec<Vec<Vec<E>>>) -> Self {
-        let inner_inner_length = if data.len() == 0 {
+        let inner_inner_length = if data.is_empty() {
+            0
+        } else if data[0].is_empty() {
             0
         } else {
-            if data[0].len() == 0 {
-                0
-            } else {
-                data[0][0].len()
-            }
+            data[0][0].len()
         };
-        let inner_length = if data.len() == 0 { 0 } else { data[0].len() };
+        let inner_length = if data.is_empty() { 0 } else { data[0].len() };
         let outer_length = data.len();
         let flattened_data = data.into_iter().flatten().flatten().collect();
         ThreeDimensionalVector {

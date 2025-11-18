@@ -121,8 +121,8 @@ impl Hintable<InnerConfig> for BasefoldProof {
 impl From<InnerBasefoldProof<E>> for BasefoldProof {
     fn from(proof: InnerBasefoldProof<E>) -> Self {
         BasefoldProof {
-            commits: proof.commits.iter().map(|c| c.clone().into()).collect(),
-            final_message: proof.final_message.into(),
+            commits: proof.commits.iter().map(|c| (*c).into()).collect(),
+            final_message: proof.final_message,
             query_opening_proof: proof
                 .query_opening_proof
                 .iter()

@@ -53,7 +53,7 @@ impl
     ) -> Self {
         Self {
             opened_values: inner.opened_values,
-            opening_proof: inner.opening_proof.into(),
+            opening_proof: inner.opening_proof,
         }
     }
 }
@@ -117,7 +117,7 @@ impl From<InnerCommitPhaseProofStep<E, ExtMmcs<E>>> for CommitPhaseProofStep {
     fn from(inner: InnerCommitPhaseProofStep<E, ExtMmcs<E>>) -> Self {
         Self {
             sibling_value: inner.sibling_value,
-            opening_proof: inner.opening_proof.into(),
+            opening_proof: inner.opening_proof,
         }
     }
 }
@@ -353,7 +353,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
     let all_zeros = builder.dyn_array(input.max_width.clone());
     iter_zip!(builder, all_zeros).for_each(|ptr_vec, builder| {
-        builder.set_value(&all_zeros, ptr_vec[0], zero.clone());
+        builder.set_value(&all_zeros, ptr_vec[0], zero);
     });
 
     builder
@@ -433,7 +433,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 opened_value_buffer.clone(),
             );
 
-            let alpha_offset = builder.get(&input.batch_coeffs, batch_coeffs_offset.clone());
+            let alpha_offset = builder.get(&input.batch_coeffs, batch_coeffs_offset);
             // Will need to negate the values of low and high
             // because `fri_single_reduced_opening_eval` is
             // computing \sum_i alpha^i (0 - opened_value[i]).
@@ -482,15 +482,15 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     let bit = builder.get(&idx_bits, i_vec[0]);
                     builder.assert_eq::<Var<_>>(bit, Usize::from(0));
                 });
-            let idx_bits = idx_bits.slice(builder, 1, log2_max_codeword_size.clone());
+            let idx_bits = idx_bits.slice(builder, 1, log2_max_codeword_size);
 
             let reduced_codeword_by_height: Array<C, PackedCodeword<C>> =
-                builder.dyn_array(log2_max_codeword_size.clone());
+                builder.dyn_array(log2_max_codeword_size);
             // initialize reduced_codeword_by_height with zeroes
             iter_zip!(builder, reduced_codeword_by_height).for_each(|ptr_vec, builder| {
                 let zero_codeword = PackedCodeword {
-                    low: zero.clone(),
-                    high: zero.clone(),
+                    low: zero,
+                    high: zero,
                 };
                 builder.set_value(&reduced_codeword_by_height, ptr_vec[0], zero_codeword);
             });
@@ -568,7 +568,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     });
                     // i >>= (log2_max_codeword_size - commit.log2_max_codeword_size);
                     let bits_shift: Var<C::N> = builder
-                        .eval(log2_max_codeword_size.clone() - round.commit.log2_max_codeword_size);
+                        .eval(log2_max_codeword_size - round.commit.log2_max_codeword_size);
                     let reduced_idx_bits = idx_bits.slice(builder, bits_shift, idx_bits.len());
 
                     // verify input mmcs
@@ -613,7 +613,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
             builder.cycle_tracker_start("FRI rounds");
             let i: Var<C::N> = builder.constant(C::N::ZERO);
             iter_zip!(builder, commits, opening_ext).for_each(|ptr_vec, builder| {
-                let commit = builder.iter_ptr_get(&commits, ptr_vec[0]);
+                let commit = builder.iter_ptr_get(commits, ptr_vec[0]);
                 let commit_phase_step = builder.iter_ptr_get(&opening_ext, ptr_vec[1]);
                 let i_plus_one = builder.eval_expr(i + Usize::from(1));
 
@@ -625,7 +625,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
                 let folded_idx = builder.get(&idx_bits, i);
                 let new_involved_packed_codeword =
-                    builder.get(&reduced_codeword_by_height, log2_height.clone());
+                    builder.get(&reduced_codeword_by_height, log2_height);
 
                 // Note that previous coeff is
                 //   1/2 * generator_of_order(2^{level + 2})^{-prev_index}
@@ -673,7 +673,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 let dimensions = builder.dyn_array(1);
                 let opened_values = builder.dyn_array(1);
                 builder.set_value(&opened_values, 0, leafs.clone());
-                builder.set_value(&dimensions, 0, log2_height.clone());
+                builder.set_value(&dimensions, 0, log2_height);
                 let ext_mmcs_verifier_input = ExtMmcsVerifierInputVariable {
                     commit: commit.clone(),
                     dimensions,
@@ -757,9 +757,9 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
     // 3. check final evaluation are correct
     let final_evals = builder
-        .get(&input.proof.sumcheck_proof, fold_len_minus_one.clone())
+        .get(&input.proof.sumcheck_proof, fold_len_minus_one)
         .evaluations;
-    let final_challenge = builder.get(&input.fold_challenges, fold_len_minus_one.clone());
+    let final_challenge = builder.get(&input.fold_challenges, fold_len_minus_one);
     let left = interpolate_uni_poly(builder, &final_evals, final_challenge);
     let right: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let one: Var<C::N> = builder.constant(C::N::ONE);

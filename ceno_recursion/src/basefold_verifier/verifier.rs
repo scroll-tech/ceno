@@ -3,18 +3,14 @@ use crate::{
     transcript::{transcript_check_pow_witness, transcript_observe_label},
 };
 
-use super::{basefold::*, extension_mmcs::*, mmcs::*, rs::*, structs::*, utils::*};
-use ff_ext::{BabyBearExt4, ExtensionField, PoseidonField};
+use super::{basefold::*, rs::*, utils::*};
+use ff_ext::BabyBearExt4;
 use openvm_native_compiler::{asm::AsmConfig, ir::FromConstant, prelude::*};
 use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::{
-    challenger::{
-        CanObserveDigest, CanObserveVariable, CanSampleBitsVariable, CanSampleVariable,
+use openvm_native_recursion::challenger::{
+        CanObserveDigest, CanObserveVariable, CanSampleBitsVariable,
         FeltChallenger, duplex::DuplexChallengerVariable,
-    },
-    hints::{Hintable, VecAutoHintable},
-    vars::HintSlice,
-};
+    };
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldAlgebra;
 
@@ -87,13 +83,13 @@ pub fn batch_verify<C: Config>(
 
         iter_zip!(builder, round.openings).for_each(|ptr_vec_opening, builder| {
             let opening = builder.iter_ptr_get(&round.openings, ptr_vec_opening[0]);
-            let diff: Var<C::N> = builder.eval(max_num_var.clone() - opening.num_var);
+            let diff: Var<C::N> = builder.eval(max_num_var - opening.num_var);
             // num_var is always smaller than 32.
             builder.range_check_var(diff, 5);
             builder.assign(&diff_product_num_var, diff_product_num_var * diff);
 
             let diff: Var<C::N> =
-                builder.eval(max_width.clone() - opening.point_and_evals.evals.len());
+                builder.eval(max_width - opening.point_and_evals.evals.len());
             // width is always smaller than 2^14.
             builder.range_check_var(diff, 14);
             builder.assign(&diff_product_width, diff_product_width * diff);

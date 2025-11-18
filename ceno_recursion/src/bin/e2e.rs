@@ -1,4 +1,4 @@
-use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
+use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_recursion::aggregation::compress_to_root_proof;
 #[cfg(all(feature = "jemalloc", unix, not(test)))]
@@ -6,29 +6,23 @@ use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
         Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
-        setup_platform, setup_platform_debug, verify,
+        setup_platform, setup_platform_debug,
     },
     scheme::{
-        ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
-        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
+        constants::MAX_NUM_VARIABLES, create_backend, create_prover,
     },
-    with_panic_hook,
 };
 use clap::Parser;
-use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use gkr_iop::hal::ProverBackend;
+use ff_ext::BabyBearExt4;
 use mpcs::{
-    Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
+    Basefold, BasefoldRSParams, SecurityLevel,
 };
-use p3::field::FieldAlgebra;
-use serde::{Serialize, de::DeserializeOwned};
-use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
-use tracing::{error, level_filters::LevelFilter};
+use std::{fs, path::PathBuf};
+use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
     EnvFilter, Registry, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
-use transcript::BasicTranscript as Transcript;
 
 // Use jemalloc as global allocator for performance
 #[cfg(all(feature = "jemalloc", unix, not(test)))]
