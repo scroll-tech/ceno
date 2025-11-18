@@ -29,7 +29,7 @@ use openvm_native_compiler::{
 };
 use openvm_native_recursion::hints::Hintable;
 use openvm_sdk::{
-    SC, Sdk,
+    SC,
     commit::AppExecutionCommit,
     prover::vm::{SingleSegmentVmProver, local::VmLocalProver, types::VmProvingKey},
 };
@@ -106,7 +106,6 @@ pub fn compress_to_root_proof(
         .collect();
 
     let aggregation_start_timestamp = Instant::now();
-    let sdk = Sdk::new();
 
     let [leaf_fri_params, internal_fri_params, _root_fri_params] =
         [LEAF_LOG_BLOWUP, INTERNAL_LOG_BLOWUP, ROOT_LOG_BLOWUP]
@@ -309,8 +308,8 @@ pub fn compress_to_root_proof(
 pub fn verify_e2e_stark_proof(
     k: &CenoRecursionVerifierKeys,
     proof: &VmStarkProof<SC>,
-    expected_exe_commit: &Bn254Fr,
-    expected_vm_commit: &Bn254Fr,
+    _expected_exe_commit: &Bn254Fr,
+    _expected_vm_commit: &Bn254Fr,
 ) -> Result<AppExecutionCommit, String> {
     if proof.proof.per_air.len() < 3 {
         return Err("Invalid number of AIRs: expected at least 3".into());
@@ -365,7 +364,7 @@ pub fn verify_e2e_stark_proof(
     // }
 
     let hasher = vm_poseidon2_hasher();
-    let public_values_root = hasher.merkle_root(&proof.user_public_values);
+    let _public_values_root = hasher.merkle_root(&proof.user_public_values);
     // _debug: Public value commitment
     // if public_values_root != pvs.public_values_commit {
     // return Err(format!(
@@ -382,8 +381,8 @@ pub fn verify_e2e_stark_proof(
         pvs.connector.initial_pc,
     );
     let app_commit = AppExecutionCommit::from_field_commit(exe_commit, vm_commit);
-    let exe_commit_bn254 = app_commit.app_exe_commit.to_bn254();
-    let vm_commit_bn254 = app_commit.app_vm_commit.to_bn254();
+    let _exe_commit_bn254 = app_commit.app_exe_commit.to_bn254();
+    let _vm_commit_bn254 = app_commit.app_vm_commit.to_bn254();
 
     // _debug: execution commit checks
     // if exe_commit_bn254 != *expected_exe_commit {
@@ -447,7 +446,7 @@ pub fn verify_proofs(
 
         let vm = VirtualMachine::new(engine, config);
 
-        let result = vm.execute_and_generate(program, witness_stream).unwrap();
+        let _result = vm.execute_and_generate(program, witness_stream).unwrap();
         // let pk = vm.keygen();
         // let proofs = vm.prove(&pk, result);
         // for proof in proofs {
@@ -461,7 +460,7 @@ mod tests {
     use super::verify_e2e_stark_proof;
     use crate::{
         aggregation::{compress_to_root_proof, verify_proofs},
-        zkvm_verifier::binding::{E, F},
+        zkvm_verifier::binding::E,
     };
     use ceno_zkvm::{
         e2e::verify,
