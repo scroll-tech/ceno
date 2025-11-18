@@ -223,8 +223,8 @@ impl<
         tracing::debug!(
             "witness rmm in {} MB",
             wits_rmms
-                .iter()
-                .map(|(_, v)| v.values.len() * std::mem::size_of::<E::BaseField>())
+                .values()
+                .map(|v| v.values.len() * std::mem::size_of::<E::BaseField>())
                 .sum::<usize>() as f64
                 / (1024.0 * 1024.0)
         );
