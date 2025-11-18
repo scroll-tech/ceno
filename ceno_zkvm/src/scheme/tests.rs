@@ -152,7 +152,7 @@ fn test_rw_lk_expression_combination() {
             .unwrap();
 
         // get proof
-        let prover = ZKVMProver::new(pk, device);
+        let prover = ZKVMProver::new_with_single_shard(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
         let mut rmm: Vec<_> = zkvm_witness
             .into_iter_sorted()
@@ -349,7 +349,7 @@ fn test_single_add_instance_e2e() {
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
     let device = create_prover(backend);
-    let prover = ZKVMProver::new(pk, device);
+    let prover = ZKVMProver::new_with_single_shard(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
