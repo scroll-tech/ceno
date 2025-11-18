@@ -1413,37 +1413,7 @@ pub fn run_e2e_with_checkpoint<
         };
     }
 
-    let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
-
-    let zkvm_proofs = zkvm_witness
-        .map(|(zkvm_witness, shard_ctx, pi)| {
-            if is_mock_proving {
-                MockProver::assert_satisfied_full(
-                    &shard_ctx,
-                    &ctx.system_config.zkvm_cs,
-                    ctx.zkvm_fixed_traces.clone(),
-                    &zkvm_witness,
-                    &pi,
-                    &ctx.program,
-                );
-                tracing::info!("Mock proving passed");
-            }
-
-            // Run proof phase
-            let transcript = Transcript::new(b"riscv");
-            let start = std::time::Instant::now();
-            let zkvm_proof = prover
-                .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                .expect("create_proof failed");
-            tracing::debug!(
-                "{}th shard proof created in {:?}",
-                shard_ctx.shard_id,
-                start.elapsed()
-            );
-            tracing::info!("e2e proof stat: {}", zkvm_proof);
-            zkvm_proof
-        })
-        .collect_vec();
+    let zkvm_proofs = create_proofs_helper(&ctx, emul_result, &prover, is_mock_proving);
 
     let verifier = ZKVMVerifier::new(vk.clone());
 
@@ -1472,7 +1442,7 @@ pub fn run_e2e_with_checkpoint<
 #[allow(clippy::too_many_arguments)]
 pub fn run_e2e_proof<
     E: ExtensionField + LkMultiplicityKey,
-    PCS: PolynomialCommitmentScheme<E> + 'static,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     PD: ProverDevice<PB> + 'static,
 >(
@@ -1490,33 +1460,118 @@ pub fn run_e2e_proof<
         &ctx.platform,
         &ctx.multi_prover,
     );
+    create_proofs_helper(ctx, emul_result, prover, is_mock_proving)
+}
 
-    // Generate witness
-    let zkvm_witness = generate_witness(&ctx.system_config, emul_result, &ctx.program);
-
-    zkvm_witness
-        .map(|(zkvm_witness, shard_ctx, pi)| {
-            if is_mock_proving {
-                if shard_ctx.num_shards > 1 {
-                    todo!("support mock proving on more than 1 shard")
+/// defines a lightweight CPU -> GPU pipeline for witness generation and proof creation.
+/// This enables overlapped execution such that while the GPU is proving shard `i`,
+/// the CPU is already generating the witness for shard `i+1`. The resulting time
+/// slice looks like:
+///
+///   CPU: gen(w1) ─── gen(w2) ─── gen(w3) ─── ...
+///   GPU:       prove(w1) ─── prove(w2) ─── prove(w3) ─── ...
+///
+/// This improves total proving throughput by hiding CPU witness generation latency
+/// behind GPU proof execution.
+///
+/// in pure CPU mode, the pipeline is disabled and the prover falls back to
+/// fully sequential execution. Witness generation and proof creation run
+/// one after another with no overlap.
+fn create_proofs_helper<
+    'a,
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB> + 'static,
+>(
+    ctx: &E2EProgramCtx<E>,
+    emulation_result: EmulationResult<'a>,
+    prover: &ZKVMProver<E, PCS, PB, PD>,
+    is_mock_proving: bool,
+) -> Vec<ZKVMProof<E, PCS>> {
+    #[cfg(feature = "gpu")]
+    {
+        use crossbeam::channel;
+        let (tx, rx) = channel::bounded(1);
+        std::thread::scope(|s| {
+            // pipeline cpu/gpu workload
+            // cpu producer
+            s.spawn({
+                move || {
+                    for proof_input in
+                        generate_witness(&ctx.system_config, emulation_result, &ctx.program)
+                    {
+                        tx.send(proof_input).unwrap()
+                    }
                 }
-                MockProver::assert_satisfied_full(
-                    &shard_ctx,
-                    &ctx.system_config.zkvm_cs,
-                    ctx.zkvm_fixed_traces.clone(),
-                    &zkvm_witness,
-                    &pi,
-                    &ctx.program,
-                );
-                tracing::info!("Mock proving passed");
-            }
+            });
 
-            let transcript = Transcript::new(b"riscv");
-            prover
-                .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                .expect("create_proof failed")
+            // gpu consumer
+            rx.iter()
+                .map(|(zkvm_witness, shard_ctx, pi)| {
+                    if is_mock_proving {
+                        MockProver::assert_satisfied_full(
+                            &shard_ctx,
+                            &ctx.system_config.zkvm_cs,
+                            ctx.zkvm_fixed_traces.clone(),
+                            &zkvm_witness,
+                            &pi,
+                            &ctx.program,
+                        );
+                        tracing::info!("Mock proving passed");
+                    }
+
+                    let transcript = Transcript::new(b"riscv");
+                    let start = std::time::Instant::now();
+                    let zkvm_proof = prover
+                        .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
+                        .expect("create_proof failed");
+                    tracing::debug!(
+                        "{}th shard proof created in {:?}",
+                        shard_ctx.shard_id,
+                        start.elapsed()
+                    );
+                    zkvm_proof
+                })
+                .collect::<Vec<_>>()
         })
-        .collect_vec()
+    }
+
+    #[cfg(not(feature = "gpu"))]
+    {
+        // Generate witness
+        let zkvm_witness = generate_witness(&ctx.system_config, emulation_result, &ctx.program);
+
+        zkvm_witness
+            .map(|(zkvm_witness, shard_ctx, pi)| {
+                if is_mock_proving {
+                    MockProver::assert_satisfied_full(
+                        &shard_ctx,
+                        &ctx.system_config.zkvm_cs,
+                        ctx.zkvm_fixed_traces.clone(),
+                        &zkvm_witness,
+                        &pi,
+                        &ctx.program,
+                    );
+                    tracing::info!("Mock proving passed");
+                }
+
+                let transcript = Transcript::new(b"riscv");
+                let start = std::time::Instant::now();
+                let zkvm_proof = prover
+                    .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
+                    .expect("create_proof failed");
+                tracing::debug!(
+                    "{}th shard proof created in {:?}",
+                    shard_ctx.shard_id,
+                    start.elapsed()
+                );
+                // only show e2e stats in cpu mode
+                tracing::info!("e2e proof stat: {}", zkvm_proof);
+                zkvm_proof
+            })
+            .collect_vec()
+    }
 }
 
 pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(

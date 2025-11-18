@@ -44,6 +44,7 @@ tracing-subscriber.workspace = true
 bincode.workspace = true
 cfg-if.workspace = true
 clap.workspace = true
+crossbeam = { version = "*", optional = true }
 derive = { path = "../derive" }
 generic-array.workspace = true
 generic_static = "0.2"
@@ -74,7 +75,7 @@ default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel",
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 goldilocks = ["forbid_overflow", "nightly-features", "parallel", "bigint-rug"]
-gpu = ["gkr_iop/gpu", "dep:ceno_gpu"]
+gpu = ["gkr_iop/gpu", "dep:ceno_gpu", "dep:crossbeam"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 nightly-features = [
