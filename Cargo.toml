@@ -95,6 +95,35 @@ opt-level = 2
 opt-level = 3
 
 [profile.release]
+codegen-units = 16
+debug = "line-tables-only"
+lto = "thin"
+opt-level = 3
+panic = "unwind"
+strip = true
+
+[profile.profiling]
+debug = 2
+debug-assertions = false
+inherits = "release"
+strip = false
+
+# Make sure debug symbols are in the bench profile for flamegraphs
+[profile.bench]
+inherits = "profiling"
+
+# This will compile slowly
+[profile.maxperf]
+codegen-units = 1
+inherits = "release"
+lto = "fat"
+
+# For O1 optimization but still fast(ish) compile times
+[profile.fast]
+debug-assertions = true
+inherits = "dev"
+# better recompile times
+incremental = true
 lto = "thin"
 
 # [patch."ssh://git@github.com/scroll-tech/ceno-gpu.git"]
