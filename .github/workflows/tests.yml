@@ -46,6 +46,10 @@ jobs:
         run: |
           cargo make --version || cargo install cargo-make
       - name: run test
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
         run: cargo make tests
       - name: run test + goldilocks
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
         run: cargo make tests_goldilock
