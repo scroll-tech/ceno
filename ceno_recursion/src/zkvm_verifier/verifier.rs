@@ -332,7 +332,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
             builder.cycle_tracker_start("Verify chip proof");
             let (input_opening_point, _chip_shard_ec_sum) = verify_chip_proof(
-                &circuit_name,
+                circuit_name,
                 builder,
                 &mut challenger,
                 &chip_proof,
