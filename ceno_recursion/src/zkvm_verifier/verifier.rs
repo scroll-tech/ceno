@@ -131,10 +131,35 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
-    if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-        builder
-            .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
+    builder
+        .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+        .then(|builder| {
+            if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
+                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+
+                commit.value.into_iter().enumerate().for_each(|(i, v)| {
+                    let v = builder.constant(v);
+                    // TODO: put fixed commit to public values
+                    // builder.commit_public_value(v);
+
+                    builder.set_value(&commit_array, i, v);
+                });
+
+                challenger_multi_observe(builder, &mut challenger, &commit_array);
+
+                let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
+                    fixed_commit.log2_max_codeword_size,
+                ));
+
+                challenger.observe(builder, log2_max_codeword_size_felt);
+            }
+        });
+
+    builder
+        .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+        .then(|builder| {
+            if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
                 let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
                 let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
 
@@ -152,30 +177,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 ));
 
                 challenger.observe(builder, log2_max_codeword_size_felt);
-            });
-    } else if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
-        builder
-            .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
-
-                commit.value.into_iter().enumerate().for_each(|(i, v)| {
-                    let v = builder.constant(v);
-                    // TODO: put fixed commit to public values
-                    // builder.commit_public_value(v);
-
-                    builder.set_value(&commit_array, i, v);
-                });
-                challenger_multi_observe(builder, &mut challenger, &commit_array);
-
-                let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
-                    fixed_commit.log2_max_codeword_size,
-                ));
-
-                challenger.observe(builder, log2_max_codeword_size_felt);
-            });
-    }
+            }
+        });
 
     let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
     iter_zip!(builder, zkvm_proof_input.chip_proofs).for_each(|ptr_vec, builder| {
@@ -329,6 +332,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
             builder.cycle_tracker_start("Verify chip proof");
             let (input_opening_point, _chip_shard_ec_sum) = verify_chip_proof(
+                circuit_name,
                 builder,
                 &mut challenger,
                 &chip_proof,
@@ -500,6 +504,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 }
 
 pub fn verify_chip_proof<C: Config>(
+    circuit_name: &str,
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
     chip_proof: &ZKVMChipProofInputVariable<C>,
@@ -588,7 +593,7 @@ pub fn verify_chip_proof<C: Config>(
         concat(builder, &chip_proof.r_out_evals, &chip_proof.w_out_evals);
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
 
-    builder.cycle_tracker_start("verify tower proof for opcode");
+    builder.cycle_tracker_start(format!("verify tower proof for opcode {circuit_name}",).as_str());
     let (_, record_evals, logup_p_evals, logup_q_evals) = verify_tower_proof(
         builder,
         challenger,
@@ -600,7 +605,7 @@ pub fn verify_chip_proof<C: Config>(
         tower_proof,
         unipoly_extrapolator,
     );
-    builder.cycle_tracker_end("verify tower proof for opcode");
+    builder.cycle_tracker_end(format!("verify tower proof for opcode {circuit_name}",).as_str());
 
     if cs.lk_table_expressions.is_empty() {
         builder
