@@ -1465,11 +1465,23 @@ pub fn run_e2e_proof<
 
 /// defines a lightweight CPU -> GPU pipeline for witness generation and proof creation.
 /// This enables overlapped execution such that while the GPU is proving shard `i`,
-/// the CPU is already generating the witness for shard `i+1`. The resulting time
-/// slice looks like:
+/// the CPU is already generating the witness for shard `i+1`.
 ///
-///   CPU: gen(w1) ─── gen(w2) ─── gen(w3) ─── ...
-///   GPU:       prove(w1) ─── prove(w2) ─── prove(w3) ─── ...
+/// With `channel::bounded(0)` the pipeline behaves as a strict rendezvous:
+/// - CPU generates the next witness while GPU is proving the current one.
+/// - Once the CPU finishes generating `wN`, it blocks on `send(wN)`
+///   until the GPU finishes proving `wN–1` and calls `recv()`.
+///
+/// This ensures:
+///   - At most **one** witness on the GPU, and
+///   - At most **one** fully-generated witness waiting in CPU memory,
+///     keeping memory usage strictly bounded (2 witnesses max).
+///
+/// Timeline with bounded(0):
+///
+/// CPU gen(w1)→gen(w2)→wait→gen(w3)→wait, while GPU wait→prove(w1)→prove(w2)→prove(w3)→prove(w4).
+///
+/// CPU never runs ahead more than one witness, but CPU/GPU still overlap fully.
 ///
 /// This improves total proving throughput by hiding CPU witness generation latency
 /// behind GPU proof execution.
@@ -1492,7 +1504,7 @@ fn create_proofs_helper<
     #[cfg(feature = "gpu")]
     {
         use crossbeam::channel;
-        let (tx, rx) = channel::bounded(1);
+        let (tx, rx) = channel::bounded(0);
         std::thread::scope(|s| {
             // pipeline cpu/gpu workload
             // cpu producer
