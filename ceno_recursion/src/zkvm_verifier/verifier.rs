@@ -4,7 +4,7 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        _print_usize_arr, PolyEvaluator, UniPolyExtrapolator, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, mask_arr, reverse
+        _print_usize_arr, PolyEvaluator, UniPolyExtrapolator, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -31,6 +31,7 @@ use crate::{
 };
 use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
+
 use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{
@@ -52,6 +53,7 @@ use openvm_native_recursion::challenger::{
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
 use p3::babybear::BabyBear;
+use multilinear_extensions::{StructuralWitInType, Expression::StructuralWitIn};
 
 type F = BabyBear;
 type E = BabyBearExt4;
@@ -897,9 +899,7 @@ pub fn verify_gkr_circuit<C: Config>(
             unipoly_extrapolator,
         );
 
-        /* _debug: ecc
-        let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
-
+        /* _debug
         // check selector evaluations
         layer
             .out_sel_and_eval_exprs
@@ -920,48 +920,105 @@ pub fn verify_gkr_circuit<C: Config>(
                     selector_ctx,
                 );
             });
-
+        */
+        
         // check structural witin
-        for StructuralWitIn { id, witin_type } in &self.structural_witins {
-            let wit_id = *id as usize + structural_witin_offset;
-            let expected_eval = match witin_type {
+        let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
+        for s in &layer.structural_witins {
+            let id = s.id;
+            let witin_type = s.witin_type;
+
+            let wit_id = id as usize + structural_witin_offset;
+            let expected_eval: Ext<C::F, C::EF> = match witin_type {
                 StructuralWitInType::EqualDistanceSequence {
                     offset,
                     multi_factor,
                     descending,
                     ..
-                } => eval_wellform_address_vec(
-                    *offset as u64,
-                    *multi_factor as u64,
-                    &in_point,
-                    *descending,
-                ),
+                } => {
+                    eval_wellform_address_vec(
+                        builder, 
+                        offset,
+                        multi_factor as u32, 
+                        &in_point, 
+                        descending
+                    )
+                },
                 StructuralWitInType::StackedIncrementalSequence { .. } => {
-                    eval_stacked_wellform_address_vec(&in_point)
-                }
+                    let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+                    let one_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
+                    let r_len = in_point.len();
 
+                    builder.if_ne(r_len.clone(), Usize::from(0)).then(|builder| {
+                        builder.if_ne(r_len.clone(), Usize::from(1)).then(|builder| {
+                            builder.range(1, r_len.clone()).for_each(|idx_vec, builder| {
+                                let i = idx_vec[0];
+                                let r_i = builder.get(&in_point, i);
+
+                                let r_slice = &in_point.slice(builder, 0, i);
+                                let eval = eval_wellform_address_vec(
+                                    builder, 
+                                    0,
+                                    1, 
+                                    r_slice, 
+                                    false,
+                                );
+                                builder.assign(&res, res * (one_ext - r_i) + eval * r_i);
+                            });
+                        });
+                    });
+                    
+                    res
+                }
                 StructuralWitInType::StackedConstantSequence { .. } => {
-                    eval_stacked_constant_vec(&in_point)
+                    let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+                    let one_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
+                    let i_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
+                    let r_len = in_point.len();
+
+                    builder.if_ne(r_len.clone(), Usize::from(0)).then(|builder| {
+                        builder.if_ne(r_len.clone(), Usize::from(1)).then(|builder| {
+                            builder.range(1, r_len.clone()).for_each(|idx_vec, builder| {
+                                let i = idx_vec[0];
+                                let r_i = builder.get(&in_point, i);
+
+                                builder.assign(&res, res * (one_ext - r_i) + i_ext * r_i);
+                                builder.assign(&i_ext, i_ext + one_ext);
+                            });
+                        });
+                    });
+                    
+                    res
                 }
                 StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
-                    eval_inner_repeated_incremental_vec(*k as u64, &in_point)
+                    let r_slice = in_point.slice(builder, k, in_point.len());
+
+                    eval_wellform_address_vec(
+                        builder, 
+                        0,
+                        1, 
+                        &r_slice, 
+                        false,
+                    )
                 }
                 StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
-                    eval_outer_repeated_incremental_vec(*k as u64, &in_point)
+                    let r_slice = in_point.slice(builder, 0, k);
+                    eval_wellform_address_vec(
+                        builder, 
+                        0,
+                        1, 
+                        &r_slice, 
+                        false,
+                    )
                 }
                 StructuralWitInType::Empty => continue,
             };
-            if expected_eval != main_evals[wit_id] {
-                return Err(BackendError::LayerVerificationFailed(
-                    format!("layer {} structural witin mismatch", self.name.clone()).into(),
-                    VerifierError::ClaimNotMatch(
-                        format!("{}", expected_eval).into(),
-                        format!("{}", main_evals[wit_id]).into(),
-                    ),
-                ));
-            }
+
+            let main_wit_eval = builder.get(&main_evals, wit_id);
+            builder.assert_ext_eq(expected_eval, main_wit_eval);
         }
 
+        /* _debug
         // check pub-io
         // assume public io is tiny vector, so we evaluate it directly without PCS
         let pubio_offset = self.n_witin + self.n_fixed;
@@ -980,6 +1037,7 @@ pub fn verify_gkr_circuit<C: Config>(
             }
         }
         */
+
 
         // TODO: we should store alpha_pows in a bigger array to avoid concatenating them
         let main_sumcheck_challenges_len: Usize<C::N> =
