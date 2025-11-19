@@ -220,6 +220,15 @@ impl<
             structural_rmms.push(structural_witness_rmm);
         }
 
+        tracing::debug!(
+            "witness rmm in {} MB",
+            wits_rmms
+                .values()
+                .map(|v| v.values.len() * std::mem::size_of::<E::BaseField>())
+                .sum::<usize>() as f64
+                / (1024.0 * 1024.0)
+        );
+
         // commit to witness traces in batch
         let (mut witness_mles, witness_data, witin_commit) = self.device.commit_traces(wits_rmms);
         PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;

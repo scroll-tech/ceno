@@ -37,16 +37,19 @@ use multilinear_extensions::util::max_usable_threads;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 use std::{
-    cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    marker::PhantomData,
     sync::Arc,
 };
 use transcript::BasicTranscript as Transcript;
 use witness::next_pow2_instance_padding;
 
-pub const DEFAULT_MIN_CYCLE_PER_SHARDS: Cycle = 1 << 24;
-pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 27;
+// default value: 16GB VRAM, each cell 4 byte, log explosion 2
+pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
+pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
 pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
+// define a relative small number to make first shard handle much less instruction
+pub const DEFAULT_MAX_CELL_FIRST_SHARD: u64 = 1 << 20;
 
 /// The polynomial commitment scheme kind
 #[derive(
@@ -107,7 +110,9 @@ pub struct EmulationResult<'a> {
     pub all_records: Vec<StepRecord>,
     pub final_mem_state: FinalMemState,
     pub pi: PublicValues,
-    pub shard_ctxs: Vec<ShardContext<'a>>,
+    pub shard_ctx_builder: ShardContextBuilder,
+    pub phantom: PhantomData<&'a ()>,
+    // pub shard_ctxs: Vec<ShardContext<'a>>,
 }
 
 pub struct RAMRecord {
@@ -132,7 +137,7 @@ pub struct RAMRecord {
 pub struct MultiProver {
     pub prover_id: usize,
     pub max_provers: usize,
-    pub min_cycle_per_shard: Cycle,
+    pub max_cell_per_shard: u64,
     pub max_cycle_per_shard: Cycle,
 }
 
@@ -140,14 +145,14 @@ impl MultiProver {
     pub fn new(
         prover_id: usize,
         max_provers: usize,
-        min_cycle_per_shard: Cycle,
+        max_cell_per_shard: u64,
         max_cycle_per_shard: Cycle,
     ) -> Self {
         assert!(prover_id < max_provers);
         Self {
             prover_id,
             max_provers,
-            min_cycle_per_shard,
+            max_cell_per_shard,
             max_cycle_per_shard,
         }
     }
@@ -158,7 +163,7 @@ impl Default for MultiProver {
         Self {
             prover_id: 0,
             max_provers: 1,
-            min_cycle_per_shard: DEFAULT_MIN_CYCLE_PER_SHARDS,
+            max_cell_per_shard: u64::MAX,
             max_cycle_per_shard: DEFAULT_MAX_CYCLE_PER_SHARDS,
         }
     }
@@ -168,7 +173,7 @@ pub struct ShardContext<'a> {
     shard_id: usize,
     num_shards: usize,
     max_cycle: Cycle,
-    addr_future_accesses: Arc<NextCycleAccess>,
+    pub addr_future_accesses: Arc<NextCycleAccess>,
     // this is only updated in first shard
     addr_accessed_thread_based_first_shard:
         Either<Vec<FxHashSet<WordAddr>>, &'a mut FxHashSet<WordAddr>>,
@@ -179,6 +184,8 @@ pub struct ShardContext<'a> {
     pub cur_shard_cycle_range: std::ops::Range<usize>,
     pub expected_inst_per_shard: usize,
     pub max_num_cross_shard_accesses: usize,
+    // shard 0: [v[0], v[1]), shard 1: [v[1], v[2]), shard 2: [v[2], v[3])
+    pub prev_shard_cycle_range: Vec<Cycle>,
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -211,6 +218,7 @@ impl<'a> Default for ShardContext<'a> {
             cur_shard_cycle_range: Tracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
             expected_inst_per_shard: usize::MAX,
             max_num_cross_shard_accesses,
+            prev_shard_cycle_range: vec![],
         }
     }
 }
@@ -226,122 +234,6 @@ impl<'a> Default for ShardContext<'a> {
 /// for example, if there are 10 shards and 3 provers,
 /// the shard counts will be distributed as 3, 3, and 4, ensuring an even workload across all provers.
 impl<'a> ShardContext<'a> {
-    pub fn new(
-        multi_prover: MultiProver,
-        executed_instructions: usize,
-        addr_future_accesses: NextCycleAccess,
-    ) -> Vec<Self> {
-        let min_cycle_per_shard = multi_prover.min_cycle_per_shard;
-        let max_cycle_per_shard = multi_prover.max_cycle_per_shard;
-        assert!(
-            min_cycle_per_shard < max_cycle_per_shard,
-            "invalid input: min_cycle_per_shard {min_cycle_per_shard} >= max_cycle_per_shard {max_cycle_per_shard}"
-        );
-        let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN as usize;
-        let max_threads = max_usable_threads();
-
-        let max_num_cross_shard_accesses = std::env::var("CENO_CROSS_SHARD_LIMIT")
-            .map(|v| v.parse().unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT))
-            .unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT);
-
-        // strategies
-        // 0. set cur_num_shards = num_provers
-        // 1. split instructions evenly by cur_num_shards
-        // 2. stop if min_inst <= shard instructions < max_inst
-        // 3.1 if shard instructions >= max_inst, update cur_num_shards += 1 then goes to 1
-        // 3.2 if shard instructions < min_inst, update cur_num_shards -= 1 then goes to 1
-        const MAX_ITER: usize = 1000;
-        let mut num_shards = multi_prover.max_provers;
-        let mut last_shard_count = None;
-        let mut expected_inst_per_shard = 0;
-        for _ in 0..MAX_ITER {
-            expected_inst_per_shard = executed_instructions.div_ceil(num_shards);
-            let expected_cycle_per_shard = expected_inst_per_shard * subcycle_per_insn;
-            if (min_cycle_per_shard as usize..max_cycle_per_shard as usize)
-                .contains(&expected_cycle_per_shard)
-            {
-                break;
-            }
-
-            if expected_cycle_per_shard >= max_cycle_per_shard as usize {
-                num_shards += 1;
-            } else if expected_cycle_per_shard < min_cycle_per_shard as usize {
-                if num_shards == 1 {
-                    break;
-                }
-                num_shards -= 1;
-            }
-
-            // Detect oscillation (no progress)
-            if let Some(last_shard_count) = last_shard_count
-                && last_shard_count == num_shards
-            {
-                panic!(
-                    "no convergence detected: shard count stuck at {num_shards}, \
-                 per-shard={expected_inst_per_shard}"
-                );
-            }
-
-            last_shard_count = Some(num_shards);
-        }
-
-        // generated shards belong to this prover id
-        let prover_id_shards_mapping =
-            Self::distribute_shards_into_provers(num_shards, multi_prover.max_provers);
-        assert!(multi_prover.prover_id < prover_id_shards_mapping.len());
-
-        let max_cycle = (executed_instructions + 1) * subcycle_per_insn; // cycle start from subcycle_per_insn
-        let addr_future_accesses = Arc::new(addr_future_accesses);
-
-        // sum for all shards before prover id
-        let start = prover_id_shards_mapping
-            .iter()
-            .take(multi_prover.prover_id)
-            .sum::<usize>();
-        // length of shards belong to prover id
-        let shard_len = prover_id_shards_mapping[multi_prover.prover_id];
-        tracing::info!(
-            "total num_shards {num_shards}, num_shards belong to this prover: {shard_len}, multi-prover {:?}",
-            multi_prover
-        );
-        let end = start + shard_len;
-        (start..end)
-            .map(|shard_id| {
-                let cur_shard_cycle_range = (shard_id * expected_inst_per_shard * subcycle_per_insn
-                    + subcycle_per_insn)
-                    ..((shard_id + 1) * expected_inst_per_shard * subcycle_per_insn
-                        + subcycle_per_insn)
-                        .min(max_cycle);
-                ShardContext {
-                    shard_id,
-                    num_shards,
-                    max_cycle: max_cycle as Cycle,
-                    addr_future_accesses: addr_future_accesses.clone(),
-                    addr_accessed_thread_based_first_shard: Either::Left(
-                        (0..max_threads)
-                            .map(|_| Default::default())
-                            .collect::<Vec<_>>(),
-                    ),
-                    // TODO with_capacity optimisation
-                    read_records_tbs: Either::Left(
-                        (0..max_threads)
-                            .map(|_| BTreeMap::new())
-                            .collect::<Vec<_>>(),
-                    ),
-                    // TODO with_capacity optimisation
-                    write_records_tbs: Either::Left(
-                        (0..max_threads)
-                            .map(|_| BTreeMap::new())
-                            .collect::<Vec<_>>(),
-                    ),
-                    cur_shard_cycle_range,
-                    expected_inst_per_shard,
-                    max_num_cross_shard_accesses,
-                }
-            })
-            .collect_vec()
-    }
-
     pub fn get_forked(&mut self) -> Vec<ShardContext<'_>> {
         match (
             &mut self.read_records_tbs,
@@ -370,6 +262,7 @@ impl<'a> ShardContext<'a> {
                         cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
                         expected_inst_per_shard: self.expected_inst_per_shard,
                         max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
+                        prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
                     },
                 )
                 .collect_vec(),
@@ -416,12 +309,11 @@ impl<'a> ShardContext<'a> {
         (cycle as usize) >= self.cur_shard_cycle_range.end
     }
 
+    /// Extract shard_id which produce this record
+    /// NOTE prev_shard_cycle_range[0] should be 0 otherwise it will panic with subtract-overflow
     #[inline(always)]
     pub fn extract_shard_id(&self, cycle: Cycle) -> usize {
-        let subcycle_per_insn = Tracer::SUBCYCLES_PER_INSN;
-        let per_shard_cycles =
-            (self.expected_inst_per_shard as u64).saturating_mul(subcycle_per_insn);
-        ((cycle.saturating_sub(subcycle_per_insn)) / per_shard_cycles) as usize
+        self.prev_shard_cycle_range.partition_point(|&t| t <= cycle) - 1
     }
 
     #[inline(always)]
@@ -620,6 +512,107 @@ impl<'a> ShardContext<'a> {
     }
 }
 
+pub trait StepCellExtractor {
+    fn extract_cells(&self, step: &StepRecord) -> u64;
+}
+
+#[derive(Default)]
+pub struct ShardContextBuilder {
+    cur_shard_id: usize,
+    addr_future_accesses: Arc<NextCycleAccess>,
+    cur_cells: u64,
+    cur_acc_cycle: Cycle,
+    max_cell_per_shard: u64,
+    max_cycle_per_shard: Cycle,
+    target_cell_first_shard: u64,
+    prev_shard_cycle_range: Vec<Cycle>,
+}
+
+impl ShardContextBuilder {
+    /// set max_cell_per_shard == u64::MAX if target for single shard
+    pub fn new(multi_prover: &MultiProver, addr_future_accesses: NextCycleAccess) -> Self {
+        assert_eq!(multi_prover.max_provers, 1);
+        assert_eq!(multi_prover.prover_id, 0);
+        ShardContextBuilder {
+            cur_shard_id: 0,
+            cur_cells: 0,
+            cur_acc_cycle: 0,
+            max_cell_per_shard: multi_prover.max_cell_per_shard,
+            max_cycle_per_shard: multi_prover.max_cycle_per_shard,
+            target_cell_first_shard: {
+                if multi_prover.max_cell_per_shard == u64::MAX {
+                    u64::MAX
+                } else {
+                    DEFAULT_MAX_CELL_FIRST_SHARD
+                }
+            },
+            addr_future_accesses: Arc::new(addr_future_accesses),
+            prev_shard_cycle_range: vec![0],
+        }
+    }
+
+    /// return next shard size and shard_ctx
+    /// panic if empty match
+    pub fn position_next_shard<'a>(
+        &mut self,
+        steps: &[StepRecord],
+        step_cell_extractor: impl StepCellExtractor,
+    ) -> (usize, ShardContext<'a>) {
+        assert_eq!(self.cur_cells, 0);
+        assert!(!steps.is_empty());
+        // on non-first shard, prev shard cycle end should match current cycle start
+        if self.cur_shard_id > 0 {
+            assert_eq!(
+                steps.first().map(|step| step.cycle()).unwrap_or_default(),
+                self.prev_shard_cycle_range
+                    .last()
+                    .copied()
+                    .unwrap_or(Tracer::SUBCYCLES_PER_INSN)
+            );
+        }
+        let target_cost_current_shard = if self.cur_shard_id == 0 {
+            self.target_cell_first_shard
+        } else {
+            self.max_cell_per_shard
+        };
+        let mut shard_ctx = ShardContext::default();
+        let n = steps
+            .iter()
+            .take_while(|step| {
+                let next_cells = self.cur_cells + step_cell_extractor.extract_cells(step);
+                let next_cycle = self.cur_acc_cycle + Tracer::SUBCYCLES_PER_INSN;
+                if next_cells >= target_cost_current_shard || next_cycle >= self.max_cycle_per_shard
+                {
+                    return false;
+                }
+                self.cur_cells = next_cells;
+                self.cur_acc_cycle = next_cycle;
+                true
+            })
+            .count();
+
+        assert!(n > 0, "empty record match");
+        tracing::debug!(
+            "{}th shard contain cells {}, cycle {}",
+            self.cur_shard_id,
+            self.cur_cells,
+            self.cur_acc_cycle,
+        );
+
+        shard_ctx.shard_id = self.cur_shard_id;
+        shard_ctx.cur_shard_cycle_range = steps.first().map(|step| step.cycle() as usize).unwrap()
+            ..(steps.get(n - 1).as_ref().unwrap().cycle() + Tracer::SUBCYCLES_PER_INSN) as usize;
+        shard_ctx.addr_future_accesses = self.addr_future_accesses.clone();
+        shard_ctx.prev_shard_cycle_range = self.prev_shard_cycle_range.clone();
+        self.prev_shard_cycle_range
+            .push(shard_ctx.cur_shard_cycle_range.end as u64);
+        self.cur_cells = 0;
+        self.cur_acc_cycle = 0;
+        self.cur_shard_id += 1;
+        (n, shard_ctx)
+    }
+}
+
 pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
@@ -813,17 +806,14 @@ pub fn emulate_program<'a>(
         ),
     );
 
-    let shard_ctxs = ShardContext::new(
-        multi_prover.clone(),
-        insts,
-        vm.take_tracer().next_accesses(),
-    );
+    let shard_ctx_builder =
+        ShardContextBuilder::new(multi_prover, vm.take_tracer().next_accesses());
 
     EmulationResult {
         pi,
         exit_code,
         all_records,
-        shard_ctxs,
+        shard_ctx_builder,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,
@@ -832,6 +822,7 @@ pub fn emulate_program<'a>(
             stack: stack_final,
             heap: heap_final,
         },
+        phantom: PhantomData,
     }
 }
 
@@ -1003,59 +994,48 @@ pub fn generate_witness<'a, E: ExtensionField>(
     mut emul_result: EmulationResult<'a>,
     program: &Program,
 ) -> impl Iterator<Item = (ZKVMWitnesses<E>, ShardContext<'a>, PublicValues)> {
-    let shard_ctxs = std::mem::take(&mut emul_result.shard_ctxs);
-    assert!(!shard_ctxs.is_empty());
+    let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
     let all_records = std::mem::take(&mut emul_result.all_records);
     assert!(!all_records.is_empty());
 
-    tracing::debug!(
-        "first shard cycle range {:?}",
-        shard_ctxs[0].cur_shard_cycle_range
-    );
-    let time = std::time::Instant::now();
-    // clean up all records before first shard start cycle, as it's not belong to current prover
-    let mut start = all_records
-        .iter()
-        .position(|step| {
-            shard_ctxs[0]
-                .cur_shard_cycle_range
-                .contains(&(step.cycle() as usize))
-        })
-        .unwrap_or(all_records.len());
-    tracing::debug!(
-        "skip {} records as not belong to current shard take {:?}",
-        start,
-        time.elapsed()
+    // TODO refactor this condition to support num_provers > 1 cluster mode
+    assert_eq!(
+        Tracer::SUBCYCLES_PER_INSN,
+        all_records
+            .first()
+            .map(|step| step.cycle())
+            .unwrap_or(Tracer::SUBCYCLES_PER_INSN),
+        "first record cycle must start from Tracer::SUBCYCLES_PER_INSN"
     );
 
-    let pi = std::mem::take(&mut emul_result.pi);
-    shard_ctxs.into_iter().map(move |mut shard_ctx| {
+    let mut cur_index = 0;
+    let pi_template = emul_result.pi.clone();
+    std::iter::from_fn(move || {
+        if cur_index >= all_records.len() {
+            return None;
+        }
+        let (cur_shard_steps_len, mut shard_ctx) =
+            shard_ctx_builder.position_next_shard(&all_records[cur_index..], &system_config.config);
         let time = std::time::Instant::now();
         // assume public io clone low cost
-        let mut pi = pi.clone();
-        let n = all_records[start..]
-            .binary_search_by(|step| {
-                if shard_ctx.is_in_current_shard(step.cycle()) {
-                    Ordering::Less // continue right
-                } else {
-                    Ordering::Greater // stop here
-                }
-            })
-            .unwrap_or_else(|idx| idx);
-        let end = start + n;
+        let mut pi = pi_template.clone();
+        let end = cur_index + cur_shard_steps_len;
         tracing::debug!("collect filter step in {:?}", time.elapsed());
 
-        tracing::debug!("{}th shard collect {n} steps", shard_ctx.shard_id);
+        tracing::debug!(
+            "{}th shard collect {cur_shard_steps_len} steps",
+            shard_ctx.shard_id
+        );
         let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
-        let current_shard_end_cycle = all_records[start..end].last().unwrap().cycle()
+        let current_shard_end_cycle = all_records[cur_index..end].last().unwrap().cycle()
             + Tracer::SUBCYCLES_PER_INSN
             - current_shard_offset_cycle;
         let current_shard_init_pc = if shard_ctx.is_first_shard() {
             program.entry
         } else {
-            all_records[start..end][0].pc().before.0
+            all_records[cur_index..end][0].pc().before.0
         };
-        let current_shard_end_pc = all_records[start..end].last().unwrap().pc().after.0;
+        let current_shard_end_pc = all_records[cur_index..end].last().unwrap().pc().after.0;
 
         let mut zkvm_witness = ZKVMWitnesses::default();
         let time = std::time::Instant::now();
@@ -1066,7 +1046,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 &system_config.zkvm_cs,
                 &mut shard_ctx,
                 &mut zkvm_witness,
-                &all_records[start..end],
+                &all_records[cur_index..end],
             )
             .unwrap();
         tracing::debug!("assign_opcode_circuit finish in {:?}", time.elapsed());
@@ -1184,12 +1164,11 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 *v = f.to_canonical_u64() as u32;
             }
             tracing::debug!("update pi shard_rw_sum finish in {:?}", time.elapsed());
-
-            // update next round start
-            start = end;
         }
 
-        (zkvm_witness, shard_ctx, pi)
+        // update next round start
+        cur_index = end;
+        Some((zkvm_witness, shard_ctx, pi))
     })
 }
 
@@ -1689,8 +1668,17 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 
 #[cfg(test)]
 mod tests {
-    use crate::e2e::{MultiProver, ShardContext};
-    use ceno_emul::{Cycle, NextCycleAccess};
+    use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
+    use ceno_emul::{Cycle, NextCycleAccess, StepRecord, Tracer};
+    use itertools::Itertools;
+
+    struct UniformStepExtractor;
+
+    impl StepCellExtractor for &UniformStepExtractor {
+        fn extract_cells(&self, _step: &StepRecord) -> u64 {
+            1
+        }
+    }
 
     #[test]
     fn test_single_prover_shard_ctx() {
@@ -1718,11 +1706,29 @@ mod tests {
         executed_instruction: usize,
         expected_shard: usize,
     ) {
-        let shard_ctx = ShardContext::new(
-            MultiProver::new(0, 1, 1 << 3, max_cycle_per_shard),
-            executed_instruction,
+        let mut shard_ctx_builder = ShardContextBuilder::new(
+            &MultiProver::new(0, 1, u64::MAX, max_cycle_per_shard),
             NextCycleAccess::default(),
         );
+
+        let steps = (0..executed_instruction)
+            .map(|i| {
+                StepRecord::new_ecall_any(Tracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
+            })
+            .collect_vec();
+
+        let mut cur_index = 0;
+        let shard_ctx = std::iter::from_fn(|| {
+            if cur_index >= steps.len() {
+                return None;
+            }
+            let (n, shard_ctx) = shard_ctx_builder
+                .position_next_shard(&steps[cur_index..], &UniformStepExtractor {});
+            cur_index += n;
+            Some(shard_ctx)
+        })
+        .collect_vec();
+
         assert_eq!(shard_ctx.len(), expected_shard, "{name} test case failed");
         assert_eq!(
             shard_ctx.first().unwrap().cur_shard_cycle_range.start,
@@ -1741,39 +1747,6 @@ mod tests {
                     "{name} test case failed"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn test_multi_prover_shard_ctx() {
-        for (name, num_shards, num_prover, expected_num_shards_of_provers) in [
-            ("2 provers", 7, 2, vec![4, 3]),
-            ("2 provers", 10, 3, vec![4, 3, 3]),
-        ] {
-            test_multi_shard_ctx_helper(
-                name,
-                num_shards,
-                num_prover,
-                expected_num_shards_of_provers,
-            );
-        }
-    }
-
-    fn test_multi_shard_ctx_helper(
-        name: &str,
-        num_shards: usize,
-        num_prover: usize,
-        expected_num_shards_of_provers: Vec<usize>,
-    ) {
-        let max_cycle_per_shard = (1 << 8) * 4;
-        let executed_instruction = (1 << 8) * num_shards - 10; // this will be split into num_shards
-        for (prover_id, expected_shard) in (0..num_prover).zip(expected_num_shards_of_provers) {
-            let shard_ctx = ShardContext::new(
-                MultiProver::new(prover_id, num_prover, 1 << 3, max_cycle_per_shard),
-                executed_instruction,
-                NextCycleAccess::default(),
-            );
-            assert_eq!(shard_ctx.len(), expected_shard, "{name} test case failed");
         }
     }
 }
