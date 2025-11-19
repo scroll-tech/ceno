@@ -47,9 +47,11 @@ jobs:
           cargo make --version || cargo install cargo-make
 
       - name: Run aggregation tests
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
         run: |
           cargo run --release --package ceno_zkvm --bin e2e -- \
-            --platform=ceno --min-cycle-per-shard=10 --max-cycle-per-shard=1600 \
+            --platform=ceno --max-cycle-per-shard=1600 \
             examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
           mkdir -p ceno_recursion/src/imported
           mv proof.bin ceno_recursion/src/imported/
