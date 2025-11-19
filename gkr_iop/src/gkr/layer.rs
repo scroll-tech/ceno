@@ -6,6 +6,7 @@ use multilinear_extensions::{
     Expression, Instance, StructuralWitIn, ToExpr,
     mle::{Point, PointAndEval},
     monomial::Term,
+    utils::Node,
 };
 use p3::field::FieldAlgebra;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
@@ -47,6 +48,8 @@ pub enum LayerType {
     Zerocheck,
     Linear,
 }
+
+pub type DagInfo<E> = (Vec<Node>, Vec<Expression<E>>, u32, usize, usize);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
@@ -102,6 +105,10 @@ pub struct Layer<E: ExtensionField> {
     // store in 2 forms: expression & monomial
     pub main_sumcheck_expression_monomial_terms: Option<Vec<Term<Expression<E>, Expression<E>>>>,
     pub main_sumcheck_expression: Option<Expression<E>>,
+
+    // flatten computation dag
+    // (dag, coeffs, final_out_index, max_dag_depth, max_degree)
+    pub main_sumcheck_expression_dag: Option<DagInfo<E>>,
 
     // rotation sumcheck expression, only optionally valid for zerocheck
     // store in 2 forms: expression & monomial
@@ -175,6 +182,7 @@ impl<E: ExtensionField> Layer<E> {
                     expr_names,
                     main_sumcheck_expression_monomial_terms: None,
                     main_sumcheck_expression: None,
+                    main_sumcheck_expression_dag: None,
                     rotation_sumcheck_expression_monomial_terms: None,
                     rotation_sumcheck_expression: None,
                 };
