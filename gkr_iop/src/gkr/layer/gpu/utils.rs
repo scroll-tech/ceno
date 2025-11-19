@@ -10,7 +10,7 @@ use multilinear_extensions::{
     Expression, mle::Point, monomial::Term, utils::eval_by_expr_constant,
 };
 
-use crate::selector::SelectorType;
+use crate::selector::{SelectorContext, SelectorType};
 
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
@@ -63,7 +63,7 @@ pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
 pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
     hal: &CudaHalBB31,
     point: &Point<E>,
-    num_instances: usize,
+    selector_ctx: &SelectorContext,
     selector: &SelectorType<E>,
 ) -> MultilinearExtensionGpu<'static, E> {
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
@@ -74,12 +74,16 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
     let (num_instances, is_sp32, indices) = match selector {
         SelectorType::None => panic!("SelectorType::None"),
         SelectorType::Whole(_expr) => (eq_len, false, vec![]),
-        SelectorType::Prefix(_, _expr) => (num_instances, false, vec![]),
-        SelectorType::OrderedSparse32 { indices, .. } => (num_instances, true, indices.clone()),
+        SelectorType::Prefix(_expr) => (selector_ctx.num_instances, false, vec![]),
+        SelectorType::OrderedSparse32 { indices, .. } => {
+            (selector_ctx.num_instances, true, indices.clone())
+        }
+        SelectorType::QuarkBinaryTreeLessThan(..) => unimplemented!(),
     };
 
     // type eq
     let eq_mle = if is_sp32 {
+        assert_eq!(selector_ctx.offset, 0);
         let eq = build_eq_x_r_gpu(hal, point);
         let mut eq_buf = match eq.mle {
             GpuFieldType::Base(_) => panic!("should be ext field"),
@@ -103,6 +107,7 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
             &hal.inner,
             &gpu_points,
             &mut gpu_output,
+            selector_ctx.offset,
             num_instances,
         )
         .unwrap();
@@ -135,6 +140,7 @@ pub fn build_eq_x_r_gpu<E: ExtensionField>(
             &hal.inner,
             &gpu_points,
             &mut gpu_output,
+            0,
             eq_len,
         )
         .unwrap();

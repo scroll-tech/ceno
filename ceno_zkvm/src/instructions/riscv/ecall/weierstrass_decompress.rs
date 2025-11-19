@@ -31,6 +31,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     chip_handler::general::InstFetch,
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -208,6 +209,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
 
     fn assign_instance(
         _config: &Self::InstructionConfig,
+        _shard_ctx: &mut ShardContext,
         _instance: &mut [<E as ExtensionField>::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
@@ -217,9 +219,10 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
 
     fn assign_instances(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<StepRecord>,
+        steps: Vec<&StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let syscall_code = match EC::CURVE_TYPE {
             CurveType::Secp256k1 => SECP256K1_DECOMPRESS,
@@ -254,12 +257,14 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
         );
 
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
+        let shard_ctx_vec = shard_ctx.get_forked();
 
         let ec_field_num_words = <EC::BaseField as NumWords>::WordsFieldElement::USIZE;
         // 1st pass: assign witness outside of gkr-iop scope
         let sign_bit_and_y_words = raw_witin_iter
             .zip_eq(steps.par_chunks(num_instance_per_batch))
-            .flat_map(|(instances, steps)| {
+            .zip(shard_ctx_vec)
+            .flat_map(|((instances, steps), mut shard_ctx)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
 
                 instances
@@ -269,9 +274,12 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                         let ops = &step.syscall().expect("syscall step");
 
                         // vm_state
-                        config.vm_state.assign_instance(instance, step)?;
+                        config
+                            .vm_state
+                            .assign_instance(instance, &shard_ctx, step)?;
                         config.ecall_id.assign_op(
                             instance,
+                            &mut shard_ctx,
                             &mut lk_multiplicity,
                             step.cycle(),
                             &WriteOp::new_register_op(
@@ -288,6 +296,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                         )?;
                         config.field_ptr.0.assign_op(
                             instance,
+                            &mut shard_ctx,
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[0],
@@ -295,12 +304,19 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                         // register read for sign_bit
                         config.sign_bit.assign_op(
                             instance,
+                            &mut shard_ctx,
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[1],
                         )?;
                         for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
-                            writer.assign_op(instance, &mut lk_multiplicity, step.cycle(), op)?;
+                            writer.assign_op(
+                                instance,
+                                &mut shard_ctx,
+                                &mut lk_multiplicity,
+                                step.cycle(),
+                                op,
+                            )?;
                         }
 
                         // fetch

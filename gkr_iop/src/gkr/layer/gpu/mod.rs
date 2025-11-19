@@ -43,6 +43,7 @@ use crate::{
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
 pub mod utils;
+use crate::selector::SelectorContext;
 use utils::*;
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<GpuBackend<E, PCS>>
@@ -112,7 +113,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         pub_io_evals: &[<GpuBackend<E, PCS> as ProverBackend>::E],
         challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (
         LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<GpuBackend<E, PCS> as ProverBackend>::E>,
@@ -175,8 +176,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .out_sel_and_eval_exprs
             .iter()
             .zip(out_points.iter())
-            .map(|((sel_type, _), point)| {
-                build_eq_x_r_with_sel_gpu(&cuda_hal, point, num_instances, sel_type)
+            .zip(selector_ctxs.iter())
+            .map(|(((sel_type, _), point), selector_ctx)| {
+                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type)
             })
             // for rotation left point
             .chain(
@@ -197,18 +199,39 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     .map(|rotation_point| build_eq_x_r_gpu(&cuda_hal, rotation_point)),
             )
             .collect::<Vec<_>>();
+        // `wit` := witin ++ fixed ++ pubio
         let all_witins_gpu = wit
             .iter()
-            .take(layer.n_witin)
+            .take(layer.n_witin + layer.n_fixed + layer.n_instance)
             .map(|mle| mle.as_ref())
-            .chain(eqs_gpu.iter())
             .chain(
-                // fixed, start after `n_witin`
+                // some non-selector structural witin
                 wit.iter()
-                    .skip(layer.n_witin + layer.n_structural_witin)
+                    .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
+                    .take(
+                        layer.n_structural_witin
+                            - layer.out_sel_and_eval_exprs.len()
+                            - layer
+                                .rotation_exprs
+                                .0
+                                .as_ref()
+                                .map(|_| ROTATION_OPENING_COUNT)
+                                .unwrap_or(0),
+                    )
                     .map(|mle| mle.as_ref()),
             )
+            .chain(eqs_gpu.iter())
             .collect_vec();
+        assert_eq!(
+            all_witins_gpu.len(),
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {} + layer.n_instance {}",
+            all_witins_gpu.len(),
+            layer.n_witin,
+            layer.n_structural_witin,
+            layer.n_fixed,
+            layer.n_instance,
+        );
         // Calculate max_num_var and max_degree from the extracted relationships
         let (term_coefficients, mle_indices_per_term, mle_size_info) =
             extract_mle_relationships_from_monomial_terms(

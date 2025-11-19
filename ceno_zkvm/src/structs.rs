@@ -1,23 +1,50 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::Instruction,
+    scheme::septic_curve::SepticPoint,
     state::StateCircuit,
-    tables::{RMMCollections, TableCircuit},
+    tables::{
+        ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
+        TableCircuit,
+    },
 };
-use ceno_emul::{CENO_PLATFORM, Platform, StepRecord};
-use ff_ext::ExtensionField;
+use ceno_emul::{CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
+use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
+use rayon::{
+    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    prelude::ParallelSlice,
+};
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
-use sumcheck::structs::IOPProverMessage;
-use witness::RowMajorMatrix;
+use sumcheck::structs::{IOPProof, IOPProverMessage};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
+
+/// proof that the sum of N=2^n EC points is equal to `sum`
+/// in one layer instead of GKR layered circuit approach
+/// note that this one layer IOP borrowed ideas from
+/// [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct EccQuarkProof<E: ExtensionField> {
+    pub zerocheck_proof: IOPProof<E>,
+    pub num_instances: usize,
+    pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[0,rt], y[0,rt], s[0,rt]
+    pub rt: Point<E>,
+    pub sum: SepticPoint<E::BaseField>,
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -108,6 +135,10 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.num_witin.into()
     }
 
+    pub fn num_structural_witin(&self) -> usize {
+        self.zkvm_v1_css.num_structural_witin.into()
+    }
+
     pub fn num_fixed(&self) -> usize {
         self.zkvm_v1_css.num_fixed
     }
@@ -120,14 +151,15 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.w_expressions.len() + self.zkvm_v1_css.w_table_expressions.len()
     }
 
-    pub fn instance_name_map(&self) -> &HashMap<Instance, String> {
-        &self.zkvm_v1_css.instance_name_map
+    pub fn instance_openings(&self) -> &[Instance] {
+        &self.zkvm_v1_css.instance_openings
+    }
+    pub fn has_ecc_ops(&self) -> bool {
+        !self.zkvm_v1_css.ec_final_sum.is_empty()
     }
 
-    pub fn is_opcode_circuit(&self) -> bool {
-        self.zkvm_v1_css.lk_table_expressions.is_empty()
-            && self.zkvm_v1_css.r_table_expressions.is_empty()
-            && self.zkvm_v1_css.w_table_expressions.is_empty()
+    pub fn is_with_lk_table(&self) -> bool {
+        !self.zkvm_v1_css.lk_table_expressions.is_empty()
     }
 
     /// return number of lookup operation
@@ -149,6 +181,10 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
             .rotation_params
             .as_ref()
             .map(|param| param.rotation_cyclic_subgroup_size)
+    }
+
+    pub fn with_omc_init_only(&self) -> bool {
+        self.zkvm_v1_css.with_omc_init_only
     }
 }
 
@@ -209,18 +245,13 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
         let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        let config = TC::construct_circuit(&mut circuit_builder, &self.params).unwrap();
-        assert!(
-            self.circuit_css
-                .insert(
-                    TC::name(),
-                    ComposedConstrainSystem {
-                        zkvm_v1_css: cs,
-                        gkr_circuit: None
-                    }
-                )
-                .is_none()
-        );
+        let (config, gkr_iop_circuit) =
+            TC::build_gkr_iop_circuit(&mut circuit_builder, &self.params).unwrap();
+        let cs = ComposedConstrainSystem {
+            zkvm_v1_css: cs,
+            gkr_circuit: gkr_iop_circuit,
+        };
+        assert!(self.circuit_css.insert(TC::name(), cs).is_none());
         config
     }
 
@@ -286,21 +317,42 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
     }
 }
 
+#[derive(Clone)]
+pub struct ChipInput<E: ExtensionField> {
+    pub name: String,
+    pub witness_rmms: RMMCollections<E::BaseField>,
+    // in shard ram chip, num_instances length would be > 1
+    pub num_instances: Vec<usize>,
+}
+
+impl<E: ExtensionField> ChipInput<E> {
+    pub fn new(
+        name: String,
+        witness_rmms: RMMCollections<E::BaseField>,
+        num_instances: Vec<usize>,
+    ) -> Self {
+        Self {
+            name,
+            witness_rmms,
+            num_instances,
+        }
+    }
+
+    pub fn num_instances(&self) -> usize {
+        self.num_instances.iter().sum()
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct ZKVMWitnesses<E: ExtensionField> {
-    witnesses_opcodes: BTreeMap<String, RMMCollections<E::BaseField>>,
-    witnesses_tables: BTreeMap<String, RMMCollections<E::BaseField>>,
+    pub witnesses: BTreeMap<String, Vec<ChipInput<E>>>,
     lk_mlts: BTreeMap<String, Multiplicity<u64>>,
     combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
-    pub fn get_opcode_witness(&self, name: &String) -> Option<&RMMCollections<E::BaseField>> {
-        self.witnesses_opcodes.get(name)
-    }
-
-    pub fn get_table_witness(&self, name: &String) -> Option<&RMMCollections<E::BaseField>> {
-        self.witnesses_tables.get(name)
+    pub fn get_witness(&self, name: &String) -> Option<&Vec<ChipInput<E>>> {
+        self.witnesses.get(name)
     }
 
     pub fn get_lk_mlt(&self, name: &String) -> Option<&Multiplicity<u64>> {
@@ -310,20 +362,31 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &mut ShardContext,
         config: &OC::InstructionConfig,
-        records: Vec<StepRecord>,
+        records: Vec<&StepRecord>,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
 
         let cs = cs.get_cs(&OC::name()).unwrap();
         let (witness, logup_multiplicity) = OC::assign_instances(
             config,
+            shard_ctx,
             cs.zkvm_v1_css.num_witin as usize,
             cs.zkvm_v1_css.num_structural_witin as usize,
             records,
         )?;
-        assert!(self.witnesses_opcodes.insert(OC::name(), witness).is_none());
-        assert!(!self.witnesses_tables.contains_key(&OC::name()));
+        let num_instances = vec![witness[0].num_instances()];
+        let input = ChipInput::new(
+            OC::name(),
+            witness,
+            if num_instances[0] > 0 {
+                num_instances
+            } else {
+                vec![]
+            },
+        );
+        assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
         assert!(
             self.lk_mlts
                 .insert(OC::name(), logup_multiplicity)
@@ -375,35 +438,195 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
-        assert!(self.witnesses_tables.insert(TC::name(), witness).is_none());
-        assert!(!self.witnesses_opcodes.contains_key(&TC::name()));
+        let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
+        let input = ChipInput::new(
+            TC::name(),
+            witness,
+            if num_instances > 0 {
+                vec![num_instances]
+            } else {
+                vec![]
+            },
+        );
+        assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
 
         Ok(())
     }
 
-    /// Iterate opcode/table circuits, sorted by alphabetical order.
-    pub fn into_iter_sorted(
-        self,
-    ) -> impl Iterator<Item = (String, Vec<RowMajorMatrix<E::BaseField>>)> {
-        self.witnesses_opcodes
-            .into_iter()
-            .map(|(name, witnesses)| (name, witnesses.into()))
+    pub fn assign_shared_circuit(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        // shard_ctx: &ShardContext,
+        (shard_ctx, final_mem): &(
+            &ShardContext,
+            &[(InstancePaddingStrategy, &[MemFinalRecord])],
+        ),
+        config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
+    ) -> Result<(), ZKVMError> {
+        let perm = <E::BaseField as PoseidonField>::get_default_perm();
+        let waddr_first_access = if shard_ctx.is_first_shard() {
+            shard_ctx.get_addr_accessed_first_shard()
+        } else {
+            FxHashSet::default()
+        };
+
+        let non_first_shard_records = if shard_ctx.is_first_shard() {
+            final_mem
+                .par_iter()
+                .flat_map_iter(|(_, final_mem)| {
+                    final_mem.iter().filter_map(|mem_record| {
+                        // prepare cross shard writes record for those record which not accessed in first record
+                        // but access in future shard
+                        let (waddr, addr): (WordAddr, u32) = match mem_record.ram_type {
+                            RAMType::Register => (
+                                Platform::register_vma(mem_record.addr as RegIdx).into(),
+                                mem_record.addr,
+                            ),
+                            RAMType::Memory => (mem_record.addr.into(), mem_record.addr),
+                            _ => unimplemented!(),
+                        };
+                        if !waddr_first_access.contains(&waddr)
+                            && shard_ctx.after_current_shard_cycle(mem_record.cycle)
+                        {
+                            let global_write = ShardRamRecord {
+                                addr: match mem_record.ram_type {
+                                    RAMType::Register => addr,
+                                    RAMType::Memory => waddr.into(),
+                                    _ => unimplemented!(),
+                                },
+                                ram_type: mem_record.ram_type,
+                                // fill initial value to cancel initial record
+                                value: mem_record.init_value,
+                                shard: 0,
+                                local_clk: 0,
+                                global_clk: 0,
+                                is_to_write_set: true,
+                            };
+                            let ec_point: ECPoint<E> = global_write.to_ec_point(&perm);
+                            Some(ShardRamInput {
+                                record: global_write,
+                                ec_point,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+        let global_input = shard_ctx
+            .write_records()
+            .par_iter()
+            .flat_map_iter(|records| {
+                // global write -> local reads
+                records.iter().map(|(vma, record)| {
+                    let global_write: ShardRamRecord = (vma, record, true).into();
+                    let ec_point: ECPoint<E> = global_write.to_ec_point(&perm);
+                    ShardRamInput {
+                        record: global_write,
+                        ec_point,
+                    }
+                })
+            })
+            .chain(non_first_shard_records.into_par_iter())
             .chain(
-                self.witnesses_tables
-                    .into_iter()
-                    .map(|(name, witnesses)| (name, witnesses.into())),
+                shard_ctx
+                    .read_records()
+                    .par_iter()
+                    .flat_map_iter(|records| {
+                        // global read -> local write
+                        records.iter().map(|(vma, record)| {
+                            let global_read: ShardRamRecord = (vma, record, false).into();
+                            let ec_point: ECPoint<E> = global_read.to_ec_point(&perm);
+                            ShardRamInput {
+                                record: global_read,
+                                ec_point,
+                            }
+                        })
+                    }),
             )
-            .collect::<BTreeMap<_, _>>()
+            .collect::<Vec<_>>();
+
+        assert!(self.combined_lk_mlt.is_some());
+        let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let circuit_inputs = global_input
+            .par_chunks(shard_ctx.max_num_cross_shard_accesses)
+            .map(|shard_accesses| {
+                let witness = ShardRamCircuit::assign_instances(
+                    config,
+                    cs.zkvm_v1_css.num_witin as usize,
+                    cs.zkvm_v1_css.num_structural_witin as usize,
+                    self.combined_lk_mlt.as_ref().unwrap(),
+                    shard_accesses,
+                )?;
+                let num_reads = shard_accesses
+                    .par_iter()
+                    .filter(|access| access.record.is_to_write_set)
+                    .count();
+                let num_writes = shard_accesses.len() - num_reads;
+
+                Ok(ChipInput::new(
+                    ShardRamCircuit::<E>::name(),
+                    witness,
+                    vec![num_reads, num_writes],
+                ))
+            })
+            .collect::<Result<Vec<_>, ZKVMError>>()?;
+        // set num_read, num_write as separate instance
+        assert!(
+            self.witnesses
+                .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
+                .is_none()
+        );
+
+        Ok(())
+    }
+
+    pub fn get_witnesses_name_instance(&self) -> Vec<(String, Vec<usize>)> {
+        self.witnesses
+            .iter()
+            .flat_map(|(_, chip_inputs)| {
+                chip_inputs
+                    .iter()
+                    .map(|chip_input| (chip_input.name.clone(), chip_input.num_instances.clone()))
+            })
+            .collect_vec()
+    }
+
+    /// Iterate opcode/table circuits, sorted by alphabetical order.
+    pub fn into_iter_sorted(self) -> impl Iterator<Item = ChipInput<E>> {
+        self.witnesses
             .into_iter()
+            .flat_map(|(_, chip_inputs)| chip_inputs.into_iter())
     }
 }
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,
+    // entry program counter
+    pub entry_pc: u32,
     // pk for opcode and table circuits
     pub circuit_pks: BTreeMap<String, ProvingKey<E>>,
+    pub circuit_name_to_index: BTreeMap<String, usize>,
+
+    // Fixed commitments are separated into two groups:
+    //
+    // 1. `fixed_commit_*`
+    //    - Used by the *main circuit* for offline memory check (OMC) table initialization.
+    //    - This initialization occurs **only in the first shard** (`shard_id = 0`).
+    //
+    // 2. `fixed_no_omc_init_commit_*`
+    //    - Used by subsequent shards (`shard_id > 0`), which **omit** OMC table initialization.
+    //    - All circuit components related to OMC init are skipped in these shards.
     pub fixed_commit_wd: Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    pub fixed_no_omc_init_commit_wd:
+        Option<Arc<<PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness>>,
+    pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+
+    pub circuit_index_fixed_num_instances: BTreeMap<usize, usize>,
 
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
@@ -415,17 +638,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
         Self {
             pp,
             vp,
+            entry_pc: 0,
             circuit_pks: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
             finalize_global_state_expr: Expression::ZERO,
+            circuit_index_fixed_num_instances: BTreeMap::new(),
+            circuit_name_to_index: BTreeMap::new(),
             fixed_commit_wd: None,
             fixed_commit: None,
+            fixed_no_omc_init_commit_wd: None,
+            fixed_no_omc_init_commit: None,
         }
     }
 
     pub(crate) fn commit_fixed(
         &mut self,
         fixed_traces: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+        fixed_traces_no_omc_init: BTreeMap<usize, RowMajorMatrix<<E as ExtensionField>::BaseField>>,
     ) -> Result<(), ZKVMError> {
         if !fixed_traces.is_empty() {
             let fixed_commit_wd =
@@ -438,7 +667,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             self.fixed_commit_wd = None;
             self.fixed_commit = None;
         }
+
+        if !fixed_traces_no_omc_init.is_empty() {
+            let fixed_commit_wd = PCS::batch_commit(
+                &self.pp,
+                fixed_traces_no_omc_init.into_values().collect_vec(),
+            )
+            .map_err(ZKVMError::PCSError)?;
+            let fixed_commit = PCS::get_pure_commitment(&fixed_commit_wd);
+            self.fixed_no_omc_init_commit_wd = Some(Arc::new(fixed_commit_wd));
+            self.fixed_no_omc_init_commit = Some(fixed_commit);
+        } else {
+            self.fixed_no_omc_init_commit_wd = None;
+            self.fixed_no_omc_init_commit = None;
+        }
         Ok(())
+    }
+
+    pub(crate) fn set_program_entry_pc(&mut self, entry_pc: u32) {
+        self.entry_pc = entry_pc;
+    }
+
+    pub fn has_fixed_commitment(&self) -> bool {
+        self.fixed_commit_wd.is_some() || self.fixed_no_omc_init_commit_wd.is_some()
     }
 }
 
@@ -446,12 +697,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     pub fn get_vk_slow(&self) -> ZKVMVerifyingKey<E, PCS> {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
+            entry_pc: self.entry_pc,
             circuit_vks: self
                 .circuit_pks
                 .iter()
                 .map(|(name, pk)| (name.clone(), pk.vk.clone()))
                 .collect(),
             fixed_commit: self.fixed_commit.clone(),
+            fixed_no_omc_init_commit: self.fixed_no_omc_init_commit.clone(),
             // expression for global state in/out
             initial_global_state_expr: self.initial_global_state_expr.clone(),
             finalize_global_state_expr: self.finalize_global_state_expr.clone(),
@@ -472,9 +725,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 ))]
 pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vp: PCS::VerifierParam,
+    // entry program counter
+    pub entry_pc: u32,
     // vk for opcode and table circuits
     pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     // expression for global state in/out
     pub initial_global_state_expr: Expression<E>,
     pub finalize_global_state_expr: Expression<E>,

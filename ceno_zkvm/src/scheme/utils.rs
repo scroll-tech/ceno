@@ -1,7 +1,7 @@
 use crate::{
     scheme::{
         constants::MIN_PAR_SIZE,
-        hal::{MainSumcheckProver, ProofInput, ProverDevice},
+        hal::{ProofInput, ProverDevice},
     },
     structs::ComposedConstrainSystem,
 };
@@ -28,50 +28,6 @@ use rayon::{
 };
 use std::{iter, sync::Arc};
 use witness::next_pow2_instance_padding;
-
-// first computes the masked mle'[j] = mle[j] if j < num_instance, else default
-// then split it into `num_parts` smaller mles
-pub(crate) fn masked_mle_split_to_chunks<'a, 'b, E: ExtensionField>(
-    mle: &'a MultilinearExtension<'a, E>,
-    num_instance: usize,
-    num_chunks: usize,
-    default: E,
-) -> Vec<MultilinearExtension<'b, E>> {
-    assert!(num_chunks.is_power_of_two());
-    assert!(
-        num_instance <= mle.evaluations().len(),
-        "num_instance {num_instance} > {}",
-        mle.evaluations().len()
-    );
-
-    // TODO: when mle.len() is two's power, we should avoid the clone
-    (0..num_chunks)
-        .into_par_iter()
-        .map(|part_idx| {
-            let n = mle.evaluations().len() / num_chunks;
-
-            match mle.evaluations() {
-                FieldType::Ext(evals) => (part_idx * n..(part_idx + 1) * n)
-                    .into_par_iter()
-                    .with_min_len(64)
-                    .map(|i| if i < num_instance { evals[i] } else { default })
-                    .collect::<Vec<_>>()
-                    .into_mle(),
-                FieldType::Base(evals) => (part_idx * n..(part_idx + 1) * n)
-                    .map(|i| {
-                        if i < num_instance {
-                            E::from(evals[i])
-                        } else {
-                            default
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .into_mle(),
-                _ => unreachable!(),
-            }
-        })
-        .collect::<Vec<_>>()
-}
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
@@ -154,6 +110,11 @@ macro_rules! tower_mle_4 {
             })
             .unzip()
     }};
+}
+
+pub fn log2_strict_usize(n: usize) -> usize {
+    assert!(n.is_power_of_two());
+    n.trailing_zeros() as usize
 }
 
 /// infer logup witness from last layer
@@ -254,45 +215,80 @@ pub(crate) fn infer_tower_logup_witness<'a, E: ExtensionField>(
         .collect_vec()
 }
 
-/// infer tower witness from last layer
-pub(crate) fn infer_tower_product_witness<E: ExtensionField>(
+/// Infer tower witness from input layer (layer 0 is the output layer and layer n is the input layer).
+/// The relation between layer i and layer i+1 is as follows:
+///      prod[i][b] = ∏_s prod[i+1][s,b]
+/// where 2^s is the fanin of the product gate `num_product_fanin`.
+pub fn infer_tower_product_witness<E: ExtensionField>(
     num_vars: usize,
     last_layer: Vec<MultilinearExtension<'_, E>>,
     num_product_fanin: usize,
 ) -> Vec<Vec<MultilinearExtension<'_, E>>> {
+    // sanity check
     assert!(last_layer.len() == num_product_fanin);
-    assert_eq!(num_product_fanin % 2, 0);
-    let log2_num_product_fanin = ceil_log2(num_product_fanin);
-    let mut wit_layers =
-        (0..(num_vars / log2_num_product_fanin) - 1).fold(vec![last_layer], |mut acc, _| {
-            let next_layer = acc.last().unwrap();
-            let cur_len = next_layer[0].evaluations().len() / num_product_fanin;
-            let cur_layer: Vec<MultilinearExtension<E>> = (0..num_product_fanin)
-                .map(|index| {
-                    let mut evaluations = vec![E::ONE; cur_len];
-                    next_layer.chunks_exact(2).for_each(|f| {
-                        match (f[0].evaluations(), f[1].evaluations()) {
-                            (FieldType::Ext(f1), FieldType::Ext(f2)) => {
-                                let start: usize = index * cur_len;
-                                (start..(start + cur_len))
+    assert!(num_product_fanin.is_power_of_two());
+
+    let log2_num_product_fanin = log2_strict_usize(num_product_fanin);
+    assert!(num_vars.is_multiple_of(log2_num_product_fanin));
+    assert!(
+        last_layer
+            .iter()
+            .all(|p| p.num_vars() == num_vars - log2_num_product_fanin)
+    );
+
+    let num_layers = num_vars / log2_num_product_fanin;
+
+    let mut wit_layers = Vec::with_capacity(num_layers);
+    wit_layers.push(last_layer);
+
+    for _ in (0..num_layers - 1).rev() {
+        let input_layer = wit_layers.last().unwrap();
+        let output_len = input_layer[0].evaluations().len() / num_product_fanin;
+
+        let output_layer: Vec<MultilinearExtension<E>> = (0..num_product_fanin)
+            .map(|index| {
+                // avoid the overhead of vector initialization
+                let mut evaluations: Vec<E> = Vec::with_capacity(output_len);
+                let remaining = evaluations.spare_capacity_mut();
+
+                input_layer.chunks_exact(2).enumerate().for_each(|(i, f)| {
+                    match (f[0].evaluations(), f[1].evaluations()) {
+                        (FieldType::Ext(f1), FieldType::Ext(f2)) => {
+                            let start: usize = index * output_len;
+
+                            if i == 0 {
+                                (start..(start + output_len))
                                     .into_par_iter()
-                                    .zip(evaluations.par_iter_mut())
+                                    .zip(remaining.par_iter_mut())
                                     .with_min_len(MIN_PAR_SIZE)
-                                    .map(|(index, evaluations)| {
-                                        *evaluations *= f1[index] * f2[index]
-                                    })
-                                    .collect()
+                                    .for_each(|(index, evaluations)| {
+                                        evaluations.write(f1[index] * f2[index]);
+                                    });
+                            } else {
+                                (start..(start + output_len))
+                                    .into_par_iter()
+                                    .zip(remaining.par_iter_mut())
+                                    .with_min_len(MIN_PAR_SIZE)
+                                    .for_each(|(index, evaluations)| {
+                                        evaluations.write(f1[index] * f2[index]);
+                                    });
                             }
-                            _ => unreachable!("must be extension field"),
                         }
-                    });
-                    evaluations.into_mle()
-                })
-                .collect_vec();
-            acc.push(cur_layer);
-            acc
-        });
+                        _ => unreachable!("must be extension field"),
+                    }
+                });
+
+                unsafe {
+                    evaluations.set_len(output_len);
+                }
+                evaluations.into_mle()
+            })
+            .collect_vec();
+        wit_layers.push(output_layer);
+    }
+
     wit_layers.reverse();
+
     wit_layers
 }
 
@@ -309,72 +305,70 @@ pub fn build_main_witness<
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     PD: ProverDevice<PB>,
 >(
-    device: &PD,
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'a, PB>,
     challenges: &[E; 2],
-) -> (Vec<Arc<PB::MultilinearPoly<'a>>>, bool) {
-    let (mles, is_padded) = {
-        let ComposedConstrainSystem {
-            zkvm_v1_css: cs,
-            gkr_circuit,
-        } = composed_cs;
-        let log2_num_instances = input.log2_num_instances();
-        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+) -> Vec<Arc<PB::MultilinearPoly<'a>>> {
+    let ComposedConstrainSystem {
+        zkvm_v1_css: cs,
+        gkr_circuit,
+    } = composed_cs;
+    let log2_num_instances = input.log2_num_instances();
+    let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
-        // sanity check
-        assert_eq!(input.witness.len(), cs.num_witin as usize);
+    // sanity check
+    assert_eq!(input.witness.len(), cs.num_witin as usize);
 
-        // structural witness can be empty. In this case they are `eq`, and will be filled later
-        assert!(
-            input.structural_witness.len() == cs.num_structural_witin as usize
-                || input.structural_witness.is_empty(),
-        );
-        assert_eq!(input.fixed.len(), cs.num_fixed);
+    // structural witness can be empty. In this case they are `eq`, and will be filled later
+    assert!(
+        input.structural_witness.len() == cs.num_structural_witin as usize
+            || input.structural_witness.is_empty(),
+    );
+    assert_eq!(input.fixed.len(), cs.num_fixed);
 
-        // check all witness size are power of 2
-        assert!(
-            input
-                .witness
-                .iter()
-                .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
-        );
-
-        if !input.structural_witness.is_empty() {
-            assert!(
-                input
-                    .structural_witness
-                    .iter()
-                    .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
-            );
-        }
-
-        if let Some(gkr_circuit) = gkr_circuit {
-            // opcode must have at least one read/write/lookup
-            assert!(
-                cs.lk_expressions.is_empty()
-                    || !cs.r_expressions.is_empty()
-                    || !cs.w_expressions.is_empty(),
-                "assert opcode circuit"
-            );
-
-            let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
-                gkr_circuit,
-                &input.witness,
-                &input.structural_witness,
-                &input.fixed,
-                &input.public_input,
-                challenges,
-            );
-            (gkr_circuit_out.0.0, true)
-        } else {
-            (
-                <PD as MainSumcheckProver<PB>>::table_witness(device, input, cs, challenges),
-                false,
-            )
-        }
+    let Some(gkr_circuit) = gkr_circuit else {
+        panic!("empty gkr-iop")
     };
-    (mles, is_padded)
+
+    // circuit must have at least one read/write/lookup
+    assert!(
+        cs.r_expressions.len()
+            + cs.w_expressions.len()
+            + cs.lk_expressions.len()
+            + cs.r_table_expressions.len()
+            + cs.w_table_expressions.len()
+            + cs.lk_table_expressions.len()
+            > 0,
+        "assert circuit"
+    );
+
+    let pub_io_mles = cs
+        .instance_openings
+        .iter()
+        .map(|instance| input.public_input[instance.0].clone())
+        .collect_vec();
+
+    // check all witness size are power of 2
+    assert!(
+        input
+            .witness
+            .iter()
+            .chain(&input.structural_witness)
+            .chain(&input.fixed)
+            .chain(&pub_io_mles)
+            .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
+    );
+
+    let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
+        gkr_circuit,
+        &input.witness,
+        &input.structural_witness,
+        &input.fixed,
+        &pub_io_mles,
+        &input.pub_io_evals,
+        challenges,
+    );
+    gkr_circuit_out.0.0
 }
 
 pub fn gkr_witness<
@@ -388,7 +382,8 @@ pub fn gkr_witness<
     phase1_witness_group: &[Arc<PB::MultilinearPoly<'b>>],
     structural_witness: &[Arc<PB::MultilinearPoly<'b>>],
     fixed: &[Arc<PB::MultilinearPoly<'b>>],
-    pub_io: &[Arc<PB::MultilinearPoly<'b>>],
+    pub_io_mles: &[Arc<PB::MultilinearPoly<'b>>],
+    pub_io_evals: &[Either<E::BaseField, E>],
     challenges: &[E],
 ) -> (GKRCircuitWitness<'b, PB>, GKRCircuitOutput<'b, PB>) {
     // layer order from output to input
@@ -402,20 +397,35 @@ pub fn gkr_witness<
         first_layer
             .in_eval_expr
             .iter()
-            .take(phase1_witness_group.len())
-            .enumerate()
-            .for_each(|(index, witin)| {
-                witness_mle_flatten[*witin] = Some(phase1_witness_group[index].clone());
+            .take(first_layer.n_witin)
+            .zip_eq(phase1_witness_group.iter())
+            .for_each(|(index, witin_mle)| {
+                witness_mle_flatten[*index] = Some(witin_mle.clone());
             });
 
-        // TODO process fixed (and probably short) mle
-        assert_eq!(
-            first_layer.in_eval_expr.len(),
-            phase1_witness_group.len(),
-            "TODO process fixed (and probably short) mle"
-        );
-        // XXX currently fixed poly not support in layers > 1
+        first_layer
+            .in_eval_expr
+            .iter()
+            .skip(first_layer.n_witin)
+            .take(first_layer.n_fixed)
+            .zip_eq(fixed.iter())
+            .for_each(|(index, fixed_mle)| {
+                witness_mle_flatten[*index] = Some(fixed_mle.clone());
+            });
 
+        first_layer
+            .in_eval_expr
+            .iter()
+            .skip(first_layer.n_witin + first_layer.n_fixed)
+            .take(first_layer.n_instance)
+            .zip_eq(pub_io_mles.iter())
+            .for_each(|(index, pubio_mle)| {
+                witness_mle_flatten[*index] = Some(pubio_mle.clone());
+            });
+
+        // XXX currently fixed poly not support in layers > 1
+        // TODO process fixed (and probably short) mle
+        //
         // first_layer
         //     .in_eval_expr
         //     .par_iter()
@@ -461,15 +471,22 @@ pub fn gkr_witness<
             } else {
                 Either::Right(iter::empty())
             })
-            .chain(fixed.iter().cloned())
             .collect_vec();
+
+        assert_eq!(
+            current_layer_wits.len(),
+            layer.n_witin
+                + layer.n_fixed
+                + layer.n_instance
+                + if i == 0 { layer.n_structural_witin } else { 0 }
+        );
 
         // infer current layer output
         let current_layer_output: Vec<Arc<PB::MultilinearPoly<'b>>> =
             <PD as ProtocolWitnessGeneratorProver<PB>>::layer_witness(
                 layer,
                 &current_layer_wits,
-                pub_io,
+                pub_io_evals,
                 challenges,
             );
         layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
@@ -481,7 +498,6 @@ pub fn gkr_witness<
             .flat_map(|(_, out_eval)| out_eval)
             .zip_eq(&current_layer_output)
             .for_each(|(out_eval, out_mle)| match out_eval {
-                // note: Linear (x - b)/a has been done and encode in expression
                 EvalExpression::Single(out) | EvalExpression::Linear(out, _, _) => {
                     witness_mle_flatten[*out] = Some(out_mle.clone());
                 }

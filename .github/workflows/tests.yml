@@ -15,7 +15,7 @@ concurrency:
 jobs:
   tests:
     name: Run Tests
-    timeout-minutes: 30
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
 
     steps:
@@ -45,7 +45,26 @@ jobs:
       - name: Install cargo make
         run: |
           cargo make --version || cargo install cargo-make
+
+      - name: Run aggregation tests
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
+        run: |
+          cargo run --release --package ceno_zkvm --bin e2e -- \
+            --platform=ceno --max-cycle-per-shard=1600 \
+            examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+          mkdir -p ceno_recursion/src/imported
+          mv proof.bin ceno_recursion/src/imported/
+          mv vk.bin ceno_recursion/src/imported/
+          cargo test --release --package ceno_recursion --tests -- --ignored
+
       - name: run test
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
         run: cargo make tests
+
       - name: run test + goldilocks
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
         run: cargo make tests_goldilock
+

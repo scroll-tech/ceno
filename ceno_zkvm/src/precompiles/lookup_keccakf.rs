@@ -14,13 +14,13 @@ use gkr_iop::{
         layer::Layer,
         mock::MockProver,
     },
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
     utils::lk_multiplicity::LkMultiplicity,
 };
 use itertools::{Itertools, iproduct, izip, zip_eq};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
+    Expression, StructuralWitIn, ToExpr, WitIn,
     mle::PointAndEval,
     util::{ceil_log2, max_usable_threads},
 };
@@ -40,6 +40,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     chip_handler::MemoryExpr,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
@@ -184,15 +185,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 //     cb.create_fixed(|| format!("keccak_fixed_{}", id))
                 // })),
                 array::from_fn(|id| {
-                    cb.create_structural_witin(
-                        || format!("keccak_eq_{}", id),
-                        StructuralWitInType::EqualDistanceSequence {
-                            max_len: 0,
-                            offset: 0,
-                            multi_factor: 0,
-                            descending: false,
-                        },
-                    )
+                    cb.create_placeholder_structural_witin(|| format!("keccak_eq_{}", id))
                 }),
             )
         };
@@ -991,8 +984,12 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
 
     let (out_evals, mut chip) = layout.finalize(&mut cb);
 
-    let layer =
-        Layer::from_circuit_builder(&cb, "Rounds".to_string(), layout.n_challenges, out_evals);
+    let layer = Layer::from_circuit_builder(
+        &cb,
+        "lookup_keccak".to_string(),
+        layout.n_challenges,
+        out_evals,
+    );
     chip.add_layer(layer);
 
     Ok((
@@ -1025,6 +1022,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     verify: bool,
     test_outputs: bool,
 ) -> Result<GKRProof<E>, BackendError> {
+    let mut shard_ctx = ShardContext::default();
     let num_instances = states.len();
     let num_instances_rounds = num_instances * ROUNDS.next_power_of_two();
     let log2_num_instance_rounds = ceil_log2(num_instances_rounds);
@@ -1073,9 +1071,11 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     );
     let raw_witin_iter =
         phase1_witness.par_batch_iter_mut(num_instance_per_batch * ROUNDS.next_power_of_two());
+    let shard_ctx_vec = shard_ctx.get_forked();
     raw_witin_iter
         .zip_eq(instances.par_chunks(num_instance_per_batch))
-        .for_each(|(instances, steps)| {
+        .zip(shard_ctx_vec)
+        .for_each(|((instances, steps), mut shard_ctx)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
                 .chunks_mut(num_witin as usize * ROUNDS.next_power_of_two())
@@ -1087,6 +1087,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                             .vm_state
                             .assign_instance(
                                 instance,
+                                &shard_ctx,
                                 &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
                             )
                             .expect("assign vm_state error");
@@ -1095,6 +1096,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                                 mem_config
                                     .assign_op(
                                         instance,
+                                        &mut shard_ctx,
                                         &mut lk_multiplicity,
                                         10,
                                         &MemOp {
@@ -1148,6 +1150,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         &phase1_witness_group,
         &structural_witness,
         &fixed,
+        &[],
         &[],
         &challenges,
     );
@@ -1222,6 +1225,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
+    let selector_ctxs = vec![SelectorContext::new(0, num_instances, log2_num_instance_rounds); 3];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -1231,7 +1235,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             &[],
             &challenges,
             &mut prover_transcript,
-            num_instances,
+            &selector_ctxs,
         )
         .expect("Failed to prove phase");
     exit_span!(span);
@@ -1258,9 +1262,10 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                     gkr_proof.clone(),
                     &out_evals,
                     &[],
+                    &[],
                     &challenges,
                     &mut verifier_transcript,
-                    num_instances,
+                    &selector_ctxs,
                 )
                 .expect("GKR verify failed");
 

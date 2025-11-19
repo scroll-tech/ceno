@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -142,13 +143,14 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         config
             .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         let rd_written = split_to_u8(step.rd().unwrap().value.after);
         config.rd_written.assign_limbs(instance, &rd_written);
@@ -189,6 +191,7 @@ mod tests {
     use crate::{
         Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
+        e2e::ShardContext,
         instructions::{
             Instruction,
             riscv::{auipc::AuipcInstruction, constants::UInt},
@@ -239,9 +242,10 @@ mod tests {
         let insn_code = encode_rv32(InsnKind::AUIPC, 0, 0, 4, imm);
         let (raw_witin, lkm) = AuipcInstruction::<E>::assign_instances(
             &config,
+            &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![StepRecord::new_i_instruction(
+            vec![&StepRecord::new_i_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                 insn_code,

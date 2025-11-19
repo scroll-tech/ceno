@@ -1,9 +1,9 @@
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramParams,
+    circuit_builder::CircuitBuilder, e2e::ShardContext, error::ZKVMError, structs::ProgramParams,
     tables::RMMCollections, witness::LkMultiplicity,
 };
 use ceno_emul::StepRecord;
-use ff_ext::{ExtensionField, FieldInto};
+use ff_ext::ExtensionField;
 use gkr_iop::{
     chip::Chip,
     gkr::{GKRCircuit, layer::Layer},
@@ -11,13 +11,13 @@ use gkr_iop::{
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::Itertools;
-use multilinear_extensions::{StructuralWitInType, ToExpr, WitIn, util::max_usable_threads};
+use multilinear_extensions::{ToExpr, util::max_usable_threads};
 use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
+use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 pub mod riscv;
 
@@ -47,16 +47,8 @@ pub trait Instruction<E: ExtensionField> {
         let zero_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
-        let selector = cb.create_structural_witin(
-            || "selector",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len: 0,
-                offset: 0,
-                multi_factor: 0,
-                descending: false,
-            },
-        );
-        let selector_type = SelectorType::Prefix(E::BaseField::ZERO, selector.expr());
+        let selector = cb.create_placeholder_structural_witin(|| "selector");
+        let selector_type = SelectorType::Prefix(selector.expr());
 
         // all shared the same selector
         let (out_evals, mut chip) = (
@@ -79,7 +71,7 @@ pub trait Instruction<E: ExtensionField> {
         cb.cs.lk_selector = Some(selector_type.clone());
         cb.cs.zero_selector = Some(selector_type.clone());
 
-        let layer = Layer::from_circuit_builder(cb, "Rounds".to_string(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
         chip.add_layer(layer);
 
         Ok((config, chip.gkr_circuit()))
@@ -93,8 +85,9 @@ pub trait Instruction<E: ExtensionField> {
     }
 
     // assign single instance giving step from trace
-    fn assign_instance(
+    fn assign_instance<'a>(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext<'a>,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -102,16 +95,16 @@ pub trait Instruction<E: ExtensionField> {
 
     fn assign_instances(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<StepRecord>,
+        steps: Vec<&StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
-        // FIXME selector is the only structural witness
+        // TODO: selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
-        let selector_witin = WitIn { id: 0 };
 
         let nthreads = max_usable_threads();
         let num_instance_per_batch = if steps.len() > 256 {
@@ -131,22 +124,32 @@ pub trait Instruction<E: ExtensionField> {
         let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
         let raw_structual_witin_iter =
             raw_structual_witin.par_batch_iter_mut(num_instance_per_batch);
+        let shard_ctx_vec = shard_ctx.get_forked();
 
         raw_witin_iter
             .zip_eq(raw_structual_witin_iter)
             .zip_eq(steps.par_chunks(num_instance_per_batch))
-            .flat_map(|((instances, structural_instance), steps)| {
-                let mut lk_multiplicity = lk_multiplicity.clone();
-                instances
-                    .chunks_mut(num_witin)
-                    .zip_eq(structural_instance.chunks_mut(num_structural_witin))
-                    .zip_eq(steps)
-                    .map(|((instance, structural_instance), step)| {
-                        set_val!(structural_instance, selector_witin, E::BaseField::ONE);
-                        Self::assign_instance(config, instance, &mut lk_multiplicity, step)
-                    })
-                    .collect::<Vec<_>>()
-            })
+            .zip(shard_ctx_vec)
+            .flat_map(
+                |(((instances, structural_instance), steps), mut shard_ctx)| {
+                    let mut lk_multiplicity = lk_multiplicity.clone();
+                    instances
+                        .chunks_mut(num_witin)
+                        .zip_eq(structural_instance.chunks_mut(num_structural_witin))
+                        .zip_eq(steps)
+                        .map(|((instance, structural_instance), step)| {
+                            *structural_instance.last_mut().unwrap() = E::BaseField::ONE;
+                            Self::assign_instance(
+                                config,
+                                &mut shard_ctx,
+                                instance,
+                                &mut lk_multiplicity,
+                                step,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                },
+            )
             .collect::<Result<(), ZKVMError>>()?;
 
         raw_witin.padding_by_strategy();

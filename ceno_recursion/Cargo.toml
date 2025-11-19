@@ -1,0 +1,69 @@
+[package]
+categories.workspace = true
+description = "Ceno Recursion"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "ceno_recursion"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+bincode.workspace = true
+ceno-examples = { path = "../examples-builder" }
+ceno_emul = { path = "../ceno_emul" }
+ceno_host = { path = "../ceno_host" }
+ceno_zkvm = { path = "../ceno_zkvm" }
+clap.workspace = true
+ff_ext.workspace = true
+gkr_iop = { path = "../gkr_iop" }
+itertools.workspace = true
+mpcs.workspace = true
+multilinear_extensions.workspace = true
+p3.workspace = true
+parse-size = "1.1"
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sumcheck.workspace = true
+tracing.workspace = true
+tracing-forest.workspace = true
+tracing-subscriber.workspace = true
+transcript.workspace = true
+whir.workspace = true
+witness.workspace = true
+
+# openvm
+openvm = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false, features = ["bench-metrics"] }
+openvm-continuations = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-native-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-native-compiler = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-native-compiler-derive = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-native-recursion = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-rv32im-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm-sdk = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+
+# openvm = { path = "../../openvm-scroll-tech/crates/toolchain/openvm", default-features = false }
+# openvm-circuit = { path = "../../openvm-scroll-tech/crates/vm", default-features = false, features = ["bench-metrics"] }
+# openvm-native-circuit = { path = "../../openvm-scroll-tech/extensions/native/circuit", default-features = false }
+# openvm-sdk = { path = "../../openvm-scroll-tech/crates/sdk", default-features = false }
+# openvm-native-compiler = { path = "../../openvm-scroll-tech/extensions/native/compiler", default-features = false }
+# openvm-native-compiler-derive = { path = "../../openvm-scroll-tech/extensions/native/compiler/derive", default-features = false }
+# openvm-native-recursion = { path = "../../openvm-scroll-tech/extensions/native/recursion", default-features = false }
+# openvm-continuations = { path = "../../openvm-scroll-tech/crates/continuations", default-features = false }
+# openvm-rv32im-circuit = { path = "../../openvm-scroll-tech/extensions/rv32im/circuit", default-features = false }
+
+openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.1.1", default-features = false }
+openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.1.1", default-features = false }
+p3-monty-31 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "539bbc84085efb609f4f62cb03cf49588388abdb" }
+
+[features]
+bench-metrics = ["openvm-circuit/bench-metrics"]
+default = ["parallel", "nightly-features"]
+nightly-features = [
+  "ceno_zkvm/nightly-features",
+  "openvm-stark-sdk/nightly-features",
+]
+parallel = ["openvm-stark-backend/parallel"]

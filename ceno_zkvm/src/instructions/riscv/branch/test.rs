@@ -6,6 +6,7 @@ use ff_ext::{ExtensionField, GoldilocksExt2};
 use super::*;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::Instruction,
     scheme::mock_prover::{MOCK_PC_START, MockProver},
@@ -39,9 +40,10 @@ fn impl_opcode_beq(equal: bool) {
     let pc_offset = if equal { 8 } else { PC_STEP_SIZE };
     let (raw_witin, lkm) = BeqInstruction::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
             insn_code,
@@ -79,9 +81,10 @@ fn impl_opcode_bne(equal: bool) {
     let pc_offset = if equal { PC_STEP_SIZE } else { 8 };
     let (raw_witin, lkm) = BneInstruction::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
             insn_code,
@@ -122,9 +125,10 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     let insn_code = encode_rv32(InsnKind::BLTU, 2, 3, 0, -8);
     let (raw_witin, lkm) = BltuInstruction::assign_instances(
         &config,
+        &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -166,9 +170,10 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     let insn_code = encode_rv32(InsnKind::BGEU, 2, 3, 0, -8);
     let (raw_witin, lkm) = BgeuInstruction::assign_instances(
         &config,
+        &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -217,9 +222,10 @@ fn impl_blt_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
     let insn_code = encode_rv32(InsnKind::BLT, 2, 3, 0, -8);
     let (raw_witin, lkm) = BltInstruction::assign_instances(
         &config,
+        &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -268,9 +274,10 @@ fn impl_bge_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
     let insn_code = encode_rv32(InsnKind::BGE, 2, 3, 0, -8);
     let (raw_witin, lkm) = BgeInstruction::assign_instances(
         &config,
+        &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,

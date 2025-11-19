@@ -1,18 +1,16 @@
 use super::hal::{
-    DeviceTransporter, MainSumcheckProver, OpeningProver, ProverDevice, TowerProver, TraceCommitter,
+    DeviceTransporter, MainSumcheckEvals, MainSumcheckProver, OpeningProver, ProverDevice,
+    TowerProver, TraceCommitter,
 };
 use crate::{
-    circuit_builder::ConstraintSystem,
     error::ZKVMError,
     scheme::{
-        constants::{NUM_FANIN, NUM_FANIN_LOGUP},
-        hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
-        utils::{
-            infer_tower_logup_witness, infer_tower_product_witness, masked_mle_split_to_chunks,
-            wit_infer_by_expr,
-        },
+        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        hal::{DeviceProvingKey, EccQuarkProver, ProofInput, TowerProverSpec},
+        septic_curve::{SepticExtension, SepticPoint, SymbolicSepticExtension},
+        utils::{infer_tower_logup_witness, infer_tower_product_witness},
     },
-    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
+    structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -20,17 +18,21 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
+    selector::{SelectorContext, SelectorType},
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
-    Expression, Instance, WitnessId,
+    Expression,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -47,6 +49,256 @@ pub type TowerRelationOutput<E> = (
     Vec<Vec<E>>,
     Vec<Vec<E>>,
 );
+
+// accumulate N=2^n EC points into one EC point using affine coordinates
+// in one layer which borrows ideas from the [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
+pub struct CpuEccProver;
+
+impl CpuEccProver {
+    pub fn create_ecc_proof<'a, E: ExtensionField>(
+        num_instances: usize,
+        xs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        ys: Vec<Arc<MultilinearExtension<'a, E>>>,
+        invs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        transcript: &mut impl Transcript<E>,
+    ) -> EccQuarkProof<E> {
+        assert_eq!(xs.len(), SEPTIC_EXTENSION_DEGREE);
+        assert_eq!(ys.len(), SEPTIC_EXTENSION_DEGREE);
+
+        let n = xs[0].num_vars() - 1;
+        tracing::debug!(
+            "Creating EC Summation Quark proof with {} points in {n} variables",
+            num_instances
+        );
+
+        let out_rt = transcript.sample_and_append_vec(b"ecc", n);
+        let num_threads = optimal_sumcheck_threads(out_rt.len());
+
+        // expression with add (3 zero constrains) and bypass (2 zero constrains)
+        let alpha_pows = transcript.sample_and_append_challenge_pows(
+            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2,
+            b"ecc_alpha",
+        );
+        let mut alpha_pows_iter = alpha_pows.iter();
+
+        let mut expr_builder = VirtualPolynomialsBuilder::new(num_threads, out_rt.len());
+
+        let sel_add = SelectorType::QuarkBinaryTreeLessThan(0.into());
+        let sel_add_ctx = SelectorContext {
+            offset: 0,
+            num_instances,
+            num_vars: n,
+        };
+        let mut sel_add_mle: MultilinearExtension<'_, E> =
+            sel_add.compute(&out_rt, &sel_add_ctx).unwrap();
+        // we construct sel_bypass witness here
+        // verifier can derive it via `sel_bypass = eq - sel_add - sel_last_onehot`
+        let mut sel_bypass_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
+        match sel_add_mle.evaluations() {
+            FieldType::Ext(sel_add_mle) => sel_add_mle
+                .par_iter()
+                .zip_eq(sel_bypass_mle.par_iter_mut())
+                .for_each(|(sel_add, sel_bypass)| {
+                    if *sel_add != E::ZERO {
+                        *sel_bypass = E::ZERO;
+                    }
+                }),
+            _ => unreachable!(),
+        }
+        *sel_bypass_mle.last_mut().unwrap() = E::ZERO;
+        let mut sel_bypass_mle = sel_bypass_mle.into_mle();
+        let sel_add_expr = expr_builder.lift(sel_add_mle.to_either());
+        let sel_bypass_expr = expr_builder.lift(sel_bypass_mle.to_either());
+
+        let mut exprs_add = vec![];
+        let mut exprs_bypass = vec![];
+
+        let filter_bj = |v: &[Arc<MultilinearExtension<'_, E>>], j: usize| {
+            v.iter()
+                .map(|v| {
+                    v.get_base_field_vec()
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| *i % 2 == j)
+                        .map(|(_, v)| v)
+                        .cloned()
+                        .collect_vec()
+                        .into_mle()
+                })
+                .collect_vec()
+        };
+        // build x[b,0], x[b,1], y[b,0], y[b,1]
+        let mut x0 = filter_bj(&xs, 0);
+        let mut y0 = filter_bj(&ys, 0);
+        let mut x1 = filter_bj(&xs, 1);
+        let mut y1 = filter_bj(&ys, 1);
+        // build x[1,b], y[1,b], s[1,b]
+        let mut x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+        let mut y3 = ys.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+        let mut s = invs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+
+        let s = SymbolicSepticExtension::new(
+            s.iter_mut()
+                .map(|s| expr_builder.lift(s.to_either()))
+                .collect(),
+        );
+        let x0 = SymbolicSepticExtension::new(
+            x0.iter_mut()
+                .map(|x| expr_builder.lift(x.to_either()))
+                .collect(),
+        );
+        let y0 = SymbolicSepticExtension::new(
+            y0.iter_mut()
+                .map(|y| expr_builder.lift(y.to_either()))
+                .collect(),
+        );
+        let x1 = SymbolicSepticExtension::new(
+            x1.iter_mut()
+                .map(|x| expr_builder.lift(x.to_either()))
+                .collect(),
+        );
+        let y1 = SymbolicSepticExtension::new(
+            y1.iter_mut()
+                .map(|y| expr_builder.lift(y.to_either()))
+                .collect(),
+        );
+        let x3 = SymbolicSepticExtension::new(
+            x3.iter_mut()
+                .map(|x| expr_builder.lift(x.to_either()))
+                .collect(),
+        );
+        let y3 = SymbolicSepticExtension::new(
+            y3.iter_mut()
+                .map(|y| expr_builder.lift(y.to_either()))
+                .collect(),
+        );
+        // affine addition
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1]) with b != (1,...,1)
+        exprs_add.extend(
+            (s.clone() * (&x0 - &x1) - (&y0 - &y1))
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        // zerocheck: 0 = s[1,b]^2 - x[b,0] - x[b,1] - x[1,b] with b != (1,...,1)
+        exprs_add.extend(
+            ((&s * &s) - &x0 - &x1 - &x3)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b]) with b != (1,...,1)
+        exprs_add.extend(
+            (s.clone() * (&x0 - &x3) - (&y0 + &y3))
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        let exprs_add = exprs_add.into_iter().sum::<Expression<E>>() * sel_add_expr;
+
+        // deal with bypass
+        // 0 = (x[1,b] - x[b,0])
+        exprs_bypass.extend(
+            (&x3 - &x0)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+        // 0 = (y[1,b] - y[b,0])
+        exprs_bypass.extend(
+            (&y3 - &y0)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+        assert!(alpha_pows_iter.next().is_none());
+
+        let exprs_bypass = exprs_bypass.into_iter().sum::<Expression<E>>() * sel_bypass_expr;
+
+        let (zerocheck_proof, state) = IOPProverState::prove(
+            expr_builder.to_virtual_polys(&[exprs_add + exprs_bypass], &[]),
+            transcript,
+        );
+
+        let rt = state.collect_raw_challenges();
+        let evals = state.get_mle_flatten_final_evaluations();
+
+        // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
+        assert_eq!(evals.len(), 2 + SEPTIC_EXTENSION_DEGREE * 7);
+
+        let last_evaluation_index = (1 << n) - 1;
+        let x3 = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+        let y3 = ys.iter().map(|y| y.as_view_slice(2, 1)).collect_vec();
+        let final_sum_x: SepticExtension<E::BaseField> = (x3.iter())
+            .map(|x| x.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
+            .collect_vec()
+            .into();
+        let final_sum_y: SepticExtension<E::BaseField> = (y3.iter())
+            .map(|y| y.get_base_field_vec()[last_evaluation_index - 1]) // x[1,...,1,0]
+            .collect_vec()
+            .into();
+        let final_sum = SepticPoint::from_affine(final_sum_x, final_sum_y);
+
+        #[cfg(feature = "sanity-check")]
+        {
+            let s = invs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
+            let x0 = filter_bj(&xs, 0);
+            let y0 = filter_bj(&ys, 0);
+            let x1 = filter_bj(&xs, 1);
+            let y1 = filter_bj(&ys, 1);
+
+            let evals = &evals[2..];
+            // check evaluations
+            for i in 0..SEPTIC_EXTENSION_DEGREE {
+                assert_eq!(s[i].evaluate(&rt), evals[i]);
+                assert_eq!(x0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE + i]);
+                assert_eq!(y0[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 2 + i]);
+                assert_eq!(x1[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 3 + i]);
+                assert_eq!(y1[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 4 + i]);
+                assert_eq!(x3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 5 + i]);
+                assert_eq!(y3[i].evaluate(&rt), evals[SEPTIC_EXTENSION_DEGREE * 6 + i]);
+            }
+        }
+        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
+
+        EccQuarkProof {
+            zerocheck_proof,
+            num_instances,
+            evals,
+            rt,
+            sum: final_sum,
+        }
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<CpuBackend<E, PCS>>
+    for CpuProver<CpuBackend<E, PCS>>
+{
+    fn prove_ec_sum_quark<'a>(
+        &self,
+        num_instances: usize,
+        xs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        ys: Vec<Arc<MultilinearExtension<'a, E>>>,
+        invs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<EccQuarkProof<E>, ZKVMError> {
+        Ok(CpuEccProver::create_ecc_proof(
+            num_instances,
+            xs,
+            ys,
+            invs,
+            transcript,
+        ))
+    }
+}
+
 pub struct CpuTowerProver;
 
 impl CpuTowerProver {
@@ -59,7 +311,7 @@ impl CpuTowerProver {
         #[derive(Debug, Clone)]
         enum GroupedMLE<'a, E: ExtensionField> {
             Prod((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in prod_specs
-            Logup((usize, Vec<MultilinearExtension<'a, E>>)), /* usize is the index in logup_specs */
+            Logup((usize, Vec<MultilinearExtension<'a, E>>)), // usize is the index in logup_specs
         }
 
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
@@ -252,7 +504,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
     for CpuProver<CpuBackend<E, PCS>>
 {
     fn commit_traces<'a>(
-        &mut self,
+        &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
         Vec<MultilinearExtension<'a, E>>,
@@ -297,8 +549,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [ArcMultilinearExtension<'b, E>],
-        is_padded: bool,
-        challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
         Vec<TowerProverSpec<'c, CpuBackend<E, PCS>>>,
@@ -311,12 +561,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = composed_cs;
-        let num_instances_with_rotation =
-            input.num_instances << composed_cs.rotation_vars().unwrap_or(0);
         let num_var_with_rotation =
             input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
-
-        let chip_record_alpha = challenges[0];
 
         let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
         let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
@@ -340,39 +586,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let mut r_set_last_layer = r_set_wit
             .iter()
             .chain(w_set_wit.iter())
-            .map(|wit| {
-                if is_padded {
-                    wit.as_view_chunks(NUM_FANIN)
-                } else {
-                    masked_mle_split_to_chunks(wit, num_instances_with_rotation, NUM_FANIN, E::ONE)
-                }
-            })
+            .map(|wit| wit.as_view_chunks(NUM_FANIN))
             .collect::<Vec<_>>();
         let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
 
         let mut lk_numerator_last_layer = lk_n_wit
             .iter()
             .chain(lk_d_wit.iter())
-            .enumerate()
-            .map(|(i, wit)| {
-                if is_padded {
-                    wit.as_view_chunks(NUM_FANIN)
-                } else {
-                    let default = if i < lk_n_wit.len() {
-                        // For table circuit, the last layer's length is always two's power
-                        // so the padding will not happen, therefore we can use any value here.
-                        E::ONE
-                    } else {
-                        chip_record_alpha
-                    };
-                    masked_mle_split_to_chunks(
-                        wit,
-                        num_instances_with_rotation,
-                        NUM_FANIN_LOGUP,
-                        default,
-                    )
-                }
-            })
+            .map(|wit| wit.as_view_chunks(NUM_FANIN))
             .collect::<Vec<_>>();
         let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
         exit_span!(span);
@@ -513,8 +734,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [Arc<MultilinearExtension<'b, E>>],
-        is_padded: bool,
-        challenges: &[E; 2],
+        _challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
     ) -> TowerRelationOutput<E>
     where
@@ -524,7 +744,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         // First build tower witness
         let span = entered_span!("build_tower_witness", profiling_2 = true);
         let (mut out_evals, prod_specs, logup_specs) =
-            self.build_tower_witness(composed_cs, input, records, is_padded, challenges);
+            self.build_tower_witness(composed_cs, input, records);
         exit_span!(span);
 
         // Then prove the tower relation
@@ -542,49 +762,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
-    #[allow(clippy::type_complexity)]
-    #[tracing::instrument(skip_all, name = "table_witness", fields(profiling_2), level = "trace")]
-    fn table_witness<'a>(
-        &self,
-        input: &ProofInput<'a, CpuBackend<<CpuBackend<E, PCS> as ProverBackend>::E, PCS>>,
-        cs: &ConstraintSystem<<CpuBackend<E, PCS> as ProverBackend>::E>,
-        challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
-    ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
-        // main constraint: lookup denominator and numerator record witness inference
-        let span = entered_span!("witness_infer", profiling_2 = true);
-        let records: Vec<ArcMultilinearExtension<'_, E>> = cs
-            .r_table_expressions
-            .par_iter()
-            .map(|r| &r.expr)
-            .chain(cs.r_expressions.par_iter())
-            .chain(cs.w_table_expressions.par_iter().map(|w| &w.expr))
-            .chain(cs.w_expressions.par_iter())
-            .chain(
-                cs.lk_table_expressions
-                    .par_iter()
-                    .map(|lk| &lk.multiplicity),
-            )
-            .chain(cs.lk_table_expressions.par_iter().map(|lk| &lk.values))
-            .chain(cs.lk_expressions.par_iter())
-            .map(|expr| {
-                assert_eq!(expr.degree(), 1);
-                wit_infer_by_expr(
-                    expr,
-                    cs.num_witin,
-                    cs.num_structural_witin,
-                    cs.num_fixed as WitnessId,
-                    &input.fixed,
-                    &input.witness,
-                    &input.structural_witness,
-                    &input.public_input,
-                    challenges,
-                )
-            })
-            .collect();
-        exit_span!(span);
-        records
-    }
-
     #[allow(clippy::type_complexity)]
     #[tracing::instrument(
         skip_all,
@@ -613,95 +790,104 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             gkr_circuit,
         } = composed_cs;
 
-        let num_instances = input.num_instances;
-        let next_pow2_instances = next_pow2_instance_padding(num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instances);
+        let num_instances = input.num_instances();
+        let log2_num_instances = input.log2_num_instances();
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
-        if let Some(gkr_circuit) = gkr_circuit {
-            let pub_io_evals = // get public io evaluations
-                cs.instance_name_map
-                    .keys()
-                    .sorted()
-                    .map(|Instance(inst_id)| {
-                        let mle = &input.public_input[*inst_id];
-                        assert_eq!(
-                            mle.evaluations.len(),
-                            1,
-                            "doesnt support instance with evaluation length > 1"
-                        );
-                        match mle.evaluations() {
-                            FieldType::Base(smart_slice) => E::from(smart_slice[0]),
-                            FieldType::Ext(smart_slice) => smart_slice[0],
-                            _ => unreachable!(),
-                        }
-                    })
-                    .collect_vec();
-            let GKRProverOutput {
-                gkr_proof,
-                opening_evaluations,
-            } = gkr_circuit.prove::<CpuBackend<E, PCS>, CpuProver<_>>(
-                num_threads,
-                num_var_with_rotation,
-                gkr::GKRCircuitWitness {
-                    layers: vec![LayerWitness(
-                        chain!(&input.witness, &input.structural_witness, &input.fixed)
-                            .cloned()
-                            .collect_vec(),
-                    )],
-                },
-                // eval value doesnt matter as it wont be used by prover
-                &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
-                &pub_io_evals,
-                challenges,
-                transcript,
-                num_instances,
-            )?;
-            Ok((
-                opening_evaluations[0].point.clone(),
-                MainSumcheckEvals {
-                    wits_in_evals: opening_evaluations
-                        .iter()
-                        .take(cs.num_witin as usize)
-                        .map(|Evaluation { value, .. }| value)
-                        .copied()
-                        .collect_vec(),
-                    fixed_in_evals: opening_evaluations
-                        .iter()
-                        .skip((cs.num_witin + cs.num_structural_witin) as usize)
-                        .take(cs.num_fixed)
-                        .map(|Evaluation { value, .. }| value)
-                        .copied()
-                        .collect_vec(),
-                },
-                None,
-                Some(gkr_proof),
-            ))
+        let Some(gkr_circuit) = gkr_circuit else {
+            panic!("empty gkr circuit")
+        };
+        let pub_io_mles = cs
+            .instance_openings
+            .iter()
+            .map(|instance| input.public_input[instance.0].clone())
+            .collect_vec();
+        let selector_ctxs = if cs.ec_final_sum.is_empty() {
+            // it's not global chip
+            vec![
+                SelectorContext {
+                    offset: 0,
+                    num_instances,
+                    num_vars: num_var_with_rotation,
+                };
+                gkr_circuit
+                    .layers
+                    .first()
+                    .map(|layer| layer.out_sel_and_eval_exprs.len())
+                    .unwrap_or(0)
+            ]
         } else {
-            let span = entered_span!("fixed::evals + witin::evals");
-            // In table proof, we always skip same point sumcheck for now
-            // as tower sumcheck batch product argument/logup in same length
-            let mut evals = input
-                .witness
-                .par_iter()
-                .chain(input.fixed.par_iter())
-                .map(|poly| poly.evaluate(&rt_tower[..poly.num_vars()]))
-                .collect::<Vec<_>>();
-            let fixed_in_evals = evals.split_off(input.witness.len());
-            let wits_in_evals = evals;
-            exit_span!(span);
-
-            Ok((
-                rt_tower,
-                MainSumcheckEvals {
-                    wits_in_evals,
-                    fixed_in_evals,
+            // it's global chip
+            vec![
+                SelectorContext {
+                    offset: 0,
+                    num_instances: input.num_instances[0],
+                    num_vars: num_var_with_rotation,
                 },
-                None,
-                None,
-            ))
-        }
+                SelectorContext {
+                    offset: input.num_instances[0],
+                    num_instances: input.num_instances[1],
+                    num_vars: num_var_with_rotation,
+                },
+                SelectorContext {
+                    offset: 0,
+                    num_instances,
+                    num_vars: num_var_with_rotation,
+                },
+            ]
+        };
+        let GKRProverOutput {
+            gkr_proof,
+            opening_evaluations,
+            mut rt,
+        } = gkr_circuit.prove::<CpuBackend<E, PCS>, CpuProver<_>>(
+            num_threads,
+            num_var_with_rotation,
+            gkr::GKRCircuitWitness {
+                layers: vec![LayerWitness(
+                    chain!(
+                        &input.witness,
+                        &input.fixed,
+                        &pub_io_mles,
+                        &input.structural_witness,
+                    )
+                    .cloned()
+                    .collect_vec(),
+                )],
+            },
+            // eval value doesnt matter as it wont be used by prover
+            &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
+            &input
+                .pub_io_evals
+                .iter()
+                .map(|v| v.map_either(E::from, |v| v).into_inner())
+                .collect_vec(),
+            challenges,
+            transcript,
+            &selector_ctxs,
+        )?;
+        assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
+        Ok((
+            rt.remove(0),
+            MainSumcheckEvals {
+                wits_in_evals: opening_evaluations
+                    .iter()
+                    .take(cs.num_witin as usize)
+                    .map(|Evaluation { value, .. }| value)
+                    .copied()
+                    .collect_vec(),
+                fixed_in_evals: opening_evaluations
+                    .iter()
+                    .skip(cs.num_witin as usize)
+                    .take(cs.num_fixed)
+                    .map(|Evaluation { value, .. }| value)
+                    .copied()
+                    .collect_vec(),
+            },
+            None,
+            Some(gkr_proof),
+        ))
     }
 }
 
@@ -713,38 +899,38 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
         witness_data: PCS::CommitmentWithWitness,
         fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
         points: Vec<Point<E>>,
-        mut evals: Vec<Vec<E>>, // where each inner Vec<E> = wit_evals + fixed_evals
-        circuit_num_polys: &[(usize, usize)],
-        num_instances: &[(usize, usize)],
+        mut evals: Vec<Vec<Vec<E>>>, // where each inner vec![wit_evals, fixed_evals]
         transcript: &mut impl Transcript<E>,
     ) -> PCS::Proof {
         let mut rounds = vec![];
-        rounds.push((
-            &witness_data,
-            points
-                .iter()
-                .zip_eq(evals.iter_mut())
-                .zip_eq(num_instances.iter())
-                .map(|((point, evals), (chip_idx, _))| {
-                    let (num_witin, _) = circuit_num_polys[*chip_idx];
-                    (point.clone(), evals.drain(..num_witin).collect_vec())
+        rounds.push((&witness_data, {
+            evals
+                .iter_mut()
+                .zip(&points)
+                .filter_map(|(evals, point)| {
+                    let witin_evals = evals.remove(0);
+                    if !witin_evals.is_empty() {
+                        Some((point.clone(), witin_evals))
+                    } else {
+                        None
+                    }
                 })
-                .collect_vec(),
-        ));
+                .collect_vec()
+        }));
         if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
-            rounds.push((
-                fixed_data,
-                points
-                    .iter()
-                    .zip_eq(evals.iter_mut())
-                    .zip_eq(num_instances.iter())
-                    .filter(|(_, (chip_idx, _))| {
-                        let (_, num_fixed) = circuit_num_polys[*chip_idx];
-                        num_fixed > 0
+            rounds.push((fixed_data, {
+                evals
+                    .iter_mut()
+                    .zip(points)
+                    .filter_map(|(evals, point)| {
+                        if !evals.is_empty() && !evals[0].is_empty() {
+                            Some((point.clone(), evals.remove(0)))
+                        } else {
+                            None
+                        }
                     })
-                    .map(|((point, evals), _)| (point.clone(), evals.to_vec()))
-                    .collect_vec(),
-            ));
+                    .collect_vec()
+            }));
         }
         PCS::batch_open(&self.backend.pp, rounds, transcript).unwrap()
     }
@@ -755,16 +941,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
 {
     fn transport_proving_key(
         &self,
+        is_first_shard: bool,
         pk: Arc<
             crate::structs::ZKVMProvingKey<
                 <CpuBackend<E, PCS> as ProverBackend>::E,
                 <CpuBackend<E, PCS> as ProverBackend>::Pcs,
             >,
         >,
-    ) -> DeviceProvingKey<'_, CpuBackend<E, PCS>> {
-        let pcs_data = pk.fixed_commit_wd.clone().unwrap();
-        let fixed_mles =
-            PCS::get_arc_mle_witness_from_commitment(pk.fixed_commit_wd.as_ref().unwrap());
+    ) -> DeviceProvingKey<'static, CpuBackend<E, PCS>> {
+        let pcs_data = if is_first_shard {
+            pk.fixed_commit_wd.clone().unwrap()
+        } else {
+            pk.fixed_no_omc_init_commit_wd.clone().unwrap()
+        };
+
+        let fixed_mles = PCS::get_arc_mle_witness_from_commitment(pcs_data.as_ref());
 
         DeviceProvingKey {
             pcs_data,
@@ -828,5 +1019,127 @@ where
 {
     fn get_pb(&self) -> &CpuBackend<E, PCS> {
         self.backend.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::scheme::{
+        constants::SEPTIC_EXTENSION_DEGREE,
+        cpu::CpuEccProver,
+        septic_curve::{SepticExtension, SepticPoint},
+        verifier::EccVerifier,
+    };
+    use ff_ext::BabyBearExt4;
+    use itertools::Itertools;
+    use multilinear_extensions::{
+        mle::{IntoMLE, MultilinearExtension},
+        util::transpose,
+    };
+    use p3::babybear::BabyBear;
+    use std::{iter::repeat_n, sync::Arc};
+    use transcript::BasicTranscript;
+    use witness::next_pow2_instance_padding;
+
+    #[test]
+    fn test_ecc_quark_prover() {
+        for n_points in 1..2 ^ 10 {
+            test_ecc_quark_prover_inner(n_points)
+        }
+    }
+
+    fn test_ecc_quark_prover_inner(n_points: usize) {
+        type E = BabyBearExt4;
+        type F = BabyBear;
+
+        let log2_n = next_pow2_instance_padding(n_points).ilog2();
+        let mut rng = rand::thread_rng();
+
+        let final_sum;
+        // generate 1 ecc add witness
+        let ecc_spec: Vec<MultilinearExtension<'_, E>> = {
+            // sample N = 2^n points
+            let mut points = (0..n_points)
+                .map(|_| SepticPoint::<F>::random(&mut rng))
+                .collect_vec();
+            points.extend(repeat_n(
+                SepticPoint::point_at_infinity(),
+                (1 << log2_n) - points.len(),
+            ));
+            let mut s = Vec::with_capacity(1 << (log2_n + 1));
+            s.extend(repeat_n(SepticExtension::zero(), 1 << log2_n));
+
+            for layer in (1..=log2_n).rev() {
+                let num_inputs = 1 << layer;
+                let inputs = &points[points.len() - num_inputs..];
+
+                s.extend(inputs.chunks_exact(2).map(|chunk| {
+                    let p = &chunk[0];
+                    let q = &chunk[1];
+                    if q.is_infinity {
+                        SepticExtension::zero()
+                    } else {
+                        (&p.y - &q.y) * (&p.x - &q.x).inverse().unwrap()
+                    }
+                }));
+
+                points.extend(
+                    inputs
+                        .chunks_exact(2)
+                        .map(|chunk| {
+                            let p = chunk[0].clone();
+                            let q = chunk[1].clone();
+                            p + q
+                        })
+                        .collect_vec(),
+                );
+            }
+            final_sum = points.last().cloned().unwrap();
+
+            // padding to 2*N
+            s.push(SepticExtension::zero());
+            points.push(SepticPoint::point_at_infinity());
+
+            assert_eq!(s.len(), 1 << (log2_n + 1));
+            assert_eq!(points.len(), 1 << (log2_n + 1));
+
+            // transform points to row major matrix
+            let trace = points
+                .iter()
+                .zip_eq(s.iter())
+                .map(|(p, s)| {
+                    p.x.iter()
+                        .chain(p.y.iter())
+                        .chain(s.iter())
+                        .copied()
+                        .collect_vec()
+                })
+                .collect_vec();
+
+            // transpose row major matrix to column major matrix
+            transpose(trace)
+                .into_iter()
+                .map(|v| v.into_mle())
+                .collect_vec()
+        };
+        let (xs, rest) = ecc_spec.split_at(SEPTIC_EXTENSION_DEGREE);
+        let (ys, s) = rest.split_at(SEPTIC_EXTENSION_DEGREE);
+
+        let mut transcript = BasicTranscript::new(b"test");
+        let quark_proof = CpuEccProver::create_ecc_proof(
+            n_points,
+            xs.iter().cloned().map(Arc::new).collect_vec(),
+            ys.iter().cloned().map(Arc::new).collect_vec(),
+            s.iter().cloned().map(Arc::new).collect_vec(),
+            &mut transcript,
+        );
+
+        assert_eq!(quark_proof.sum, final_sum);
+        let mut transcript = BasicTranscript::new(b"test");
+        assert!(
+            EccVerifier::verify_ecc_proof(&quark_proof, &mut transcript)
+                .inspect_err(|err| println!("err {:?}", err))
+                .is_ok()
+        );
     }
 }

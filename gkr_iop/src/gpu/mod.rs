@@ -14,6 +14,7 @@ use witness::RowMajorMatrix;
 
 use crate::cpu::default_backend_config;
 
+use either::Either;
 use itertools::{Itertools, izip};
 use std::marker::PhantomData;
 
@@ -26,44 +27,32 @@ pub mod gpu_prover {
         common::{
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
+            get_ceno_gpu_device_id,
             mle::{
                 build_mle_as_ceno, ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu,
                 rotation_selector_gpu,
             },
         },
     };
-    use cudarc::driver::{CudaDevice, DriverError};
+
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex, MutexGuard};
 
     pub type BB31Base = p3::babybear::BabyBear;
     pub type BB31Ext = ff_ext::BabyBearExt4;
 
-    pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> =
-        Lazy::new(|| CudaDevice::new(0));
-
     #[allow(clippy::type_complexity)]
     pub static CUDA_HAL: Lazy<
         Result<Arc<Mutex<CudaHalBB31>>, Box<dyn std::error::Error + Send + Sync>>,
     > = Lazy::new(|| {
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device init failed: {:?}", e))?;
-        device.bind_to_thread()?;
-
-        CudaHalBB31::new()
+        // can be overridden by env variable `CENO_GPU_DEVICE_ID`
+        let device_id: usize = get_ceno_gpu_device_id(0);
+        CudaHalBB31::new(device_id)
             .map(|hal| Arc::new(Mutex::new(hal)))
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     });
 
     pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalBB31>, String> {
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))?;
-        device
-            .bind_to_thread()
-            .map_err(|e| format!("Failed to bind device to thread: {:?}", e))?;
-
         let hal_arc = CUDA_HAL
             .as_ref()
             .map_err(|e| format!("HAL not available: {:?}", e))?;
@@ -338,7 +327,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     fn layer_witness<'a>(
         layer: &Layer<E>,
         layer_wits: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
-        pub_io_evals: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
+        pub_io_evals: &[Either<E::BaseField, E>],
         challenges: &[E],
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let span = entered_span!("preprocess", profiling_2 = true);
@@ -351,17 +340,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
             .collect();
-
-        // take public input from gpu to cpu for scalar evaluation
-        // assume public io is quite small, thus the cost is negligible
-        // evaluate all scalar terms first
-        // when instance was access in scalar, we only take its first item
-        // this operation is sound
-        let pub_io_evals = pub_io_evals
-            .iter()
-            .map(|mle| mle.inner_to_mle())
-            .map(|instance| instance.evaluations.index(0))
-            .collect_vec();
 
         // pre-process and flatten indices into friendly GPU format
         let (num_non_zero_expr, term_coefficients, mle_indices_per_term, mle_size_info) = layer
