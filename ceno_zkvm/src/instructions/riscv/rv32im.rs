@@ -9,7 +9,7 @@ use crate::instructions::riscv::lui::LuiInstruction;
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::tables::PowTableCircuit;
 use crate::{
-    e2e::ShardContext,
+    e2e::{ShardContext, StepCellExtractor},
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -57,11 +57,13 @@ use slti::SltiuInstruction;
 use sp1_curves::weierstrass::{SwCurve, bn254::Bn254, secp256k1::Secp256k1};
 use std::{
     cmp::Reverse,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
 };
-use strum::IntoEnumIterator;
+use strum::{EnumCount, IntoEnumIterator};
 
 pub mod mmu;
+
+const ECALL_HALT: u32 = Platform::ecall_halt();
 
 pub struct Rv32imConfig<E: ExtensionField> {
     // ALU Opcodes.
@@ -144,81 +146,154 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub ltu_config: <LtuTableCircuit<E> as TableCircuit<E>>::TableConfig,
     #[cfg(not(feature = "u16limb_circuit"))]
     pub pow_config: <PowTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    // record InsnKind -> cells
+    pub inst_cells_map: Vec<u64>,
+    // record opcode name -> cells
+    // serve ecall/table for no InsnKind
+    pub ecall_cells_map: HashMap<String, u64>,
 }
+
+const KECCAK_CELL_BLOWUP_FACTOR: u64 = 2;
 
 impl<E: ExtensionField> Rv32imConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
+        let mut inst_cells_map = vec![0; InsnKind::COUNT];
+        let mut ecall_cells_map = HashMap::new();
+
+        macro_rules! register_opcode_circuit {
+            ($insn_kind:ident, $instruction:ty, $inst_cells_map:ident) => {{
+                let config = cs.register_opcode_circuit::<$instruction>();
+
+                // update estimated cell
+                $inst_cells_map[$insn_kind as usize] = cs
+                    .get_cs(&<$instruction>::name())
+                    .as_ref()
+                    .map(|cs| {
+                        (cs.zkvm_v1_css.num_witin as u64
+                            + cs.zkvm_v1_css.num_structural_witin as u64
+                            + cs.zkvm_v1_css.num_fixed as u64)
+                            * (1 << cs.rotation_vars().unwrap_or(0))
+                    })
+                    .unwrap_or_default();
+
+                config
+            }};
+        }
         // opcode circuits
         // alu opcodes
-        let add_config = cs.register_opcode_circuit::<AddInstruction<E>>();
-        let sub_config = cs.register_opcode_circuit::<SubInstruction<E>>();
-        let and_config = cs.register_opcode_circuit::<AndInstruction<E>>();
-        let or_config = cs.register_opcode_circuit::<OrInstruction<E>>();
-        let xor_config = cs.register_opcode_circuit::<XorInstruction<E>>();
-        let sll_config = cs.register_opcode_circuit::<SllInstruction<E>>();
-        let srl_config = cs.register_opcode_circuit::<SrlInstruction<E>>();
-        let sra_config = cs.register_opcode_circuit::<SraInstruction<E>>();
-        let slt_config = cs.register_opcode_circuit::<SltInstruction<E>>();
-        let sltu_config = cs.register_opcode_circuit::<SltuInstruction<E>>();
-        let mul_config = cs.register_opcode_circuit::<MulInstruction<E>>();
-        let mulh_config = cs.register_opcode_circuit::<MulhInstruction<E>>();
-        let mulhsu_config = cs.register_opcode_circuit::<MulhsuInstruction<E>>();
-        let mulhu_config = cs.register_opcode_circuit::<MulhuInstruction<E>>();
-        let divu_config = cs.register_opcode_circuit::<DivuInstruction<E>>();
-        let remu_config = cs.register_opcode_circuit::<RemuInstruction<E>>();
-        let div_config = cs.register_opcode_circuit::<DivInstruction<E>>();
-        let rem_config = cs.register_opcode_circuit::<RemInstruction<E>>();
+        let add_config = register_opcode_circuit!(ADD, AddInstruction<E>, inst_cells_map);
+        let sub_config = register_opcode_circuit!(SUB, SubInstruction<E>, inst_cells_map);
+        let and_config = register_opcode_circuit!(AND, AndInstruction<E>, inst_cells_map);
+        let or_config = register_opcode_circuit!(OR, OrInstruction<E>, inst_cells_map);
+        let xor_config = register_opcode_circuit!(XOR, XorInstruction<E>, inst_cells_map);
+        let sll_config = register_opcode_circuit!(SLL, SllInstruction<E>, inst_cells_map);
+        let srl_config = register_opcode_circuit!(SRL, SrlInstruction<E>, inst_cells_map);
+        let sra_config = register_opcode_circuit!(SRA, SraInstruction<E>, inst_cells_map);
+        let slt_config = register_opcode_circuit!(SLT, SltInstruction<E>, inst_cells_map);
+        let sltu_config = register_opcode_circuit!(SLTU, SltuInstruction<E>, inst_cells_map);
+        let mul_config = register_opcode_circuit!(MUL, MulInstruction<E>, inst_cells_map);
+        let mulh_config = register_opcode_circuit!(MULH, MulhInstruction<E>, inst_cells_map);
+        let mulhsu_config = register_opcode_circuit!(MULHSU, MulhsuInstruction<E>, inst_cells_map);
+        let mulhu_config = register_opcode_circuit!(MULHU, MulhuInstruction<E>, inst_cells_map);
+        let divu_config = register_opcode_circuit!(DIVU, DivuInstruction<E>, inst_cells_map);
+        let remu_config = register_opcode_circuit!(REMU, RemuInstruction<E>, inst_cells_map);
+        let div_config = register_opcode_circuit!(DIV, DivInstruction<E>, inst_cells_map);
+        let rem_config = register_opcode_circuit!(REM, RemInstruction<E>, inst_cells_map);
 
         // alu with imm opcodes
-        let addi_config = cs.register_opcode_circuit::<AddiInstruction<E>>();
-        let andi_config = cs.register_opcode_circuit::<AndiInstruction<E>>();
-        let ori_config = cs.register_opcode_circuit::<OriInstruction<E>>();
-        let xori_config = cs.register_opcode_circuit::<XoriInstruction<E>>();
-        let slli_config = cs.register_opcode_circuit::<SlliInstruction<E>>();
-        let srli_config = cs.register_opcode_circuit::<SrliInstruction<E>>();
-        let srai_config = cs.register_opcode_circuit::<SraiInstruction<E>>();
-        let slti_config = cs.register_opcode_circuit::<SltiInstruction<E>>();
-        let sltiu_config = cs.register_opcode_circuit::<SltiuInstruction<E>>();
+        let addi_config = register_opcode_circuit!(ADDI, AddiInstruction<E>, inst_cells_map);
+        let andi_config = register_opcode_circuit!(ANDI, AndiInstruction<E>, inst_cells_map);
+        let ori_config = register_opcode_circuit!(ORI, OriInstruction<E>, inst_cells_map);
+        let xori_config = register_opcode_circuit!(XORI, XoriInstruction<E>, inst_cells_map);
+        let slli_config = register_opcode_circuit!(SLLI, SlliInstruction<E>, inst_cells_map);
+        let srli_config = register_opcode_circuit!(SRLI, SrliInstruction<E>, inst_cells_map);
+        let srai_config = register_opcode_circuit!(SRAI, SraiInstruction<E>, inst_cells_map);
+        let slti_config = register_opcode_circuit!(SLTI, SltiInstruction<E>, inst_cells_map);
+        let sltiu_config = register_opcode_circuit!(SLTIU, SltiuInstruction<E>, inst_cells_map);
         #[cfg(feature = "u16limb_circuit")]
-        let lui_config = cs.register_opcode_circuit::<LuiInstruction<E>>();
+        let lui_config = register_opcode_circuit!(LUI, LuiInstruction<E>, inst_cells_map);
         #[cfg(feature = "u16limb_circuit")]
-        let auipc_config = cs.register_opcode_circuit::<AuipcInstruction<E>>();
+        let auipc_config = register_opcode_circuit!(AUIPC, AuipcInstruction<E>, inst_cells_map);
 
         // branching opcodes
-        let beq_config = cs.register_opcode_circuit::<BeqInstruction<E>>();
-        let bne_config = cs.register_opcode_circuit::<BneInstruction<E>>();
-        let blt_config = cs.register_opcode_circuit::<BltInstruction<E>>();
-        let bltu_config = cs.register_opcode_circuit::<BltuInstruction<E>>();
-        let bge_config = cs.register_opcode_circuit::<BgeInstruction<E>>();
-        let bgeu_config = cs.register_opcode_circuit::<BgeuInstruction<E>>();
+        let beq_config = register_opcode_circuit!(BEQ, BeqInstruction<E>, inst_cells_map);
+        let bne_config = register_opcode_circuit!(BNE, BneInstruction<E>, inst_cells_map);
+        let blt_config = register_opcode_circuit!(BLT, BltInstruction<E>, inst_cells_map);
+        let bltu_config = register_opcode_circuit!(BLTU, BltuInstruction<E>, inst_cells_map);
+        let bge_config = register_opcode_circuit!(BGE, BgeInstruction<E>, inst_cells_map);
+        let bgeu_config = register_opcode_circuit!(BGEU, BgeuInstruction<E>, inst_cells_map);
 
         // jump opcodes
-        let jal_config = cs.register_opcode_circuit::<JalInstruction<E>>();
-        let jalr_config = cs.register_opcode_circuit::<JalrInstruction<E>>();
+        let jal_config = register_opcode_circuit!(JAL, JalInstruction<E>, inst_cells_map);
+        let jalr_config = register_opcode_circuit!(JALR, JalrInstruction<E>, inst_cells_map);
 
         // memory opcodes
-        let lw_config = cs.register_opcode_circuit::<LwInstruction<E>>();
-        let lhu_config = cs.register_opcode_circuit::<LhuInstruction<E>>();
-        let lh_config = cs.register_opcode_circuit::<LhInstruction<E>>();
-        let lbu_config = cs.register_opcode_circuit::<LbuInstruction<E>>();
-        let lb_config = cs.register_opcode_circuit::<LbInstruction<E>>();
-        let sw_config = cs.register_opcode_circuit::<SwInstruction<E>>();
-        let sh_config = cs.register_opcode_circuit::<ShInstruction<E>>();
-        let sb_config = cs.register_opcode_circuit::<SbInstruction<E>>();
+        let lw_config = register_opcode_circuit!(LW, LwInstruction<E>, inst_cells_map);
+        let lhu_config = register_opcode_circuit!(LHU, LhuInstruction<E>, inst_cells_map);
+        let lh_config = register_opcode_circuit!(LH, LhInstruction<E>, inst_cells_map);
+        let lbu_config = register_opcode_circuit!(LBU, LbuInstruction<E>, inst_cells_map);
+        let lb_config = register_opcode_circuit!(LB, LbInstruction<E>, inst_cells_map);
+        let sw_config = register_opcode_circuit!(SW, SwInstruction<E>, inst_cells_map);
+        let sh_config = register_opcode_circuit!(SH, ShInstruction<E>, inst_cells_map);
+        let sb_config = register_opcode_circuit!(SB, SbInstruction<E>, inst_cells_map);
 
         // ecall opcodes
-        let halt_config = cs.register_opcode_circuit::<HaltInstruction<E>>();
+        macro_rules! register_ecall_circuit {
+            ($instruction:ty, $ecall_cells_map:ident) => {{
+                let config = cs.register_opcode_circuit::<$instruction>();
+
+                // update estimated cell
+                assert!(
+                    $ecall_cells_map
+                        .insert(
+                            <$instruction>::name(),
+                            cs.get_cs(&<$instruction>::name())
+                                .as_ref()
+                                .map(|cs| {
+                                    (cs.zkvm_v1_css.num_witin as u64
+                                        + cs.zkvm_v1_css.num_structural_witin as u64
+                                        + cs.zkvm_v1_css.num_fixed as u64)
+                                        * (1 << cs.rotation_vars().unwrap_or(0))
+                                })
+                                .unwrap_or_default(),
+                        )
+                        .is_none()
+                );
+
+                config
+            }};
+        }
+        let halt_config = register_ecall_circuit!(HaltInstruction<E>, ecall_cells_map);
+
+        // Keccak precompile is a known hotspot for peak memory.
+        // Its heavy read/write/LK activity inflates tower-witness usage, causing
+        // substantial memory overhead which not reflected on basic column count.
+        //
+        // We estimate this effect by applying an extra scaling factor that models
+        // tower-witness blowup proportional to the number of base columns.
         let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
-        let bn254_add_config =
-            cs.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>();
-        let bn254_double_config =
-            cs.register_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>>();
-        let secp256k1_add_config =
-            cs.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>>();
-        let secp256k1_double_config = cs
-            .register_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>>();
-        let secp256k1_decompress_config =
-            cs.register_opcode_circuit::<WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>>();
+        assert!(
+            ecall_cells_map
+                .insert(
+                    <KeccakInstruction<E>>::name(),
+                    cs.get_cs(&<KeccakInstruction<E>>::name())
+                        .as_ref()
+                        .map(|cs| {
+                            (cs.zkvm_v1_css.num_witin as u64
+                                + cs.zkvm_v1_css.num_structural_witin as u64
+                                + cs.zkvm_v1_css.num_fixed as u64)
+                                * (1 << cs.rotation_vars().unwrap_or(0))
+                                * KECCAK_CELL_BLOWUP_FACTOR
+                        })
+                        .unwrap_or_default(),
+                )
+                .is_none()
+        );
+        let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
+        let bn254_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
+        let secp256k1_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
+        let secp256k1_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
+        let secp256k1_decompress_config = register_ecall_circuit!(WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
 
         // tables
         let dynamic_range_config =
@@ -301,6 +376,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             ltu_config,
             #[cfg(not(feature = "u16limb_circuit"))]
             pow_config,
+            inst_cells_map,
+            ecall_cells_map,
         }
     }
 
@@ -761,5 +838,50 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let keys: Vec<&InsnKind> = steps.keys().collect::<Vec<_>>();
         assert!(steps.is_empty(), "unimplemented opcodes: {:?}", keys);
         Ok(())
+    }
+}
+
+impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
+    #[inline(always)]
+    fn extract_cells(&self, record: &StepRecord) -> u64 {
+        let insn_kind = record.insn.kind;
+        if !matches!(insn_kind, InsnKind::ECALL) {
+            // quick match for opcode and return
+            return self.inst_cells_map[insn_kind as usize];
+        }
+        // deal with ecall logic
+        match record.rs1().unwrap().value {
+            // ecall / halt
+            ECALL_HALT => *self
+                .ecall_cells_map
+                .get(&HaltInstruction::<E>::name())
+                .expect("unable to find name"),
+            KeccakSpec::CODE => *self
+                .ecall_cells_map
+                .get(&KeccakInstruction::<E>::name())
+                .expect("unable to find name"),
+            Bn254AddSpec::CODE => *self
+                .ecall_cells_map
+                .get(&WeierstrassAddAssignInstruction::<E, SwCurve<Bn254>>::name())
+                .expect("unable to find name"),
+            Bn254DoubleSpec::CODE => *self
+                .ecall_cells_map
+                .get(&WeierstrassDoubleAssignInstruction::<E, SwCurve<Bn254>>::name())
+                .expect("unable to find name"),
+            Secp256k1AddSpec::CODE => *self
+                .ecall_cells_map
+                .get(&WeierstrassAddAssignInstruction::<E, SwCurve<Secp256k1>>::name())
+                .expect("unable to find name"),
+            Secp256k1DoubleSpec::CODE => *self
+                .ecall_cells_map
+                .get(&WeierstrassDoubleAssignInstruction::<E, SwCurve<Secp256k1>>::name())
+                .expect("unable to find name"),
+            Secp256k1DecompressSpec::CODE => *self
+                .ecall_cells_map
+                .get(&WeierstrassDecompressInstruction::<E, SwCurve<Secp256k1>>::name())
+                .expect("unable to find name"),
+            // other type of ecalls are handled by dummy ecall instruction
+            _ => unreachable!("unknow match record {:?}", record),
+        }
     }
 }

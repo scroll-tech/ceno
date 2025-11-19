@@ -57,8 +57,12 @@ jobs:
           cargo test --release --package ceno_recursion --tests -- --ignored
 
       - name: run test
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
         run: cargo make tests
 
       - name: run test + goldilocks
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
         run: cargo make tests_goldilock
 

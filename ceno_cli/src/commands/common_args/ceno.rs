@@ -86,13 +86,15 @@ pub struct CenoOptions {
     #[arg(long, default_value = "1")]
     num_provers: u32,
 
-    // min cycle per shard
-    #[arg(long, default_value = "16777216")] // 16777216 = 2^24
-    min_cycle_per_shard: u64,
-
     // max cycle per shard
     #[arg(long, default_value = "536870912")] // 536870912 = 2^29
     max_cycle_per_shard: u64,
+
+    // max cycle per shard
+    // default value: 16GB VRAM, each cell 4 byte, log explosion 2
+    // => 2^30 * 16 / 4 / 2
+    #[arg(long, default_value = "2147483648")]
+    max_cell_per_shard: u64,
 
     /// Profiling granularity.
     /// Setting any value restricts logs to profiling information
@@ -356,7 +358,7 @@ fn run_elf_inner<
     let multi_prover = MultiProver::new(
         options.prover_id as usize,
         options.num_provers as usize,
-        options.min_cycle_per_shard,
+        options.max_cell_per_shard,
         options.max_cycle_per_shard,
     );
 
