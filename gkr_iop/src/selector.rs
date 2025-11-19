@@ -323,6 +323,10 @@ impl<E: ExtensionField> SelectorType<E> {
                     .collect::<Vec<_>>();
                 prefix_one_seq.reverse();
 
+                // _debug
+                println!("=> ctx.num_instances: {:?}", ctx.num_instances);
+                println!("=> prefix_one_seq: {:?}", prefix_one_seq);
+
                 let mut res = if prefix_one_seq[0] == 0 {
                     E::ZERO
                 } else {
