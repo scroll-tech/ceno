@@ -4,7 +4,7 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        _print_usize_arr, PolyEvaluator, UniPolyExtrapolator, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse
+        PolyEvaluator, UniPolyExtrapolator, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -53,7 +53,7 @@ use openvm_native_recursion::challenger::{
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
 use p3::babybear::BabyBear;
-use multilinear_extensions::{StructuralWitInType, Expression::StructuralWitIn};
+use multilinear_extensions::StructuralWitInType;
 
 type F = BabyBear;
 type E = BabyBearExt4;
@@ -1277,12 +1277,8 @@ pub fn rotation_selector_eval<C: Config>(
 pub fn evaluate_selector<C: Config>(
     builder: &mut Builder<C>,
     sel_type: &SelectorType<E>,
-    // _debug
-    // evals: &Array<C, Ext<C::F, C::EF>>,
     out_point: &Array<C, Ext<C::F, C::EF>>,
     in_point: &Array<C, Ext<C::F, C::EF>>,
-    // _debug
-    // offset_eq_id: usize,
     ctx: &SelectorContextVariable<C>,
 ) -> (usize, Ext<C::F, C::EF>) {
     let (expr, eval) = match sel_type {
@@ -1296,35 +1292,22 @@ pub fn evaluate_selector<C: Config>(
             (expr, eq_eval(builder, out_point, in_point, one, zero))
         }
         SelectorType::Prefix(expr) => {
+            let start = ctx.offset.clone();
+            let end: Usize<C::N> = builder.eval(start.clone() + ctx.num_instances.clone());
             builder.assert_usize_eq(in_point.len(), out_point.len());
 
             let sel: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-            
-            /* _debug
-            builder
-                .if_ne(ctx.num_instances.clone(), Usize::from(0))
-                .then(|builder| {
-                    let eq_end = eq_eval_less_or_equal_than(
-                        builder,
-                        &ctx.offset_bit_decomp,
-                        out_point,
-                        in_point,
-                    );
-                    builder.assign(&sel, eq_end);
-                    builder
-                        .if_ne(ctx.offset.clone(), Usize::from(0))
-                        .then(|builder| {
-                            let eq_start = eq_eval_less_or_equal_than(
-                                builder,
-                                &ctx.num_instances_bit_decomp,
-                                out_point,
-                                in_point,
-                            );
-                            builder.assign(&sel, sel - eq_start);
-                        });
-                });
-            */
 
+            builder.if_ne(end, Usize::from(0)).then(|builder| {
+                let eq_end = eq_eval_less_or_equal_than(builder, &ctx.offset_instance_sum_bit_decomps, out_point, in_point);
+                builder.assign(&sel, eq_end);
+
+                builder.if_ne(start.clone(), Usize::from(0)).then(|builder| {
+                    let eq_start = eq_eval_less_or_equal_than(builder, &ctx.offset_bit_decomps, out_point, in_point);
+                    builder.assign(&sel, sel - eq_start);
+                });
+            });
+            
             (expr, sel)
         }
         SelectorType::OrderedSparse32 {
@@ -1798,13 +1781,16 @@ pub fn verify_ecc_proof<C: Config>(
         0,
         StackedConstantSequence { max_value: 0 },
     ));
+
+    let offset_bit_decomps = builder.dyn_array(32);
+    let offset_instance_sum_bit_decomps = builder.get(&proof.num_instances_bit_decomps, 0).clone();
     let ctx: SelectorContextVariable<C> = SelectorContextVariable {
         offset: Usize::from(0),
-
+        offset_bit_decomps,
         num_instances: proof.num_instances.clone(),
         num_instances_layered_ns: proof.num_instances_layered_ns.clone(),
         num_instances_bit_decomps: proof.num_instances_bit_decomps.clone(),
-
+        offset_instance_sum_bit_decomps,
         num_vars: proof.num_vars.clone(),
     };
 

@@ -15,7 +15,7 @@ use ceno_zkvm::{
 use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::LayerProof};
 use itertools::Itertools;
 use mpcs::{Basefold, BasefoldRSParams};
-use multilinear_extensions::{mle::Point, util::bit_decompose};
+use multilinear_extensions::mle::Point;
 use openvm_native_compiler::{
     asm::AsmConfig,
     ir::{Array, Builder, Config, Felt},
@@ -963,10 +963,10 @@ impl Hintable<InnerConfig> for SepticPointInput {
 #[derive(DslVariable, Clone)]
 pub struct SelectorContextVariable<C: Config> {
     pub offset: Usize<C::N>,
-
+    pub offset_bit_decomps: Array<C, Felt<C::F>>,
     pub num_instances: Usize<C::N>,
     pub num_instances_layered_ns: Array<C, Var<C::N>>,
     pub num_instances_bit_decomps: Array<C, Array<C, Felt<C::F>>>,
-
+    pub offset_instance_sum_bit_decomps: Array<C, Felt<C::F>>,
     pub num_vars: Usize<C::N>,
 }
