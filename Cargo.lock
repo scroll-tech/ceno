@@ -1097,6 +1097,7 @@ dependencies = [
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
+ "num",
  "num-derive",
  "num-traits",
  "rayon",
@@ -1105,11 +1106,13 @@ dependencies = [
  "secp",
  "serde",
  "smallvec",
+ "sp1-curves",
  "strum",
  "strum_macros",
  "substrate-bn 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tiny-keccak",
  "tracing",
+ "typenum",
 ]
 
 [[package]]
@@ -1251,6 +1254,7 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber 0.3.19",
  "transcript",
+ "typenum",
  "whir",
  "witness",
 ]
@@ -6781,9 +6785,9 @@ dependencies = [
 
 [[package]]
 name = "typenum"
-version = "1.18.0"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
+checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "ucd-trie"

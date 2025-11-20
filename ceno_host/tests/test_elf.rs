@@ -4,7 +4,7 @@ use anyhow::Result;
 use ceno_emul::{
     BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, EmuContext, InsnKind,
     Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, SHA_EXTEND_WORDS,
-    StepRecord, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    StepRecord, UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
     host_utils::{read_all_messages, read_all_messages_as_words},
 };
 use ceno_host::CenoStdin;
@@ -623,6 +623,60 @@ fn test_bn254_precompile() -> Result<()> {
     let program_elf = ceno_examples::bn254_precompile;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
     let _ = run(&mut state)?;
+    Ok(())
+}
+
+#[test]
+fn test_uint256_mul() -> Result<()> {
+    let program_elf = ceno_examples::uint256_mul_syscall;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 1);
+
+    let witness = syscalls[0];
+    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+    assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+
+    let a_address = witness.reg_ops[0].value.after;
+    assert_eq!(a_address, witness.reg_ops[0].value.before);
+    let a_address: WordAddr = a_address.into();
+
+    let b_address = witness.reg_ops[1].value.after;
+    assert_eq!(b_address, witness.reg_ops[1].value.before);
+    let b_address: WordAddr = b_address.into();
+
+    let expect: [u32; 8] = [
+        0xF0D2F44F, 0xF0DC2116, 0x253AB7CD, 0x3089E8F6, 0x803BED8F, 0x969E7A64, 0x610CBFFF,
+        0x80012A20,
+    ];
+
+    assert_eq!(witness.mem_ops.len(), 3 * UINT256_WORDS_FIELD_ELEMENT);
+    // Expect first half to consist of read/writes on x
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .take(UINT256_WORDS_FIELD_ELEMENT)
+        .enumerate()
+    {
+        assert_eq!(write_op.addr, a_address + i);
+        assert_eq!(write_op.value.after, expect[i]);
+    }
+
+    // Expect second half to consist of reads on y and modulus
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .skip(UINT256_WORDS_FIELD_ELEMENT)
+        .take(UINT256_WORDS_FIELD_ELEMENT * 2)
+        .enumerate()
+    {
+        assert_eq!(write_op.addr, b_address + i);
+        assert_eq!(write_op.value.after, write_op.value.before);
+    }
 
     Ok(())
 }

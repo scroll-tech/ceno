@@ -18,6 +18,7 @@ pub const BLS12381_DOUBLE: u32 = 0x00_00_01_1F;
 pub const SECP256R1_ADD: u32 = 0x00_01_01_2C;
 pub const SECP256R1_DOUBLE: u32 = 0x00_00_01_2D;
 pub const SECP256R1_DECOMPRESS: u32 = 0x00_00_01_2E;
+pub const UINT256_MUL: u32 = 0x00_01_01_1D;
 
 pub const KECCAK_STATE_WORDS: usize = 25;
 
@@ -290,6 +291,30 @@ pub extern "C" fn syscall_bn254_fp2_mulmod(x: &mut [u32; 16], y: &[u32; 16]) {
             asm!(
             "ecall",
             in("t0") BN254_FP2_MUL,
+            in("a0") x,
+            in("a1") y,
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    unreachable!()
+}
+
+/// Uint256 multiplication operation.
+///
+/// The result is written over the first input.
+#[allow(unused_variables)]
+#[unsafe(no_mangle)]
+pub extern "C" fn syscall_uint256_mul(x: &mut [u32; 8], y_and_modulus: &[u32; 16]) {
+    #[cfg(target_os = "zkvm")]
+    {
+        let x = x.as_mut_ptr();
+        let y = y_and_modulus.as_ptr();
+        unsafe {
+            asm!(
+            "ecall",
+            in("t0") UINT256_MUL,
             in("a0") x,
             in("a1") y,
             );

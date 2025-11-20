@@ -548,7 +548,7 @@ pub fn run_weierstrass_double<
     PCS: PolynomialCommitmentScheme<E> + 'static,
     EC: EllipticCurve + WeierstrassParameters,
 >(
-    (layout, gkr_circuit, num_witin, num_structual_witin): (
+    (layout, gkr_circuit, num_witin, num_structural_witin): (
         TestWeierstrassDoubleLayout<E, EC>,
         GKRCircuit<E>,
         u16,
@@ -584,7 +584,7 @@ pub fn run_weierstrass_double<
     );
     let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
         instances.len(),
-        num_structual_witin as usize,
+        num_structural_witin as usize,
         InstancePaddingStrategy::Default,
     );
     let raw_witin_iter = phase1_witness.par_batch_iter_mut(num_instance_per_batch);

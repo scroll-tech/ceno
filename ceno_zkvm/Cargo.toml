@@ -55,6 +55,7 @@ rand.workspace = true
 sp1-curves.workspace = true
 tempfile = "3.14"
 tiny-keccak.workspace = true
+typenum = "1.19.0"
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
