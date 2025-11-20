@@ -222,7 +222,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         .count();
 
     let mut unipoly_extrapolator = UniPolyExtrapolator::new(builder);
-    let _poly_evaluator = PolyEvaluator::new(builder);
+    let mut poly_evaluator = PolyEvaluator::new(builder);
 
     let dummy_table_item = alpha;
     let dummy_table_item_multiplicity: Var<C::N> = builder.constant(C::N::ZERO);
@@ -338,9 +338,12 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 &mut challenger,
                 &chip_proof,
                 &zkvm_proof_input.pi_evals,
+                &zkvm_proof_input.raw_pi,
+                &zkvm_proof_input.raw_pi_num_variables,
                 &challenges,
                 chip_vk,
                 &mut unipoly_extrapolator,
+                &mut poly_evaluator,
             );
             builder.cycle_tracker_end("Verify chip proof");
 
@@ -510,9 +513,12 @@ pub fn verify_chip_proof<C: Config>(
     challenger: &mut DuplexChallengerVariable<C>,
     chip_proof: &ZKVMChipProofInputVariable<C>,
     pi_evals: &Array<C, Ext<C::F, C::EF>>,
+    raw_pi: &Array<C, Array<C, Felt<C::F>>>,
+    raw_pi_num_variables: &Array<C, Var<C::N>>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     vk: &VerifyingKey<E>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    poly_evaluator: &mut PolyEvaluator<C>,
 ) -> (Array<C, Ext<C::F, C::EF>>, SepticPointVariable<C>) {
     let composed_cs = vk.get_cs();
     let ComposedConstrainSystem {
@@ -729,10 +735,13 @@ pub fn verify_chip_proof<C: Config>(
         &chip_proof.gkr_iop_proof,
         challenges,
         pi_evals,
+        raw_pi,
+        raw_pi_num_variables,
         &out_evals,
         chip_proof,
         selector_ctxs,
         unipoly_extrapolator,
+        poly_evaluator,
     );
     builder.cycle_tracker_end("Verify GKR Circuit");
 
@@ -747,10 +756,13 @@ pub fn verify_gkr_circuit<C: Config>(
     gkr_proof: &GKRProofVariable<C>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     pub_io_evals: &Array<C, Ext<C::F, C::EF>>,
+    raw_pi: &Array<C, Array<C, Felt<C::F>>>,
+    raw_pi_num_variables: &Array<C, Var<C::N>>,
     claims: &Array<C, PointAndEvalVariable<C>>,
     _chip_proof: &ZKVMChipProofInputVariable<C>,
     _selector_ctxs: Vec<SelectorContextVariable<C>>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    poly_evaluator: &mut PolyEvaluator<C>,
 ) -> PointVariable<C> {
     let rt = PointVariable {
         fs: builder.dyn_array(0),
@@ -1018,26 +1030,16 @@ pub fn verify_gkr_circuit<C: Config>(
             builder.assert_ext_eq(expected_eval, main_wit_eval);
         }
 
-        /* _debug
-        // check pub-io
-        // assume public io is tiny vector, so we evaluate it directly without PCS
-        let pubio_offset = self.n_witin + self.n_fixed;
-        for (index, instance) in self.instance_openings.iter().enumerate() {
+        let pubio_offset = layer.n_witin + layer.n_fixed;
+        for (index, instance) in layer.instance_openings.iter().enumerate() {
             let index: usize = pubio_offset + index;
-            let poly = raw_pi[instance.0].to_vec().into_mle();
-            let expected_eval = poly.evaluate(&in_point[..poly.num_vars()]);
-            if expected_eval != main_evals[index] {
-                return Err(BackendError::LayerVerificationFailed(
-                    format!("layer {} pi mismatch", self.name.clone()).into(),
-                    VerifierError::ClaimNotMatch(
-                        format!("{}", expected_eval).into(),
-                        format!("{}", main_evals[index]).into(),
-                    ),
-                ));
-            }
+            let poly = builder.get(raw_pi, instance.0);
+            let num_variable = builder.get(raw_pi_num_variables, instance.0);
+            let in_point_slice = in_point.slice(builder, 0, num_variable);
+            let expected_eval = poly_evaluator.evaluate_base_poly_at_point(builder, &poly, &in_point_slice);
+            let main_eval = builder.get(&main_evals, index);
+            builder.assert_ext_eq(expected_eval, main_eval);
         }
-        */
-
 
         // TODO: we should store alpha_pows in a bigger array to avoid concatenating them
         let main_sumcheck_challenges_len: Usize<C::N> =
