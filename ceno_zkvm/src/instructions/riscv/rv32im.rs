@@ -562,6 +562,28 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         {
             tracing::debug!("tracer generated {:?} {} records", insn_kind, records.len());
         }
+        tracing::debug!("tracer generated HALT {} records", halt_records.len());
+        tracing::debug!("tracer generated KECCAL {} records", keccak_records.len());
+        tracing::debug!(
+            "tracer generated bn254_add_records {} records",
+            bn254_add_records.len()
+        );
+        tracing::debug!(
+            "tracer generated bn254_double_records {} records",
+            bn254_double_records.len()
+        );
+        tracing::debug!(
+            "tracer generated secp256k1_add_records {} records",
+            secp256k1_add_records.len()
+        );
+        tracing::debug!(
+            "tracer generated secp256k1_double_records {} records",
+            secp256k1_double_records.len()
+        );
+        tracing::debug!(
+            "tracer generated secp256k1_decompress_records {} records",
+            secp256k1_decompress_records.len()
+        );
 
         macro_rules! assign_opcode {
             ($insn_kind:ident,$instruction:ty,$config:ident) => {
