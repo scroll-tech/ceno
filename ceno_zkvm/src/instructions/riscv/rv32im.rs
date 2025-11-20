@@ -560,7 +560,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         for (insn_kind, (_, records)) in
             izip!(InsnKind::iter(), &all_records).sorted_by_key(|(_, (_, a))| Reverse(a.len()))
         {
-            tracing::trace!("tracer generated {:?} {} records", insn_kind, records.len());
+            tracing::debug!("tracer generated {:?} {} records", insn_kind, records.len());
         }
 
         macro_rules! assign_opcode {
