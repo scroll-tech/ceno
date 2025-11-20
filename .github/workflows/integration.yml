@@ -148,6 +148,12 @@ jobs:
           CENO_CROSS_SHARD_LIMIT: 32
         run: cargo run --release --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
+      - name: Run aggregation e2e
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: |
+          cargo run --release --package ceno_recursion --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+
       - name: Install cargo make
         run: |
           cargo make --version || cargo install cargo-make
