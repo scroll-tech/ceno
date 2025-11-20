@@ -1422,8 +1422,8 @@ pub fn evaluate_selector<C: Config>(
             let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
             let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             builder.if_eq(n_0, Usize::from(1)).then(|builder| {
-                let in_point_0 = builder.get(&in_point, 0);
-                let out_point_0 = builder.get(&out_point, 0);
+                let in_point_0 = builder.get(in_point, 0);
+                let out_point_0 = builder.get(out_point, 0);
                 builder.assign(&res, (one - out_point_0) * (one - in_point_0));
             });
 
@@ -1433,8 +1433,8 @@ pub fn evaluate_selector<C: Config>(
                     let i = idx_vec[0];
                     let num_prefix_one_lhs = builder.get(&prefix_one_seq, i);
                     let lhs_res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-                    let in_point_i = builder.get(&in_point, i);
-                    let out_point_i = builder.get(&out_point, i);
+                    let in_point_i = builder.get(in_point, i);
+                    let out_point_i = builder.get(out_point, i);
 
                     builder
                         .if_ne(num_prefix_one_lhs, Usize::from(0))

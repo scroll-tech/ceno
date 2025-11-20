@@ -43,7 +43,7 @@ pub fn decompose_minus_one_bits(n: usize) -> Vec<F> {
     bit_decomp
 }
 pub fn decompose_prefixed_layer_bits(n: usize) -> (Vec<usize>, Vec<Vec<F>>) {
-    let mut m = n.clone();
+    let mut m = n;
     let mut r = vec![];
     let mut r_bits = vec![];
 
