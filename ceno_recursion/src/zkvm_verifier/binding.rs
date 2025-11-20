@@ -533,7 +533,11 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let n_inst_0 = self.num_instances[0];
         let n_inst_0_bit_decomps = decompose_minus_one_bits(n_inst_0);
 
-        let n_inst_1 = if self.num_instances.len() > 1 { self.num_instances[1] } else { 1usize };
+        let n_inst_1 = if self.num_instances.len() > 1 {
+            self.num_instances[1]
+        } else {
+            1usize
+        };
         let n_inst_1_bit_decomps = decompose_minus_one_bits(n_inst_1);
 
         stream.extend(n_inst_0_bit_decomps.write());

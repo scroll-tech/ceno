@@ -4,7 +4,8 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        PolyEvaluator, UniPolyExtrapolator, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse
+        PolyEvaluator, UniPolyExtrapolator, challenger_multi_observe, eq_eval,
+        eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -16,8 +17,8 @@ use crate::{
 // use crate::basefold_verifier::verifier::batch_verify;
 use crate::{
     arithmetics::{
-        build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
-        eq_eval_less_or_equal_than, gen_alpha_pows, nested_product, arr_product,
+        arr_product, build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
+        eq_eval_less_or_equal_than, gen_alpha_pows, nested_product,
     },
     tower_verifier::{
         binding::{PointAndEvalVariable, PointVariable},
@@ -44,7 +45,7 @@ use gkr_iop::{
 use itertools::{Itertools, izip};
 use mpcs::{Basefold, BasefoldRSParams};
 use multilinear_extensions::{
-    StructuralWitInType::StackedConstantSequence, expression::Expression,
+    StructuralWitInType, StructuralWitInType::StackedConstantSequence, expression::Expression,
 };
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
@@ -53,7 +54,6 @@ use openvm_native_recursion::challenger::{
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
 use p3::babybear::BabyBear;
-use multilinear_extensions::StructuralWitInType;
 
 type F = BabyBear;
 type E = BabyBearExt4;
@@ -678,18 +678,30 @@ pub fn verify_chip_proof<C: Config>(
     let selector_ctxs: Vec<SelectorContextVariable<C>> = if cs.ec_final_sum.is_empty() {
         builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(1));
         let num_instances_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
-        builder.set(&num_instances_bit_decomps, 0, chip_proof.sum_num_instances_minus_one_bit_decomposition.clone());
+        builder.set(
+            &num_instances_bit_decomps,
+            0,
+            chip_proof
+                .sum_num_instances_minus_one_bit_decomposition
+                .clone(),
+        );
         vec![
             SelectorContextVariable {
                 offset: Usize::from(0),
                 offset_bit_decomps: zero_bit_decomps,
                 num_instances: chip_proof.sum_num_instances.clone(),
-                num_instances_layered_ns: builder.dyn_array(0),     // Only used in QuarkBinaryTreeLessThan(Expression<E>)
+                num_instances_layered_ns: builder.dyn_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
                 num_instances_bit_decomps,
-                offset_instance_sum_bit_decomps: chip_proof.sum_num_instances_minus_one_bit_decomposition.clone(),
+                offset_instance_sum_bit_decomps: chip_proof
+                    .sum_num_instances_minus_one_bit_decomposition
+                    .clone(),
                 num_vars: num_var_with_rotation.clone(),
             };
-            gkr_circuit.layers.first().map(|layer| layer.out_sel_and_eval_exprs.len()).unwrap_or(0)
+            gkr_circuit
+                .layers
+                .first()
+                .map(|layer| layer.out_sel_and_eval_exprs.len())
+                .unwrap_or(0)
         ]
     } else {
         builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(2));
@@ -698,16 +710,30 @@ pub fn verify_chip_proof<C: Config>(
         let num_inst_1_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
         let num_inst_sum_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
 
-        builder.set(&num_inst_0_bit_decomps, 0, chip_proof.n_inst_0_bit_decomps.clone());
-        builder.set(&num_inst_1_bit_decomps, 0, chip_proof.n_inst_1_bit_decomps.clone());
-        builder.set(&num_inst_sum_bit_decomps, 0, chip_proof.sum_num_instances_minus_one_bit_decomposition.clone());
+        builder.set(
+            &num_inst_0_bit_decomps,
+            0,
+            chip_proof.n_inst_0_bit_decomps.clone(),
+        );
+        builder.set(
+            &num_inst_1_bit_decomps,
+            0,
+            chip_proof.n_inst_1_bit_decomps.clone(),
+        );
+        builder.set(
+            &num_inst_sum_bit_decomps,
+            0,
+            chip_proof
+                .sum_num_instances_minus_one_bit_decomposition
+                .clone(),
+        );
 
         vec![
             SelectorContextVariable {
                 offset: Usize::from(0),
                 offset_bit_decomps: zero_bit_decomps.clone(),
                 num_instances: Usize::Var(builder.get(&chip_proof.num_instances, 0)),
-                num_instances_layered_ns: builder.dyn_array(0),     // Only used in QuarkBinaryTreeLessThan(Expression<E>)
+                num_instances_layered_ns: builder.dyn_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
                 num_instances_bit_decomps: num_inst_0_bit_decomps,
                 offset_instance_sum_bit_decomps: chip_proof.n_inst_0_bit_decomps.clone(),
                 num_vars: num_var_with_rotation.clone(),
@@ -716,18 +742,22 @@ pub fn verify_chip_proof<C: Config>(
                 offset: Usize::Var(builder.get(&chip_proof.num_instances, 0)),
                 offset_bit_decomps: chip_proof.n_inst_0_bit_decomps.clone(),
                 num_instances: Usize::Var(builder.get(&chip_proof.num_instances, 1)),
-                num_instances_layered_ns: builder.dyn_array(0),     // Only used in QuarkBinaryTreeLessThan(Expression<E>)
+                num_instances_layered_ns: builder.dyn_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
                 num_instances_bit_decomps: num_inst_1_bit_decomps,
-                offset_instance_sum_bit_decomps: chip_proof.sum_num_instances_minus_one_bit_decomposition.clone(),
+                offset_instance_sum_bit_decomps: chip_proof
+                    .sum_num_instances_minus_one_bit_decomposition
+                    .clone(),
                 num_vars: num_var_with_rotation.clone(),
             },
             SelectorContextVariable {
                 offset: Usize::from(0),
                 offset_bit_decomps: zero_bit_decomps,
                 num_instances: chip_proof.sum_num_instances.clone(),
-                num_instances_layered_ns: builder.dyn_array(0),     // Only used in QuarkBinaryTreeLessThan(Expression<E>)
+                num_instances_layered_ns: builder.dyn_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
                 num_instances_bit_decomps: num_inst_sum_bit_decomps,
-                offset_instance_sum_bit_decomps: chip_proof.sum_num_instances_minus_one_bit_decomposition.clone(),
+                offset_instance_sum_bit_decomps: chip_proof
+                    .sum_num_instances_minus_one_bit_decomposition
+                    .clone(),
                 num_vars: num_var_with_rotation.clone(),
             },
         ]
@@ -801,7 +831,9 @@ pub fn verify_gkr_circuit<C: Config>(
             has_rotation,
         } = layer_proof;
 
-        let expected_main_evals_len: Usize<C::N> = Usize::from(layer.n_witin + layer.n_fixed + layer.n_instance + layer.n_structural_witin);
+        let expected_main_evals_len: Usize<C::N> = Usize::from(
+            layer.n_witin + layer.n_fixed + layer.n_instance + layer.n_structural_witin,
+        );
         builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
 
         if layer.rotation_sumcheck_expression.is_some() {
@@ -837,7 +869,8 @@ pub fn verify_gkr_circuit<C: Config>(
                 //     (right_evals, right_point),
                 //     (target_evals, origin_point),
                 //  ]
-                let last_idx: Usize<C::N> = builder.eval(eval_and_dedup_points.len() - Usize::from(1));
+                let last_idx: Usize<C::N> =
+                    builder.eval(eval_and_dedup_points.len() - Usize::from(1));
                 builder.set(
                     &eval_and_dedup_points,
                     last_idx.clone(),
@@ -905,8 +938,7 @@ pub fn verify_gkr_circuit<C: Config>(
         // sigma = \sum_b sel(b) * zero_expr(b)
         let max_degree = builder.constant(C::F::from_canonical_usize(layer.max_expr_degree + 1));
 
-        let max_num_variables_f =
-            builder.unsafe_cast_var_to_felt(max_num_variables.get_var());
+        let max_num_variables_f = builder.unsafe_cast_var_to_felt(max_num_variables.get_var());
 
         let (in_point, expected_evaluation) = iop_verifier_state_verify(
             builder,
@@ -929,19 +961,14 @@ pub fn verify_gkr_circuit<C: Config>(
                 let out_point = builder.get(&eval_and_dedup_points, idx).point.fs;
                 let ctx = &selector_ctxs[idx];
 
-                let (wit_id, expected_eval) = evaluate_selector(
-                    builder,
-                    sel_type,
-                    &out_point,
-                    &in_point,
-                    ctx
-                );
+                let (wit_id, expected_eval) =
+                    evaluate_selector(builder, sel_type, &out_point, &in_point, ctx);
 
                 let wit_id = wit_id + structural_witin_offset;
                 let main_eval = builder.get(&main_evals, wit_id);
                 builder.assert_ext_eq(main_eval, expected_eval);
             });
-        
+
         // check structural witin
         for s in &layer.structural_witins {
             let id = s.id;
@@ -954,39 +981,40 @@ pub fn verify_gkr_circuit<C: Config>(
                     multi_factor,
                     descending,
                     ..
-                } => {
-                    eval_wellform_address_vec(
-                        builder, 
-                        offset,
-                        multi_factor as u32, 
-                        &in_point, 
-                        descending
-                    )
-                },
+                } => eval_wellform_address_vec(
+                    builder,
+                    offset,
+                    multi_factor as u32,
+                    &in_point,
+                    descending,
+                ),
                 StructuralWitInType::StackedIncrementalSequence { .. } => {
                     let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
                     let one_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
                     let r_len = in_point.len();
 
-                    builder.if_ne(r_len.clone(), Usize::from(0)).then(|builder| {
-                        builder.if_ne(r_len.clone(), Usize::from(1)).then(|builder| {
-                            builder.range(1, r_len.clone()).for_each(|idx_vec, builder| {
-                                let i = idx_vec[0];
-                                let r_i = builder.get(&in_point, i);
+                    builder
+                        .if_ne(r_len.clone(), Usize::from(0))
+                        .then(|builder| {
+                            builder
+                                .if_ne(r_len.clone(), Usize::from(1))
+                                .then(|builder| {
+                                    builder
+                                        .range(1, r_len.clone())
+                                        .for_each(|idx_vec, builder| {
+                                            let i = idx_vec[0];
+                                            let r_i = builder.get(&in_point, i);
 
-                                let r_slice = &in_point.slice(builder, 0, i);
-                                let eval = eval_wellform_address_vec(
-                                    builder, 
-                                    0,
-                                    1, 
-                                    r_slice, 
-                                    false,
-                                );
-                                builder.assign(&res, res * (one_ext - r_i) + eval * r_i);
-                            });
+                                            let r_slice = &in_point.slice(builder, 0, i);
+                                            let eval = eval_wellform_address_vec(
+                                                builder, 0, 1, r_slice, false,
+                                            );
+                                            builder
+                                                .assign(&res, res * (one_ext - r_i) + eval * r_i);
+                                        });
+                                });
                         });
-                    });
-                    
+
                     res
                 }
                 StructuralWitInType::StackedConstantSequence { .. } => {
@@ -995,40 +1023,35 @@ pub fn verify_gkr_circuit<C: Config>(
                     let i_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
                     let r_len = in_point.len();
 
-                    builder.if_ne(r_len.clone(), Usize::from(0)).then(|builder| {
-                        builder.if_ne(r_len.clone(), Usize::from(1)).then(|builder| {
-                            builder.range(1, r_len.clone()).for_each(|idx_vec, builder| {
-                                let i = idx_vec[0];
-                                let r_i = builder.get(&in_point, i);
+                    builder
+                        .if_ne(r_len.clone(), Usize::from(0))
+                        .then(|builder| {
+                            builder
+                                .if_ne(r_len.clone(), Usize::from(1))
+                                .then(|builder| {
+                                    builder
+                                        .range(1, r_len.clone())
+                                        .for_each(|idx_vec, builder| {
+                                            let i = idx_vec[0];
+                                            let r_i = builder.get(&in_point, i);
 
-                                builder.assign(&res, res * (one_ext - r_i) + i_ext * r_i);
-                                builder.assign(&i_ext, i_ext + one_ext);
-                            });
+                                            builder
+                                                .assign(&res, res * (one_ext - r_i) + i_ext * r_i);
+                                            builder.assign(&i_ext, i_ext + one_ext);
+                                        });
+                                });
                         });
-                    });
-                    
+
                     res
                 }
                 StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
                     let r_slice = in_point.slice(builder, k, in_point.len());
 
-                    eval_wellform_address_vec(
-                        builder, 
-                        0,
-                        1, 
-                        &r_slice, 
-                        false,
-                    )
+                    eval_wellform_address_vec(builder, 0, 1, &r_slice, false)
                 }
                 StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
                     let r_slice = in_point.slice(builder, 0, k);
-                    eval_wellform_address_vec(
-                        builder, 
-                        0,
-                        1, 
-                        &r_slice, 
-                        false,
-                    )
+                    eval_wellform_address_vec(builder, 0, 1, &r_slice, false)
                 }
                 StructuralWitInType::Empty => continue,
             };
@@ -1043,7 +1066,8 @@ pub fn verify_gkr_circuit<C: Config>(
             let poly = builder.get(raw_pi, instance.0);
             let num_variable = builder.get(raw_pi_num_variables, instance.0);
             let in_point_slice = in_point.slice(builder, 0, num_variable);
-            let expected_eval = poly_evaluator.evaluate_base_poly_at_point(builder, &poly, &in_point_slice);
+            let expected_eval =
+                poly_evaluator.evaluate_base_poly_at_point(builder, &poly, &in_point_slice);
             let main_eval = builder.get(&main_evals, index);
             builder.assert_ext_eq(expected_eval, main_eval);
         }
@@ -1292,7 +1316,7 @@ pub fn evaluate_selector<C: Config>(
         SelectorType::None => {
             let r = builder.constant(C::EF::ZERO);
             return (0, r);
-        },
+        }
         SelectorType::Whole(expr) => {
             let one = builder.constant(C::EF::ONE);
             let zero = builder.constant(C::EF::ZERO);
@@ -1306,15 +1330,27 @@ pub fn evaluate_selector<C: Config>(
             let sel: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
 
             builder.if_ne(end, Usize::from(0)).then(|builder| {
-                let eq_end = eq_eval_less_or_equal_than(builder, &ctx.offset_instance_sum_bit_decomps, out_point, in_point);
+                let eq_end = eq_eval_less_or_equal_than(
+                    builder,
+                    &ctx.offset_instance_sum_bit_decomps,
+                    out_point,
+                    in_point,
+                );
                 builder.assign(&sel, eq_end);
 
-                builder.if_ne(start.clone(), Usize::from(0)).then(|builder| {
-                    let eq_start = eq_eval_less_or_equal_than(builder, &ctx.offset_bit_decomps, out_point, in_point);
-                    builder.assign(&sel, sel - eq_start);
-                });
+                builder
+                    .if_ne(start.clone(), Usize::from(0))
+                    .then(|builder| {
+                        let eq_start = eq_eval_less_or_equal_than(
+                            builder,
+                            &ctx.offset_bit_decomps,
+                            out_point,
+                            in_point,
+                        );
+                        builder.assign(&sel, sel - eq_start);
+                    });
             });
-            
+
             (expr, sel)
         }
         SelectorType::OrderedSparse32 {
@@ -1336,13 +1372,9 @@ pub fn evaluate_selector<C: Config>(
             let out_point_slice = out_point.slice(builder, 5, out_point.len());
             let in_point_slice = in_point.slice(builder, 5, in_point.len());
             let n_bits = builder.get(&ctx.num_instances_bit_decomps, 0);
-            
-            let sel = eq_eval_less_or_equal_than(
-                builder,
-                &n_bits,
-                &out_point_slice,
-                &in_point_slice,
-            );
+
+            let sel =
+                eq_eval_less_or_equal_than(builder, &n_bits, &out_point_slice, &in_point_slice);
             builder.assign(&eval, eval * sel);
 
             (expression, eval)
@@ -1351,9 +1383,10 @@ pub fn evaluate_selector<C: Config>(
             builder.assert_nonzero(&ctx.num_instances);
             builder.assert_nonzero(&out_point.len());
             builder.assert_usize_eq(in_point.len(), out_point.len());
-            
+
             let prefix_one_seq: Array<C, Usize<C::N>> = builder.dyn_array(out_point.len());
-            let prefix_one_seq_minus_one_bits: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(out_point.len());
+            let prefix_one_seq_minus_one_bits: Array<C, Array<C, Felt<C::F>>> =
+                builder.dyn_array(out_point.len());
             let zero_bit_decomp: Array<C, Felt<C::F>> = builder.dyn_array(32);
 
             let default_n: Usize<C::N> = builder.eval(C::N::ONE);
@@ -1362,17 +1395,25 @@ pub fn evaluate_selector<C: Config>(
                 builder.assign(&default_n, Usize::from(0));
             });
 
-            builder.range(0, prefix_one_seq.len()).for_each(|idx_vec, builder| {
-                builder.set(&prefix_one_seq, idx_vec[0], default_n.clone());
-                builder.set(&prefix_one_seq_minus_one_bits, idx_vec[0], zero_bit_decomp.clone());
-            });
-            builder.range(1, ctx.num_instances_layered_ns.len()).for_each(|idx_vec, builder| {
-                let n = builder.get(&ctx.num_instances_layered_ns, idx_vec[0]);
-                let n_bits = builder.get(&ctx.num_instances_bit_decomps, idx_vec[0]);
-                let target_idx: Usize<C::N> = builder.eval(idx_vec[0] - Usize::from(1));
-                builder.set(&prefix_one_seq, target_idx.clone(), n);
-                builder.set(&prefix_one_seq_minus_one_bits, target_idx, n_bits.clone());
-            });
+            builder
+                .range(0, prefix_one_seq.len())
+                .for_each(|idx_vec, builder| {
+                    builder.set(&prefix_one_seq, idx_vec[0], default_n.clone());
+                    builder.set(
+                        &prefix_one_seq_minus_one_bits,
+                        idx_vec[0],
+                        zero_bit_decomp.clone(),
+                    );
+                });
+            builder
+                .range(1, ctx.num_instances_layered_ns.len())
+                .for_each(|idx_vec, builder| {
+                    let n = builder.get(&ctx.num_instances_layered_ns, idx_vec[0]);
+                    let n_bits = builder.get(&ctx.num_instances_bit_decomps, idx_vec[0]);
+                    let target_idx: Usize<C::N> = builder.eval(idx_vec[0] - Usize::from(1));
+                    builder.set(&prefix_one_seq, target_idx.clone(), n);
+                    builder.set(&prefix_one_seq_minus_one_bits, target_idx, n_bits.clone());
+                });
 
             let prefix_one_seq = reverse(builder, &prefix_one_seq);
             let prefix_one_seq_minus_one_bits = reverse(builder, &prefix_one_seq_minus_one_bits);
@@ -1386,24 +1427,36 @@ pub fn evaluate_selector<C: Config>(
                 builder.assign(&res, (one - out_point_0) * (one - in_point_0));
             });
 
-            builder.range(1, out_point.len()).for_each(|idx_vec, builder| {
-                let i = idx_vec[0];
-                let num_prefix_one_lhs = builder.get(&prefix_one_seq, i);
-                let lhs_res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-                let in_point_i = builder.get(&in_point, i);
-                let out_point_i = builder.get(&out_point, i);
-                
-                builder.if_ne(num_prefix_one_lhs, Usize::from(0)).then(|builder| {
-                    let out_point_slice = out_point.slice(builder, 0, i);
-                    let in_point_slice = in_point.slice(builder, 0, i);
-                    let n_bits = builder.get(&prefix_one_seq_minus_one_bits, i);
-                    let eq_eval = eq_eval_less_or_equal_than(builder, &n_bits, &out_point_slice, &in_point_slice);
-                    builder.assign(&lhs_res, (one - out_point_i) * (one - in_point_i) * eq_eval);
-                });
+            builder
+                .range(1, out_point.len())
+                .for_each(|idx_vec, builder| {
+                    let i = idx_vec[0];
+                    let num_prefix_one_lhs = builder.get(&prefix_one_seq, i);
+                    let lhs_res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+                    let in_point_i = builder.get(&in_point, i);
+                    let out_point_i = builder.get(&out_point, i);
 
-                let rhs_res: Ext<C::F, C::EF> = builder.eval(out_point_i * in_point_i * res);
-                builder.assign(&res, lhs_res + rhs_res);
-            });
+                    builder
+                        .if_ne(num_prefix_one_lhs, Usize::from(0))
+                        .then(|builder| {
+                            let out_point_slice = out_point.slice(builder, 0, i);
+                            let in_point_slice = in_point.slice(builder, 0, i);
+                            let n_bits = builder.get(&prefix_one_seq_minus_one_bits, i);
+                            let eq_eval = eq_eval_less_or_equal_than(
+                                builder,
+                                &n_bits,
+                                &out_point_slice,
+                                &in_point_slice,
+                            );
+                            builder.assign(
+                                &lhs_res,
+                                (one - out_point_i) * (one - in_point_i) * eq_eval,
+                            );
+                        });
+
+                    let rhs_res: Ext<C::F, C::EF> = builder.eval(out_point_i * in_point_i * res);
+                    builder.assign(&res, lhs_res + rhs_res);
+                });
 
             (expr, res)
         }
@@ -1801,21 +1854,17 @@ pub fn verify_ecc_proof<C: Config>(
         num_vars: proof.num_vars.clone(),
     };
 
-    let (_wit_id, expected_sel_add) = evaluate_selector(
-        builder,
-        &sel_add_expr, 
-        &out_rt, 
-        &rt,
-        &ctx
-    );
+    let (_wit_id, expected_sel_add) = evaluate_selector(builder, &sel_add_expr, &out_rt, &rt, &ctx);
 
     let proof_eval_0 = builder.get(&proof.evals, 0);
     builder.assert_ext_eq(proof_eval_0, expected_sel_add);
 
-    let eq_eval: Ext<<C as Config>::F, <C as Config>::EF> = eq_eval(builder, &out_rt, &rt, one_ext, zero_ext);
+    let eq_eval: Ext<<C as Config>::F, <C as Config>::EF> =
+        eq_eval(builder, &out_rt, &rt, one_ext, zero_ext);
     let out_rt_prod = arr_product(builder, &out_rt);
     let rt_prod = arr_product(builder, &rt);
-    let expected_sel_bypass: Ext<C::F, C::EF> = builder.eval(eq_eval - expected_sel_add - (out_rt_prod * rt_prod));
+    let expected_sel_bypass: Ext<C::F, C::EF> =
+        builder.eval(eq_eval - expected_sel_add - (out_rt_prod * rt_prod));
 
     let proof_eval_1 = builder.get(&proof.evals, 1);
     builder.assert_ext_eq(proof_eval_1, expected_sel_bypass);
@@ -1832,7 +1881,8 @@ pub fn verify_ecc_proof<C: Config>(
         builder.assign(&add_evaluations, add_evaluations + v1_i + v2_i + v3_i);
         builder.assign(&bypass_evaluations, bypass_evaluations + v4_i + v5_i);
     }
-    let op_evaluation: Ext<C::F, C::EF> = builder.eval(add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass);
+    let op_evaluation: Ext<C::F, C::EF> =
+        builder.eval(add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass);
     builder.assert_ext_eq(sumcheck_expected_evaluation, op_evaluation);
 }
 
