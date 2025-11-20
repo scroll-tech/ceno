@@ -33,6 +33,33 @@ pub type E = BinomialExtensionField<F, 4>;
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 pub type InnerConfig = AsmConfig<F, E>;
 
+pub fn decompose_minus_one_bits(n: usize) -> Vec<F> {
+    let a = if n > 0 { n - 1 } else { 0 };
+    let mut bit_decomp: Vec<F> = vec![];
+    for i in 0..32usize {
+        bit_decomp.push(F::from_canonical_usize((a >> i) & 1));
+    }
+
+    bit_decomp
+}
+pub fn decompose_prefixed_layer_bits(n: usize) -> (Vec<usize>, Vec<Vec<F>>) {
+    let mut m = n.clone();
+    let mut r = vec![];
+    let mut r_bits = vec![];
+
+    r.push(m);
+    r_bits.push(decompose_minus_one_bits(m));
+
+    while m > 1 {
+        let cur = m / 2;
+        r.push(cur);
+        r_bits.push(decompose_minus_one_bits(cur));
+        m = m.div_ceil(2);
+    }
+
+    (r, r_bits)
+}
+
 #[derive(DslVariable, Clone)]
 pub struct ZKVMProofInputVariable<C: Config> {
     pub shard_id: Usize<C::N>,
@@ -393,7 +420,9 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub has_ecc_proof: Usize<C::N>,
     pub ecc_proof: EccQuarkProofVariable<C>,
     pub num_instances: Array<C, Var<C::N>>,
-    pub num_instances_bit_decompositions: Array<C, Felt<C::F>>, // len = 96
+    pub n_inst_0_bit_decomps: Array<C, Felt<C::F>>,
+    pub n_inst_1_bit_decomps: Array<C, Felt<C::F>>,
+
     pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
     pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
 }
@@ -425,7 +454,9 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let ecc_proof = EccQuarkProofInput::read(builder);
 
         let num_instances = Vec::<usize>::read(builder);
-        let num_instances_bit_decompositions = Vec::<F>::read(builder);
+        let n_inst_0_bit_decomps = Vec::<F>::read(builder);
+        let n_inst_1_bit_decomps = Vec::<F>::read(builder);
+
         let fixed_in_evals = Vec::<E>::read(builder);
         let wits_in_evals = Vec::<E>::read(builder);
 
@@ -449,7 +480,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             has_ecc_proof,
             ecc_proof,
             num_instances,
-            num_instances_bit_decompositions,
+            n_inst_0_bit_decomps,
+            n_inst_1_bit_decomps,
             fixed_in_evals,
             wits_in_evals,
         }
@@ -465,23 +497,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let sum_num_instances = self.num_instances.iter().sum();
         stream.extend(<usize as Hintable<InnerConfig>>::write(&sum_num_instances));
 
-
-
-
-
-
-        let eq_instance = sum_num_instances - 1;
-        let mut bit_decomp: Vec<F> = vec![];
-        for i in 0..32usize {
-            bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-        }
-        stream.extend(bit_decomp.write());
-
-
-
-
-
-
+        let sum_num_instance_bit_decomp = decompose_minus_one_bits(sum_num_instances);
+        stream.extend(sum_num_instance_bit_decomp.write());
 
         let next_pow2_instance = next_pow2_instance_padding(sum_num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instance);
@@ -513,80 +530,20 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             &self.num_instances,
         ));
 
+        let n_inst_0 = self.num_instances[0];
+        let n_inst_0_bit_decomps = decompose_minus_one_bits(n_inst_0);
 
+        let n_inst_1 = if self.num_instances.len() > 1 { self.num_instances[1] } else { 1usize };
+        let n_inst_1_bit_decomps = decompose_minus_one_bits(n_inst_1);
 
-
-        let mut sum: usize = 0;
-        let mut bit_decomp: Vec<F> = vec![];
-        if !self.num_instances.is_empty() {
-            let eq_instance = if self.num_instances[0] > 0 {
-                self.num_instances[0] - 1
-            } else {
-                0
-            };
-
-            for i in 0..32usize {
-                bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-            }
-            sum += self.num_instances[0];
-        }
-        if self.num_instances.len() > 1 {
-            let eq_instance = if self.num_instances[1] > 0 {
-                self.num_instances[1] - 1
-            } else {
-                0
-            };
-
-            for i in 0..32usize {
-                bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-            }
-            sum += self.num_instances[1];
-        }
-        let eq_instance = if sum > 0 { sum - 1 } else { 0 };
-        for i in 0..32usize {
-            bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-        }
-        stream.extend(bit_decomp.write());
-
-
-
-
-
-
-
+        stream.extend(n_inst_0_bit_decomps.write());
+        stream.extend(n_inst_1_bit_decomps.write());
 
         stream.extend(self.fixed_in_evals.write());
         stream.extend(self.wits_in_evals.write());
 
         stream
     }
-}
-
-pub fn decompose_minus_one_bits(n: usize) -> Vec<F> {
-    let a = if n > 0 { n - 1 } else { 0 };
-    let mut bit_decomp: Vec<F> = vec![];
-    for i in 0..32usize {
-        bit_decomp.push(F::from_canonical_usize((a >> i) & 1));
-    }
-
-    bit_decomp
-}
-pub fn decompose_prefixed_layer_bits(n: usize) -> (Vec<usize>, Vec<Vec<F>>) {
-    let mut m = n.clone();
-    let mut r = vec![];
-    let mut r_bits = vec![];
-
-    r.push(m);
-    r_bits.push(decompose_minus_one_bits(m));
-
-    while m > 1 {
-        let cur = m / 2;
-        r.push(cur);
-        r_bits.push(decompose_minus_one_bits(cur));
-        m = m.div_ceil(2);
-    }
-
-    (r, r_bits)
 }
 
 #[derive(Default)]

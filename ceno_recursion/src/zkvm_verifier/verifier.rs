@@ -674,57 +674,64 @@ pub fn verify_chip_proof<C: Config>(
         });
     let gkr_circuit = gkr_circuit.clone().unwrap();
 
-    // _debug
-    let selector_ctxs: Vec<SelectorContextVariable<C>> = vec![];
-    // _debug: selector
-    // let zero_decomp = builder.dyn_array(32);
-    // if cs.ec_final_sum.is_empty() {
-    // builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(1));
-    // vec![
-    // SelectorContextVariable {
-    // offset: Usize::from(0),
-    // offset_bit_decomp: zero_decomp.clone(),
-    // num_instances: chip_proof.sum_num_instances.clone(),
-    // num_instances_bit_decomp: chip_proof.sum_num_instances_minus_one_bit_decomposition.clone(),
-    // num_vars: num_var_with_rotation.clone(),
-    // };
-    // gkr_circuit
-    // .layers
-    // .first()
-    // .map(|layer| layer.out_sel_and_eval_exprs.len())
-    // .unwrap_or(0)
-    // ]
-    // } else {
-    // builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(2));
-    // let n_inst_sum = Usize::uninit(builder);
-    // let n_inst_left = builder.get(&chip_proof.num_instances, 0);
-    // let n_inst_right = builder.get(&chip_proof.num_instances, 1);
-    // builder.assign(&n_inst_sum, n_inst_left + n_inst_right);
-    //
-    // vec![
-    // SelectorContextVariable {
-    // offset: Usize::from(0),
-    // offset_bit_decomp: zero_decomp.clone(),
-    // num_instances: Usize::Var(n_inst_left),
-    // num_instances_bit_decomp: chip_proof.num_instances_bit_decompositions.slice(builder, 0, 32),
-    // num_vars: num_var_with_rotation.clone(),
-    // },
-    // SelectorContextVariable {
-    // offset: Usize::Var(n_inst_left),
-    // offset_bit_decomp: chip_proof.num_instances_bit_decompositions.slice(builder, 0, 32),
-    // num_instances: Usize::Var(n_inst_right),
-    // num_instances_bit_decomp: chip_proof.num_instances_bit_decompositions.slice(builder, 32, 64),
-    // num_vars: num_var_with_rotation.clone(),
-    // },
-    // SelectorContextVariable {
-    // offset: Usize::from(0),
-    // offset_bit_decomp: zero_decomp.clone(),
-    // num_instances: n_inst_sum,
-    // num_instances_bit_decomp: chip_proof.num_instances_bit_decompositions.slice(builder, 64, 96),
-    // num_vars: num_var_with_rotation.clone(),
-    // },
-    // ]
-    // };
+    let zero_bit_decomps: Array<C, Felt<C::F>> = builder.dyn_array(32);
+    let selector_ctxs: Vec<SelectorContextVariable<C>> = if cs.ec_final_sum.is_empty() {
+        builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(1));
+        let num_instances_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
+        builder.set(&num_instances_bit_decomps, 0, chip_proof.sum_num_instances_minus_one_bit_decomposition.clone());
+        vec![
+            SelectorContextVariable {
+                offset: Usize::from(0),
+                offset_bit_decomps: zero_bit_decomps,
+                num_instances: chip_proof.sum_num_instances.clone(),
+                num_instances_layered_ns: builder.dyn_array(0),     // Only used in QuarkBinaryTreeLessThan(Expression<E>)
+                num_instances_bit_decomps,
+                offset_instance_sum_bit_decomps: chip_proof.sum_num_instances_minus_one_bit_decomposition.clone(),
+                num_vars: num_var_with_rotation.clone(),
+            };
+            gkr_circuit.layers.first().map(|layer| layer.out_sel_and_eval_exprs.len()).unwrap_or(0)
+        ]
+    } else {
+        builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(2));
+
+        let num_inst_0_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
+        let num_inst_1_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
+        let num_inst_sum_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
+
+        builder.set(&num_inst_0_bit_decomps, 0, chip_proof.n_inst_0_bit_decomps.clone());
+        builder.set(&num_inst_1_bit_decomps, 0, chip_proof.n_inst_1_bit_decomps.clone());
+        builder.set(&num_inst_sum_bit_decomps, 0, chip_proof.sum_num_instances_minus_one_bit_decomposition.clone());
+
+        vec![
+            SelectorContextVariable {
+                offset: Usize::from(0),
+                offset_bit_decomps: zero_bit_decomps.clone(),
+                num_instances: Usize::Var(builder.get(&chip_proof.num_instances, 0)),
+                num_instances_layered_ns: builder.dyn_array(0),     // Only used in QuarkBinaryTreeLessThan(Expression<E>)
+                num_instances_bit_decomps: num_inst_0_bit_decomps,
+                offset_instance_sum_bit_decomps: chip_proof.n_inst_0_bit_decomps.clone(),
+                num_vars: num_var_with_rotation.clone(),
+            },
+            SelectorContextVariable {
+                offset: Usize::Var(builder.get(&chip_proof.num_instances, 0)),
+                offset_bit_decomps: chip_proof.n_inst_0_bit_decomps.clone(),
+                num_instances: Usize::Var(builder.get(&chip_proof.num_instances, 1)),
+                num_instances_layered_ns: builder.dyn_array(0),     // Only used in QuarkBinaryTreeLessThan(Expression<E>)
+                num_instances_bit_decomps: num_inst_1_bit_decomps,
+                offset_instance_sum_bit_decomps: chip_proof.sum_num_instances_minus_one_bit_decomposition.clone(),
+                num_vars: num_var_with_rotation.clone(),
+            },
+            SelectorContextVariable {
+                offset: Usize::from(0),
+                offset_bit_decomps: zero_bit_decomps,
+                num_instances: chip_proof.sum_num_instances.clone(),
+                num_instances_layered_ns: builder.dyn_array(0),     // Only used in QuarkBinaryTreeLessThan(Expression<E>)
+                num_instances_bit_decomps: num_inst_sum_bit_decomps,
+                offset_instance_sum_bit_decomps: chip_proof.sum_num_instances_minus_one_bit_decomposition.clone(),
+                num_vars: num_var_with_rotation.clone(),
+            },
+        ]
+    };
 
     builder.cycle_tracker_start("Verify GKR Circuit");
     let rt = verify_gkr_circuit(
@@ -760,7 +767,7 @@ pub fn verify_gkr_circuit<C: Config>(
     raw_pi_num_variables: &Array<C, Var<C::N>>,
     claims: &Array<C, PointAndEvalVariable<C>>,
     _chip_proof: &ZKVMChipProofInputVariable<C>,
-    _selector_ctxs: Vec<SelectorContextVariable<C>>,
+    selector_ctxs: Vec<SelectorContextVariable<C>>,
     unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
     poly_evaluator: &mut PolyEvaluator<C>,
 ) -> PointVariable<C> {
@@ -911,7 +918,8 @@ pub fn verify_gkr_circuit<C: Config>(
             unipoly_extrapolator,
         );
 
-        /* _debug
+        let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
+
         // check selector evaluations
         layer
             .out_sel_and_eval_exprs
@@ -919,23 +927,22 @@ pub fn verify_gkr_circuit<C: Config>(
             .enumerate()
             .for_each(|(idx, (sel_type, _))| {
                 let out_point = builder.get(&eval_and_dedup_points, idx).point.fs;
-                let selector_ctx = &selector_ctxs[idx];
+                let ctx = &selector_ctxs[idx];
 
-                evaluate_selector(
+                let (wit_id, expected_eval) = evaluate_selector(
                     builder,
                     sel_type,
-                    &main_evals,
                     &out_point,
                     &in_point,
-                    chip_proof,
-                    layer.n_witin,
-                    selector_ctx,
+                    ctx
                 );
+
+                let wit_id = wit_id + structural_witin_offset;
+                let main_eval = builder.get(&main_evals, wit_id);
+                builder.assert_ext_eq(main_eval, expected_eval);
             });
-        */
         
         // check structural witin
-        let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
         for s in &layer.structural_witins {
             let id = s.id;
             let witin_type = s.witin_type;
