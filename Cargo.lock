@@ -1097,6 +1097,7 @@ dependencies = [
  "ff_ext",
  "itertools 0.13.0",
  "multilinear_extensions",
+ "num",
  "num-derive",
  "num-traits",
  "rayon",
@@ -1105,11 +1106,13 @@ dependencies = [
  "secp",
  "serde",
  "smallvec",
+ "sp1-curves",
  "strum",
  "strum_macros",
  "substrate-bn 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tiny-keccak",
  "tracing",
+ "typenum",
 ]
 
 [[package]]
@@ -1251,6 +1254,7 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber 0.3.19",
  "transcript",
+ "typenum",
  "whir",
  "witness",
 ]
@@ -2222,7 +2226,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "once_cell",
  "p3",
@@ -3271,7 +3275,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "bincode",
  "clap",
@@ -3295,7 +3299,7 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "either",
  "ff_ext",
@@ -4526,7 +4530,7 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "p3-air",
  "p3-baby-bear",
@@ -5094,7 +5098,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "ff_ext",
  "p3",
@@ -6187,7 +6191,7 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -6312,7 +6316,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "either",
  "ff_ext",
@@ -6330,7 +6334,7 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "itertools 0.13.0",
  "p3",
@@ -6761,7 +6765,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -6781,9 +6785,9 @@ dependencies = [
 
 [[package]]
 name = "typenum"
-version = "1.18.0"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
+checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "ucd-trie"
@@ -7043,7 +7047,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "bincode",
  "clap",
@@ -7330,7 +7334,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.13#89aa6add9f4d16cd2f10ec81f7c11d4507400c9b"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",
