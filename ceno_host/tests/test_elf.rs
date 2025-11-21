@@ -452,12 +452,12 @@ fn test_secp256k1_decompress() -> Result<()> {
 
 #[test]
 fn test_secp256k1_ecrecover() -> Result<()> {
-    let _ = ceno_host::run(
-        CENO_PLATFORM,
-        ceno_examples::secp256k1_ecrecover,
-        &CenoStdin::default(),
-        None,
-    );
+    let program_elf = ceno_examples::secp256k1_ecrecover;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+
+    let steps = run(&mut state)?;
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert!(!syscalls.is_empty());
 
     Ok(())
 }
