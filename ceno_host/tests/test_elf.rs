@@ -290,6 +290,18 @@ fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
 }
 
 #[test]
+fn test_secp256k1() -> Result<()> {
+    let program_elf = ceno_examples::secp256k1;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert!(!syscalls.is_empty());
+
+    Ok(())
+}
+
+#[test]
 fn test_secp256k1_add() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_add_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
