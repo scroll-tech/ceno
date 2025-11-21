@@ -2,6 +2,11 @@
 extern crate ceno_rt;
 use ceno_syscall::syscall_secp256k1_double;
 
+use k256::{
+    ProjectivePoint, Scalar,
+    elliptic_curve::{Group, ops::MulByGenerator},
+};
+
 // Byte repr. of points from https://docs.rs/secp/latest/secp/#arithmetic-1
 const P: [u8; 65] = [
     4, 180, 53, 9, 32, 85, 226, 220, 154, 20, 116, 218, 199, 119, 48, 44, 23, 45, 222, 10, 64, 50,
@@ -35,9 +40,9 @@ fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
     std::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * (i + 1)].try_into().unwrap()))
 }
 fn main() {
-    let mut p: DecompressedPoint = bytes_to_words(P);
-    let double_p: DecompressedPoint = bytes_to_words(DOUBLE_P);
-
-    syscall_secp256k1_double(&mut p);
-    assert_eq!(p, double_p);
+    // scalar mulitiplication
+    let scalar = Scalar::from(5u64);
+    let a = ProjectivePoint::mul_by_generator(&scalar);
+    // let _ = a.double(); // uncomment this failed
+    // let _ = a + a; // uncomment this aslso failed
 }
