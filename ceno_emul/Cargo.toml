@@ -32,7 +32,7 @@ strum_macros.workspace = true
 substrate-bn.workspace = true
 tiny-keccak.workspace = true
 tracing.workspace = true
-typenum = "1.19.0"
+typenum.workspace = true
 
 [features]
 default = ["forbid_overflow"]

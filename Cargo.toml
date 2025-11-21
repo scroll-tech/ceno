@@ -80,6 +80,7 @@ tracing = { version = "0.1", features = [
 ] }
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+typenum = "*"
 uint = "0.8"
 
 ceno_gpu = { path = "utils/cuda_hal", package = "cuda_hal" }
