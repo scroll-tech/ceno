@@ -22,11 +22,11 @@ use std::{fmt::Debug, ops::Neg};
 
 /// The affine point type for SP1.
 pub mod affine;
-pub use affine::AffinePoint;
+pub use affine::CenoAffinePoint;
 
 /// The projective point type for SP1.
 pub mod projective;
-pub use projective::ProjectivePoint;
+pub use projective::CenoProjectivePoint;
 
 /// NOTE: The only supported ECDSA curves are secp256k1 and secp256r1, which both
 /// have 8 limbs in their field elements.
@@ -49,8 +49,8 @@ pub trait ECDSACurve
 where
     Self: CurveArithmetic<
             FieldBytesSize = FIELD_BYTES_SIZE,
-            AffinePoint = AffinePoint<Self>,
-            ProjectivePoint = ProjectivePoint<Self>,
+            AffinePoint = CenoAffinePoint<Self>,
+            ProjectivePoint = CenoProjectivePoint<Self>,
         >,
 {
     type FieldElement: Field<Self> + Neg<Output = Self::FieldElement>;
@@ -96,10 +96,10 @@ impl<P> ECDSAPoint for P where P: AffinePointTrait<POINT_LIMBS> + Clone + Copy +
 pub mod ecdh {
     pub use elliptic_curve::ecdh::{EphemeralSecret, SharedSecret, diffie_hellman};
 
-    use super::{AffinePoint, ECDSACurve, Field};
+    use super::{CenoAffinePoint, ECDSACurve, Field};
 
-    impl<C: ECDSACurve> From<&AffinePoint<C>> for SharedSecret<C> {
-        fn from(affine: &AffinePoint<C>) -> SharedSecret<C> {
+    impl<C: ECDSACurve> From<&CenoAffinePoint<C>> for SharedSecret<C> {
+        fn from(affine: &CenoAffinePoint<C>) -> SharedSecret<C> {
             let (x, _) = affine.field_elements();
 
             x.to_bytes().into()

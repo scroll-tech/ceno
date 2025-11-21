@@ -2,7 +2,7 @@
 //!
 //! Implementation of an affine point, with acceleration for operations in the context of SP1.
 //!
-//! The [`crate::ecdsa::ProjectivePoint`] type is mainly used in the `ecdsa-core` algorithms,
+//! The [`crate::ecdsa::CenoProjectivePoint`] type is mainly used in the `ecdsa-core` algorithms,
 //! however, in some cases, the affine point is required.
 //!
 //! Note: When performing curve operations, accelerated crates for SP1 use affine arithmetic instead
@@ -24,11 +24,11 @@ use elliptic_curve::{
 use std::ops::Neg;
 
 #[derive(Clone, Copy, Debug)]
-pub struct AffinePoint<C: ECDSACurve> {
+pub struct CenoAffinePoint<C: ECDSACurve> {
     pub inner: C::SP1AffinePoint,
 }
 
-impl<C: ECDSACurve> AffinePoint<C> {
+impl<C: ECDSACurve> CenoAffinePoint<C> {
     /// Create an affine point from the given field elements, without checking if the point is on
     /// the curve.
     pub fn from_field_elements_unchecked(x: FieldElement<C>, y: FieldElement<C>) -> Self {
@@ -40,7 +40,7 @@ impl<C: ECDSACurve> AffinePoint<C> {
         let y_slice = y_slice.as_mut_slice();
         y_slice.reverse();
 
-        AffinePoint {
+        CenoAffinePoint {
             inner: <C::SP1AffinePoint as ECDSAPoint>::from(x_slice, y_slice),
         }
     }
@@ -72,14 +72,14 @@ impl<C: ECDSACurve> AffinePoint<C> {
 
     /// Get the generator point.
     pub fn generator() -> Self {
-        AffinePoint {
+        CenoAffinePoint {
             inner: C::SP1AffinePoint::GENERATOR,
         }
     }
 
     /// Get the identity point.
     pub fn identity() -> Self {
-        AffinePoint {
+        CenoAffinePoint {
             inner: C::SP1AffinePoint::identity(),
         }
     }
@@ -90,13 +90,13 @@ impl<C: ECDSACurve> AffinePoint<C> {
     }
 }
 
-impl<C: ECDSACurve> FromEncodedPoint<C> for AffinePoint<C> {
+impl<C: ECDSACurve> FromEncodedPoint<C> for CenoAffinePoint<C> {
     fn from_encoded_point(point: &EncodedPoint<C>) -> CtOption<Self> {
         match point.coordinates() {
             sec1::Coordinates::Identity => CtOption::new(Self::identity(), 1.into()),
             sec1::Coordinates::Compact { x } => Self::decompact(x),
             sec1::Coordinates::Compressed { x, y_is_odd } => {
-                AffinePoint::<C>::decompress(x, Choice::from(y_is_odd as u8))
+                CenoAffinePoint::<C>::decompress(x, Choice::from(y_is_odd as u8))
             }
             sec1::Coordinates::Uncompressed { x, y } => {
                 let x = FieldElement::<C>::from_bytes(x);
@@ -118,7 +118,7 @@ impl<C: ECDSACurve> FromEncodedPoint<C> for AffinePoint<C> {
     }
 }
 
-impl<C: ECDSACurve> ToEncodedPoint<C> for AffinePoint<C> {
+impl<C: ECDSACurve> ToEncodedPoint<C> for CenoAffinePoint<C> {
     fn to_encoded_point(&self, compress: bool) -> EncodedPoint<C> {
         // If the point is the identity point, just return the identity point.
         if self.is_identity().into() {
@@ -132,7 +132,7 @@ impl<C: ECDSACurve> ToEncodedPoint<C> for AffinePoint<C> {
     }
 }
 
-impl<C: ECDSACurve> DecompressPoint<C> for AffinePoint<C> {
+impl<C: ECDSACurve> DecompressPoint<C> for CenoAffinePoint<C> {
     fn decompress(x_bytes: &FieldBytes<C>, y_is_odd: Choice) -> CtOption<Self> {
         FieldElement::<C>::from_bytes(x_bytes).and_then(|x| {
             let alpha = (x * x * x) + (C::EQUATION_A * x) + C::EQUATION_B;
@@ -149,19 +149,19 @@ impl<C: ECDSACurve> DecompressPoint<C> for AffinePoint<C> {
                 );
 
                 // X is normalized by virtue of being created via `FromBytes`.
-                AffinePoint::from_field_elements_unchecked(x, y.normalize())
+                CenoAffinePoint::from_field_elements_unchecked(x, y.normalize())
             })
         })
     }
 }
 
-impl<C: ECDSACurve> DecompactPoint<C> for AffinePoint<C> {
+impl<C: ECDSACurve> DecompactPoint<C> for CenoAffinePoint<C> {
     fn decompact(x_bytes: &FieldBytes<C>) -> CtOption<Self> {
         Self::decompress(x_bytes, Choice::from(0))
     }
 }
 
-impl<C: ECDSACurve> AffineCoordinates for AffinePoint<C> {
+impl<C: ECDSACurve> AffineCoordinates for CenoAffinePoint<C> {
     type FieldRepr = FieldBytes<C>;
 
     fn x(&self) -> FieldBytes<C> {
@@ -178,7 +178,7 @@ impl<C: ECDSACurve> AffineCoordinates for AffinePoint<C> {
     }
 }
 
-impl<C: ECDSACurve> ConditionallySelectable for AffinePoint<C> {
+impl<C: ECDSACurve> ConditionallySelectable for CenoAffinePoint<C> {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
         // Conditional select is a constant time if-else operation.
         //
@@ -187,7 +187,7 @@ impl<C: ECDSACurve> ConditionallySelectable for AffinePoint<C> {
     }
 }
 
-impl<C: ECDSACurve> ConstantTimeEq for AffinePoint<C> {
+impl<C: ECDSACurve> ConstantTimeEq for CenoAffinePoint<C> {
     fn ct_eq(&self, other: &Self) -> Choice {
         let (x1, y1) = self.field_elements();
         let (x1, y1) = (x1, y1);
@@ -200,23 +200,23 @@ impl<C: ECDSACurve> ConstantTimeEq for AffinePoint<C> {
     }
 }
 
-impl<C: ECDSACurve> PartialEq for AffinePoint<C> {
+impl<C: ECDSACurve> PartialEq for CenoAffinePoint<C> {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).into()
     }
 }
 
-impl<C: ECDSACurve> Eq for AffinePoint<C> {}
+impl<C: ECDSACurve> Eq for CenoAffinePoint<C> {}
 
-impl<C: ECDSACurve> Default for AffinePoint<C> {
+impl<C: ECDSACurve> Default for CenoAffinePoint<C> {
     fn default() -> Self {
-        AffinePoint::identity()
+        CenoAffinePoint::identity()
     }
 }
 
-impl<C: ECDSACurve> DefaultIsZeroes for AffinePoint<C> {}
+impl<C: ECDSACurve> DefaultIsZeroes for CenoAffinePoint<C> {}
 
-impl<C: ECDSACurve> GroupEncoding for AffinePoint<C> {
+impl<C: ECDSACurve> GroupEncoding for CenoAffinePoint<C> {
     type Repr = CompressedPoint<C>;
 
     fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {

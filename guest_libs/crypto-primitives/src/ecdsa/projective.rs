@@ -8,7 +8,7 @@
 //! Note: When performing curve operations, accelerated crates for SP1 use affine arithmetic instead
 //! of projective arithmetic for performance.
 
-use super::{AffinePoint, AffinePointTrait, ECDSACurve};
+use super::{CenoAffinePoint, AffinePointTrait, ECDSACurve};
 
 use elliptic_curve::{
     CurveArithmetic, FieldBytes,
@@ -35,22 +35,22 @@ use std::borrow::Borrow;
 
 /// The SP1 accelerated projective point.
 #[derive(Clone, Copy, Debug)]
-pub struct ProjectivePoint<C: ECDSACurve> {
+pub struct CenoProjectivePoint<C: ECDSACurve> {
     /// The inner affine point.
     ///
     /// SP1 uses affine arithmetic for all operations.
-    pub inner: AffinePoint<C>,
+    pub inner: CenoAffinePoint<C>,
 }
 
-impl<C: ECDSACurve> ProjectivePoint<C> {
+impl<C: ECDSACurve> CenoProjectivePoint<C> {
     pub fn identity() -> Self {
-        ProjectivePoint {
-            inner: AffinePoint::<C>::identity(),
+        CenoProjectivePoint {
+            inner: CenoAffinePoint::<C>::identity(),
         }
     }
 
     /// Convert the projective point to an affine point.
-    pub fn to_affine(self) -> AffinePoint<C> {
+    pub fn to_affine(self) -> CenoAffinePoint<C> {
         self.inner
     }
 
@@ -73,36 +73,36 @@ impl<C: ECDSACurve> ProjectivePoint<C> {
 
     fn from_zkvm_point(p: C::SP1AffinePoint) -> Self {
         Self {
-            inner: AffinePoint { inner: p },
+            inner: CenoAffinePoint { inner: p },
         }
     }
 }
 
-impl<C: ECDSACurve> From<AffinePoint<C>> for ProjectivePoint<C> {
-    fn from(p: AffinePoint<C>) -> Self {
-        ProjectivePoint { inner: p }
+impl<C: ECDSACurve> From<CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    fn from(p: CenoAffinePoint<C>) -> Self {
+        CenoProjectivePoint { inner: p }
     }
 }
 
-impl<C: ECDSACurve> From<&AffinePoint<C>> for ProjectivePoint<C> {
-    fn from(p: &AffinePoint<C>) -> Self {
-        ProjectivePoint { inner: *p }
+impl<C: ECDSACurve> From<&CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    fn from(p: &CenoAffinePoint<C>) -> Self {
+        CenoProjectivePoint { inner: *p }
     }
 }
 
-impl<C: ECDSACurve> From<ProjectivePoint<C>> for AffinePoint<C> {
-    fn from(p: ProjectivePoint<C>) -> Self {
+impl<C: ECDSACurve> From<CenoProjectivePoint<C>> for CenoAffinePoint<C> {
+    fn from(p: CenoProjectivePoint<C>) -> Self {
         p.inner
     }
 }
 
-impl<C: ECDSACurve> From<&ProjectivePoint<C>> for AffinePoint<C> {
-    fn from(p: &ProjectivePoint<C>) -> Self {
+impl<C: ECDSACurve> From<&CenoProjectivePoint<C>> for CenoAffinePoint<C> {
+    fn from(p: &CenoProjectivePoint<C>) -> Self {
         p.inner
     }
 }
 
-impl<C: ECDSACurve> Group for ProjectivePoint<C> {
+impl<C: ECDSACurve> Group for CenoProjectivePoint<C> {
     type Scalar = <C as CurveArithmetic>::Scalar;
 
     fn identity() -> Self {
@@ -110,7 +110,7 @@ impl<C: ECDSACurve> Group for ProjectivePoint<C> {
     }
 
     fn random(rng: impl RngCore) -> Self {
-        ProjectivePoint::<C>::generator() * Self::Scalar::random(rng)
+        CenoProjectivePoint::<C>::generator() * Self::Scalar::random(rng)
     }
 
     fn double(&self) -> Self {
@@ -119,7 +119,7 @@ impl<C: ECDSACurve> Group for ProjectivePoint<C> {
 
     fn generator() -> Self {
         Self {
-            inner: AffinePoint::<C>::generator(),
+            inner: CenoAffinePoint::<C>::generator(),
         }
     }
 
@@ -128,17 +128,17 @@ impl<C: ECDSACurve> Group for ProjectivePoint<C> {
     }
 }
 
-impl<C: ECDSACurve> Curve for ProjectivePoint<C> {
-    type AffineRepr = AffinePoint<C>;
+impl<C: ECDSACurve> Curve for CenoProjectivePoint<C> {
+    type AffineRepr = CenoAffinePoint<C>;
 
     fn to_affine(&self) -> Self::AffineRepr {
         self.inner
     }
 }
 
-impl<C: ECDSACurve> MulByGenerator for ProjectivePoint<C> {}
+impl<C: ECDSACurve> MulByGenerator for CenoProjectivePoint<C> {}
 
-impl<C: ECDSACurve> LinearCombination for ProjectivePoint<C> {
+impl<C: ECDSACurve> LinearCombination for CenoProjectivePoint<C> {
     fn lincomb(x: &Self, k: &Self::Scalar, y: &Self, l: &Self::Scalar) -> Self {
         let x = x.to_zkvm_point();
         let y = y.to_zkvm_point();
@@ -155,8 +155,8 @@ impl<C: ECDSACurve> LinearCombination for ProjectivePoint<C> {
 
 // Implementation of scalar multiplication for the projective point.
 
-impl<C: ECDSACurve, T: Borrow<C::Scalar>> Mul<T> for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve, T: Borrow<C::Scalar>> Mul<T> for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
     fn mul(mut self, rhs: T) -> Self::Output {
         let sp1_point = self.as_mut_zkvm_point();
@@ -166,7 +166,7 @@ impl<C: ECDSACurve, T: Borrow<C::Scalar>> Mul<T> for ProjectivePoint<C> {
     }
 }
 
-impl<C: ECDSACurve, T: Borrow<C::Scalar>> MulAssign<T> for ProjectivePoint<C> {
+impl<C: ECDSACurve, T: Borrow<C::Scalar>> MulAssign<T> for CenoProjectivePoint<C> {
     fn mul_assign(&mut self, rhs: T) {
         self.as_mut_zkvm_point()
             .mul_assign(&be_bytes_to_le_words(rhs.borrow().to_repr()));
@@ -175,8 +175,8 @@ impl<C: ECDSACurve, T: Borrow<C::Scalar>> MulAssign<T> for ProjectivePoint<C> {
 
 // Implementation of projective arithmetic.
 
-impl<C: ECDSACurve> Neg for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve> Neg for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
     fn neg(self) -> Self::Output {
         if self.is_identity().into() {
@@ -186,87 +186,87 @@ impl<C: ECDSACurve> Neg for ProjectivePoint<C> {
         let point = self.to_affine();
         let (x, y) = point.field_elements();
 
-        AffinePoint::<C>::from_field_elements_unchecked(x, y.neg()).into()
+        CenoAffinePoint::<C>::from_field_elements_unchecked(x, y.neg()).into()
     }
 }
 
-impl<C: ECDSACurve> Add<ProjectivePoint<C>> for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve> Add<CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
-    fn add(mut self, rhs: ProjectivePoint<C>) -> Self::Output {
+    fn add(mut self, rhs: CenoProjectivePoint<C>) -> Self::Output {
         self.as_mut_zkvm_point().add_assign(rhs.as_zkvm_point());
 
         self
     }
 }
 
-impl<C: ECDSACurve> Add<&ProjectivePoint<C>> for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve> Add<&CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
-    fn add(mut self, rhs: &ProjectivePoint<C>) -> Self::Output {
+    fn add(mut self, rhs: &CenoProjectivePoint<C>) -> Self::Output {
         self.as_mut_zkvm_point().add_assign(rhs.as_zkvm_point());
 
         self
     }
 }
 
-impl<C: ECDSACurve> Sub<ProjectivePoint<C>> for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve> Sub<CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
     #[allow(clippy::suspicious_arithmetic_impl)]
-    fn sub(self, rhs: ProjectivePoint<C>) -> Self::Output {
+    fn sub(self, rhs: CenoProjectivePoint<C>) -> Self::Output {
         self + rhs.neg()
     }
 }
 
-impl<C: ECDSACurve> Sub<&ProjectivePoint<C>> for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve> Sub<&CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
     #[allow(clippy::suspicious_arithmetic_impl)]
-    fn sub(self, rhs: &ProjectivePoint<C>) -> Self::Output {
+    fn sub(self, rhs: &CenoProjectivePoint<C>) -> Self::Output {
         self + (*rhs).neg()
     }
 }
 
-impl<C: ECDSACurve> Sum<ProjectivePoint<C>> for ProjectivePoint<C> {
+impl<C: ECDSACurve> Sum<CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         iter.fold(Self::identity(), |a, b| a + b)
     }
 }
 
-impl<'a, C: ECDSACurve> Sum<&'a ProjectivePoint<C>> for ProjectivePoint<C> {
-    fn sum<I: Iterator<Item = &'a ProjectivePoint<C>>>(iter: I) -> Self {
+impl<'a, C: ECDSACurve> Sum<&'a CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
+    fn sum<I: Iterator<Item = &'a CenoProjectivePoint<C>>>(iter: I) -> Self {
         iter.cloned().sum()
     }
 }
 
-impl<C: ECDSACurve> AddAssign<ProjectivePoint<C>> for ProjectivePoint<C> {
-    fn add_assign(&mut self, rhs: ProjectivePoint<C>) {
+impl<C: ECDSACurve> AddAssign<CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
+    fn add_assign(&mut self, rhs: CenoProjectivePoint<C>) {
         self.as_mut_zkvm_point().add_assign(rhs.as_zkvm_point());
     }
 }
 
-impl<C: ECDSACurve> AddAssign<&ProjectivePoint<C>> for ProjectivePoint<C> {
-    fn add_assign(&mut self, rhs: &ProjectivePoint<C>) {
+impl<C: ECDSACurve> AddAssign<&CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
+    fn add_assign(&mut self, rhs: &CenoProjectivePoint<C>) {
         self.as_mut_zkvm_point().add_assign(rhs.as_zkvm_point());
     }
 }
 
-impl<C: ECDSACurve> SubAssign<ProjectivePoint<C>> for ProjectivePoint<C> {
-    fn sub_assign(&mut self, rhs: ProjectivePoint<C>) {
+impl<C: ECDSACurve> SubAssign<CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
+    fn sub_assign(&mut self, rhs: CenoProjectivePoint<C>) {
         self.as_mut_zkvm_point()
             .add_assign(rhs.neg().as_zkvm_point());
     }
 }
 
-impl<C: ECDSACurve> SubAssign<&ProjectivePoint<C>> for ProjectivePoint<C> {
-    fn sub_assign(&mut self, rhs: &ProjectivePoint<C>) {
+impl<C: ECDSACurve> SubAssign<&CenoProjectivePoint<C>> for CenoProjectivePoint<C> {
+    fn sub_assign(&mut self, rhs: &CenoProjectivePoint<C>) {
         self.as_mut_zkvm_point()
             .add_assign(rhs.neg().as_zkvm_point());
     }
 }
 
-impl<C: ECDSACurve> Default for ProjectivePoint<C> {
+impl<C: ECDSACurve> Default for CenoProjectivePoint<C> {
     fn default() -> Self {
         Self::identity()
     }
@@ -274,93 +274,93 @@ impl<C: ECDSACurve> Default for ProjectivePoint<C> {
 
 // Implementation of mixed arithmetic.
 
-impl<C: ECDSACurve> Add<AffinePoint<C>> for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve> Add<CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
-    fn add(self, rhs: AffinePoint<C>) -> Self::Output {
-        self + ProjectivePoint { inner: rhs }
+    fn add(self, rhs: CenoAffinePoint<C>) -> Self::Output {
+        self + CenoProjectivePoint { inner: rhs }
     }
 }
 
-impl<C: ECDSACurve> Add<&AffinePoint<C>> for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve> Add<&CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
-    fn add(self, rhs: &AffinePoint<C>) -> Self::Output {
-        self + ProjectivePoint { inner: *rhs }
+    fn add(self, rhs: &CenoAffinePoint<C>) -> Self::Output {
+        self + CenoProjectivePoint { inner: *rhs }
     }
 }
 
-impl<C: ECDSACurve> AddAssign<AffinePoint<C>> for ProjectivePoint<C> {
-    fn add_assign(&mut self, rhs: AffinePoint<C>) {
+impl<C: ECDSACurve> AddAssign<CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    fn add_assign(&mut self, rhs: CenoAffinePoint<C>) {
         self.as_mut_zkvm_point().add_assign(&rhs.inner);
     }
 }
 
-impl<C: ECDSACurve> AddAssign<&AffinePoint<C>> for ProjectivePoint<C> {
-    fn add_assign(&mut self, rhs: &AffinePoint<C>) {
+impl<C: ECDSACurve> AddAssign<&CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    fn add_assign(&mut self, rhs: &CenoAffinePoint<C>) {
         self.as_mut_zkvm_point().add_assign(&rhs.inner);
     }
 }
 
-impl<C: ECDSACurve> Sub<AffinePoint<C>> for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve> Sub<CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
-    fn sub(self, rhs: AffinePoint<C>) -> Self::Output {
-        self - ProjectivePoint { inner: rhs }
+    fn sub(self, rhs: CenoAffinePoint<C>) -> Self::Output {
+        self - CenoProjectivePoint { inner: rhs }
     }
 }
 
-impl<C: ECDSACurve> Sub<&AffinePoint<C>> for ProjectivePoint<C> {
-    type Output = ProjectivePoint<C>;
+impl<C: ECDSACurve> Sub<&CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    type Output = CenoProjectivePoint<C>;
 
-    fn sub(self, rhs: &AffinePoint<C>) -> Self::Output {
-        self - ProjectivePoint { inner: *rhs }
+    fn sub(self, rhs: &CenoAffinePoint<C>) -> Self::Output {
+        self - CenoProjectivePoint { inner: *rhs }
     }
 }
 
-impl<C: ECDSACurve> SubAssign<AffinePoint<C>> for ProjectivePoint<C> {
-    fn sub_assign(&mut self, rhs: AffinePoint<C>) {
-        let projective = ProjectivePoint { inner: rhs }.neg();
+impl<C: ECDSACurve> SubAssign<CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    fn sub_assign(&mut self, rhs: CenoAffinePoint<C>) {
+        let projective = CenoProjectivePoint { inner: rhs }.neg();
 
         self.as_mut_zkvm_point()
             .add_assign(projective.as_zkvm_point());
     }
 }
 
-impl<C: ECDSACurve> SubAssign<&AffinePoint<C>> for ProjectivePoint<C> {
-    fn sub_assign(&mut self, rhs: &AffinePoint<C>) {
-        let projective = ProjectivePoint { inner: *rhs }.neg();
+impl<C: ECDSACurve> SubAssign<&CenoAffinePoint<C>> for CenoProjectivePoint<C> {
+    fn sub_assign(&mut self, rhs: &CenoAffinePoint<C>) {
+        let projective = CenoProjectivePoint { inner: *rhs }.neg();
 
         self.as_mut_zkvm_point()
             .add_assign(projective.as_zkvm_point());
     }
 }
 
-impl<C: ECDSACurve> DefaultIsZeroes for ProjectivePoint<C> {}
+impl<C: ECDSACurve> DefaultIsZeroes for CenoProjectivePoint<C> {}
 
-impl<C: ECDSACurve> ConditionallySelectable for ProjectivePoint<C> {
+impl<C: ECDSACurve> ConditionallySelectable for CenoProjectivePoint<C> {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
         Self {
-            inner: AffinePoint::conditional_select(&a.inner, &b.inner, choice),
+            inner: CenoAffinePoint::conditional_select(&a.inner, &b.inner, choice),
         }
     }
 }
 
-impl<C: ECDSACurve> ConstantTimeEq for ProjectivePoint<C> {
+impl<C: ECDSACurve> ConstantTimeEq for CenoProjectivePoint<C> {
     fn ct_eq(&self, other: &Self) -> Choice {
         self.inner.ct_eq(&other.inner)
     }
 }
 
-impl<C: ECDSACurve> PartialEq for ProjectivePoint<C> {
+impl<C: ECDSACurve> PartialEq for CenoProjectivePoint<C> {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).into()
     }
 }
 
-impl<C: ECDSACurve> Eq for ProjectivePoint<C> {}
+impl<C: ECDSACurve> Eq for CenoProjectivePoint<C> {}
 
-impl<C: ECDSACurve> GroupEncoding for ProjectivePoint<C>
+impl<C: ECDSACurve> GroupEncoding for CenoProjectivePoint<C>
 where
     FieldBytes<C>: Copy,
     C::FieldBytesSize: ModulusSize,
@@ -369,7 +369,7 @@ where
     type Repr = CompressedPoint<C>;
 
     fn from_bytes(bytes: &Self::Repr) -> CtOption<Self> {
-        <AffinePoint<C> as GroupEncoding>::from_bytes(bytes).map(Into::into)
+        <CenoAffinePoint<C> as GroupEncoding>::from_bytes(bytes).map(Into::into)
     }
 
     fn from_bytes_unchecked(bytes: &Self::Repr) -> CtOption<Self> {
@@ -382,7 +382,7 @@ where
     }
 }
 
-impl<C: ECDSACurve> PrimeGroup for ProjectivePoint<C>
+impl<C: ECDSACurve> PrimeGroup for CenoProjectivePoint<C>
 where
     FieldBytes<C>: Copy,
     C::FieldBytesSize: ModulusSize,
@@ -391,7 +391,7 @@ where
 }
 
 /// The scalar field has prime order, so the cofactor is 1.
-impl<C: ECDSACurve> CofactorGroup for ProjectivePoint<C>
+impl<C: ECDSACurve> CofactorGroup for CenoProjectivePoint<C>
 where
     FieldBytes<C>: Copy,
     C::FieldBytesSize: ModulusSize,
