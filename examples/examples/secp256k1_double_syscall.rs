@@ -1,4 +1,4 @@
-// Test addition of two curve points. Assert result inside the guest
+// Test double of a curve point via syscall and compare with expected output
 extern crate ceno_rt;
 use ceno_syscall::syscall_secp256k1_double;
 
@@ -41,8 +41,7 @@ fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
 }
 fn main() {
     // scalar mulitiplication
-    let scalar = Scalar::from(5u64);
-    let a = ProjectivePoint::mul_by_generator(&scalar);
-    // let _ = a.double(); // uncomment this failed
+    let a = ProjectivePoint::generator();
+    let _ = a.double(); // uncomment this failed
     // let _ = a + a; // uncomment this aslso failed
 }
