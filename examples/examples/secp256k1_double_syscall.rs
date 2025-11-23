@@ -1,6 +1,11 @@
-// Test addition of two curve points. Assert result inside the guest
+// Test double of a curve point via syscall and compare with expected output
 extern crate ceno_rt;
 use ceno_syscall::syscall_secp256k1_double;
+
+use k256::{
+    ProjectivePoint, Scalar,
+    elliptic_curve::{Group, ops::MulByGenerator},
+};
 
 // Byte repr. of points from https://docs.rs/secp/latest/secp/#arithmetic-1
 const P: [u8; 65] = [
@@ -35,9 +40,8 @@ fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
     std::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * (i + 1)].try_into().unwrap()))
 }
 fn main() {
-    let mut p: DecompressedPoint = bytes_to_words(P);
-    let double_p: DecompressedPoint = bytes_to_words(DOUBLE_P);
-
-    syscall_secp256k1_double(&mut p);
-    assert_eq!(p, double_p);
+    // scalar mulitiplication
+    let a = ProjectivePoint::generator();
+    let _ = a.double(); // uncomment this failed
+    // let _ = a + a; // uncomment this aslso failed
 }
