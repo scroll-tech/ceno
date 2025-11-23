@@ -752,6 +752,29 @@ impl<C: Config> From<Array<C, Ext<C::F, C::EF>>> for SepticExtensionVariable<C> 
     }
 }
 
+impl<C: Config> SepticExtensionVariable<C> {
+    pub fn is_zero(&self, builder: &mut Builder<C>) -> Usize<C::N> {
+        let r = Usize::uninit(builder);
+        builder.assign(&r, Usize::from(1));
+
+        let zero = Usize::from(0);
+
+        iter_zip!(builder, self.vs).for_each(|ptr_vec, builder| {
+            let e = builder.iter_ptr_get(&self.vs, ptr_vec[0]);
+            let fs = builder.ext2felt(e);
+            builder.range(0, fs.len()).for_each(|idx_vec, builder| {
+                let f = builder.get(&fs, idx_vec[0]);
+                let u = Usize::Var(builder.cast_felt_to_var(f));
+                builder.if_ne(u, zero.clone()).then(|builder| {
+                    builder.assign(&r, Usize::from(0));
+                });
+            });
+        });
+
+        r
+    }
+}
+
 pub struct SepticPointInput {
     x: SepticExtensionInput,
     y: SepticExtensionInput,

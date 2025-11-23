@@ -238,7 +238,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         y: SepticExtensionVariable {
             vs: builder.dyn_array(7),
         },
-        is_infinity: Usize::from(0),
+        is_infinity: Usize::uninit(builder),
     };
 
     let num_chips_verified: Usize<C::N> = builder.eval(C::N::ZERO);
@@ -2033,25 +2033,27 @@ pub fn septic_ext_sub<C: Config>(
 
 const INVERTER_COEFF_LEN: usize = SEPTIC_EXTENSION_DEGREE * SEPTIC_EXTENSION_DEGREE;
 const Z_POW_PS: [u32; INVERTER_COEFF_LEN] = [
-    1, 0, 0, 0, 0, 0, 0,
-    954599710, 1359279693, 566669999, 1982781815, 1735718361, 1174868538, 1120871770,
-    862825265, 597046311, 978840770, 1790138282, 1044777201, 835869808, 1342179023,
-    596273169, 658837454, 1515468261, 367059247, 781278880, 1544222616, 155490465,
-    557608863, 1173670028, 1749546888, 1086464137, 803900099, 1288818584, 1184677604,
-    763416381, 1252567168, 628856225, 1771903394, 650712211, 19417363, 57990258,
-    1734711039, 1749813853, 1227235221, 1707730636, 424560395, 1007029514, 498034669,
+    1, 0, 0, 0, 0, 0, 0, 954599710, 1359279693, 566669999, 1982781815, 1735718361, 1174868538,
+    1120871770, 862825265, 597046311, 978840770, 1790138282, 1044777201, 835869808, 1342179023,
+    596273169, 658837454, 1515468261, 367059247, 781278880, 1544222616, 155490465, 557608863,
+    1173670028, 1749546888, 1086464137, 803900099, 1288818584, 1184677604, 763416381, 1252567168,
+    628856225, 1771903394, 650712211, 19417363, 57990258, 1734711039, 1749813853, 1227235221,
+    1707730636, 424560395, 1007029514, 498034669,
 ];
 const Z_POW_P_SQUARES: [u32; INVERTER_COEFF_LEN] = [
-    1, 0, 0, 0, 0, 0, 0,
-    1013489358, 1619071628, 304593143, 1949397349, 1564307636, 327761151, 415430835,
-    209824426, 1313900768, 38410482, 256593180, 1708830551, 1244995038, 1555324019,
-    1475628651, 777565847, 704492386, 1218528120, 1245363405, 475884575, 649166061,
-    550038364, 948935655, 68722023, 1251345762, 1692456177, 1177958698, 350232928,
-    882720258, 821925756, 199955840, 812002876, 1484951277, 1063138035, 491712810,
-    738287111, 1955364991, 552724293, 1175775744, 341623997, 1454022463, 408193320,
+    1, 0, 0, 0, 0, 0, 0, 1013489358, 1619071628, 304593143, 1949397349, 1564307636, 327761151,
+    415430835, 209824426, 1313900768, 38410482, 256593180, 1708830551, 1244995038, 1555324019,
+    1475628651, 777565847, 704492386, 1218528120, 1245363405, 475884575, 649166061, 550038364,
+    948935655, 68722023, 1251345762, 1692456177, 1177958698, 350232928, 882720258, 821925756,
+    199955840, 812002876, 1484951277, 1063138035, 491712810, 738287111, 1955364991, 552724293,
+    1175775744, 341623997, 1454022463, 408193320,
 ];
 
-pub fn frobenius<C: Config>(builder: &mut Builder<C>, input: &SepticExtensionVariable<C>, is_double: bool) -> SepticExtensionVariable<C> {
+pub fn frobenius<C: Config>(
+    builder: &mut Builder<C>,
+    input: &SepticExtensionVariable<C>,
+    is_double: bool,
+) -> SepticExtensionVariable<C> {
     let vs: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
 
     let v0 = builder.get(&input.vs, 0);
@@ -2065,8 +2067,8 @@ pub fn frobenius<C: Config>(builder: &mut Builder<C>, input: &SepticExtensionVar
     for i in 0..SEPTIC_EXTENSION_DEGREE {
         let coeff = if is_double {
             &[
-                Z_POW_P_SQUARES[0 * SEPTIC_EXTENSION_DEGREE + i],
-                Z_POW_P_SQUARES[1 * SEPTIC_EXTENSION_DEGREE + i],
+                Z_POW_P_SQUARES[i],
+                Z_POW_P_SQUARES[SEPTIC_EXTENSION_DEGREE + i],
                 Z_POW_P_SQUARES[2 * SEPTIC_EXTENSION_DEGREE + i],
                 Z_POW_P_SQUARES[3 * SEPTIC_EXTENSION_DEGREE + i],
                 Z_POW_P_SQUARES[4 * SEPTIC_EXTENSION_DEGREE + i],
@@ -2075,8 +2077,8 @@ pub fn frobenius<C: Config>(builder: &mut Builder<C>, input: &SepticExtensionVar
             ]
         } else {
             &[
-                Z_POW_PS[0 * SEPTIC_EXTENSION_DEGREE + i],
-                Z_POW_PS[1 * SEPTIC_EXTENSION_DEGREE + i],
+                Z_POW_PS[i],
+                Z_POW_PS[SEPTIC_EXTENSION_DEGREE + i],
                 Z_POW_PS[2 * SEPTIC_EXTENSION_DEGREE + i],
                 Z_POW_PS[3 * SEPTIC_EXTENSION_DEGREE + i],
                 Z_POW_PS[4 * SEPTIC_EXTENSION_DEGREE + i],
@@ -2084,17 +2086,17 @@ pub fn frobenius<C: Config>(builder: &mut Builder<C>, input: &SepticExtensionVar
                 Z_POW_PS[6 * SEPTIC_EXTENSION_DEGREE + i],
             ]
         };
-        
+
         builder.set(
-            &vs, 
-            i, 
-            v0 * C::EF::from_canonical_u32(coeff[0]) +
-            v1 * C::EF::from_canonical_u32(coeff[1]) +
-            v2 * C::EF::from_canonical_u32(coeff[2]) +
-            v3 * C::EF::from_canonical_u32(coeff[3]) +
-            v4 * C::EF::from_canonical_u32(coeff[4]) +
-            v5 * C::EF::from_canonical_u32(coeff[5]) +
-            v6 * C::EF::from_canonical_u32(coeff[6])
+            &vs,
+            i,
+            v0 * C::EF::from_canonical_u32(coeff[0])
+                + v1 * C::EF::from_canonical_u32(coeff[1])
+                + v2 * C::EF::from_canonical_u32(coeff[2])
+                + v3 * C::EF::from_canonical_u32(coeff[3])
+                + v4 * C::EF::from_canonical_u32(coeff[4])
+                + v5 * C::EF::from_canonical_u32(coeff[5])
+                + v6 * C::EF::from_canonical_u32(coeff[6]),
         );
     }
 
@@ -2107,11 +2109,7 @@ pub fn norm_sub<C: Config>(
 ) -> SepticExtensionVariable<C> {
     let a_frobenius = frobenius(builder, input, false);
     let b_double_frobenius = frobenius(builder, input, true);
-    let a = septic_ext_mul(
-        builder,
-        &a_frobenius,
-        &b_double_frobenius,
-    );
+    let a = septic_ext_mul(builder, &a_frobenius, &b_double_frobenius);
     let b = frobenius(builder, &a, true);
     let c = frobenius(builder, &b, true);
 
@@ -2128,7 +2126,6 @@ pub fn invert<C: Config>(
     let norm: Ext<C::F, C::EF> = builder.get(&input_mul_x.vs, 0);
     let norm_inv: Ext<C::F, C::EF> = builder.eval(norm.inverse());
     let vs: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
-
     for i in 0..SEPTIC_EXTENSION_DEGREE {
         let x_i = builder.get(&x.vs, i);
         builder.set(&vs, i, x_i * norm_inv);
@@ -2137,27 +2134,104 @@ pub fn invert<C: Config>(
     SepticExtensionVariable { vs }
 }
 
+// Double a septic point in place
+pub fn double_septic_points_in_place<C: Config>(
+    builder: &mut Builder<C>,
+    pt: &SepticPointVariable<C>,
+) {
+    let x1_sqr = septic_ext_squared(builder, &pt.x);
+
+    let x1_sqr_x_3_plus_2: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
+    let x1_sqr_0 = builder.get(&x1_sqr.vs, 0);
+    builder.set(
+        &x1_sqr_x_3_plus_2,
+        0,
+        x1_sqr_0 * C::EF::from_canonical_u32(3) + C::EF::ONE,
+    );
+    for i in 1..SEPTIC_EXTENSION_DEGREE {
+        let x1_sqr_i = builder.get(&x1_sqr.vs, i);
+        builder.set(
+            &x1_sqr_x_3_plus_2,
+            i,
+            x1_sqr_i * C::EF::from_canonical_u32(3),
+        );
+    }
+
+    let y1_x_2: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
+    for i in 0..SEPTIC_EXTENSION_DEGREE {
+        let y_i = builder.get(&pt.y.vs, i);
+        builder.set(&y1_x_2, i, y_i * C::EF::TWO);
+    }
+
+    let y1_x_2_inv = invert(builder, &SepticExtensionVariable { vs: y1_x_2 });
+    let slope = septic_ext_mul(
+        builder,
+        &SepticExtensionVariable {
+            vs: x1_sqr_x_3_plus_2,
+        },
+        &y1_x_2_inv,
+    );
+    let slope_squared = septic_ext_squared(builder, &slope);
+    let x3 = septic_ext_sub(builder, &slope_squared, &pt.x);
+    let x3 = septic_ext_sub(builder, &x3, &pt.x);
+
+    let x1_x3 = septic_ext_sub(builder, &pt.x, &x3);
+    let slope_x_x1_x3 = septic_ext_mul(builder, &slope, &x1_x3);
+    let y3 = septic_ext_sub(builder, &slope_x_x1_x3, &pt.y);
+
+    builder.assign(&pt.x, x3);
+    builder.assign(&pt.y, y3);
+    builder.assign(&pt.is_infinity, Usize::from(0));
+}
+
 // Modify left septic point in place
 pub fn add_septic_points_in_place<C: Config>(
     builder: &mut Builder<C>,
     left: &SepticPointVariable<C>,
     right: &SepticPointVariable<C>,
 ) {
-    builder.if_ne(right.is_infinity.clone(), Usize::from(1)).then(|builder| {
-        let y_diff = septic_ext_sub(builder, &right.y, &left.y);
-        let x_diff = septic_ext_sub(builder, &right.x, &right.x);
-        let x_diff_inv = invert(builder, &x_diff);
-        let slope = septic_ext_mul(builder, &y_diff, &x_diff_inv);
+    builder
+        .if_ne(right.is_infinity.clone(), Usize::from(1))
+        .then(|builder| {
+            let x_diff = septic_ext_sub(builder, &right.x, &left.x);
+            let y_diff = septic_ext_sub(builder, &right.y, &left.y);
+            let is_x_same = x_diff.is_zero(builder);
 
-        let x_sum = septic_ext_add(builder, &right.x, &left.x);
-        let slope_squared = septic_ext_squared(builder, &slope);
-        let x = septic_ext_sub(builder, &slope_squared, &x_sum);
+            builder.if_eq(is_x_same, Usize::from(1)).then_or_else(
+                |builder| {
+                    let is_y_same = y_diff.is_zero(builder);
 
-        let slope_mul_x_diff = septic_ext_mul(builder, &slope, &x_diff);
-        let y = septic_ext_sub(builder, &slope_mul_x_diff, &left.y);
+                    builder.if_eq(is_y_same, Usize::from(1)).then_or_else(
+                        |builder| {
+                            double_septic_points_in_place(builder, left);
+                        },
+                        |builder| {
+                            let y_sum = septic_ext_add(builder, &right.y, &left.y);
+                            let is_y_sum_zero = y_sum.is_zero(builder);
+                            builder.assert_usize_eq(is_y_sum_zero, Usize::from(1));
+                            let zero_ext_arr: Array<C, Ext<C::F, C::EF>> =
+                                builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
+                            builder.assign(&left.x, zero_ext_arr.clone());
+                            builder.assign(&left.y, zero_ext_arr.clone());
+                            builder.assign(&left.is_infinity, Usize::from(1));
+                        },
+                    );
+                },
+                |builder| {
+                    let x_diff_inv = invert(builder, &x_diff);
+                    let slope = septic_ext_mul(builder, &y_diff, &x_diff_inv);
 
-        builder.assign(&left.x, x);
-        builder.assign(&left.y, y);
-        builder.assign(&left.is_infinity, Usize::from(0));
-    });
+                    let x_sum = septic_ext_add(builder, &right.x, &left.x);
+                    let slope_squared = septic_ext_squared(builder, &slope);
+                    let x = septic_ext_sub(builder, &slope_squared, &x_sum);
+
+                    let slope_mul_x_diff = septic_ext_mul(builder, &slope, &x_diff);
+                    let y = septic_ext_sub(builder, &slope_mul_x_diff, &left.y);
+
+                    builder.assign(&left.x, x);
+                    builder.assign(&left.y, y);
+                    builder.assign(&left.is_infinity, Usize::from(0));
+                },
+            );
+        });
 }
