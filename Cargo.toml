@@ -4,7 +4,6 @@ members = [
   "ceno_emul",
   "ceno_host",
   "ceno_rt",
-  "ceno_syscall",
   "ceno_zkvm",
   "ceno_recursion",
   "derive",
@@ -24,6 +23,8 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [workspace.dependencies]
+ceno_crypto_primitives = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_crypto_primitives", branch = "main" }
+ceno_syscall = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_syscall", branch = "main" }
 ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", tag = "v1.0.0-alpha.15" }
 mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", tag = "v1.0.0-alpha.15" }
 multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", tag = "v1.0.0-alpha.15" }
@@ -80,6 +81,7 @@ tracing = { version = "0.1", features = [
 ] }
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+typenum = "*"
 uint = "0.8"
 
 ceno_gpu = { path = "utils/cuda_hal", package = "cuda_hal" }

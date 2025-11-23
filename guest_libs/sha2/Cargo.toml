@@ -10,7 +10,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-ceno_syscall = { path = "../../ceno_syscall" }
+ceno_syscall.workspace = true
 digest = "0.10.7"
 
 [features]
