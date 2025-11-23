@@ -114,7 +114,9 @@ impl<C: ECDSACurve> Group for ProjectivePoint<C> {
     }
 
     fn double(&self) -> Self {
-        *self + self
+        let mut point = self.to_zkvm_point();
+        point.double();
+        Self::from_zkvm_point(point)
     }
 
     fn generator() -> Self {
