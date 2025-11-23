@@ -1063,7 +1063,7 @@ dependencies = [
  "alloy-primitives",
  "ceno_keccak",
  "ceno_sha2",
- "k256 0.13.4 (git+https://github.com/hero78119/elliptic-curves?rev=e4b858da2aabbb81668356b46e1b2b72bb6aeeed)",
+ "k256 0.13.4 (git+https://github.com/hero78119/elliptic-curves?rev=2e67dfe934e781bf3e3e6c3e77721e4d7803b557)",
  "revm-precompile 27.0.0",
  "substrate-bn 0.6.0 (git+https://github.com/scroll-tech/bn?branch=ceno)",
  "thiserror 2.0.12",
@@ -3011,7 +3011,7 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/hero78119/elliptic-curves?rev=e4b858da2aabbb81668356b46e1b2b72bb6aeeed#e4b858da2aabbb81668356b46e1b2b72bb6aeeed"
+source = "git+https://github.com/hero78119/elliptic-curves?rev=2e67dfe934e781bf3e3e6c3e77721e4d7803b557#2e67dfe934e781bf3e3e6c3e77721e4d7803b557"
 dependencies = [
  "ceno_crypto_primitives 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "cfg-if",
