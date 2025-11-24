@@ -1,8 +1,11 @@
 // Test double of a curve point via syscall
 extern crate ceno_rt;
-use k256::ProjectivePoint;
+
+#[allow(unused_imports)]
+use k256::{ProjectivePoint, elliptic_curve::Group};
 
 fn main() {
-    let a = ProjectivePoint::generator();
-    let _ = a.double();
+    #[allow(deprecated)]
+    let g = ProjectivePoint::generator();
+    let _ = g.double();
 }
