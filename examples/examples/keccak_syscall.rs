@@ -3,7 +3,7 @@
 //! Iterate multiple times and log the state after each iteration.
 
 extern crate ceno_rt;
-use ceno_syscall::syscall_keccak_permute;
+use ceno_syscall::{syscall_keccak_permute, syscall_phantom_log_pc_cycle};
 
 const ITERATIONS: usize = 100;
 
@@ -16,6 +16,7 @@ fn main() {
             log_state(&state);
         }
     }
+    syscall_phantom_log_pc_cycle("keccak_end");
 }
 
 #[cfg(debug_assertions)]

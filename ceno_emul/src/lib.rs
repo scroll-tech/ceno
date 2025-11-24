@@ -35,6 +35,7 @@ pub use syscalls::{
         Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec, Bn254FpMulSpec,
     },
     keccak_permute::{KECCAK_WORDS, KeccakSpec},
+    phantom::LogPcCycleSpec,
     secp256k1::{
         COORDINATE_WORDS as SECP256K1_COORDINATE_WORDS, SECP256K1_ARG_WORDS, Secp256k1AddSpec,
         Secp256k1DecompressSpec, Secp256k1DoubleSpec,

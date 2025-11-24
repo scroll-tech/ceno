@@ -43,8 +43,8 @@ use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
     Bn254FpMulSpec,
     InsnKind::{self, *},
-    KeccakSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec,
-    Sha256ExtendSpec, StepRecord, SyscallSpec, Uint256MulSpec,
+    KeccakSpec, LogPcCycleSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec,
+    Secp256k1DoubleSpec, Sha256ExtendSpec, StepRecord, SyscallSpec, Uint256MulSpec,
 };
 use dummy::LargeEcallDummy;
 use ecall::EcallDummy;
@@ -738,6 +738,8 @@ pub struct DummyExtraConfig<E: ExtensionField> {
         <LargeEcallDummy<E, Bn254Fp2AddSpec> as Instruction<E>>::InstructionConfig,
     bn254_fp2_mul_config:
         <LargeEcallDummy<E, Bn254Fp2MulSpec> as Instruction<E>>::InstructionConfig,
+
+    phantom_log_pc_cycle: <LargeEcallDummy<E, LogPcCycleSpec> as Instruction<E>>::InstructionConfig,
 }
 
 impl<E: ExtensionField> DummyExtraConfig<E> {
@@ -753,6 +755,8 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>();
         let bn254_fp2_mul_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>();
+        let phantom_log_pc_cycle =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>();
 
         Self {
             ecall_config,
@@ -761,6 +765,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             bn254_fp_mul_config,
             bn254_fp2_add_config,
             bn254_fp2_mul_config,
+            phantom_log_pc_cycle,
         }
     }
 
@@ -790,6 +795,10 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs,
             &self.bn254_fp2_mul_config,
         );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
+            cs,
+            &self.phantom_log_pc_cycle,
+        );
     }
 
     pub fn assign_opcode_circuit(
@@ -806,6 +815,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let mut bn254_fp_mul_steps = Vec::new();
         let mut bn254_fp2_add_steps = Vec::new();
         let mut bn254_fp2_mul_steps = Vec::new();
+        let mut phantom_log_pc_cycle_spec = Vec::new();
         let mut other_steps = Vec::new();
 
         if let Some(ecall_steps) = steps.remove(&ECALL) {
@@ -816,6 +826,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
                     Bn254FpMulSpec::CODE => bn254_fp_mul_steps.push(step),
                     Bn254Fp2AddSpec::CODE => bn254_fp2_add_steps.push(step),
                     Bn254Fp2MulSpec::CODE => bn254_fp2_mul_steps.push(step),
+                    LogPcCycleSpec::CODE => phantom_log_pc_cycle_spec.push(step),
                     _ => other_steps.push(step),
                 }
             }
@@ -850,6 +861,12 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             shard_ctx,
             &self.bn254_fp2_mul_config,
             bn254_fp2_mul_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
+            cs,
+            shard_ctx,
+            &self.phantom_log_pc_cycle,
+            phantom_log_pc_cycle_spec,
         )?;
         witness.assign_opcode_circuit::<EcallDummy<E>>(
             cs,
@@ -908,6 +925,8 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
                 .ecall_cells_map
                 .get(&Uint256MulInstruction::<E>::name())
                 .expect("unable to find name"),
+            // phantom
+            LogPcCycleSpec::CODE => 0,
             // other type of ecalls are handled by dummy ecall instruction
             _ => unreachable!("unknow match record {:?}", record),
         }
