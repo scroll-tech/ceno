@@ -4,7 +4,8 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        PolyEvaluator, UniPolyExtrapolator, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse
+        PolyEvaluator, UniPolyExtrapolator, assert_ext_arr_eq, challenger_multi_observe, eq_eval,
+        eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -373,9 +374,11 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             builder.assign(&prod_w, prod_w * w_out_evals_prod);
 
             builder.inc(&num_chips_verified);
-            builder.if_ne(chip_shard_ec_sum.is_infinity.clone(), Usize::from(1)).then(|builder| {
-                add_septic_points_in_place(builder, &shard_ec_sum, &chip_shard_ec_sum);    
-            });
+            builder
+                .if_ne(chip_shard_ec_sum.is_infinity.clone(), Usize::from(1))
+                .then(|builder| {
+                    add_septic_points_in_place(builder, &shard_ec_sum, &chip_shard_ec_sum);
+                });
         });
     }
     builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
@@ -595,13 +598,6 @@ pub fn verify_chip_proof<C: Config>(
             });
     }
 
-    // _debug: constraint
-    // debug_assert!(
-    //     chain!(&record_evals, &logup_p_evals, &logup_q_evals)
-    //         .map(|e| &e.point)
-    //         .all_equal()
-    // );
-
     let num_rw_records: Usize<C::N> = builder.eval(r_counts_per_instance + w_counts_per_instance);
     builder.assert_usize_eq(record_evals.len(), num_rw_records.clone());
     builder.assert_usize_eq(logup_p_evals.len(), lk_counts_per_instance.clone());
@@ -790,11 +786,17 @@ pub fn verify_gkr_circuit<C: Config>(
         );
 
         if layer.rotation_sumcheck_expression.is_some() {
-            builder.assert_usize_eq(Usize::from(layer.out_sel_and_eval_exprs.len() + 3), eval_and_dedup_points.len());
+            builder.assert_usize_eq(
+                Usize::from(layer.out_sel_and_eval_exprs.len() + 3),
+                eval_and_dedup_points.len(),
+            );
         } else {
-            builder.assert_usize_eq(Usize::from(layer.out_sel_and_eval_exprs.len()), eval_and_dedup_points.len());
+            builder.assert_usize_eq(
+                Usize::from(layer.out_sel_and_eval_exprs.len()),
+                eval_and_dedup_points.len(),
+            );
         }
-        
+
         // ZeroCheckLayer verification (might include other layer types in the future)
         let LayerProofVariable {
             main:
@@ -1532,8 +1534,12 @@ pub fn evaluate_gkr_expression<C: Config>(
 
             assert_eq!(parts.len(), 1 << indices.len());
 
-            // _debug
-            // assert!(parts.iter().all(|part| part.point == parts[0].point));
+            if !parts.is_empty() {
+                let first_pt = parts[0].point.fs.clone();
+                for pt_eval in parts.iter().skip(1) {
+                    assert_ext_arr_eq(builder, &first_pt, &pt_eval.point.fs);
+                }
+            }
 
             // FIXME: this is WRONG. we should use builder.dyn_array();
             let mut new_point: Vec<Ext<C::F, C::EF>> = vec![];
@@ -2168,54 +2174,59 @@ pub fn add_septic_points_in_place<C: Config>(
     left: &SepticPointVariable<C>,
     right: &SepticPointVariable<C>,
 ) {
-    builder.if_eq(left.is_infinity.clone(), Usize::from(1)).then_or_else(|builder| {
-        builder.assign(&left.x, right.x.clone());
-        builder.assign(&left.y, right.y.clone());
-        builder.assign(&left.is_infinity, right.is_infinity.clone());
-    }, |builder| {
-        builder
-            .if_ne(right.is_infinity.clone(), Usize::from(1))
-            .then(|builder| {
-                let x_diff = septic_ext_sub(builder, &right.x, &left.x);
-                let y_diff = septic_ext_sub(builder, &right.y, &left.y);
-                let is_x_same = x_diff.is_zero(builder);
+    builder
+        .if_eq(left.is_infinity.clone(), Usize::from(1))
+        .then_or_else(
+            |builder| {
+                builder.assign(&left.x, right.x.clone());
+                builder.assign(&left.y, right.y.clone());
+                builder.assign(&left.is_infinity, right.is_infinity.clone());
+            },
+            |builder| {
+                builder
+                    .if_ne(right.is_infinity.clone(), Usize::from(1))
+                    .then(|builder| {
+                        let x_diff = septic_ext_sub(builder, &right.x, &left.x);
+                        let y_diff = septic_ext_sub(builder, &right.y, &left.y);
+                        let is_x_same = x_diff.is_zero(builder);
 
-                builder.if_eq(is_x_same, Usize::from(1)).then_or_else(
-                    |builder| {
-                        let is_y_same = y_diff.is_zero(builder);
-
-                        builder.if_eq(is_y_same, Usize::from(1)).then_or_else(
+                        builder.if_eq(is_x_same, Usize::from(1)).then_or_else(
                             |builder| {
-                                double_septic_points_in_place(builder, left);
+                                let is_y_same = y_diff.is_zero(builder);
+
+                                builder.if_eq(is_y_same, Usize::from(1)).then_or_else(
+                                    |builder| {
+                                        double_septic_points_in_place(builder, left);
+                                    },
+                                    |builder| {
+                                        let y_sum = septic_ext_add(builder, &right.y, &left.y);
+                                        let is_y_sum_zero = y_sum.is_zero(builder);
+                                        builder.assert_usize_eq(is_y_sum_zero, Usize::from(1));
+                                        let zero_ext_arr: Array<C, Ext<C::F, C::EF>> =
+                                            builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
+                                        builder.assign(&left.x, zero_ext_arr.clone());
+                                        builder.assign(&left.y, zero_ext_arr.clone());
+                                        builder.assign(&left.is_infinity, Usize::from(1));
+                                    },
+                                );
                             },
                             |builder| {
-                                let y_sum = septic_ext_add(builder, &right.y, &left.y);
-                                let is_y_sum_zero = y_sum.is_zero(builder);
-                                builder.assert_usize_eq(is_y_sum_zero, Usize::from(1));
-                                let zero_ext_arr: Array<C, Ext<C::F, C::EF>> =
-                                    builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
-                                builder.assign(&left.x, zero_ext_arr.clone());
-                                builder.assign(&left.y, zero_ext_arr.clone());
-                                builder.assign(&left.is_infinity, Usize::from(1));
+                                let x_diff_inv = invert(builder, &x_diff);
+                                let slope = septic_ext_mul(builder, &y_diff, &x_diff_inv);
+
+                                let x_sum = septic_ext_add(builder, &right.x, &left.x);
+                                let slope_squared = septic_ext_squared(builder, &slope);
+                                let x = septic_ext_sub(builder, &slope_squared, &x_sum);
+
+                                let slope_mul_x_diff = septic_ext_mul(builder, &slope, &x_diff);
+                                let y = septic_ext_sub(builder, &slope_mul_x_diff, &left.y);
+
+                                builder.assign(&left.x, x);
+                                builder.assign(&left.y, y);
+                                builder.assign(&left.is_infinity, Usize::from(0));
                             },
                         );
-                    },
-                    |builder| {
-                        let x_diff_inv = invert(builder, &x_diff);
-                        let slope = septic_ext_mul(builder, &y_diff, &x_diff_inv);
-
-                        let x_sum = septic_ext_add(builder, &right.x, &left.x);
-                        let slope_squared = septic_ext_squared(builder, &slope);
-                        let x = septic_ext_sub(builder, &slope_squared, &x_sum);
-
-                        let slope_mul_x_diff = septic_ext_mul(builder, &slope, &x_diff);
-                        let y = septic_ext_sub(builder, &slope_mul_x_diff, &left.y);
-
-                        builder.assign(&left.x, x);
-                        builder.assign(&left.y, y);
-                        builder.assign(&left.is_infinity, Usize::from(0));
-                    },
-                );
-            });
-    });    
+                    });
+            },
+        );
 }
