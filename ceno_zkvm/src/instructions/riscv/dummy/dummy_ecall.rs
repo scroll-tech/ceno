@@ -102,7 +102,11 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         if S::MEM_OPS_COUNT > 0 {
-            set_val!(instance, config.start_addr.as_ref().unwrap(), u64::from(ops.mem_ops[0].addr));
+            set_val!(
+                instance,
+                config.start_addr.as_ref().unwrap(),
+                u64::from(ops.mem_ops[0].addr)
+            );
         }
 
         // Assign registers.
