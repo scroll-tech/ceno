@@ -40,7 +40,7 @@ pub fn log_pc_cycle(vm: &VMState) -> SyscallEffects {
         })
         .collect_vec();
     tracing::debug!(
-        "PHANTOM_SYSCALL_LOG_PC_CYCLE: label={}, pc={:x},cycle={}",
+        "PHANTOM_SYSCALL_LOG_PC_CYCLE: label={},pc={:x},cycle={}",
         String::from_utf8_lossy(&raw_string_u8),
         vm.get_pc().0,
         vm.tracer().cycle()
