@@ -1072,17 +1072,9 @@ dependencies = [
 [[package]]
 name = "ceno_crypto_primitives"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#126d3bd2981859dfbfcea3b440a7f05382d6f6e2"
 dependencies = [
- "ceno_syscall 0.1.0",
- "elliptic-curve",
-]
-
-[[package]]
-name = "ceno_crypto_primitives"
-version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno#050108047aad24101fcb010da4e7d29e9d72678a"
-dependencies = [
- "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno)",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "elliptic-curve",
 ]
 
@@ -1092,7 +1084,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ceno_rt",
- "ceno_syscall 0.1.0",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "elf",
  "ff_ext",
  "itertools 0.13.0",
@@ -1132,7 +1124,7 @@ dependencies = [
 name = "ceno_keccak"
 version = "0.1.0"
 dependencies = [
- "ceno_syscall 0.1.0",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "tiny-keccak",
 ]
 
@@ -1190,18 +1182,19 @@ dependencies = [
 name = "ceno_sha2"
 version = "0.1.0"
 dependencies = [
- "ceno_syscall 0.1.0",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "digest 0.10.7",
 ]
 
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#126d3bd2981859dfbfcea3b440a7f05382d6f6e2"
 
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno#050108047aad24101fcb010da4e7d29e9d72678a"
+source = "git+https://github.com/scroll-tech/ceno#075d900d655311f40992f4331da8f749521f4c14"
 
 [[package]]
 name = "ceno_zkvm"
@@ -2133,11 +2126,13 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "ceno_crypto",
+ "ceno_crypto_primitives",
  "ceno_keccak",
  "ceno_rt",
  "ceno_sha2",
- "ceno_syscall 0.1.0",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "getrandom 0.3.2",
+ "k256 0.13.4 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
  "rand 0.8.5",
  "revm-precompile 28.1.1",
  "rkyv",
@@ -2993,9 +2988,9 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#bfb5430d750ad19102f3d27caaff8bed720d564c"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#63d182e7bc110c5ef6438fb99c517d77f3287938"
 dependencies = [
- "ceno_crypto_primitives 0.1.0 (git+https://github.com/scroll-tech/ceno)",
+ "ceno_crypto_primitives",
  "cfg-if",
  "ecdsa 0.16.9 (git+https://github.com/sp1-patches/signatures.git?tag=patch-16.9-sp1-4.1.0)",
  "elliptic-curve",

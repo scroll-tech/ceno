@@ -290,6 +290,18 @@ fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
 }
 
 #[test]
+fn test_secp256k1() -> Result<()> {
+    let program_elf = ceno_examples::secp256k1;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert!(!syscalls.is_empty());
+
+    Ok(())
+}
+
+#[test]
 fn test_secp256k1_add() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_add_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
@@ -359,11 +371,12 @@ fn test_secp256k1_double() -> Result<()> {
     assert_eq!(p_address, witness.reg_ops[0].value.before);
     let p_address: WordAddr = p_address.into();
 
+    // first byte is tag
     const DOUBLE_P: [u8; 65] = [
-        4, 111, 137, 182, 244, 228, 50, 13, 91, 93, 34, 231, 93, 191, 248, 105, 28, 226, 251, 23,
-        66, 192, 188, 66, 140, 44, 218, 130, 239, 101, 255, 164, 76, 202, 170, 134, 48, 127, 46,
-        14, 9, 192, 64, 102, 67, 163, 33, 48, 157, 140, 217, 10, 97, 231, 183, 28, 129, 177, 185,
-        253, 179, 135, 182, 253, 203,
+        1, 198, 4, 127, 148, 65, 237, 125, 109, 48, 69, 64, 110, 149, 192, 124, 216, 92, 119, 142,
+        75, 140, 239, 60, 167, 171, 172, 9, 185, 92, 112, 158, 229, 26, 225, 104, 254, 166, 61,
+        195, 57, 163, 197, 132, 25, 70, 108, 234, 238, 247, 246, 50, 101, 50, 102, 208, 225, 35,
+        100, 49, 169, 80, 207, 229, 42,
     ];
     let expect = bytes_to_words(DOUBLE_P);
 
@@ -440,12 +453,12 @@ fn test_secp256k1_decompress() -> Result<()> {
 
 #[test]
 fn test_secp256k1_ecrecover() -> Result<()> {
-    let _ = ceno_host::run(
-        CENO_PLATFORM,
-        ceno_examples::secp256k1_ecrecover,
-        &CenoStdin::default(),
-        None,
-    );
+    let program_elf = ceno_examples::secp256k1_ecrecover;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+
+    let steps = run(&mut state)?;
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert!(!syscalls.is_empty());
 
     Ok(())
 }
