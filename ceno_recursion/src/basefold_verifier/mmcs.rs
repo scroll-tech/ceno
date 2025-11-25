@@ -91,6 +91,7 @@ pub fn mmcs_verify_batch<C: Config>(builder: &mut Builder<C>, input: MmcsVerifie
 #[cfg(test)]
 pub mod tests {
     use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_instructions::exe::VmExe;
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::asm::AsmBuilder;
     use openvm_native_recursion::hints::Hintable;
@@ -258,8 +259,11 @@ pub mod tests {
             .with_max_segment_len((1 << 25) - 100);
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<F, NativeConfig>::new(config);
-        executor.execute(program, witness).unwrap();
+        let executor = VmExecutor::<F, NativeConfig>::new(config).unwrap();
+
+        let exe = VmExe::new(program);
+        let interpreter = executor.instance(&exe).unwrap();
+        interpreter.execute(witness, None);
 
         // _debug
         // let results = executor.execute_segments(program, witness).unwrap();

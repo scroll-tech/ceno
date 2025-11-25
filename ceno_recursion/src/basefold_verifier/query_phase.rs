@@ -811,6 +811,7 @@ pub mod tests {
         pcs_batch_commit, pcs_trim, util::hash::write_digest_to_transcript,
     };
     use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_instructions::exe::VmExe;
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::asm::AsmBuilder;
     use openvm_native_recursion::hints::Hintable;
@@ -978,14 +979,17 @@ pub mod tests {
             .with_max_segment_len((1 << 25) - 100);
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
-        executor.execute(program.clone(), witness.clone()).unwrap();
+        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
+
+        let exe = VmExe::new(program);
+        let interpreter = executor.instance(&exe).unwrap();
+        interpreter.execute(witness, None);
 
         // _debug
-        let results = executor.execute_segments(program, witness).unwrap();
-        for seg in results {
-            println!("=> cycle count: {:?}", seg.metrics.cycle_count);
-        }
+        // let results = executor.execute_segments(program, witness).unwrap();
+        // for seg in results {
+        //     println!("=> cycle count: {:?}", seg.metrics.cycle_count);
+        // }
     }
 
     #[test]
