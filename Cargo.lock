@@ -1195,7 +1195,7 @@ source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#2b19559d
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno#075d900d655311f40992f4331da8f749521f4c14"
+source = "git+https://github.com/scroll-tech/ceno-patch#2b19559dd7f6a41106592fcdecfb4ca44ce63d16"
 
 [[package]]
 name = "ceno_zkvm"
@@ -6290,11 +6290,11 @@ dependencies = [
 [[package]]
 name = "substrate-bn"
 version = "0.6.0"
-source = "git+https://github.com/scroll-tech/bn?branch=ceno#58d807ae392d26ad94811a40e0b46e6e2d9a67ab"
+source = "git+https://github.com/scroll-tech/bn?branch=ceno#99cab34de6af12579f5c518a46e278c74a703e9f"
 dependencies = [
  "bytemuck",
  "byteorder",
- "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno)",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch)",
  "cfg-if",
  "crunchy",
  "lazy_static",
