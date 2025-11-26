@@ -24,8 +24,12 @@ pub fn secp256k1_ecrecover(
     }
     let recid = RecoveryId::from_byte(recid).expect("recovery ID is valid");
 
+    #[cfg(feature = "profiling")]
+    syscall_phantom_log_pc_cycle("recover_from_prehash start");
     // recover key
     let recovered_key = VerifyingKey::recover_from_prehash(&msg[..], &sig, recid)?;
+    #[cfg(feature = "profiling")]
+    syscall_phantom_log_pc_cycle("recover_from_prehash end");
     // hash it
     let mut hasher = Keccak::v256();
     let mut hash = [0u8; 32];
