@@ -1063,6 +1063,7 @@ dependencies = [
  "alloy-primitives",
  "ceno_keccak",
  "ceno_sha2",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "k256 0.13.4 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
  "revm-precompile 27.0.0",
  "substrate-bn 0.6.0 (git+https://github.com/scroll-tech/bn?branch=ceno)",
@@ -1072,7 +1073,7 @@ dependencies = [
 [[package]]
 name = "ceno_crypto_primitives"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#126d3bd2981859dfbfcea3b440a7f05382d6f6e2"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#2b19559dd7f6a41106592fcdecfb4ca44ce63d16"
 dependencies = [
  "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "elliptic-curve",
@@ -1189,12 +1190,12 @@ dependencies = [
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#126d3bd2981859dfbfcea3b440a7f05382d6f6e2"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#2b19559dd7f6a41106592fcdecfb4ca44ce63d16"
 
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno#075d900d655311f40992f4331da8f749521f4c14"
+source = "git+https://github.com/scroll-tech/ceno-patch#2b19559dd7f6a41106592fcdecfb4ca44ce63d16"
 
 [[package]]
 name = "ceno_zkvm"
@@ -2988,7 +2989,7 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#63d182e7bc110c5ef6438fb99c517d77f3287938"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#1a2bc976dfa28a7f1e3950667ec58940b58945a9"
 dependencies = [
  "ceno_crypto_primitives",
  "cfg-if",
@@ -6289,11 +6290,11 @@ dependencies = [
 [[package]]
 name = "substrate-bn"
 version = "0.6.0"
-source = "git+https://github.com/scroll-tech/bn?branch=ceno#58d807ae392d26ad94811a40e0b46e6e2d9a67ab"
+source = "git+https://github.com/scroll-tech/bn?branch=ceno#99cab34de6af12579f5c518a46e278c74a703e9f"
 dependencies = [
  "bytemuck",
  "byteorder",
- "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno)",
+ "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch)",
  "cfg-if",
  "crunchy",
  "lazy_static",

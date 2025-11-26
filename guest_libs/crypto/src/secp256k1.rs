@@ -1,5 +1,7 @@
 use crate::CenoCryptoError;
 use ceno_keccak::{Hasher, Keccak};
+#[cfg(feature = "profiling")]
+use ceno_syscall::syscall_phantom_log_pc_cycle;
 use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 
 /// secp256k1 ECDSA signature recovery.
@@ -9,6 +11,8 @@ pub fn secp256k1_ecrecover(
     mut recid: u8,
     msg: &[u8; 32],
 ) -> Result<[u8; 32], CenoCryptoError> {
+    #[cfg(feature = "profiling")]
+    syscall_phantom_log_pc_cycle("secp256k1_ecrecover start");
     // Copied from <https://github.com/alloy-rs/alloy/blob/8e9be40eb0e7c27618db1316989f77f1cfe3accb/crates/consensus/src/crypto.rs#L311-L334>
     // parse signature
     let mut sig = Signature::from_slice(sig.as_slice())?;
@@ -34,5 +38,7 @@ pub fn secp256k1_ecrecover(
 
     // truncate to 20 bytes
     hash[..12].fill(0);
+    #[cfg(feature = "profiling")]
+    syscall_phantom_log_pc_cycle("secp256k1_ecrecover end");
     Ok(hash)
 }

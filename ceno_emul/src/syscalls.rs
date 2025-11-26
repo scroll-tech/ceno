@@ -3,18 +3,18 @@ use anyhow::Result;
 
 pub mod bn254;
 pub mod keccak_permute;
+pub mod phantom;
 pub mod secp256k1;
 pub mod sha256;
 pub mod uint256;
-
 // Using the same function codes as sp1:
 // https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/code.rs
 
 pub use ceno_syscall::{
     BLS12381_ADD, BLS12381_DECOMPRESS, BLS12381_DOUBLE, BN254_ADD, BN254_DOUBLE, BN254_FP_ADD,
-    BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL, KECCAK_PERMUTE, SECP256K1_ADD,
-    SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SECP256R1_ADD, SECP256R1_DECOMPRESS, SECP256R1_DOUBLE,
-    SHA_EXTEND, UINT256_MUL,
+    BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL, KECCAK_PERMUTE, PHANTOM_LOG_PC_CYCLE,
+    SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SECP256R1_ADD, SECP256R1_DECOMPRESS,
+    SECP256R1_DOUBLE, SHA_EXTEND, UINT256_MUL,
 };
 
 pub trait SyscallSpec {
@@ -44,6 +44,9 @@ pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects
         BN254_FP2_ADD => Ok(bn254::bn254_fp2_add(vm)),
         BN254_FP2_MUL => Ok(bn254::bn254_fp2_mul(vm)),
         UINT256_MUL => Ok(uint256::uint256_mul(vm)),
+
+        // phantom syscall
+        PHANTOM_LOG_PC_CYCLE => Ok(phantom::log_pc_cycle(vm)),
         // TODO: introduce error types.
         _ => Err(anyhow::anyhow!("Unknown syscall: {}", function_code)),
     }
