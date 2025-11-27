@@ -1590,6 +1590,7 @@ dependencies = [
 [[package]]
 name = "cuda_hal"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/ceno-gpu-mock.git?branch=main#802928096212ecb1d7347922bc13526ea63e1b01"
 dependencies = [
  "anyhow",
  "ff_ext",

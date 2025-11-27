@@ -6,7 +6,7 @@
 WORKSPACE_CARGO="Cargo.toml"
 
 # Workspace dependency declarations
-LOCAL_DEP='ceno_gpu = { path = "utils/cuda_hal", package = "cuda_hal" }'
+LOCAL_DEP='ceno_gpu = { git = "https://github.com/scroll-tech/ceno-gpu-mock.git", package = "cuda_hal", branch = "main", default-features = false, features = \["bb31"\] }'
 REMOTE_DEP='ceno_gpu = { git = "ssh://git@github.com/scroll-tech/ceno-gpu.git", package = "cuda_hal", branch = "main", default-features = false, features = \["bb31"\] }'
 
 if [ "$1" = "enable-gpu" ]; then
