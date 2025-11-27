@@ -5,6 +5,7 @@ mod tests {
         zkvm_verifier::binding::F,
     };
     use openvm_circuit::arch::{SystemConfig, VmExecutor};
+    use openvm_instructions::exe::VmExe;
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::{
         asm::AsmBuilder,
@@ -21,7 +22,6 @@ mod tests {
     use openvm_stark_sdk::{
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,
     };
-    use openvm_instructions::exe::VmExe;
 
     type SC = BabyBearPoseidon2Config;
     type EF = <SC as StarkGenericConfig>::Challenge;
@@ -56,7 +56,9 @@ mod tests {
         let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
         let exe = VmExe::new(program);
         let interpreter = executor.instance(&exe).unwrap();
-        interpreter.execute(witness_stream, None).expect("test_native_multi_observe should not fail");
+        interpreter
+            .execute(witness_stream, None)
+            .expect("test_native_multi_observe should not fail");
     }
 
     fn vm_program<C: Config>(builder: &mut Builder<C>) {

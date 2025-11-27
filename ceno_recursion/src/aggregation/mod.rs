@@ -6,7 +6,8 @@ use ceno_zkvm::{scheme::ZKVMProof, structs::ZKVMVerifyingKey};
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{
     arch::{
-        MemoryConfig, SystemConfig, VirtualMachine, VmExecutor, VmInstance, instructions::program::Program
+        MemoryConfig, SystemConfig, VirtualMachine, VmExecutor, VmInstance,
+        instructions::program::Program,
     },
     system::program::trace::VmCommittedExe,
 };
@@ -28,7 +29,10 @@ use openvm_native_compiler::{
 };
 use openvm_native_recursion::hints::Hintable;
 use openvm_sdk::{
-    SC, commit::AppExecutionCommit, config::DEFAULT_NUM_CHILDREN_INTERNAL, prover::vm::{new_local_prover, types::VmProvingKey}
+    SC,
+    commit::AppExecutionCommit,
+    config::DEFAULT_NUM_CHILDREN_INTERNAL,
+    prover::vm::{new_local_prover, types::VmProvingKey},
 };
 use openvm_stark_backend::{engine::StarkEngine, prover::hal::DeviceDataTransporter};
 use openvm_stark_sdk::{
@@ -50,9 +54,8 @@ use openvm_circuit::{
     },
     system::{memory::CHUNK, program::trace::compute_exe_commit},
 };
-use openvm_native_circuit::NativeCpuBuilder;
+use openvm_native_circuit::{NATIVE_MAX_TRACE_HEIGHTS, NativeCpuBuilder};
 use openvm_sdk::util::check_max_constraint_degrees;
-use openvm_native_circuit::NATIVE_MAX_TRACE_HEIGHTS;
 use openvm_stark_backend::proof::Proof;
 
 const LEAF_LOG_BLOWUP: usize = 1;
@@ -63,7 +66,7 @@ const SBOX_SIZE: usize = 7;
 pub struct CenoAggregationProver {
     leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-    vk: CenoRecursionVerifierKeys
+    vk: CenoRecursionVerifierKeys,
 }
 
 impl CenoAggregationProver {
@@ -112,15 +115,20 @@ impl CenoAggregationProver {
         // Leaf layer program
         let leaf_engine = BabyBearPoseidon2Engine::new(leaf_fri_params);
         let leaf_program = CenoLeafVmVerifierConfig {
-                vk,
-                compiler_options: CompilerOptions::default().with_cycle_tracker(),
-            }
-            .build_program();
+            vk,
+            compiler_options: CompilerOptions::default().with_cycle_tracker(),
+        }
+        .build_program();
         let leaf_committed_exe = Arc::new(VmCommittedExe::<SC>::commit(
-                leaf_program.into(),
-                leaf_engine.config().pcs(),
-            ));
-        let leaf_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(vm_builder.clone(), &leaf_vm_pk, leaf_committed_exe.exe.clone()).expect("leaf prover");
+            leaf_program.into(),
+            leaf_engine.config().pcs(),
+        ));
+        let leaf_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
+            vm_builder.clone(),
+            &leaf_vm_pk,
+            leaf_committed_exe.exe.clone(),
+        )
+        .expect("leaf prover");
 
         // Configure vm for internal layers
         let internal_vm_config = NativeConfig {
@@ -164,7 +172,12 @@ impl CenoAggregationProver {
             internal_program.into(),
             internal_vm.engine.config().pcs(),
         ));
-        let internal_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(vm_builder.clone(), &internal_vm_pk, internal_committed_exe.exe.clone()).expect("internal prover");
+        let internal_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
+            vm_builder.clone(),
+            &internal_vm_pk,
+            internal_committed_exe.exe.clone(),
+        )
+        .expect("internal prover");
 
         let vk = CenoRecursionVerifierKeys {
             leaf_vm_vk,
@@ -177,7 +190,7 @@ impl CenoAggregationProver {
         Self {
             leaf_prover,
             internal_prover,
-            vk
+            vk,
         }
     }
 }
@@ -242,7 +255,11 @@ pub fn compress_to_root_proof(
             );
             let mut witness_stream: Vec<Vec<F>> = Vec::new();
             witness_stream.extend(p.write());
-            let leaf_proof = SingleSegmentVmProver::prove(&mut ceno_aggregation_prover.leaf_prover, witness_stream, NATIVE_MAX_TRACE_HEIGHTS);
+            let leaf_proof = SingleSegmentVmProver::prove(
+                &mut ceno_aggregation_prover.leaf_prover,
+                witness_stream,
+                NATIVE_MAX_TRACE_HEIGHTS,
+            );
 
             // _debug: export
             // let file =
@@ -271,22 +288,21 @@ pub fn compress_to_root_proof(
     // We will always generate at least one internal proof, even if there is only one leaf
     // proof, in order to shrink the proof size
     while proofs.len() > 1 || internal_node_height == 0 {
-
         let internal_inputs = InternalVmVerifierInput::chunk_leaf_or_internal_proofs(
             (*ceno_aggregation_prover.internal_prover.program_commitment()).into(),
             &proofs,
             DEFAULT_NUM_CHILDREN_INTERNAL,
         );
-        
+
         let proofs: Vec<Proof<_>> = internal_inputs
             .into_iter()
             .map(|input| {
                 internal_node_idx += 1;
                 let internal_proof = SingleSegmentVmProver::prove(
-                        &mut ceno_aggregation_prover.internal_prover,
-                        input.write(),
-                        NATIVE_MAX_TRACE_HEIGHTS,
-                    );
+                    &mut ceno_aggregation_prover.internal_prover,
+                    input.write(),
+                    NATIVE_MAX_TRACE_HEIGHTS,
+                );
 
                 println!(
                     "Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}",
@@ -474,7 +490,9 @@ pub fn verify_proofs(
         let executor = VmExecutor::new(config).unwrap();
         let exe = VmExe::new(program);
         let interpreter = executor.instance(&exe).unwrap();
-        interpreter.execute(witness_stream, None).expect("verification should pass");
+        interpreter
+            .execute(witness_stream, None)
+            .expect("verification should pass");
     }
 }
 

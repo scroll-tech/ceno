@@ -982,7 +982,9 @@ pub mod tests {
         let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
         let exe = VmExe::new(program);
         let interpreter = executor.instance(&exe).unwrap();
-        interpreter.execute(witness, None).expect("constructed test should pass");
+        interpreter
+            .execute(witness, None)
+            .expect("constructed test should pass");
     }
 
     #[test]

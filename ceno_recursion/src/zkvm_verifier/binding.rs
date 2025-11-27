@@ -683,9 +683,7 @@ impl Hintable<InnerConfig> for GKRProofInput {
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let layer_proofs = Vec::<LayerProofInput>::read(builder);
-        Self::HintVariable {
-            layer_proofs,
-        }
+        Self::HintVariable { layer_proofs }
     }
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();

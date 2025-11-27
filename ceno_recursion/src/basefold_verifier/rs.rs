@@ -222,6 +222,7 @@ pub(crate) fn encode_small<C: Config>(
 
 pub mod tests {
     use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_instructions::exe::VmExe;
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::{asm::AsmBuilder, prelude::*};
     use openvm_native_recursion::hints::Hintable;
@@ -230,7 +231,6 @@ pub mod tests {
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,
     };
     use p3::field::{FieldAlgebra, extension::BinomialExtensionField};
-    use openvm_instructions::exe::VmExe;
 
     type SC = BabyBearPoseidon2Config;
 
@@ -283,6 +283,8 @@ pub mod tests {
         let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
         let exe = VmExe::new(program);
         let interpreter = executor.instance(&exe).unwrap();
-        interpreter.execute(witness, None).expect("test_dense_matrix_pad should not fail");
+        interpreter
+            .execute(witness, None)
+            .expect("test_dense_matrix_pad should not fail");
     }
 }

@@ -263,6 +263,8 @@ pub mod tests {
 
         let exe = VmExe::new(program);
         let interpreter = executor.instance(&exe).unwrap();
-        interpreter.execute(witness, None).expect("test_mmcs_verify_batch should not fail");
+        interpreter
+            .execute(witness, None)
+            .expect("test_mmcs_verify_batch should not fail");
     }
 }
