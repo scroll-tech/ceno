@@ -24,7 +24,7 @@ fn build_elfs() {
     let mut dest = File::create(&dest_path).expect("failed to create vars.rs");
 
     let is_release = std::env::var("PROFILE").unwrap() == "release";
-    let mut args = vec!["build", "--features", "profiling", "--examples", "--target-dir", "target"];
+    let mut args = vec!["build", "--examples", "--target-dir", "target"];
     if is_release {
         args.insert(1, "--release"); // insert --release after "build"
     }
