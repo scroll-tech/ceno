@@ -100,6 +100,9 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 
+[patch."https://github.com/scroll-tech/elliptic-curves"]
+k256 = { path = "../elliptic-curves/k256", default-features = false, features = ["std", "ecdsa"] }
+
 # [patch."ssh://git@github.com/scroll-tech/ceno-gpu.git"]
 # ceno_gpu = { path = "../ceno-gpu/cuda_hal", package = "cuda_hal", default-features = false, features=["bb31"] }
 

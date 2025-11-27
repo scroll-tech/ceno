@@ -1064,7 +1064,7 @@ dependencies = [
  "ceno_keccak",
  "ceno_sha2",
  "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
- "k256 0.13.4 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
+ "k256 0.13.4",
  "revm-precompile 27.0.0",
  "substrate-bn 0.6.0 (git+https://github.com/scroll-tech/bn?branch=ceno)",
  "thiserror 2.0.12",
@@ -2133,7 +2133,7 @@ dependencies = [
  "ceno_sha2",
  "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "getrandom 0.3.2",
- "k256 0.13.4 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
+ "k256 0.13.4",
  "rand 0.8.5",
  "revm-precompile 28.1.1",
  "rkyv",
@@ -2975,21 +2975,6 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b"
-dependencies = [
- "cfg-if",
- "ecdsa 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
- "elliptic-curve",
- "once_cell",
- "sha2 0.10.9",
- "signature",
-]
-
-[[package]]
-name = "k256"
-version = "0.13.4"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#61afd88a8f8b4e9b705fdefdabfaccd0c6b0a55d"
 dependencies = [
  "ceno_crypto_primitives",
  "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
@@ -2999,6 +2984,20 @@ dependencies = [
  "hex",
  "once_cell",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "k256"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b"
+dependencies = [
+ "cfg-if",
+ "ecdsa 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "elliptic-curve",
+ "once_cell",
+ "sha2 0.10.9",
+ "signature",
 ]
 
 [[package]]
