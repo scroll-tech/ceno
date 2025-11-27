@@ -263,12 +263,6 @@ pub mod tests {
 
         let exe = VmExe::new(program);
         let interpreter = executor.instance(&exe).unwrap();
-        interpreter.execute(witness, None);
-
-        // _debug
-        // let results = executor.execute_segments(program, witness).unwrap();
-        // for seg in results {
-        //     println!("=> cycle count: {:?}", seg.metrics.cycle_count);
-        // }
+        interpreter.execute(witness, None).expect("test_mmcs_verify_batch should not fail");
     }
 }

@@ -21,6 +21,7 @@ mod tests {
     use openvm_stark_sdk::{
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,
     };
+    use openvm_instructions::exe::VmExe;
 
     type SC = BabyBearPoseidon2Config;
     type EF = <SC as StarkGenericConfig>::Challenge;
@@ -52,18 +53,10 @@ mod tests {
         system_config.profiling = true;
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
-
-        // Alternative execution
-        // executor.execute(program, witness_stream).unwrap();
-
-        let res = executor
-            .execute_and_then(program, witness_stream, |_, seg| Ok(seg), |err| err)
-            .unwrap();
-
-        for (i, seg) in res.iter().enumerate() {
-            println!("=> segment {:?} metrics: {:?}", i, seg.metrics);
-        }
+        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
+        let exe = VmExe::new(program);
+        let interpreter = executor.instance(&exe).unwrap();
+        interpreter.execute(witness_stream, None).expect("test_native_multi_observe should not fail");
     }
 
     fn vm_program<C: Config>(builder: &mut Builder<C>) {

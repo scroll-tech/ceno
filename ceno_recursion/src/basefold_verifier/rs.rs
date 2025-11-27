@@ -230,6 +230,7 @@ pub mod tests {
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,
     };
     use p3::field::{FieldAlgebra, extension::BinomialExtensionField};
+    use openvm_instructions::exe::VmExe;
 
     type SC = BabyBearPoseidon2Config;
 
@@ -279,13 +280,9 @@ pub mod tests {
             .with_max_segment_len((1 << 25) - 100);
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
-        executor.execute(program, witness).unwrap();
-
-        // _debug
-        // let results = executor.execute_segments(program, witness).unwrap();
-        // for seg in results {
-        //     println!("=> cycle count: {:?}", seg.metrics.cycle_count);
-        // }
+        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
+        let exe = VmExe::new(program);
+        let interpreter = executor.instance(&exe).unwrap();
+        interpreter.execute(witness, None).expect("test_dense_matrix_pad should not fail");
     }
 }

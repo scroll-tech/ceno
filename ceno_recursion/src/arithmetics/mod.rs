@@ -1045,6 +1045,7 @@ pub fn extend<C: Config>(
 mod tests {
     use ff_ext::BabyBearExt4;
     use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_instructions::exe::VmExe;
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::{
         asm::{AsmBuilder, AsmCompiler},
@@ -1052,7 +1053,6 @@ mod tests {
         ir::Ext,
     };
     use p3::{babybear::BabyBear, field::FieldAlgebra};
-    use openvm_instructions::exe::VmExe;
 
     use crate::arithmetics::eval_stacked_wellform_address_vec;
 

@@ -980,16 +980,9 @@ pub mod tests {
         let config = NativeConfig::new(system_config, Native);
 
         let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
-
         let exe = VmExe::new(program);
         let interpreter = executor.instance(&exe).unwrap();
-        interpreter.execute(witness, None);
-
-        // _debug
-        // let results = executor.execute_segments(program, witness).unwrap();
-        // for seg in results {
-        //     println!("=> cycle count: {:?}", seg.metrics.cycle_count);
-        // }
+        interpreter.execute(witness, None).expect("constructed test should pass");
     }
 
     #[test]

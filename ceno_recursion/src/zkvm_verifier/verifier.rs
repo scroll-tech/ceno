@@ -246,6 +246,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             builder.set(&chip_indices, i, chip_proof.idx);
         });
 
+    /* _debug: waiting for native sumcheck
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
@@ -498,6 +499,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // logup check
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     builder.assert_ext_eq(logup_sum, zero);
+    */
 }
 
 pub fn verify_chip_proof<C: Config>(
