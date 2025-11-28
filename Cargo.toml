@@ -100,6 +100,13 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 
+#[patch."https://github.com/scroll-tech/elliptic-curves"]
+#k256 = { path = "../elliptic-curves/k256", default-features = false, features = ["std", "ecdsa"] }
+#
+#[patch."https://github.com/scroll-tech/ceno-patch.git"]
+#ceno_crypto_primitives = { path = "../ceno-patch/crypto-primitives", package = "ceno_crypto_primitives" }
+#ceno_syscall = { path = "../ceno-patch/syscall", package = "ceno_syscall" }
+
 # [patch."https://github.com/scroll-tech/ceno-gpu-mock.git"]
 # ceno_gpu = { path = "../ceno-gpu/cuda_hal", package = "cuda_hal", default-features = false, features=["bb31"] }
 

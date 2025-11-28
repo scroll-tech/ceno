@@ -30,3 +30,6 @@ rkyv = { version = "0.8", default-features = false, features = [
   "bytecheck",
 ] }
 substrate-bn.workspace = true
+
+[features]
+profiling = ["k256/std", "k256/ecdsa", "k256/profiling"]
