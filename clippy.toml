@@ -21,4 +21,7 @@ allowed-duplicate-crates = [
   "winnow",
   "generic-array",
   "num-bigint",
+  "rfc6979",
+  "k256",
+  "ecdsa",
 ]

@@ -23,7 +23,9 @@ num-traits.workspace = true
 rayon.workspace = true
 rrs_lib = { package = "rrs-succinct", version = "0.1.0" }
 rustc-hash.workspace = true
-secp.workspace = true
+# TODO clean up secp and only use k256 from elliptic-curves
+k256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa"] }
+secp = { workspace = true }
 serde.workspace = true
 smallvec.workspace = true
 sp1-curves.workspace = true
