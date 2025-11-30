@@ -239,7 +239,6 @@ impl CenoLeafVmVerifierConfig {
                 builder.assert_nonzero(&pv.len());
 
                 // PC and cycle checks
-                /* _debug
                 let prev_pc: Ext<_, _> = builder.uninit();
                 builder.range(0, pv.len()).for_each(|idx_vec, builder| {
                     let shard_pi = builder.get(&pv, idx_vec[0]);
@@ -256,7 +255,6 @@ impl CenoLeafVmVerifierConfig {
                     });
                     builder.assign(&prev_pc, end_pc);
                 });
-                */
 
                 // EC sum verification
                 let expected_last_shard_id = Usize::uninit(builder);
