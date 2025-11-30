@@ -120,6 +120,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], E::from_canonical_u32(self.vk.entry_pc));
                 }
                 let end_pc = vm_proof.pi_evals[END_PC_IDX];
+
                 // add to shard ec sum
                 shard_ec_sum = shard_ec_sum + self.verify_proof_validity(shard_id, vm_proof, transcript)?;
                 Ok((Some(end_pc), shard_ec_sum))

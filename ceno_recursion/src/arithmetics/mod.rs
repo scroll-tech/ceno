@@ -6,6 +6,7 @@ use ceno_zkvm::structs::{ChallengeId, WitnessId};
 use ff_ext::{BabyBearExt4, ExtensionField, SmallField};
 use itertools::Either;
 use multilinear_extensions::{Expression, Fixed, Instance};
+use openvm_native_circuit::EXT_DEG;
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
@@ -31,6 +32,20 @@ pub fn _print_usize_arr<C: Config>(builder: &mut Builder<C>, arr: &Array<C, Usiz
     iter_zip!(builder, arr).for_each(|ptr_vec, builder| {
         let n = builder.iter_ptr_get(arr, ptr_vec[0]);
         builder.print_v(n.get_var());
+    });
+}
+
+pub fn assert_ext_arr_eq<C: Config>(
+    builder: &mut Builder<C>,
+    arr1: &Array<C, Ext<C::F, C::EF>>,
+    arr2: &Array<C, Ext<C::F, C::EF>>,
+) {
+    let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    iter_zip!(builder, arr1, arr2).for_each(|ptr_vec, builder| {
+        let e1 = builder.iter_ptr_get(arr1, ptr_vec[0]);
+        let e2 = builder.iter_ptr_get(arr2, ptr_vec[0]);
+        let diff: Ext<C::F, C::EF> = builder.eval(e1 - e2);
+        builder.assert_ext_eq(diff, zero);
     });
 }
 

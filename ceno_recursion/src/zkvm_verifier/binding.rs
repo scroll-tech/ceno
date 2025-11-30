@@ -33,6 +33,33 @@ pub type E = BinomialExtensionField<F, 4>;
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 pub type InnerConfig = AsmConfig<F, E>;
 
+pub fn decompose_minus_one_bits(n: usize) -> Vec<F> {
+    let a = if n > 0 { n - 1 } else { 0 };
+    let mut bit_decomp: Vec<F> = vec![];
+    for i in 0..32usize {
+        bit_decomp.push(F::from_canonical_usize((a >> i) & 1));
+    }
+
+    bit_decomp
+}
+pub fn decompose_prefixed_layer_bits(n: usize) -> (Vec<usize>, Vec<Vec<F>>) {
+    let mut m = n;
+    let mut r = vec![];
+    let mut r_bits = vec![];
+
+    r.push(m);
+    r_bits.push(decompose_minus_one_bits(m));
+
+    while m > 1 {
+        let cur = m / 2;
+        r.push(cur);
+        r_bits.push(decompose_minus_one_bits(cur));
+        m = m.div_ceil(2);
+    }
+
+    (r, r_bits)
+}
+
 #[derive(DslVariable, Clone)]
 pub struct ZKVMProofInputVariable<C: Config> {
     pub shard_id: Usize<C::N>,
@@ -393,7 +420,9 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub has_ecc_proof: Usize<C::N>,
     pub ecc_proof: EccQuarkProofVariable<C>,
     pub num_instances: Array<C, Var<C::N>>,
-    pub num_instances_bit_decompositions: Array<C, Felt<C::F>>, // len = 96
+    pub n_inst_0_bit_decomps: Array<C, Felt<C::F>>,
+    pub n_inst_1_bit_decomps: Array<C, Felt<C::F>>,
+
     pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
     pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
 }
@@ -425,7 +454,9 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let ecc_proof = EccQuarkProofInput::read(builder);
 
         let num_instances = Vec::<usize>::read(builder);
-        let num_instances_bit_decompositions = Vec::<F>::read(builder);
+        let n_inst_0_bit_decomps = Vec::<F>::read(builder);
+        let n_inst_1_bit_decomps = Vec::<F>::read(builder);
+
         let fixed_in_evals = Vec::<E>::read(builder);
         let wits_in_evals = Vec::<E>::read(builder);
 
@@ -449,7 +480,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             has_ecc_proof,
             ecc_proof,
             num_instances,
-            num_instances_bit_decompositions,
+            n_inst_0_bit_decomps,
+            n_inst_1_bit_decomps,
             fixed_in_evals,
             wits_in_evals,
         }
@@ -464,12 +496,10 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
 
         let sum_num_instances = self.num_instances.iter().sum();
         stream.extend(<usize as Hintable<InnerConfig>>::write(&sum_num_instances));
-        let eq_instance = sum_num_instances - 1;
-        let mut bit_decomp: Vec<F> = vec![];
-        for i in 0..32usize {
-            bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-        }
-        stream.extend(bit_decomp.write());
+
+        let sum_num_instance_bit_decomp = decompose_minus_one_bits(sum_num_instances);
+        stream.extend(sum_num_instance_bit_decomp.write());
+
         let next_pow2_instance = next_pow2_instance_padding(sum_num_instances);
         let log2_num_instances = ceil_log2(next_pow2_instance);
         stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
@@ -500,37 +530,18 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             &self.num_instances,
         ));
 
-        let mut sum: usize = 0;
-        let mut bit_decomp: Vec<F> = vec![];
-        if !self.num_instances.is_empty() {
-            let eq_instance = if self.num_instances[0] > 0 {
-                self.num_instances[0] - 1
-            } else {
-                0
-            };
+        let n_inst_0 = self.num_instances[0];
+        let n_inst_0_bit_decomps = decompose_minus_one_bits(n_inst_0);
 
-            for i in 0..32usize {
-                bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-            }
-            sum += self.num_instances[0];
-        }
-        if self.num_instances.len() > 1 {
-            let eq_instance = if self.num_instances[1] > 0 {
-                self.num_instances[1] - 1
-            } else {
-                0
-            };
+        let n_inst_1 = if self.num_instances.len() > 1 {
+            self.num_instances[1]
+        } else {
+            1usize
+        };
+        let n_inst_1_bit_decomps = decompose_minus_one_bits(n_inst_1);
 
-            for i in 0..32usize {
-                bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-            }
-            sum += self.num_instances[1];
-        }
-        let eq_instance = if sum > 0 { sum - 1 } else { 0 };
-        for i in 0..32usize {
-            bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-        }
-        stream.extend(bit_decomp.write());
+        stream.extend(n_inst_0_bit_decomps.write());
+        stream.extend(n_inst_1_bit_decomps.write());
 
         stream.extend(self.fixed_in_evals.write());
         stream.extend(self.wits_in_evals.write());
@@ -741,6 +752,29 @@ impl<C: Config> From<Array<C, Ext<C::F, C::EF>>> for SepticExtensionVariable<C> 
     }
 }
 
+impl<C: Config> SepticExtensionVariable<C> {
+    pub fn is_zero(&self, builder: &mut Builder<C>) -> Usize<C::N> {
+        let r = Usize::uninit(builder);
+        builder.assign(&r, Usize::from(1));
+
+        let zero = Usize::from(0);
+
+        iter_zip!(builder, self.vs).for_each(|ptr_vec, builder| {
+            let e = builder.iter_ptr_get(&self.vs, ptr_vec[0]);
+            let fs = builder.ext2felt(e);
+            builder.range(0, fs.len()).for_each(|idx_vec, builder| {
+                let f = builder.get(&fs, idx_vec[0]);
+                let u = Usize::Var(builder.cast_felt_to_var(f));
+                builder.if_ne(u, zero.clone()).then(|builder| {
+                    builder.assign(&r, Usize::from(0));
+                });
+            });
+        });
+
+        r
+    }
+}
+
 pub struct SepticPointInput {
     x: SepticExtensionInput,
     y: SepticExtensionInput,
@@ -798,13 +832,12 @@ impl From<EccQuarkProof<E>> for EccQuarkProofInput {
 pub struct EccQuarkProofVariable<C: Config> {
     pub zerocheck_proof: IOPProverMessageVecVariable<C>,
     pub num_instances: Usize<C::N>,
-    pub num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
+    pub num_instances_layered_ns: Array<C, Var<C::N>>,
+    pub num_instances_bit_decomps: Array<C, Array<C, Felt<C::F>>>,
     pub num_vars: Usize<C::N>, // next_pow2_instance_padding(proof.num_instances).ilog2()
     pub evals: Array<C, Ext<C::F, C::EF>>,
     pub rt: PointVariable<C>,
     pub sum: SepticPointVariable<C>,
-    // _debug: hintable
-    // pub prefix_one_seq: Array<C, Usize<C::N>>,
 }
 
 impl Hintable<InnerConfig> for EccQuarkProofInput {
@@ -813,7 +846,8 @@ impl Hintable<InnerConfig> for EccQuarkProofInput {
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let zerocheck_proof = IOPProverMessageVec::read(builder);
         let num_instances = Usize::Var(usize::read(builder));
-        let num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
+        let num_instances_layered_ns = Vec::<usize>::read(builder);
+        let num_instances_bit_decomps = Vec::<Vec<F>>::read(builder);
         let num_vars = Usize::Var(usize::read(builder));
         let evals = Vec::<E>::read(builder);
         let rt_vec = Vec::<E>::read(builder);
@@ -823,7 +857,8 @@ impl Hintable<InnerConfig> for EccQuarkProofInput {
         EccQuarkProofVariable {
             zerocheck_proof,
             num_instances,
-            num_instances_minus_one_bit_decomposition,
+            num_instances_layered_ns,
+            num_instances_bit_decomps,
             num_vars,
             evals,
             rt,
@@ -845,18 +880,11 @@ impl Hintable<InnerConfig> for EccQuarkProofInput {
                 .collect::<Vec<IOPProverMessage>>(),
         );
         stream.extend(p_vec.write());
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.num_instances));
 
-        let eq_instance = if self.num_instances > 0 {
-            self.num_instances - 1
-        } else {
-            0
-        };
-        let mut bit_decomp: Vec<F> = vec![];
-        for i in 0..32usize {
-            bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-        }
-        stream.extend(bit_decomp.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.num_instances));
+        let (ns, n_bits) = decompose_prefixed_layer_bits(self.num_instances);
+        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(&ns));
+        stream.extend(<Vec<Vec<F>> as Hintable<InnerConfig>>::write(&n_bits));
 
         let num_vars = next_pow2_instance_padding(self.num_instances).ilog2() as usize;
         stream.extend(<usize as Hintable<InnerConfig>>::write(&num_vars));
@@ -919,8 +947,10 @@ impl Hintable<InnerConfig> for SepticPointInput {
 #[derive(DslVariable, Clone)]
 pub struct SelectorContextVariable<C: Config> {
     pub offset: Usize<C::N>,
-    pub offset_bit_decomp: Array<C, Felt<C::F>>,
+    pub offset_bit_decomps: Array<C, Felt<C::F>>,
     pub num_instances: Usize<C::N>,
-    pub num_instances_bit_decomp: Array<C, Felt<C::F>>,
+    pub num_instances_layered_ns: Array<C, Var<C::N>>,
+    pub num_instances_bit_decomps: Array<C, Array<C, Felt<C::F>>>,
+    pub offset_instance_sum_bit_decomps: Array<C, Felt<C::F>>,
     pub num_vars: Usize<C::N>,
 }
