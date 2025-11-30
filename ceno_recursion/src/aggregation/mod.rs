@@ -294,11 +294,6 @@ impl CenoLeafVmVerifierConfig {
                         builder.assign(&shard_ec.is_infinity, Usize::from(0));
                     });
 
-                    // _debug
-                    // builder.print_debug(0);
-                    // _print_ext_arr(builder, &ec_sum.x.vs);
-                    // _print_ext_arr(builder, &ec_sum.y.vs);
-
                     add_septic_points_in_place(builder, &ec_sum, &shard_ec);
                 });
             });
@@ -372,17 +367,6 @@ impl Hintable<InnerConfig> for CenoLeafVmVerifierInput {
 
 pub(crate) fn chunk_ceno_leaf_proof_inputs(zkvm_proofs: Vec<ZKVMProofInput>) -> Vec<CenoLeafVmVerifierInput> {
     let user_public_values = zkvm_proofs.iter().map(|p| p.pi_evals.clone()).collect::<Vec<Vec<E>>>();
-
-    // _debug: structural reference
-    // let seq_septic_pts = user_public_values.iter().map(|vs| {
-    //     let x = &vs[SHARD_RW_SUM_IDX..SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE];
-    //     let y = &vs[SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE..SHARD_RW_SUM_IDX + 2 * SEPTIC_EXTENSION_DEGREE];
-    //     SepticPoint::from_affine(SepticExtension::from(x), SepticExtension::from(y))
-    // }).collect::<Vec<SepticPoint<E>>>();
-
-    // _debug
-    // println!("=> seq_septic_pts: {:?}", seq_septic_pts);
-
     let mut ret: Vec<CenoLeafVmVerifierInput> = zkvm_proofs.into_iter().map(|p| {
         CenoLeafVmVerifierInput {
             proof: p,
