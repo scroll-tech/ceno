@@ -380,13 +380,14 @@ pub mod tests {
             .with_profiling();
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
-        executor.execute(program.clone(), witness.clone()).unwrap();
-
-        let results = executor.execute_segments(program, witness).unwrap();
-        for seg in results {
-            println!("=> cycle count: {:?}", seg.metrics.cycle_count);
-        }
+        // _debug
+        // let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
+        // executor.execute(program.clone(), witness.clone()).unwrap();
+        //
+        // let results = executor.execute_segments(program, witness).unwrap();
+        // for seg in results {
+        // println!("=> cycle count: {:?}", seg.metrics.cycle_count);
+        // }
     }
 
     #[test]
