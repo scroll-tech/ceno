@@ -112,7 +112,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         challenger_multi_observe(builder, &mut challenger, &v);
     });
 
-    /* _debug
     iter_zip!(builder, zkvm_proof_input.raw_pi, zkvm_proof_input.pi_evals).for_each(
         |ptr_vec, builder| {
             let raw = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
@@ -249,7 +248,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             builder.set(&chip_indices, i, chip_proof.idx);
         });
 
-    
+    /* _debug
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());

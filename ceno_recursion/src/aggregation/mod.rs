@@ -77,11 +77,7 @@ const INTERNAL_LOG_BLOWUP: usize = 2;
 const ROOT_LOG_BLOWUP: usize = 3;
 const SBOX_SIZE: usize = 7;
 const PI_LEN: usize = 92;
-const LEAF_VM_MAX_TRACE_HEIGHTS: &[u32] = &[
-    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216, 2097152, 8388608,
-    262144, 2097152, 1048576, 4194304, 65536, 262144,
-];
-const INTERNAL_VM_MAX_TRACE_HEIGHTS: &[u32] = &[
+const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216, 2097152, 8388608,
     262144, 2097152, 1048576, 4194304, 65536, 262144,
 ];
@@ -309,19 +305,6 @@ impl CenoLeafVmVerifierConfig {
                 });
             });
             builder.cycle_tracker_end("PV Operations");
-
-            let mut commit_pi_arr: Vec<Felt<F>> = vec![];
-            builder.range(0, shard_raw_pi.len()).for_each(|idx_vec, builder| {
-                let fs = builder.get(&shard_raw_pi, idx_vec[0]);
-                for j in 0..4usize {
-                    let f = builder.get(&fs, j);
-                    commit_pi_arr.push(f);
-                }
-            });
-            for f in commit_pi_arr {
-                builder.commit_public_value(f);
-            }
-
             builder.halt();
         }
 
@@ -428,7 +411,7 @@ pub fn compress_to_root_proof(
             let leaf_proof = SingleSegmentVmProver::prove(
                 &mut ceno_aggregation_prover.leaf_prover,
                 witness_stream,
-                LEAF_VM_MAX_TRACE_HEIGHTS,
+                VM_MAX_TRACE_HEIGHTS,
             );
 
             // _debug: export
@@ -446,6 +429,7 @@ pub fn compress_to_root_proof(
         })
         .collect::<Vec<_>>();
 
+    /* _debug
     // Aggregate tree to root proof
     let mut internal_node_idx = -1;
     let mut internal_node_height = 0;
@@ -471,7 +455,7 @@ pub fn compress_to_root_proof(
                 let internal_proof = SingleSegmentVmProver::prove(
                     &mut ceno_aggregation_prover.internal_prover,
                     input.write(),
-                    NATIVE_MAX_TRACE_HEIGHTS,
+                    VM_MAX_TRACE_HEIGHTS,
                 );
 
                 println!(
@@ -499,9 +483,7 @@ pub fn compress_to_root_proof(
         aggregation_start_timestamp.elapsed()
     );
     println!("Aggregation - Final height: {:?}", internal_node_height);
-
-
-    /* _debug
+    
     // Export e2e stark proof (used in verify_e2e_stark_proof)
     let root_stark_proof = VmStarkProof {
         inner: proofs.pop().unwrap(),
@@ -519,7 +501,7 @@ pub fn compress_to_root_proof(
     let file = File::create("ceno_vk.bin").expect("Create export proof file");
     bincode::serialize_into(file, &vk).expect("failed to serialize internal proof");
 
-    (vk, root_stark_proof)
+    (vk, root_stark_proof)    
     */
 }
 

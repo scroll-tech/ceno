@@ -389,14 +389,13 @@ pub fn verify_tower_proof<C: Config>(
         let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
         builder.set(&challenges, 0, alpha);
 
-        // _debug
-        // builder.sumcheck_layer_eval(
-        // &input_ctx,
-        // &challenges,
-        // &proof.prod_specs_eval.data,
-        // &proof.logup_specs_eval.data,
-        // &next_layer_evals,
-        // );
+        builder.sumcheck_layer_eval(
+            &input_ctx,
+            &challenges,
+            &proof.prod_specs_eval.data,
+            &proof.logup_specs_eval.data,
+            &next_layer_evals,
+        );
         let expected_evaluation = builder.get(&next_layer_evals, 0);
 
         builder.assign(&expected_evaluation, expected_evaluation * eq_e);
@@ -429,14 +428,13 @@ pub fn verify_tower_proof<C: Config>(
         builder.set(&challenges, 1, c1);
         builder.set(&challenges, 2, c2);
 
-        // _debug
-        // builder.sumcheck_layer_eval(
-        // &input_ctx,
-        // &challenges,
-        // &proof.prod_specs_eval.data,
-        // &proof.logup_specs_eval.data,
-        // &next_layer_evals,
-        // );
+        builder.sumcheck_layer_eval(
+            &input_ctx,
+            &challenges,
+            &proof.prod_specs_eval.data,
+            &proof.logup_specs_eval.data,
+            &next_layer_evals,
+        );
 
         let next_round = builder.eval_expr(round_var + RVar::from(1));
         builder
