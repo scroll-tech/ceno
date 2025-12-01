@@ -73,7 +73,7 @@ const ROOT_LOG_BLOWUP: usize = 3;
 const SBOX_SIZE: usize = 7;
 const PI_LEN: usize = 92;
 const LEAF_VM_MAX_TRACE_HEIGHTS: &[u32] = &[
-    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 16777216, 2097152, 16777216, 2097152, 8388608,
+    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216, 2097152, 8388608,
     262144, 2097152, 1048576, 4194304, 65536, 262144,
 ];
 
@@ -98,7 +98,7 @@ impl CenoAggregationProver {
             system: SystemConfig::new(
                 SBOX_SIZE.min(leaf_fri_params.max_constraint_degree()),
                 MemoryConfig {
-                    max_access_adapter_n: 8,
+                    max_access_adapter_n: 16,
                     ..Default::default()
                 },
                 VmVerifierPvs::<u8>::width(),
