@@ -112,357 +112,357 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         challenger_multi_observe(builder, &mut challenger, &v);
     });
 
-    /* _debug
-    iter_zip!(builder, zkvm_proof_input.raw_pi, zkvm_proof_input.pi_evals).for_each(
-        |ptr_vec, builder| {
-            let raw = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
-            let eval = builder.iter_ptr_get(&zkvm_proof_input.pi_evals, ptr_vec[1]);
-            let raw0 = builder.get(&raw, 0);
-
-            builder.if_eq(raw.len(), Usize::from(1)).then(|builder| {
-                let raw0_ext = builder.ext_from_base_slice(&[raw0]);
-                builder.assert_ext_eq(raw0_ext, eval);
-            });
-        },
-    );
-
-    
-    builder
-        .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-        .then(|builder| {
-            if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
-
-                commit.value.into_iter().enumerate().for_each(|(i, v)| {
-                    let v = builder.constant(v);
-                    // TODO: put fixed commit to public values
-                    // builder.commit_public_value(v);
-
-                    builder.set_value(&commit_array, i, v);
-                });
-
-                challenger_multi_observe(builder, &mut challenger, &commit_array);
-
-                let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
-                    fixed_commit.log2_max_codeword_size,
-                ));
-
-                challenger.observe(builder, log2_max_codeword_size_felt);
-            }
-        });
-
-    
-    builder
-        .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-        .then(|builder| {
-            if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
-
-                commit.value.into_iter().enumerate().for_each(|(i, v)| {
-                    let v = builder.constant(v);
-                    // TODO: put fixed commit to public values
-                    // builder.commit_public_value(v);
-
-                    builder.set_value(&commit_array, i, v);
-                });
-                challenger_multi_observe(builder, &mut challenger, &commit_array);
-
-                let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
-                    fixed_commit.log2_max_codeword_size,
-                ));
-
-                challenger.observe(builder, log2_max_codeword_size_felt);
-            }
-        });
-
-    let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
-    iter_zip!(builder, zkvm_proof_input.chip_proofs).for_each(|ptr_vec, builder| {
-        let chip_proof = builder.iter_ptr_get(&zkvm_proof_input.chip_proofs, ptr_vec[0]);
-        challenger.observe(builder, chip_proof.idx_felt);
-        challenger.observe(builder, zero_f);
-
-        iter_zip!(builder, chip_proof.num_instances).for_each(|ptr_vec, builder| {
-            let num_instance = builder.iter_ptr_get(&chip_proof.num_instances, ptr_vec[0]);
-            let num_instance = builder.unsafe_cast_var_to_felt(num_instance);
-            challenger.observe(builder, num_instance);
-            challenger.observe(builder, zero_f);
-        });
-    });
-
-    challenger_multi_observe(
-        builder,
-        &mut challenger,
-        &zkvm_proof_input.witin_commit.commit.value,
-    );
-    let log2_max_codeword_size_felt = builder.unsafe_cast_var_to_felt(
-        zkvm_proof_input
-            .witin_commit
-            .log2_max_codeword_size
-            .get_var(),
-    );
-    challenger.observe(builder, log2_max_codeword_size_felt);
-
-    let alpha = challenger.sample_ext(builder);
-    let beta = challenger.sample_ext(builder);
-
-    let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(2);
-    builder.set(&challenges, 0, alpha);
-    builder.set(&challenges, 1, beta);
-
-    let num_fixed_opening = vk
-        .circuit_vks
-        .values()
-        .filter(|c| c.get_cs().num_fixed() > 0)
-        .count();
-
-    let mut unipoly_extrapolator = UniPolyExtrapolator::new(builder);
-    let mut poly_evaluator = PolyEvaluator::new(builder);
-
-    let dummy_table_item = alpha;
-    let dummy_table_item_multiplicity: Var<C::N> = builder.constant(C::N::ZERO);
-
-    let witin_openings: Array<C, RoundOpeningVariable<C>> =
-        builder.dyn_array(zkvm_proof_input.chip_proofs.len());
-    let fixed_openings: Array<C, RoundOpeningVariable<C>> =
-        builder.dyn_array(zkvm_proof_input.chip_proofs.len());
-    let shard_ec_sum = SepticPointVariable {
-        x: SepticExtensionVariable {
-            vs: builder.dyn_array(7),
-        },
-        y: SepticExtensionVariable {
-            vs: builder.dyn_array(7),
-        },
-        is_infinity: Usize::uninit(builder),
-    };
-
-    let num_chips_verified: Usize<C::N> = builder.eval(C::N::ZERO);
-    let num_chips_have_fixed: Usize<C::N> = builder.eval(C::N::ZERO);
-
-    let chip_indices: Array<C, Var<C::N>> = builder.dyn_array(zkvm_proof_input.chip_proofs.len());
-    builder
-        .range(0, chip_indices.len())
-        .for_each(|idx_vec, builder| {
-            let i = idx_vec[0];
-            let chip_proof = builder.get(&zkvm_proof_input.chip_proofs, i);
-            builder.set(&chip_indices, i, chip_proof.idx);
-        });
-
-    
-    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
-        let circuit_vk = &vk.circuit_vks[circuit_name];
-        let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
-
-        builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
-            let chip_proof =
-                builder.get(&zkvm_proof_input.chip_proofs, num_chips_verified.get_var());
-
-            builder.assert_usize_eq(
-                chip_proof.wits_in_evals.len(),
-                Usize::from(circuit_vk.get_cs().num_witin()),
-            );
-            builder.assert_usize_eq(
-                chip_proof.fixed_in_evals.len(),
-                Usize::from(circuit_vk.get_cs().num_fixed()),
-            );
-            builder.assert_usize_eq(
-                chip_proof.r_out_evals.len(),
-                Usize::from(circuit_vk.get_cs().num_reads()),
-            );
-            builder.assert_usize_eq(
-                chip_proof.w_out_evals.len(),
-                Usize::from(circuit_vk.get_cs().num_writes()),
-            );
-            builder.assert_usize_eq(
-                chip_proof.lk_out_evals.len(),
-                Usize::from(circuit_vk.get_cs().num_lks()),
-            );
-
-            let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-            iter_zip!(builder, chip_proof.lk_out_evals).for_each(|ptr_vec, builder| {
-                let evals = builder.iter_ptr_get(&chip_proof.lk_out_evals, ptr_vec[0]);
-                let p1 = builder.get(&evals, 0);
-                let p2 = builder.get(&evals, 1);
-                let q1 = builder.get(&evals, 2);
-                let q2 = builder.get(&evals, 3);
-
-                builder.assign(&chip_logup_sum, chip_logup_sum + p1 * q1.inverse());
-                builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
-            });
-            challenger.observe(builder, chip_proof.idx_felt);
-
-            if circuit_vk.get_cs().is_with_lk_table() {
-                builder.assign(&logup_sum, logup_sum - chip_logup_sum);
-            } else {
-                // getting the number of dummy padding item that we used in this opcode circuit
-                let num_lks: Var<C::N> =
-                    builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
-
-                // each padding instance contribute to (2^rotation_vars) dummy lookup padding
-                let next_pow2_instance: Var<C::N> =
-                    pow_2(builder, chip_proof.log2_num_instances.get_var());
-                let num_padded_instance: Var<C::N> =
-                    builder.eval(next_pow2_instance - chip_proof.sum_num_instances.clone());
-                let rotation_var: Var<C::N> = builder.constant(C::N::from_canonical_usize(
-                    1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0),
-                ));
-                let rotation_subgroup_size: Var<C::N> =
-                    builder.constant(C::N::from_canonical_usize(
-                        circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0),
-                    ));
-                builder.assign(&num_padded_instance, num_padded_instance * rotation_var);
-
-                // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
-                let num_instance_non_selected: Var<C::N> = builder.eval(
-                    chip_proof.sum_num_instances.clone()
-                        * (rotation_var - rotation_subgroup_size - C::N::ONE),
-                );
-                let new_multiplicity: Var<C::N> =
-                    builder.eval(num_lks * (num_padded_instance + num_instance_non_selected));
-                builder.assign(
-                    &dummy_table_item_multiplicity,
-                    dummy_table_item_multiplicity + new_multiplicity,
-                );
-
-                builder.assign(&logup_sum, logup_sum + chip_logup_sum);
-            }
-
-            builder.cycle_tracker_start("Verify chip proof");
-            let (input_opening_point, chip_shard_ec_sum) = verify_chip_proof(
-                circuit_name,
-                builder,
-                &mut challenger,
-                &chip_proof,
-                &zkvm_proof_input.pi_evals,
-                &zkvm_proof_input.raw_pi,
-                &zkvm_proof_input.raw_pi_num_variables,
-                &challenges,
-                chip_vk,
-                &mut unipoly_extrapolator,
-                &mut poly_evaluator,
-            );
-            builder.cycle_tracker_end("Verify chip proof");
-
-            let point_clone: Array<C, Ext<C::F, C::EF>> = builder.eval(input_opening_point.clone());
-
-            if circuit_vk.get_cs().num_witin() > 0 {
-                let witin_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
-                    num_var: input_opening_point.len().get_var(),
-                    point_and_evals: PointAndEvalsVariable {
-                        point: PointVariable { fs: point_clone },
-                        evals: chip_proof.wits_in_evals,
-                    },
-                });
-                builder.set_value(&witin_openings, num_chips_verified.get_var(), witin_round);
-            }
-            if circuit_vk.get_cs().num_fixed() > 0 {
-                let fixed_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
-                    num_var: input_opening_point.len().get_var(),
-                    point_and_evals: PointAndEvalsVariable {
-                        point: PointVariable {
-                            fs: input_opening_point,
-                        },
-                        evals: chip_proof.fixed_in_evals,
-                    },
-                });
-
-                builder.set_value(&fixed_openings, num_chips_have_fixed.get_var(), fixed_round);
-                builder.inc(&num_chips_have_fixed);
-            }
-
-            let r_out_evals_prod = nested_product(builder, &chip_proof.r_out_evals);
-            builder.assign(&prod_r, prod_r * r_out_evals_prod);
-
-            let w_out_evals_prod = nested_product(builder, &chip_proof.w_out_evals);
-            builder.assign(&prod_w, prod_w * w_out_evals_prod);
-
-            builder.inc(&num_chips_verified);
-            builder
-                .if_ne(chip_shard_ec_sum.is_infinity.clone(), Usize::from(1))
-                .then(|builder| {
-                    add_septic_points_in_place(builder, &shard_ec_sum, &chip_shard_ec_sum);
-                });
-        });
-    }
-    builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
-
-    let dummy_table_item_multiplicity =
-        builder.unsafe_cast_var_to_felt(dummy_table_item_multiplicity);
-    builder.assign(
-        &logup_sum,
-        logup_sum - dummy_table_item_multiplicity * dummy_table_item.inverse(),
-    );
-
-    let rounds: Array<C, RoundVariable<C>> = if num_fixed_opening > 0 {
-        builder.dyn_array(2)
-    } else {
-        builder.dyn_array(1)
-    };
-    builder.set(
-        &rounds,
-        0,
-        RoundVariable {
-            commit: zkvm_proof_input.witin_commit,
-            openings: witin_openings,
-            perm: zkvm_proof_input.witin_perm.clone(),
-        },
-    );
-
-    if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-        builder
-            .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
-
-                let log2_max_codeword_size: Var<C::N> = builder.constant(
-                    C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
-                );
-
-                builder.set(
-                    &rounds,
-                    1,
-                    RoundVariable {
-                        commit: BasefoldCommitmentVariable {
-                            commit: MmcsCommitmentVariable {
-                                value: commit_array,
-                            },
-                            log2_max_codeword_size: log2_max_codeword_size.into(),
-                        },
-                        openings: fixed_openings.clone(),
-                        perm: zkvm_proof_input.fixed_perm.clone(),
-                    },
-                );
-            });
-    } else if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
-        builder
-            .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
-
-                let log2_max_codeword_size: Var<C::N> = builder.constant(
-                    C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
-                );
-
-                builder.set(
-                    &rounds,
-                    1,
-                    RoundVariable {
-                        commit: BasefoldCommitmentVariable {
-                            commit: MmcsCommitmentVariable {
-                                value: commit_array,
-                            },
-                            log2_max_codeword_size: log2_max_codeword_size.into(),
-                        },
-                        openings: fixed_openings.clone(),
-                        perm: zkvm_proof_input.fixed_perm.clone(),
-                    },
-                );
-            });
-    }
-
+    // _debug
+    // iter_zip!(builder, zkvm_proof_input.raw_pi, zkvm_proof_input.pi_evals).for_each(
+    // |ptr_vec, builder| {
+    // let raw = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
+    // let eval = builder.iter_ptr_get(&zkvm_proof_input.pi_evals, ptr_vec[1]);
+    // let raw0 = builder.get(&raw, 0);
+    //
+    // builder.if_eq(raw.len(), Usize::from(1)).then(|builder| {
+    // let raw0_ext = builder.ext_from_base_slice(&[raw0]);
+    // builder.assert_ext_eq(raw0_ext, eval);
+    // });
+    // },
+    // );
+    //
+    //
+    // builder
+    // .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+    // .then(|builder| {
+    // if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
+    // let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+    // let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+    //
+    // commit.value.into_iter().enumerate().for_each(|(i, v)| {
+    // let v = builder.constant(v);
+    // TODO: put fixed commit to public values
+    // builder.commit_public_value(v);
+    //
+    // builder.set_value(&commit_array, i, v);
+    // });
+    //
+    // challenger_multi_observe(builder, &mut challenger, &commit_array);
+    //
+    // let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
+    // fixed_commit.log2_max_codeword_size,
+    // ));
+    //
+    // challenger.observe(builder, log2_max_codeword_size_felt);
+    // }
+    // });
+    //
+    //
+    // builder
+    // .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+    // .then(|builder| {
+    // if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
+    // let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+    // let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+    //
+    // commit.value.into_iter().enumerate().for_each(|(i, v)| {
+    // let v = builder.constant(v);
+    // TODO: put fixed commit to public values
+    // builder.commit_public_value(v);
+    //
+    // builder.set_value(&commit_array, i, v);
+    // });
+    // challenger_multi_observe(builder, &mut challenger, &commit_array);
+    //
+    // let log2_max_codeword_size_felt = builder.constant(C::F::from_canonical_usize(
+    // fixed_commit.log2_max_codeword_size,
+    // ));
+    //
+    // challenger.observe(builder, log2_max_codeword_size_felt);
+    // }
+    // });
+    //
+    // let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
+    // iter_zip!(builder, zkvm_proof_input.chip_proofs).for_each(|ptr_vec, builder| {
+    // let chip_proof = builder.iter_ptr_get(&zkvm_proof_input.chip_proofs, ptr_vec[0]);
+    // challenger.observe(builder, chip_proof.idx_felt);
+    // challenger.observe(builder, zero_f);
+    //
+    // iter_zip!(builder, chip_proof.num_instances).for_each(|ptr_vec, builder| {
+    // let num_instance = builder.iter_ptr_get(&chip_proof.num_instances, ptr_vec[0]);
+    // let num_instance = builder.unsafe_cast_var_to_felt(num_instance);
+    // challenger.observe(builder, num_instance);
+    // challenger.observe(builder, zero_f);
+    // });
+    // });
+    //
+    // challenger_multi_observe(
+    // builder,
+    // &mut challenger,
+    // &zkvm_proof_input.witin_commit.commit.value,
+    // );
+    // let log2_max_codeword_size_felt = builder.unsafe_cast_var_to_felt(
+    // zkvm_proof_input
+    // .witin_commit
+    // .log2_max_codeword_size
+    // .get_var(),
+    // );
+    // challenger.observe(builder, log2_max_codeword_size_felt);
+    //
+    // let alpha = challenger.sample_ext(builder);
+    // let beta = challenger.sample_ext(builder);
+    //
+    // let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(2);
+    // builder.set(&challenges, 0, alpha);
+    // builder.set(&challenges, 1, beta);
+    //
+    // let num_fixed_opening = vk
+    // .circuit_vks
+    // .values()
+    // .filter(|c| c.get_cs().num_fixed() > 0)
+    // .count();
+    //
+    // let mut unipoly_extrapolator = UniPolyExtrapolator::new(builder);
+    // let mut poly_evaluator = PolyEvaluator::new(builder);
+    //
+    // let dummy_table_item = alpha;
+    // let dummy_table_item_multiplicity: Var<C::N> = builder.constant(C::N::ZERO);
+    //
+    // let witin_openings: Array<C, RoundOpeningVariable<C>> =
+    // builder.dyn_array(zkvm_proof_input.chip_proofs.len());
+    // let fixed_openings: Array<C, RoundOpeningVariable<C>> =
+    // builder.dyn_array(zkvm_proof_input.chip_proofs.len());
+    // let shard_ec_sum = SepticPointVariable {
+    // x: SepticExtensionVariable {
+    // vs: builder.dyn_array(7),
+    // },
+    // y: SepticExtensionVariable {
+    // vs: builder.dyn_array(7),
+    // },
+    // is_infinity: Usize::uninit(builder),
+    // };
+    //
+    // let num_chips_verified: Usize<C::N> = builder.eval(C::N::ZERO);
+    // let num_chips_have_fixed: Usize<C::N> = builder.eval(C::N::ZERO);
+    //
+    // let chip_indices: Array<C, Var<C::N>> = builder.dyn_array(zkvm_proof_input.chip_proofs.len());
+    // builder
+    // .range(0, chip_indices.len())
+    // .for_each(|idx_vec, builder| {
+    // let i = idx_vec[0];
+    // let chip_proof = builder.get(&zkvm_proof_input.chip_proofs, i);
+    // builder.set(&chip_indices, i, chip_proof.idx);
+    // });
+    //
+    //
+    // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+    // let circuit_vk = &vk.circuit_vks[circuit_name];
+    // let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
+    //
+    // builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
+    // let chip_proof =
+    // builder.get(&zkvm_proof_input.chip_proofs, num_chips_verified.get_var());
+    //
+    // builder.assert_usize_eq(
+    // chip_proof.wits_in_evals.len(),
+    // Usize::from(circuit_vk.get_cs().num_witin()),
+    // );
+    // builder.assert_usize_eq(
+    // chip_proof.fixed_in_evals.len(),
+    // Usize::from(circuit_vk.get_cs().num_fixed()),
+    // );
+    // builder.assert_usize_eq(
+    // chip_proof.r_out_evals.len(),
+    // Usize::from(circuit_vk.get_cs().num_reads()),
+    // );
+    // builder.assert_usize_eq(
+    // chip_proof.w_out_evals.len(),
+    // Usize::from(circuit_vk.get_cs().num_writes()),
+    // );
+    // builder.assert_usize_eq(
+    // chip_proof.lk_out_evals.len(),
+    // Usize::from(circuit_vk.get_cs().num_lks()),
+    // );
+    //
+    // let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    // iter_zip!(builder, chip_proof.lk_out_evals).for_each(|ptr_vec, builder| {
+    // let evals = builder.iter_ptr_get(&chip_proof.lk_out_evals, ptr_vec[0]);
+    // let p1 = builder.get(&evals, 0);
+    // let p2 = builder.get(&evals, 1);
+    // let q1 = builder.get(&evals, 2);
+    // let q2 = builder.get(&evals, 3);
+    //
+    // builder.assign(&chip_logup_sum, chip_logup_sum + p1 * q1.inverse());
+    // builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
+    // });
+    // challenger.observe(builder, chip_proof.idx_felt);
+    //
+    // if circuit_vk.get_cs().is_with_lk_table() {
+    // builder.assign(&logup_sum, logup_sum - chip_logup_sum);
+    // } else {
+    // getting the number of dummy padding item that we used in this opcode circuit
+    // let num_lks: Var<C::N> =
+    // builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
+    //
+    // each padding instance contribute to (2^rotation_vars) dummy lookup padding
+    // let next_pow2_instance: Var<C::N> =
+    // pow_2(builder, chip_proof.log2_num_instances.get_var());
+    // let num_padded_instance: Var<C::N> =
+    // builder.eval(next_pow2_instance - chip_proof.sum_num_instances.clone());
+    // let rotation_var: Var<C::N> = builder.constant(C::N::from_canonical_usize(
+    // 1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0),
+    // ));
+    // let rotation_subgroup_size: Var<C::N> =
+    // builder.constant(C::N::from_canonical_usize(
+    // circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0),
+    // ));
+    // builder.assign(&num_padded_instance, num_padded_instance * rotation_var);
+    //
+    // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
+    // let num_instance_non_selected: Var<C::N> = builder.eval(
+    // chip_proof.sum_num_instances.clone()
+    // (rotation_var - rotation_subgroup_size - C::N::ONE),
+    // );
+    // let new_multiplicity: Var<C::N> =
+    // builder.eval(num_lks * (num_padded_instance + num_instance_non_selected));
+    // builder.assign(
+    // &dummy_table_item_multiplicity,
+    // dummy_table_item_multiplicity + new_multiplicity,
+    // );
+    //
+    // builder.assign(&logup_sum, logup_sum + chip_logup_sum);
+    // }
+    //
+    // builder.cycle_tracker_start("Verify chip proof");
+    // let (input_opening_point, chip_shard_ec_sum) = verify_chip_proof(
+    // circuit_name,
+    // builder,
+    // &mut challenger,
+    // &chip_proof,
+    // &zkvm_proof_input.pi_evals,
+    // &zkvm_proof_input.raw_pi,
+    // &zkvm_proof_input.raw_pi_num_variables,
+    // &challenges,
+    // chip_vk,
+    // &mut unipoly_extrapolator,
+    // &mut poly_evaluator,
+    // );
+    // builder.cycle_tracker_end("Verify chip proof");
+    //
+    // let point_clone: Array<C, Ext<C::F, C::EF>> = builder.eval(input_opening_point.clone());
+    //
+    // if circuit_vk.get_cs().num_witin() > 0 {
+    // let witin_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
+    // num_var: input_opening_point.len().get_var(),
+    // point_and_evals: PointAndEvalsVariable {
+    // point: PointVariable { fs: point_clone },
+    // evals: chip_proof.wits_in_evals,
+    // },
+    // });
+    // builder.set_value(&witin_openings, num_chips_verified.get_var(), witin_round);
+    // }
+    // if circuit_vk.get_cs().num_fixed() > 0 {
+    // let fixed_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
+    // num_var: input_opening_point.len().get_var(),
+    // point_and_evals: PointAndEvalsVariable {
+    // point: PointVariable {
+    // fs: input_opening_point,
+    // },
+    // evals: chip_proof.fixed_in_evals,
+    // },
+    // });
+    //
+    // builder.set_value(&fixed_openings, num_chips_have_fixed.get_var(), fixed_round);
+    // builder.inc(&num_chips_have_fixed);
+    // }
+    //
+    // let r_out_evals_prod = nested_product(builder, &chip_proof.r_out_evals);
+    // builder.assign(&prod_r, prod_r * r_out_evals_prod);
+    //
+    // let w_out_evals_prod = nested_product(builder, &chip_proof.w_out_evals);
+    // builder.assign(&prod_w, prod_w * w_out_evals_prod);
+    //
+    // builder.inc(&num_chips_verified);
+    // builder
+    // .if_ne(chip_shard_ec_sum.is_infinity.clone(), Usize::from(1))
+    // .then(|builder| {
+    // add_septic_points_in_place(builder, &shard_ec_sum, &chip_shard_ec_sum);
+    // });
+    // });
+    // }
+    // builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
+    //
+    // let dummy_table_item_multiplicity =
+    // builder.unsafe_cast_var_to_felt(dummy_table_item_multiplicity);
+    // builder.assign(
+    // &logup_sum,
+    // logup_sum - dummy_table_item_multiplicity * dummy_table_item.inverse(),
+    // );
+    //
+    // let rounds: Array<C, RoundVariable<C>> = if num_fixed_opening > 0 {
+    // builder.dyn_array(2)
+    // } else {
+    // builder.dyn_array(1)
+    // };
+    // builder.set(
+    // &rounds,
+    // 0,
+    // RoundVariable {
+    // commit: zkvm_proof_input.witin_commit,
+    // openings: witin_openings,
+    // perm: zkvm_proof_input.witin_perm.clone(),
+    // },
+    // );
+    //
+    // if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
+    // builder
+    // .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+    // .then(|builder| {
+    // let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+    // let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+    //
+    // let log2_max_codeword_size: Var<C::N> = builder.constant(
+    // C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
+    // );
+    //
+    // builder.set(
+    // &rounds,
+    // 1,
+    // RoundVariable {
+    // commit: BasefoldCommitmentVariable {
+    // commit: MmcsCommitmentVariable {
+    // value: commit_array,
+    // },
+    // log2_max_codeword_size: log2_max_codeword_size.into(),
+    // },
+    // openings: fixed_openings.clone(),
+    // perm: zkvm_proof_input.fixed_perm.clone(),
+    // },
+    // );
+    // });
+    // } else if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
+    // builder
+    // .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+    // .then(|builder| {
+    // let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+    // let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+    //
+    // let log2_max_codeword_size: Var<C::N> = builder.constant(
+    // C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
+    // );
+    //
+    // builder.set(
+    // &rounds,
+    // 1,
+    // RoundVariable {
+    // commit: BasefoldCommitmentVariable {
+    // commit: MmcsCommitmentVariable {
+    // value: commit_array,
+    // },
+    // log2_max_codeword_size: log2_max_codeword_size.into(),
+    // },
+    // openings: fixed_openings.clone(),
+    // perm: zkvm_proof_input.fixed_perm.clone(),
+    // },
+    // );
+    // });
+    // }
+    //
     // _debug
     // batch_verify(
     // builder,
@@ -472,37 +472,36 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // zkvm_proof_input.pcs_proof,
     // &mut challenger,
     // );
-
-    let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
-    let initial_global_state = eval_ceno_expr_with_instance(
-        builder,
-        &empty_arr,
-        &empty_arr,
-        &empty_arr,
-        &zkvm_proof_input.pi_evals,
-        &challenges,
-        &vk.initial_global_state_expr,
-    );
-    builder.assign(&prod_w, prod_w * initial_global_state);
-
-    let finalize_global_state = eval_ceno_expr_with_instance(
-        builder,
-        &empty_arr,
-        &empty_arr,
-        &empty_arr,
-        &zkvm_proof_input.pi_evals,
-        &challenges,
-        &vk.finalize_global_state_expr,
-    );
-    builder.assign(&prod_r, prod_r * finalize_global_state);
-
+    //
+    // let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
+    // let initial_global_state = eval_ceno_expr_with_instance(
+    // builder,
+    // &empty_arr,
+    // &empty_arr,
+    // &empty_arr,
+    // &zkvm_proof_input.pi_evals,
+    // &challenges,
+    // &vk.initial_global_state_expr,
+    // );
+    // builder.assign(&prod_w, prod_w * initial_global_state);
+    //
+    // let finalize_global_state = eval_ceno_expr_with_instance(
+    // builder,
+    // &empty_arr,
+    // &empty_arr,
+    // &empty_arr,
+    // &zkvm_proof_input.pi_evals,
+    // &challenges,
+    // &vk.finalize_global_state_expr,
+    // );
+    // builder.assign(&prod_r, prod_r * finalize_global_state);
+    //
     // memory consistency check
-    builder.assert_ext_eq(prod_r, prod_w);
-
+    // builder.assert_ext_eq(prod_r, prod_w);
+    //
     // logup check
-    let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-    builder.assert_ext_eq(logup_sum, zero);
-    */
+    // let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    // builder.assert_ext_eq(logup_sum, zero);
 }
 
 pub fn verify_chip_proof<C: Config>(
