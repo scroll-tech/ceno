@@ -72,8 +72,8 @@ const INTERNAL_LOG_BLOWUP: usize = 2;
 const ROOT_LOG_BLOWUP: usize = 3;
 const SBOX_SIZE: usize = 7;
 const PI_LEN: usize = 92;
-const MAX_TRACE_HEIGHTS: &[u32] = &[
-    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 2097152, 16777216, 2097152, 8388608,
+const LEAF_VM_MAX_TRACE_HEIGHTS: &[u32] = &[
+    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 16777216, 2097152, 16777216, 2097152, 8388608,
     262144, 2097152, 1048576, 4194304, 65536, 262144,
 ];
 
@@ -417,7 +417,7 @@ pub fn compress_to_root_proof(
             let leaf_proof = SingleSegmentVmProver::prove(
                 &mut ceno_aggregation_prover.leaf_prover,
                 witness_stream,
-                NATIVE_MAX_TRACE_HEIGHTS,
+                LEAF_VM_MAX_TRACE_HEIGHTS,
             );
 
             // _debug: export
