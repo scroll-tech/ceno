@@ -153,6 +153,8 @@ impl CenoAggregationProver {
         .expect("leaf prover");
 
         // Configure vm for internal layers
+        // needs to be a multiple of DIGEST_SIZE
+        let num_public_values = InternalVmVerifierPvs::<u8>::width().div_ceil(DIGEST_SIZE) * DIGEST_SIZE;
         let internal_vm_config = NativeConfig {
             system: SystemConfig::new(
                 SBOX_SIZE.min(internal_fri_params.max_constraint_degree()),
@@ -160,7 +162,7 @@ impl CenoAggregationProver {
                     max_access_adapter_n: 8,
                     ..Default::default()
                 },
-                InternalVmVerifierPvs::<u8>::width(),
+                num_public_values,
             )
             .with_max_segment_len((1 << 24) - 100),
             native: Default::default(),
