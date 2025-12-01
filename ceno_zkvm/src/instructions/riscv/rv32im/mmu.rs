@@ -162,10 +162,23 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
         heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         let all_records = vec![
-            (InstancePaddingStrategy::Default, io_final),
-            (InstancePaddingStrategy::Default, reg_final),
-            (InstancePaddingStrategy::Default, static_mem_final),
             (
+                PubIOTable::name(),
+                InstancePaddingStrategy::Default,
+                io_final,
+            ),
+            (
+                RegTable::name(),
+                InstancePaddingStrategy::Default,
+                reg_final,
+            ),
+            (
+                StaticMemTable::name(),
+                InstancePaddingStrategy::Default,
+                static_mem_final,
+            ),
+            (
+                StackTable::name(),
                 InstancePaddingStrategy::Custom({
                     let params = cs.params.clone();
                     Arc::new(move |row: u64, _: u64| StackTable::addr(&params, row as usize) as u64)
@@ -173,6 +186,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
                 stack_final,
             ),
             (
+                HintsTable::name(),
                 InstancePaddingStrategy::Custom({
                     let params = cs.params.clone();
                     Arc::new(move |row: u64, _: u64| HintsTable::addr(&params, row as usize) as u64)
@@ -180,6 +194,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
                 hints_final,
             ),
             (
+                HeapTable::name(),
                 InstancePaddingStrategy::Custom({
                     let params = cs.params.clone();
                     Arc::new(move |row: u64, _: u64| HeapTable::addr(&params, row as usize) as u64)
@@ -188,7 +203,7 @@ impl<E: ExtensionField> MmuConfig<'_, E> {
             ),
         ]
         .into_iter()
-        .filter(|(_, record)| !record.is_empty())
+        .filter(|(_, _, record)| !record.is_empty())
         .collect_vec();
 
         witness.assign_table_circuit::<LocalFinalCircuit<E>>(

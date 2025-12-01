@@ -305,6 +305,7 @@ pub struct ShardRamCircuit<E> {
 
 #[derive(Clone, Debug)]
 pub struct ShardRamInput<E: ExtensionField> {
+    pub name: &'static str,
     pub record: ShardRamRecord,
     pub ec_point: ECPoint<E>,
 }
@@ -735,7 +736,11 @@ mod tests {
             .chain(global_reads) // local writes
             .map(|record| {
                 let ec_point = record.to_ec_point::<E, Perm>(&perm);
-                ShardRamInput { record, ec_point }
+                ShardRamInput {
+                    name: "dummy_test",
+                    record,
+                    ec_point,
+                }
             })
             .collect::<Vec<_>>();
 

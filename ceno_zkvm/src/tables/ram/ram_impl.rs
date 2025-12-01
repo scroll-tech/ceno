@@ -481,7 +481,7 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
         shard_ctx: &ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        final_mem: &[(InstancePaddingStrategy, &[MemFinalRecord])],
+        final_mem: &[(&'static str, InstancePaddingStrategy, &[MemFinalRecord])],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
@@ -494,7 +494,7 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
         // collect each raw mem belong to this shard, BEFORE padding length
         let current_shard_mems_len: Vec<usize> = final_mem
             .par_iter()
-            .map(|(_, mem)| mem.par_iter().filter(is_current_shard_mem_record).count())
+            .map(|(_, _, mem)| mem.par_iter().filter(is_current_shard_mem_record).count())
             .collect();
 
         // deal with non-pow2 padding for first shard
@@ -502,7 +502,7 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
         let padding_info = if shard_ctx.is_first_shard() {
             final_mem
                 .iter()
-                .map(|(_, mem)| {
+                .map(|(_, _, mem)| {
                     assert!(!mem.is_empty());
                     (
                         next_pow2_instance_padding(mem.len()) - mem.len(),
@@ -565,7 +565,7 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
             .zip_eq(padding_info.par_iter())
             .for_each(
                 |(
-                    ((witness, structural_witness), (padding_strategy, final_mem)),
+                    ((witness, structural_witness), (_, padding_strategy, final_mem)),
                     (pad_size, pad_start_index, ram_type),
                 )| {
                     let mem_record_count = witness
