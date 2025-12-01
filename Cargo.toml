@@ -87,6 +87,22 @@ uint = "0.8"
 ceno_gpu = { path = "utils/cuda_hal", package = "cuda_hal" }
 cudarc = { version = "0.17.3", features = ["driver", "cuda-version-from-build-system"] }
 
+# ceno-recursion dependencies
+openvm = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+openvm-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+openvm-continuations = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+openvm-instructions = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+openvm-native-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+openvm-native-compiler = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+openvm-native-compiler-derive = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+openvm-native-recursion = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+openvm-rv32im-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+openvm-sdk = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
+
+openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.2.1", default-features = false }
+openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.2.1", default-features = false }
+openvm-cuda-backend = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.2.1", default-features = false }
+
 [profile.dev]
 lto = "thin"
 # We are running our tests with optimizations turned on to make them faster.
@@ -114,3 +130,15 @@ lto = "thin"
 #transcript = { path = "../gkr-backend/crates/transcript", package = "transcript" }
 #whir = { path = "../gkr-backend/crates/whir", package = "whir" }
 #witness = { path = "../gkr-backend/crates/witness", package = "witness" }
+
+# [patch."https://github.com/scroll-tech/openvm.git"]
+# openvm = { path = "../openvm-scroll-tech/crates/toolchain/openvm", default-features = false }
+# openvm-circuit = { path = "../openvm-scroll-tech/crates/vm", default-features = false }
+# openvm-continuations = { path = "../openvm-scroll-tech/crates/continuations", default-features = false }
+# openvm-instructions = { path = "../openvm-scroll-tech/crates/toolchain/instructions", default-features = false }
+# openvm-native-circuit = { path = "../openvm-scroll-tech/extensions/native/circuit", default-features = false }
+# openvm-native-compiler = { path = "../openvm-scroll-tech/extensions/native/compiler", default-features = false }
+# openvm-native-compiler-derive = { path = "../openvm-scroll-tech/extensions/native/compiler/derive", default-features = false }
+# openvm-native-recursion = { path = "../openvm-scroll-tech/extensions/native/recursion", default-features = false }
+# openvm-rv32im-circuit = { path = "../openvm-scroll-tech/extensions/rv32im/circuit", default-features = false }
+# openvm-sdk = { path = "../openvm-scroll-tech/crates/sdk", default-features = false }

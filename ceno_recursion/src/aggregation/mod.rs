@@ -10,8 +10,13 @@ use openvm_circuit::{
         MemoryConfig, SystemConfig, VirtualMachine, VmExecutor, VmInstance,
         instructions::program::Program,
     },
-    system::program::trace::VmCommittedExe,
+    system::program::trace::VmCommittedExe, utils::air_test_impl,
 };
+
+#[cfg(feature = "gpu")]
+use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
+#[cfg(not(feature = "gpu"))]
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
 use openvm_continuations::{
     C,
     verifier::{
@@ -37,7 +42,7 @@ use openvm_sdk::{
 };
 use openvm_stark_backend::{engine::StarkEngine, prover::hal::DeviceDataTransporter};
 use openvm_stark_sdk::{
-    config::{FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Engine},
+    config::{FriParameters, fri_params::standard_fri_params_with_100_bits_conjectured_security},
     engine::StarkFriEngine,
     openvm_stark_backend::{config::StarkGenericConfig, keygen::types::MultiStarkVerifyingKey},
     p3_bn254_fr::Bn254Fr,
@@ -57,7 +62,7 @@ use openvm_circuit::{
     },
     system::{memory::CHUNK, program::trace::compute_exe_commit},
 };
-use openvm_native_circuit::{NATIVE_MAX_TRACE_HEIGHTS, NativeCpuBuilder};
+use openvm_native_circuit::{NATIVE_MAX_TRACE_HEIGHTS};
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
 use openvm_native_compiler::{
@@ -89,6 +94,7 @@ impl CenoAggregationProver {
         vm_builder: NativeBuilder,
         vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     ) -> Self {
+        let vb = NativeBuilder::default();
         let [leaf_fri_params, internal_fri_params, _root_fri_params] =
             [LEAF_LOG_BLOWUP, INTERNAL_LOG_BLOWUP, ROOT_LOG_BLOWUP]
                 .map(FriParameters::standard_with_100_bits_conjectured_security);
@@ -114,7 +120,7 @@ impl CenoAggregationProver {
             let leaf_engine = BabyBearPoseidon2Engine::new(leaf_fri_params);
             let (_, vm_pk) = VirtualMachine::new_with_keygen(
                 leaf_engine,
-                NativeCpuBuilder,
+                vb.clone(),
                 leaf_vm_config.clone(),
             )
             .expect("leaf keygen");
@@ -147,6 +153,8 @@ impl CenoAggregationProver {
         .expect("leaf prover");
 
         // Configure vm for internal layers
+        // needs to be a multiple of DIGEST_SIZE
+        let num_public_values = InternalVmVerifierPvs::<u8>::width().div_ceil(DIGEST_SIZE) * DIGEST_SIZE;
         let internal_vm_config = NativeConfig {
             system: SystemConfig::new(
                 SBOX_SIZE.min(internal_fri_params.max_constraint_degree()),
@@ -154,7 +162,7 @@ impl CenoAggregationProver {
                     max_access_adapter_n: 8,
                     ..Default::default()
                 },
-                InternalVmVerifierPvs::<u8>::width(),
+                num_public_values,
             )
             .with_max_segment_len((1 << 24) - 100),
             native: Default::default(),
@@ -164,7 +172,7 @@ impl CenoAggregationProver {
         let internal_engine = BabyBearPoseidon2Engine::new(internal_fri_params);
         let (internal_vm, vm_pk) = VirtualMachine::new_with_keygen(
             internal_engine,
-            NativeCpuBuilder,
+            vb,
             internal_vm_config.clone(),
         )
         .expect("internal keygen");
@@ -646,14 +654,21 @@ pub fn verify_proofs(
 
         let poseidon2_max_constraint_degree: usize = 3;
         let mut config = NativeConfig::aggregation(0, poseidon2_max_constraint_degree);
-        config.system.memory_config.max_access_adapter_n = 8;
+        config.system.memory_config.max_access_adapter_n = 16;
 
-        let executor = VmExecutor::new(config).unwrap();
         let exe = VmExe::new(program);
-        let interpreter = executor.instance(&exe).unwrap();
-        interpreter
-            .execute(witness_stream, None)
-            .expect("verification should pass");
+
+        let fri_params = standard_fri_params_with_100_bits_conjectured_security(1);
+        let vb = NativeBuilder::default();
+        air_test_impl::<BabyBearPoseidon2Engine, _>(
+            fri_params,
+            vb,
+            config,
+            exe,
+            witness_stream,
+            1,
+            true
+        ).unwrap();
     }
 }
 

@@ -690,6 +690,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
+dependencies = [
+ "bincode_derive",
+ "serde",
+ "unty",
+]
+
+[[package]]
+name = "bincode_derive"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf95709a440f45e986983918d0e8a1f30a9b1df04918fc828670606804ac3c09"
+dependencies = [
+ "virtue",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -934,6 +954,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytesize"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bd91ee7b2422bcb158d90ef4d14f75ef67f340943fc4149891dcce8f8b972a3"
+
+[[package]]
 name = "c-kzg"
 version = "2.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -962,7 +988,7 @@ name = "cargo-ceno"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bincode",
+ "bincode 1.3.3",
  "cargo_metadata 0.19.2",
  "ceno_emul",
  "ceno_host",
@@ -1121,7 +1147,7 @@ dependencies = [
 name = "ceno_recursion"
 version = "0.1.0"
 dependencies = [
- "bincode",
+ "bincode 1.3.3",
  "ceno-examples",
  "ceno_emul",
  "ceno_host",
@@ -1135,6 +1161,7 @@ dependencies = [
  "openvm",
  "openvm-circuit",
  "openvm-continuations",
+ "openvm-cuda-backend",
  "openvm-instructions",
  "openvm-native-circuit",
  "openvm-native-compiler",
@@ -1191,7 +1218,7 @@ name = "ceno_zkvm"
 version = "0.1.0"
 dependencies = [
  "base64",
- "bincode",
+ "bincode 1.3.3",
  "ceno-examples",
  "ceno_emul",
  "ceno_host",
@@ -1569,6 +1596,22 @@ checksum = "7d02f3b0da4c6504f86e9cd789d8dbafab48c2321be74e9987593de5a894d93d"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "ctor"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67773048316103656a637612c4a62477603b777d91d9c62ff2290f9cde178fdb"
+dependencies = [
+ "ctor-proc-macro",
+ "dtor",
+]
+
+[[package]]
+name = "ctor-proc-macro"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2931af7e13dc045d8e9d26afccc6fa115d64e115c9c84b1166288b46f6782c2"
 
 [[package]]
 name = "cuda_hal"
@@ -1962,6 +2005,21 @@ name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
+
+[[package]]
+name = "dtor"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "404d02eeb088a82cfd873006cb713fe411306c7d182c344905e101fb1167d301"
+dependencies = [
+ "dtor-proc-macro",
+]
+
+[[package]]
+name = "dtor-proc-macro"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f678cf4a922c215c63e0de95eb1ff08a958a81d47e485cf9da1e27bf6305cfa5"
 
 [[package]]
 name = "dyn-clone"
@@ -2371,7 +2429,7 @@ dependencies = [
 name = "gkr_iop"
 version = "0.1.0"
 dependencies = [
- "bincode",
+ "bincode 1.3.3",
  "criterion",
  "cuda_hal",
  "cudarc",
@@ -3257,7 +3315,7 @@ name = "mpcs"
 version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
- "bincode",
+ "bincode 1.3.3",
  "clap",
  "ff_ext",
  "itertools 0.13.0",
@@ -3800,6 +3858,9 @@ dependencies = [
  "openvm-circuit-derive",
  "openvm-circuit-primitives",
  "openvm-circuit-primitives-derive",
+ "openvm-cuda-backend",
+ "openvm-cuda-builder",
+ "openvm-cuda-common",
  "openvm-instructions",
  "openvm-poseidon2-air",
  "openvm-stark-backend",
@@ -3836,7 +3897,9 @@ dependencies = [
  "num-bigint 0.4.6",
  "num-traits",
  "openvm-circuit-primitives-derive",
+ "openvm-cuda-backend",
  "openvm-cuda-builder",
+ "openvm-cuda-common",
  "openvm-stark-backend",
  "rand 0.8.5",
  "tracing",
@@ -3868,12 +3931,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "openvm-cuda-backend"
+version = "1.2.1"
+source = "git+https://github.com/openvm-org/stark-backend.git?tag=v1.2.1#dde6cdaf105cc57d1609fd49568c7bce0a066cc2"
+dependencies = [
+ "bincode 2.0.1",
+ "bincode_derive",
+ "derivative",
+ "derive-new 0.7.0",
+ "itertools 0.14.0",
+ "lazy_static",
+ "metrics",
+ "openvm-cuda-builder",
+ "openvm-cuda-common",
+ "openvm-stark-backend",
+ "openvm-stark-sdk",
+ "p3-baby-bear",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-fri",
+ "p3-matrix",
+ "p3-merkle-tree",
+ "p3-symmetric",
+ "p3-util",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "openvm-cuda-builder"
 version = "1.2.1"
 source = "git+https://github.com/openvm-org/stark-backend.git?tag=v1.2.1#dde6cdaf105cc57d1609fd49568c7bce0a066cc2"
 dependencies = [
  "cc",
  "glob",
+]
+
+[[package]]
+name = "openvm-cuda-common"
+version = "1.2.1"
+source = "git+https://github.com/openvm-org/stark-backend.git?tag=v1.2.1#dde6cdaf105cc57d1609fd49568c7bce0a066cc2"
+dependencies = [
+ "bytesize",
+ "ctor",
+ "lazy_static",
+ "metrics",
+ "openvm-cuda-builder",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
@@ -4071,6 +4180,9 @@ dependencies = [
  "openvm-circuit-derive",
  "openvm-circuit-primitives",
  "openvm-circuit-primitives-derive",
+ "openvm-cuda-backend",
+ "openvm-cuda-builder",
+ "openvm-cuda-common",
  "openvm-instructions",
  "openvm-native-compiler",
  "openvm-poseidon2-air",
@@ -6843,6 +6955,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unty"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
+
+[[package]]
 name = "url"
 version = "2.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6936,6 +7054,12 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "virtue"
+version = "0.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "wait-timeout"
@@ -7044,7 +7168,7 @@ name = "whir"
 version = "0.1.0"
 source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.15#9be620b18900138d0b89569759fc2b3b9451b49e"
 dependencies = [
- "bincode",
+ "bincode 1.3.3",
  "clap",
  "derive_more 1.0.0",
  "ff_ext",
