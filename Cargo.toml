@@ -131,14 +131,14 @@ lto = "thin"
 #whir = { path = "../gkr-backend/crates/whir", package = "whir" }
 #witness = { path = "../gkr-backend/crates/witness", package = "witness" }
 
-[patch."https://github.com/scroll-tech/openvm.git"]
-openvm = { path = "../openvm-scroll-tech/crates/toolchain/openvm", default-features = false }
-openvm-circuit = { path = "../openvm-scroll-tech/crates/vm", default-features = false }
-openvm-continuations = { path = "../openvm-scroll-tech/crates/continuations", default-features = false }
-openvm-instructions = { path = "../openvm-scroll-tech/crates/toolchain/instructions", default-features = false }
-openvm-native-circuit = { path = "../openvm-scroll-tech/extensions/native/circuit", default-features = false }
-openvm-native-compiler = { path = "../openvm-scroll-tech/extensions/native/compiler", default-features = false }
-openvm-native-compiler-derive = { path = "../openvm-scroll-tech/extensions/native/compiler/derive", default-features = false }
-openvm-native-recursion = { path = "../openvm-scroll-tech/extensions/native/recursion", default-features = false }
-openvm-rv32im-circuit = { path = "../openvm-scroll-tech/extensions/rv32im/circuit", default-features = false }
-openvm-sdk = { path = "../openvm-scroll-tech/crates/sdk", default-features = false }
+# [patch."https://github.com/scroll-tech/openvm.git"]
+# openvm = { path = "../openvm-scroll-tech/crates/toolchain/openvm", default-features = false }
+# openvm-circuit = { path = "../openvm-scroll-tech/crates/vm", default-features = false }
+# openvm-continuations = { path = "../openvm-scroll-tech/crates/continuations", default-features = false }
+# openvm-instructions = { path = "../openvm-scroll-tech/crates/toolchain/instructions", default-features = false }
+# openvm-native-circuit = { path = "../openvm-scroll-tech/extensions/native/circuit", default-features = false }
+# openvm-native-compiler = { path = "../openvm-scroll-tech/extensions/native/compiler", default-features = false }
+# openvm-native-compiler-derive = { path = "../openvm-scroll-tech/extensions/native/compiler/derive", default-features = false }
+# openvm-native-recursion = { path = "../openvm-scroll-tech/extensions/native/recursion", default-features = false }
+# openvm-rv32im-circuit = { path = "../openvm-scroll-tech/extensions/rv32im/circuit", default-features = false }
+# openvm-sdk = { path = "../openvm-scroll-tech/crates/sdk", default-features = false }
