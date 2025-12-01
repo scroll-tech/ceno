@@ -22,7 +22,7 @@ use rayon::{
 use sp1_curves::{
     params::NumWords,
     uint256::U256Field,
-    utils::biguint_from_words,
+    utils::{biguint_from_be_words, biguint_from_le_words},
     weierstrass::{
         WeierstrassParameters,
         secp256k1::{Secp256k1, Secp256k1BaseField},
@@ -334,13 +334,13 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
                     .map(|op| (op.value.before, op.previous_cycle))
                     .unzip();
 
-                let x = biguint_from_words(
+                let x = biguint_from_le_words(
                     &instance[0..<U256Field as NumWords>::WordsFieldElement::USIZE],
                 );
-                let y = biguint_from_words(
+                let y = biguint_from_le_words(
                     &instance[<U256Field as NumWords>::WordsFieldElement::USIZE..],
                 );
-                let modulus = biguint_from_words(
+                let modulus = biguint_from_le_words(
                     &instance[2 * <U256Field as NumWords>::WordsFieldElement::USIZE..],
                 );
                 Uint256MulInstance { x, y, modulus }
@@ -392,14 +392,6 @@ pub struct EcallUint256InvConfig<E: ExtensionField, Spec: Uint256InvSpec> {
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
     word_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
-}
-
-pub fn biguint_from_be_words(be_words: &[u32]) -> BigUint {
-    let mut bytes = Vec::with_capacity(be_words.len() * 4);
-    for word in be_words {
-        bytes.extend_from_slice(&word.to_le_bytes());
-    }
-    BigUint::from_bytes_be(&bytes)
 }
 
 impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstruction<E, Spec> {
