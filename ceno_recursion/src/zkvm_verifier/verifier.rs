@@ -103,8 +103,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let mut challenger = DuplexChallengerVariable::new(builder);
     transcript_observe_label(builder, &mut challenger, b"riscv");
 
-    /* _debug: re-enable when native sumcheck is merged
-
     let prod_r: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let prod_w: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
@@ -114,6 +112,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         challenger_multi_observe(builder, &mut challenger, &v);
     });
 
+    /* _debug
     iter_zip!(builder, zkvm_proof_input.raw_pi, zkvm_proof_input.pi_evals).for_each(
         |ptr_vec, builder| {
             let raw = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
@@ -127,6 +126,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
+    
     builder
         .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
         .then(|builder| {
@@ -152,6 +152,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             }
         });
 
+    
     builder
         .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
         .then(|builder| {

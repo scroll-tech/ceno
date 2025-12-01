@@ -46,7 +46,6 @@ openvm-native-recursion = { git = "https://github.com/scroll-tech/openvm.git", b
 openvm-rv32im-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
 openvm-sdk = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/v1.4.1-scroll-ext", default-features = false }
 
-
 openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.2.1", default-features = false }
 openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.2.1", default-features = false }
 openvm-cuda-backend = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.2.1", default-features = false }

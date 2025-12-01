@@ -77,8 +77,8 @@ const INTERNAL_LOG_BLOWUP: usize = 2;
 const ROOT_LOG_BLOWUP: usize = 3;
 const SBOX_SIZE: usize = 7;
 const PI_LEN: usize = 92;
-const MAX_TRACE_HEIGHTS: &[u32] = &[
-    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 2097152, 16777216, 2097152, 8388608,
+const LEAF_VM_MAX_TRACE_HEIGHTS: &[u32] = &[
+    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216, 2097152, 8388608,
     262144, 2097152, 1048576, 4194304, 65536, 262144,
 ];
 
@@ -104,7 +104,7 @@ impl CenoAggregationProver {
             system: SystemConfig::new(
                 SBOX_SIZE.min(leaf_fri_params.max_constraint_degree()),
                 MemoryConfig {
-                    max_access_adapter_n: 8,
+                    max_access_adapter_n: 16,
                     ..Default::default()
                 },
                 VmVerifierPvs::<u8>::width(),
@@ -245,7 +245,6 @@ impl CenoLeafVmVerifierConfig {
                 builder.assert_nonzero(&pv.len());
 
                 // PC and cycle checks
-                /* _debug
                 let prev_pc: Ext<_, _> = builder.uninit();
                 builder.range(0, pv.len()).for_each(|idx_vec, builder| {
                     let shard_pi = builder.get(&pv, idx_vec[0]);
@@ -262,7 +261,6 @@ impl CenoLeafVmVerifierConfig {
                     });
                     builder.assign(&prev_pc, end_pc);
                 });
-                */
 
                 // EC sum verification
                 let expected_last_shard_id = Usize::uninit(builder);
@@ -301,11 +299,6 @@ impl CenoLeafVmVerifierConfig {
                     }, |builder| {
                         builder.assign(&shard_ec.is_infinity, Usize::from(0));
                     });
-
-                    // _debug
-                    // builder.print_debug(0);
-                    // _print_ext_arr(builder, &ec_sum.x.vs);
-                    // _print_ext_arr(builder, &ec_sum.y.vs);
 
                     add_septic_points_in_place(builder, &ec_sum, &shard_ec);
                 });
@@ -380,17 +373,6 @@ impl Hintable<InnerConfig> for CenoLeafVmVerifierInput {
 
 pub(crate) fn chunk_ceno_leaf_proof_inputs(zkvm_proofs: Vec<ZKVMProofInput>) -> Vec<CenoLeafVmVerifierInput> {
     let user_public_values = zkvm_proofs.iter().map(|p| p.pi_evals.clone()).collect::<Vec<Vec<E>>>();
-
-    // _debug: structural reference
-    // let seq_septic_pts = user_public_values.iter().map(|vs| {
-    //     let x = &vs[SHARD_RW_SUM_IDX..SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE];
-    //     let y = &vs[SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE..SHARD_RW_SUM_IDX + 2 * SEPTIC_EXTENSION_DEGREE];
-    //     SepticPoint::from_affine(SepticExtension::from(x), SepticExtension::from(y))
-    // }).collect::<Vec<SepticPoint<E>>>();
-
-    // _debug
-    // println!("=> seq_septic_pts: {:?}", seq_septic_pts);
-
     let mut ret: Vec<CenoLeafVmVerifierInput> = zkvm_proofs.into_iter().map(|p| {
         CenoLeafVmVerifierInput {
             proof: p,
@@ -441,7 +423,7 @@ pub fn compress_to_root_proof(
             let leaf_proof = SingleSegmentVmProver::prove(
                 &mut ceno_aggregation_prover.leaf_prover,
                 witness_stream,
-                NATIVE_MAX_TRACE_HEIGHTS,
+                LEAF_VM_MAX_TRACE_HEIGHTS,
             );
 
             // _debug: export
