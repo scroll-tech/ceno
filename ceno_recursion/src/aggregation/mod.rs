@@ -81,11 +81,14 @@ const LEAF_VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216, 2097152, 8388608,
     262144, 2097152, 1048576, 4194304, 65536, 262144,
 ];
+const INTERNAL_VM_MAX_TRACE_HEIGHTS: &[u32] = &[
+    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216, 2097152, 8388608,
+    262144, 2097152, 1048576, 4194304, 65536, 262144,
+];
 
 pub struct CenoAggregationProver {
     leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-    // _debug: need sumcheck
-    // internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
+    internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     vk: CenoRecursionVerifierKeys,
 }
 
@@ -159,12 +162,14 @@ impl CenoAggregationProver {
             system: SystemConfig::new(
                 SBOX_SIZE.min(internal_fri_params.max_constraint_degree()),
                 MemoryConfig {
-                    max_access_adapter_n: 8,
+                    max_access_adapter_n: 16,
                     ..Default::default()
                 },
                 num_public_values,
             )
-            .with_max_segment_len((1 << 24) - 100),
+            .with_max_segment_len((1 << 24) - 100)
+            .with_profiling()
+            .without_continuations(),
             native: Default::default(),
         };
 
@@ -196,14 +201,12 @@ impl CenoAggregationProver {
             internal_program.into(),
             internal_vm.engine.config().pcs(),
         ));
-        /* _debug: need sumcheck
         let internal_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
             vm_builder.clone(),
             &internal_vm_pk,
             internal_committed_exe.exe.clone(),
         )
         .expect("internal prover");
-        */
 
         let vk = CenoRecursionVerifierKeys {
             leaf_vm_vk,
@@ -215,7 +218,7 @@ impl CenoAggregationProver {
 
         Self {
             leaf_prover,
-            // internal_prover,
+            internal_prover,
             vk,
         }
     }
@@ -443,7 +446,6 @@ pub fn compress_to_root_proof(
         })
         .collect::<Vec<_>>();
 
-    /* _debug
     // Aggregate tree to root proof
     let mut internal_node_idx = -1;
     let mut internal_node_height = 0;
@@ -498,6 +500,8 @@ pub fn compress_to_root_proof(
     );
     println!("Aggregation - Final height: {:?}", internal_node_height);
 
+
+    /* _debug
     // Export e2e stark proof (used in verify_e2e_stark_proof)
     let root_stark_proof = VmStarkProof {
         inner: proofs.pop().unwrap(),
