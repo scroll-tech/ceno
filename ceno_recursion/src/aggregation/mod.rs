@@ -652,7 +652,7 @@ pub fn verify_proofs(
 
         let poseidon2_max_constraint_degree: usize = 3;
         let mut config = NativeConfig::aggregation(0, poseidon2_max_constraint_degree);
-        config.system.memory_config.max_access_adapter_n = 8;
+        config.system.memory_config.max_access_adapter_n = 16;
 
         let exe = VmExe::new(program);
 
