@@ -45,7 +45,7 @@ openvm-rv32im-circuit.workspace = true
 openvm-sdk.workspace = true
 openvm-stark-sdk.workspace = true
 openvm-stark-backend.workspace = true
-openvm-cuda-backend.workspace = true
+openvm-cuda-backend = { workspace = true, optional = true }
 
 p3-monty-31 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "539bbc84085efb609f4f62cb03cf49588388abdb" }
 
@@ -56,7 +56,7 @@ path = "src/bin/e2e_aggregate.rs"
 [features]
 # bench-metrics = ["openvm-circuit/bench-metrics"]
 default = ["parallel", "nightly-features"]
-gpu = ["openvm-circuit/cuda", "openvm-native-circuit/cuda"]
+gpu = ["openvm-circuit/cuda", "openvm-native-circuit/cuda", "dep:openvm-cuda-backend"]
 nightly-features = [
   "ceno_zkvm/nightly-features",
   "openvm-stark-sdk/nightly-features",
