@@ -13,9 +13,9 @@ use openvm_circuit::{
     system::program::trace::VmCommittedExe, utils::air_test_impl,
 };
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
-#[cfg(not(feature = "cuda"))]
+#[cfg(not(feature = "gpu"))]
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
 use openvm_continuations::{
     C,
