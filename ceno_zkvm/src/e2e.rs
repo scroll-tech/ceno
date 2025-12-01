@@ -170,7 +170,7 @@ impl Default for MultiProver {
 }
 
 pub struct ShardContext<'a> {
-    shard_id: usize,
+    pub shard_id: usize,
     num_shards: usize,
     max_cycle: Cycle,
     pub addr_future_accesses: Arc<NextCycleAccess>,
