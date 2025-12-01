@@ -13,8 +13,8 @@ pub mod uint256;
 pub use ceno_syscall::{
     BLS12381_ADD, BLS12381_DECOMPRESS, BLS12381_DOUBLE, BN254_ADD, BN254_DOUBLE, BN254_FP_ADD,
     BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL, KECCAK_PERMUTE, PHANTOM_LOG_PC_CYCLE,
-    SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SECP256R1_ADD, SECP256R1_DECOMPRESS,
-    SECP256R1_DOUBLE, SHA_EXTEND, UINT256_MUL,
+    SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SECP256K1_SCALAR_INVERT, SECP256R1_ADD,
+    SECP256R1_DECOMPRESS, SECP256R1_DOUBLE, SHA_EXTEND, UINT256_MUL,
 };
 
 pub trait SyscallSpec {
@@ -36,6 +36,7 @@ pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects
         SECP256K1_ADD => Ok(secp256k1::secp256k1_add(vm)),
         SECP256K1_DOUBLE => Ok(secp256k1::secp256k1_double(vm)),
         SECP256K1_DECOMPRESS => Ok(secp256k1::secp256k1_decompress(vm)),
+        SECP256K1_SCALAR_INVERT => Ok(secp256k1::secp256k1_invert(vm)),
         SHA_EXTEND => Ok(sha256::extend(vm)),
         BN254_ADD => Ok(bn254::bn254_add(vm)),
         BN254_DOUBLE => Ok(bn254::bn254_double(vm)),

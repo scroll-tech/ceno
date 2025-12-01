@@ -9,7 +9,7 @@ use num::{BigUint, One, Zero};
 use sp1_curves::{
     params::NumWords,
     uint256::U256Field,
-    utils::{biguint_from_words, biguint_to_words},
+    utils::{biguint_from_le_words, biguint_to_words},
 };
 use typenum::marker_traits::Unsigned;
 
@@ -49,9 +49,9 @@ pub fn uint256_mul(vm: &VMState) -> SyscallEffects {
     let y_and_modulus_view = MemoryView::<{ UINT256_WORDS_FIELD_ELEMENT * 2 }>::new(vm, y_ptr);
 
     // Read x, y, and modulus from words via wrapper type
-    let x = biguint_from_words(&x_view.words());
-    let y = biguint_from_words(&y_and_modulus_view.words()[..UINT256_WORDS_FIELD_ELEMENT]);
-    let modulus = biguint_from_words(&y_and_modulus_view.words()[UINT256_WORDS_FIELD_ELEMENT..]);
+    let x = biguint_from_le_words(&x_view.words());
+    let y = biguint_from_le_words(&y_and_modulus_view.words()[..UINT256_WORDS_FIELD_ELEMENT]);
+    let modulus = biguint_from_le_words(&y_and_modulus_view.words()[UINT256_WORDS_FIELD_ELEMENT..]);
 
     // Perform the multiplication and take the result modulo the modulus.
     let result: BigUint = if modulus.is_zero() {
