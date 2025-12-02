@@ -2,7 +2,8 @@
 use ceno_emul::{Platform, Program};
 use ceno_recursion::{
     aggregation::{
-        CenoLeafVmVerifierConfig, INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP, ROOT_LOG_BLOWUP, SBOX_SIZE,
+        CenoLeafVmVerifierConfig, CenoRecursionVerifierKeys, INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP,
+        ROOT_LOG_BLOWUP, SBOX_SIZE,
     },
     zkvm_verifier::binding::E,
 };
@@ -309,6 +310,22 @@ where
         ));
 
         (leaf_prover, internal_prover)
+    }
+
+    pub fn create_agg_verifier(&self) -> CenoRecursionVerifierKeys {
+        let Some((ceno_leaf_agg_pk, _leaf_committed_exe, internal_vm_pk, internal_committed_exe)) =
+            self.agg_pk.as_ref()
+        else {
+            panic!("empty agg_pk")
+        };
+
+        CenoRecursionVerifierKeys {
+            ceno_leaf_vm_vk: ceno_leaf_agg_pk.vm_pk.get_vk(),
+            ceno_leaf_fri_params: ceno_leaf_agg_pk.fri_params,
+            internal_vm_vk: internal_vm_pk.vm_pk.get_vk(),
+            ceno_internal_fri_params: internal_vm_pk.fri_params,
+            internal_commit: internal_committed_exe.get_program_commit().into(),
+        }
     }
 }
 
