@@ -298,10 +298,12 @@ impl<
             transcript.append_field_element(&E::BaseField::from_canonical_u64(circuit_idx as u64));
 
             // TODO: add an enum for circuit type either in constraint_system or vk
-            let witness_mle = witness_mles
-                .drain(..cs.num_witin())
-                .map(|mle| mle.into())
-                .collect_vec();
+            let witness_mle = self.device.extract_witness_mles(
+                &mut witness_mles,
+                cs.num_witin(),
+                &witness_data,
+                circuit_idx,
+            );
 
             let structural_witness_span = entered_span!("structural_witness", profiling_2 = true);
             let structural_mles = structural_rmm.to_mles();

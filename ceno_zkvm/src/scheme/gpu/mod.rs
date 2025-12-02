@@ -172,6 +172,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         // let mles = mles.into_iter().map(|mle| MultilinearExtensionGpu::from_ceno(mle)).collect_vec();
         (mles, pcs_data, commit)
     }
+
+    fn extract_witness_mles<'a>(
+        &self,
+        witness_mles: &mut Vec<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
+        num_inputs: usize,
+        _pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
+        _trace_idx: usize,
+    ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        witness_mles
+            .drain(..num_inputs)
+            .map(|mle| Arc::new(mle))
+            .collect_vec()
+    }
 }
 
 fn build_tower_witness_gpu<'buf, E: ExtensionField>(

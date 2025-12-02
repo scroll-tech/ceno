@@ -78,6 +78,15 @@ pub trait TraceCommitter<PB: ProverBackend> {
         PB::PcsData,
         <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Commitment,
     );
+
+    /// Extract a specified number of polynomials from witness_mles and return them wrapped in Arc
+    fn extract_witness_mles<'a>(
+        &self,
+        witness_mles: &mut Vec<PB::MultilinearPoly<'a>>,
+        num_inputs: usize,
+        pcs_data: &PB::PcsData,
+        trace_idx: usize,
+    ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
 
 /// Accumulate N (not necessarily power of 2) EC points into one EC point using affine coordinates
