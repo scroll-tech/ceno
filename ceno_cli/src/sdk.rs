@@ -185,12 +185,12 @@ where
         VmLocalProver<BabyBearPoseidon2Config, NativeConfig, BabyBearPoseidon2Engine>,
         VmLocalProver<BabyBearPoseidon2Config, NativeConfig, BabyBearPoseidon2Engine>,
     ) {
-        let Some(app_vk) = self.zkvm_vk.clone() else {
-            panic!("please call `create_zkvm_prover` to keygen vk first");
-        };
-
         let (ceno_leaf_agg_pk, leaf_committed_exe, internal_vm_pk, internal_committed_exe) =
             self.agg_pk.clone().unwrap_or_else(|| {
+                let Some(app_vk) = self.zkvm_vk.clone() else {
+                    panic!("set app vk first");
+                };
+
                 tracing::debug!(
                     "empty agg proving/verifying key detected — running key generation..."
                 );
