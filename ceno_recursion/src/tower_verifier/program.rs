@@ -389,14 +389,13 @@ pub fn verify_tower_proof<C: Config>(
         let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
         builder.set(&challenges, 0, alpha);
 
-        // _debug
-        // builder.sumcheck_layer_eval(
-        // &input_ctx,
-        // &challenges,
-        // &proof.prod_specs_eval.data,
-        // &proof.logup_specs_eval.data,
-        // &next_layer_evals,
-        // );
+        builder.sumcheck_layer_eval(
+            &input_ctx,
+            &challenges,
+            &proof.prod_specs_eval.data,
+            &proof.logup_specs_eval.data,
+            &next_layer_evals,
+        );
         let expected_evaluation = builder.get(&next_layer_evals, 0);
 
         builder.assign(&expected_evaluation, expected_evaluation * eq_e);
@@ -429,14 +428,13 @@ pub fn verify_tower_proof<C: Config>(
         builder.set(&challenges, 1, c1);
         builder.set(&challenges, 2, c2);
 
-        // _debug
-        // builder.sumcheck_layer_eval(
-        // &input_ctx,
-        // &challenges,
-        // &proof.prod_specs_eval.data,
-        // &proof.logup_specs_eval.data,
-        // &next_layer_evals,
-        // );
+        builder.sumcheck_layer_eval(
+            &input_ctx,
+            &challenges,
+            &proof.prod_specs_eval.data,
+            &proof.logup_specs_eval.data,
+            &next_layer_evals,
+        );
 
         let next_round = builder.eval_expr(round_var + RVar::from(1));
         builder
@@ -532,41 +530,37 @@ pub fn verify_tower_proof<C: Config>(
 
 // #[cfg(test)]
 // mod tests {
-// use crate::arithmetics::UniPolyExtrapolator;
-// use crate::tower_verifier::binding::IOPProverMessage;
-// use crate::tower_verifier::binding::TowerVerifierInput;
-// use crate::tower_verifier::program::iop_verifier_state_verify;
-// use crate::tower_verifier::program::verify_tower_proof;
-// use ceno_mle::mle::ArcMultilinearExtension;
-// use ceno_mle::mle::{IntoMLE, MultilinearExtension};
-// use ceno_mle::virtual_polys::VirtualPolynomials;
+// use crate::{
+// arithmetics::UniPolyExtrapolator,
+// tower_verifier::{
+// binding::{IOPProverMessage, TowerVerifierInput},
+// program::{iop_verifier_state_verify, verify_tower_proof},
+// },
+// };
+// use ceno_mle::{
+// mle::{ArcMultilinearExtension, IntoMLE, MultilinearExtension},
+// virtual_polys::VirtualPolynomials,
+// };
 // use ceno_sumcheck::structs::IOPProverState;
 // use ceno_transcript::BasicTranscript;
-// use ceno_zkvm::scheme::constants::NUM_FANIN;
-// use ceno_zkvm::scheme::hal::TowerProver;
-// use ceno_zkvm::scheme::hal::TowerProverSpec;
-// use ff_ext::BabyBearExt4;
-// use ff_ext::FieldFrom;
-// use ff_ext::FromUniformBytes;
+// use ceno_zkvm::scheme::{
+// constants::NUM_FANIN,
+// hal::{TowerProver, TowerProverSpec},
+// };
+// use ff_ext::{BabyBearExt4, FieldFrom, FromUniformBytes};
 // use itertools::Itertools;
-// use openvm_circuit::arch::SystemConfig;
-// use openvm_circuit::arch::VmExecutor;
-// use openvm_native_circuit::Native;
-// use openvm_native_circuit::NativeConfig;
-// use openvm_native_compiler::asm::AsmCompiler;
-// use openvm_native_compiler::asm::{AsmBuilder, AsmConfig};
-// use openvm_native_compiler::conversion::convert_program;
-// use openvm_native_compiler::conversion::CompilerOptions;
-// use openvm_native_compiler::ir::Array;
-// use openvm_native_compiler::ir::Ext;
-// use openvm_native_compiler::prelude::Felt;
-// use openvm_native_recursion::challenger::duplex::DuplexChallengerVariable;
-// use openvm_native_recursion::hints::Hintable;
+// use openvm_circuit::arch::{SystemConfig, VmExecutor};
+// use openvm_native_circuit::{Native, NativeConfig};
+// use openvm_native_compiler::{
+// asm::{AsmBuilder, AsmCompiler, AsmConfig},
+// conversion::{CompilerOptions, convert_program},
+// ir::{Array, Ext},
+// prelude::Felt,
+// };
+// use openvm_native_recursion::{challenger::duplex::DuplexChallengerVariable, hints::Hintable};
 // use openvm_stark_sdk::config::setup_tracing_with_log_level;
 // use p3_baby_bear::BabyBear;
-// use p3_field::extension::BinomialExtensionField;
-// use p3_field::Field;
-// use p3_field::FieldAlgebra;
+// use p3_field::{Field, FieldAlgebra, extension::BinomialExtensionField};
 // use rand::thread_rng;
 //
 // type F = BabyBear;
