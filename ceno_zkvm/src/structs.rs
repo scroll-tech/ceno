@@ -1,6 +1,6 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    e2e::ShardContext,
+    e2e::{E2EProgramCtx, ShardContext},
     error::ZKVMError,
     instructions::Instruction,
     scheme::septic_curve::SepticPoint,
@@ -428,7 +428,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: &TC::TableConfig,
-        input: &TC::WitnessInput,
+        input: &TC::WitnessInput<'_>,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&TC::name()).unwrap();
@@ -637,6 +637,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,
+    pub program_ctx: Option<E2EProgramCtx<E>>,
+
     // entry program counter
     pub entry_pc: u32,
     // pk for opcode and table circuits
@@ -670,6 +672,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
         Self {
             pp,
             vp,
+            program_ctx: None,
             entry_pc: 0,
             circuit_pks: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
@@ -747,6 +750,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .map(|(index, name)| (index, name.clone()))
                 .collect(),
         }
+    }
+
+    pub fn set_program_ctx(&mut self, ctx: E2EProgramCtx<E>) {
+        self.program_ctx = Some(ctx)
     }
 }
 

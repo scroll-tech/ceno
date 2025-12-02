@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use ceno_emul::{Platform, Program};
 use ceno_recursion::{
     aggregation::{

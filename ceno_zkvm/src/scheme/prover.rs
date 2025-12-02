@@ -466,6 +466,13 @@ impl<
             input_opening_point,
         ))
     }
+
+    pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> crate::e2e::InitMemState {
+        let Some(ctx) = self.pk.program_ctx.as_ref() else {
+            panic!("empty program ctx")
+        };
+        ctx.setup_init_mem(hints, public_io)
+    }
 }
 
 /// TowerProofs

@@ -15,7 +15,7 @@ use itertools::{Itertools, chain};
 use std::{collections::HashSet, iter::zip, ops::Range, sync::Arc};
 use witness::InstancePaddingStrategy;
 
-pub struct MmuConfig<'a, E: ExtensionField> {
+pub struct MmuConfig<E: ExtensionField> {
     /// Initialization of registers.
     pub reg_init_config: <RegTableInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of memory with static addresses.
@@ -29,13 +29,13 @@ pub struct MmuConfig<'a, E: ExtensionField> {
     /// Initialization of stack.
     pub stack_init_config: <StackInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// finalized circuit for all MMIO
-    pub local_final_circuit: <LocalFinalCircuit<'a, E> as TableCircuit<E>>::TableConfig,
+    pub local_final_circuit: <LocalFinalCircuit<E> as TableCircuit<E>>::TableConfig,
     /// ram bus to deal with cross shard read/write
     pub ram_bus_circuit: <ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
-impl<E: ExtensionField> MmuConfig<'_, E> {
+impl<E: ExtensionField> MmuConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let reg_init_config = cs.register_table_circuit::<RegTableInitCircuit<E>>();
 

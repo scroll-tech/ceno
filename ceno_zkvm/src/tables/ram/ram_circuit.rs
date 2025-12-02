@@ -84,7 +84,7 @@ impl<
 {
     type TableConfig = C::Config;
     type FixedInput = [MemInitRecord];
-    type WitnessInput = [MemFinalRecord];
+    type WitnessInput<'a> = [MemFinalRecord];
 
     fn name() -> String {
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
@@ -111,7 +111,7 @@ impl<
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        final_v: &Self::WitnessInput,
+        final_v: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
         Ok(C::assign_instances(
@@ -137,7 +137,7 @@ impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCirc
 {
     type TableConfig = PubIOTableInitConfig<NVRAM>;
     type FixedInput = [Addr];
-    type WitnessInput = [MemFinalRecord];
+    type WitnessInput<'a> = [MemFinalRecord];
 
     fn name() -> String {
         format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
@@ -241,7 +241,7 @@ impl<
 {
     type TableConfig = C::Config;
     type FixedInput = ();
-    type WitnessInput = [MemFinalRecord];
+    type WitnessInput<'a> = [MemFinalRecord];
 
     fn name() -> String {
         format!("{}_{:?}_RAM", DVRAM::name(), DVRAM::RAM_TYPE,)
@@ -267,7 +267,7 @@ impl<
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        final_v: &Self::WitnessInput,
+        final_v: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
         Ok(
@@ -282,14 +282,12 @@ impl<
 }
 
 /// This circuit is generalized version to handle all mmio records
-pub struct LocalFinalRamCircuit<'a, const V_LIMBS: usize, E>(PhantomData<(&'a (), E)>);
+pub struct LocalFinalRamCircuit<const V_LIMBS: usize, E>(PhantomData<E>);
 
-impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
-    for LocalFinalRamCircuit<'a, V_LIMBS, E>
-{
+impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamCircuit<V_LIMBS, E> {
     type TableConfig = LocalFinalRAMTableConfig<V_LIMBS>;
     type FixedInput = ();
-    type WitnessInput = (
+    type WitnessInput<'a> = (
         &'a ShardContext<'a>,
         &'a [(&'static str, InstancePaddingStrategy, &'a [MemFinalRecord])],
     );
@@ -350,12 +348,12 @@ impl<'a, E: ExtensionField, const V_LIMBS: usize> TableCircuit<E>
         RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
     }
 
-    fn assign_instances(
+    fn assign_instances<'a>(
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        (shard_ctx, final_mem): &Self::WitnessInput,
+        (shard_ctx, final_mem): &Self::WitnessInput<'a>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
         Ok(Self::TableConfig::assign_instances(
