@@ -84,8 +84,8 @@ pub trait TraceCommitter<PB: ProverBackend> {
         &self,
         witness_mles: &mut Vec<PB::MultilinearPoly<'a>>,
         num_inputs: usize,
-        pcs_data: &PB::PcsData,
-        trace_idx: usize,
+        pcs_data: &PB::PcsData, // used by GPU backend
+        trace_idx: usize,  // used by GPU backend
     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
 
