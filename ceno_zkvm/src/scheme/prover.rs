@@ -130,6 +130,7 @@ impl<
         pi: PublicValues,
         mut transcript: impl Transcript<E> + 'static,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
+        let timer = std::time::Instant::now();
         let raw_pi = pi.to_vec::<E>();
         let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
         let mut chip_proofs = BTreeMap::new();
@@ -381,6 +382,8 @@ impl<
             witin_commit,
             mpcs_opening_proof,
         );
+
+        println!("create_proof done in {:?}", timer.elapsed());
 
         Ok(vm_proof)
     }
