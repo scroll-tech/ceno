@@ -8,7 +8,7 @@ use ceno_recursion::{
 };
 use ceno_zkvm::{
     e2e::{MultiProver, setup_program},
-    scheme::{hal::ProverDevice, prover::ZKVMProver},
+    scheme::{hal::ProverDevice, prover::ZKVMProver, verifier::ZKVMVerifier},
     structs::{ZKVMProvingKey, ZKVMVerifyingKey},
 };
 use ff_ext::{BabyBearExt4, ExtensionField};
@@ -162,6 +162,13 @@ where
         self.zkvm_pk = Some(pk.clone());
 
         ZKVMProver::new(pk, device)
+    }
+
+    pub fn create_zkvm_verifier(&self) -> ZKVMVerifier<E, PCS> {
+        let Some(app_vk) = self.zkvm_vk.clone() else {
+            panic!("empty zkvm pk");
+        };
+        ZKVMVerifier::new(app_vk)
     }
 }
 
