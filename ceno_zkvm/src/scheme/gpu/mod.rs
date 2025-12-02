@@ -10,7 +10,7 @@ use crate::{
     },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
-use ff_ext::{ExtensionField, GoldilocksExt2};
+use ff_ext::ExtensionField;
 use gkr_iop::{
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     gpu::{GpuBackend, GpuProver},
@@ -122,7 +122,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         exit_span!(span);
 
         let is_pcs_match =
-            std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<GoldilocksExt2>>()
+            std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
                 == std::mem::size_of::<PCS::CommitmentWithWitness>();
         let (mles, pcs_data, commit) = if is_pcs_match {
             let vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
@@ -180,8 +180,8 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     records: &[ArcMultilinearExtensionGpu<'_, E>],
     challenges: &[E; 2],
     cuda_hal: &CudaHalBB31,
-    prod_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
-    logup_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
+    big_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
+    view_last_layers: &mut Vec<Vec<Vec<GpuPolynomialExt<'static>>>>,
 ) -> Result<
     (
         Vec<ceno_gpu::GpuProverSpec<'buf>>,
@@ -196,9 +196,9 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     let ComposedConstrainSystem {
         zkvm_v1_css: cs, ..
     } = composed_cs;
-    let num_instances_with_rotation =
+    let _num_instances_with_rotation =
         input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
-    let chip_record_alpha = challenges[0];
+    let _chip_record_alpha = challenges[0];
 
     // TODO: safety ?
     let records = unsafe {
@@ -224,126 +224,53 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         &records[offset..][..cs.lk_expressions.len()]
     };
 
-    // Use GPU version of masked_mle_split_to_chunks to avoid CPU-GPU data transfers
-    let mut r_set_gpu_chunks = Vec::new();
-    let mut w_set_gpu_chunks = Vec::new();
+    cuda_hal.inner().synchronize().unwrap();
+    cuda_hal.print_mem_info().unwrap();
+    assert_eq!(big_buffers.len(), 0, "expect no big buffers");
 
-    // Process read set witnesses using GPU
-    for wit in r_set_wit.iter() {
-        let gpu_chunks = cuda_hal
-            .tower
-            .masked_mle_split_to_chunks(
-                &cuda_hal,
-                wit.as_ceno_gpu_ext(),
-                num_instances_with_rotation,
-                NUM_FANIN,
-                BB31Ext::ONE,
-            )
-            .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for r_set: {:?}", e))?;
-        r_set_gpu_chunks.push(gpu_chunks);
-    }
+    // prod: last layes & buffer
+    let mut is_prod_buffer_exists = false;
+    let prod_last_layers = r_set_wit
+        .iter()
+        .chain(w_set_wit.iter())
+        .map(|wit| wit.as_view_chunks(NUM_FANIN))
+        .collect::<Vec<_>>();
+    if !prod_last_layers.is_empty() {
+        let first_layer = &prod_last_layers[0];
+        assert_eq!(first_layer.len(), 2, "prod last_layer must have 2 MLEs");
+        let num_vars = first_layer[0].num_vars();
+        let num_towers = prod_last_layers.len();
+        view_last_layers.push(prod_last_layers);
 
-    // Process write set witnesses using GPU
-    for wit in w_set_wit.iter() {
-        let gpu_chunks = cuda_hal
-            .tower
-            .masked_mle_split_to_chunks(
-                &cuda_hal,
-                wit.as_ceno_gpu_ext(),
-                num_instances_with_rotation,
-                NUM_FANIN,
-                BB31Ext::ONE,
-            )
-            .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for w_set: {:?}", e))?;
-        w_set_gpu_chunks.push(gpu_chunks);
-    }
-
-    // Process logup witnesses using GPU
-    let mut lk_numerator_gpu_chunks = Vec::new();
-    let mut lk_denominator_gpu_chunks = Vec::new();
-
-    for wit in lk_n_wit.iter() {
-        let gpu_chunks = cuda_hal
-            .tower
-            .masked_mle_split_to_chunks(
-                &cuda_hal,
-                wit.as_ceno_gpu_ext(),
-                num_instances_with_rotation,
-                NUM_FANIN_LOGUP,
-                BB31Ext::ONE,
-            )
-            .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for lk_n: {:?}", e))?;
-        lk_numerator_gpu_chunks.push(gpu_chunks);
-    }
-
-    for wit in lk_d_wit.iter() {
-        // For GPU backend, E must be GoldilocksExt2. This is ensured by the caller.
-        let chip_record_alpha_gl: BB31Ext = unsafe {
-            assert_eq!(std::mem::size_of::<E>(), std::mem::size_of::<BB31Ext>());
-            std::mem::transmute_copy(&chip_record_alpha)
-        };
-        let gpu_chunks = cuda_hal
-            .tower
-            .masked_mle_split_to_chunks(
-                &cuda_hal,
-                wit.as_ceno_gpu_ext(),
-                num_instances_with_rotation,
-                NUM_FANIN_LOGUP,
-                chip_record_alpha_gl,
-            )
-            .map_err(|e| format!("GPU masked_mle_split_to_chunks failed for lk_d: {:?}", e))?;
-        lk_denominator_gpu_chunks.push(gpu_chunks);
-    }
-
-    // First, allocate buffers based on original witness num_vars
-    // This avoids the need to call build_tower_witness just to get buffer sizes
-    for wit in r_set_wit.iter().chain(w_set_wit.iter()) {
-        let nv = wit.num_vars();
-        let buf = cuda_hal
-            .alloc_ext_elems_on_device(1 << (nv + 2))
+        // Allocate one big buffer for all product towers and add it to big_buffers
+        let tower_size = 1 << (num_vars + 1); // 2 * mle_len elements per tower
+        let total_buffer_size = num_towers * tower_size;
+        println!("prod tower request buffer size: {:.2} MB", (total_buffer_size * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0));
+        let big_buffer = cuda_hal
+            .alloc_ext_elems_on_device(total_buffer_size)
             .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))?;
-        prod_buffers.push(buf);
-    }
-    // Allocate logup buffers based on original witness num_vars
-    for wit in lk_n_wit.iter().chain(lk_d_wit.iter()) {
-        let nv = wit.num_vars();
-        let buf = cuda_hal
-            .alloc_ext_elems_on_device(1 << (nv + 3))
-            .map_err(|e| format!("Failed to allocate logup GPU buffer: {:?}", e))?;
-        logup_buffers.push(buf);
+        big_buffers.push(big_buffer);
+        is_prod_buffer_exists = true;
+        cuda_hal.inner().synchronize().unwrap();
+        cuda_hal.print_mem_info().unwrap();
     }
 
-    // Build product GpuProverSpecs using GPU polynomials directly
-    let mut prod_gpu_specs = Vec::new();
-    let mut remaining_prod_buffers = &mut prod_buffers[..];
-
-    // Process all product chunks (r_set and w_set) uniformly
-    for gpu_chunks in r_set_gpu_chunks.into_iter().chain(w_set_gpu_chunks) {
-        assert_eq!(gpu_chunks.len(), 2, "prod_spec must have 2 MLEs");
-        let nv = gpu_chunks[0].num_vars();
-
-        let (current_buffer_slice, rest) = remaining_prod_buffers.split_at_mut(1);
-        remaining_prod_buffers = rest;
-
-        let gpu_spec = cuda_hal
-            .tower
-            .build_prod_tower_from_gpu_polys(nv, &gpu_chunks, &mut current_buffer_slice[0])
-            .map_err(|e| format!("build_prod_tower_from_gpu_polys failed: {:?}", e))?;
-
-        prod_gpu_specs.push(gpu_spec);
-    }
-
-    // Build logup GpuProverSpecs using GPU polynomials directly
-    let mut logup_gpu_specs = Vec::new();
-    let mut remaining_logup_buffers = &mut logup_buffers[..];
-
-    // Prepare last_layer for all logup cases
-    let logup_last_layers = if !lk_numerator_gpu_chunks.is_empty() {
+    // logup: last layes
+    let mut is_logup_buffer_exists = false;
+    let lk_numerator_last_layer = lk_n_wit
+        .iter()
+        .map(|wit| wit.as_view_chunks(NUM_FANIN_LOGUP))
+        .collect::<Vec<_>>();
+    let lk_denominator_last_layer = lk_d_wit
+        .iter()
+        .map(|wit| wit.as_view_chunks(NUM_FANIN_LOGUP))
+        .collect::<Vec<_>>();
+    let logup_last_layers = if !lk_numerator_last_layer.is_empty() {
         // Case when we have both numerator and denominator
         // Combine [p1, p2] from numerator and [q1, q2] from denominator
-        lk_numerator_gpu_chunks
+        lk_numerator_last_layer
             .into_iter()
-            .zip(lk_denominator_gpu_chunks)
+            .zip(lk_denominator_last_layer)
             .map(|(lk_n_chunks, lk_d_chunks)| {
                 let mut last_layer = lk_n_chunks;
                 last_layer.extend(lk_d_chunks);
@@ -352,7 +279,8 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .collect::<Vec<_>>()
     } else {
         // Case when numerator is empty - create GPU polynomials with scalar E::ONE
-        lk_denominator_gpu_chunks
+
+        let res = lk_denominator_last_layer
             .into_iter()
             .map(|lk_d_chunks| {
                 let nv = lk_d_chunks[0].num_vars();
@@ -367,25 +295,108 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
                 last_layer.extend(lk_d_chunks);
                 last_layer
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        println!("fill denominator with BB31Ext::ONE");
+        cuda_hal.inner().synchronize().unwrap();
+        cuda_hal.print_mem_info().unwrap();
+        res
     };
+    if !logup_last_layers.is_empty() {
+        let first_layer = &logup_last_layers[0];
+        assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
+        let num_vars = first_layer[0].num_vars();
+        let num_towers = logup_last_layers.len();
+        view_last_layers.push(logup_last_layers);
 
-    // Process all logup last_layers uniformly
-    for last_layer in logup_last_layers {
-        assert_eq!(last_layer.len(), 4, "logup last_layer must have 4 MLEs");
-        let nv = last_layer[0].num_vars();
-
-        let (current_buffer_slice, rest) = remaining_logup_buffers.split_at_mut(1);
-        remaining_logup_buffers = rest;
-
-        let gpu_spec = cuda_hal
-            .tower
-            .build_logup_tower_from_gpu_polys(nv, &last_layer, &mut current_buffer_slice[0])
-            .map_err(|e| format!("build_logup_tower_from_gpu_polys failed: {:?}", e))?;
-
-        logup_gpu_specs.push(gpu_spec);
+        // Allocate one big buffer for all towers and add it to big_buffers
+        let tower_size = 1 << (num_vars + 2); // 4 * mle_len elements per tower
+        let total_buffer_size = num_towers * tower_size;
+        println!("logup tower request buffer size: {:.2} MB", (total_buffer_size * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0));
+        let big_buffer = cuda_hal.alloc_ext_elems_on_device(total_buffer_size).unwrap();
+        big_buffers.push(big_buffer);
+        is_logup_buffer_exists = true;
+        cuda_hal.inner().synchronize().unwrap();
+        cuda_hal.print_mem_info().unwrap();
     }
 
+    let (_, pushed_big_buffers) = big_buffers.split_at_mut(0);
+    let (prod_big_buffer, logup_big_buffer) = match (is_prod_buffer_exists, is_logup_buffer_exists, pushed_big_buffers) {
+        (false, false, []) => (None, None),
+        (true, false, [prod]) => (Some(prod), None),
+        (false, true, [logup]) => (None, Some(logup)),
+        (true, true, [prod, logup]) => (Some(prod), Some(logup)),
+        (prod_flag, logup_flag, slice) => {
+            panic!(
+                "unexpected state: prod={}, logup={}, newly_pushed_len={}",
+                prod_flag,
+                logup_flag,
+                slice.len()
+            );
+        }
+    };
+
+    // Build product GpuProverSpecs
+    let mut prod_gpu_specs = Vec::new();
+    if is_prod_buffer_exists {
+        let prod_last_layers = &view_last_layers[0];
+        let first_layer = &prod_last_layers[0];
+        assert_eq!(first_layer.len(), 2, "prod last_layer must have 2 MLEs");
+        let num_vars = first_layer[0].num_vars();
+        let num_towers = prod_last_layers.len();
+        let Some(prod_big_buffer) = prod_big_buffer else {
+            panic!("prod big buffer not found");
+        };
+
+        let span_prod = entered_span!(
+            "build_prod_tower",
+            prod_layers = prod_last_layers.len(),
+            profiling_3 = true
+        );
+        let last_layers_refs: Vec<&[GpuPolynomialExt]> =
+            prod_last_layers.iter().map(|v| v.as_slice()).collect();
+        let gpu_specs = {
+            cuda_hal
+                .tower
+                .build_prod_tower_from_gpu_polys_batch(
+                    cuda_hal,
+                    prod_big_buffer,
+                    &last_layers_refs,
+                    num_vars,
+                    num_towers,
+                )
+        }
+        .map_err(|e| format!("build_prod_tower_from_gpu_polys_batch failed: {:?}", e))?;
+        prod_gpu_specs.extend(gpu_specs);
+        exit_span!(span_prod);
+    }
+
+    // Build logup GpuProverSpecs
+    let mut logup_gpu_specs = Vec::new();
+    if is_logup_buffer_exists {
+        let logup_last_layers = view_last_layers.last().unwrap();
+        let first_layer = &logup_last_layers[0];
+        assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
+        let num_vars = first_layer[0].num_vars();
+        let num_towers = logup_last_layers.len();
+        let Some(logup_big_buffer) = logup_big_buffer else {
+            panic!("logup big buffer not found");
+        };
+
+        let span_logup = entered_span!(
+            "build_logup_tower",
+            logup_layers = logup_last_layers.len(),
+            profiling_3 = true
+        );
+        let last_layers_refs: Vec<&[GpuPolynomialExt]> =
+            logup_last_layers.iter().map(|v| v.as_slice()).collect();
+        let gpu_specs = cuda_hal
+            .tower
+            .build_logup_tower_from_gpu_polys_batch(cuda_hal, logup_big_buffer, &last_layers_refs, num_vars, num_towers)
+            .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
+
+        logup_gpu_specs.extend(gpu_specs);
+        exit_span!(span_logup);
+    }
     Ok((prod_gpu_specs, logup_gpu_specs))
 }
 
@@ -445,52 +456,59 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         } = composed_cs;
         let r_set_len = cs.r_expressions.len() + cs.r_table_expressions.len();
 
-        // GPU optimization: Use build_tower_witness_gpu which handles buffer allocation internally
-        let mut _prod_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
-        let mut _logup_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
-
-        // Call build_tower_witness_gpu which will allocate buffers and build GPU specs
-        let span = entered_span!("build_tower_witness", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
-        let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
-            composed_cs,
-            input,
-            records,
-            challenges,
-            &cuda_hal,
-            &mut _prod_buffers,
-            &mut _logup_buffers,
-        )
-        .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
-        .unwrap();
-        exit_span!(span);
+        let (point, proof, lk_out_evals, w_out_evals, r_out_evals) = {
+            // build_tower_witness_gpu will allocate buffers and build GPU specs
+            let span = entered_span!("build_tower_witness", profiling_2 = true);
+            let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
+            let mut _view_last_layers: Vec<Vec<Vec<ceno_gpu::bb31::GpuPolynomialExt<'static>>>> =
+                Vec::new();
+            let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
+                composed_cs,
+                input,
+                records,
+                challenges,
+                &cuda_hal,
+                // &mut _logup_buffers,
+                &mut _big_buffers,
+                &mut _view_last_layers,
+            )
+            .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
+            .unwrap();
+            exit_span!(span);
 
-        // GPU optimization: Extract out_evals from GPU-built towers before consuming them
-        // This is the true optimization - using GPU tower results instead of CPU inference
-        let span = entered_span!("extract_out_evals_from_gpu_towers", profiling_2 = true);
-        let (r_out_evals, w_out_evals, lk_out_evals) =
-            extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
-        exit_span!(span);
+            // GPU optimization: Extract out_evals from GPU-built towers before consuming them
+            // This is the true optimization - using GPU tower results instead of CPU inference
+            let span = entered_span!("extract_out_evals_from_gpu_towers", profiling_2 = true);
+            let (r_out_evals, w_out_evals, lk_out_evals) =
+                extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
+            exit_span!(span);
 
-        // transcript >>> BasicTranscript<E>
-        let basic_tr: &mut BasicTranscript<BB31Ext> =
-            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
+            // transcript >>> BasicTranscript<E>
+            let basic_tr: &mut BasicTranscript<BB31Ext> =
+                unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
 
-        let input = ceno_gpu::TowerInput {
-            prod_specs: prod_gpu,
-            logup_specs: logup_gpu,
+            let input = ceno_gpu::TowerInput {
+                prod_specs: prod_gpu,
+                logup_specs: logup_gpu,
+            };
+
+            let span = entered_span!("prove_tower_relation", profiling_2 = true);
+            let (point_gl, proof_gpu) = cuda_hal
+                .tower
+                .create_proof(&cuda_hal, &input, NUM_FANIN, basic_tr)
+                .expect("gpu tower create_proof failed");
+            exit_span!(span);
+
+            // TowerProofs
+            let point: Point<E> = unsafe { std::mem::transmute(point_gl) };
+            let proof: TowerProofs<E> = unsafe { std::mem::transmute(proof_gpu) };
+            (point, proof, lk_out_evals, w_out_evals, r_out_evals)
         };
 
-        let span = entered_span!("prove_tower_relation", profiling_2 = true);
-        let (point_gl, proof_gpu) = cuda_hal
-            .tower
-            .create_proof(&cuda_hal, &input, NUM_FANIN, basic_tr)
-            .expect("gpu tower create_proof failed");
-        exit_span!(span);
-
-        // TowerProofs
-        let point: Point<E> = unsafe { std::mem::transmute(point_gl) };
-        let proof: TowerProofs<E> = unsafe { std::mem::transmute(proof_gpu) };
+        let span_sync = entered_span!("wait for GPU to free memory", profiling_3 = true);
+        cuda_hal.inner().synchronize().unwrap();
+        exit_span!(span_sync);
 
         (point, proof, lk_out_evals, w_out_evals, r_out_evals)
     }
@@ -702,11 +720,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
                     .collect_vec()
             }));
         }
-
-        // use ceno_gpu::{
-        //     BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu,
-        //     gl64::buffer::BufferImpl,
-        // };
 
         // Type conversions using unsafe transmute
         let prover_param = &self.backend.pp;
