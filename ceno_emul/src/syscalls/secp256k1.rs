@@ -1,13 +1,14 @@
+use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 use crate::{Change, EmuContext, Platform, VMState, WORD_SIZE, Word, WriteOp, utils::MemoryView};
 use itertools::Itertools;
-use secp::{self};
+use k256::{FieldBytes, elliptic_curve::PrimeField};
 use std::iter;
-
-use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
 pub struct Secp256k1AddSpec;
 
 pub struct Secp256k1DoubleSpec;
+
+pub struct Secp256k1ScalarInvertSpec;
 
 pub struct Secp256k1DecompressSpec;
 
@@ -25,6 +26,14 @@ impl SyscallSpec for Secp256k1DoubleSpec {
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = SECP256K1_ARG_WORDS;
     const CODE: u32 = ceno_syscall::SECP256K1_DOUBLE;
+}
+
+impl SyscallSpec for Secp256k1ScalarInvertSpec {
+    const NAME: &'static str = "SECP256K1_SCALAR_INVERT";
+
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize = COORDINATE_WORDS;
+    const CODE: u32 = ceno_syscall::SECP256K1_SCALAR_INVERT;
 }
 
 impl SyscallSpec for Secp256k1DecompressSpec {
@@ -162,6 +171,33 @@ pub fn secp256k1_double(vm: &VMState) -> SyscallEffects {
     let mem_ops = p_view.mem_ops().to_vec();
 
     assert_eq!(mem_ops.len(), SECP256K1_ARG_WORDS);
+    SyscallEffects {
+        witness: SyscallWitness::new(mem_ops, reg_ops),
+        next_pc: None,
+    }
+}
+
+pub fn secp256k1_invert(vm: &VMState) -> SyscallEffects {
+    let p_ptr = vm.peek_register(Platform::reg_arg0());
+
+    // Read the argument pointers
+    let reg_ops = vec![WriteOp::new_register_op(
+        Platform::reg_arg0(),
+        Change::new(p_ptr, p_ptr),
+        0, // Cycle set later in finalize().
+    )];
+
+    // P's memory segment
+    let mut p_view = MemoryView::<COORDINATE_WORDS>::new(vm, p_ptr);
+    let p = k256::Scalar::from_repr(*FieldBytes::from_slice(&p_view.bytes())).expect("illegal p");
+    let p_inv = p.invert().unwrap();
+    let bytes: [u8; 32] = p_inv.to_bytes().into();
+    let output_words: [Word; COORDINATE_WORDS] = unsafe { std::mem::transmute(bytes) };
+
+    p_view.write(output_words);
+    let mem_ops = p_view.mem_ops().to_vec();
+
+    assert_eq!(mem_ops.len(), COORDINATE_WORDS);
     SyscallEffects {
         witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,

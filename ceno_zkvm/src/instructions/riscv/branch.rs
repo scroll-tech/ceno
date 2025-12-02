@@ -1,7 +1,9 @@
 use super::RIVInstruction;
 use ceno_emul::InsnKind;
 
+#[cfg(not(feature = "u16limb_circuit"))]
 mod branch_circuit;
+#[cfg(feature = "u16limb_circuit")]
 mod branch_circuit_v2;
 #[cfg(test)]
 mod test;
@@ -10,12 +12,18 @@ pub struct BeqOp;
 impl RIVInstruction for BeqOp {
     const INST_KIND: InsnKind = InsnKind::BEQ;
 }
+#[cfg(feature = "u16limb_circuit")]
+pub type BeqInstruction<E> = branch_circuit_v2::BranchCircuit<E, BeqOp>;
+#[cfg(not(feature = "u16limb_circuit"))]
 pub type BeqInstruction<E> = branch_circuit::BranchCircuit<E, BeqOp>;
 
 pub struct BneOp;
 impl RIVInstruction for BneOp {
     const INST_KIND: InsnKind = InsnKind::BNE;
 }
+#[cfg(feature = "u16limb_circuit")]
+pub type BneInstruction<E> = branch_circuit_v2::BranchCircuit<E, BneOp>;
+#[cfg(not(feature = "u16limb_circuit"))]
 pub type BneInstruction<E> = branch_circuit::BranchCircuit<E, BneOp>;
 
 pub struct BltuOp;
