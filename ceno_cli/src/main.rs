@@ -5,6 +5,7 @@ use ceno_zkvm::print_allocated_bytes;
 use clap::{Args, Parser, Subcommand};
 
 mod commands;
+mod sdk;
 mod utils;
 
 // Use jemalloc as global allocator for performance

@@ -795,7 +795,7 @@ mod tests {
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
         let zkvm_vk = zkvm_pk.get_vk_slow();
-        let zkvm_prover = ZKVMProver::new(zkvm_pk, pd);
+        let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 
         let public_input_mles = public_value

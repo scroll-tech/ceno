@@ -1362,7 +1362,7 @@ pub fn run_e2e_with_checkpoint<
     tracing::debug!("keygen done in {:?}", start.elapsed());
 
     // New with prover
-    let prover = ZKVMProver::new(pk, device);
+    let prover = ZKVMProver::new(pk.into(), device);
 
     let start = std::time::Instant::now();
     let init_full_mem = ctx.setup_init_mem(hints, public_io);

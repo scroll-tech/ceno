@@ -76,8 +76,7 @@ impl<
         }
     }
 
-    pub fn new(pk: ZKVMProvingKey<E, PCS>, device: PD) -> Self {
-        let pk = Arc::new(pk);
+    pub fn new(pk: Arc<ZKVMProvingKey<E, PCS>>, device: PD) -> Self {
         let (device_first_shard_pk, device_non_first_shard_pk) =
             if pk.as_ref().has_fixed_commitment() {
                 (
