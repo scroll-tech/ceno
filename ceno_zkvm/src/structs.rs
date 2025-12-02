@@ -755,7 +755,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned",
 ))]
-pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
+where
+    PCS::VerifierParam: Sized,
+{
     pub vp: PCS::VerifierParam,
     // entry program counter
     pub entry_pc: u32,

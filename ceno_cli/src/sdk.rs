@@ -3,14 +3,14 @@ use ceno_recursion::{
     aggregation::{
         CenoLeafVmVerifierConfig, INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP, ROOT_LOG_BLOWUP, SBOX_SIZE,
     },
-    zkvm_verifier::binding::F,
+    zkvm_verifier::binding::E,
 };
 use ceno_zkvm::{
     e2e::{MultiProver, setup_program},
     scheme::{hal::ProverDevice, prover::ZKVMProver},
     structs::{ZKVMProvingKey, ZKVMVerifyingKey},
 };
-use ff_ext::ExtensionField;
+use ff_ext::{BabyBearExt4, ExtensionField};
 use gkr_iop::hal::ProverBackend;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use openvm_circuit::{
@@ -24,16 +24,17 @@ use openvm_continuations::verifier::{
 use openvm_native_circuit::NativeConfig;
 use openvm_native_compiler::conversion::CompilerOptions;
 use openvm_sdk::prover::vm::{local::VmLocalProver, types::VmProvingKey};
-use openvm_stark_backend::{
-    config::StarkGenericConfig, p3_field::extension::BinomialExtensionField,
-};
+use openvm_stark_backend::config::StarkGenericConfig;
 use openvm_stark_sdk::{
-    config::{FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Engine},
+    config::{
+        FriParameters,
+        baby_bear_poseidon2::{BabyBearPoseidon2Config, BabyBearPoseidon2Engine},
+    },
     engine::StarkFriEngine,
 };
 use std::{marker::PhantomData, sync::Arc};
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPermutationConfig;
 
+#[allow(clippy::type_complexity)]
 pub struct Sdk<
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
@@ -51,7 +52,7 @@ pub struct Sdk<
     pub multi_prover: Option<MultiProver>,
 
     pub zkvm_pk: Option<Arc<ZKVMProvingKey<E, PCS>>>,
-    pub zkvm_vk: Option<Arc<ZKVMVerifyingKey<E, PCS>>>,
+    pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS>>,
 
     // aggregation
     pub zkvm_agg: Option<Arc<ZKVMProvingKey<E, PCS>>>,
@@ -112,9 +113,10 @@ where
     }
 
     pub fn set_app_vk(&mut self, vk: ZKVMVerifyingKey<E, PCS>) {
-        self.zkvm_vk = Some(Arc::new(vk));
+        self.zkvm_vk = Some(vk);
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn set_agg_pk(
         &mut self,
         agg_pk: (
@@ -133,6 +135,9 @@ where
             .clone()
             .zip(self.zkvm_vk.clone())
             .unwrap_or_else(|| {
+                tracing::debug!(
+                    "empty app proving/verifying key detected — running key generation..."
+                );
                 let (Some(program), Some(platform), Some(multi_prover)) = (
                     self.app_program.as_ref(),
                     self.platform.as_ref(),
@@ -149,28 +154,38 @@ where
                 let start = std::time::Instant::now();
                 let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
                 tracing::debug!("keygen done in {:?}", start.elapsed());
-                (pk.into(), vk.into())
+                (pk.into(), vk)
             });
 
-        self.zkvm_vk.as_mut().map(|v| *v = vk.clone());
-        self.zkvm_pk.as_mut().map(|p| *p = pk.clone());
+        self.zkvm_vk = Some(vk.clone());
+        self.zkvm_pk = Some(pk.clone());
 
         ZKVMProver::new(pk, device)
     }
+}
 
+impl<PB, PD>
+    Sdk<BabyBearExt4, Basefold<E, BasefoldRSParams>, PB, PD, BabyBearPoseidon2Config, NativeConfig>
+where
+    PB: ProverBackend<E = BabyBearExt4, Pcs = Basefold<E, BasefoldRSParams>> + 'static,
+    PD: ProverDevice<PB> + 'static,
+{
     // initialized agg prover
-    pub fn create_agg_prover<Engine: StarkFriEngine<SC>>(
+    pub fn create_agg_prover(
         &mut self,
-    ) -> (VmLocalProver<SC, VC, Engine>, VmLocalProver<SC, VC, Engine>) {
-        let Some(app_vk) = self.zkvm_vk.as_ref() else {
+    ) -> (
+        VmLocalProver<BabyBearPoseidon2Config, NativeConfig, BabyBearPoseidon2Engine>,
+        VmLocalProver<BabyBearPoseidon2Config, NativeConfig, BabyBearPoseidon2Engine>,
+    ) {
+        let Some(app_vk) = self.zkvm_vk.clone() else {
             panic!("please call `create_zkvm_prover` to keygen vk first");
         };
 
-        // mapping generic type to poseidon
-        assert_eq!(size_of::<Engine>(), size_of::<BabyBearPoseidon2Engine>());
-
         let (ceno_leaf_agg_pk, leaf_committed_exe, internal_vm_pk, internal_committed_exe) =
             self.agg_pk.clone().unwrap_or_else(|| {
+                tracing::debug!(
+                    "empty agg proving/verifying key detected — running key generation..."
+                );
                 let [leaf_fri_params, internal_fri_params, _root_fri_params] =
                     [LEAF_LOG_BLOWUP, INTERNAL_LOG_BLOWUP, ROOT_LOG_BLOWUP]
                         .map(FriParameters::standard_with_100_bits_conjectured_security);
@@ -189,13 +204,7 @@ where
                     native: Default::default(),
                 };
 
-                let app_vk = (**app_vk).clone();
-                let app_vk: ZKVMVerifyingKey<
-                    BinomialExtensionField<F, 4>,
-                    Basefold<BinomialExtensionField<F, 4>, BasefoldRSParams>,
-                > = unsafe { std::mem::transmute(app_vk) };
-
-                let leaf_committed_exe = {
+                let leaf_committed_exe: Arc<VmCommittedExe<BabyBearPoseidon2Config>> = {
                     let leaf_engine = BabyBearPoseidon2Engine::new(leaf_fri_params);
                     let leaf_program = CenoLeafVmVerifierConfig {
                         vk: app_vk,
@@ -259,10 +268,11 @@ where
                     compiler_options: CompilerOptions::default(),
                 }
                 .build_program(&ceno_leaf_vm_pk.vm_pk.get_vk(), &internal_vm_vk);
-                let internal_committed_exe = Arc::new(VmCommittedExe::commit(
-                    internal_program.into(),
-                    internal_vm.engine.config.pcs(),
-                ));
+                let internal_committed_exe: Arc<VmCommittedExe<BabyBearPoseidon2Config>> =
+                    Arc::new(VmCommittedExe::commit(
+                        internal_program.into(),
+                        internal_vm.engine.config.pcs(),
+                    ));
 
                 (
                     ceno_leaf_vm_pk,
@@ -272,40 +282,41 @@ where
                 )
             });
 
-        let leaf_prover = VmLocalProver::new(ceno_leaf_agg_pk.clone(), leaf_committed_exe.clone());
+        let leaf_prover = VmLocalProver::<_, NativeConfig, BabyBearPoseidon2Engine>::new(
+            ceno_leaf_agg_pk.clone(),
+            leaf_committed_exe.clone(),
+        );
 
-        let leaf_prover: VmLocalProver<SC, VC, Engine> =
-            unsafe { std::mem::transmute(leaf_prover) };
-
-        let internal_prover = VmLocalProver::<
-            openvm_continuations::SC,
-            NativeConfig,
-            BabyBearPoseidon2Engine,
-        >::new(internal_vm_pk.clone(), internal_committed_exe.clone());
-
-        let internal_prover: VmLocalProver<SC, VC, Engine> =
-            unsafe { std::mem::transmute(internal_prover) };
+        let internal_prover = VmLocalProver::<_, NativeConfig, BabyBearPoseidon2Engine>::new(
+            internal_vm_pk.clone(),
+            internal_committed_exe.clone(),
+        );
 
         // set to agg_pk
-        self.agg_pk.as_mut().map(|agg_pk| {
-            let ceno_leaf_agg_pk: Arc<VmProvingKey<SC, VC>> =
-                unsafe { std::mem::transmute(ceno_leaf_agg_pk) };
-            let leaf_committed_exe: Arc<VmCommittedExe<SC>> =
-                unsafe { std::mem::transmute(leaf_committed_exe) };
-
-            let internal_vm_pk: Arc<VmProvingKey<SC, VC>> =
-                unsafe { std::mem::transmute(internal_vm_pk) };
-            let internal_committed_exe: Arc<VmCommittedExe<SC>> =
-                unsafe { std::mem::transmute(internal_committed_exe) };
-
-            *agg_pk = (
-                ceno_leaf_agg_pk,
-                leaf_committed_exe,
-                internal_vm_pk,
-                internal_committed_exe,
-            )
-        });
+        self.agg_pk = Some((
+            ceno_leaf_agg_pk,
+            leaf_committed_exe,
+            internal_vm_pk,
+            internal_committed_exe,
+        ));
 
         (leaf_prover, internal_prover)
+    }
+}
+
+impl<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+    PB,
+    PD,
+    SC: StarkGenericConfig,
+    VC,
+> Default for Sdk<E, PCS, PB, PD, SC, VC>
+where
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB> + 'static,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
