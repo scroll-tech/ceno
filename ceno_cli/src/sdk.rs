@@ -2,7 +2,9 @@
 use ceno_emul::{Platform, Program};
 use ceno_recursion::{
     aggregation::{
-        CenoAggregationProver, CenoLeafVmVerifierConfig, CenoRecursionProvingKeys, CenoRecursionVerifierKeys, INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP, ROOT_LOG_BLOWUP, SBOX_SIZE
+        CenoAggregationProver, CenoLeafVmVerifierConfig, CenoRecursionProvingKeys,
+        CenoRecursionVerifierKeys, INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP, ROOT_LOG_BLOWUP,
+        SBOX_SIZE,
     },
     zkvm_verifier::binding::E,
 };
@@ -113,10 +115,7 @@ where
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn set_agg_pk(
-        &mut self,
-        agg_pk: CenoRecursionProvingKeys<SC, VC>,
-    ) {
+    pub fn set_agg_pk(&mut self, agg_pk: CenoRecursionProvingKeys<SC, VC>) {
         self.agg_pk = Some(agg_pk);
     }
 
@@ -179,7 +178,7 @@ where
 
         if let Some(agg_pk) = self.agg_pk.as_ref() {
             let leaf_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
-            vb.clone(),
+                vb.clone(),
                 &agg_pk.leaf_vm_pk,
                 agg_pk.leaf_committed_exe.exe.clone(),
             )
@@ -203,9 +202,7 @@ where
     }
 
     pub fn create_agg_verifier(&self) -> CenoRecursionVerifierKeys<BabyBearPoseidon2Config> {
-        let Some(agg_pk) =
-            self.agg_pk.as_ref()
-        else {
+        let Some(agg_pk) = self.agg_pk.as_ref() else {
             panic!("empty agg_pk")
         };
 
