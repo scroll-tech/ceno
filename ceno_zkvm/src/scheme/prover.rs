@@ -240,6 +240,9 @@ impl<
 
         let mut points = Vec::new();
         let mut evaluations = Vec::new();
+        let mut witness_iter = self
+            .device
+            .extract_witness_mles(&mut witness_mles, &witness_data);
         for ((circuit_name, num_instances), structural_rmm) in name_and_instances
             .into_iter()
             .zip_eq(structural_rmms.into_iter())
@@ -267,10 +270,18 @@ impl<
             transcript.append_field_element(&E::BaseField::from_canonical_u64(circuit_idx as u64));
 
             // TODO: add an enum for circuit type either in constraint_system or vk
-            let witness_mle = witness_mles
-                .drain(..cs.num_witin())
-                .map(|mle| mle.into())
-                .collect_vec();
+            let witness_mle = if cs.num_witin() > 0 {
+                let mles = witness_iter.by_ref().take(cs.num_witin()).collect_vec();
+                assert_eq!(
+                    mles.len(),
+                    cs.num_witin(),
+                    "insufficient witness mles for circuit {}",
+                    circuit_name
+                );
+                mles
+            } else {
+                vec![]
+            };
 
             let structural_witness_span = entered_span!("structural_witness", profiling_2 = true);
             let structural_mles = structural_rmm.to_mles();
@@ -318,6 +329,7 @@ impl<
                 pi_evals[idx] = eval;
             }
         }
+        drop(witness_iter);
         exit_span!(main_proofs_span);
 
         // batch opening pcs
@@ -438,7 +450,7 @@ impl<
         // evaluate pi if there is instance query
         let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
         if !cs.instance_openings().is_empty() {
-            let span = entered_span!("pi::evals");
+            let span = entered_span!("pi::evals", profiling_2 = true);
             for &Instance(idx) in cs.instance_openings() {
                 let poly = &input.public_input[idx];
                 pi_in_evals.insert(
