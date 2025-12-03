@@ -171,6 +171,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         )
         .collect_vec();
 
+        let span_eq = entered_span!("build eqs", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
         let eqs_gpu = layer
             .out_sel_and_eval_exprs
@@ -232,6 +233,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             layer.n_fixed,
             layer.n_instance,
         );
+        exit_span!(span_eq);
+
         // Calculate max_num_var and max_degree from the extracted relationships
         let (term_coefficients, mle_indices_per_term, mle_size_info) =
             extract_mle_relationships_from_monomial_terms(
