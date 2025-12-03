@@ -532,6 +532,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
 
         (mles, pcs_data, commit)
     }
+
+    fn extract_witness_mles<'a>(
+        &self,
+        witness_mles: &mut Vec<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
+        num_inputs: usize,
+        _pcs_data: &<CpuBackend<E, PCS> as ProverBackend>::PcsData,
+        _trace_idx: usize,
+    ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        witness_mles
+            .drain(..num_inputs)
+            .map(|mle| Arc::new(mle))
+            .collect_vec()
+    }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBackend<E, PCS>>

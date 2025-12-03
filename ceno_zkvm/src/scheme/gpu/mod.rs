@@ -171,6 +171,35 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         // let mles = mles.into_iter().map(|mle| MultilinearExtensionGpu::from_ceno(mle)).collect_vec();
         (mles, pcs_data, commit)
     }
+
+    fn extract_witness_mles<'a>(
+        &self,
+        _witness_mles: &mut Vec<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
+        num_inputs: usize,
+        pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
+        trace_idx: usize,
+    ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        // transmute pcs_data from generic PcsData type to GPU-specific type
+        let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
+            BB31Base,
+            BufferImpl<BB31Base>,
+            GpuDigestLayer,
+            GpuMatrix<'static>,
+            GpuPolynomial<'static>,
+        > = unsafe { std::mem::transmute(pcs_data) };
+
+        let cuda_hal = get_cuda_hal().unwrap();
+        let poly_group = cuda_hal
+            .basefold
+            .get_trace(&cuda_hal, pcs_data_basefold, trace_idx)
+            .unwrap();
+        assert_eq!(poly_group.len(), num_inputs, "num_inputs mismatch");
+
+        poly_group
+            .into_iter()
+            .map(|poly| Arc::new(MultilinearExtensionGpu::from_ceno_gpu(poly)))
+            .collect_vec()
+    }
 }
 
 fn build_tower_witness_gpu<'buf, E: ExtensionField>(

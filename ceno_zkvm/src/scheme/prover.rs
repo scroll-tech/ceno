@@ -261,6 +261,7 @@ impl<
 
         let mut points = Vec::new();
         let mut evaluations = Vec::new();
+        let mut trace_idx = 0usize; // tracks the index of circuits with witness columns (num_witin > 0) in PCS data
         for ((circuit_name, num_instances), structural_rmm) in name_and_instances
             .into_iter()
             .zip_eq(structural_rmms.into_iter())
@@ -298,10 +299,19 @@ impl<
             transcript.append_field_element(&E::BaseField::from_canonical_u64(circuit_idx as u64));
 
             // TODO: add an enum for circuit type either in constraint_system or vk
-            let witness_mle = witness_mles
-                .drain(..cs.num_witin())
-                .map(|mle| mle.into())
-                .collect_vec();
+            let witness_mle = if cs.num_witin() > 0 {
+                // only extract and increment trace_idx when circuit has witness columns
+                let mles = self.device.extract_witness_mles(
+                    &mut witness_mles,
+                    cs.num_witin(),
+                    &witness_data,
+                    trace_idx,
+                );
+                trace_idx += 1;
+                mles
+            } else {
+                vec![]
+            };
 
             let structural_witness_span = entered_span!("structural_witness", profiling_2 = true);
             let structural_mles = structural_rmm.to_mles();
