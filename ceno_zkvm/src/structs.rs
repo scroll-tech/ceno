@@ -1,6 +1,6 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    e2e::ShardContext,
+    e2e::{E2EProgramCtx, ShardContext},
     error::ZKVMError,
     instructions::Instruction,
     scheme::septic_curve::SepticPoint,
@@ -27,6 +27,7 @@ use std::{
     sync::Arc,
 };
 use sumcheck::structs::{IOPProof, IOPProverMessage};
+use tracing::Level;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 /// proof that the sum of N=2^n EC points is equal to `sum`
@@ -427,7 +428,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
         config: &TC::TableConfig,
-        input: &TC::WitnessInput,
+        input: &TC::WitnessInput<'_>,
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&TC::name()).unwrap();
@@ -453,13 +454,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         Ok(())
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn assign_shared_circuit(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
-        // shard_ctx: &ShardContext,
         (shard_ctx, final_mem): &(
             &ShardContext,
-            &[(InstancePaddingStrategy, &[MemFinalRecord])],
+            &[(&'static str, InstancePaddingStrategy, &[MemFinalRecord])],
         ),
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
@@ -473,7 +474,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let non_first_shard_records = if shard_ctx.is_first_shard() {
             final_mem
                 .par_iter()
-                .flat_map_iter(|(_, final_mem)| {
+                .flat_map_iter(|(mem_name, _, final_mem)| {
                     final_mem.iter().filter_map(|mem_record| {
                         // prepare cross shard writes record for those record which not accessed in first record
                         // but access in future shard
@@ -504,6 +505,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                             };
                             let ec_point: ECPoint<E> = global_write.to_ec_point(&perm);
                             Some(ShardRamInput {
+                                name: mem_name,
                                 record: global_write,
                                 ec_point,
                             })
@@ -525,6 +527,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     let global_write: ShardRamRecord = (vma, record, true).into();
                     let ec_point: ECPoint<E> = global_write.to_ec_point(&perm);
                     ShardRamInput {
+                        name: "current_shard_external_write",
                         record: global_write,
                         ec_point,
                     }
@@ -541,6 +544,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                             let global_read: ShardRamRecord = (vma, record, false).into();
                             let ec_point: ECPoint<E> = global_read.to_ec_point(&perm);
                             ShardRamInput {
+                                name: "current_shard_external_read",
                                 record: global_read,
                                 ec_point,
                             }
@@ -548,6 +552,34 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     }),
             )
             .collect::<Vec<_>>();
+
+        if tracing::enabled!(Level::DEBUG) {
+            let total = global_input.len() as f64;
+            // log global input stats
+            let record_stats = global_input
+                .par_iter()
+                .fold(HashMap::new, |mut local, d| {
+                    *local.entry(d.name).or_insert(0) += 1;
+                    local
+                })
+                .reduce(HashMap::new, |mut a, b| {
+                    for (k, v) in b {
+                        *a.entry(k).or_insert(0) += v;
+                    }
+                    a
+                });
+
+            for (mem_name, count) in record_stats {
+                let pct = (count as f64 / total) * 100.0;
+                tracing::debug!(
+                    "{}th-shard shard ram circuit records: mem_name={} count={} ({:.2}%)",
+                    shard_ctx.shard_id,
+                    mem_name,
+                    count,
+                    pct
+                );
+            }
+        }
 
         assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
@@ -605,6 +637,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,
+    pub program_ctx: Option<E2EProgramCtx<E>>,
+
     // entry program counter
     pub entry_pc: u32,
     // pk for opcode and table circuits
@@ -638,6 +672,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
         Self {
             pp,
             vp,
+            program_ctx: None,
             entry_pc: 0,
             circuit_pks: BTreeMap::new(),
             initial_global_state_expr: Expression::ZERO,
@@ -716,6 +751,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .collect(),
         }
     }
+
+    pub fn set_program_ctx(&mut self, ctx: E2EProgramCtx<E>) {
+        self.program_ctx = Some(ctx)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -723,7 +762,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned",
 ))]
-pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
+where
+    PCS::VerifierParam: Sized,
+{
     pub vp: PCS::VerifierParam,
     // entry program counter
     pub entry_pc: u32,

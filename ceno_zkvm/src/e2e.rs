@@ -102,7 +102,7 @@ pub struct FullMemState<Record> {
     pub heap: Vec<Record>,
 }
 
-type InitMemState = FullMemState<MemInitRecord>;
+pub(crate) type InitMemState = FullMemState<MemInitRecord>;
 type FinalMemState = FullMemState<MemFinalRecord>;
 
 pub struct EmulationResult<'a> {
@@ -170,7 +170,7 @@ impl Default for MultiProver {
 }
 
 pub struct ShardContext<'a> {
-    shard_id: usize,
+    pub shard_id: usize,
     num_shards: usize,
     max_cycle: Cycle,
     pub addr_future_accesses: Arc<NextCycleAccess>,
@@ -930,17 +930,17 @@ pub fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
     program_addrs
 }
 
-pub struct ConstraintSystemConfig<'a, E: ExtensionField> {
+pub struct ConstraintSystemConfig<E: ExtensionField> {
     pub zkvm_cs: ZKVMConstraintSystem<E>,
     pub config: Rv32imConfig<E>,
-    pub mmu_config: MmuConfig<'a, E>,
+    pub mmu_config: MmuConfig<E>,
     pub dummy_config: DummyExtraConfig<E>,
     pub prog_config: ProgramTableConfig,
 }
 
-pub fn construct_configs<'a, E: ExtensionField>(
+pub fn construct_configs<E: ExtensionField>(
     program_params: ProgramParams,
-) -> ConstraintSystemConfig<'a, E> {
+) -> ConstraintSystemConfig<E> {
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
     let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
@@ -1187,13 +1187,13 @@ pub enum Checkpoint {
 pub type IntermediateState<E, PCS> = (Option<ZKVMProof<E, PCS>>, Option<ZKVMVerifyingKey<E, PCS>>);
 
 /// Context construct from a program and given platform
-pub struct E2EProgramCtx<'a, E: ExtensionField> {
+pub struct E2EProgramCtx<E: ExtensionField> {
     pub program: Arc<Program>,
     pub platform: Platform,
     pub multi_prover: MultiProver,
     pub static_addrs: Vec<MemInitRecord>,
     pub pubio_len: usize,
-    pub system_config: ConstraintSystemConfig<'a, E>,
+    pub system_config: ConstraintSystemConfig<E>,
     pub reg_init: Vec<MemInitRecord>,
     pub io_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
@@ -1218,11 +1218,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> E2ECheckpointResult<
 }
 
 /// Set up a program with the given platform
-pub fn setup_program<'a, E: ExtensionField>(
+pub fn setup_program<E: ExtensionField>(
     program: Program,
     platform: Platform,
     multi_prover: MultiProver,
-) -> E2EProgramCtx<'a, E> {
+) -> E2EProgramCtx<E> {
     let static_addrs = init_static_addrs(&program);
     let pubio_len = platform.public_io.iter_addresses().len();
     let program_params = ProgramParams {
@@ -1257,16 +1257,16 @@ pub fn setup_program<'a, E: ExtensionField>(
     }
 }
 
-impl<E: ExtensionField> E2EProgramCtx<'_, E> {
+impl<E: ExtensionField> E2EProgramCtx<E> {
     pub fn keygen<PCS: PolynomialCommitmentScheme<E> + 'static>(
-        &self,
+        self,
         max_num_variables: usize,
         security_level: SecurityLevel,
     ) -> (ZKVMProvingKey<E, PCS>, ZKVMVerifyingKey<E, PCS>) {
         let pcs_param =
             PCS::setup(1 << max_num_variables, security_level).expect("Basefold PCS setup");
         let (pp, vp) = PCS::trim(pcs_param, 1 << max_num_variables).expect("Basefold trim");
-        let pk = self
+        let mut pk = self
             .system_config
             .zkvm_cs
             .clone()
@@ -1278,6 +1278,7 @@ impl<E: ExtensionField> E2EProgramCtx<'_, E> {
             )
             .expect("keygen failed");
         let vk = pk.get_vk_slow();
+        pk.set_program_ctx(self);
         (pk, vk)
     }
 
@@ -1285,10 +1286,10 @@ impl<E: ExtensionField> E2EProgramCtx<'_, E> {
         PCS: PolynomialCommitmentScheme<E> + 'static,
         PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     >(
-        &self,
+        self,
         pb: &PB,
     ) -> (ZKVMProvingKey<E, PCS>, ZKVMVerifyingKey<E, PCS>) {
-        let pk = self
+        let mut pk = self
             .system_config
             .zkvm_cs
             .clone()
@@ -1300,6 +1301,7 @@ impl<E: ExtensionField> E2EProgramCtx<'_, E> {
             )
             .expect("keygen failed");
         let vk = pk.get_vk_slow();
+        pk.set_program_ctx(self);
         (pk, vk)
     }
 
@@ -1362,10 +1364,10 @@ pub fn run_e2e_with_checkpoint<
     tracing::debug!("keygen done in {:?}", start.elapsed());
 
     // New with prover
-    let prover = ZKVMProver::new(pk, device);
+    let prover = ZKVMProver::new(pk.into(), device);
 
     let start = std::time::Instant::now();
-    let init_full_mem = ctx.setup_init_mem(hints, public_io);
+    let init_full_mem = prover.setup_init_mem(hints, public_io);
     tracing::debug!("setup_init_mem done in {:?}", start.elapsed());
 
     // Generate witness
@@ -1375,13 +1377,7 @@ pub fn run_e2e_with_checkpoint<
             proofs: None,
             vk: Some(vk),
             next_step: Some(Box::new(move || {
-                _ = run_e2e_proof::<E, _, _, _>(
-                    &ctx,
-                    &prover,
-                    &init_full_mem,
-                    max_steps,
-                    is_mock_proving,
-                )
+                _ = run_e2e_proof::<E, _, _, _>(&prover, &init_full_mem, max_steps, is_mock_proving)
             })),
         };
     }
@@ -1389,11 +1385,11 @@ pub fn run_e2e_with_checkpoint<
     // Emulate program
     let start = std::time::Instant::now();
     let emul_result = emulate_program(
-        ctx.program.clone(),
+        prover.pk.program_ctx.as_ref().unwrap().program.clone(),
         max_steps,
         &init_full_mem,
-        &ctx.platform,
-        &ctx.multi_prover,
+        &prover.pk.program_ctx.as_ref().unwrap().platform,
+        &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
     );
     tracing::debug!("emulate done in {:?}", start.elapsed());
 
@@ -1408,12 +1404,16 @@ pub fn run_e2e_with_checkpoint<
                 // When we run e2e and halt before generate_witness, this implies we are going to
                 // benchmark generate_witness performance. So we skip mock proving check on
                 // `generate_witness` to avoid it affecting the benchmark result.
-                _ = generate_witness(&ctx.system_config, emul_result, &ctx.program)
+                _ = generate_witness(
+                    &prover.pk.program_ctx.as_ref().unwrap().system_config,
+                    emul_result,
+                    &prover.pk.program_ctx.as_ref().unwrap().program,
+                )
             })),
         };
     }
 
-    let zkvm_proofs = create_proofs_helper(&ctx, emul_result, &prover, is_mock_proving);
+    let zkvm_proofs = create_proofs_helper(emul_result, &prover, is_mock_proving);
 
     let verifier = ZKVMVerifier::new(vk.clone());
 
@@ -1446,12 +1446,12 @@ pub fn run_e2e_proof<
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     PD: ProverDevice<PB> + 'static,
 >(
-    ctx: &E2EProgramCtx<E>,
     prover: &ZKVMProver<E, PCS, PB, PD>,
     init_full_mem: &InitMemState,
     max_steps: usize,
     is_mock_proving: bool,
 ) -> Vec<ZKVMProof<E, PCS>> {
+    let ctx = prover.pk.program_ctx.as_ref().unwrap();
     // Emulate program
     let emul_result = emulate_program(
         ctx.program.clone(),
@@ -1460,7 +1460,7 @@ pub fn run_e2e_proof<
         &ctx.platform,
         &ctx.multi_prover,
     );
-    create_proofs_helper(ctx, emul_result, prover, is_mock_proving)
+    create_proofs_helper(emul_result, prover, is_mock_proving)
 }
 
 /// defines a lightweight CPU -> GPU pipeline for witness generation and proof creation.
@@ -1490,17 +1490,16 @@ pub fn run_e2e_proof<
 /// fully sequential execution. Witness generation and proof creation run
 /// one after another with no overlap.
 fn create_proofs_helper<
-    'a,
     E: ExtensionField + LkMultiplicityKey,
     PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     PD: ProverDevice<PB> + 'static,
 >(
-    ctx: &E2EProgramCtx<E>,
-    emulation_result: EmulationResult<'a>,
+    emulation_result: EmulationResult,
     prover: &ZKVMProver<E, PCS, PB, PD>,
     is_mock_proving: bool,
 ) -> Vec<ZKVMProof<E, PCS>> {
+    let ctx = prover.pk.program_ctx.as_ref().unwrap();
     #[cfg(feature = "gpu")]
     {
         use crossbeam::channel;

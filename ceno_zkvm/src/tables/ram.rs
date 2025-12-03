@@ -156,4 +156,4 @@ impl NonVolatileTable for PubIOTable {
 }
 
 pub type PubIOInitCircuit<E> = PubIORamInitCircuit<E, PubIOTable>;
-pub type LocalFinalCircuit<'a, E> = LocalFinalRamCircuit<'a, UINT_LIMBS, E>;
+pub type LocalFinalCircuit<E> = LocalFinalRamCircuit<UINT_LIMBS, E>;
