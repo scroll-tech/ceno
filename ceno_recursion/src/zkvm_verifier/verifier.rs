@@ -4,21 +4,18 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        PolyEvaluator, UniPolyExtrapolator, assert_ext_arr_eq, challenger_multi_observe, eq_eval,
-        eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse,
+        PolyEvaluator, UniPolyExtrapolator, arr_product, assert_ext_arr_eq,
+        build_eq_x_r_vec_sequential, challenger_multi_observe, concat,
+        dot_product as ext_dot_product, eq_eval, eq_eval_less_or_equal_than,
+        eval_ceno_expr_with_instance, eval_wellform_address_vec, gen_alpha_pows, mask_arr,
+        nested_product, reverse,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
         mmcs::MmcsCommitmentVariable,
         query_phase::PointAndEvalsVariable,
         utils::pow_2,
-    },
-};
-// use crate::basefold_verifier::verifier::batch_verify;
-use crate::{
-    arithmetics::{
-        arr_product, build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
-        eq_eval_less_or_equal_than, gen_alpha_pows, nested_product,
+        verifier::batch_verify,
     },
     tower_verifier::{
         binding::{PointAndEvalVariable, PointVariable},
@@ -202,6 +199,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     challenger.observe(builder, log2_max_codeword_size_felt);
 
     let alpha = challenger.sample_ext(builder);
+    builder.print_e(alpha);
     let beta = challenger.sample_ext(builder);
 
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(2);
@@ -249,11 +247,13 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
+        println!("{} circuit name: {}", i, circuit_name);
 
         builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
             let chip_proof =
                 builder.get(&zkvm_proof_input.chip_proofs, num_chips_verified.get_var());
 
+            builder.print_v(chip_id);
             builder.assert_usize_eq(
                 chip_proof.wits_in_evals.len(),
                 Usize::from(circuit_vk.get_cs().num_witin()),
@@ -288,6 +288,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             });
             challenger.observe(builder, chip_proof.idx_felt);
 
+            builder.print_e(chip_logup_sum);
             if circuit_vk.get_cs().is_with_lk_table() {
                 builder.assign(&logup_sum, logup_sum - chip_logup_sum);
             } else {
@@ -459,7 +460,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             });
     }
 
-    // _debug
     // batch_verify(
     //     builder,
     //     zkvm_proof_input.max_num_var,

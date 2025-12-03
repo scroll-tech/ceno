@@ -172,12 +172,25 @@ pub mod tests {
         pcs_batch_commit, pcs_setup, pcs_trim, util::hash::write_digest_to_transcript,
     };
     use multilinear_extensions::mle::MultilinearExtension;
-    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
-    use openvm_native_circuit::{Native, NativeConfig};
+    use openvm_circuit::{
+        arch::{SystemConfig, VirtualMachine, VmExecutor, instructions::program::Program},
+        utils::TestStarkEngine,
+    };
+    use openvm_instructions::exe::VmExe;
+    use openvm_native_circuit::{
+        Native, NativeBuilder, NativeConfig, execute_program, execute_program_with_config,
+    };
     use openvm_native_compiler::{asm::AsmBuilder, conversion::CompilerOptions};
     use openvm_native_recursion::{challenger::duplex::DuplexChallengerVariable, hints::Hintable};
     use openvm_stark_backend::p3_challenger::GrindingChallenger;
-    use openvm_stark_sdk::{config::baby_bear_poseidon2::Challenger, p3_baby_bear::BabyBear};
+    use openvm_stark_sdk::{
+        config::{
+            FriParameters,
+            baby_bear_poseidon2::{BabyBearPoseidon2Engine, Challenger},
+        },
+        engine::StarkFriEngine,
+        p3_baby_bear::BabyBear,
+    };
     use p3::field::{Field, FieldAlgebra};
     use rand::thread_rng;
     use serde::Deserialize;
@@ -377,8 +390,17 @@ pub mod tests {
         let system_config = SystemConfig::default()
             .with_public_values(4)
             .with_max_segment_len((1 << 25) - 100)
+            .without_continuations()
             .with_profiling();
         let config = NativeConfig::new(system_config, Native);
+
+        let builder = NativeBuilder::default();
+        let output = execute_program_with_config::<BabyBearPoseidon2Engine, _>(
+            program, witness, builder, config,
+        )
+        .unwrap()
+        .0;
+        output.to_state.metrics.emit();
 
         // _debug
         // let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
