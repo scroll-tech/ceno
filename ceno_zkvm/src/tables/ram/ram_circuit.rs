@@ -348,12 +348,12 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
         RowMajorMatrix::<E::BaseField>::new(0, 0, InstancePaddingStrategy::Default)
     }
 
-    fn assign_instances<'a>(
+    fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        (shard_ctx, final_mem): &Self::WitnessInput<'a>,
+        (shard_ctx, final_mem): &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
         Ok(Self::TableConfig::assign_instances(
