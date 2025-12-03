@@ -14,7 +14,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     gpu::{GpuBackend, GpuProver},
-    hal::{MultilinearPolynomial, ProverBackend},
+    hal::ProverBackend,
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -163,13 +163,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         (mles, pcs_data, commit)
     }
 
-    fn extract_witness_mles<'a>(
+    fn extract_witness_mles<'a, 'b>(
         &self,
-        _witness_mles: &mut Vec<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
-        num_inputs: usize,
-        pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
-        trace_idx: usize,
-    ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        _witness_mles: &'b mut Vec<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
+        pcs_data: &'b <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    ) -> Box<
+        dyn Iterator<Item = Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> + 'b,
+    > {
         // transmute pcs_data from generic PcsData type to GPU-specific type
         let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
             BB31Base,
@@ -179,17 +179,39 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             GpuPolynomial<'static>,
         > = unsafe { std::mem::transmute(pcs_data) };
 
-        let cuda_hal = get_cuda_hal().unwrap();
-        let poly_group = cuda_hal
-            .basefold
-            .get_trace(&cuda_hal, pcs_data_basefold, trace_idx)
-            .unwrap();
-        assert_eq!(poly_group.len(), num_inputs, "num_inputs mismatch");
+        let total_traces = pcs_data_basefold.num_traces();
+        let mut trace_idx = 0usize;
+        let mut current_iter: std::vec::IntoIter<
+            Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
+        > = Vec::new().into_iter();
 
-        poly_group
-            .into_iter()
-            .map(|poly| Arc::new(MultilinearExtensionGpu::from_ceno_gpu(poly)))
-            .collect_vec()
+        let iter = std::iter::from_fn(move || {
+            loop {
+                if let Some(poly) = current_iter.next() {
+                    return Some(poly);
+                }
+
+                if trace_idx >= total_traces {
+                    return None;
+                }
+
+                let cuda_hal = get_cuda_hal().unwrap();
+                let poly_group = cuda_hal
+                    .basefold
+                    .get_trace(&cuda_hal, pcs_data_basefold, trace_idx)
+                    .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
+                trace_idx += 1;
+                drop(cuda_hal);
+
+                current_iter = poly_group
+                    .into_iter()
+                    .map(|poly| Arc::new(MultilinearExtensionGpu::from_ceno_gpu(poly)))
+                    .collect::<Vec<_>>()
+                    .into_iter();
+            }
+        });
+
+        Box::new(iter)
     }
 }
 

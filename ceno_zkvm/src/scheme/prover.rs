@@ -240,7 +240,9 @@ impl<
 
         let mut points = Vec::new();
         let mut evaluations = Vec::new();
-        let mut trace_idx = 0usize; // tracks the index of circuits with witness columns (num_witin > 0) in PCS data
+        let mut witness_iter = self
+            .device
+            .extract_witness_mles(&mut witness_mles, &witness_data);
         for ((circuit_name, num_instances), structural_rmm) in name_and_instances
             .into_iter()
             .zip_eq(structural_rmms.into_iter())
@@ -269,14 +271,13 @@ impl<
 
             // TODO: add an enum for circuit type either in constraint_system or vk
             let witness_mle = if cs.num_witin() > 0 {
-                // only extract and increment trace_idx when circuit has witness columns
-                let mles = self.device.extract_witness_mles(
-                    &mut witness_mles,
+                let mles = witness_iter.by_ref().take(cs.num_witin()).collect_vec();
+                assert_eq!(
+                    mles.len(),
                     cs.num_witin(),
-                    &witness_data,
-                    trace_idx,
+                    "insufficient witness mles for circuit {}",
+                    circuit_name
                 );
-                trace_idx += 1;
                 mles
             } else {
                 vec![]
@@ -328,6 +329,7 @@ impl<
                 pi_evals[idx] = eval;
             }
         }
+        drop(witness_iter);
         exit_span!(main_proofs_span);
 
         // batch opening pcs
