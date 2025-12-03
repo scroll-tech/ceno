@@ -31,7 +31,7 @@ pub type RMMCollections<F> = [RowMajorMatrix<F>; 2];
 pub trait TableCircuit<E: ExtensionField> {
     type TableConfig: Send + Sync;
     type FixedInput: Send + Sync + ?Sized;
-    type WitnessInput: Send + Sync + ?Sized;
+    type WitnessInput<'a>: Send + Sync + ?Sized;
 
     fn name() -> String;
 
@@ -95,6 +95,6 @@ pub trait TableCircuit<E: ExtensionField> {
         num_witin: usize,
         num_structural_witin: usize,
         multiplicity: &[HashMap<u64, usize>],
-        input: &Self::WitnessInput,
+        input: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError>;
 }

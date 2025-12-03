@@ -40,7 +40,7 @@ impl<E: ExtensionField, const MAX_BITS: usize> TableCircuit<E>
 {
     type TableConfig = DynamicRangeTableConfig;
     type FixedInput = ();
-    type WitnessInput = ();
+    type WitnessInput<'a> = ();
 
     fn name() -> String {
         format!("DYNAMIC_RANGE_{}", MAX_BITS)
@@ -86,7 +86,7 @@ impl<E: ExtensionField, const MAX_BITS_1: usize, const MAX_BITS_2: usize, R: Ran
 {
     type TableConfig = DoubleRangeTableConfig;
     type FixedInput = ();
-    type WitnessInput = ();
+    type WitnessInput<'a> = ();
 
     fn name() -> String {
         format!("DOUBLE_RANGE_{:?}", R::ROM_TYPE)
