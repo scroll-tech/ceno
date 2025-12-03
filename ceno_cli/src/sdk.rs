@@ -2,9 +2,8 @@
 use ceno_emul::{Platform, Program};
 use ceno_recursion::{
     aggregation::{
-        CenoAggregationProver, CenoLeafVmVerifierConfig, CenoRecursionProvingKeys,
-        CenoRecursionVerifierKeys, INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP, ROOT_LOG_BLOWUP,
-        SBOX_SIZE,
+        CenoAggregationProver, CenoRecursionProvingKeys,
+        CenoRecursionVerifierKeys,
     },
     zkvm_verifier::binding::E,
 };
@@ -16,23 +15,12 @@ use ceno_zkvm::{
 use ff_ext::{BabyBearExt4, ExtensionField};
 use gkr_iop::hal::ProverBackend;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use openvm_circuit::{
-    arch::{MemoryConfig, SystemConfig, VirtualMachine, VmInstance},
-    system::program::trace::VmCommittedExe,
-};
-use openvm_continuations::verifier::{
-    common::types::VmVerifierPvs,
-    internal::{InternalVmVerifierConfig, types::InternalVmVerifierPvs},
-};
+use openvm_circuit::arch::VmInstance;
 use openvm_native_circuit::{NativeBuilder, NativeConfig};
-use openvm_native_compiler::conversion::CompilerOptions;
-use openvm_sdk::prover::vm::{new_local_prover, types::VmProvingKey};
+use openvm_sdk::prover::vm::new_local_prover;
 use openvm_stark_backend::config::StarkGenericConfig;
 use openvm_stark_sdk::{
-    config::{
-        FriParameters,
-        baby_bear_poseidon2::{BabyBearPoseidon2Config, BabyBearPoseidon2Engine},
-    },
+    config::baby_bear_poseidon2::{BabyBearPoseidon2Config, BabyBearPoseidon2Engine},
     engine::StarkFriEngine,
 };
 use std::{marker::PhantomData, sync::Arc};

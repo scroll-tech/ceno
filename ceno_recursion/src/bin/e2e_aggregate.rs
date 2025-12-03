@@ -1,9 +1,6 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
-use ceno_recursion::aggregation::{
-    CenoAggregationProver, CenoLeafVmVerifierConfig, CenoRecursionVerifierKeys,
-    INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP, ROOT_LOG_BLOWUP, SBOX_SIZE, compress_to_root_proof,
-};
+use ceno_recursion::aggregation::compress_to_root_proof;
 use ceno_zkvm::{
     e2e::{
         Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
@@ -14,26 +11,9 @@ use ceno_zkvm::{
 use clap::Parser;
 use ff_ext::BabyBearExt4;
 use mpcs::{Basefold, BasefoldRSParams, SecurityLevel};
-use openvm_circuit::{
-    arch::{MemoryConfig, SystemConfig, VirtualMachine},
-    system::program::trace::VmCommittedExe,
-};
-use openvm_continuations::{
-    SC,
-    verifier::{
-        common::types::VmVerifierPvs,
-        internal::{InternalVmVerifierConfig, types::InternalVmVerifierPvs},
-    },
-};
-use openvm_native_circuit::NativeConfig;
-use openvm_native_compiler::conversion::CompilerOptions;
-use openvm_sdk::prover::vm::types::VmProvingKey;
 use openvm_stark_backend::config::StarkGenericConfig;
-use openvm_stark_sdk::{
-    config::{FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Engine},
-    engine::StarkFriEngine,
-};
-use std::{fs, fs::File, path::PathBuf, sync::Arc};
+use openvm_stark_sdk::engine::StarkFriEngine;
+use std::{fs, fs::File, path::PathBuf};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{

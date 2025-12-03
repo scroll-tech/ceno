@@ -11,7 +11,6 @@ use crate::{
 use ceno_zkvm::{
     scheme::{
         ZKVMChipProof, ZKVMProof,
-        septic_curve::{SepticExtension, SepticPoint},
     },
     structs::{EccQuarkProof, TowerProofs},
 };

@@ -1,6 +1,6 @@
 use crate::zkvm_verifier::{
     binding::{
-        E, F, SepticExtensionVariable, SepticPointInput, SepticPointVariable, ZKVMProofInput,
+        E, F, SepticExtensionVariable, SepticPointVariable, ZKVMProofInput,
         ZKVMProofInputVariable,
     },
     verifier::{add_septic_points_in_place, verify_zkvm_proof},
@@ -13,14 +13,13 @@ use ceno_zkvm::{
     scheme::{
         ZKVMProof,
         constants::SEPTIC_EXTENSION_DEGREE,
-        septic_curve::{SepticExtension, SepticPoint},
     },
     structs::ZKVMVerifyingKey,
 };
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{
     arch::{
-        MemoryConfig, SystemConfig, VirtualMachine, VmExecutor, VmInstance,
+        MemoryConfig, SystemConfig, VirtualMachine, VmInstance,
         instructions::program::Program,
     },
     system::program::trace::VmCommittedExe,
@@ -55,7 +54,6 @@ use openvm_sdk::{
 use openvm_stark_backend::{
     config::{Com, StarkGenericConfig},
     engine::StarkEngine,
-    prover::hal::DeviceDataTransporter,
 };
 #[cfg(not(feature = "gpu"))]
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
@@ -70,24 +68,20 @@ use openvm_stark_sdk::{
 };
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use serde_json::map;
-use std::{borrow::Borrow, fmt::write, fs::File, sync::Arc, time::Instant};
+use std::{borrow::Borrow, fs::File, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use openvm_circuit::{
     arch::{
-        CONNECTOR_AIR_ID, ContinuationVmProof, PROGRAM_AIR_ID, PROGRAM_CACHED_TRACE_INDEX,
-        PUBLIC_VALUES_AIR_ID, PreflightExecutor, SingleSegmentVmProver, VirtualMachineError,
-        VmBuilder, VmExecutionConfig,
+        CONNECTOR_AIR_ID, PROGRAM_AIR_ID, PROGRAM_CACHED_TRACE_INDEX,
+        PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver,
         hasher::{Hasher, poseidon2::vm_poseidon2_hasher},
         instructions::exe::VmExe,
     },
     system::{memory::CHUNK, program::trace::compute_exe_commit},
 };
-use openvm_native_circuit::NATIVE_MAX_TRACE_HEIGHTS;
 use openvm_native_compiler::{
     asm::AsmConfig,
     ir::{Array, Builder, Config, Felt},
-    prelude::*,
 };
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
@@ -204,8 +198,8 @@ impl CenoAggregationProver {
 
         // Internal program
         let internal_program = InternalVmVerifierConfig {
-            leaf_fri_params: leaf_fri_params,
-            internal_fri_params: internal_fri_params,
+            leaf_fri_params,
+            internal_fri_params,
             compiler_options: CompilerOptions::default().with_cycle_tracker(),
         }
         .build_program(&leaf_vm_vk, &internal_vm_vk);
@@ -225,7 +219,7 @@ impl CenoAggregationProver {
             leaf_fri_params: leaf_vm_pk.fri_params,
             internal_vm_vk,
             internal_fri_params: internal_vm_pk.fri_params,
-            internal_commit: internal_committed_exe.get_program_commit().into(),
+            internal_commit: internal_committed_exe.get_program_commit(),
         };
 
         let pk = CenoRecursionProvingKeys {
@@ -410,7 +404,7 @@ impl<SC: StarkGenericConfig, VC> CenoRecursionProvingKeys<SC, VC> {
             leaf_fri_params: self.leaf_vm_pk.fri_params,
             internal_vm_vk: self.internal_vm_pk.vm_pk.get_vk(),
             internal_fri_params: self.internal_vm_pk.fri_params,
-            internal_commit: self.internal_committed_exe.get_program_commit().into(),
+            internal_commit: self.internal_committed_exe.get_program_commit(),
         }
     }
 }
