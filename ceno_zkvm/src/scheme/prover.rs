@@ -191,16 +191,6 @@ impl<
         // (circuit_name, num_instances)
         let name_and_instances = witnesses.get_witnesses_name_instance();
 
-        // check memory usage
-        #[cfg(feature = "gpu")]
-        {
-            use gkr_iop::gpu::gpu_prover::*;
-            println!("[create_proof] init");
-            let cuda_hal = get_cuda_hal().unwrap();
-            cuda_hal.inner().synchronize().unwrap();
-            cuda_hal.print_mem_info().unwrap();
-        }
-
         let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
         let mut wits_rmms = BTreeMap::new();
 
@@ -228,16 +218,6 @@ impl<
         let (mut witness_mles, witness_data, witin_commit) = self.device.commit_traces(wits_rmms);
         PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         exit_span!(commit_to_traces_span);
-
-        // check memory usage
-        #[cfg(feature = "gpu")]
-        {
-            use gkr_iop::gpu::gpu_prover::*;
-            println!("[commit_traces] done");
-            let cuda_hal = get_cuda_hal().unwrap();
-            cuda_hal.inner().synchronize().unwrap();
-            cuda_hal.print_mem_info().unwrap();
-        }
 
         // transfer pk to device
         let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
@@ -267,16 +247,6 @@ impl<
             .into_iter()
             .zip_eq(structural_rmms.into_iter())
         {
-            // check memory usage
-            #[cfg(feature = "gpu")]
-            {
-                use gkr_iop::gpu::gpu_prover::*;
-                println!("[main_proofs] chip: {:?}", circuit_name);
-                let cuda_hal = get_cuda_hal().unwrap();
-                cuda_hal.inner().synchronize().unwrap();
-                cuda_hal.print_mem_info().unwrap();
-            }
-
             let circuit_idx = self
                 .pk
                 .circuit_name_to_index
