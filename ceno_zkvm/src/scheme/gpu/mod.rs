@@ -145,30 +145,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             let basefold_commit = cuda_hal.basefold.get_pure_commitment(&pcs_data);
             exit_span!(span);
 
-            let span = entered_span!("[gpu] get_mle_witness_from_commitment", profiling_2 = true);
-            let basefold_mles = cuda_hal
-                .basefold
-                .get_mle_witness_from_commitment_gpu(&pcs_data);
-            exit_span!(span);
-
             let span = entered_span!("[gpu] transmute back", profiling_2 = true);
             let commit: PCS::Commitment = unsafe { std::mem::transmute_copy(&basefold_commit) };
-            let mles = basefold_mles
-                .into_iter()
-                .map(|mle| MultilinearExtensionGpu::from_ceno_gpu(mle))
-                .collect_vec();
             // transmute pcs_data from GPU specific type to generic PcsData type
             let pcs_data_generic: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
                 unsafe { std::mem::transmute_copy(&pcs_data) };
             std::mem::forget(pcs_data);
             exit_span!(span);
 
-            (mles, pcs_data_generic, commit)
+            (vec![], pcs_data_generic, commit)
         } else {
             panic!("GPU commitment data is not compatible with the PCS");
         };
 
-        // let mles = mles.into_iter().map(|mle| MultilinearExtensionGpu::from_ceno(mle)).collect_vec();
+        // Note: mles are not used by GPU backend
+        // `fn extract_witness_mles` uses `hal.basefold.get_trace` to extract mles from pcs_data
         (mles, pcs_data, commit)
     }
 
