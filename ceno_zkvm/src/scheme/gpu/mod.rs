@@ -223,6 +223,8 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         &records[offset..][..cs.lk_expressions.len()]
     };
 
+    cuda_hal.inner().synchronize().unwrap();
+    cuda_hal.print_mem_info().unwrap();
     assert_eq!(big_buffers.len(), 0, "expect no big buffers");
 
     // prod: last layes & buffer
@@ -251,6 +253,8 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))?;
         big_buffers.push(big_buffer);
         is_prod_buffer_exists = true;
+        cuda_hal.inner().synchronize().unwrap();
+        cuda_hal.print_mem_info().unwrap();
     }
 
     // logup: last layes
@@ -294,6 +298,8 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
                 last_layer
             })
             .collect::<Vec<_>>();
+        cuda_hal.inner().synchronize().unwrap();
+        cuda_hal.print_mem_info().unwrap();
         res
     };
     if !logup_last_layers.is_empty() {
@@ -315,6 +321,8 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             .unwrap();
         big_buffers.push(big_buffer);
         is_logup_buffer_exists = true;
+        cuda_hal.inner().synchronize().unwrap();
+        cuda_hal.print_mem_info().unwrap();
     }
 
     let (_, pushed_big_buffers) = big_buffers.split_at_mut(0);
