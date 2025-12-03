@@ -21,10 +21,7 @@ use openvm_continuations::{
     C,
     verifier::{
         common::types::VmVerifierPvs,
-        internal::{
-            InternalVmVerifierConfig,
-            types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
-        },
+        internal::{InternalVmVerifierConfig, types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof}},
     },
 };
 use openvm_native_circuit::{NativeBuilder, NativeConfig};
@@ -40,11 +37,12 @@ use openvm_sdk::{
     config::DEFAULT_NUM_CHILDREN_INTERNAL,
     prover::vm::{new_local_prover, types::VmProvingKey},
 };
+use openvm_stark_backend::config::{Com, StarkGenericConfig};
 use openvm_stark_backend::{engine::StarkEngine, prover::hal::DeviceDataTransporter};
 use openvm_stark_sdk::{
-    config::{FriParameters, fri_params::standard_fri_params_with_100_bits_conjectured_security},
+    config::{FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Config, fri_params::standard_fri_params_with_100_bits_conjectured_security},
     engine::StarkFriEngine,
-    openvm_stark_backend::{config::StarkGenericConfig, keygen::types::MultiStarkVerifyingKey},
+    openvm_stark_backend::keygen::types::MultiStarkVerifyingKey,
     p3_bn254_fr::Bn254Fr,
 };
 use p3::field::FieldAlgebra;
@@ -72,10 +70,10 @@ use openvm_native_compiler::{
 };
 
 pub type InnerConfig = AsmConfig<F, E>;
-const LEAF_LOG_BLOWUP: usize = 1;
-const INTERNAL_LOG_BLOWUP: usize = 2;
-const ROOT_LOG_BLOWUP: usize = 3;
-const SBOX_SIZE: usize = 7;
+pub const LEAF_LOG_BLOWUP: usize = 1;
+pub const INTERNAL_LOG_BLOWUP: usize = 2;
+pub const ROOT_LOG_BLOWUP: usize = 3;
+pub const SBOX_SIZE: usize = 7;
 const PI_LEN: usize = 92;
 const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216, 2097152, 8388608,
@@ -83,9 +81,10 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
 ];
 
 pub struct CenoAggregationProver {
-    leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-    internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-    vk: CenoRecursionVerifierKeys,
+    pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
+    pub internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
+    pub vk: CenoRecursionVerifierKeys<BabyBearPoseidon2Config>,
+    pub pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
 }
 
 impl CenoAggregationProver {
@@ -212,10 +211,18 @@ impl CenoAggregationProver {
             internal_commit: internal_committed_exe.get_program_commit().into(),
         };
 
+        let pk = CenoRecursionProvingKeys {
+            leaf_vm_pk,
+            leaf_committed_exe,
+            internal_vm_pk,
+            internal_committed_exe,
+        };
+
         Self {
             leaf_prover,
             internal_prover,
             vk,
+            pk,
         }
     }
 }
@@ -314,14 +321,47 @@ impl CenoLeafVmVerifierConfig {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct CenoRecursionVerifierKeys {
+#[serde(bound(
+    serialize = "Com<SC>: Serialize",
+    deserialize = "Com<SC>: Deserialize<'de>"
+))]
+pub struct CenoRecursionVerifierKeys<SC: StarkGenericConfig> {
     pub leaf_vm_vk: MultiStarkVerifyingKey<SC>,
     pub leaf_fri_params: FriParameters,
     pub internal_vm_vk: MultiStarkVerifyingKey<SC>,
     pub internal_fri_params: FriParameters,
-    pub internal_commit: [F; CHUNK],
+    pub internal_commit: Com<SC>,
 }
 
+pub struct CenoRecursionProvingKeys<SC: StarkGenericConfig, VC> {
+    pub leaf_vm_pk: Arc<VmProvingKey<SC, VC>>,
+    pub leaf_committed_exe: Arc<VmCommittedExe<SC>>,
+    pub internal_vm_pk: Arc<VmProvingKey<SC, VC>>,
+    pub internal_committed_exe: Arc<VmCommittedExe<SC>>,
+}
+
+impl<SC: StarkGenericConfig, VC> Clone for CenoRecursionProvingKeys<SC, VC> {
+    fn clone(&self) -> Self {
+        Self {
+            leaf_vm_pk: self.leaf_vm_pk.clone(),
+            leaf_committed_exe: self.leaf_committed_exe.clone(),
+            internal_vm_pk: self.internal_vm_pk.clone(),
+            internal_committed_exe: self.internal_committed_exe.clone(),
+        }
+    }
+}
+
+impl<SC: StarkGenericConfig, VC> CenoRecursionProvingKeys<SC, VC> {
+    pub fn get_vk(&self) -> CenoRecursionVerifierKeys<SC> {
+        CenoRecursionVerifierKeys {
+            leaf_vm_vk: self.leaf_vm_pk.vm_pk.get_vk(),
+            leaf_fri_params: self.leaf_vm_pk.fri_params,
+            internal_vm_vk: self.internal_vm_pk.vm_pk.get_vk(),
+            internal_fri_params: self.internal_vm_pk.fri_params,
+            internal_commit: self.internal_committed_exe.get_program_commit().into(),
+        }
+    }
+}
 pub(crate) struct CenoLeafVmVerifierInput {
     pub proof: ZKVMProofInput,
     pub is_last: usize,
@@ -379,9 +419,7 @@ pub(crate) fn chunk_ceno_leaf_proof_inputs(zkvm_proofs: Vec<ZKVMProofInput>) -> 
 pub fn compress_to_root_proof(
     zkvm_proofs: Vec<ZKVMProof<E, RecPcs>>,
     vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
-// _debug
-// ) -> (CenoRecursionVerifierKeys, VmStarkProof<SC>) {
-) {
+) -> (CenoRecursionVerifierKeys<SC>, VmStarkProof<SC>) {
     let aggregation_start_timestamp = Instant::now();
 
     // Construct zkvm proof input
@@ -503,12 +541,13 @@ pub fn compress_to_root_proof(
 
     (vk, root_stark_proof)    
     */
+    todo!()
 }
 
 // Source from OpenVm SDK::verify_e2e_stark_proof with abridged key
 // See: https://github.com/openvm-org/openvm
 pub fn verify_e2e_stark_proof(
-    k: &CenoRecursionVerifierKeys,
+    k: &CenoRecursionVerifierKeys<SC>,
     proof: &VmStarkProof<SC>,
     _expected_exe_commit: &Bn254Fr,
     _expected_vm_commit: &Bn254Fr,
@@ -525,7 +564,7 @@ pub fn verify_e2e_stark_proof(
     let public_values_air_proof_data = &proof.inner.per_air[2];
 
     let program_commit = proof.inner.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref();
-    let internal_commit: &[_; CHUNK] = &k.internal_commit;
+    let internal_commit: &[_; CHUNK] = &k.internal_commit.into();
 
     let (vm_vk, fri_params, vm_commit) = if program_commit == internal_commit {
         let internal_pvs: &InternalVmVerifierPvs<_> = public_values_air_proof_data
@@ -660,7 +699,10 @@ pub fn verify_proofs(
 
 #[cfg(test)]
 mod tests {
-    use super::verify_e2e_stark_proof;
+    use super::{
+        CenoLeafVmVerifierConfig, CenoRecursionVerifierKeys, INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP,
+        ROOT_LOG_BLOWUP, SBOX_SIZE, verify_e2e_stark_proof,
+    };
     use crate::{
         aggregation::{compress_to_root_proof, verify_proofs},
         zkvm_verifier::binding::E,
@@ -671,9 +713,31 @@ mod tests {
         structs::ZKVMVerifyingKey,
     };
     use mpcs::{Basefold, BasefoldRSParams};
-    use openvm_stark_sdk::{config::setup_tracing_with_log_level, p3_bn254_fr::Bn254Fr};
+    use openvm_circuit::{
+        arch::{MemoryConfig, SystemConfig, VirtualMachine},
+        system::program::trace::VmCommittedExe,
+    };
+    use openvm_continuations::{
+        SC,
+        verifier::{
+            common::types::VmVerifierPvs,
+            internal::{InternalVmVerifierConfig, types::InternalVmVerifierPvs},
+        },
+    };
+    use openvm_native_circuit::NativeConfig;
+    use openvm_native_compiler::conversion::CompilerOptions;
+    use openvm_sdk::prover::vm::{types::VmProvingKey};
+    use openvm_stark_backend::config::StarkGenericConfig;
+    use openvm_stark_sdk::{
+        config::{
+            FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Engine,
+            setup_tracing_with_log_level,
+        },
+        engine::StarkFriEngine,
+        p3_bn254_fr::Bn254Fr,
+    };
     use p3::field::FieldAlgebra;
-    use std::fs::File;
+    use std::{fs::File, sync::Arc};
 
     pub fn aggregation_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);
@@ -695,7 +759,7 @@ mod tests {
 
         /* _debug
         verify_e2e_stark_proof(
-            &vk,
+            &ceno_vk,
             &root_stark_proof,
             // _debug
             &Bn254Fr::ZERO,

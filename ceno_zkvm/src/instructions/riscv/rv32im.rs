@@ -20,8 +20,9 @@ use crate::{
             },
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
-                KeccakInstruction, Uint256MulInstruction, WeierstrassAddAssignInstruction,
-                WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
+                KeccakInstruction, Secp256k1InvInstruction, Uint256MulInstruction,
+                WeierstrassAddAssignInstruction, WeierstrassDecompressInstruction,
+                WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
@@ -43,8 +44,9 @@ use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
     Bn254FpMulSpec,
     InsnKind::{self, *},
-    KeccakSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec,
-    Sha256ExtendSpec, StepRecord, SyscallSpec, Uint256MulSpec,
+    KeccakSpec, LogPcCycleSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec,
+    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Sha256ExtendSpec, StepRecord, SyscallSpec,
+    Uint256MulSpec,
 };
 use dummy::LargeEcallDummy;
 use ecall::EcallDummy;
@@ -134,6 +136,8 @@ pub struct Rv32imConfig<E: ExtensionField> {
         <WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>> as Instruction<E>>::InstructionConfig,
     pub secp256k1_double_config:
         <WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>> as Instruction<E>>::InstructionConfig,
+    pub secp256k1_scalar_invert:
+        <Secp256k1InvInstruction<E> as Instruction<E>>::InstructionConfig,
     pub secp256k1_decompress_config:
         <WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>> as Instruction<E>>::InstructionConfig,
     pub uint256_mul_config:
@@ -296,6 +300,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let secp256k1_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
         let secp256k1_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
         let secp256k1_decompress_config = register_ecall_circuit!(WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
+        let secp256k1_scalar_invert =
+            register_ecall_circuit!(Secp256k1InvInstruction<E>, ecall_cells_map);
         let uint256_mul_config = register_ecall_circuit!(Uint256MulInstruction<E>, ecall_cells_map);
 
         // tables
@@ -369,6 +375,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             bn254_double_config,
             secp256k1_add_config,
             secp256k1_double_config,
+            secp256k1_scalar_invert,
             secp256k1_decompress_config,
             uint256_mul_config,
             // tables
@@ -507,6 +514,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut secp256k1_double_records = Vec::new();
         let mut secp256k1_decompress_records = Vec::new();
         let mut uint256_mul_records = Vec::new();
+        let mut secp256k1_scalar_invert_records = Vec::new();
         steps.iter().for_each(|record| {
             let insn_kind = record.insn.kind;
             match insn_kind {
@@ -529,6 +537,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DoubleSpec::CODE => {
                     secp256k1_double_records.push(record);
                 }
+                InsnKind::ECALL
+                    if record.rs1().unwrap().value == Secp256k1ScalarInvertSpec::CODE =>
+                {
+                    secp256k1_scalar_invert_records.push(record);
+                }
                 InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DecompressSpec::CODE => {
                     secp256k1_decompress_records.push(record);
                 }
@@ -549,7 +562,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             tracing::debug!("tracer generated {:?} {} records", insn_kind, records.len());
         }
         tracing::debug!("tracer generated HALT {} records", halt_records.len());
-        tracing::debug!("tracer generated KECCAL {} records", keccak_records.len());
+        tracing::debug!("tracer generated KECCAK {} records", keccak_records.len());
         tracing::debug!(
             "tracer generated bn254_add_records {} records",
             bn254_add_records.len()
@@ -565,6 +578,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         tracing::debug!(
             "tracer generated secp256k1_double_records {} records",
             secp256k1_double_records.len()
+        );
+        tracing::debug!(
+            "tracer generated secp256k1_scalar_invert_records {} records",
+            secp256k1_scalar_invert_records.len()
         );
         tracing::debug!(
             "tracer generated secp256k1_decompress_records {} records",
@@ -676,6 +693,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 &self.secp256k1_double_config,
                 secp256k1_double_records,
             )?;
+        witness.assign_opcode_circuit::<Secp256k1InvInstruction<E>>(
+            cs,
+            shard_ctx,
+            &self.secp256k1_scalar_invert,
+            secp256k1_scalar_invert_records,
+        )?;
         witness.assign_opcode_circuit::<WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>>(
             cs,
             shard_ctx,
@@ -738,6 +761,8 @@ pub struct DummyExtraConfig<E: ExtensionField> {
         <LargeEcallDummy<E, Bn254Fp2AddSpec> as Instruction<E>>::InstructionConfig,
     bn254_fp2_mul_config:
         <LargeEcallDummy<E, Bn254Fp2MulSpec> as Instruction<E>>::InstructionConfig,
+
+    phantom_log_pc_cycle: <LargeEcallDummy<E, LogPcCycleSpec> as Instruction<E>>::InstructionConfig,
 }
 
 impl<E: ExtensionField> DummyExtraConfig<E> {
@@ -753,6 +778,8 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2AddSpec>>();
         let bn254_fp2_mul_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254Fp2MulSpec>>();
+        let phantom_log_pc_cycle =
+            cs.register_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>();
 
         Self {
             ecall_config,
@@ -761,6 +788,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             bn254_fp_mul_config,
             bn254_fp2_add_config,
             bn254_fp2_mul_config,
+            phantom_log_pc_cycle,
         }
     }
 
@@ -790,6 +818,10 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs,
             &self.bn254_fp2_mul_config,
         );
+        fixed.register_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
+            cs,
+            &self.phantom_log_pc_cycle,
+        );
     }
 
     pub fn assign_opcode_circuit(
@@ -806,6 +838,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let mut bn254_fp_mul_steps = Vec::new();
         let mut bn254_fp2_add_steps = Vec::new();
         let mut bn254_fp2_mul_steps = Vec::new();
+        let mut phantom_log_pc_cycle_spec = Vec::new();
         let mut other_steps = Vec::new();
 
         if let Some(ecall_steps) = steps.remove(&ECALL) {
@@ -816,6 +849,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
                     Bn254FpMulSpec::CODE => bn254_fp_mul_steps.push(step),
                     Bn254Fp2AddSpec::CODE => bn254_fp2_add_steps.push(step),
                     Bn254Fp2MulSpec::CODE => bn254_fp2_mul_steps.push(step),
+                    LogPcCycleSpec::CODE => phantom_log_pc_cycle_spec.push(step),
                     _ => other_steps.push(step),
                 }
             }
@@ -850,6 +884,12 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             shard_ctx,
             &self.bn254_fp2_mul_config,
             bn254_fp2_mul_steps,
+        )?;
+        witness.assign_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
+            cs,
+            shard_ctx,
+            &self.phantom_log_pc_cycle,
+            phantom_log_pc_cycle_spec,
         )?;
         witness.assign_opcode_circuit::<EcallDummy<E>>(
             cs,
@@ -900,6 +940,10 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
                 .ecall_cells_map
                 .get(&WeierstrassDoubleAssignInstruction::<E, SwCurve<Secp256k1>>::name())
                 .expect("unable to find name"),
+            Secp256k1ScalarInvertSpec::CODE => *self
+                .ecall_cells_map
+                .get(&Secp256k1InvInstruction::<E>::name())
+                .expect("unable to find name"),
             Secp256k1DecompressSpec::CODE => *self
                 .ecall_cells_map
                 .get(&WeierstrassDecompressInstruction::<E, SwCurve<Secp256k1>>::name())
@@ -908,6 +952,8 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
                 .ecall_cells_map
                 .get(&Uint256MulInstruction::<E>::name())
                 .expect("unable to find name"),
+            // phantom
+            LogPcCycleSpec::CODE => 0,
             // other type of ecalls are handled by dummy ecall instruction
             _ => unreachable!("unknow match record {:?}", record),
         }

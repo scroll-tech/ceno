@@ -6,13 +6,14 @@ use ceno_zkvm::structs::{ChallengeId, WitnessId};
 use ff_ext::{BabyBearExt4, ExtensionField, SmallField};
 use itertools::Either;
 use multilinear_extensions::{Expression, Fixed, Instance};
+use openvm_native_circuit::EXT_DEG;
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
 use openvm_stark_backend::p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+
 type E = BabyBearExt4;
 const MAX_NUM_VARS: usize = 25;
-const EXT_DEG: usize = 4;
 
 pub fn _print_ext_arr<C: Config>(builder: &mut Builder<C>, arr: &Array<C, Ext<C::F, C::EF>>) {
     iter_zip!(builder, arr).for_each(|ptr_vec, builder| {

@@ -22,8 +22,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-use std::{array, borrow::BorrowMut, sync::Arc};
-
 use crate::{
     chip_handler::MemoryExpr,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -66,6 +64,7 @@ use sp1_curves::{
     uint256::U256Field,
     utils::biguint_to_limbs,
 };
+use std::{array, borrow::BorrowMut, marker::PhantomData, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
@@ -381,6 +380,260 @@ impl<E: ExtensionField> ProtocolWitnessGenerator<E> for Uint256MulLayout<E> {
     }
 }
 
+pub trait Uint256InvSpec {
+    type P: FieldParameters + NumWords;
+    fn syscall() -> u32;
+    fn name() -> String;
+    fn modulus() -> BigUint;
+}
+
+/// A set of columns for the Uint256Inv operation.
+#[derive(Debug, Clone, AlignedBorrow)]
+#[repr(C)]
+pub struct Uint256InvWitCols<T> {
+    // x = UInt256Field::ONE
+    // y := input
+    // y in little endian format
+    pub y_limbs: Limbs<T, <U256Field as NumLimbs>::Limbs>,
+    // output values. x / y = output
+    pub output: FieldOpCols<T, U256Field>,
+    pub output_range_check: FieldLtCols<T, U256Field>,
+}
+
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct Uint256InvLayer<WitT> {
+    pub wits: Uint256InvWitCols<WitT>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Uint256InvLayout<E: ExtensionField, Spec: Uint256InvSpec> {
+    pub layer_exprs: Uint256InvLayer<WitIn>,
+    pub selector_type_layout: SelectorTypeLayout<E>,
+    // y from memory
+    pub input32_exprs: GenericArray<MemoryExpr<E>, <Spec::P as NumWords>::WordsFieldElement>,
+    pub modulus_limbs: Limbs<Expression<E>, <Spec::P as NumLimbs>::Limbs>,
+    pub output32_exprs: GenericArray<MemoryExpr<E>, <Spec::P as NumWords>::WordsFieldElement>,
+    pub n_fixed: usize,
+    pub n_committed: usize,
+    pub n_structural_witin: usize,
+    pub n_challenges: usize,
+    phantom: PhantomData<Spec::P>,
+}
+
+impl<E: ExtensionField, Spec: Uint256InvSpec> Uint256InvLayout<E, Spec> {
+    fn new(cb: &mut CircuitBuilder<E>) -> Self {
+        let wits = Uint256InvWitCols {
+            y_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "uint256 y"))),
+            output: FieldOpCols::create(cb, || "uint256_inv_output"),
+            output_range_check: FieldLtCols::create(cb, || "uint256_inv_output_range_check"),
+        };
+        let modulus_limbs = Spec::P::to_limbs_expr(&Spec::modulus());
+
+        let eq = cb.create_placeholder_structural_witin(|| "uint256_mul_structural_witin");
+        let sel = SelectorType::Prefix(eq.expr());
+        let selector_type_layout = SelectorTypeLayout {
+            sel_mem_read: sel.clone(),
+            sel_mem_write: sel.clone(),
+            sel_lookup: sel.clone(),
+            sel_zero: sel.clone(),
+        };
+
+        // Default expression, will be updated in build_layer_logic
+        let input32_exprs = GenericArray::generate(|_| array::from_fn(|_| Expression::WitIn(0)));
+        // Default expression, will be updated in build_layer_logic
+        let output32_exprs = GenericArray::generate(|_| array::from_fn(|_| Expression::WitIn(0)));
+
+        Self {
+            layer_exprs: Uint256InvLayer { wits },
+            selector_type_layout,
+            input32_exprs,
+            modulus_limbs,
+            output32_exprs,
+            n_fixed: 0,
+            n_committed: 0,
+            n_challenges: 0,
+            n_structural_witin: 0,
+            phantom: Default::default(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn populate_row(
+        blu_events: &mut LkMultiplicity,
+        cols: &mut Uint256InvWitCols<E::BaseField>,
+        y: &BigUint,
+    ) {
+        cols.y_limbs = U256Field::to_limbs_field(y);
+        let y_inv = cols.output.populate_with_modulus(
+            blu_events,
+            &BigUint::one(),
+            y,
+            &Spec::modulus(),
+            FieldOperation::Div,
+        );
+        cols.output_range_check
+            .populate(blu_events, &y_inv, &Spec::modulus());
+    }
+}
+
+impl<E: ExtensionField, Spec: Uint256InvSpec> ProtocolBuilder<E> for Uint256InvLayout<E, Spec> {
+    type Params = ();
+
+    fn build_layer_logic(
+        cb: &mut CircuitBuilder<E>,
+        _params: Self::Params,
+    ) -> Result<Self, CircuitBuilderError> {
+        let mut layout = Self::new(cb);
+        let wits = &layout.layer_exprs.wits;
+
+        // compute y_inv = (1 / y) % modulus
+        // NOTE: y_limbs and modulus_limbs in little endian format
+        let y_limbs = &wits.y_limbs;
+        let modulus_limbs = &layout.modulus_limbs;
+
+        // If the modulus is zero, we'll actually use 2^256 as the modulus, so nothing happens.
+        // Otherwise, we use the modulus passed in.
+        let modulus_polynomial: Polynomial<Expression<E>> = modulus_limbs.clone().into();
+        let p_modulus: Polynomial<Expression<E>> = modulus_polynomial;
+
+        // constant one
+        let one_limbs: Limbs<Expression<E>, _> = Spec::P::to_limbs_expr(&BigUint::one());
+
+        // Evaluate the uint256 multiplication
+        wits.output
+            .eval_with_modulus(cb, &one_limbs, y_limbs, &p_modulus, FieldOperation::Div)?;
+
+        // Verify the range of the output if the moduls is not zero.  Also, check the value of
+        // modulus_is_not_zero.
+        wits.output_range_check
+            .eval(cb, &wits.output.result, modulus_limbs)?;
+
+        // Constraint output32 from wits.output by converting 8-bit limbs to 2x16-bit felts
+        let mut output32 = Vec::with_capacity(<Spec::P as NumWords>::WordsFieldElement::USIZE);
+        merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(
+            // rev to convert to big-endian
+            &wits.output.result.0.into_iter().rev().collect_vec(),
+            &mut output32,
+        );
+        let output32 = output32.try_into().unwrap();
+
+        // Constraint input32 from wits.y_limbs
+        let mut y_input32 = Vec::with_capacity(<Spec::P as NumWords>::WordsFieldElement::USIZE);
+        merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(
+            // rev to convert to big-endian
+            &wits.y_limbs.0.into_iter().rev().collect_vec(),
+            &mut y_input32,
+        );
+        let y_input32 = y_input32.try_into().unwrap();
+
+        // set input32/output32 expr
+        layout.input32_exprs = y_input32;
+        layout.output32_exprs = output32;
+
+        Ok(layout)
+    }
+
+    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
+        self.n_fixed = cb.cs.num_fixed;
+        self.n_committed = cb.cs.num_witin as usize;
+        self.n_structural_witin = cb.cs.num_structural_witin as usize;
+        self.n_challenges = 0;
+
+        // register selector to legacy constrain system
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
+
+        let w_len = cb.cs.w_expressions.len();
+        let r_len = cb.cs.r_expressions.len();
+        let lk_len = cb.cs.lk_expressions.len();
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+        (
+            [
+                // r_record
+                (0..r_len).collect_vec(),
+                // w_record
+                (r_len..r_len + w_len).collect_vec(),
+                // lk_record
+                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
+                // zero_record
+                (0..zero_len).collect_vec(),
+            ],
+            Chip::new_from_cb(cb, self.n_challenges),
+        )
+    }
+
+    fn n_committed(&self) -> usize {
+        todo!()
+    }
+
+    fn n_fixed(&self) -> usize {
+        todo!()
+    }
+
+    fn n_challenges(&self) -> usize {
+        todo!()
+    }
+
+    fn n_evaluations(&self) -> usize {
+        todo!()
+    }
+
+    fn n_layers(&self) -> usize {
+        todo!()
+    }
+}
+
+pub struct Uint256InvTrace {
+    pub instances: Vec<BigUint>,
+}
+
+impl<E: ExtensionField, Spec: Uint256InvSpec> ProtocolWitnessGenerator<E>
+    for Uint256InvLayout<E, Spec>
+{
+    type Trace = Uint256InvTrace;
+
+    fn fixed_witness_group(&self) -> RowMajorMatrix<E::BaseField> {
+        RowMajorMatrix::new(0, 0, InstancePaddingStrategy::Default)
+    }
+
+    fn phase1_witness_group(
+        &self,
+        phase1: Self::Trace,
+        wits: [&mut RowMajorMatrix<E::BaseField>; 2],
+        lk_multiplicity: &mut LkMultiplicity,
+    ) {
+        let num_instances = wits[0].num_instances();
+        let nthreads = max_usable_threads();
+        let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
+        let num_wit_cols = size_of::<Uint256InvWitCols<u8>>();
+        let [wits, structural_wits] = wits;
+        let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
+        let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
+        raw_witin_iter
+            .zip_eq(raw_structural_wits_iter)
+            .zip_eq(phase1.instances.par_chunks(num_instance_per_batch))
+            .for_each(|((rows, eqs), phase1_instances)| {
+                let mut lk_multiplicity = lk_multiplicity.clone();
+                rows.chunks_mut(self.n_committed)
+                    .zip_eq(eqs.chunks_mut(self.n_structural_witin))
+                    .zip_eq(phase1_instances)
+                    .for_each(|((row, eqs), phase1_instance)| {
+                        let cols: &mut Uint256InvWitCols<E::BaseField> = row
+                            [self.layer_exprs.wits.y_limbs.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
+                            .borrow_mut();
+                        Self::populate_row(&mut lk_multiplicity, cols, phase1_instance);
+                        for x in eqs.iter_mut() {
+                            *x = E::BaseField::ONE;
+                        }
+                    });
+            });
+    }
+}
+
 /// Uint256 Mul Event.
 ///
 /// This event is emitted when a uint256 mul operation is performed.
@@ -403,7 +656,7 @@ pub struct TestUint256MulLayout<E: ExtensionField> {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn setup_gkr_circuit<E: ExtensionField>()
+pub fn setup_uint256mul_gkr_circuit<E: ExtensionField>()
 -> Result<(TestUint256MulLayout<E>, GKRCircuit<E>, u16, u16), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "uint256_mul");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
@@ -741,7 +994,7 @@ mod tests {
             .collect_vec();
 
         let _ = run_uint256_mul::<E, Pcs>(
-            setup_gkr_circuit::<E>().expect("setup gkr circuit failed"),
+            setup_uint256mul_gkr_circuit::<E>().expect("setup gkr circuit failed"),
             instances,
             true,
             true,
