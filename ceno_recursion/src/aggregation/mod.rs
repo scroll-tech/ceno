@@ -77,9 +77,8 @@ pub const SBOX_SIZE: usize = 7;
 const PI_LEN: usize = 92;
 const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216, 2097152, 8388608,
-    262144, 2097152, 1048576, 4194304, 65536, 262144,
+    262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
-
 pub struct CenoAggregationProver {
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
@@ -239,6 +238,7 @@ impl CenoLeafVmVerifierConfig {
 
         {
             let ceno_leaf_input = CenoLeafVmVerifierInput::read(&mut builder);
+            let stark_pvs = VmVerifierPvs::<Felt<F>>::uninit(&mut builder);
 
             builder.cycle_tracker_start("Verify Ceno ZKVM Proof");
             let zkvm_proof = ceno_leaf_input.proof;
@@ -311,6 +311,10 @@ impl CenoLeafVmVerifierConfig {
                     add_septic_points_in_place(builder, &ec_sum, &shard_ec);
                 });
             });
+
+            for pv in stark_pvs.flatten() {
+                builder.commit_public_value(pv);
+            }
             builder.cycle_tracker_end("PV Operations");
             builder.halt();
         }
@@ -489,7 +493,7 @@ pub fn compress_to_root_proof(
             DEFAULT_NUM_CHILDREN_INTERNAL,
         );
 
-        let proofs: Vec<Proof<_>> = internal_inputs
+        let layer_proofs: Vec<Proof<_>> = internal_inputs
             .into_iter()
             .map(|input| {
                 internal_node_idx += 1;
@@ -517,6 +521,7 @@ pub fn compress_to_root_proof(
             })
             .collect();
 
+        proofs = layer_proofs;
         internal_node_height += 1;
     }
     println!(
