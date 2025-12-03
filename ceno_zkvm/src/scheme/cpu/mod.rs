@@ -540,10 +540,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
         _pcs_data: &<CpuBackend<E, PCS> as ProverBackend>::PcsData,
         _trace_idx: usize,
     ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
-        witness_mles
-            .drain(..num_inputs)
-            .map(Arc::new)
-            .collect_vec()
+        witness_mles.drain(..num_inputs).map(Arc::new).collect_vec()
     }
 }
 
