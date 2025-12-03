@@ -305,6 +305,7 @@ pub struct ShardRamCircuit<E> {
 
 #[derive(Clone, Debug)]
 pub struct ShardRamInput<E: ExtensionField> {
+    pub name: &'static str,
     pub record: ShardRamRecord,
     pub ec_point: ECPoint<E>,
 }
@@ -394,7 +395,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
 impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
     type TableConfig = ShardRamConfig<E>;
     type FixedInput = ();
-    type WitnessInput = [ShardRamInput<E>];
+    type WitnessInput<'a> = [ShardRamInput<E>];
 
     fn name() -> String {
         "ShardRamCircuit".to_string()
@@ -469,12 +470,12 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
     }
 
     /// steps format: local reads ++ local writes
-    fn assign_instances<'a>(
+    fn assign_instances(
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        steps: &Self::WitnessInput,
+        steps: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         if steps.is_empty() {
             return Ok([
@@ -735,7 +736,11 @@ mod tests {
             .chain(global_reads) // local writes
             .map(|record| {
                 let ec_point = record.to_ec_point::<E, Perm>(&perm);
-                ShardRamInput { record, ec_point }
+                ShardRamInput {
+                    name: "dummy_test",
+                    record,
+                    ec_point,
+                }
             })
             .collect::<Vec<_>>();
 
@@ -790,7 +795,7 @@ mod tests {
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
         let zkvm_vk = zkvm_pk.get_vk_slow();
-        let zkvm_prover = ZKVMProver::new(zkvm_pk, pd);
+        let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 
         let public_input_mles = public_value

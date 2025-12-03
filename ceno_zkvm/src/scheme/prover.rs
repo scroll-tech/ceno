@@ -76,8 +76,7 @@ impl<
         }
     }
 
-    pub fn new(pk: ZKVMProvingKey<E, PCS>, device: PD) -> Self {
-        let pk = Arc::new(pk);
+    pub fn new(pk: Arc<ZKVMProvingKey<E, PCS>>, device: PD) -> Self {
         let (device_first_shard_pk, device_non_first_shard_pk) =
             if pk.as_ref().has_fixed_commitment() {
                 (
@@ -476,6 +475,13 @@ impl<
             pi_in_evals,
             input_opening_point,
         ))
+    }
+
+    pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> crate::e2e::InitMemState {
+        let Some(ctx) = self.pk.program_ctx.as_ref() else {
+            panic!("empty program ctx")
+        };
+        ctx.setup_init_mem(hints, public_io)
     }
 }
 

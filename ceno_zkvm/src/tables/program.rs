@@ -174,7 +174,7 @@ pub struct ProgramTableCircuit<E>(PhantomData<E>);
 impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
     type TableConfig = ProgramTableConfig;
     type FixedInput = Program;
-    type WitnessInput = Program;
+    type WitnessInput<'a> = Program;
 
     fn name() -> String {
         "PROGRAM".into()

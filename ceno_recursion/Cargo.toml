@@ -35,15 +35,15 @@ whir.workspace = true
 witness.workspace = true
 
 # openvm
-openvm = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false, features = ["bench-metrics"] }
-openvm-continuations = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-native-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-native-compiler = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-native-compiler-derive = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-native-recursion = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-rv32im-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-sdk = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
+openvm.workspace = true
+openvm-circuit.workspace = true
+openvm-continuations.workspace = true
+openvm-native-circuit.workspace = true
+openvm-native-compiler.workspace = true
+openvm-native-compiler-derive.workspace = true
+openvm-native-recursion.workspace = true
+openvm-rv32im-circuit.workspace = true
+openvm-sdk.workspace = true
 
 # openvm = { path = "../../openvm-scroll-tech/crates/toolchain/openvm", default-features = false }
 # openvm-circuit = { path = "../../openvm-scroll-tech/crates/vm", default-features = false, features = ["bench-metrics"] }
