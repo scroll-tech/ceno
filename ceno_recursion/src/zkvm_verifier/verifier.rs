@@ -125,7 +125,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
-    
     builder
         .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
         .then(|builder| {
@@ -151,7 +150,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             }
         });
 
-    
     builder
         .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
         .then(|builder| {
@@ -248,7 +246,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             builder.set(&chip_indices, i, chip_proof.idx);
         });
 
-    /* _debug
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
@@ -464,12 +461,12 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     // _debug
     // batch_verify(
-    // builder,
-    // zkvm_proof_input.max_num_var,
-    // zkvm_proof_input.max_width,
-    // rounds,
-    // zkvm_proof_input.pcs_proof,
-    // &mut challenger,
+    //     builder,
+    //     zkvm_proof_input.max_num_var,
+    //     zkvm_proof_input.max_width,
+    //     rounds,
+    //     zkvm_proof_input.pcs_proof,
+    //     &mut challenger,
     // );
 
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
@@ -501,7 +498,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // logup check
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     builder.assert_ext_eq(logup_sum, zero);
-    */
 }
 
 pub fn verify_chip_proof<C: Config>(

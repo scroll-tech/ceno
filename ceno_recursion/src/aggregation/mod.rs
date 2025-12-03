@@ -428,6 +428,10 @@ pub fn compress_to_root_proof(
         .enumerate()
         .map(|(shard_id, p)| ZKVMProofInput::from((shard_id, p)))
         .collect();
+    let user_public_values = zkvm_proof_inputs
+            .iter()
+            .flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>())
+            .collect();
     let leaf_inputs = chunk_ceno_leaf_proof_inputs(zkvm_proof_inputs);
 
     let vm_builder = NativeBuilder::default();
@@ -467,7 +471,6 @@ pub fn compress_to_root_proof(
         })
         .collect::<Vec<_>>();
 
-    /* _debug
     // Aggregate tree to root proof
     let mut internal_node_idx = -1;
     let mut internal_node_height = 0;
@@ -525,10 +528,7 @@ pub fn compress_to_root_proof(
     // Export e2e stark proof (used in verify_e2e_stark_proof)
     let root_stark_proof = VmStarkProof {
         inner: proofs.pop().unwrap(),
-        user_public_values: zkvm_proof_inputs
-            .iter()
-            .flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>())
-            .collect(),
+        user_public_values,
     };
     // let file = File::create("root_stark_proof.bin").expect("Create export proof file");
     // bincode::serialize_into(file, &root_stark_proof).expect("failed to serialize internal proof");
@@ -540,8 +540,6 @@ pub fn compress_to_root_proof(
     bincode::serialize_into(file, &vk).expect("failed to serialize internal proof");
 
     (vk, root_stark_proof)    
-    */
-    todo!()
 }
 
 // Source from OpenVm SDK::verify_e2e_stark_proof with abridged key
@@ -805,7 +803,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
@@ -818,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_single() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
