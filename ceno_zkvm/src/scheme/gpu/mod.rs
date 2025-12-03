@@ -264,7 +264,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         // Allocate one big buffer for all product towers and add it to big_buffers
         let tower_size = 1 << (num_vars + 1); // 2 * mle_len elements per tower
         let total_buffer_size = num_towers * tower_size;
-        trace::debug!(
+        tracing::debug!(
             "prod tower request buffer size: {:.2} MB",
             (total_buffer_size * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0)
         );
@@ -332,7 +332,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         // Allocate one big buffer for all towers and add it to big_buffers
         let tower_size = 1 << (num_vars + 2); // 4 * mle_len elements per tower
         let total_buffer_size = num_towers * tower_size;
-        trace::debug!(
+        tracing::debug!(
             "logup tower request buffer size: {:.2} MB",
             (total_buffer_size * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0)
         );
