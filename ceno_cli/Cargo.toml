@@ -31,15 +31,14 @@ ceno_host = { path = "../ceno_host" }
 ceno_recursion = { path = "../ceno_recursion" }
 ceno_zkvm = { path = "../ceno_zkvm" }
 
-# openvm
-openvm-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false, features = ["bench-metrics"] }
-openvm-continuations = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-native-circuit = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-native-compiler = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-native-compiler-derive = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false }
-openvm-sdk = { git = "https://github.com/scroll-tech/openvm.git", branch = "feat/ceno_leaves", default-features = false, features = ["evm-prove"] }
-openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.1.1", default-features = false }
-openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.1.1", default-features = false }
+openvm-circuit.workspace = true
+openvm-continuations.workspace = true
+openvm-native-circuit.workspace = true
+openvm-native-compiler.workspace = true
+openvm-native-compiler-derive.workspace = true
+openvm-sdk.workspace = true
+openvm-stark-backend.workspace = true
+openvm-stark-sdk.workspace = true
 
 ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
