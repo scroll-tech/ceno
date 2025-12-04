@@ -128,16 +128,8 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let max_num_var = usize::read(builder);
         let max_width = usize::read(builder);
         let witin_commit = BasefoldCommitment::read(builder);
-        let witin_perm: Array<
-            AsmConfig<
-                p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>,
-                BinomialExtensionField<
-                    p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>,
-                    4,
-                >,
-            >,
-            Var<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>>,
-        > = Vec::<usize>::read(builder);
+        let witin_perm: Array<AsmConfig<F, BinomialExtensionField<F, 4>>, Var<F>> =
+            Vec::<usize>::read(builder);
         let fixed_perm = Vec::<usize>::read(builder);
         let pcs_proof = BasefoldProof::read(builder);
 
@@ -311,7 +303,6 @@ impl Hintable<InnerConfig> for TowerProofInput {
 }
 
 pub struct ZKVMChipProofInput {
-    // _debug: binding
     pub idx: usize,
     pub sum_num_instances: usize,
 
@@ -660,9 +651,6 @@ impl Hintable<InnerConfig> for LayerProofInput {
 }
 #[derive(Default)]
 pub struct GKRProofInput {
-    // _debug: binding
-    // pub num_var_with_rotation: usize,
-    // pub num_instances: usize,
     pub layer_proofs: Vec<LayerProofInput>,
 }
 
@@ -680,38 +668,17 @@ impl From<GKRProof<E>> for GKRProofInput {
 
 #[derive(DslVariable, Clone)]
 pub struct GKRProofVariable<C: Config> {
-    // _debug: binding
-    // pub num_var_with_rotation: Usize<C::N>,
-    // pub num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
     pub layer_proofs: Array<C, LayerProofVariable<C>>,
 }
 impl Hintable<InnerConfig> for GKRProofInput {
     type HintVariable = GKRProofVariable<InnerConfig>;
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        // let num_var_with_rotation = Usize::Var(usize::read(builder));
-        // let num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
         let layer_proofs = Vec::<LayerProofInput>::read(builder);
-        Self::HintVariable {
-            // _debug: binding
-            // num_var_with_rotation,
-            // num_instances_minus_one_bit_decomposition,
-            layer_proofs,
-        }
+        Self::HintVariable { layer_proofs }
     }
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        // _debug: binding
-        // stream.extend(<usize as Hintable<InnerConfig>>::write(
-        //     &self.num_var_with_rotation,
-        // ));
-
-        // let eq_instance = self.num_instances - 1;
-        // let mut bit_decomp: Vec<F> = vec![];
-        // for i in 0..32usize {
-        //     bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-        // }
-        // stream.extend(bit_decomp.write());
         stream.extend(self.layer_proofs.write());
         stream
     }

@@ -167,7 +167,7 @@ jobs:
         env:
           RUSTFLAGS: "-C opt-level=3"
         run: |
-          cargo run --release --package ceno_recursion --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+          cargo run --release --package ceno_recursion --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Install cargo make
         run: |

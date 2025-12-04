@@ -91,6 +91,7 @@ pub fn mmcs_verify_batch<C: Config>(builder: &mut Builder<C>, input: MmcsVerifie
 #[cfg(test)]
 pub mod tests {
     use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_instructions::exe::VmExe;
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::asm::AsmBuilder;
     use openvm_native_recursion::hints::Hintable;
@@ -113,9 +114,7 @@ pub mod tests {
 
         // Pass in witness stream
         let f = |n: usize| F::from_canonical_usize(n);
-        let mut witness_stream: Vec<
-            Vec<p3_monty_31::MontyField31<openvm_stark_sdk::p3_baby_bear::BabyBearParameters>>,
-        > = Vec::new();
+        let mut witness_stream: Vec<Vec<F>> = Vec::new();
         let commit = MmcsCommitment {
             value: [
                 f(414821839),
@@ -258,13 +257,12 @@ pub mod tests {
             .with_max_segment_len((1 << 25) - 100);
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<F, NativeConfig>::new(config);
-        executor.execute(program, witness).unwrap();
+        let executor = VmExecutor::<F, NativeConfig>::new(config).unwrap();
 
-        // _debug
-        // let results = executor.execute_segments(program, witness).unwrap();
-        // for seg in results {
-        //     println!("=> cycle count: {:?}", seg.metrics.cycle_count);
-        // }
+        let exe = VmExe::new(program);
+        let interpreter = executor.instance(&exe).unwrap();
+        interpreter
+            .execute(witness, None)
+            .expect("test_mmcs_verify_batch should not fail");
     }
 }

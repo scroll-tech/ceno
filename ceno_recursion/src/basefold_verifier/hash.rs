@@ -47,6 +47,7 @@ impl Hintable<InnerConfig> for Hash {
 #[cfg(test)]
 mod tests {
     use openvm_circuit::arch::{SystemConfig, VmExecutor};
+    use openvm_instructions::exe::VmExe;
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::asm::AsmBuilder;
 
@@ -63,7 +64,7 @@ mod tests {
         // configure the VM executor
         let system_config = SystemConfig::default().with_max_segment_len(1 << 20);
         let config = NativeConfig::new(system_config, Native);
-        let executor = VmExecutor::new(config);
+        let executor = VmExecutor::new(config).unwrap();
 
         // prepare input
         let mut input = Vec::new();
@@ -71,6 +72,8 @@ mod tests {
 
         // execute the program
         let program = builder.compile_isa();
-        executor.execute(program, input).unwrap();
+        let exe = VmExe::new(program);
+        let interpreter = executor.instance(&exe).unwrap();
+        interpreter.execute(input, None).unwrap();
     }
 }

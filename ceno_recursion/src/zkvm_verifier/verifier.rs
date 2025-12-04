@@ -99,7 +99,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     builder: &mut Builder<C>,
     zkvm_proof_input: ZKVMProofInputVariable<C>,
     vk: &ZKVMVerifyingKey<E, Pcs>,
-) {
+) -> SepticPointVariable<C> {
     let mut challenger = DuplexChallengerVariable::new(builder);
     transcript_observe_label(builder, &mut challenger, b"riscv");
 
@@ -461,12 +461,12 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     // _debug
     // batch_verify(
-    // builder,
-    // zkvm_proof_input.max_num_var,
-    // zkvm_proof_input.max_width,
-    // rounds,
-    // zkvm_proof_input.pcs_proof,
-    // &mut challenger,
+    //     builder,
+    //     zkvm_proof_input.max_num_var,
+    //     zkvm_proof_input.max_width,
+    //     rounds,
+    //     zkvm_proof_input.pcs_proof,
+    //     &mut challenger,
     // );
 
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
@@ -498,6 +498,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // logup check
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     builder.assert_ext_eq(logup_sum, zero);
+
+    shard_ec_sum
 }
 
 pub fn verify_chip_proof<C: Config>(
@@ -2213,11 +2215,10 @@ pub fn add_septic_points_in_place<C: Config>(
                             |builder| {
                                 let x_diff_inv = invert(builder, &x_diff);
                                 let slope = septic_ext_mul(builder, &y_diff, &x_diff_inv);
-
                                 let x_sum = septic_ext_add(builder, &right.x, &left.x);
                                 let slope_squared = septic_ext_squared(builder, &slope);
                                 let x = septic_ext_sub(builder, &slope_squared, &x_sum);
-
+                                let x_diff = septic_ext_sub(builder, &left.x, &x);
                                 let slope_mul_x_diff = septic_ext_mul(builder, &slope, &x_diff);
                                 let y = septic_ext_sub(builder, &slope_mul_x_diff, &left.y);
 
