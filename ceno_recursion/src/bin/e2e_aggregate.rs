@@ -261,6 +261,7 @@ fn main() {
             &public_io,
             max_steps,
             Checkpoint::Complete,
+            None,
         );
 
     let zkvm_proofs = result
