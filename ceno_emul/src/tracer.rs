@@ -1,11 +1,10 @@
+use ceno_rt::WORD_SIZE;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-use std::{collections::BTreeMap, fmt, mem};
-
-use ceno_rt::WORD_SIZE;
+use std::{collections::BTreeMap, fmt, mem, sync::Arc};
 
 use crate::{
-    CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
+    CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform, Program,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     chunked_vec::ChunkedVec,
     encode_rv32,
@@ -27,6 +26,7 @@ use crate::{
 pub struct StepRecord {
     cycle: Cycle,
     pc: Change<ByteAddr>,
+    heap_watermark_ptr: Change<ByteAddr>,
     pub insn: Instruction,
 
     rs1: Option<ReadOp>,
@@ -239,6 +239,7 @@ impl StepRecord {
         rd: Option<Change<Word>>,
         memory_op: Option<WriteOp>,
         previous_cycle: Cycle,
+        heap_watermark_ptr: Change<ByteAddr>,
     ) -> StepRecord {
         StepRecord {
             cycle,
@@ -261,6 +262,7 @@ impl StepRecord {
             insn,
             memory_op,
             syscall: None,
+            heap_watermark_ptr,
         }
     }
 
@@ -396,6 +398,14 @@ impl Tracer {
     pub fn fetch(&mut self, pc: WordAddr, value: Instruction) {
         self.record.pc.before = pc.baddr();
         self.record.insn = value;
+    }
+
+    pub fn track_heap_watermark_before(&mut self, heap_watermark: Word) {
+        self.record.heap_watermark_ptr.before = ByteAddr::from(heap_watermark);
+    }
+
+    pub fn track_heap_watermark_after(&mut self, heap_watermark: Word) {
+        self.record.heap_watermark_ptr.after = ByteAddr::from(heap_watermark);
     }
 
     pub fn load_register(&mut self, idx: RegIdx, value: Word) {
