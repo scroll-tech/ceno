@@ -114,9 +114,7 @@ pub mod tests {
 
         // Pass in witness stream
         let f = |n: usize| F::from_canonical_usize(n);
-        let mut witness_stream: Vec<
-            Vec<p3_monty_31::MontyField31<openvm_stark_sdk::p3_baby_bear::BabyBearParameters>>,
-        > = Vec::new();
+        let mut witness_stream: Vec<Vec<F>> = Vec::new();
         let commit = MmcsCommitment {
             value: [
                 f(414821839),

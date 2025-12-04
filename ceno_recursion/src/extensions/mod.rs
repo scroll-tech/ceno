@@ -36,9 +36,7 @@ mod tests {
         builder.halt();
 
         // Pass in witness stream
-        let witness_stream: Vec<
-            Vec<p3_monty_31::MontyField31<openvm_stark_sdk::p3_baby_bear::BabyBearParameters>>,
-        > = Vec::new();
+        let witness_stream: Vec<Vec<F>> = Vec::new();
 
         // Compile program
         let options = CompilerOptions::default().with_cycle_tracker();

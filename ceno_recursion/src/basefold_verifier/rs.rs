@@ -252,9 +252,7 @@ pub mod tests {
         builder.halt();
 
         // Pass in witness stream
-        let mut witness_stream: Vec<
-            Vec<p3_monty_31::MontyField31<openvm_stark_sdk::p3_baby_bear::BabyBearParameters>>,
-        > = Vec::new();
+        let mut witness_stream: Vec<Vec<F>> = Vec::new();
 
         let verifier_input = DenseMatrix {
             values: vec![E::ONE; 25],
@@ -264,9 +262,7 @@ pub mod tests {
         // Hint for height
         witness_stream.extend(<usize as Hintable<InnerConfig>>::write(&5));
 
-        let program: Program<
-            p3_monty_31::MontyField31<openvm_stark_sdk::p3_baby_bear::BabyBearParameters>,
-        > = builder.compile_isa();
+        let program: Program<F> = builder.compile_isa();
 
         (program, witness_stream)
     }

@@ -21,6 +21,19 @@ gkr_iop = { path = "../gkr_iop" }
 itertools.workspace = true
 mpcs.workspace = true
 multilinear_extensions.workspace = true
+openvm.workspace = true
+openvm-circuit.workspace = true
+openvm-continuations.workspace = true
+openvm-cuda-backend = { workspace = true, optional = true }
+openvm-instructions.workspace = true
+openvm-native-circuit.workspace = true
+openvm-native-compiler.workspace = true
+openvm-native-compiler-derive.workspace = true
+openvm-native-recursion.workspace = true
+openvm-rv32im-circuit.workspace = true
+openvm-sdk.workspace = true
+openvm-stark-backend.workspace = true
+openvm-stark-sdk.workspace = true
 p3.workspace = true
 parse-size = "1.1"
 rand.workspace = true
@@ -33,21 +46,6 @@ tracing-subscriber.workspace = true
 transcript.workspace = true
 whir.workspace = true
 witness.workspace = true
-openvm.workspace = true
-openvm-circuit.workspace = true
-openvm-continuations.workspace = true
-openvm-instructions.workspace = true
-openvm-native-circuit.workspace = true
-openvm-native-compiler.workspace = true
-openvm-native-compiler-derive.workspace = true
-openvm-native-recursion.workspace = true
-openvm-rv32im-circuit.workspace = true
-openvm-sdk.workspace = true
-openvm-stark-sdk.workspace = true
-openvm-stark-backend.workspace = true
-openvm-cuda-backend = { workspace = true, optional = true }
-
-p3-monty-31 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "539bbc84085efb609f4f62cb03cf49588388abdb" }
 
 [[bin]]
 name = "e2e_aggregate"

@@ -128,16 +128,8 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let max_num_var = usize::read(builder);
         let max_width = usize::read(builder);
         let witin_commit = BasefoldCommitment::read(builder);
-        let witin_perm: Array<
-            AsmConfig<
-                p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>,
-                BinomialExtensionField<
-                    p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>,
-                    4,
-                >,
-            >,
-            Var<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>>,
-        > = Vec::<usize>::read(builder);
+        let witin_perm: Array<AsmConfig<F, BinomialExtensionField<F, 4>>, Var<F>> =
+            Vec::<usize>::read(builder);
         let fixed_perm = Vec::<usize>::read(builder);
         let pcs_proof = BasefoldProof::read(builder);
 
