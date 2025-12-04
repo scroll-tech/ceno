@@ -270,8 +270,6 @@ fn main() {
         .expect("PrepSanityCheck should yield zkvm_proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
-    // let recursion_proving_keys = RecursionProvingKeys::keygen(leaf_fri_params, leaf_vm_config);
-
     let (ceno_vk, _) = compress_to_root_proof(zkvm_proofs, vk);
 
     // serialize aggregation key

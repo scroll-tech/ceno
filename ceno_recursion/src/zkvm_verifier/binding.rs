@@ -9,9 +9,7 @@ use crate::{
     },
 };
 use ceno_zkvm::{
-    scheme::{
-        ZKVMChipProof, ZKVMProof,
-    },
+    scheme::{ZKVMChipProof, ZKVMProof},
     structs::{EccQuarkProof, TowerProofs},
 };
 use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::LayerProof};

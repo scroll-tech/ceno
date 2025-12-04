@@ -1,10 +1,7 @@
 #![allow(dead_code)]
 use ceno_emul::{Platform, Program};
 use ceno_recursion::{
-    aggregation::{
-        CenoAggregationProver, CenoRecursionProvingKeys,
-        CenoRecursionVerifierKeys,
-    },
+    aggregation::{CenoAggregationProver, CenoRecursionProvingKeys, CenoRecursionVerifierKeys},
     zkvm_verifier::binding::E,
 };
 use ceno_zkvm::{

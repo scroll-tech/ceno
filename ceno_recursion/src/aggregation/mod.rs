@@ -1,7 +1,6 @@
 use crate::zkvm_verifier::{
     binding::{
-        E, F, SepticExtensionVariable, SepticPointVariable, ZKVMProofInput,
-        ZKVMProofInputVariable,
+        E, F, SepticExtensionVariable, SepticPointVariable, ZKVMProofInput, ZKVMProofInputVariable,
     },
     verifier::{add_septic_points_in_place, verify_zkvm_proof},
 };
@@ -10,17 +9,13 @@ use ceno_zkvm::{
     instructions::riscv::constants::{
         END_PC_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
     },
-    scheme::{
-        ZKVMProof,
-        constants::SEPTIC_EXTENSION_DEGREE,
-    },
+    scheme::{ZKVMProof, constants::SEPTIC_EXTENSION_DEGREE},
     structs::ZKVMVerifyingKey,
 };
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{
     arch::{
-        MemoryConfig, SystemConfig, VirtualMachine, VmInstance,
-        instructions::program::Program,
+        MemoryConfig, SystemConfig, VirtualMachine, VmInstance, instructions::program::Program,
     },
     system::program::trace::VmCommittedExe,
     utils::air_test_impl,
@@ -72,8 +67,8 @@ use std::{borrow::Borrow, fs::File, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use openvm_circuit::{
     arch::{
-        CONNECTOR_AIR_ID, PROGRAM_AIR_ID, PROGRAM_CACHED_TRACE_INDEX,
-        PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver,
+        CONNECTOR_AIR_ID, PROGRAM_AIR_ID, PROGRAM_CACHED_TRACE_INDEX, PUBLIC_VALUES_AIR_ID,
+        SingleSegmentVmProver,
         hasher::{Hasher, poseidon2::vm_poseidon2_hasher},
         instructions::exe::VmExe,
     },
@@ -255,8 +250,7 @@ impl CenoLeafVmVerifierConfig {
             builder.cycle_tracker_start("Verify Ceno ZKVM Proof");
             let zkvm_proof = ceno_leaf_input.proof;
             let shard_raw_pi = zkvm_proof.raw_pi.clone();
-            let shard_pi = zkvm_proof.pi_evals.clone();
-            verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
+            let calculated_shard_ec_sum = verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
             builder.cycle_tracker_end("Verify Ceno ZKVM Proof");
 
             builder.cycle_tracker_start("PV Operations");
@@ -293,8 +287,7 @@ impl CenoLeafVmVerifierConfig {
                     let expected_last_shard_id = Usize::uninit(builder);
                     builder.assign(&expected_last_shard_id, pv.len() - Usize::from(1));
 
-                    let shard_id = builder.get(&shard_pi, SHARD_ID_IDX);
-                    let shard_id_fs = builder.ext2felt(shard_id);
+                    let shard_id_fs = builder.get(&shard_raw_pi, SHARD_ID_IDX);
                     let shard_id_f = builder.get(&shard_id_fs, 0);
                     let shard_id = Usize::Var(builder.cast_felt_to_var(shard_id_f));
                     builder.assert_usize_eq(expected_last_shard_id, shard_id);
@@ -353,6 +346,14 @@ impl CenoLeafVmVerifierConfig {
 
                         add_septic_points_in_place(builder, &ec_sum, &shard_ec);
                     });
+
+                    add_septic_points_in_place(builder, &ec_sum, &calculated_shard_ec_sum);
+
+                    let is_sum_x_zero = ec_sum.x.is_zero(builder);
+                    let is_sum_y_zero = ec_sum.y.is_zero(builder);
+
+                    builder.assert_usize_eq(is_sum_x_zero, Usize::from(1));
+                    builder.assert_usize_eq(is_sum_y_zero, Usize::from(1));
                 });
 
             for pv in stark_pvs.flatten() {
@@ -476,7 +477,7 @@ pub fn compress_to_root_proof(
         .enumerate()
         .map(|(shard_id, p)| ZKVMProofInput::from((shard_id, p)))
         .collect();
-    let user_public_values = zkvm_proof_inputs
+    let user_public_values: Vec<F> = zkvm_proof_inputs
         .iter()
         .flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>())
         .collect();
@@ -850,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
