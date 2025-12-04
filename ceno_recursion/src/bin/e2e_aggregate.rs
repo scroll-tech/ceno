@@ -11,8 +11,6 @@ use ceno_zkvm::{
 use clap::Parser;
 use ff_ext::BabyBearExt4;
 use mpcs::{Basefold, BasefoldRSParams, SecurityLevel};
-use openvm_stark_backend::config::StarkGenericConfig;
-use openvm_stark_sdk::engine::StarkFriEngine;
 use std::{fs, fs::File, path::PathBuf};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;

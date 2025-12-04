@@ -30,10 +30,7 @@ use crate::{
         SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable,
     },
 };
-use ceno_zkvm::{
-    scheme::septic_curve::SepticPoint,
-    structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey},
-};
+use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
 
 use gkr_iop::{

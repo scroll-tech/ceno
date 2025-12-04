@@ -16,9 +16,8 @@ use openvm_circuit::arch::VmInstance;
 use openvm_native_circuit::{NativeBuilder, NativeConfig};
 use openvm_sdk::prover::vm::new_local_prover;
 use openvm_stark_backend::config::StarkGenericConfig;
-use openvm_stark_sdk::{
-    config::baby_bear_poseidon2::{BabyBearPoseidon2Config, BabyBearPoseidon2Engine},
-    engine::StarkFriEngine,
+use openvm_stark_sdk::config::baby_bear_poseidon2::{
+    BabyBearPoseidon2Config, BabyBearPoseidon2Engine,
 };
 use std::{marker::PhantomData, sync::Arc};
 
