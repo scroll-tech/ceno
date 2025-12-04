@@ -74,6 +74,6 @@ mod tests {
         let program = builder.compile_isa();
         let exe = VmExe::new(program);
         let interpreter = executor.instance(&exe).unwrap();
-        interpreter.execute(input, None);
+        interpreter.execute(input, None).unwrap();
     }
 }

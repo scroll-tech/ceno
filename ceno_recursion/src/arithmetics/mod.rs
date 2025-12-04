@@ -1069,7 +1069,7 @@ mod tests {
         let executor = VmExecutor::<F, NativeConfig>::new(config).expect("executor initiation");
         let exe = VmExe::new(program);
         let interpreter = executor.instance(&exe).unwrap();
-        interpreter.execute(vec![], None);
+        interpreter.execute(vec![], None).unwrap();
     }
 
     #[test]

@@ -747,10 +747,7 @@ pub fn verify_proofs(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CenoLeafVmVerifierConfig, CenoRecursionVerifierKeys, INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP,
-        ROOT_LOG_BLOWUP, SBOX_SIZE, verify_e2e_stark_proof,
-    };
+    use super::verify_e2e_stark_proof;
     use crate::{
         aggregation::{compress_to_root_proof, verify_proofs},
         zkvm_verifier::binding::E,
@@ -761,31 +758,9 @@ mod tests {
         structs::ZKVMVerifyingKey,
     };
     use mpcs::{Basefold, BasefoldRSParams};
-    use openvm_circuit::{
-        arch::{MemoryConfig, SystemConfig, VirtualMachine},
-        system::program::trace::VmCommittedExe,
-    };
-    use openvm_continuations::{
-        SC,
-        verifier::{
-            common::types::VmVerifierPvs,
-            internal::{InternalVmVerifierConfig, types::InternalVmVerifierPvs},
-        },
-    };
-    use openvm_native_circuit::NativeConfig;
-    use openvm_native_compiler::conversion::CompilerOptions;
-    use openvm_sdk::prover::vm::types::VmProvingKey;
-    use openvm_stark_backend::config::StarkGenericConfig;
-    use openvm_stark_sdk::{
-        config::{
-            FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Engine,
-            setup_tracing_with_log_level,
-        },
-        engine::StarkFriEngine,
-        p3_bn254_fr::Bn254Fr,
-    };
+    use openvm_stark_sdk::{config::setup_tracing_with_log_level, p3_bn254_fr::Bn254Fr};
     use p3::field::FieldAlgebra;
-    use std::{fs::File, sync::Arc};
+    use std::fs::File;
 
     pub fn aggregation_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);
@@ -804,14 +779,8 @@ mod tests {
         let (vk, root_stark_proof) = compress_to_root_proof(zkvm_proofs, vk);
 
         // _debug
-        // verify_e2e_stark_proof(
-        // &ceno_vk,
-        // &root_stark_proof,
-        // _debug
-        // &Bn254Fr::ZERO,
-        // &Bn254Fr::ZERO,
-        // )
-        // .expect("Verify e2e stark proof should pass");
+        verify_e2e_stark_proof(&vk, &root_stark_proof, &Bn254Fr::ZERO, &Bn254Fr::ZERO)
+            .expect("Verify e2e stark proof should pass");
     }
 
     pub fn verify_single_inner_thread() {
