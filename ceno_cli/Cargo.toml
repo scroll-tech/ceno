@@ -39,6 +39,7 @@ openvm-native-compiler-derive.workspace = true
 openvm-sdk.workspace = true
 openvm-stark-backend.workspace = true
 openvm-stark-sdk.workspace = true
+openvm-cuda-backend = { workspace = true, optional = true }
 
 ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
@@ -50,6 +51,7 @@ vergen-git2 = { version = "1", features = ["build", "cargo", "rustc", "emit_and_
 [features]
 jemalloc = ["dep:tikv-jemallocator", "ceno_zkvm/jemalloc"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
+gpu = ["ceno_recursion/gpu", "dep:openvm-cuda-backend"]
 nightly-features = [
   "ceno_zkvm/nightly-features",
   "ff_ext/nightly-features",

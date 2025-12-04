@@ -13,12 +13,15 @@ use ff_ext::{BabyBearExt4, ExtensionField};
 use gkr_iop::hal::ProverBackend;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
 use openvm_circuit::arch::VmInstance;
+#[cfg(feature = "gpu")]
+use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
 use openvm_native_circuit::{NativeBuilder, NativeConfig};
 use openvm_sdk::prover::vm::new_local_prover;
 use openvm_stark_backend::config::StarkGenericConfig;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    BabyBearPoseidon2Config, BabyBearPoseidon2Engine,
-};
+#[cfg(not(feature = "gpu"))]
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
+
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 use std::{marker::PhantomData, sync::Arc};
 
 #[allow(clippy::type_complexity)]
