@@ -993,6 +993,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     mut emul_result: EmulationResult<'a>,
     program: &Program,
+    // this is for debug purpose, which only run target shard id and skip all others
+    target_shard_id: Option<usize>,
 ) -> impl Iterator<Item = (ZKVMWitnesses<E>, ShardContext<'a>, PublicValues)> {
     let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
     let all_records = std::mem::take(&mut emul_result.all_records);
@@ -1038,6 +1040,21 @@ pub fn generate_witness<'a, E: ExtensionField>(
         let current_shard_end_pc = all_records[cur_index..end].last().unwrap().pc().after.0;
 
         let mut zkvm_witness = ZKVMWitnesses::default();
+
+        if let Some(target_shard_id) = target_shard_id {
+            if shard_ctx.shard_id < target_shard_id {
+                tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
+                // update next round start
+                // early stop and return empty zkvm witness, skipped all the potiential cost
+                cur_index = end;
+                return Some((zkvm_witness, shard_ctx, pi));
+            } else if shard_ctx.shard_id > target_shard_id {
+                tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
+                return None;
+            }
+            // go ahead to generate witness
+        }
+
         let time = std::time::Instant::now();
         // assign opcode circuits
         let dummy_records = system_config
@@ -1353,6 +1370,8 @@ pub fn run_e2e_with_checkpoint<
     public_io: &[u32],
     max_steps: usize,
     checkpoint: Checkpoint,
+    // for debug purpose
+    target_shard_id: Option<usize>,
 ) -> E2ECheckpointResult<E, PCS> {
     let start = std::time::Instant::now();
     let ctx = setup_program::<E>(program, platform, multi_prover);
@@ -1377,7 +1396,13 @@ pub fn run_e2e_with_checkpoint<
             proofs: None,
             vk: Some(vk),
             next_step: Some(Box::new(move || {
-                _ = run_e2e_proof::<E, _, _, _>(&prover, &init_full_mem, max_steps, is_mock_proving)
+                _ = run_e2e_proof::<E, _, _, _>(
+                    &prover,
+                    &init_full_mem,
+                    max_steps,
+                    is_mock_proving,
+                    target_shard_id,
+                )
             })),
         };
     }
@@ -1408,12 +1433,22 @@ pub fn run_e2e_with_checkpoint<
                     &prover.pk.program_ctx.as_ref().unwrap().system_config,
                     emul_result,
                     &prover.pk.program_ctx.as_ref().unwrap().program,
+                    target_shard_id,
                 )
             })),
         };
     }
 
-    let zkvm_proofs = create_proofs_helper(emul_result, &prover, is_mock_proving);
+    let zkvm_proofs = create_proofs_helper(emul_result, &prover, is_mock_proving, target_shard_id);
+
+    if target_shard_id.is_some() {
+        // skip verify as the proof are in-completed
+        return E2ECheckpointResult {
+            proofs: Some(zkvm_proofs),
+            vk: Some(vk),
+            next_step: None,
+        };
+    }
 
     let verifier = ZKVMVerifier::new(vk.clone());
 
@@ -1451,6 +1486,8 @@ pub fn run_e2e_proof<
     init_full_mem: &InitMemState,
     max_steps: usize,
     is_mock_proving: bool,
+    // for debug purpose
+    target_shard_id: Option<usize>,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     // Emulate program
@@ -1461,7 +1498,7 @@ pub fn run_e2e_proof<
         &ctx.platform,
         &ctx.multi_prover,
     );
-    create_proofs_helper(emul_result, prover, is_mock_proving)
+    create_proofs_helper(emul_result, prover, is_mock_proving, target_shard_id)
 }
 
 /// defines a lightweight CPU -> GPU pipeline for witness generation and proof creation.
@@ -1499,6 +1536,7 @@ fn create_proofs_helper<
     emulation_result: EmulationResult,
     prover: &ZKVMProver<E, PCS, PB, PD>,
     is_mock_proving: bool,
+    target_shard_id: Option<usize>,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     #[cfg(feature = "gpu")]
@@ -1510,9 +1548,20 @@ fn create_proofs_helper<
             // cpu producer
             s.spawn({
                 move || {
-                    for proof_input in
-                        generate_witness(&ctx.system_config, emulation_result, &ctx.program)
-                    {
+                    let wit_iter = generate_witness(
+                        &ctx.system_config,
+                        emulation_result,
+                        &ctx.program,
+                        target_shard_id,
+                    );
+
+                    let wit_iter = if let Some(target_shard_id) = target_shard_id {
+                        Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
+                    } else {
+                        Box::new(wit_iter)
+                    };
+
+                    for proof_input in wit_iter {
                         tx.send(proof_input).unwrap()
                     }
                 }
@@ -1552,9 +1601,20 @@ fn create_proofs_helper<
     #[cfg(not(feature = "gpu"))]
     {
         // Generate witness
-        let zkvm_witness = generate_witness(&ctx.system_config, emulation_result, &ctx.program);
+        let wit_iter = generate_witness(
+            &ctx.system_config,
+            emulation_result,
+            &ctx.program,
+            target_shard_id,
+        );
 
-        zkvm_witness
+        let wit_iter = if let Some(target_shard_id) = target_shard_id {
+            Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
+        } else {
+            Box::new(wit_iter)
+        };
+
+        wit_iter
             .map(|(zkvm_witness, shard_ctx, pi)| {
                 if is_mock_proving {
                     MockProver::assert_satisfied_full(

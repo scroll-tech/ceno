@@ -100,6 +100,11 @@ pub struct CenoOptions {
     /// Setting any value restricts logs to profiling information
     #[arg(long)]
     profiling: Option<usize>,
+
+    // for debug purpose
+    // only generate respective shard id and skip others
+    #[arg(long)]
+    shard_id: Option<u64>,
 }
 
 impl CenoOptions {
@@ -414,6 +419,7 @@ fn run_elf_inner<
         &public_io,
         options.max_steps,
         checkpoint,
+        options.shard_id.map(|v| v as usize),
     ))
 }
 
