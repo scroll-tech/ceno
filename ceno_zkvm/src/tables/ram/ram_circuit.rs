@@ -19,7 +19,7 @@ use gkr_iop::{
     selector::SelectorType,
 };
 use itertools::Itertools;
-use multilinear_extensions::ToExpr;
+use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 #[derive(Clone, Debug)]
@@ -183,6 +183,23 @@ pub trait DynVolatileRamTable {
     const V_LIMBS: usize;
     const ZERO_INIT: bool;
     const DESCENDING: bool;
+
+    fn addr_expr<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
+        let max_len = Self::max_len(params);
+        let addr = cb.create_structural_witin(
+            || "addr",
+            StructuralWitInType::EqualDistanceSequence {
+                max_len,
+                offset: Self::offset_addr(params),
+                multi_factor: WORD_SIZE,
+                descending: Self::DESCENDING,
+            },
+        );
+        Ok((addr.expr(), addr))
+    }
 
     fn offset_addr(params: &ProgramParams) -> Addr;
     fn end_addr(params: &ProgramParams) -> Addr;

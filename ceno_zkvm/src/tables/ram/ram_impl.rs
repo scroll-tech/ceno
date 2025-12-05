@@ -277,16 +277,8 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
         cb.set_omc_init_only();
-        let max_len = DVRAM::max_len(params);
-        let addr = cb.create_structural_witin(
-            || "addr",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len,
-                offset: DVRAM::offset_addr(params),
-                multi_factor: WORD_SIZE,
-                descending: DVRAM::DESCENDING,
-            },
-        );
+
+        let (addr_expr, addr) = DVRAM::addr_expr(cb, params)?;
 
         let (init_expr, init_v) = if DVRAM::ZERO_INIT {
             (vec![Expression::ZERO; DVRAM::V_LIMBS], None)
@@ -299,7 +291,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
 
         let init_table = [
             vec![(DVRAM::RAM_TYPE as usize).into()],
-            vec![addr.expr()],
+            vec![addr_expr.expr()],
             init_expr,
             vec![Expression::ZERO], // Initial cycle.
         ]
