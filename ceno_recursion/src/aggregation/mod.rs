@@ -781,8 +781,13 @@ mod tests {
         let root_stark_proof = agg_prover.generate_root_proof(zkvm_proofs);
 
         // _debug
-        verify_e2e_stark_proof(&agg_prover.vk, &root_stark_proof, &Bn254Fr::ZERO, &Bn254Fr::ZERO)
-            .expect("Verify e2e stark proof should pass");
+        verify_e2e_stark_proof(
+            &agg_prover.vk,
+            &root_stark_proof,
+            &Bn254Fr::ZERO,
+            &Bn254Fr::ZERO,
+        )
+        .expect("Verify e2e stark proof should pass");
     }
 
     pub fn verify_single_inner_thread() {
