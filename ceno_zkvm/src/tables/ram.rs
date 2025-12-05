@@ -1,5 +1,9 @@
 use ceno_emul::{Addr, VMState, WORD_SIZE};
+use ff_ext::ExtensionField;
+use gkr_iop::error::CircuitBuilderError;
+use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamInitCircuit};
+use rand::rngs::adapter::ReseedingRng;
 
 use crate::{
     instructions::riscv::constants::UINT_LIMBS,
@@ -8,9 +12,13 @@ use crate::{
 
 mod ram_circuit;
 mod ram_impl;
-use crate::tables::ram::{
-    ram_circuit::LocalFinalRamCircuit,
-    ram_impl::{DynVolatileRamTableInitConfig, NonVolatileInitTableConfig},
+use crate::{
+    chip_handler::general::PublicIOQuery,
+    circuit_builder::CircuitBuilder,
+    tables::ram::{
+        ram_circuit::LocalFinalRamCircuit,
+        ram_impl::{DynVolatileRamTableInitConfig, NonVolatileInitTableConfig},
+    },
 };
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
@@ -22,6 +30,24 @@ impl DynVolatileRamTable for HeapTable {
     const V_LIMBS: usize = UINT_LIMBS;
     const ZERO_INIT: bool = true;
     const DESCENDING: bool = false;
+
+    fn addr_expr<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
+        let max_len = Self::max_len(params);
+        let addr = cb.create_structural_witin(
+            || "addr",
+            StructuralWitInType::EqualDistanceSequence {
+                max_len,
+                offset: Self::offset_addr(params),
+                multi_factor: WORD_SIZE,
+                descending: Self::DESCENDING,
+            },
+        );
+        let offset_addr = cb.query_heap_start_addr()?;
+        Ok((offset_addr.expr() + addr.expr(), addr))
+    }
 
     fn offset_addr(params: &ProgramParams) -> Addr {
         params.platform.heap.start
