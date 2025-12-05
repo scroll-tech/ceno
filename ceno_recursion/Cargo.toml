@@ -54,7 +54,7 @@ path = "src/bin/e2e_aggregate.rs"
 [features]
 bench-metrics = ["openvm-circuit/metrics"]
 default = ["parallel", "nightly-features"]
-gpu = ["ceno_zkvm/gpu", "openvm-circuit/cuda", "openvm-native-circuit/cuda", "dep:openvm-cuda-backend"]
+gpu = ["openvm-circuit/cuda", "openvm-native-circuit/cuda", "dep:openvm-cuda-backend"]
 nightly-features = [
   "ceno_zkvm/nightly-features",
   "openvm-stark-sdk/nightly-features",
