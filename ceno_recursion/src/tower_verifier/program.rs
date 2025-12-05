@@ -1,8 +1,7 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
     arithmetics::{
-        UniPolyExtrapolator, challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend,
-        exts_to_felts, reverse,
+        _print_usize_arr, UniPolyExtrapolator, challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend, exts_to_felts, reverse
     },
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::transcript_observe_label,
@@ -14,6 +13,7 @@ use openvm_native_recursion::challenger::{
     CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
+const NATIVE_SUMCHECK_CTX_LEN: usize = 9;
 
 pub(crate) fn interpolate_uni_poly<C: Config>(
     builder: &mut Builder<C>,
@@ -348,11 +348,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.cycle_tracker_start("check expected evaluation");
         let eq_e = eq_eval(builder, out_rt, &sub_rt, one, zero);
 
-        let input_ctx_len: Usize<C::N> = Usize::Var(builder.uninit());
-        let num_variables_len = num_variables.len();
-        builder.assign(&input_ctx_len, Usize::from(8) + num_variables_len.clone());
-        let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(input_ctx_len);
-
+        let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
         builder.set(&input_ctx, 0, round_var);
         builder.set(&input_ctx, 1, num_prod_spec.clone());
         builder.set(&input_ctx, 2, num_logup_spec.clone());
@@ -377,15 +373,9 @@ pub fn verify_tower_proof<C: Config>(
             Usize::from(proof.logup_specs_eval.inner_inner_length),
         );
         builder.set(&input_ctx, 7, Usize::from(1));
-
-        let input_ctx_variables_slice = input_ctx.slice(builder, 8, input_ctx.len());
-        iter_zip!(builder, input_ctx_variables_slice, num_variables).for_each(
-            |ptr_vec, builder| {
-                let n_v = builder.iter_ptr_get(&num_variables, ptr_vec[1]);
-                builder.iter_ptr_set(&input_ctx_variables_slice, ptr_vec[0], n_v);
-            },
-        );
-
+        let n_v = builder.get(&num_variables, 0);
+        builder.set(&input_ctx, 8, n_v);
+    
         let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
         builder.set(&challenges, 0, alpha);
 
@@ -463,6 +453,7 @@ pub fn verify_tower_proof<C: Config>(
                 });
             });
 
+        let num_variables_len = num_variables.len();
         let logup_num_variables_slice =
             num_variables.slice(builder, num_prod_spec.clone(), num_variables_len.clone());
 
