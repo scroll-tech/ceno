@@ -1,6 +1,6 @@
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
-use ceno_recursion::aggregation::compress_to_root_proof;
+use ceno_recursion::aggregation::CenoAggregationProver;
 use ceno_zkvm::{
     e2e::{
         Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
@@ -11,7 +11,7 @@ use ceno_zkvm::{
 use clap::Parser;
 use ff_ext::BabyBearExt4;
 use mpcs::{Basefold, BasefoldRSParams, SecurityLevel};
-use std::{fs, fs::File, path::PathBuf};
+use std::{fs, path::PathBuf};
 use tracing::level_filters::LevelFilter;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
@@ -269,9 +269,6 @@ fn main() {
         .expect("PrepSanityCheck should yield zkvm_proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
-    let (ceno_vk, _) = compress_to_root_proof(zkvm_proofs, vk);
-
-    // serialize aggregation key
-    let file = File::create("ceno_vk.bin").expect("Create export proof file");
-    bincode::serialize_into(file, &ceno_vk).expect("failed to serialize internal proof");
+    let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
+    let _ = agg_prover.generate_root_proof(zkvm_proofs);
 }
