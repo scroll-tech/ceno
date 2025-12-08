@@ -190,7 +190,7 @@ where
     PB: ProverBackend<E = BabyBearExt4, Pcs = Basefold<E, BasefoldRSParams>> + 'static,
     PD: ProverDevice<PB> + 'static,
 {
-    // initialize agg prover
+    /// aggregating base proofs into a root STARK proof
     pub fn compress_to_root_proof(
         &mut self,
         base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
@@ -221,6 +221,18 @@ where
         };
 
         agg_prover.generate_root_proof(base_proofs)
+    }
+
+    pub fn init_agg_pk(
+        &mut self,
+    ) -> CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig> {
+        assert!(self.zkvm_vk.is_some(), "zkvm_vk is not set");
+
+        if self.agg_pk.is_none() {
+            let agg_prover = CenoAggregationProver::from_base_vk(self.zkvm_vk.clone().unwrap());
+            self.agg_pk = Some(agg_prover.pk.clone());
+        }
+        self.agg_pk.clone().unwrap()
     }
 
     pub fn get_agg_verifier(&self) -> CenoRecursionVerifierKeys<BabyBearPoseidon2Config> {
