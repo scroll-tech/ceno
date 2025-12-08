@@ -33,6 +33,7 @@ ceno_zkvm = { path = "../ceno_zkvm" }
 
 openvm-circuit.workspace = true
 openvm-continuations.workspace = true
+openvm-cuda-backend = { workspace = true, optional = true }
 openvm-native-circuit.workspace = true
 openvm-native-compiler.workspace = true
 openvm-native-compiler-derive.workspace = true
@@ -48,6 +49,7 @@ mpcs.workspace = true
 vergen-git2 = { version = "1", features = ["build", "cargo", "rustc", "emit_and_set"] }
 
 [features]
+gpu = ["gkr_iop/gpu", "ceno_zkvm/gpu", "ceno_recursion/gpu", "dep:openvm-cuda-backend", "openvm-native-circuit/cuda"]
 jemalloc = ["dep:tikv-jemallocator", "ceno_zkvm/jemalloc"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 nightly-features = [

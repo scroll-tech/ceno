@@ -629,6 +629,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             .flat_map(|(_, chip_inputs)| chip_inputs.into_iter())
     }
 }
+
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub pp: PCS::ProverParam,
     pub vp: PCS::VerifierParam,
