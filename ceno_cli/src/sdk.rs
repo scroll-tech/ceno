@@ -13,11 +13,10 @@ use ceno_zkvm::{
     structs::{ZKVMProvingKey, ZKVMVerifyingKey},
 };
 use ff_ext::{BabyBearExt4, ExtensionField};
-#[cfg(not(feature = "gpu"))]
-use gkr_iop::cpu::{CpuBackend, CpuProver};
-#[cfg(feature = "gpu")]
-use gkr_iop::gpu::{GpuBackend, GpuProver};
-use gkr_iop::hal::ProverBackend;
+use gkr_iop::{
+    cpu::{CpuBackend, CpuProver},
+    hal::ProverBackend,
+};
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
 use openvm_continuations::verifier::internal::types::VmStarkProof;
 #[cfg(feature = "gpu")]
@@ -249,31 +248,9 @@ where
     }
 }
 
-#[cfg(not(feature = "gpu"))]
 pub type CenoSDK<E, PCS, SC, VC> =
     Sdk<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>, SC, VC>;
 
-#[cfg(not(feature = "gpu"))]
-impl<E, PCS, SC, VC> CenoSDK<E, PCS, SC, VC>
-where
-    E: ExtensionField + LkMultiplicityKey,
-    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
-    SC: StarkGenericConfig,
-    VC: 'static,
-{
-    pub fn init_base_prover(&mut self, max_num_variables: usize, level: SecurityLevel) {
-        let backend = create_backend(max_num_variables, level);
-        let device = create_prover(backend);
-
-        self.set_zkvm_prover(device);
-    }
-}
-
-#[cfg(feature = "gpu")]
-pub type CenoSDK<E, PCS, SC, VC> =
-    Sdk<E, PCS, GpuBackend<E, PCS>, GpuProver<GpuBackend<E, PCS>>, SC, VC>;
-
-#[cfg(feature = "gpu")]
 impl<E, PCS, SC, VC> CenoSDK<E, PCS, SC, VC>
 where
     E: ExtensionField + LkMultiplicityKey,
