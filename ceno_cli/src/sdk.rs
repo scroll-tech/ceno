@@ -159,6 +159,23 @@ where
             panic!("ZKVMProver is not initialized")
         }
     }
+
+    pub fn get_app_pk(&self) -> Arc<ZKVMProvingKey<E, PCS>> {
+        self.zkvm_pk.clone().expect("zkvm pk is not set")
+    }
+
+    pub fn get_app_vk(&self) -> ZKVMVerifyingKey<E, PCS> {
+        self.zkvm_vk.clone().expect("zkvm vk is not set")
+    }
+
+    pub fn get_agg_pk(&self) -> CenoRecursionProvingKeys<SC, VC> {
+        self.agg_pk.clone().expect("agg pk is not set")
+    }
+
+    pub fn get_agg_vk(&self) -> CenoRecursionVerifierKeys<SC> {
+        self.agg_pk.as_ref().expect("agg pk is not set").get_vk()
+    }
+
     pub fn create_zkvm_verifier(&self) -> ZKVMVerifier<E, PCS> {
         let Some(app_vk) = self.zkvm_vk.clone() else {
             panic!("empty zkvm vk");

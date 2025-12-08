@@ -21,6 +21,8 @@ use openvm_circuit::{
     system::program::trace::VmCommittedExe,
     utils::air_test_impl,
 };
+use openvm_stark_backend::config::PcsProverData;
+use openvm_stark_backend::config::Val;
 
 use openvm_continuations::{
     C,
@@ -507,6 +509,11 @@ pub struct CenoRecursionVerifierKeys<SC: StarkGenericConfig> {
     pub internal_commit: Com<SC>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "VmExe<Val<SC>>: Serialize, PcsProverData<SC>: Serialize, VC: Serialize",
+    deserialize = "VmExe<Val<SC>>: Deserialize<'de>, PcsProverData<SC>: Deserialize<'de>, VC: Deserialize<'de>"
+))]
 pub struct CenoRecursionProvingKeys<SC: StarkGenericConfig, VC> {
     pub leaf_vm_pk: Arc<VmProvingKey<SC, VC>>,
     pub leaf_committed_exe: Arc<VmCommittedExe<SC>>,
