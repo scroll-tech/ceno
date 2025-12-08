@@ -1734,6 +1734,7 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
+ "rayon",
 ]
 
 [[package]]
@@ -4617,6 +4618,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tikv-jemallocator",
  "tracing",
 ]
 
@@ -4668,6 +4670,7 @@ dependencies = [
  "openvm-platform",
  "openvm-stark-backend",
  "rrs-lib",
+ "rustc-demangle",
  "thiserror 1.0.69",
 ]
 
