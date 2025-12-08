@@ -41,6 +41,7 @@ use std::{
     marker::PhantomData,
     sync::Arc,
 };
+use tracing::info_span;
 use transcript::BasicTranscript as Transcript;
 use witness::next_pow2_instance_padding;
 
@@ -635,8 +636,8 @@ pub fn emulate_program<'a>(
         vm.init_memory(record.addr.into(), record.value);
     }
 
-    let all_records_result: Result<Vec<StepRecord>, _> =
-        vm.iter_until_halt().take(max_steps).collect();
+    let all_records_result: Result<Vec<StepRecord>, _> = info_span!("emulator.iter_until_halt")
+        .in_scope(|| vm.iter_until_halt().take(max_steps).collect());
 
     if platform.is_debug {
         let all_messages = read_all_messages(&vm)
@@ -669,6 +670,7 @@ pub fn emulate_program<'a>(
     let end_cycle = vm.tracer().cycle();
     let insts = vm.tracer().executed_insts();
     tracing::info!("program executed {insts} instructions in {end_cycle} cycles");
+    metrics::gauge!("cycles").set(insts as f64);
 
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),
@@ -1018,83 +1020,118 @@ pub fn generate_witness<'a, E: ExtensionField>(
         }
         let (cur_shard_steps_len, mut shard_ctx) =
             shard_ctx_builder.position_next_shard(&all_records[cur_index..], &system_config.config);
-        let time = std::time::Instant::now();
-        // assume public io clone low cost
-        let mut pi = pi_template.clone();
-        let end = cur_index + cur_shard_steps_len;
-        tracing::debug!("collect filter step in {:?}", time.elapsed());
+        info_span!("app_prove.generate_witness", shard_id = shard_ctx.shard_id).in_scope(|| {
+            let time = std::time::Instant::now();
+            // assume public io clone low cost
+            let mut pi = pi_template.clone();
+            let end = cur_index + cur_shard_steps_len;
+            tracing::debug!("collect filter step in {:?}", time.elapsed());
 
-        tracing::debug!(
-            "{}th shard collect {cur_shard_steps_len} steps",
-            shard_ctx.shard_id
-        );
-        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
-        let current_shard_end_cycle = all_records[cur_index..end].last().unwrap().cycle()
-            + Tracer::SUBCYCLES_PER_INSN
-            - current_shard_offset_cycle;
-        let current_shard_init_pc = if shard_ctx.is_first_shard() {
-            program.entry
-        } else {
-            all_records[cur_index..end][0].pc().before.0
-        };
-        let current_shard_end_pc = all_records[cur_index..end].last().unwrap().pc().after.0;
+            tracing::debug!(
+                "{}th shard collect {cur_shard_steps_len} steps",
+                shard_ctx.shard_id
+            );
+            let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+            let current_shard_end_cycle = all_records[cur_index..end].last().unwrap().cycle()
+                + Tracer::SUBCYCLES_PER_INSN
+                - current_shard_offset_cycle;
+            let current_shard_init_pc = if shard_ctx.is_first_shard() {
+                program.entry
+            } else {
+                all_records[cur_index..end][0].pc().before.0
+            };
+            let current_shard_end_pc = all_records[cur_index..end].last().unwrap().pc().after.0;
 
-        let mut zkvm_witness = ZKVMWitnesses::default();
+            let mut zkvm_witness = ZKVMWitnesses::default();
 
-        if let Some(target_shard_id) = target_shard_id {
-            if shard_ctx.shard_id < target_shard_id {
-                tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
-                // update next round start
-                // early stop and return empty zkvm witness, skipped all the potiential cost
-                cur_index = end;
-                return Some((zkvm_witness, shard_ctx, pi));
-            } else if shard_ctx.shard_id > target_shard_id {
-                tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
-                return None;
+            if let Some(target_shard_id) = target_shard_id {
+                if shard_ctx.shard_id < target_shard_id {
+                    tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
+                    // update next round start
+                    // early stop and return empty zkvm witness, skipped all the potiential cost
+                    cur_index = end;
+                    return Some((zkvm_witness, shard_ctx, pi));
+                } else if shard_ctx.shard_id > target_shard_id {
+                    tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
+                    return None;
+                }
+                // go ahead to generate witness
             }
-            // go ahead to generate witness
-        }
 
-        let time = std::time::Instant::now();
-        // assign opcode circuits
-        let dummy_records = system_config
-            .config
-            .assign_opcode_circuit(
-                &system_config.zkvm_cs,
-                &mut shard_ctx,
-                &mut zkvm_witness,
-                &all_records[cur_index..end],
-            )
-            .unwrap();
-        tracing::debug!("assign_opcode_circuit finish in {:?}", time.elapsed());
-        let time = std::time::Instant::now();
-        system_config
-            .dummy_config
-            .assign_opcode_circuit(
-                &system_config.zkvm_cs,
-                &mut shard_ctx,
-                &mut zkvm_witness,
-                dummy_records,
-            )
-            .unwrap();
-        tracing::debug!("assign_dummy_config finish in {:?}", time.elapsed());
-        zkvm_witness.finalize_lk_multiplicities();
-
-        // assign table circuits
-        let time = std::time::Instant::now();
-        system_config
-            .config
-            .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
-            .unwrap();
-        tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
-
-        if shard_ctx.is_first_shard() {
-            // assign init table on first shard
+            let time = std::time::Instant::now();
+            // assign opcode circuits
+            let dummy_records = system_config
+                .config
+                .assign_opcode_circuit(
+                    &system_config.zkvm_cs,
+                    &mut shard_ctx,
+                    &mut zkvm_witness,
+                    &all_records[cur_index..end],
+                )
+                .unwrap();
+            tracing::debug!("assign_opcode_circuit finish in {:?}", time.elapsed());
             let time = std::time::Instant::now();
             system_config
-                .mmu_config
-                .assign_init_table_circuit(
+                .dummy_config
+                .assign_opcode_circuit(
                     &system_config.zkvm_cs,
+                    &mut shard_ctx,
+                    &mut zkvm_witness,
+                    dummy_records,
+                )
+                .unwrap();
+            tracing::debug!("assign_dummy_config finish in {:?}", time.elapsed());
+            zkvm_witness.finalize_lk_multiplicities();
+
+            // assign table circuits
+            let time = std::time::Instant::now();
+            system_config
+                .config
+                .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
+                .unwrap();
+            tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
+
+            if shard_ctx.is_first_shard() {
+                // assign init table on first shard
+                let time = std::time::Instant::now();
+                system_config
+                    .mmu_config
+                    .assign_init_table_circuit(
+                        &system_config.zkvm_cs,
+                        &mut zkvm_witness,
+                        &emul_result.final_mem_state.reg,
+                        &emul_result.final_mem_state.mem,
+                        &emul_result.final_mem_state.io,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.stack,
+                        &emul_result.final_mem_state.heap,
+                    )
+                    .unwrap();
+                tracing::debug!("assign_init_table_circuit finish in {:?}", time.elapsed());
+            } else {
+                // empty assignment
+                system_config
+                    .mmu_config
+                    .assign_init_table_circuit(
+                        &system_config.zkvm_cs,
+                        &mut zkvm_witness,
+                        &[],
+                        &[],
+                        &[],
+                        &[],
+                        &[],
+                        &[],
+                    )
+                    .unwrap();
+            }
+
+            let time = std::time::Instant::now();
+            // assign continuation circuit
+            system_config
+                .mmu_config
+                .assign_continuation_circuit(
+                    &system_config.zkvm_cs,
+                    &shard_ctx,
                     &mut zkvm_witness,
                     &emul_result.final_mem_state.reg,
                     &emul_result.final_mem_state.mem,
@@ -1104,88 +1141,55 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     &emul_result.final_mem_state.heap,
                 )
                 .unwrap();
-            tracing::debug!("assign_init_table_circuit finish in {:?}", time.elapsed());
-        } else {
-            // empty assignment
-            system_config
-                .mmu_config
-                .assign_init_table_circuit(
+            tracing::debug!("assign_continuation_circuit finish in {:?}", time.elapsed());
+
+            let time = std::time::Instant::now();
+            // assign program circuit
+            zkvm_witness
+                .assign_table_circuit::<ProgramTableCircuit<E>>(
                     &system_config.zkvm_cs,
-                    &mut zkvm_witness,
-                    &[],
-                    &[],
-                    &[],
-                    &[],
-                    &[],
-                    &[],
+                    &system_config.prog_config,
+                    program,
                 )
                 .unwrap();
-        }
+            tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
 
-        let time = std::time::Instant::now();
-        // assign continuation circuit
-        system_config
-            .mmu_config
-            .assign_continuation_circuit(
-                &system_config.zkvm_cs,
-                &shard_ctx,
-                &mut zkvm_witness,
-                &emul_result.final_mem_state.reg,
-                &emul_result.final_mem_state.mem,
-                &emul_result.final_mem_state.io,
-                &emul_result.final_mem_state.hints,
-                &emul_result.final_mem_state.stack,
-                &emul_result.final_mem_state.heap,
-            )
-            .unwrap();
-        tracing::debug!("assign_continuation_circuit finish in {:?}", time.elapsed());
+            pi.init_pc = current_shard_init_pc;
+            pi.init_cycle = Tracer::SUBCYCLES_PER_INSN;
+            pi.shard_id = shard_ctx.shard_id as u32;
+            pi.end_pc = current_shard_end_pc;
+            pi.end_cycle = current_shard_end_cycle;
+            // set shard ram bus expected output to pi
+            let shard_ram_witnesses = zkvm_witness.get_witness(&ShardRamCircuit::<E>::name());
 
-        let time = std::time::Instant::now();
-        // assign program circuit
-        zkvm_witness
-            .assign_table_circuit::<ProgramTableCircuit<E>>(
-                &system_config.zkvm_cs,
-                &system_config.prog_config,
-                program,
-            )
-            .unwrap();
-        tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
+            if let Some(shard_ram_witnesses) = shard_ram_witnesses {
+                let time = std::time::Instant::now();
+                let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
+                    .iter()
+                    .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
+                    .map(|shard_ram_witness| {
+                        ShardRamCircuit::<E>::extract_ec_sum(
+                            &system_config.mmu_config.ram_bus_circuit,
+                            &shard_ram_witness.witness_rmms[0],
+                        )
+                    })
+                    .sum();
 
-        pi.init_pc = current_shard_init_pc;
-        pi.init_cycle = Tracer::SUBCYCLES_PER_INSN;
-        pi.shard_id = shard_ctx.shard_id as u32;
-        pi.end_pc = current_shard_end_pc;
-        pi.end_cycle = current_shard_end_cycle;
-        // set shard ram bus expected output to pi
-        let shard_ram_witnesses = zkvm_witness.get_witness(&ShardRamCircuit::<E>::name());
-
-        if let Some(shard_ram_witnesses) = shard_ram_witnesses {
-            let time = std::time::Instant::now();
-            let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
-                .iter()
-                .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
-                .map(|shard_ram_witness| {
-                    ShardRamCircuit::<E>::extract_ec_sum(
-                        &system_config.mmu_config.ram_bus_circuit,
-                        &shard_ram_witness.witness_rmms[0],
-                    )
-                })
-                .sum();
-
-            let xy = shard_ram_ec_sum
-                .x
-                .0
-                .iter()
-                .chain(shard_ram_ec_sum.y.0.iter());
-            for (f, v) in xy.zip_eq(pi.shard_rw_sum.as_mut_slice()) {
-                *v = f.to_canonical_u64() as u32;
+                let xy = shard_ram_ec_sum
+                    .x
+                    .0
+                    .iter()
+                    .chain(shard_ram_ec_sum.y.0.iter());
+                for (f, v) in xy.zip_eq(pi.shard_rw_sum.as_mut_slice()) {
+                    *v = f.to_canonical_u64() as u32;
+                }
+                tracing::debug!("update pi shard_rw_sum finish in {:?}", time.elapsed());
             }
-            tracing::debug!("update pi shard_rw_sum finish in {:?}", time.elapsed());
-        }
 
-        // update next round start
-        cur_index = end;
-        Some((zkvm_witness, shard_ctx, pi))
+            // update next round start
+            cur_index = end;
+            Some((zkvm_witness, shard_ctx, pi))
+        })
     })
 }
 
@@ -1539,36 +1543,83 @@ fn create_proofs_helper<
     target_shard_id: Option<usize>,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
-    #[cfg(feature = "gpu")]
-    {
-        use crossbeam::channel;
-        let (tx, rx) = channel::bounded(0);
-        std::thread::scope(|s| {
-            // pipeline cpu/gpu workload
-            // cpu producer
-            s.spawn({
-                move || {
-                    let wit_iter = generate_witness(
-                        &ctx.system_config,
-                        emulation_result,
-                        &ctx.program,
-                        target_shard_id,
-                    );
+    info_span!("app_prove.inner").in_scope(|| {
+        #[cfg(feature = "gpu")]
+        {
+            use crossbeam::channel;
+            let (tx, rx) = channel::bounded(0);
+            std::thread::scope(|s| {
+                // pipeline cpu/gpu workload
+                // cpu producer
+                s.spawn({
+                    move || {
+                        let wit_iter = generate_witness(
+                            &ctx.system_config,
+                            emulation_result,
+                            &ctx.program,
+                            target_shard_id,
+                        );
 
-                    let wit_iter = if let Some(target_shard_id) = target_shard_id {
-                        Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
-                    } else {
-                        Box::new(wit_iter)
-                    };
+                        let wit_iter = if let Some(target_shard_id) = target_shard_id {
+                            Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
+                        } else {
+                            Box::new(wit_iter)
+                        };
 
-                    for proof_input in wit_iter {
-                        tx.send(proof_input).unwrap()
+                        for proof_input in wit_iter {
+                            tx.send(proof_input).unwrap()
+                        }
                     }
-                }
-            });
+                });
 
-            // gpu consumer
-            rx.iter()
+                // gpu consumer
+                rx.iter()
+                    .map(|(zkvm_witness, shard_ctx, pi)| {
+                        if is_mock_proving {
+                            MockProver::assert_satisfied_full(
+                                &shard_ctx,
+                                &ctx.system_config.zkvm_cs,
+                                ctx.zkvm_fixed_traces.clone(),
+                                &zkvm_witness,
+                                &pi,
+                                &ctx.program,
+                            );
+                            tracing::info!("Mock proving passed");
+                        }
+
+                        let transcript = Transcript::new(b"riscv");
+                        let start = std::time::Instant::now();
+                        let zkvm_proof = prover
+                            .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
+                            .expect("create_proof failed");
+                        tracing::debug!(
+                            "{}th shard proof created in {:?}",
+                            shard_ctx.shard_id,
+                            start.elapsed()
+                        );
+                        zkvm_proof
+                    })
+                    .collect::<Vec<_>>()
+            })
+        }
+
+        #[cfg(not(feature = "gpu"))]
+        {
+            // Generate witness
+            let wit_iter = generate_witness(
+                &ctx.system_config,
+                emulation_result,
+                &ctx.program,
+                target_shard_id,
+            );
+
+            let wit_iter = if let Some(target_shard_id) = target_shard_id {
+                Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
+            } else {
+                Box::new(wit_iter)
+            };
+
+            wit_iter
                 .map(|(zkvm_witness, shard_ctx, pi)| {
                     if is_mock_proving {
                         MockProver::assert_satisfied_full(
@@ -1592,58 +1643,13 @@ fn create_proofs_helper<
                         shard_ctx.shard_id,
                         start.elapsed()
                     );
+                    // only show e2e stats in cpu mode
+                    tracing::info!("e2e proof stat: {}", zkvm_proof);
                     zkvm_proof
                 })
-                .collect::<Vec<_>>()
-        })
-    }
-
-    #[cfg(not(feature = "gpu"))]
-    {
-        // Generate witness
-        let wit_iter = generate_witness(
-            &ctx.system_config,
-            emulation_result,
-            &ctx.program,
-            target_shard_id,
-        );
-
-        let wit_iter = if let Some(target_shard_id) = target_shard_id {
-            Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
-        } else {
-            Box::new(wit_iter)
-        };
-
-        wit_iter
-            .map(|(zkvm_witness, shard_ctx, pi)| {
-                if is_mock_proving {
-                    MockProver::assert_satisfied_full(
-                        &shard_ctx,
-                        &ctx.system_config.zkvm_cs,
-                        ctx.zkvm_fixed_traces.clone(),
-                        &zkvm_witness,
-                        &pi,
-                        &ctx.program,
-                    );
-                    tracing::info!("Mock proving passed");
-                }
-
-                let transcript = Transcript::new(b"riscv");
-                let start = std::time::Instant::now();
-                let zkvm_proof = prover
-                    .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                    .expect("create_proof failed");
-                tracing::debug!(
-                    "{}th shard proof created in {:?}",
-                    shard_ctx.shard_id,
-                    start.elapsed()
-                );
-                // only show e2e stats in cpu mode
-                tracing::info!("e2e proof stat: {}", zkvm_proof);
-                zkvm_proof
-            })
-            .collect_vec()
-    }
+                .collect_vec()
+        }
+    })
 }
 
 pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
