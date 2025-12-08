@@ -1247,6 +1247,7 @@ dependencies = [
  "gkr_iop",
  "glob",
  "itertools 0.13.0",
+ "metrics",
  "mpcs 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18)",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18)",
  "ndarray",
