@@ -21,8 +21,7 @@ use openvm_circuit::{
     system::program::trace::VmCommittedExe,
     utils::air_test_impl,
 };
-use openvm_stark_backend::config::PcsProverData;
-use openvm_stark_backend::config::Val;
+use openvm_stark_backend::config::{PcsProverData, Val};
 
 use openvm_continuations::{
     C,
