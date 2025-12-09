@@ -776,9 +776,12 @@ pub fn verify_gkr_circuit<C: Config>(
     };
 
     for (i, layer) in gkr_circuit.layers.iter().enumerate() {
+        builder.cycle_tracker_start("GKR Circuit Layer");
         let layer_proof = builder.get(&gkr_proof.layer_proofs, i);
         let layer_challenges: Array<C, Ext<C::F, C::EF>> =
             generate_layer_challenges(builder, challenger, challenges, layer.n_challenges);
+
+        builder.cycle_tracker_start("Extract claim and point");
         let eval_and_dedup_points: Array<C, ClaimAndPoint<C>> = extract_claim_and_point(
             builder,
             layer,
@@ -786,6 +789,7 @@ pub fn verify_gkr_circuit<C: Config>(
             &layer_challenges,
             &layer_proof.has_rotation,
         );
+        builder.cycle_tracker_end("Extract claim and point");
 
         if layer.rotation_sumcheck_expression.is_some() {
             builder.assert_usize_eq(
@@ -816,6 +820,7 @@ pub fn verify_gkr_circuit<C: Config>(
         );
         builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
 
+        builder.cycle_tracker_start("Verify Rotation");
         if layer.rotation_sumcheck_expression.is_some() {
             builder.if_eq(has_rotation, Usize::from(1)).then(|builder| {
                 let first = builder.get(&eval_and_dedup_points, 0);
@@ -884,6 +889,7 @@ pub fn verify_gkr_circuit<C: Config>(
                 );
             });
         }
+        builder.cycle_tracker_end("Verify Rotation");
 
         let rotation_exprs_len = layer.rotation_exprs.1.len();
         transcript_observe_label(builder, challenger, b"combine subset evals");
@@ -893,6 +899,7 @@ pub fn verify_gkr_circuit<C: Config>(
             Usize::from(layer.exprs.len() + rotation_exprs_len * ROTATION_OPENING_COUNT),
         );
 
+        builder.cycle_tracker_start("Calculate Sigma");
         let sigma: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
         let alpha_idx: Usize<C::N> = Usize::Var(Var::uninit(builder));
         builder.assign(&alpha_idx, C::N::from_canonical_usize(0));
@@ -914,12 +921,14 @@ pub fn verify_gkr_circuit<C: Config>(
                 builder.assign(&sigma, sigma + sub_sum);
                 builder.assign(&alpha_idx, end_idx);
             });
-
+        builder.cycle_tracker_end("Calculate Sigma");
+        
         // sigma = \sum_b sel(b) * zero_expr(b)
         let max_degree = builder.constant(C::F::from_canonical_usize(layer.max_expr_degree + 1));
 
         let max_num_variables_f = builder.unsafe_cast_var_to_felt(max_num_variables.get_var());
 
+        builder.cycle_tracker_start("Sumcheck Verification");
         let (in_point, expected_evaluation) = iop_verifier_state_verify(
             builder,
             challenger,
@@ -929,9 +938,11 @@ pub fn verify_gkr_circuit<C: Config>(
             max_degree,
             unipoly_extrapolator,
         );
+        builder.cycle_tracker_end("Sumcheck Verification");
 
         let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
 
+        builder.cycle_tracker_start("Check selector evaluations");
         // check selector evaluations
         layer
             .out_sel_and_eval_exprs
@@ -948,7 +959,9 @@ pub fn verify_gkr_circuit<C: Config>(
                 let main_eval = builder.get(&main_evals, wit_id);
                 builder.assert_ext_eq(main_eval, expected_eval);
             });
+        builder.cycle_tracker_end("Check selector evaluations");
 
+        builder.cycle_tracker_start("Check structural witin");
         // check structural witin
         for s in &layer.structural_witins {
             let id = s.id;
@@ -1039,7 +1052,10 @@ pub fn verify_gkr_circuit<C: Config>(
             let main_wit_eval = builder.get(&main_evals, wit_id);
             builder.assert_ext_eq(expected_eval, main_wit_eval);
         }
+        builder.cycle_tracker_end("Check structural witin");
 
+
+        builder.cycle_tracker_start("Check instances");
         let pubio_offset = layer.n_witin + layer.n_fixed;
         for (index, instance) in layer.instance_openings.iter().enumerate() {
             let index: usize = pubio_offset + index;
@@ -1051,7 +1067,10 @@ pub fn verify_gkr_circuit<C: Config>(
             let main_eval = builder.get(&main_evals, index);
             builder.assert_ext_eq(expected_eval, main_eval);
         }
+        builder.cycle_tracker_end("Check instances");
 
+
+        builder.cycle_tracker_start("Evaluate main sumcheck expression with instance");
         // TODO: we should store alpha_pows in a bigger array to avoid concatenating them
         let main_sumcheck_challenges_len: Usize<C::N> =
             builder.eval(alpha_pows.len() + Usize::from(2));
@@ -1069,8 +1088,8 @@ pub fn verify_gkr_circuit<C: Config>(
                 let alpha = builder.get(&alpha_pows, idx_vec[0]);
                 builder.set(&challenge_slice, idx_vec[0], alpha);
             });
-
         let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
+        builder.cycle_tracker_start("Evaluate claim");
         let got_claim = eval_ceno_expr_with_instance(
             builder,
             &empty_arr,
@@ -1080,9 +1099,11 @@ pub fn verify_gkr_circuit<C: Config>(
             &main_sumcheck_challenges,
             layer.main_sumcheck_expression.as_ref().unwrap(),
         );
-
+        builder.cycle_tracker_end("Evaluate claim");
         builder.assert_ext_eq(got_claim, expected_evaluation);
+        builder.cycle_tracker_end("Evaluate main sumcheck expression with instance");
 
+        builder.cycle_tracker_start("Update claim");
         // Update claim
         layer
             .in_eval_expr
@@ -1099,6 +1120,9 @@ pub fn verify_gkr_circuit<C: Config>(
             });
 
         builder.assign(&rt.fs, in_point);
+        builder.cycle_tracker_end("Update claim");
+
+        builder.cycle_tracker_end("GKR Circuit Layer");
     }
 
     // GKR Claim
