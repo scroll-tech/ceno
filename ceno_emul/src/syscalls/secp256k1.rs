@@ -23,7 +23,7 @@ impl SyscallSpec for Secp256k1AddSpec {
 impl SyscallSpec for Secp256k1DoubleSpec {
     const NAME: &'static str = "SECP256K1_DOUBLE";
 
-    const REG_OPS_COUNT: usize = 2;
+    const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = SECP256K1_ARG_WORDS;
     const CODE: u32 = ceno_syscall::SECP256K1_DOUBLE;
 }
