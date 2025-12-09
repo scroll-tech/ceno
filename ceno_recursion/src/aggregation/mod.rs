@@ -256,7 +256,13 @@ impl CenoAggregationProver {
         let zkvm_proof_inputs: Vec<ZKVMProofInput> = base_proofs
             .into_iter()
             .enumerate()
-            .map(|(shard_id, p)| ZKVMProofInput::from((shard_id, p)))
+            .map(|(shard_id, p)| {
+                println!(
+                    "leaf input {shard_id} has {} bytes",
+                    bincode::serialized_size(&p).unwrap()
+                );
+                ZKVMProofInput::from((shard_id, p))
+            })
             .collect();
         let user_public_values: Vec<F> = zkvm_proof_inputs
             .iter()
@@ -281,20 +287,23 @@ impl CenoAggregationProver {
                     &mut self.leaf_prover,
                     witness_stream,
                     VM_MAX_TRACE_HEIGHTS,
-                );
+                )
+                .expect("leaf proof");
 
                 // _debug: export
                 // let file =
                 // File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
                 // bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
 
+                let leaf_proof_size = bincode::serialized_size(&leaf_proof).unwrap();
                 println!(
-                    "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}",
+                    "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}, size: {:?} bytes",
                     proof_idx,
-                    aggregation_start_timestamp.elapsed()
+                    aggregation_start_timestamp.elapsed(),
+                    leaf_proof_size
                 );
 
-                leaf_proof.expect("leaf proof")
+                leaf_proof
             })
             .collect::<Vec<_>>();
 
@@ -310,10 +319,17 @@ impl CenoAggregationProver {
         // We will always generate at least one internal proof, even if there is only one leaf
         // proof, in order to shrink the proof size
         while proofs.len() > 1 || internal_node_height == 0 {
+            for (i, proof) in proofs.iter().enumerate() {
+                println!(
+                    "Internal aggregation layer {:?} node {i} has proof size: {:?} bytes",
+                    internal_node_height,
+                    bincode::serialized_size(proof).unwrap()
+                );
+            }
             let internal_inputs = InternalVmVerifierInput::chunk_leaf_or_internal_proofs(
                 (*self.internal_prover.program_commitment()).into(),
                 &proofs,
-                DEFAULT_NUM_CHILDREN_INTERNAL,
+                2,
             );
 
             let layer_proofs: Vec<Proof<_>> = internal_inputs
@@ -324,7 +340,8 @@ impl CenoAggregationProver {
                         &mut self.internal_prover,
                         input.write(),
                         VM_MAX_TRACE_HEIGHTS,
-                    );
+                    )
+                    .expect("internal_proof");
 
                     println!(
                         "Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}",
@@ -340,7 +357,7 @@ impl CenoAggregationProver {
                     // ))
                     // .expect("Create export proof file");
                     // bincode::serialize_into(file, &internal_proof).expect("failed to serialize internal proof");
-                    internal_proof.expect("internal_proof")
+                    internal_proof
                 })
                 .collect();
 
@@ -772,16 +789,16 @@ mod tests {
     pub fn aggregation_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);
 
-        let proof_path = "./src/imported/proof.bin";
-        let vk_path = "./src/imported/vk.bin";
+        let proof_path = "./src/imported/app_proof.bitcode";
+        let vk_path = "./src/imported/app_vk.bitcode";
 
+        let proof_bytes = std::fs::read(proof_path).unwrap();
+        let vk_bytes = std::fs::read(vk_path).unwrap();
         let zkvm_proofs: Vec<ZKVMProof<E, Basefold<E, BasefoldRSParams>>> =
-            bincode::deserialize_from(File::open(proof_path).expect("Failed to open proof file"))
-                .expect("Failed to deserialize proof file");
+            bitcode::deserialize(&proof_bytes).expect("Failed to deserialize proof file");
 
         let vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>> =
-            bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
-                .expect("Failed to deserialize vk file");
+            bitcode::deserialize(&vk_bytes).expect("Failed to deserialize vk file");
 
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
         let root_stark_proof = agg_prover.generate_root_proof(zkvm_proofs);

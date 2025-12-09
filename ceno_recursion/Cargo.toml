@@ -10,6 +10,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+bitcode = { version = "0.6.5", default-features = false, features = ["serde"] }
 bincode.workspace = true
 ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
@@ -53,7 +54,7 @@ path = "src/bin/e2e_aggregate.rs"
 
 [features]
 bench-metrics = ["openvm-circuit/metrics"]
-default = ["parallel", "nightly-features"]
+default = ["parallel", "nightly-features", "openvm-circuit/perf-metrics"]
 gpu = ["openvm-circuit/cuda", "openvm-native-circuit/cuda", "dep:openvm-cuda-backend"]
 nightly-features = [
   "ceno_zkvm/nightly-features",
