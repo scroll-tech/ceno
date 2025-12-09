@@ -49,6 +49,7 @@ ndarray = "*"
 num-derive = "0.4"
 num-traits = "0.2"
 
+metrics = "*"
 num = "*"
 num-bigint = "0.4.6"
 pprof2 = { version = "0.13", features = ["flamegraph"] }
