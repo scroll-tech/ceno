@@ -7,6 +7,7 @@ use crate::{
     syscalls::{SyscallEffects, SyscallWitness},
 };
 use ceno_rt::WORD_SIZE;
+#[cfg(any(test, debug_assertions))]
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{collections::BTreeMap, fmt, mem};
@@ -74,6 +75,8 @@ pub type WriteOp = MemOp<Change<Word>>;
 #[derive(Debug)]
 pub struct LatestAccesses {
     store: DenseAddrSpace<Cycle>,
+    len: usize,
+    #[cfg(any(test, debug_assertions))]
     touched: Vec<WordAddr>,
 }
 
@@ -81,6 +84,8 @@ impl LatestAccesses {
     fn new(platform: &Platform) -> Self {
         Self {
             store: DenseAddrSpace::new(0, platform.heap.end),
+            len: 0,
+            #[cfg(any(test, debug_assertions))]
             touched: Vec::new(),
         }
     }
@@ -91,7 +96,11 @@ impl LatestAccesses {
             .replace(addr, cycle)
             .unwrap_or_else(|| panic!("addr {addr:?} outside tracked address space"));
         if prev == Cycle::default() {
-            self.touched.push(addr);
+            self.len += 1;
+            #[cfg(any(test, debug_assertions))]
+            {
+                self.touched.push(addr);
+            }
         }
         prev
     }
@@ -103,6 +112,15 @@ impl LatestAccesses {
             .expect("address must lie within tracked range")
     }
 
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[cfg(any(test, debug_assertions))]
     pub fn iter(&self) -> LatestAccessIter<'_> {
         LatestAccessIter {
             accesses: self,
@@ -110,24 +128,28 @@ impl LatestAccesses {
         }
     }
 
+    #[cfg(any(test, debug_assertions))]
     pub fn keys(&self) -> impl Iterator<Item = WordAddr> + '_ {
         self.touched.iter().copied()
     }
 
-    pub fn len(&self) -> usize {
-        self.touched.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.touched.is_empty()
+    #[cfg(any(test, debug_assertions))]
+    pub fn eq_map(&self, other: &FxHashMap<WordAddr, Cycle>) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        self.iter()
+            .all(|(addr, cycle)| other.get(addr).map(|c| *c == *cycle).unwrap_or(false))
     }
 }
 
+#[cfg(any(test, debug_assertions))]
 pub struct LatestAccessIter<'a> {
     accesses: &'a LatestAccesses,
     idx: usize,
 }
 
+#[cfg(any(test, debug_assertions))]
 impl<'a> Iterator for LatestAccessIter<'a> {
     type Item = (&'a WordAddr, &'a Cycle);
 
@@ -143,22 +165,13 @@ impl<'a> Iterator for LatestAccessIter<'a> {
     }
 }
 
+#[cfg(any(test, debug_assertions))]
 impl<'a> IntoIterator for &'a LatestAccesses {
     type Item = (&'a WordAddr, &'a Cycle);
     type IntoIter = LatestAccessIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
-    }
-}
-
-impl LatestAccesses {
-    pub fn eq_map(&self, other: &FxHashMap<WordAddr, Cycle>) -> bool {
-        if self.len() != other.len() {
-            return false;
-        }
-        self.iter()
-            .all(|(addr, cycle)| other.get(addr).map(|c| *c == *cycle).unwrap_or(false))
     }
 }
 

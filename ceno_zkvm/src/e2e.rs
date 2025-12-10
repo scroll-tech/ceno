@@ -31,13 +31,17 @@ use ff_ext::{ExtensionField, SmallField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 use gkr_iop::{RAMType, hal::ProverBackend};
-use itertools::{Itertools, MinMaxResult, chain};
+#[cfg(debug_assertions)]
+use itertools::MinMaxResult;
+use itertools::{Itertools, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
+#[cfg(debug_assertions)]
+use std::collections::{HashMap, HashSet};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
     sync::Arc,
 };
@@ -797,16 +801,19 @@ pub fn emulate_program<'a>(
         vec![]
     };
 
-    debug_memory_ranges(
-        &vm,
-        chain!(
-            &mem_final,
-            &io_final,
-            &hints_final,
-            &stack_final,
-            &heap_final
-        ),
-    );
+    #[cfg(debug_assertions)]
+    {
+        debug_memory_ranges(
+            &vm,
+            chain!(
+                &mem_final,
+                &io_final,
+                &hints_final,
+                &stack_final,
+                &heap_final
+            ),
+        );
+    }
 
     let shard_ctx_builder =
         ShardContextBuilder::new(multi_prover, vm.take_tracer().next_accesses());
@@ -1673,6 +1680,7 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     }
 }
 
+#[cfg(debug_assertions)]
 fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState, mem_final: I) {
     let accessed_addrs = vm
         .tracer()
@@ -1702,6 +1710,7 @@ fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState,
     }
 }
 
+#[cfg(debug_assertions)]
 fn format_segments(
     platform: &Platform,
     addrs: impl Iterator<Item = ByteAddr>,
@@ -1711,6 +1720,7 @@ fn format_segments(
         .minmax()
 }
 
+#[cfg(debug_assertions)]
 fn format_segment(platform: &Platform, addr: u32) -> String {
     format!(
         "{}{}",
