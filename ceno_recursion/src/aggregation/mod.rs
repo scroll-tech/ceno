@@ -82,6 +82,9 @@ use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
 
 mod internal;
+mod root;
+mod types;
+
 pub type InnerConfig = AsmConfig<F, E>;
 pub const LEAF_LOG_BLOWUP: usize = 1;
 pub const INTERNAL_LOG_BLOWUP: usize = 2;
@@ -435,77 +438,6 @@ impl CenoLeafVmVerifierConfig {
             //             builder.assign(&prev_pc, end_pc);
             //         });
 
-            //         // EC sum verification
-            //         let expected_last_shard_id = Usize::uninit(builder);
-            //         builder.assign(&expected_last_shard_id, pv.len() - Usize::from(1));
-
-            //         let shard_id_fs = builder.get(&shard_raw_pi, SHARD_ID_IDX);
-            //         let shard_id_f = builder.get(&shard_id_fs, 0);
-            //         let shard_id = Usize::Var(builder.cast_felt_to_var(shard_id_f));
-            //         builder.assert_usize_eq(expected_last_shard_id, shard_id);
-
-            //         let ec_sum = SepticPointVariable {
-            //             x: SepticExtensionVariable {
-            //                 vs: builder.dyn_array(7),
-            //             },
-            //             y: SepticExtensionVariable {
-            //                 vs: builder.dyn_array(7),
-            //             },
-            //             is_infinity: Usize::uninit(builder),
-            //         };
-            //         builder.assign(&ec_sum.is_infinity, Usize::from(1));
-
-            //         builder.range(0, pv.len()).for_each(|idx_vec, builder| {
-            //             let shard_pv = builder.get(&pv, idx_vec[0]);
-            //             let x = SepticExtensionVariable {
-            //                 vs: shard_pv.slice(
-            //                     builder,
-            //                     SHARD_RW_SUM_IDX,
-            //                     SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
-            //                 ),
-            //             };
-            //             let y = SepticExtensionVariable {
-            //                 vs: shard_pv.slice(
-            //                     builder,
-            //                     SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
-            //                     SHARD_RW_SUM_IDX + 2 * SEPTIC_EXTENSION_DEGREE,
-            //                 ),
-            //             };
-            //             let shard_ec = SepticPointVariable {
-            //                 x: x.clone(),
-            //                 y: y.clone(),
-            //                 is_infinity: Usize::uninit(builder),
-            //             };
-            //             let is_x_zero = x.is_zero(builder);
-            //             let is_y_zero = y.is_zero(builder);
-            //             builder.if_eq(is_x_zero, Usize::from(1)).then_or_else(
-            //                 |builder| {
-            //                     builder
-            //                         .if_eq(is_y_zero.clone(), Usize::from(1))
-            //                         .then_or_else(
-            //                             |builder| {
-            //                                 builder.assign(&shard_ec.is_infinity, Usize::from(1));
-            //                             },
-            //                             |builder| {
-            //                                 builder.assign(&shard_ec.is_infinity, Usize::from(0));
-            //                             },
-            //                         );
-            //                 },
-            //                 |builder| {
-            //                     builder.assign(&shard_ec.is_infinity, Usize::from(0));
-            //                 },
-            //             );
-
-            //             add_septic_points_in_place(builder, &ec_sum, &shard_ec);
-            //         });
-
-            //         add_septic_points_in_place(builder, &ec_sum, &calculated_shard_ec_sum);
-
-            //         let is_sum_x_zero = ec_sum.x.is_zero(builder);
-            //         let is_sum_y_zero = ec_sum.y.is_zero(builder);
-
-            //         builder.assert_usize_eq(is_sum_x_zero, Usize::from(1));
-            //         builder.assert_usize_eq(is_sum_y_zero, Usize::from(1));
             //     });
 
             for pv in stark_pvs.flatten() {
