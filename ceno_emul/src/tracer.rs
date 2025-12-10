@@ -527,7 +527,7 @@ impl Tracer {
         if self.record.memory_op.is_some() {
             unimplemented!("Only one memory access is supported");
         }
-        // // update min/max mmio access
+        // update min/max mmio access
         if let Some((_, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
