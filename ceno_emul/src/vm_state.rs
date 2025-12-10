@@ -2,6 +2,7 @@ use super::rv32im::EmuContext;
 use crate::{
     PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
+    dense_addr_space::DenseAddrSpace,
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
@@ -17,7 +18,7 @@ pub struct VMState {
     pc: Word,
     /// Emulated main memory backed by a pre-allocated vector covering the
     /// platform layout in `memory.x`.
-    memory: PreallocatedMemory,
+    memory: DenseAddrSpace<Word>,
     registers: [Word; VMState::REG_COUNT],
     // Termination.
     halted: bool,
@@ -36,10 +37,13 @@ impl VMState {
             pc,
             platform: platform.clone(),
             program: program.clone(),
-            memory: PreallocatedMemory::new(&platform),
+            memory: DenseAddrSpace::new(
+                platform.rom.start & !(WORD_SIZE as u32 - 1),
+                platform.heap.end,
+            ),
             registers: [0; VMState::REG_COUNT],
             halted: false,
-            tracer: Tracer::new(Some(&platform)),
+            tracer: Tracer::new(&platform),
         };
 
         // init memory from program.image
@@ -83,7 +87,7 @@ impl VMState {
     pub fn init_memory(&mut self, addr: WordAddr, value: Word) {
         self.memory
             .write(addr, value)
-            .unwrap_or_else(|| panic!("addr {addr:?} outside preallocated memory"));
+            .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
     }
 
     pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
@@ -119,7 +123,7 @@ impl VMState {
         for (addr, value) in effects.iter_mem_values() {
             self.memory
                 .write(addr, value)
-                .unwrap_or_else(|| panic!("addr {addr:?} outside preallocated memory"));
+                .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
         }
 
         for (idx, value) in effects.iter_reg_values() {
@@ -131,48 +135,6 @@ impl VMState {
 
         self.tracer.track_syscall(effects);
         Ok(())
-    }
-}
-
-/// Dense memory backing the emulator. It pre-allocates a contiguous slice that
-/// spans the address ranges declared in `memory.x` (ROM through heap) so random
-/// loads/stores become simple index operations instead of hashmap lookups.
-struct PreallocatedMemory {
-    base: u32,
-    end: u32,
-    words: Vec<Word>,
-}
-
-impl PreallocatedMemory {
-    fn new(platform: &Platform) -> Self {
-        let base = platform.rom.start & !(WORD_SIZE as u32 - 1);
-        let end = platform.heap.end;
-        debug_assert!(end > base, "invalid platform address range");
-        debug_assert_eq!((end - base) % WORD_SIZE as u32, 0);
-        let len_words = ((end - base) / WORD_SIZE as u32) as usize;
-        Self {
-            base,
-            end,
-            words: vec![0; len_words],
-        }
-    }
-
-    fn read(&self, addr: WordAddr) -> Word {
-        self.index(addr).map(|idx| self.words[idx]).unwrap_or(0)
-    }
-
-    fn write(&mut self, addr: WordAddr, value: Word) -> Option<()> {
-        self.index(addr).map(|idx| {
-            self.words[idx] = value;
-        })
-    }
-
-    fn index(&self, addr: WordAddr) -> Option<usize> {
-        let byte_addr = addr.baddr().0;
-        if byte_addr < self.base || byte_addr >= self.end {
-            return None;
-        }
-        Some(((byte_addr - self.base) / WORD_SIZE as u32) as usize)
     }
 }
 
@@ -263,7 +225,7 @@ impl EmuContext for VMState {
         self.tracer.store_memory(addr, Change { after, before });
         self.memory
             .write(addr, after)
-            .unwrap_or_else(|| panic!("addr {addr:?} outside preallocated memory"));
+            .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
         Ok(())
     }
 

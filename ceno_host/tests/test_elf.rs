@@ -76,7 +76,7 @@ fn test_ceno_rt_alloc() -> Result<()> {
 
     // Search for the RAM action of the test program.
     let mut found = (false, false);
-    for &addr in state.tracer().final_accesses().keys() {
+    for addr in state.tracer().final_accesses().keys() {
         if !CENO_PLATFORM.is_ram(addr.into()) {
             continue;
         }

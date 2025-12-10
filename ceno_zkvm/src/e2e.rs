@@ -695,7 +695,7 @@ pub fn emulate_program<'a>(
                     addr: rec.addr,
                     value: vm.peek_register(index),
                     init_value: rec.value,
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                    cycle: final_access.cycle(vma),
                 }
             } else {
                 // The table is padded beyond the number of registers.
@@ -720,7 +720,7 @@ pub fn emulate_program<'a>(
                 addr: rec.addr,
                 value: vm.peek_memory(vma),
                 init_value: rec.value,
-                cycle: *final_access.get(&vma).unwrap_or(&0),
+                cycle: final_access.cycle(vma),
             }
         })
         .collect_vec();
@@ -733,7 +733,7 @@ pub fn emulate_program<'a>(
             addr: rec.addr,
             value: rec.value,
             init_value: rec.value,
-            cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
+            cycle: final_access.cycle(rec.addr.into()),
         })
         .collect_vec();
 
@@ -745,7 +745,7 @@ pub fn emulate_program<'a>(
             addr: rec.addr,
             value: rec.value,
             init_value: rec.value,
-            cycle: *final_access.get(&rec.addr.into()).unwrap_or(&0),
+            cycle: final_access.cycle(rec.addr.into()),
         })
         .collect_vec();
 
@@ -764,7 +764,7 @@ pub fn emulate_program<'a>(
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
                     init_value: 0,
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                    cycle: final_access.cycle(vma),
                 }
             })
             .collect_vec()
@@ -789,7 +789,7 @@ pub fn emulate_program<'a>(
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
                     init_value: 0,
-                    cycle: *final_access.get(&vma).unwrap_or(&0),
+                    cycle: final_access.cycle(vma),
                 }
             })
             .collect_vec()

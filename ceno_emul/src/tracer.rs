@@ -1,16 +1,15 @@
-use rustc_hash::FxHashMap;
-use smallvec::SmallVec;
-use std::{collections::BTreeMap, fmt, mem};
-
-use ceno_rt::WORD_SIZE;
-
 use crate::{
     CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     chunked_vec::ChunkedVec,
+    dense_addr_space::DenseAddrSpace,
     encode_rv32,
     syscalls::{SyscallEffects, SyscallWitness},
 };
+use ceno_rt::WORD_SIZE;
+use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
+use std::{collections::BTreeMap, fmt, mem};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -71,6 +70,97 @@ impl<T> MemOp<T> {
 
 pub type ReadOp = MemOp<Word>;
 pub type WriteOp = MemOp<Change<Word>>;
+
+#[derive(Debug)]
+pub struct LatestAccesses {
+    store: DenseAddrSpace<Cycle>,
+    touched: Vec<WordAddr>,
+}
+
+impl LatestAccesses {
+    fn new(platform: &Platform) -> Self {
+        Self {
+            store: DenseAddrSpace::new(0, platform.heap.end),
+            touched: Vec::new(),
+        }
+    }
+
+    fn track(&mut self, addr: WordAddr, cycle: Cycle) -> Cycle {
+        let prev = self
+            .store
+            .replace(addr, cycle)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside tracked address space"));
+        if prev == Cycle::default() {
+            self.touched.push(addr);
+        }
+        prev
+    }
+
+    pub fn cycle(&self, addr: WordAddr) -> Cycle {
+        *self
+            .store
+            .get_ref(addr)
+            .expect("address must lie within tracked range")
+    }
+
+    pub fn iter(&self) -> LatestAccessIter<'_> {
+        LatestAccessIter {
+            accesses: self,
+            idx: 0,
+        }
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = WordAddr> + '_ {
+        self.touched.iter().copied()
+    }
+
+    pub fn len(&self) -> usize {
+        self.touched.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.touched.is_empty()
+    }
+}
+
+pub struct LatestAccessIter<'a> {
+    accesses: &'a LatestAccesses,
+    idx: usize,
+}
+
+impl<'a> Iterator for LatestAccessIter<'a> {
+    type Item = (&'a WordAddr, &'a Cycle);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let addr = self.accesses.touched.get(self.idx)?;
+        self.idx += 1;
+        let cycle = self
+            .accesses
+            .store
+            .get_ref(*addr)
+            .expect("tracked address must exist");
+        Some((addr, cycle))
+    }
+}
+
+impl<'a> IntoIterator for &'a LatestAccesses {
+    type Item = (&'a WordAddr, &'a Cycle);
+    type IntoIter = LatestAccessIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl LatestAccesses {
+    pub fn eq_map(&self, other: &FxHashMap<WordAddr, Cycle>) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        self.iter()
+            .all(|(addr, cycle)| other.get(addr).map(|c| *c == *cycle).unwrap_or(false))
+    }
+}
 
 impl StepRecord {
     pub fn new_r_instruction(
@@ -311,17 +401,11 @@ pub struct Tracer {
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
 
     // keep track of each address that the cycle when they were last accessed.
-    latest_accesses: FxHashMap<WordAddr, Cycle>,
+    latest_accesses: LatestAccesses,
 
     // keep track of each cycle that accessed addresses in the future with respective future cycles.
     // format: [current cycle -> Vec<(WordAddr, Cycle)>]
     next_accesses: NextCycleAccess,
-}
-
-impl Default for Tracer {
-    fn default() -> Self {
-        Self::new(None)
-    }
 }
 
 impl Tracer {
@@ -331,48 +415,43 @@ impl Tracer {
     pub const SUBCYCLE_MEM: Cycle = 3;
     pub const SUBCYCLES_PER_INSN: Cycle = 4;
 
-    pub fn new(platform: Option<&Platform>) -> Tracer {
-        let mmio_max_access = if let Some(platform) = platform {
-            let mut mmio_max_access = BTreeMap::new();
-            mmio_max_access.insert(
+    pub fn new(platform: &Platform) -> Tracer {
+        let mut mmio_max_access = BTreeMap::new();
+        mmio_max_access.insert(
+            ByteAddr::from(platform.heap.start).waddr(),
+            (
                 ByteAddr::from(platform.heap.start).waddr(),
-                (
-                    ByteAddr::from(platform.heap.start).waddr(),
-                    ByteAddr::from(platform.heap.end).waddr(),
-                    ByteAddr::from(platform.heap.end).waddr(),
-                    ByteAddr::from(platform.heap.start).waddr(),
-                ),
-            );
-            mmio_max_access.insert(
+                ByteAddr::from(platform.heap.end).waddr(),
+                ByteAddr::from(platform.heap.end).waddr(),
+                ByteAddr::from(platform.heap.start).waddr(),
+            ),
+        );
+        mmio_max_access.insert(
+            ByteAddr::from(platform.stack.start).waddr(),
+            (
                 ByteAddr::from(platform.stack.start).waddr(),
-                (
-                    ByteAddr::from(platform.stack.start).waddr(),
-                    ByteAddr::from(platform.stack.end).waddr(),
-                    ByteAddr::from(platform.stack.end).waddr(),
-                    ByteAddr::from(platform.stack.start).waddr(),
-                ),
-            );
-            mmio_max_access.insert(
+                ByteAddr::from(platform.stack.end).waddr(),
+                ByteAddr::from(platform.stack.end).waddr(),
+                ByteAddr::from(platform.stack.start).waddr(),
+            ),
+        );
+        mmio_max_access.insert(
+            ByteAddr::from(platform.hints.start).waddr(),
+            (
                 ByteAddr::from(platform.hints.start).waddr(),
-                (
-                    ByteAddr::from(platform.hints.start).waddr(),
-                    ByteAddr::from(platform.hints.end).waddr(),
-                    ByteAddr::from(platform.hints.end).waddr(),
-                    ByteAddr::from(platform.hints.start).waddr(),
-                ),
-            );
-            Some(mmio_max_access)
-        } else {
-            None
-        };
+                ByteAddr::from(platform.hints.end).waddr(),
+                ByteAddr::from(platform.hints.end).waddr(),
+                ByteAddr::from(platform.hints.start).waddr(),
+            ),
+        );
 
         Tracer {
-            mmio_min_max_access: mmio_max_access,
+            mmio_min_max_access: Some(mmio_max_access),
             record: StepRecord {
                 cycle: Self::SUBCYCLES_PER_INSN,
                 ..StepRecord::default()
             },
-            latest_accesses: FxHashMap::default(),
+            latest_accesses: LatestAccesses::new(platform),
             next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
         }
     }
@@ -441,8 +520,7 @@ impl Tracer {
         if self.record.memory_op.is_some() {
             unimplemented!("Only one memory access is supported");
         }
-
-        // update min/max mmio access
+        // // update min/max mmio access
         if let Some((_, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
@@ -483,14 +561,14 @@ impl Tracer {
     /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
     pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         let cur_cycle = self.record.cycle + subcycle;
-        let prev_cycle = self.latest_accesses.insert(addr, cur_cycle).unwrap_or(0);
+        let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
         self.next_accesses
             .get_or_create(prev_cycle as usize)
             .push((addr, cur_cycle));
         prev_cycle
     }
 
-    pub fn final_accesses(&self) -> &FxHashMap<WordAddr, Cycle> {
+    pub fn final_accesses(&self) -> &LatestAccesses {
         &self.latest_accesses
     }
 

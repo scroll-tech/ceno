@@ -29,9 +29,10 @@ fn test_vm_trace() -> Result<()> {
     let ops: Vec<InsnKind> = steps.iter().map(|step| step.insn().kind).collect();
     assert_eq!(ops, expected_ops_fibonacci_20());
 
-    assert_eq!(
-        ctx.tracer().final_accesses(),
-        &expected_final_accesses_fibonacci_20()
+    assert!(
+        ctx.tracer()
+            .final_accesses()
+            .eq_map(&expected_final_accesses_fibonacci_20())
     );
 
     Ok(())
