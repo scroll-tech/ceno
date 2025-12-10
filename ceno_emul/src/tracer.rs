@@ -81,7 +81,10 @@ pub struct LatestAccesses {
 impl LatestAccesses {
     fn new(platform: &Platform) -> Self {
         Self {
-            store: DenseAddrSpace::new(0, platform.heap.end),
+            store: DenseAddrSpace::new(
+                WordAddr::from(0u32),
+                ByteAddr::from(platform.heap.end).waddr(),
+            ),
             len: 0,
             #[cfg(any(test, debug_assertions))]
             touched: Vec::new(),

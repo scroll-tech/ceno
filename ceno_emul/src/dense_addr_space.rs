@@ -1,30 +1,24 @@
-use crate::{WORD_SIZE, addr::WordAddr};
+use crate::addr::WordAddr;
 
 /// Dense storage for addresses between `[base, end)`, addressed at word granularity.
 ///
 /// The region is pre-allocated up-front so lookups become simple index operations.
 #[derive(Debug)]
 pub(crate) struct DenseAddrSpace<T> {
-    base: u32,
-    end: u32,
+    base: WordAddr,
+    end: WordAddr,
     cells: Vec<T>,
 }
 
 impl<T: Copy + Default> DenseAddrSpace<T> {
-    pub(crate) fn new(base: u32, end: u32) -> Self {
+    pub(crate) fn new(base: WordAddr, end: WordAddr) -> Self {
         assert!(
-            end >= base,
-            "dense address space end must be greater than or equal to base"
+            end.0 >= base.0,
+            "dense address space end must be >= base ({:?} !>= {:?})",
+            end,
+            base
         );
-        assert!(
-            base.is_multiple_of(WORD_SIZE as u32),
-            "dense address space base must be word aligned"
-        );
-        assert!(
-            (end - base).is_multiple_of(WORD_SIZE as u32),
-            "dense address space must align to WORD_SIZE"
-        );
-        let len_words = ((end - base) / WORD_SIZE as u32) as usize;
+        let len_words = (end.0 - base.0) as usize;
         Self {
             base,
             end,
@@ -57,10 +51,9 @@ impl<T: Copy + Default> DenseAddrSpace<T> {
     }
 
     fn index(&self, addr: WordAddr) -> Option<usize> {
-        let byte_addr = addr.baddr().0;
-        if byte_addr < self.base || byte_addr >= self.end {
+        if addr.0 < self.base.0 || addr.0 >= self.end.0 {
             return None;
         }
-        Some(((byte_addr - self.base) / WORD_SIZE as u32) as usize)
+        Some((addr.0 - self.base.0) as usize)
     }
 }

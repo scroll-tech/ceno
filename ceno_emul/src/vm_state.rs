@@ -37,7 +37,10 @@ impl VMState {
             pc,
             platform: platform.clone(),
             program: program.clone(),
-            memory: DenseAddrSpace::new(platform.rom.start, platform.heap.end),
+            memory: DenseAddrSpace::new(
+                ByteAddr::from(platform.rom.start).waddr(),
+                ByteAddr::from(platform.heap.end).waddr(),
+            ),
             registers: [0; VMState::REG_COUNT],
             halted: false,
             tracer: Tracer::new(&platform),
