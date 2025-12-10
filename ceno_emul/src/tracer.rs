@@ -7,8 +7,6 @@ use crate::{
     syscalls::{SyscallEffects, SyscallWitness},
 };
 use ceno_rt::WORD_SIZE;
-#[cfg(any(test, debug_assertions))]
-use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{collections::BTreeMap, fmt, mem};
 
@@ -129,17 +127,13 @@ impl LatestAccesses {
     }
 
     #[cfg(any(test, debug_assertions))]
-    pub fn keys(&self) -> impl Iterator<Item = WordAddr> + '_ {
-        self.touched.iter().copied()
+    pub fn addresses(&self) -> impl Iterator<Item = &WordAddr> + '_ {
+        self.touched.iter()
     }
 
-    #[cfg(any(test, debug_assertions))]
-    pub fn eq_map(&self, other: &FxHashMap<WordAddr, Cycle>) -> bool {
-        if self.len() != other.len() {
-            return false;
-        }
-        self.iter()
-            .all(|(addr, cycle)| other.get(addr).map(|c| *c == *cycle).unwrap_or(false))
+    #[cfg(not(any(test, debug_assertions)))]
+    pub fn addresses(&self) -> std::iter::Empty<&WordAddr> {
+        unimplemented!("no track touched address in release build")
     }
 }
 

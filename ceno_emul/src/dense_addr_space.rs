@@ -17,6 +17,10 @@ impl<T: Copy + Default> DenseAddrSpace<T> {
             "dense address space end must be greater than or equal to base"
         );
         assert!(
+            base.is_multiple_of(WORD_SIZE as u32),
+            "dense address space base must be word aligned"
+        );
+        assert!(
             (end - base).is_multiple_of(WORD_SIZE as u32),
             "dense address space must align to WORD_SIZE"
         );
