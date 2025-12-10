@@ -19,11 +19,11 @@ use openvm_stark_sdk::{
     config::{FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Config},
     openvm_stark_backend::p3_field::PrimeField32,
 };
-use p3::{babybear::BabyBear, field::FieldAlgebra};
+use p3::field::FieldAlgebra;
 
 use openvm_continuations::verifier::{
     common::{
-        assert_or_assign_connector_pvs, assert_or_assign_memory_pvs,
+        assert_or_assign_connector_pvs,
         assert_required_air_for_agg_vm_present, assert_single_segment_vm_exit_successfully,
         get_program_commit, types::VmVerifierPvs,
     },

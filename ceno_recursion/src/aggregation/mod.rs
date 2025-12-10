@@ -1,15 +1,10 @@
 use crate::zkvm_verifier::{
-    binding::{
-        E, F, SepticExtensionVariable, SepticPointVariable, ZKVMProofInput, ZKVMProofInputVariable,
-    },
-    verifier::{add_septic_points_in_place, verify_zkvm_proof},
+    binding::{E, F, ZKVMProofInput, ZKVMProofInputVariable},
+    verifier::verify_zkvm_proof,
 };
-use ceno_emul::Tracer;
 use ceno_zkvm::{
-    instructions::riscv::constants::{
-        END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
-    },
-    scheme::{ZKVMProof, constants::SEPTIC_EXTENSION_DEGREE},
+    instructions::riscv::constants::{END_PC_IDX, EXIT_CODE_IDX, INIT_PC_IDX},
+    scheme::ZKVMProof,
     structs::ZKVMVerifyingKey,
 };
 use ff_ext::BabyBearExt4;
@@ -76,7 +71,7 @@ use openvm_circuit::{
 };
 use openvm_native_compiler::{
     asm::AsmConfig,
-    ir::{Array, Builder, Config, Felt},
+    ir::{Builder, Config, Felt},
 };
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
@@ -320,8 +315,7 @@ impl CenoAggregationProver {
             let internal_inputs = InternalVmVerifierInput::chunk_leaf_or_internal_proofs(
                 (*self.internal_prover.program_commitment()).into(),
                 &proofs,
-                // DEFAULT_NUM_CHILDREN_INTERNAL,
-                2,
+                DEFAULT_NUM_CHILDREN_INTERNAL,
             );
 
             let layer_proofs: Vec<Proof<_>> = internal_inputs
@@ -389,7 +383,7 @@ impl CenoLeafVmVerifierConfig {
             builder.cycle_tracker_start("Verify Ceno ZKVM Proof");
             let zkvm_proof = ceno_leaf_input.proof;
             let raw_pi = zkvm_proof.raw_pi.clone();
-            let calculated_shard_ec_sum = verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
+            let _calculated_shard_ec_sum = verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
             builder.cycle_tracker_end("Verify Ceno ZKVM Proof");
 
             builder.cycle_tracker_start("PV Operations");
@@ -415,7 +409,7 @@ impl CenoLeafVmVerifierConfig {
             builder.assign(&stark_pvs.connector.initial_pc, init_pc);
             builder.assign(&stark_pvs.connector.final_pc, end_pc);
             builder.assign(&stark_pvs.connector.exit_code, exit_code);
-            
+
             // TODO: assign shard_ec_sum to stark_pvs.shard_ec_sum
 
             // builder
