@@ -23,9 +23,8 @@ use p3::field::FieldAlgebra;
 
 use openvm_continuations::verifier::{
     common::{
-        assert_or_assign_connector_pvs,
-        assert_required_air_for_agg_vm_present, assert_single_segment_vm_exit_successfully,
-        get_program_commit, types::VmVerifierPvs,
+        assert_or_assign_connector_pvs, assert_required_air_for_agg_vm_present,
+        assert_single_segment_vm_exit_successfully, get_program_commit, types::VmVerifierPvs,
     },
     internal::{
         types::{InternalVmVerifierExtraPvs, InternalVmVerifierInput, InternalVmVerifierPvs},
