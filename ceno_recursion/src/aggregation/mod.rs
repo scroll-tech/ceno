@@ -23,14 +23,12 @@ use openvm_circuit::{
 };
 use openvm_stark_backend::config::{PcsProverData, Val};
 
+use internal::InternalVmVerifierConfig;
 use openvm_continuations::{
     C,
     verifier::{
         common::types::VmVerifierPvs,
-        internal::{
-            InternalVmVerifierConfig,
-            types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
-        },
+        internal::types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
     },
 };
 #[cfg(feature = "gpu")]
@@ -83,6 +81,7 @@ use openvm_native_compiler::{
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
 
+mod internal;
 pub type InnerConfig = AsmConfig<F, E>;
 pub const LEAF_LOG_BLOWUP: usize = 1;
 pub const INTERNAL_LOG_BLOWUP: usize = 2;
@@ -315,7 +314,8 @@ impl CenoAggregationProver {
             let internal_inputs = InternalVmVerifierInput::chunk_leaf_or_internal_proofs(
                 (*self.internal_prover.program_commitment()).into(),
                 &proofs,
-                DEFAULT_NUM_CHILDREN_INTERNAL,
+                // DEFAULT_NUM_CHILDREN_INTERNAL,
+                2,
             );
 
             let layer_proofs: Vec<Proof<_>> = internal_inputs
