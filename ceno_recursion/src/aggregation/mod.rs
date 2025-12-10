@@ -7,7 +7,7 @@ use crate::zkvm_verifier::{
 use ceno_emul::Tracer;
 use ceno_zkvm::{
     instructions::riscv::constants::{
-        END_PC_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
+        END_PC_IDX, EXIT_CODE_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
     },
     scheme::{ZKVMProof, constants::SEPTIC_EXTENSION_DEGREE},
     structs::ZKVMVerifyingKey,
@@ -281,7 +281,8 @@ impl CenoAggregationProver {
                     &mut self.leaf_prover,
                     witness_stream,
                     VM_MAX_TRACE_HEIGHTS,
-                );
+                )
+                .expect("leaf proof generation failed");
 
                 // _debug: export
                 // let file =
@@ -289,12 +290,13 @@ impl CenoAggregationProver {
                 // bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
 
                 println!(
-                    "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}",
+                    "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}, public values: {:?}",
                     proof_idx,
-                    aggregation_start_timestamp.elapsed()
+                    aggregation_start_timestamp.elapsed(),
+                    leaf_proof.per_air[PUBLIC_VALUES_AIR_ID].public_values,
                 );
 
-                leaf_proof.expect("leaf proof")
+                leaf_proof
             })
             .collect::<Vec<_>>();
 
@@ -324,7 +326,8 @@ impl CenoAggregationProver {
                         &mut self.internal_prover,
                         input.write(),
                         VM_MAX_TRACE_HEIGHTS,
-                    );
+                    )
+                    .expect("internal proof generation failed");
 
                     println!(
                         "Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}",
@@ -340,7 +343,7 @@ impl CenoAggregationProver {
                     // ))
                     // .expect("Create export proof file");
                     // bincode::serialize_into(file, &internal_proof).expect("failed to serialize internal proof");
-                    internal_proof.expect("internal_proof")
+                    internal_proof
                 })
                 .collect();
 
@@ -377,112 +380,133 @@ impl CenoLeafVmVerifierConfig {
 
             builder.cycle_tracker_start("Verify Ceno ZKVM Proof");
             let zkvm_proof = ceno_leaf_input.proof;
-            let shard_raw_pi = zkvm_proof.raw_pi.clone();
+            let raw_pi = zkvm_proof.raw_pi.clone();
             let calculated_shard_ec_sum = verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
             builder.cycle_tracker_end("Verify Ceno ZKVM Proof");
 
             builder.cycle_tracker_start("PV Operations");
-            let pv = ceno_leaf_input.pv;
-            builder
-                .if_eq(ceno_leaf_input.is_last, Usize::from(1))
-                .then(|builder| {
-                    builder.assert_nonzero(&pv.len());
 
-                    // PC and cycle checks
-                    let prev_pc: Ext<_, _> = builder.uninit();
-                    builder.range(0, pv.len()).for_each(|idx_vec, builder| {
-                        let shard_pi = builder.get(&pv, idx_vec[0]);
-                        let init_cycle = builder.get(&shard_pi, INIT_CYCLE_IDX);
-                        let tracer_default: Ext<_, _> =
-                            builder.constant(E::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN));
-                        builder.assert_ext_eq(init_cycle, tracer_default);
-                        let end_pc = builder.get(&shard_pi, END_PC_IDX);
-                        let init_pc = builder.get(&shard_pi, INIT_PC_IDX);
-                        builder.if_eq(idx_vec[0], Usize::from(0)).then_or_else(
-                            |builder| {
-                                let entry_point: Ext<_, _> =
-                                    builder.constant(E::from_canonical_u32(self.vk.entry_pc));
-                                builder.assert_ext_eq(init_pc, entry_point);
-                            },
-                            |builder| {
-                                builder.assert_ext_eq(init_pc, prev_pc);
-                            },
-                        );
-                        builder.assign(&prev_pc, end_pc);
-                    });
+            // TODO: define our own VmVerifierPvs
+            for i in 0..DIGEST_SIZE {
+                builder.assign(&stark_pvs.app_commit[i], F::ZERO);
+            }
 
-                    // EC sum verification
-                    let expected_last_shard_id = Usize::uninit(builder);
-                    builder.assign(&expected_last_shard_id, pv.len() - Usize::from(1));
+            let pv = &raw_pi;
+            let init_pc = {
+                let arr = builder.get(pv, INIT_PC_IDX);
+                builder.get(&arr, 0)
+            };
+            let end_pc = {
+                let arr = builder.get(pv, END_PC_IDX);
+                builder.get(&arr, 0)
+            };
+            let exit_code = {
+                let arr = builder.get(pv, EXIT_CODE_IDX);
+                builder.get(&arr, 0)
+            };
+            builder.assign(&stark_pvs.connector.initial_pc, init_pc);
+            builder.assign(&stark_pvs.connector.final_pc, end_pc);
+            builder.assign(&stark_pvs.connector.exit_code, exit_code);
+            // builder
+            //     .if_eq(ceno_leaf_input.is_last, Usize::from(1))
+            //     .then(|builder| {
+            //         builder.assert_nonzero(&pv.len());
 
-                    let shard_id_fs = builder.get(&shard_raw_pi, SHARD_ID_IDX);
-                    let shard_id_f = builder.get(&shard_id_fs, 0);
-                    let shard_id = Usize::Var(builder.cast_felt_to_var(shard_id_f));
-                    builder.assert_usize_eq(expected_last_shard_id, shard_id);
+            //         // PC and cycle checks
+            //         let prev_pc: Ext<_, _> = builder.uninit();
+            //         builder.range(0, pv.len()).for_each(|idx_vec, builder| {
+            //             let shard_pi = builder.get(&pv, idx_vec[0]);
+            //             let init_cycle = builder.get(&shard_pi, INIT_CYCLE_IDX);
+            //             let tracer_default: Ext<_, _> =
+            //                 builder.constant(E::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN));
+            //             builder.assert_ext_eq(init_cycle, tracer_default);
+            //             let end_pc = builder.get(&shard_pi, END_PC_IDX);
+            //             let init_pc = builder.get(&shard_pi, INIT_PC_IDX);
+            //             builder.if_eq(idx_vec[0], Usize::from(0)).then_or_else(
+            //                 |builder| {
+            //                     let entry_point: Ext<_, _> =
+            //                         builder.constant(E::from_canonical_u32(self.vk.entry_pc));
+            //                     builder.assert_ext_eq(init_pc, entry_point);
+            //                 },
+            //                 |builder| {
+            //                     builder.assert_ext_eq(init_pc, prev_pc);
+            //                 },
+            //             );
+            //             builder.assign(&prev_pc, end_pc);
+            //         });
 
-                    let ec_sum = SepticPointVariable {
-                        x: SepticExtensionVariable {
-                            vs: builder.dyn_array(7),
-                        },
-                        y: SepticExtensionVariable {
-                            vs: builder.dyn_array(7),
-                        },
-                        is_infinity: Usize::uninit(builder),
-                    };
-                    builder.assign(&ec_sum.is_infinity, Usize::from(1));
+            //         // EC sum verification
+            //         let expected_last_shard_id = Usize::uninit(builder);
+            //         builder.assign(&expected_last_shard_id, pv.len() - Usize::from(1));
 
-                    builder.range(0, pv.len()).for_each(|idx_vec, builder| {
-                        let shard_pv = builder.get(&pv, idx_vec[0]);
-                        let x = SepticExtensionVariable {
-                            vs: shard_pv.slice(
-                                builder,
-                                SHARD_RW_SUM_IDX,
-                                SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
-                            ),
-                        };
-                        let y = SepticExtensionVariable {
-                            vs: shard_pv.slice(
-                                builder,
-                                SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
-                                SHARD_RW_SUM_IDX + 2 * SEPTIC_EXTENSION_DEGREE,
-                            ),
-                        };
-                        let shard_ec = SepticPointVariable {
-                            x: x.clone(),
-                            y: y.clone(),
-                            is_infinity: Usize::uninit(builder),
-                        };
-                        let is_x_zero = x.is_zero(builder);
-                        let is_y_zero = y.is_zero(builder);
-                        builder.if_eq(is_x_zero, Usize::from(1)).then_or_else(
-                            |builder| {
-                                builder
-                                    .if_eq(is_y_zero.clone(), Usize::from(1))
-                                    .then_or_else(
-                                        |builder| {
-                                            builder.assign(&shard_ec.is_infinity, Usize::from(1));
-                                        },
-                                        |builder| {
-                                            builder.assign(&shard_ec.is_infinity, Usize::from(0));
-                                        },
-                                    );
-                            },
-                            |builder| {
-                                builder.assign(&shard_ec.is_infinity, Usize::from(0));
-                            },
-                        );
+            //         let shard_id_fs = builder.get(&shard_raw_pi, SHARD_ID_IDX);
+            //         let shard_id_f = builder.get(&shard_id_fs, 0);
+            //         let shard_id = Usize::Var(builder.cast_felt_to_var(shard_id_f));
+            //         builder.assert_usize_eq(expected_last_shard_id, shard_id);
 
-                        add_septic_points_in_place(builder, &ec_sum, &shard_ec);
-                    });
+            //         let ec_sum = SepticPointVariable {
+            //             x: SepticExtensionVariable {
+            //                 vs: builder.dyn_array(7),
+            //             },
+            //             y: SepticExtensionVariable {
+            //                 vs: builder.dyn_array(7),
+            //             },
+            //             is_infinity: Usize::uninit(builder),
+            //         };
+            //         builder.assign(&ec_sum.is_infinity, Usize::from(1));
 
-                    add_septic_points_in_place(builder, &ec_sum, &calculated_shard_ec_sum);
+            //         builder.range(0, pv.len()).for_each(|idx_vec, builder| {
+            //             let shard_pv = builder.get(&pv, idx_vec[0]);
+            //             let x = SepticExtensionVariable {
+            //                 vs: shard_pv.slice(
+            //                     builder,
+            //                     SHARD_RW_SUM_IDX,
+            //                     SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
+            //                 ),
+            //             };
+            //             let y = SepticExtensionVariable {
+            //                 vs: shard_pv.slice(
+            //                     builder,
+            //                     SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
+            //                     SHARD_RW_SUM_IDX + 2 * SEPTIC_EXTENSION_DEGREE,
+            //                 ),
+            //             };
+            //             let shard_ec = SepticPointVariable {
+            //                 x: x.clone(),
+            //                 y: y.clone(),
+            //                 is_infinity: Usize::uninit(builder),
+            //             };
+            //             let is_x_zero = x.is_zero(builder);
+            //             let is_y_zero = y.is_zero(builder);
+            //             builder.if_eq(is_x_zero, Usize::from(1)).then_or_else(
+            //                 |builder| {
+            //                     builder
+            //                         .if_eq(is_y_zero.clone(), Usize::from(1))
+            //                         .then_or_else(
+            //                             |builder| {
+            //                                 builder.assign(&shard_ec.is_infinity, Usize::from(1));
+            //                             },
+            //                             |builder| {
+            //                                 builder.assign(&shard_ec.is_infinity, Usize::from(0));
+            //                             },
+            //                         );
+            //                 },
+            //                 |builder| {
+            //                     builder.assign(&shard_ec.is_infinity, Usize::from(0));
+            //                 },
+            //             );
 
-                    let is_sum_x_zero = ec_sum.x.is_zero(builder);
-                    let is_sum_y_zero = ec_sum.y.is_zero(builder);
+            //             add_septic_points_in_place(builder, &ec_sum, &shard_ec);
+            //         });
 
-                    builder.assert_usize_eq(is_sum_x_zero, Usize::from(1));
-                    builder.assert_usize_eq(is_sum_y_zero, Usize::from(1));
-                });
+            //         add_septic_points_in_place(builder, &ec_sum, &calculated_shard_ec_sum);
+
+            //         let is_sum_x_zero = ec_sum.x.is_zero(builder);
+            //         let is_sum_y_zero = ec_sum.y.is_zero(builder);
+
+            //         builder.assert_usize_eq(is_sum_x_zero, Usize::from(1));
+            //         builder.assert_usize_eq(is_sum_y_zero, Usize::from(1));
+            //     });
 
             for pv in stark_pvs.flatten() {
                 builder.commit_public_value(pv);
@@ -545,14 +569,12 @@ impl<SC: StarkGenericConfig, VC> CenoRecursionProvingKeys<SC, VC> {
 pub(crate) struct CenoLeafVmVerifierInput {
     pub proof: ZKVMProofInput,
     pub is_last: usize,
-    pub pv: Vec<Vec<E>>,
 }
 
 #[derive(DslVariable, Clone)]
 pub(crate) struct CenoLeafVmVerifierInputVariable<C: Config> {
     pub proof: ZKVMProofInputVariable<C>,
     pub is_last: Usize<C::N>,
-    pub pv: Array<C, Array<C, Ext<C::F, C::EF>>>,
 }
 
 impl Hintable<InnerConfig> for CenoLeafVmVerifierInput {
@@ -561,16 +583,14 @@ impl Hintable<InnerConfig> for CenoLeafVmVerifierInput {
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let proof = ZKVMProofInput::read(builder);
         let is_last = Usize::Var(usize::read(builder));
-        let pv = Vec::<Vec<E>>::read(builder);
 
-        Self::HintVariable { proof, is_last, pv }
+        Self::HintVariable { proof, is_last }
     }
 
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
         stream.extend(self.proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.is_last));
-        stream.extend(<Vec<Vec<E>> as Hintable<InnerConfig>>::write(&self.pv));
         stream
     }
 }
@@ -578,21 +598,15 @@ impl Hintable<InnerConfig> for CenoLeafVmVerifierInput {
 pub(crate) fn chunk_ceno_leaf_proof_inputs(
     zkvm_proofs: Vec<ZKVMProofInput>,
 ) -> Vec<CenoLeafVmVerifierInput> {
-    let user_public_values = zkvm_proofs
-        .iter()
-        .map(|p| p.pi_evals.clone())
-        .collect::<Vec<Vec<E>>>();
     let mut ret: Vec<CenoLeafVmVerifierInput> = zkvm_proofs
         .into_iter()
         .map(|p| CenoLeafVmVerifierInput {
             proof: p,
             is_last: 0,
-            pv: vec![],
         })
         .collect();
 
     let last = ret.last_mut().unwrap();
-    last.pv = user_public_values;
     last.is_last = 1;
 
     ret
