@@ -225,6 +225,9 @@ impl CenoAggregationProver {
         )
         .expect("internal prover");
 
+        // TODO: build root program (requires shard ram ec point is zero)
+        // TODO: add root prover
+
         let vk = CenoRecursionVerifierKeys {
             leaf_vm_vk,
             leaf_fri_params: leaf_vm_pk.fri_params,
@@ -359,6 +362,8 @@ impl CenoAggregationProver {
         );
         println!("Aggregation - Final height: {:?}", internal_node_height);
 
+        // TODO: generate root proof from last internal proof
+
         // Export e2e stark proof (used in verify_e2e_stark_proof)
         VmStarkProof {
             inner: proofs.pop().unwrap(),
@@ -410,6 +415,9 @@ impl CenoLeafVmVerifierConfig {
             builder.assign(&stark_pvs.connector.initial_pc, init_pc);
             builder.assign(&stark_pvs.connector.final_pc, end_pc);
             builder.assign(&stark_pvs.connector.exit_code, exit_code);
+            
+            // TODO: assign shard_ec_sum to stark_pvs.shard_ec_sum
+
             // builder
             //     .if_eq(ceno_leaf_input.is_last, Usize::from(1))
             //     .then(|builder| {
