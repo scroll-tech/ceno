@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use super::rv32im::EmuContext;
 use crate::{
     PC_STEP_SIZE, Program, WORD_SIZE,
@@ -17,8 +15,9 @@ pub struct VMState {
     program: Arc<Program>,
     platform: Platform,
     pc: Word,
-    /// Map a word-address (addr/4) to a word.
-    memory: HashMap<WordAddr, Word>,
+    /// Emulated main memory backed by a pre-allocated vector covering the
+    /// platform layout in `memory.x`.
+    memory: PreallocatedMemory,
     registers: [Word; VMState::REG_COUNT],
     // Termination.
     halted: bool,
@@ -37,7 +36,7 @@ impl VMState {
             pc,
             platform: platform.clone(),
             program: program.clone(),
-            memory: HashMap::new(),
+            memory: PreallocatedMemory::new(&platform),
             registers: [0; VMState::REG_COUNT],
             halted: false,
             tracer: Tracer::new(Some(&platform)),
@@ -82,7 +81,9 @@ impl VMState {
 
     /// Set a word in memory without side effects.
     pub fn init_memory(&mut self, addr: WordAddr, value: Word) {
-        self.memory.insert(addr, value);
+        self.memory
+            .write(addr, value)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside preallocated memory"));
     }
 
     pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
@@ -116,7 +117,9 @@ impl VMState {
 
     fn apply_syscall(&mut self, effects: SyscallEffects) -> Result<()> {
         for (addr, value) in effects.iter_mem_values() {
-            self.memory.insert(addr, value);
+            self.memory
+                .write(addr, value)
+                .unwrap_or_else(|| panic!("addr {addr:?} outside preallocated memory"));
         }
 
         for (idx, value) in effects.iter_reg_values() {
@@ -128,6 +131,48 @@ impl VMState {
 
         self.tracer.track_syscall(effects);
         Ok(())
+    }
+}
+
+/// Dense memory backing the emulator. It pre-allocates a contiguous slice that
+/// spans the address ranges declared in `memory.x` (ROM through heap) so random
+/// loads/stores become simple index operations instead of hashmap lookups.
+struct PreallocatedMemory {
+    base: u32,
+    end: u32,
+    words: Vec<Word>,
+}
+
+impl PreallocatedMemory {
+    fn new(platform: &Platform) -> Self {
+        let base = platform.rom.start & !(WORD_SIZE as u32 - 1);
+        let end = platform.heap.end;
+        debug_assert!(end > base, "invalid platform address range");
+        debug_assert_eq!((end - base) % WORD_SIZE as u32, 0);
+        let len_words = ((end - base) / WORD_SIZE as u32) as usize;
+        Self {
+            base,
+            end,
+            words: vec![0; len_words],
+        }
+    }
+
+    fn read(&self, addr: WordAddr) -> Word {
+        self.index(addr).map(|idx| self.words[idx]).unwrap_or(0)
+    }
+
+    fn write(&mut self, addr: WordAddr, value: Word) -> Option<()> {
+        self.index(addr).map(|idx| {
+            self.words[idx] = value;
+        })
+    }
+
+    fn index(&self, addr: WordAddr) -> Option<usize> {
+        let byte_addr = addr.baddr().0;
+        if byte_addr < self.base || byte_addr >= self.end {
+            return None;
+        }
+        Some(((byte_addr - self.base) / WORD_SIZE as u32) as usize)
     }
 }
 
@@ -216,7 +261,9 @@ impl EmuContext for VMState {
     fn store_memory(&mut self, addr: WordAddr, after: Word) -> Result<()> {
         let before = self.peek_memory(addr);
         self.tracer.store_memory(addr, Change { after, before });
-        self.memory.insert(addr, after);
+        self.memory
+            .write(addr, after)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside preallocated memory"));
         Ok(())
     }
 
@@ -227,7 +274,7 @@ impl EmuContext for VMState {
 
     /// Get the value of a memory word without side-effects.
     fn peek_memory(&self, addr: WordAddr) -> Word {
-        *self.memory.get(&addr).unwrap_or(&0)
+        self.memory.read(addr)
     }
 
     fn fetch(&mut self, pc: WordAddr) -> Option<Instruction> {
