@@ -5,13 +5,11 @@
 //  builder.assert_usize_eq(is_sum_x_zero, Usize::from(1));
 //  builder.assert_usize_eq(is_sum_y_zero, Usize::from(1));
 
-use openvm_continuations::{
-    C, F, SC,
-};
+use openvm_continuations::{C, F, SC};
 use openvm_instructions::program::Program;
 use openvm_native_compiler::{
     conversion::CompilerOptions,
-    ir::{Array, Builder, Config, DIGEST_SIZE, Felt, RVar, Variable},
+    ir::{Array, Builder, Config, DIGEST_SIZE, Felt, Variable},
 };
 use openvm_native_recursion::{
     fri::TwoAdicFriPcsVariable, hints::Hintable, types::new_from_inner_multi_vk,
@@ -19,23 +17,16 @@ use openvm_native_recursion::{
 };
 use openvm_stark_backend::keygen::types::MultiStarkVerifyingKey;
 use openvm_stark_sdk::config::FriParameters;
-use std::{array, borrow::Borrow};
+use std::array;
 
-use openvm_stark_sdk::{
-    config::baby_bear_poseidon2::BabyBearPoseidon2Config,
-    openvm_stark_backend::{
-        config::{Com, StarkGenericConfig, Val},
-        p3_field::PrimeField32,
-        proof::Proof,
-    },
-};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use openvm_native_compiler::{
-    asm::AsmConfig,
-    prelude::*,
-};
-use openvm_native_recursion::vars::StarkProofVariable;
 use crate::aggregation::internal::NonLeafVerifierVariables;
+use openvm_native_compiler::prelude::*;
+use openvm_native_recursion::vars::StarkProofVariable;
+use openvm_stark_sdk::openvm_stark_backend::{
+    config::{StarkGenericConfig, Val},
+    proof::Proof,
+};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct CenoRootVmVerifierInput<SC: StarkGenericConfig> {
@@ -130,7 +121,7 @@ impl CenoRootVmVerifierConfig {
                 internal_pcs,
                 internal_advice,
             };
-            let (merged_pvs, expected_leaf_commit) =
+            let (_merged_pvs, _expected_leaf_commit) =
                 non_leaf_verifier.verify_internal_or_leaf_verifier_proofs(&mut builder, &proofs);
             builder.cycle_tracker_end("VerifyProofs");
 

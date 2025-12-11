@@ -19,15 +19,12 @@ use gkr_iop::cpu::{CpuBackend, CpuProver};
 use gkr_iop::gpu::{GpuBackend, GpuProver};
 use gkr_iop::hal::ProverBackend;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
-use openvm_continuations::verifier::internal::types::VmStarkProof;
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
-use openvm_native_circuit::{NativeBuilder, NativeConfig};
-use openvm_sdk::{RootSC, prover::vm::new_local_prover};
+use openvm_native_circuit::NativeConfig;
+use openvm_sdk::RootSC;
 use openvm_stark_backend::{config::StarkGenericConfig, proof::Proof};
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
-#[cfg(not(feature = "gpu"))]
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
 
 use serde::Serialize;
 use std::sync::Arc;
@@ -195,10 +192,8 @@ where
         &mut self,
         base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
     ) -> Proof<RootSC> {
-        let vb = NativeBuilder::default();
-
         // TODO: cache agg_prover
-        let mut agg_prover = if let Some(agg_pk) = self.agg_pk.as_ref() {
+        let mut agg_prover = if let Some(_agg_pk) = self.agg_pk.as_ref() {
             CenoAggregationProver::from_base_vk(
                 self.zkvm_vk.clone().expect("zkvm_vk need to be set"),
             )

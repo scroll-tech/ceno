@@ -251,7 +251,7 @@ impl CenoAggregationProver {
 
         let mut root_engine = BabyBearPoseidon2RootEngine::new(root_fri_params);
         root_engine.max_constraint_degree = ROOT_MAX_CONSTRAINT_DEG;
-        let (mut root_vm, mut root_vm_pk) =
+        let (root_vm, root_vm_pk) =
             VirtualMachine::new_with_keygen(root_engine, vb.clone(), root_vm_config.clone())
                 .expect("root keygen");
         let root_program = CenoRootVmVerifierConfig {
@@ -266,12 +266,6 @@ impl CenoAggregationProver {
             root_program.into(),
             root_vm.engine.config().pcs(),
         ));
-
-        // AIR Permutation?
-        // let air_heights =
-        //     compute_root_proof_heights(&mut vm, &root_committed_exe, &internal_proof)?;
-        // let root_air_perm = AirIdPermutation::compute(&air_heights);
-        // root_air_perm.permute(&mut vm_pk.per_air);
 
         let root_vm_pk = Arc::new(VmProvingKey {
             fri_params: root_fri_params,
@@ -421,20 +415,19 @@ impl CenoAggregationProver {
 
         let last_internal = proofs.pop().unwrap();
 
-        // TODO: wrapping for reducing AIR heights
+        // _todo: possible multi-layer wrapping for reducing AIR heights
 
         let root_input = RootVmVerifierInput {
             proofs: vec![last_internal],
             public_values: user_public_values,
         };
-        let root_proof = SingleSegmentVmProver::prove(
+
+        SingleSegmentVmProver::prove(
             &mut self.root_prover,
             root_input.write(),
             VM_MAX_TRACE_HEIGHTS,
         )
-        .expect("root proof generation should pass");
-
-        root_proof
+        .expect("root proof generation should pass")
     }
 }
 
@@ -852,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
