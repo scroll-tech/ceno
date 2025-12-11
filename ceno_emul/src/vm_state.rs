@@ -100,6 +100,13 @@ impl VMState {
         })
     }
 
+    pub fn next_step_record(&mut self) -> Result<Option<StepRecord>> {
+        if self.halted() {
+            return Ok(None);
+        }
+        self.step().map(Some)
+    }
+
     fn step(&mut self) -> Result<StepRecord> {
         crate::rv32im::step(self)?;
         let step = self.tracer.advance();
