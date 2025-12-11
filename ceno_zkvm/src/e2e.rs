@@ -630,6 +630,15 @@ pub fn emulate_program<'a>(
         heap: _,
     } = init_mem_state;
 
+    let mut vm: VMState = VMState::new(platform.clone(), program.clone());
+
+    for record in chain!(hints_init, io_init) {
+        vm.init_memory(record.addr.into(), record.value);
+    }
+
+    let length = info_span!("emulator.iter_until_halt_only_count")
+        .in_scope(|| vm.iter_until_halt().take(max_steps).count());
+
     let mut vm: VMState = VMState::new(platform.clone(), program);
 
     for record in chain!(hints_init, io_init) {
