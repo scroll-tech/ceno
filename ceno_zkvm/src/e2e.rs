@@ -560,68 +560,7 @@ impl ShardContextBuilder {
         }
     }
 
-    /// return next shard size and shard_ctx
-    /// panic if empty match
     pub fn position_next_shard<'a>(
-        &mut self,
-        steps: &[StepRecord],
-        step_cell_extractor: impl StepCellExtractor,
-    ) -> (usize, ShardContext<'a>) {
-        assert_eq!(self.cur_cells, 0);
-        assert!(!steps.is_empty());
-        // on non-first shard, prev shard cycle end should match current cycle start
-        if self.cur_shard_id > 0 {
-            assert_eq!(
-                steps.first().map(|step| step.cycle()).unwrap_or_default(),
-                self.prev_shard_cycle_range
-                    .last()
-                    .copied()
-                    .unwrap_or(Tracer::SUBCYCLES_PER_INSN)
-            );
-        }
-        let target_cost_current_shard = if self.cur_shard_id == 0 {
-            self.target_cell_first_shard
-        } else {
-            self.max_cell_per_shard
-        };
-        let mut shard_ctx = ShardContext::default();
-        let n = steps
-            .iter()
-            .take_while(|step| {
-                let next_cells = self.cur_cells + step_cell_extractor.extract_cells(step);
-                let next_cycle = self.cur_acc_cycle + Tracer::SUBCYCLES_PER_INSN;
-                if next_cells >= target_cost_current_shard || next_cycle >= self.max_cycle_per_shard
-                {
-                    return false;
-                }
-                self.cur_cells = next_cells;
-                self.cur_acc_cycle = next_cycle;
-                true
-            })
-            .count();
-
-        assert!(n > 0, "empty record match");
-        tracing::debug!(
-            "{}th shard contain cells {}, cycle {}",
-            self.cur_shard_id,
-            self.cur_cells,
-            self.cur_acc_cycle,
-        );
-
-        shard_ctx.shard_id = self.cur_shard_id;
-        shard_ctx.cur_shard_cycle_range = steps.first().map(|step| step.cycle() as usize).unwrap()
-            ..(steps.get(n - 1).as_ref().unwrap().cycle() + Tracer::SUBCYCLES_PER_INSN) as usize;
-        shard_ctx.addr_future_accesses = self.addr_future_accesses.clone();
-        shard_ctx.prev_shard_cycle_range = self.prev_shard_cycle_range.clone();
-        self.prev_shard_cycle_range
-            .push(shard_ctx.cur_shard_cycle_range.end as u64);
-        self.cur_cells = 0;
-        self.cur_acc_cycle = 0;
-        self.cur_shard_id += 1;
-        (n, shard_ctx)
-    }
-
-    pub fn position_next_shard_streaming<'a>(
         &mut self,
         steps_iter: &mut impl Iterator<Item = StepRecord>,
         step_cell_extractor: impl StepCellExtractor,
@@ -1138,7 +1077,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
         )
         .in_scope(|| {
             let (shard_steps, mut shard_ctx) = match shard_ctx_builder
-                .position_next_shard_streaming(&mut step_iter, &system_config.config)
+                .position_next_shard(&mut step_iter, &system_config.config)
             {
                 Some(result) => result,
                 None => return None,
@@ -1920,21 +1859,14 @@ mod tests {
             NextCycleAccess::default(),
         );
 
-        let steps = (0..executed_instruction)
-            .map(|i| {
-                StepRecord::new_ecall_any(Tracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
-            })
-            .collect_vec();
+        let mut steps_iter = (0..executed_instruction).map(|i| {
+            StepRecord::new_ecall_any(Tracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
+        });
 
-        let mut cur_index = 0;
         let shard_ctx = std::iter::from_fn(|| {
-            if cur_index >= steps.len() {
-                return None;
-            }
-            let (n, shard_ctx) = shard_ctx_builder
-                .position_next_shard(&steps[cur_index..], &UniformStepExtractor {});
-            cur_index += n;
-            Some(shard_ctx)
+            shard_ctx_builder
+                .position_next_shard(&mut steps_iter, &UniformStepExtractor {})
+                .map(|(_, shard_ctx)| shard_ctx)
         })
         .collect_vec();
 
