@@ -625,6 +625,9 @@ impl ShardContextBuilder {
     }
 }
 
+/// Lazily replays `StepRecord`s by re-running the VM up to the number of steps
+/// recorded during the preflight execution. This keeps shard generation memory
+/// usage bounded without storing the entire trace.
 struct StepReplay {
     vm: VMState,
     remaining_steps: usize,
@@ -1493,7 +1496,7 @@ pub fn run_e2e_with_checkpoint<
         };
     }
 
-    let zkvm_proofs = create_proofs_helper(
+    let zkvm_proofs = create_proofs_streaming(
         emul_result,
         &prover,
         is_mock_proving,
@@ -1558,7 +1561,7 @@ pub fn run_e2e_proof<
         &ctx.platform,
         &ctx.multi_prover,
     );
-    create_proofs_helper(
+    create_proofs_streaming(
         emul_result,
         prover,
         is_mock_proving,
@@ -1593,7 +1596,7 @@ pub fn run_e2e_proof<
 /// in pure CPU mode, the pipeline is disabled and the prover falls back to
 /// fully sequential execution. Witness generation and proof creation run
 /// one after another with no overlap.
-fn create_proofs_helper<
+fn create_proofs_streaming<
     E: ExtensionField + LkMultiplicityKey,
     PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
