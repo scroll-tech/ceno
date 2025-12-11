@@ -1617,63 +1617,106 @@ fn create_proofs_streaming<
     info_span!("app_prove.inner").in_scope(|| {
         #[cfg(feature = "gpu")]
         {
-            use crossbeam::channel;
-            let (tx, rx) = channel::bounded(0);
-            std::thread::scope(|s| {
-                // pipeline cpu/gpu workload
-                // cpu producer
-                s.spawn({
-                    move || {
-                        let wit_iter = generate_witness(
-                            &ctx.system_config,
-                            emulation_result,
-                            ctx.program.clone(),
-                            &ctx.platform,
-                            init_mem_state,
-                            target_shard_id,
-                        );
+            let wit_iter = generate_witness(
+                &ctx.system_config,
+                emulation_result,
+                ctx.program.clone(),
+                &ctx.platform,
+                init_mem_state,
+                target_shard_id,
+            );
 
-                        let wit_iter = if let Some(target_shard_id) = target_shard_id {
-                            Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
-                        } else {
-                            Box::new(wit_iter)
-                        };
+            let wit_iter = if let Some(target_shard_id) = target_shard_id {
+                Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
+            } else {
+                Box::new(wit_iter)
+            };
 
-                        for proof_input in wit_iter {
-                            tx.send(proof_input).unwrap()
-                        }
-                    }
-                });
+            let mut proofs = vec![];
+            for (zkvm_witness, shard_ctx, pi) in wit_iter {
+                if is_mock_proving {
+                    MockProver::assert_satisfied_full(
+                        &shard_ctx,
+                        &ctx.system_config.zkvm_cs,
+                        ctx.zkvm_fixed_traces.clone(),
+                        &zkvm_witness,
+                        &pi,
+                        &ctx.program,
+                    );
+                    tracing::info!("Mock proving passed");
+                }
 
-                // gpu consumer
-                rx.iter()
-                    .map(|(zkvm_witness, shard_ctx, pi)| {
-                        if is_mock_proving {
-                            MockProver::assert_satisfied_full(
-                                &shard_ctx,
-                                &ctx.system_config.zkvm_cs,
-                                ctx.zkvm_fixed_traces.clone(),
-                                &zkvm_witness,
-                                &pi,
-                                &ctx.program,
-                            );
-                            tracing::info!("Mock proving passed");
-                        }
+                let transcript = Transcript::new(b"riscv");
+                let start = std::time::Instant::now();
+                let zkvm_proof = prover
+                    .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
+                    .expect("create_proof failed");
+                tracing::debug!(
+                    "{}th shard proof created in {:?}",
+                    shard_ctx.shard_id,
+                    start.elapsed()
+                );
+                proofs.push(zkvm_proof);
+            }
+            proofs
 
-                        let transcript = Transcript::new(b"riscv");
-                        let start = std::time::Instant::now();
-                        let zkvm_proof = prover
-                            .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                            .expect("create_proof failed");
-                        tracing::debug!(
-                            "{}th shard proof created in {:?}",
-                            shard_ctx.shard_id,
-                            start.elapsed()
-                        );
-                        zkvm_proof
-                    })
-                    .collect::<Vec<_>>()
-            })
+            // use crossbeam::channel;
+            // let (tx, rx) = channel::bounded(0);
+            // std::thread::scope(|s| {
+            //     // pipeline cpu/gpu workload
+            //     // cpu producer
+            //     s.spawn({
+            //         move || {
+            //             let wit_iter = generate_witness(
+            //                 &ctx.system_config,
+            //                 emulation_result,
+            //                 ctx.program.clone(),
+            //                 &ctx.platform,
+            //                 init_mem_state,
+            //                 target_shard_id,
+            //             );
+            //
+            //             let wit_iter = if let Some(target_shard_id) = target_shard_id {
+            //                 Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
+            //             } else {
+            //                 Box::new(wit_iter)
+            //             };
+            //
+            //             for proof_input in wit_iter {
+            //                 tx.send(proof_input).unwrap()
+            //             }
+            //         }
+            //     });
+            //
+            //     // gpu consumer
+            //     rx.iter()
+            //         .map(|(zkvm_witness, shard_ctx, pi)| {
+            //             if is_mock_proving {
+            //                 MockProver::assert_satisfied_full(
+            //                     &shard_ctx,
+            //                     &ctx.system_config.zkvm_cs,
+            //                     ctx.zkvm_fixed_traces.clone(),
+            //                     &zkvm_witness,
+            //                     &pi,
+            //                     &ctx.program,
+            //                 );
+            //                 tracing::info!("Mock proving passed");
+            //             }
+            //
+            //             let transcript = Transcript::new(b"riscv");
+            //             let start = std::time::Instant::now();
+            //             let zkvm_proof = prover
+            //                 .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
+            //                 .expect("create_proof failed");
+            //             tracing::debug!(
+            //                 "{}th shard proof created in {:?}",
+            //                 shard_ctx.shard_id,
+            //                 start.elapsed()
+            //             );
+            //             zkvm_proof
+            //         })
+            //         .collect::<Vec<_>>()
+            // })
         }
 
         #[cfg(not(feature = "gpu"))]
