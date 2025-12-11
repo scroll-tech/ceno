@@ -564,8 +564,9 @@ impl ShardContextBuilder {
         &mut self,
         steps_iter: &mut impl Iterator<Item = StepRecord>,
         step_cell_extractor: impl StepCellExtractor,
-    ) -> Option<(Vec<StepRecord>, ShardContext<'a>)> {
-        let mut steps = Vec::new();
+        steps: &mut Vec<StepRecord>,
+    ) -> Option<ShardContext<'a>> {
+        steps.clear();
         let target_cost_current_shard = if self.cur_shard_id == 0 {
             self.target_cell_first_shard
         } else {
@@ -609,19 +610,21 @@ impl ShardContextBuilder {
             );
         }
 
-        let mut shard_ctx = ShardContext::default();
-        shard_ctx.shard_id = self.cur_shard_id;
-        shard_ctx.cur_shard_cycle_range = steps.first().map(|step| step.cycle() as usize).unwrap()
-            ..(steps.last().unwrap().cycle() + Tracer::SUBCYCLES_PER_INSN) as usize;
-        shard_ctx.addr_future_accesses = self.addr_future_accesses.clone();
-        shard_ctx.prev_shard_cycle_range = self.prev_shard_cycle_range.clone();
+        let shard_ctx = ShardContext {
+            shard_id: self.cur_shard_id,
+            cur_shard_cycle_range: steps.first().map(|step| step.cycle() as usize).unwrap()
+                ..(steps.last().unwrap().cycle() + Tracer::SUBCYCLES_PER_INSN) as usize,
+            addr_future_accesses: self.addr_future_accesses.clone(),
+            prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
+            ..Default::default()
+        };
         self.prev_shard_cycle_range
             .push(shard_ctx.cur_shard_cycle_range.end as u64);
         self.cur_cells = 0;
         self.cur_acc_cycle = 0;
         self.cur_shard_id += 1;
 
-        Some((steps, shard_ctx))
+        Some(shard_ctx)
     }
 }
 
@@ -1072,6 +1075,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
         init_mem_state,
         emul_result.executed_steps,
     );
+    let mut shard_steps = Vec::new();
 
     std::iter::from_fn(move || {
         info_span!(
@@ -1079,10 +1083,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
-            let (shard_steps, mut shard_ctx) = match shard_ctx_builder
-                .position_next_shard(&mut step_iter, &system_config.config)
-            {
-                Some(result) => result,
+            let mut shard_ctx = match shard_ctx_builder.position_next_shard(
+                &mut step_iter,
+                &system_config.config,
+                &mut shard_steps,
+            ) {
+                Some(ctx) => ctx,
                 None => return None,
             };
 
@@ -1476,7 +1482,6 @@ pub fn run_e2e_with_checkpoint<
     let exit_code = emul_result.exit_code;
 
     if let Checkpoint::PrepWitnessGen = checkpoint {
-        let init_full_mem = init_full_mem;
         return E2ECheckpointResult {
             proofs: None,
             vk: Some(vk),
@@ -1865,11 +1870,14 @@ mod tests {
         let mut steps_iter = (0..executed_instruction).map(|i| {
             StepRecord::new_ecall_any(Tracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
         });
+        let mut steps = Vec::new();
 
         let shard_ctx = std::iter::from_fn(|| {
-            shard_ctx_builder
-                .position_next_shard(&mut steps_iter, &UniformStepExtractor {})
-                .map(|(_, shard_ctx)| shard_ctx)
+            shard_ctx_builder.position_next_shard(
+                &mut steps_iter,
+                &UniformStepExtractor {},
+                &mut steps,
+            )
         })
         .collect_vec();
 
