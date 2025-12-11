@@ -1098,7 +1098,7 @@ dependencies = [
 [[package]]
 name = "ceno_crypto_primitives"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#e6ef2986f4e5522ead8d8509e1a379e31f5a35ea"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#0cb2c93e02e2e859e55d5d889ca8abd0a13b13be"
 dependencies = [
  "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",
  "elliptic-curve",
@@ -1218,7 +1218,7 @@ dependencies = [
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#e6ef2986f4e5522ead8d8509e1a379e31f5a35ea"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#0cb2c93e02e2e859e55d5d889ca8abd0a13b13be"
 
 [[package]]
 name = "ceno_syscall"
@@ -1248,6 +1248,7 @@ dependencies = [
  "gkr_iop",
  "glob",
  "itertools 0.13.0",
+ "metrics",
  "mpcs 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18)",
  "multilinear_extensions 0.1.0 (git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18)",
  "ndarray",
@@ -3055,7 +3056,7 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#fdd6c563c1fee5028465eae665082acb1589f5e2"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#05a8a81ef6300ff8bbf1d810b018bbeb71ab947c"
 dependencies = [
  "ceno_crypto_primitives",
  "ceno_syscall 0.1.0 (git+https://github.com/scroll-tech/ceno-patch.git?branch=main)",

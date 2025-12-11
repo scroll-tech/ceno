@@ -957,7 +957,8 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
             ceno_emul::BN254_FP_ADD
             | ceno_emul::BN254_FP_MUL
             | ceno_emul::BN254_FP2_ADD
-            | ceno_emul::BN254_FP2_MUL => 0,
+            | ceno_emul::BN254_FP2_MUL
+            | ceno_emul::SHA_EXTEND => 0,
             // other type of ecalls are handled by dummy ecall instruction
             _ => unreachable!("unknow match record {:?}", record),
         }
