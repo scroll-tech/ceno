@@ -532,6 +532,7 @@ pub struct ShardContextBuilder {
     max_cycle_per_shard: Cycle,
     target_cell_first_shard: u64,
     prev_shard_cycle_range: Vec<Cycle>,
+    // holds the first step for the next shard once the current shard hits its limit
     pending_step: Option<StepRecord>,
 }
 
@@ -1533,7 +1534,7 @@ pub fn run_e2e_with_checkpoint<
     let exit_code = emul_result.exit_code;
 
     if let Checkpoint::PrepWitnessGen = checkpoint {
-        let init_full_mem_clone = init_full_mem.clone();
+        let init_full_mem = init_full_mem;
         return E2ECheckpointResult {
             proofs: None,
             vk: Some(vk),
@@ -1546,7 +1547,7 @@ pub fn run_e2e_with_checkpoint<
                     emul_result,
                     prover.pk.program_ctx.as_ref().unwrap().program.clone(),
                     &prover.pk.program_ctx.as_ref().unwrap().platform,
-                    &init_full_mem_clone,
+                    &init_full_mem,
                     target_shard_id,
                 )
             })),
