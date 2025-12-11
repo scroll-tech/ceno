@@ -9,7 +9,7 @@ use openvm_continuations::{
     C, F, SC,
     verifier::{
         common::non_leaf::NonLeafVerifierVariables,
-        root::{types::RootVmVerifierInput, vars::RootVmVerifierInputVariable},
+        // root::{types::RootVmVerifierInput, vars::RootVmVerifierInputVariable},
     },
 };
 use openvm_instructions::program::Program;
@@ -24,6 +24,60 @@ use openvm_native_recursion::{
 use openvm_stark_backend::keygen::types::MultiStarkVerifyingKey;
 use openvm_stark_sdk::config::FriParameters;
 use std::{array, borrow::Borrow};
+
+use openvm_stark_sdk::{
+    config::baby_bear_poseidon2::BabyBearPoseidon2Config,
+    openvm_stark_backend::{
+        config::{Com, StarkGenericConfig, Val},
+        p3_field::PrimeField32,
+        proof::Proof,
+    },
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use openvm_native_compiler::{
+    asm::AsmConfig,
+    prelude::*,
+};
+use openvm_native_recursion::vars::StarkProofVariable;
+
+#[derive(Serialize, Deserialize)]
+pub struct CenoRootVmVerifierInput<SC: StarkGenericConfig> {
+    /// The proofs of leaf verifier or internal verifier in the execution order.
+    pub proofs: Vec<Proof<SC>>,
+    /// Public values to expose directly
+    pub public_values: Vec<Val<SC>>,
+}
+
+#[derive(DslVariable, Clone)]
+pub struct CenoRootVmVerifierInputVariable<C: Config> {
+    /// The proofs of leaf verifier or internal verifier in the execution order.
+    pub proofs: Array<C, StarkProofVariable<C>>,
+    /// Public values to expose
+    pub public_values: Array<C, Felt<C::F>>,
+}
+
+impl Hintable<C> for CenoRootVmVerifierInput<SC> {
+    type HintVariable = CenoRootVmVerifierInputVariable<C>;
+
+    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+        let proofs = Vec::<Proof<SC>>::read(builder);
+        let public_values = Vec::<Val<SC>>::read(builder);
+        Self::HintVariable {
+            proofs,
+            public_values,
+        }
+    }
+
+    fn write(&self) -> Vec<Vec<<C as Config>::N>> {
+        let mut stream = self.proofs.write();
+        stream.extend(self.public_values.write());
+        stream
+    }
+}
+
+
+
+
 
 pub struct CenoRootVmVerifierConfig {
     pub leaf_fri_params: FriParameters,
@@ -54,13 +108,13 @@ impl CenoRootVmVerifierConfig {
         let mut builder = Builder::<C>::default();
 
         builder.cycle_tracker_start("ReadProofsFromInput");
-        let root_verifier_input = RootVmVerifierInput::<SC>::read(&mut builder);
+        let root_verifier_input = CenoRootVmVerifierInput::<SC>::read(&mut builder);
         builder.cycle_tracker_end("ReadProofsFromInput");
 
         let pvs = {
             let leaf_advice = new_from_inner_multi_vk(leaf_vm_vk);
             let internal_advice = new_from_inner_multi_vk(internal_vm_vk);
-            let RootVmVerifierInputVariable {
+            let CenoRootVmVerifierInputVariable {
                 proofs,
                 public_values,
             } = root_verifier_input;
