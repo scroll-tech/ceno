@@ -7,10 +7,6 @@
 
 use openvm_continuations::{
     C, F, SC,
-    verifier::{
-        common::non_leaf::NonLeafVerifierVariables,
-        // root::{types::RootVmVerifierInput, vars::RootVmVerifierInputVariable},
-    },
 };
 use openvm_instructions::program::Program;
 use openvm_native_compiler::{
@@ -39,6 +35,7 @@ use openvm_native_compiler::{
     prelude::*,
 };
 use openvm_native_recursion::vars::StarkProofVariable;
+use crate::aggregation::internal::NonLeafVerifierVariables;
 
 #[derive(Serialize, Deserialize)]
 pub struct CenoRootVmVerifierInput<SC: StarkGenericConfig> {
@@ -74,10 +71,6 @@ impl Hintable<C> for CenoRootVmVerifierInput<SC> {
         stream
     }
 }
-
-
-
-
 
 pub struct CenoRootVmVerifierConfig {
     pub leaf_fri_params: FriParameters,
