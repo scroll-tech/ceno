@@ -1550,7 +1550,7 @@ fn create_proofs_helper<
     target_shard_id: Option<usize>,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
-    info_span!("app_prove.inner").in_scope(|| {
+    let proofs = info_span!("app_prove.inner").in_scope(|| {
         #[cfg(feature = "gpu")]
         {
             use crossbeam::channel;
@@ -1656,7 +1656,9 @@ fn create_proofs_helper<
                 })
                 .collect_vec()
         }
-    })
+    });
+    metrics::gauge!("num_shards").set(proofs.len() as f64);
+    proofs
 }
 
 pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
