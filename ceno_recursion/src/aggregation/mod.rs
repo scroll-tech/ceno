@@ -767,7 +767,6 @@ pub fn verify_proofs(
 
 #[cfg(test)]
 mod tests {
-    use super::verify_e2e_stark_proof;
     use crate::{
         aggregation::{CenoAggregationProver, verify_proofs},
         zkvm_verifier::binding::E,
@@ -778,8 +777,7 @@ mod tests {
         structs::ZKVMVerifyingKey,
     };
     use mpcs::{Basefold, BasefoldRSParams};
-    use openvm_stark_sdk::{config::setup_tracing_with_log_level, p3_bn254_fr::Bn254Fr};
-    use p3::field::FieldAlgebra;
+    use openvm_stark_sdk::config::setup_tracing_with_log_level;
     use std::fs::File;
 
     pub fn aggregation_inner_thread() {
@@ -797,9 +795,9 @@ mod tests {
                 .expect("Failed to deserialize vk file");
 
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
-        let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
+        let _root_proof = agg_prover.generate_root_proof(zkvm_proofs);
 
-        // _debug
+        // _todo: add a verification step after root proof generation
         // verify_e2e_stark_proof(
         //     &agg_prover.vk,
         //     &root_stark_proof,
