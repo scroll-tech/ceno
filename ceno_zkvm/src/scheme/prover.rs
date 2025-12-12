@@ -183,9 +183,10 @@ impl<
 
                 let circuit_idx = self.pk.circuit_name_to_index.get(name).unwrap();
                 // write (circuit_idx, num_var) to transcript
-                transcript.append_message(&circuit_idx.to_le_bytes());
+                transcript.append_field_element(&E::BaseField::from_canonical_usize(*circuit_idx));
                 for num_instance in num_instances {
-                    transcript.append_message(&num_instance.to_le_bytes());
+                    transcript
+                        .append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
                 }
             }
 

@@ -105,9 +105,10 @@ impl From<(usize, ZKVMProof<E, RecPcs>)> for ZKVMProofInput {
                 .1
                 .chip_proofs
                 .into_iter()
-                .map(|(chip_idx, mut proofs)| {
-                    assert_eq!(proofs.len(), 1, "TODO support > 1 proofs per chip");
-                    ZKVMChipProofInput::from((chip_idx, proofs.remove(0)))
+                .flat_map(|(chip_idx, proofs)| {
+                    proofs
+                        .into_iter()
+                        .map(move |proof| ZKVMChipProofInput::from((chip_idx, proof)))
                 })
                 .collect::<Vec<ZKVMChipProofInput>>(),
             witin_commit: d.1.witin_commit.into(),

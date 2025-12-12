@@ -174,17 +174,14 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             }
         });
 
-    let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
     iter_zip!(builder, zkvm_proof_input.chip_proofs).for_each(|ptr_vec, builder| {
         let chip_proof = builder.iter_ptr_get(&zkvm_proof_input.chip_proofs, ptr_vec[0]);
         challenger.observe(builder, chip_proof.idx_felt);
-        challenger.observe(builder, zero_f);
 
         iter_zip!(builder, chip_proof.num_instances).for_each(|ptr_vec, builder| {
             let num_instance = builder.iter_ptr_get(&chip_proof.num_instances, ptr_vec[0]);
             let num_instance = builder.unsafe_cast_var_to_felt(num_instance);
             challenger.observe(builder, num_instance);
-            challenger.observe(builder, zero_f);
         });
     });
 
@@ -203,6 +200,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     let alpha = challenger.sample_ext(builder);
     let beta = challenger.sample_ext(builder);
+    builder.print_e(alpha);
+    builder.print_e(beta);
 
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(2);
     builder.set(&challenges, 0, alpha);
