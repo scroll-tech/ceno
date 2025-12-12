@@ -108,10 +108,6 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                     );
                 },
                 |builder| {
-                    for i in 0..DIGEST_SIZE {
-                        builder.print_f(pvs.app_commit[i]);
-                        builder.print_f(proof_vm_pvs.vm_verifier_pvs.app_commit[i]);
-                    }
                     builder.assert_eq::<[_; DIGEST_SIZE]>(
                         pvs.app_commit,
                         proof_vm_pvs.vm_verifier_pvs.app_commit,
