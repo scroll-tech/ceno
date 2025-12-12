@@ -181,3 +181,10 @@ jobs:
       - name: Test install Ceno cli
         run: |
           cargo make cli
+
+      - name: Run Ceno cli example proof
+        working-directory: ceno_cli/example
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo ceno prove --platform=ceno --hints 10 --public-io 4
