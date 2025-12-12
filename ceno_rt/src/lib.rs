@@ -2,14 +2,14 @@
 #![feature(linkage)]
 use getrandom::{Error, register_custom_getrandom};
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(target_os = "zkvm")]
 use core::arch::{asm, global_asm};
 use std::{
     alloc::{Layout, alloc_zeroed},
     ptr,
 };
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(target_os = "zkvm")]
 mod allocator;
 
 mod mmio;

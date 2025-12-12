@@ -61,6 +61,6 @@ SECTIONS
   /* NOTE 1: This works correctly **only** if the total size of .text + .rodata + .data + .bss does not exceed 128MB. */
   /* NOTE 2: This alignment **does not** affect the binary size.  */
     . = ALIGN(0x8000000);
-    _sheap = .;
+    PROVIDE(_sheap = .);
   } > RAM
 }
