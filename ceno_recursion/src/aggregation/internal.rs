@@ -3,12 +3,13 @@
 /// https://github.com/openvm-org/openvm/blob/main/crates/continuations/src/verifier/common/non_leaf.rs
 use std::{array, borrow::Borrow};
 
+use ceno_zkvm::scheme::constants::SEPTIC_EXTENSION_DEGREE;
 use openvm_circuit::arch::PUBLIC_VALUES_AIR_ID;
 use openvm_instructions::program::Program;
 use openvm_native_compiler::{
+    prelude::*,
     conversion::CompilerOptions,
-    ir::{Array, Builder, Config, DIGEST_SIZE, Felt, RVar},
-    prelude::Var,
+    ir::{Array, Builder, Config, DIGEST_SIZE, Felt, RVar, Usize},
 };
 use openvm_native_recursion::{
     challenger::duplex::DuplexChallengerVariable, fri::TwoAdicFriPcsVariable, stark::StarkVerifier,
@@ -29,8 +30,10 @@ use openvm_continuations::verifier::{
 };
 use openvm_native_recursion::hints::Hintable;
 use openvm_continuations::verifier::internal::vars::InternalVmVerifierInputVariable;
-use crate::aggregation::InternalVmVerifierInput;
+use crate::{aggregation::InternalVmVerifierInput, arithmetics::_print_ext_arr, zkvm_verifier::verifier::add_septic_points_in_place};
 use crate::aggregation::types::{InternalVmVerifierPvs, InternalVmVerifierExtraPvs, VmVerifierPvs};
+use crate::zkvm_verifier::binding::SepticPointVariable;
+use crate::zkvm_verifier::binding::SepticExtensionVariable;
 
 use openvm_continuations::{C, F};
 use openvm_native_recursion::types::new_from_inner_multi_vk;
@@ -90,6 +93,16 @@ impl<C: Config> NonLeafVerifierVariables<C> {
         let pvs = VmVerifierPvs::<Felt<C::F>>::uninit(builder);
         let leaf_verifier_commit = array::from_fn(|_| builder.uninit());
 
+        let ec_sum = SepticPointVariable {
+            x: SepticExtensionVariable {
+                vs: builder.dyn_array(7),
+            },
+            y: SepticExtensionVariable {
+                vs: builder.dyn_array(7),
+            },
+            is_infinity: Usize::uninit(builder),
+        };
+
         builder.range(0, proofs.len()).for_each(|i_vec, builder| {
             let i = i_vec[0];
             let proof = builder.get(proofs, i);
@@ -98,10 +111,23 @@ impl<C: Config> NonLeafVerifierVariables<C> {
 
             assert_single_segment_vm_exit_successfully(builder, &proof);
 
+            let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
             builder.if_eq(i, RVar::zero()).then_or_else(
                 |builder| {
                     // _debug
                     // builder.assign(&pvs.app_commit, proof_vm_pvs.vm_verifier_pvs.app_commit);
+                    
+                    for i in 0..SEPTIC_EXTENSION_DEGREE {
+                        let x = Ext::uninit(builder);
+                        builder.assign(&x, proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.x[i]);
+                        let y = Ext::uninit(builder);
+                        builder.assign(&y, proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.y[i]);
+
+                        builder.set(&ec_sum.x.vs, i, x);
+                        builder.set(&ec_sum.y.vs, i, y);
+                    }
+                    let inf = Usize::Var(builder.cast_felt_to_var(proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.is_infinity));
+                    builder.assign(&ec_sum.is_infinity, inf);
 
                     builder.assign(
                         &leaf_verifier_commit,
@@ -114,13 +140,36 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                     //     pvs.app_commit,
                     //     proof_vm_pvs.vm_verifier_pvs.app_commit,
                     // );
-                    
+
+                    let right = SepticPointVariable {
+                        x: SepticExtensionVariable {
+                            vs: builder.dyn_array(7),
+                        },
+                        y: SepticExtensionVariable {
+                            vs: builder.dyn_array(7),
+                        },
+                        is_infinity: Usize::uninit(builder),
+                    };
+                    for i in 0..SEPTIC_EXTENSION_DEGREE {
+                        let x = Ext::uninit(builder);
+                        builder.assign(&x, proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.x[i]);
+                        let y = Ext::uninit(builder);
+                        builder.assign(&y, proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.y[i]);
+                        
+                        builder.set(&right.x.vs, i, x);
+                        builder.set(&right.y.vs, i, y);
+                    }
+                    let inf = Usize::Var(builder.cast_felt_to_var(proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.is_infinity));
+                    builder.assign(&right.is_infinity, inf);
+                    add_septic_points_in_place(builder, &ec_sum, &right);
+
                     builder.assert_eq::<[_; DIGEST_SIZE]>(
                         leaf_verifier_commit,
                         proof_vm_pvs.extra_pvs.leaf_verifier_commit,
                     );
                 },
             );
+
             assert_or_assign_connector_pvs(
                 builder,
                 &pvs.connector,
@@ -128,72 +177,12 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                 &proof_vm_pvs.vm_verifier_pvs.connector,
             );
 
-            // TODO: sum shard ram ec point in each proof
-            //         // EC sum verification
-            //         let expected_last_shard_id = Usize::uninit(builder);
-            //         builder.assign(&expected_last_shard_id, pv.len() - Usize::from(1));
+            // _debug
+            builder.print_debug(606);
+            _print_ext_arr(builder, &ec_sum.x.vs);
+            _print_ext_arr(builder, &ec_sum.y.vs);
 
-            //         let shard_id_fs = builder.get(&shard_raw_pi, SHARD_ID_IDX);
-            //         let shard_id_f = builder.get(&shard_id_fs, 0);
-            //         let shard_id = Usize::Var(builder.cast_felt_to_var(shard_id_f));
-            //         builder.assert_usize_eq(expected_last_shard_id, shard_id);
 
-            //         let ec_sum = SepticPointVariable {
-            //             x: SepticExtensionVariable {
-            //                 vs: builder.dyn_array(7),
-            //             },
-            //             y: SepticExtensionVariable {
-            //                 vs: builder.dyn_array(7),
-            //             },
-            //             is_infinity: Usize::uninit(builder),
-            //         };
-            //         builder.assign(&ec_sum.is_infinity, Usize::from(1));
-
-            //         builder.range(0, pv.len()).for_each(|idx_vec, builder| {
-            //             let shard_pv = builder.get(&pv, idx_vec[0]);
-            //             let x = SepticExtensionVariable {
-            //                 vs: shard_pv.slice(
-            //                     builder,
-            //                     SHARD_RW_SUM_IDX,
-            //                     SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
-            //                 ),
-            //             };
-            //             let y = SepticExtensionVariable {
-            //                 vs: shard_pv.slice(
-            //                     builder,
-            //                     SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
-            //                     SHARD_RW_SUM_IDX + 2 * SEPTIC_EXTENSION_DEGREE,
-            //                 ),
-            //             };
-            //             let shard_ec = SepticPointVariable {
-            //                 x: x.clone(),
-            //                 y: y.clone(),
-            //                 is_infinity: Usize::uninit(builder),
-            //             };
-            //             let is_x_zero = x.is_zero(builder);
-            //             let is_y_zero = y.is_zero(builder);
-            //             builder.if_eq(is_x_zero, Usize::from(1)).then_or_else(
-            //                 |builder| {
-            //                     builder
-            //                         .if_eq(is_y_zero.clone(), Usize::from(1))
-            //                         .then_or_else(
-            //                             |builder| {
-            //                                 builder.assign(&shard_ec.is_infinity, Usize::from(1));
-            //                             },
-            //                             |builder| {
-            //                                 builder.assign(&shard_ec.is_infinity, Usize::from(0));
-            //                             },
-            //                         );
-            //                 },
-            //                 |builder| {
-            //                     builder.assign(&shard_ec.is_infinity, Usize::from(0));
-            //                 },
-            //             );
-
-            //             add_septic_points_in_place(builder, &ec_sum, &shard_ec);
-            //         });
-
-            //         add_septic_points_in_place(builder, &ec_sum, &calculated_shard_ec_sum);
 
             // This is only needed when `is_terminate` but branching here won't save much, so we
             // always assign it.
