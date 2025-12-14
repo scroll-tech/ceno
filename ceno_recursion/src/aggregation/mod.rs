@@ -25,8 +25,7 @@ use internal::InternalVmVerifierConfig;
 use openvm_continuations::{
     C,
     verifier::{
-        common::types::VmVerifierPvs,
-        internal::types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
+        internal::types::{InternalVmVerifierInput, VmStarkProof},
         root::types::RootVmVerifierInput,
     },
 };
@@ -81,6 +80,7 @@ use openvm_native_compiler::{
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
 use openvm_stark_sdk::config::baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine;
+use crate::aggregation::types::{VmVerifierPvs, InternalVmVerifierPvs};
 
 mod internal;
 mod root;
@@ -454,9 +454,9 @@ impl CenoLeafVmVerifierConfig {
             builder.cycle_tracker_start("PV Operations");
 
             // TODO: define our own VmVerifierPvs
-            for i in 0..DIGEST_SIZE {
-                builder.assign(&stark_pvs.app_commit[i], F::ZERO);
-            }
+            // for i in 0..DIGEST_SIZE {
+            //     builder.assign(&stark_pvs.app_commit[i], F::ZERO);
+            // }
 
             let pv = &raw_pi;
             let init_pc = {
@@ -504,7 +504,6 @@ impl CenoLeafVmVerifierConfig {
             //             );
             //             builder.assign(&prev_pc, end_pc);
             //         });
-
             //     });
 
             for pv in stark_pvs.flatten() {
@@ -611,6 +610,7 @@ pub(crate) fn chunk_ceno_leaf_proof_inputs(
     ret
 }
 
+/* 
 // Source from OpenVm SDK::verify_e2e_stark_proof with abridged key
 // See: https://github.com/openvm-org/openvm
 pub fn verify_e2e_stark_proof(
@@ -708,6 +708,7 @@ pub fn verify_e2e_stark_proof(
     // }
     Ok(app_commit)
 }
+*/
 
 /// Build Ceno's zkVM verifier program from vk in OpenVM's eDSL
 pub fn build_zkvm_verifier_program(
@@ -843,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 

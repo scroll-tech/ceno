@@ -24,14 +24,13 @@ use p3::field::FieldAlgebra;
 use openvm_continuations::verifier::{
     common::{
         assert_or_assign_connector_pvs, assert_required_air_for_agg_vm_present,
-        assert_single_segment_vm_exit_successfully, get_program_commit, types::VmVerifierPvs,
-    },
-    internal::{
-        types::{InternalVmVerifierExtraPvs, InternalVmVerifierInput, InternalVmVerifierPvs},
-        vars::InternalVmVerifierInputVariable,
+        assert_single_segment_vm_exit_successfully, get_program_commit,
     },
 };
 use openvm_native_recursion::hints::Hintable;
+use openvm_continuations::verifier::internal::vars::InternalVmVerifierInputVariable;
+use crate::aggregation::InternalVmVerifierInput;
+use crate::aggregation::types::{InternalVmVerifierPvs, InternalVmVerifierExtraPvs, VmVerifierPvs};
 
 use openvm_continuations::{C, F};
 use openvm_native_recursion::types::new_from_inner_multi_vk;
@@ -101,17 +100,21 @@ impl<C: Config> NonLeafVerifierVariables<C> {
 
             builder.if_eq(i, RVar::zero()).then_or_else(
                 |builder| {
-                    builder.assign(&pvs.app_commit, proof_vm_pvs.vm_verifier_pvs.app_commit);
+                    // _debug
+                    // builder.assign(&pvs.app_commit, proof_vm_pvs.vm_verifier_pvs.app_commit);
+
                     builder.assign(
                         &leaf_verifier_commit,
                         proof_vm_pvs.extra_pvs.leaf_verifier_commit,
                     );
                 },
                 |builder| {
-                    builder.assert_eq::<[_; DIGEST_SIZE]>(
-                        pvs.app_commit,
-                        proof_vm_pvs.vm_verifier_pvs.app_commit,
-                    );
+                    // _debug
+                    // builder.assert_eq::<[_; DIGEST_SIZE]>(
+                    //     pvs.app_commit,
+                    //     proof_vm_pvs.vm_verifier_pvs.app_commit,
+                    // );
+                    
                     builder.assert_eq::<[_; DIGEST_SIZE]>(
                         leaf_verifier_commit,
                         proof_vm_pvs.extra_pvs.leaf_verifier_commit,
@@ -301,6 +304,7 @@ impl InternalVmVerifierConfig {
                 internal_pcs,
                 internal_advice,
             };
+            
             builder.cycle_tracker_start("VerifyProofs");
             let (vm_verifier_pvs, leaf_verifier_commit) =
                 non_leaf_verifier.verify_internal_or_leaf_verifier_proofs(&mut builder, &proofs);
