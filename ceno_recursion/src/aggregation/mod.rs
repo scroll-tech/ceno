@@ -7,7 +7,7 @@ use crate::{
 };
 use ceno_zkvm::{
     instructions::riscv::constants::{END_PC_IDX, EXIT_CODE_IDX, INIT_PC_IDX},
-    scheme::ZKVMProof,
+    scheme::{ZKVMProof, constants::SEPTIC_EXTENSION_DEGREE},
     structs::ZKVMVerifyingKey,
 };
 use ff_ext::BabyBearExt4;
@@ -448,16 +448,10 @@ impl CenoLeafVmVerifierConfig {
             builder.cycle_tracker_start("Verify Ceno ZKVM Proof");
             let zkvm_proof = ceno_leaf_input.proof;
             let raw_pi = zkvm_proof.raw_pi.clone();
-            let _calculated_shard_ec_sum = verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
+            let shard_ec_sum = verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
             builder.cycle_tracker_end("Verify Ceno ZKVM Proof");
 
             builder.cycle_tracker_start("PV Operations");
-
-            // TODO: define our own VmVerifierPvs
-            // for i in 0..DIGEST_SIZE {
-            //     builder.assign(&stark_pvs.app_commit[i], F::ZERO);
-            // }
-
             let pv = &raw_pi;
             let init_pc = {
                 let arr = builder.get(pv, INIT_PC_IDX);
@@ -475,7 +469,22 @@ impl CenoLeafVmVerifierConfig {
             builder.assign(&stark_pvs.connector.final_pc, end_pc);
             builder.assign(&stark_pvs.connector.exit_code, exit_code);
 
-            // TODO: assign shard_ec_sum to stark_pvs.shard_ec_sum
+            for i in 0..SEPTIC_EXTENSION_DEGREE {
+                let x_ext = builder.get(&shard_ec_sum.x.vs, i);
+                let y_ext = builder.get(&shard_ec_sum.y.vs, i);
+                let x_fs = builder.ext2felt(x_ext);
+                let y_fs = builder.ext2felt(y_ext);
+                let x = builder.get(&x_fs, 0);
+                let y = builder.get(&y_fs, 0);
+
+                builder.assign(&stark_pvs.shard_ram_connector.x[i], x);
+                builder.assign(&stark_pvs.shard_ram_connector.y[i], y);
+            }
+            builder.if_eq(shard_ec_sum.is_infinity, Usize::from(1)).then_or_else(|builder| {
+                builder.assign(&stark_pvs.shard_ram_connector.is_infinity, F::ONE);
+            }, |builder| {
+                builder.assign(&stark_pvs.shard_ram_connector.is_infinity, F::ZERO);
+            });
 
             // builder
             //     .if_eq(ceno_leaf_input.is_last, Usize::from(1))
