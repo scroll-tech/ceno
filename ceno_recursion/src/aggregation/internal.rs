@@ -110,13 +110,8 @@ impl<C: Config> NonLeafVerifierVariables<C> {
             let proof_vm_pvs = self.verify_internal_or_leaf_verifier_proof(builder, &proof);
 
             assert_single_segment_vm_exit_successfully(builder, &proof);
-
-            let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
             builder.if_eq(i, RVar::zero()).then_or_else(
                 |builder| {
-                    // _debug
-                    // builder.assign(&pvs.app_commit, proof_vm_pvs.vm_verifier_pvs.app_commit);
-                    
                     for i in 0..SEPTIC_EXTENSION_DEGREE {
                         let x = Ext::uninit(builder);
                         builder.assign(&x, proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.x[i]);
@@ -135,12 +130,6 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                     );
                 },
                 |builder| {
-                    // _debug
-                    // builder.assert_eq::<[_; DIGEST_SIZE]>(
-                    //     pvs.app_commit,
-                    //     proof_vm_pvs.vm_verifier_pvs.app_commit,
-                    // );
-
                     let right = SepticPointVariable {
                         x: SepticExtensionVariable {
                             vs: builder.dyn_array(7),
@@ -177,12 +166,22 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                 &proof_vm_pvs.vm_verifier_pvs.connector,
             );
 
-            // _debug
-            builder.print_debug(606);
-            _print_ext_arr(builder, &ec_sum.x.vs);
-            _print_ext_arr(builder, &ec_sum.y.vs);
+            for i in 0..SEPTIC_EXTENSION_DEGREE {
+                let x_ext = builder.get(&ec_sum.x.vs, i);
+                let y_ext = builder.get(&ec_sum.y.vs, i);
+                let x_fs = builder.ext2felt(x_ext);
+                let y_fs = builder.ext2felt(y_ext);
+                let x = builder.get(&x_fs, 0);
+                let y = builder.get(&y_fs, 0);
 
-
+                builder.assign(&pvs.shard_ram_connector.x[i], x);
+                builder.assign(&pvs.shard_ram_connector.y[i], y);
+            }
+            builder.if_eq(ec_sum.is_infinity.clone(), Usize::from(1)).then_or_else(|builder| {
+                builder.assign(&pvs.shard_ram_connector.is_infinity, C::F::ONE);
+            }, |builder| {
+                builder.assign(&pvs.shard_ram_connector.is_infinity, C::F::ZERO);
+            });
 
             // This is only needed when `is_terminate` but branching here won't save much, so we
             // always assign it.
