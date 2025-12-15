@@ -1,6 +1,6 @@
 use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 use crate::{
-    Change, EmuContext, Platform, TraceDriver, VMState, WORD_SIZE, Word, WriteOp, utils::MemoryView,
+    Change, EmuContext, Platform, Tracer, VMState, WORD_SIZE, Word, WriteOp, utils::MemoryView,
 };
 use itertools::Itertools;
 use k256::{FieldBytes, elliptic_curve::PrimeField};
@@ -104,7 +104,7 @@ impl From<SecpMaybePoint> for [Word; SECP256K1_ARG_WORDS] {
 }
 
 /// Trace the execution of a secp256k1_add call
-pub fn secp256k1_add<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn secp256k1_add<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
     let q_ptr = vm.peek_register(Platform::reg_arg1());
 
@@ -149,7 +149,7 @@ pub fn secp256k1_add<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
 }
 
 /// Trace the execution of a secp256k1_double call
-pub fn secp256k1_double<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn secp256k1_double<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
 
     // Read the argument pointers
@@ -179,7 +179,7 @@ pub fn secp256k1_double<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
     }
 }
 
-pub fn secp256k1_invert<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn secp256k1_invert<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
 
     // Read the argument pointers
@@ -236,7 +236,7 @@ impl From<SecpCoordinate> for [Word; COORDINATE_WORDS] {
 }
 
 /// Trace the execution of a secp256k1_decompress call
-pub fn secp256k1_decompress<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn secp256k1_decompress<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let ptr = vm.peek_register(Platform::reg_arg0());
     let y_is_odd = vm.peek_register(Platform::reg_arg1());
 

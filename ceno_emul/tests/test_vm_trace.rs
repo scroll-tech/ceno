@@ -4,8 +4,8 @@ use rustc_hash::FxHashMap;
 use std::{collections::BTreeMap, sync::Arc};
 
 use ceno_emul::{
-    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Instruction, Platform, Program, StepRecord, Tracer,
-    VMState, WordAddr, encode_rv32,
+    CENO_PLATFORM, Cycle, EmuContext, FullTracer, InsnKind, Instruction, Platform, Program,
+    StepRecord, VMState, WordAddr, encode_rv32,
 };
 
 #[test]
@@ -119,7 +119,7 @@ fn expected_ops_fibonacci_20() -> Vec<InsnKind> {
 fn expected_final_accesses_fibonacci_20() -> FxHashMap<WordAddr, Cycle> {
     let mut accesses = FxHashMap::default();
     let x = |i| WordAddr::from(Platform::register_vma(i));
-    const C: Cycle = Tracer::SUBCYCLES_PER_INSN;
+    const C: Cycle = FullTracer::SUBCYCLES_PER_INSN;
 
     let mut cycle = C; // First cycle.
     cycle += 2 * C; // Set x1 and x3.
@@ -130,18 +130,18 @@ fn expected_final_accesses_fibonacci_20() -> FxHashMap<WordAddr, Cycle> {
     cycle += 2 * C; // Last iteration ADDI and ADD.
 
     // Last ADD.
-    accesses.insert(x(2), cycle + Tracer::SUBCYCLE_RS1);
-    accesses.insert(x(3), cycle + Tracer::SUBCYCLE_RD);
+    accesses.insert(x(2), cycle + FullTracer::SUBCYCLE_RS1);
+    accesses.insert(x(3), cycle + FullTracer::SUBCYCLE_RD);
     cycle += C;
 
     // Last BNE.
-    accesses.insert(x(1), cycle + Tracer::SUBCYCLE_RS1);
-    accesses.insert(x(0), cycle + Tracer::SUBCYCLE_RS2);
+    accesses.insert(x(1), cycle + FullTracer::SUBCYCLE_RS1);
+    accesses.insert(x(0), cycle + FullTracer::SUBCYCLE_RS2);
     cycle += C;
 
     // Now at the final ECALL cycle.
-    accesses.insert(x(Platform::reg_ecall()), cycle + Tracer::SUBCYCLE_RS1);
-    accesses.insert(x(Platform::reg_arg0()), cycle + Tracer::SUBCYCLE_RS2);
+    accesses.insert(x(Platform::reg_ecall()), cycle + FullTracer::SUBCYCLE_RS1);
+    accesses.insert(x(Platform::reg_arg0()), cycle + FullTracer::SUBCYCLE_RS2);
 
     accesses
 }

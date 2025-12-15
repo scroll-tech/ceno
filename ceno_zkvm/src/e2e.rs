@@ -21,9 +21,9 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, IterAddresses, NextCycleAccess, Platform,
-    PreflightTracer, Program, StepRecord, TraceDriver, Tracer, VM_REG_COUNT, VMState, WORD_SIZE,
-    Word, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, NextCycleAccess,
+    Platform, PreflightTracer, Program, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word,
+    WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -221,7 +221,7 @@ impl<'a> Default for ShardContext<'a> {
                     .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
-            cur_shard_cycle_range: Tracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
+            cur_shard_cycle_range: FullTracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
             expected_inst_per_shard: usize::MAX,
             max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
@@ -325,7 +325,7 @@ impl<'a> ShardContext<'a> {
     #[inline(always)]
     pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
         let mut ts = prev_cycle.saturating_sub(self.current_shard_offset_cycle());
-        if ts < Tracer::SUBCYCLES_PER_INSN {
+        if ts < FullTracer::SUBCYCLES_PER_INSN {
             ts = 0
         }
         ts
@@ -338,7 +338,7 @@ impl<'a> ShardContext<'a> {
 
     pub fn current_shard_offset_cycle(&self) -> Cycle {
         // cycle of each local shard start from Tracer::SUBCYCLES_PER_INSN
-        (self.cur_shard_cycle_range.start as Cycle) - Tracer::SUBCYCLES_PER_INSN
+        (self.cur_shard_cycle_range.start as Cycle) - FullTracer::SUBCYCLES_PER_INSN
     }
 
     /// Finds the **next** future access cycle for the given address, starting from
@@ -582,7 +582,7 @@ impl ShardContextBuilder {
                 }
             };
             let next_cells = self.cur_cells + step_cell_extractor.extract_cells(&step);
-            let next_cycle = self.cur_acc_cycle + Tracer::SUBCYCLES_PER_INSN;
+            let next_cycle = self.cur_acc_cycle + FullTracer::SUBCYCLES_PER_INSN;
             if next_cells >= target_cost_current_shard || next_cycle >= self.max_cycle_per_shard {
                 assert!(
                     !steps.is_empty(),
@@ -606,14 +606,14 @@ impl ShardContextBuilder {
                 self.prev_shard_cycle_range
                     .last()
                     .copied()
-                    .unwrap_or(Tracer::SUBCYCLES_PER_INSN)
+                    .unwrap_or(FullTracer::SUBCYCLES_PER_INSN)
             );
         }
 
         let shard_ctx = ShardContext {
             shard_id: self.cur_shard_id,
             cur_shard_cycle_range: steps.first().map(|step| step.cycle() as usize).unwrap()
-                ..(steps.last().unwrap().cycle() + Tracer::SUBCYCLES_PER_INSN) as usize,
+                ..(steps.last().unwrap().cycle() + FullTracer::SUBCYCLES_PER_INSN) as usize,
             addr_future_accesses: self.addr_future_accesses.clone(),
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
             ..Default::default()
@@ -725,7 +725,7 @@ pub fn emulate_program<'a>(
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),
         vm.program().entry,
-        Tracer::SUBCYCLES_PER_INSN,
+        FullTracer::SUBCYCLES_PER_INSN,
         vm.get_pc().into(),
         end_cycle,
         multi_prover.prover_id as u32,
@@ -1095,7 +1095,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
             let last_step = shard_steps.last().expect("shard must contain steps");
             let current_shard_end_cycle =
-                last_step.cycle() + Tracer::SUBCYCLES_PER_INSN - current_shard_offset_cycle;
+                last_step.cycle() + FullTracer::SUBCYCLES_PER_INSN - current_shard_offset_cycle;
             let current_shard_init_pc = if shard_ctx.is_first_shard() {
                 program.entry
             } else {
@@ -1204,7 +1204,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
 
             pi.init_pc = current_shard_init_pc;
-            pi.init_cycle = Tracer::SUBCYCLES_PER_INSN;
+            pi.init_cycle = FullTracer::SUBCYCLES_PER_INSN;
             pi.shard_id = shard_ctx.shard_id as u32;
             pi.end_pc = current_shard_end_pc;
             pi.end_cycle = current_shard_end_cycle;
@@ -1742,7 +1742,7 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 }
 
 #[cfg(debug_assertions)]
-fn debug_memory_ranges<'a, T: TraceDriver, I: Iterator<Item = &'a MemFinalRecord>>(
+fn debug_memory_ranges<'a, T: Tracer, I: Iterator<Item = &'a MemFinalRecord>>(
     vm: &VMState<T>,
     mem_final: I,
 ) {
@@ -1821,7 +1821,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 #[cfg(test)]
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
-    use ceno_emul::{Cycle, NextCycleAccess, StepRecord, Tracer};
+    use ceno_emul::{Cycle, FullTracer, NextCycleAccess, StepRecord};
     use itertools::Itertools;
 
     struct UniformStepExtractor;
@@ -1864,7 +1864,7 @@ mod tests {
         );
 
         let mut steps_iter = (0..executed_instruction).map(|i| {
-            StepRecord::new_ecall_any(Tracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
+            StepRecord::new_ecall_any(FullTracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
         });
         let mut steps = Vec::new();
 

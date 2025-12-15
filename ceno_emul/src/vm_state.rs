@@ -6,7 +6,7 @@ use crate::{
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
-    tracer::{Change, TraceDriver, Tracer},
+    tracer::{Change, FullTracer, Tracer},
 };
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
@@ -18,7 +18,7 @@ pub struct HaltState {
 /// An implementation of the machine state and of the side-effects of operations.
 pub const VM_REG_COUNT: usize = 32 + 1;
 
-pub struct VMState<T: TraceDriver = Tracer> {
+pub struct VMState<T: Tracer = FullTracer> {
     program: Arc<Program>,
     platform: Platform,
     pc: Word,
@@ -31,17 +31,17 @@ pub struct VMState<T: TraceDriver = Tracer> {
     tracer: T,
 }
 
-impl VMState<Tracer> {
+impl VMState<FullTracer> {
     pub fn new(platform: Platform, program: Arc<Program>) -> Self {
         Self::new_with_tracer(platform, program)
     }
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
-        VMState::<Tracer>::new_from_elf_with_tracer(platform, elf)
+        VMState::<FullTracer>::new_from_elf_with_tracer(platform, elf)
     }
 }
 
-impl<T: TraceDriver> VMState<T> {
+impl<T: Tracer> VMState<T> {
     /// The number of registers that the VM uses.
     /// 32 architectural registers + 1 register RD_NULL for dark writes to x0.
     pub const REG_COUNT: usize = VM_REG_COUNT;
@@ -164,7 +164,7 @@ impl<T: TraceDriver> VMState<T> {
     }
 }
 
-impl<T: TraceDriver> EmuContext for VMState<T> {
+impl<T: Tracer> EmuContext for VMState<T> {
     // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {
         let function = self.load_register(Platform::reg_ecall())?;

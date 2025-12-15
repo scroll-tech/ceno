@@ -75,7 +75,7 @@ fn init_mmio_min_max_access(
     mmio_max_access
 }
 
-pub trait TraceDriver {
+pub trait Tracer {
     type Record;
 
     const SUBCYCLE_RS1: Cycle;
@@ -484,7 +484,7 @@ impl StepRecord {
 }
 
 #[derive(Debug)]
-pub struct Tracer {
+pub struct FullTracer {
     record: StepRecord,
 
     // record each section max access address
@@ -499,17 +499,17 @@ pub struct Tracer {
     next_accesses: NextCycleAccess,
 }
 
-impl Tracer {
+impl FullTracer {
     pub const SUBCYCLE_RS1: Cycle = 0;
     pub const SUBCYCLE_RS2: Cycle = 1;
     pub const SUBCYCLE_RD: Cycle = 2;
     pub const SUBCYCLE_MEM: Cycle = 3;
     pub const SUBCYCLES_PER_INSN: Cycle = 4;
 
-    pub fn new(platform: &Platform) -> Tracer {
+    pub fn new(platform: &Platform) -> FullTracer {
         let mmio_max_access = init_mmio_min_max_access(platform);
 
-        Tracer {
+        FullTracer {
             mmio_min_max_access: Some(mmio_max_access),
             record: StepRecord {
                 cycle: Self::SUBCYCLES_PER_INSN,
@@ -690,7 +690,7 @@ pub struct PreflightTracer {
 impl PreflightTracer {
     pub fn new(platform: &Platform) -> Self {
         PreflightTracer {
-            cycle: Tracer::SUBCYCLES_PER_INSN,
+            cycle: FullTracer::SUBCYCLES_PER_INSN,
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
@@ -714,14 +714,14 @@ impl PreflightTracer {
     }
 }
 
-impl TraceDriver for PreflightTracer {
+impl Tracer for PreflightTracer {
     type Record = ();
 
-    const SUBCYCLE_RS1: Cycle = Tracer::SUBCYCLE_RS1;
-    const SUBCYCLE_RS2: Cycle = Tracer::SUBCYCLE_RS2;
-    const SUBCYCLE_RD: Cycle = Tracer::SUBCYCLE_RD;
-    const SUBCYCLE_MEM: Cycle = Tracer::SUBCYCLE_MEM;
-    const SUBCYCLES_PER_INSN: Cycle = Tracer::SUBCYCLES_PER_INSN;
+    const SUBCYCLE_RS1: Cycle = FullTracer::SUBCYCLE_RS1;
+    const SUBCYCLE_RS2: Cycle = FullTracer::SUBCYCLE_RS2;
+    const SUBCYCLE_RD: Cycle = FullTracer::SUBCYCLE_RD;
+    const SUBCYCLE_MEM: Cycle = FullTracer::SUBCYCLE_MEM;
+    const SUBCYCLES_PER_INSN: Cycle = FullTracer::SUBCYCLES_PER_INSN;
 
     fn new(platform: &Platform) -> Self {
         PreflightTracer::new(platform)
@@ -808,21 +808,21 @@ impl TraceDriver for PreflightTracer {
     }
 }
 
-impl TraceDriver for Tracer {
+impl Tracer for FullTracer {
     type Record = StepRecord;
 
-    const SUBCYCLE_RS1: Cycle = Tracer::SUBCYCLE_RS1;
-    const SUBCYCLE_RS2: Cycle = Tracer::SUBCYCLE_RS2;
-    const SUBCYCLE_RD: Cycle = Tracer::SUBCYCLE_RD;
-    const SUBCYCLE_MEM: Cycle = Tracer::SUBCYCLE_MEM;
-    const SUBCYCLES_PER_INSN: Cycle = Tracer::SUBCYCLES_PER_INSN;
+    const SUBCYCLE_RS1: Cycle = FullTracer::SUBCYCLE_RS1;
+    const SUBCYCLE_RS2: Cycle = FullTracer::SUBCYCLE_RS2;
+    const SUBCYCLE_RD: Cycle = FullTracer::SUBCYCLE_RD;
+    const SUBCYCLE_MEM: Cycle = FullTracer::SUBCYCLE_MEM;
+    const SUBCYCLES_PER_INSN: Cycle = FullTracer::SUBCYCLES_PER_INSN;
 
     fn new(platform: &Platform) -> Self {
-        Tracer::new(platform)
+        FullTracer::new(platform)
     }
 
     fn advance(&mut self) -> Self::Record {
-        Tracer::advance(self)
+        FullTracer::advance(self)
     }
 
     fn is_busy_loop(record: &Self::Record) -> bool {
@@ -830,39 +830,39 @@ impl TraceDriver for Tracer {
     }
 
     fn store_pc(&mut self, pc: ByteAddr) {
-        Tracer::store_pc(self, pc)
+        FullTracer::store_pc(self, pc)
     }
 
     fn fetch(&mut self, pc: WordAddr, value: Instruction) {
-        Tracer::fetch(self, pc, value)
+        FullTracer::fetch(self, pc, value)
     }
 
     fn load_register(&mut self, idx: RegIdx, value: Word) {
-        Tracer::load_register(self, idx, value)
+        FullTracer::load_register(self, idx, value)
     }
 
     fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
-        Tracer::store_register(self, idx, value)
+        FullTracer::store_register(self, idx, value)
     }
 
     fn load_memory(&mut self, addr: WordAddr, value: Word) {
-        Tracer::load_memory(self, addr, value)
+        FullTracer::load_memory(self, addr, value)
     }
 
     fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
-        Tracer::store_memory(self, addr, value)
+        FullTracer::store_memory(self, addr, value)
     }
 
     fn track_syscall(&mut self, effects: SyscallEffects) {
-        Tracer::track_syscall(self, effects)
+        FullTracer::track_syscall(self, effects)
     }
 
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
-        Tracer::track_access(self, addr, subcycle)
+        FullTracer::track_access(self, addr, subcycle)
     }
 
     fn final_accesses(&self) -> &LatestAccesses {
-        Tracer::final_accesses(self)
+        FullTracer::final_accesses(self)
     }
 
     fn into_next_accesses(self) -> NextCycleAccess {
@@ -870,18 +870,18 @@ impl TraceDriver for Tracer {
     }
 
     fn cycle(&self) -> Cycle {
-        Tracer::cycle(self)
+        FullTracer::cycle(self)
     }
 
     fn executed_insts(&self) -> usize {
-        Tracer::executed_insts(self)
+        FullTracer::executed_insts(self)
     }
 
     fn probe_min_max_address_by_start_addr(
         &self,
         start_addr: WordAddr,
     ) -> Option<(WordAddr, WordAddr)> {
-        Tracer::probe_min_max_address_by_start_addr(self, start_addr)
+        FullTracer::probe_min_max_address_by_start_addr(self, start_addr)
     }
 }
 

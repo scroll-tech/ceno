@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
 use crate::{
-    Change, EmuContext, Platform, SyscallSpec, TraceDriver, VMState, Word, WriteOp,
+    Change, EmuContext, Platform, SyscallSpec, Tracer, VMState, Word, WriteOp,
     syscalls::{
         SyscallEffects, SyscallWitness,
         bn254::types::{Bn254Fp, Bn254Fp2},
@@ -55,7 +55,7 @@ fn bn254_fptower_binary_op<
         + Into<[Word; WORDS]>
         + std::ops::Add<Output = F>
         + std::ops::Mul<Output = F>,
-    T: TraceDriver,
+    T: Tracer,
 >(
     vm: &VMState<T>,
 ) -> SyscallEffects {
@@ -99,18 +99,18 @@ fn bn254_fptower_binary_op<
     }
 }
 
-pub fn bn254_fp_add<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn bn254_fp_add<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     bn254_fptower_binary_op::<BN254_FP_WORDS, true, Bn254Fp, T>(vm)
 }
 
-pub fn bn254_fp_mul<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn bn254_fp_mul<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     bn254_fptower_binary_op::<BN254_FP_WORDS, false, Bn254Fp, T>(vm)
 }
 
-pub fn bn254_fp2_add<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn bn254_fp2_add<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     bn254_fptower_binary_op::<BN254_FP2_WORDS, true, Bn254Fp2, T>(vm)
 }
 
-pub fn bn254_fp2_mul<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn bn254_fp2_mul<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     bn254_fptower_binary_op::<BN254_FP2_WORDS, false, Bn254Fp2, T>(vm)
 }

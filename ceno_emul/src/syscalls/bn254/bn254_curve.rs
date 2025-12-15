@@ -1,5 +1,5 @@
 use crate::{
-    Change, EmuContext, Platform, SyscallSpec, TraceDriver, VMState, Word, WriteOp,
+    Change, EmuContext, Platform, SyscallSpec, Tracer, VMState, Word, WriteOp,
     syscalls::{SyscallEffects, SyscallWitness, bn254::types::Bn254Point},
     utils::MemoryView,
 };
@@ -25,7 +25,7 @@ impl SyscallSpec for Bn254DoubleSpec {
     const CODE: u32 = ceno_syscall::BN254_DOUBLE;
 }
 
-pub fn bn254_add<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn bn254_add<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
     let q_ptr = vm.peek_register(Platform::reg_arg1());
 
@@ -69,7 +69,7 @@ pub fn bn254_add<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
     }
 }
 
-pub fn bn254_double<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn bn254_double<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
 
     // for compatibility with sp1 spec

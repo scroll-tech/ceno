@@ -1,15 +1,15 @@
 use itertools::{Itertools, izip};
 
-use crate::{Change, EmuContext, TraceDriver, VMState, WORD_SIZE, Word, WordAddr, WriteOp};
+use crate::{Change, EmuContext, Tracer, VMState, WORD_SIZE, Word, WordAddr, WriteOp};
 
 /// Utilities for reading/manipulating a memory segment of fixed length
-pub struct MemoryView<'a, T: TraceDriver, const LENGTH: usize> {
+pub struct MemoryView<'a, T: Tracer, const LENGTH: usize> {
     vm: &'a VMState<T>,
     start: WordAddr,
     writes: Option<[Word; LENGTH]>,
 }
 
-impl<'a, T: TraceDriver, const LENGTH: usize> MemoryView<'a, T, LENGTH> {
+impl<'a, T: Tracer, const LENGTH: usize> MemoryView<'a, T, LENGTH> {
     /// Creates a new memory segment view
     /// Asserts that `start` is a multiple of `WORD_SIZE`
     pub fn new(vm: &'a VMState<T>, start: u32) -> Self {

@@ -1,4 +1,4 @@
-use crate::{Change, EmuContext, Platform, TraceDriver, VMState, Word, WriteOp, utils::MemoryView};
+use crate::{Change, EmuContext, Platform, Tracer, VMState, Word, WriteOp, utils::MemoryView};
 
 use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
@@ -41,7 +41,7 @@ pub fn sha_extend(w: &mut [u32]) {
     }
 }
 
-pub fn extend<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn extend<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
     // Read the argument `state_ptr`.

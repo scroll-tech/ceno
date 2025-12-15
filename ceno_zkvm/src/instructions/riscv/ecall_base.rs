@@ -14,7 +14,7 @@ use crate::{
     uint::Value,
     witness::LkMultiplicity,
 };
-use ceno_emul::Tracer;
+use ceno_emul::FullTracer;
 use multilinear_extensions::{ToExpr, WitIn};
 
 #[derive(Debug)]
@@ -37,7 +37,7 @@ impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID
                 || "write_rd",
                 E::BaseField::from_canonical_u64(REG_ID as u64),
                 prev_ts.expr(),
-                cur_ts.expr() + Tracer::SUBCYCLE_RD,
+                cur_ts.expr() + FullTracer::SUBCYCLE_RD,
                 prev_value.register_expr(),
                 rd_written,
             )?;
@@ -48,7 +48,7 @@ impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID
                 E::BaseField::from_canonical_u64(REG_ID as u64),
                 prev_ts.expr(),
                 // share same ts with RS1
-                cur_ts.expr() + Tracer::SUBCYCLE_RS1,
+                cur_ts.expr() + FullTracer::SUBCYCLE_RS1,
                 rd_written,
             )?;
             (None, lt_cfg)
@@ -84,13 +84,13 @@ impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID
 
         let (shard_cycle, cycle) = if RW {
             (
-                shard_cycle + Tracer::SUBCYCLE_RD,
-                cycle + Tracer::SUBCYCLE_RD,
+                shard_cycle + FullTracer::SUBCYCLE_RD,
+                cycle + FullTracer::SUBCYCLE_RD,
             )
         } else {
             (
-                shard_cycle + Tracer::SUBCYCLE_RS1,
-                cycle + Tracer::SUBCYCLE_RS1,
+                shard_cycle + FullTracer::SUBCYCLE_RS1,
+                cycle + FullTracer::SUBCYCLE_RS1,
             )
         };
         // Register write

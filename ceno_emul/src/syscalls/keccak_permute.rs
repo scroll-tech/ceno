@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use tiny_keccak::keccakf;
 
-use crate::{Change, EmuContext, Platform, TraceDriver, VMState, Word, WriteOp, utils::MemoryView};
+use crate::{Change, EmuContext, Platform, Tracer, VMState, Word, WriteOp, utils::MemoryView};
 
 use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
@@ -52,7 +52,7 @@ impl From<KeccakState> for [Word; KECCAK_WORDS] {
 ///
 /// Compatible with:
 /// https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/precompiles/keccak256/permute.rs
-pub fn keccak_permute<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+pub fn keccak_permute<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
     // Read the argument `state_ptr`.
