@@ -4,9 +4,8 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        PolyEvaluator, UniPolyExtrapolator, assert_ext_arr_eq,
-        challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_wellform_address_vec,
-        mask_arr, reverse,
+        PolyEvaluator, UniPolyExtrapolator, assert_ext_arr_eq, challenger_multi_observe, eq_eval,
+        eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -1942,15 +1941,15 @@ pub fn septic_ext_mul<C: Config>(
     b: &SepticExtensionVariable<C>,
 ) -> SepticExtensionVariable<C> {
     let z: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-    let r: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(7);
-    for i in 0..7 {
+    let r: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
+    for i in 0..SEPTIC_EXTENSION_DEGREE {
         builder.set(&r, i, z);
     }
     let two_ext: Ext<C::F, C::EF> = builder.constant(C::EF::TWO);
     let five_ext: Ext<C::F, C::EF> = builder.constant(C::EF::from_canonical_u32(5));
 
-    for i in 0..7 {
-        for j in 0..7 {
+    for i in 0..SEPTIC_EXTENSION_DEGREE {
+        for j in 0..SEPTIC_EXTENSION_DEGREE {
             let mut index = i + j;
 
             let a_term = builder.get(&a.vs, i);

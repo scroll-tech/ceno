@@ -12,13 +12,14 @@ use openvm_stark_backend::keygen::types::MultiStarkVerifyingKey;
 use openvm_stark_sdk::config::FriParameters;
 use std::array;
 
-use crate::aggregation::internal::NonLeafVerifierVariables;
+use crate::aggregation::{SEPTIC_EXTENSION_DEGREE, internal::NonLeafVerifierVariables};
 use openvm_native_compiler::prelude::*;
 use openvm_native_recursion::vars::StarkProofVariable;
 use openvm_stark_sdk::openvm_stark_backend::{
     config::{StarkGenericConfig, Val},
     proof::Proof,
 };
+use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -114,20 +115,18 @@ impl CenoRootVmVerifierConfig {
                 internal_pcs,
                 internal_advice,
             };
-            let (_merged_pvs, _expected_leaf_commit) =
+            let (merged_pvs, _expected_leaf_commit) =
                 non_leaf_verifier.verify_internal_or_leaf_verifier_proofs(&mut builder, &proofs);
             builder.cycle_tracker_end("VerifyProofs");
 
             // Assert final ec sum is zero
-            /* _debug
-            let one: Felt<_> = builder.constant(<C as openvm_native_compiler::ir::Config>::F::ZERO);
+            let z: Felt<_> = builder.constant(<C as openvm_native_compiler::ir::Config>::F::ZERO);
             for i in 0..SEPTIC_EXTENSION_DEGREE {
-                builder.assert_felt_eq(merged_pvs.shard_ram_connector.x[i], one);
-                builder.assert_felt_eq(merged_pvs.shard_ram_connector.y[i], one);
+                builder.assert_felt_eq(merged_pvs.shard_ram_connector.x[i], z);
+                builder.assert_felt_eq(merged_pvs.shard_ram_connector.y[i], z);
             }
-            builder.assign(&f, <C as openvm_native_compiler::ir::Config>::F::ONE);
-            builder.assert_felt_eq(merged_pvs.shard_ram_connector.is_infinity, f);
-            */
+            let one: Felt<_> = builder.constant(<C as openvm_native_compiler::ir::Config>::F::ONE);
+            builder.assert_felt_eq(merged_pvs.shard_ram_connector.is_infinity, one);
 
             /* _todo: Change merged pv operations, including checking final ec sum is infinity
             // App Program should terminate

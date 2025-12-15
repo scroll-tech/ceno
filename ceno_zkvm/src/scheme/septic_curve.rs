@@ -225,6 +225,7 @@ impl<F: Field> SepticExtension<F> {
                 let norm = (self * &x).0[0];
                 // since self is not zero, norm is not zero
                 let norm_inv = norm.try_inverse().unwrap();
+
                 Some(x * norm_inv)
             }
         }
