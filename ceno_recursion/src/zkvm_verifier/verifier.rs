@@ -4,7 +4,9 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        _print_ext_arr, PolyEvaluator, UniPolyExtrapolator, assert_ext_arr_eq, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse
+        PolyEvaluator, UniPolyExtrapolator, assert_ext_arr_eq,
+        challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_wellform_address_vec,
+        mask_arr, reverse,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -536,7 +538,7 @@ pub fn verify_chip_proof<C: Config>(
         log2_num_instances.clone() + Usize::from(composed_cs.rotation_vars().unwrap_or(0)),
     );
     let shard_ec_sum = SepticPointVariable::zero(builder);
-    
+
     if composed_cs.has_ecc_ops() {
         builder.assert_nonzero(&chip_proof.has_ecc_proof);
         let ecc_proof = &chip_proof.ecc_proof;

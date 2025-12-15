@@ -26,10 +26,11 @@ use crate::{
     aggregation::{
         InternalVmVerifierInput,
         types::{InternalVmVerifierExtraPvs, InternalVmVerifierPvs, VmVerifierPvs},
-    }, zkvm_verifier::{
+    },
+    zkvm_verifier::{
         binding::{SepticExtensionVariable, SepticPointVariable},
         verifier::add_septic_points_in_place,
-    }
+    },
 };
 use openvm_continuations::verifier::{
     common::{
