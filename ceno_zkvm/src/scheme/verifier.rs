@@ -18,7 +18,7 @@ use crate::{
         ZKVMVerifyingKey,
     },
 };
-use ceno_emul::FullTracer;
+use ceno_emul::FullTracer as Tracer;
 use gkr_iop::{
     self,
     selector::{SelectorContext, SelectorType},
@@ -111,7 +111,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 }
                 // each shard set init cycle = Tracer::SUBCYCLES_PER_INSN
                 // to satisfy initial reads for all prev_cycle = 0 < init_cycle
-                assert_eq!(vm_proof.pi_evals[INIT_CYCLE_IDX], E::from_canonical_u64(FullTracer::SUBCYCLES_PER_INSN));
+                assert_eq!(vm_proof.pi_evals[INIT_CYCLE_IDX], E::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN));
                 // check init_pc match prev end_pc
                 if let Some(prev_pc) = prev_pc {
                     assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], prev_pc);

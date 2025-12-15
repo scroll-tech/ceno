@@ -725,7 +725,7 @@ pub fn emulate_program<'a>(
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),
         vm.program().entry,
-        FullTracer::SUBCYCLES_PER_INSN,
+        <FullTracer as Tracer>::SUBCYCLES_PER_INSN,
         vm.get_pc().into(),
         end_cycle,
         multi_prover.prover_id as u32,

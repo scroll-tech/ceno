@@ -78,11 +78,11 @@ fn init_mmio_min_max_access(
 pub trait Tracer {
     type Record;
 
-    const SUBCYCLE_RS1: Cycle;
-    const SUBCYCLE_RS2: Cycle;
-    const SUBCYCLE_RD: Cycle;
-    const SUBCYCLE_MEM: Cycle;
-    const SUBCYCLES_PER_INSN: Cycle;
+    const SUBCYCLE_RS1: Cycle = 0;
+    const SUBCYCLE_RS2: Cycle = 1;
+    const SUBCYCLE_RD: Cycle = 2;
+    const SUBCYCLE_MEM: Cycle = 3;
+    const SUBCYCLES_PER_INSN: Cycle = 4;
 
     fn new(platform: &Platform) -> Self;
 
@@ -500,11 +500,11 @@ pub struct FullTracer {
 }
 
 impl FullTracer {
-    pub const SUBCYCLE_RS1: Cycle = 0;
-    pub const SUBCYCLE_RS2: Cycle = 1;
-    pub const SUBCYCLE_RD: Cycle = 2;
-    pub const SUBCYCLE_MEM: Cycle = 3;
-    pub const SUBCYCLES_PER_INSN: Cycle = 4;
+    pub const SUBCYCLE_RS1: Cycle = <Self as Tracer>::SUBCYCLE_RS1;
+    pub const SUBCYCLE_RS2: Cycle = <Self as Tracer>::SUBCYCLE_RS2;
+    pub const SUBCYCLE_RD: Cycle = <Self as Tracer>::SUBCYCLE_RD;
+    pub const SUBCYCLE_MEM: Cycle = <Self as Tracer>::SUBCYCLE_MEM;
+    pub const SUBCYCLES_PER_INSN: Cycle = <Self as Tracer>::SUBCYCLES_PER_INSN;
 
     pub fn new(platform: &Platform) -> FullTracer {
         let mmio_max_access = init_mmio_min_max_access(platform);
@@ -688,9 +688,15 @@ pub struct PreflightTracer {
 }
 
 impl PreflightTracer {
+    pub const SUBCYCLE_RS1: Cycle = <Self as Tracer>::SUBCYCLE_RS1;
+    pub const SUBCYCLE_RS2: Cycle = <Self as Tracer>::SUBCYCLE_RS2;
+    pub const SUBCYCLE_RD: Cycle = <Self as Tracer>::SUBCYCLE_RD;
+    pub const SUBCYCLE_MEM: Cycle = <Self as Tracer>::SUBCYCLE_MEM;
+    pub const SUBCYCLES_PER_INSN: Cycle = <Self as Tracer>::SUBCYCLES_PER_INSN;
+
     pub fn new(platform: &Platform) -> Self {
         PreflightTracer {
-            cycle: FullTracer::SUBCYCLES_PER_INSN,
+            cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
@@ -716,12 +722,6 @@ impl PreflightTracer {
 
 impl Tracer for PreflightTracer {
     type Record = ();
-
-    const SUBCYCLE_RS1: Cycle = FullTracer::SUBCYCLE_RS1;
-    const SUBCYCLE_RS2: Cycle = FullTracer::SUBCYCLE_RS2;
-    const SUBCYCLE_RD: Cycle = FullTracer::SUBCYCLE_RD;
-    const SUBCYCLE_MEM: Cycle = FullTracer::SUBCYCLE_MEM;
-    const SUBCYCLES_PER_INSN: Cycle = FullTracer::SUBCYCLES_PER_INSN;
 
     fn new(platform: &Platform) -> Self {
         PreflightTracer::new(platform)
@@ -810,12 +810,6 @@ impl Tracer for PreflightTracer {
 
 impl Tracer for FullTracer {
     type Record = StepRecord;
-
-    const SUBCYCLE_RS1: Cycle = FullTracer::SUBCYCLE_RS1;
-    const SUBCYCLE_RS2: Cycle = FullTracer::SUBCYCLE_RS2;
-    const SUBCYCLE_RD: Cycle = FullTracer::SUBCYCLE_RD;
-    const SUBCYCLE_MEM: Cycle = FullTracer::SUBCYCLE_MEM;
-    const SUBCYCLES_PER_INSN: Cycle = FullTracer::SUBCYCLES_PER_INSN;
 
     fn new(platform: &Platform) -> Self {
         FullTracer::new(platform)

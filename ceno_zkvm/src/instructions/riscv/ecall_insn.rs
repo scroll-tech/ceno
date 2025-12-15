@@ -10,7 +10,7 @@ use crate::{
     tables::InsnRecord,
     witness::{LkMultiplicity, set_val},
 };
-use ceno_emul::{FullTracer, InsnKind::ECALL, PC_STEP_SIZE, Platform, StepRecord};
+use ceno_emul::{FullTracer as Tracer, InsnKind::ECALL, PC_STEP_SIZE, Platform, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::FieldAlgebra;
@@ -35,7 +35,7 @@ impl EcallInstructionConfig {
         cb.state_in(pc.expr(), ts.expr())?;
         cb.state_out(
             next_pc.map_or(pc.expr() + PC_STEP_SIZE, |next_pc| next_pc),
-            ts.expr() + (FullTracer::SUBCYCLES_PER_INSN as usize),
+            ts.expr() + (Tracer::SUBCYCLES_PER_INSN as usize),
         )?;
 
         cb.lk_fetch(&InsnRecord::new(
@@ -56,7 +56,7 @@ impl EcallInstructionConfig {
             || "write x5",
             E::BaseField::from_canonical_u64(Platform::reg_ecall() as u64),
             prev_x5_ts.expr(),
-            ts.expr() + FullTracer::SUBCYCLE_RS1,
+            ts.expr() + Tracer::SUBCYCLE_RS1,
             syscall_id.clone(),
             syscall_ret_value.map_or(syscall_id, |v| v),
         )?;
@@ -90,7 +90,7 @@ impl EcallInstructionConfig {
             instance,
             lk_multiplicity,
             shard_prev_cycle,
-            shard_cycle + FullTracer::SUBCYCLE_RS1,
+            shard_cycle + Tracer::SUBCYCLE_RS1,
         )?;
 
         // skip shard_ctx.send() as ecall_halt is the last instruction

@@ -14,7 +14,7 @@ use crate::{
     structs::{ProgramParams, RAMType},
     witness::LkMultiplicity,
 };
-use ceno_emul::{FullTracer, StepRecord};
+use ceno_emul::{FullTracer as Tracer, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
 use p3::field::FieldAlgebra;
@@ -58,7 +58,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             || "read x10",
             E::BaseField::from_canonical_u64(ceno_emul::Platform::reg_arg0() as u64),
             prev_x10_ts.expr(),
-            ecall_cfg.ts.expr() + FullTracer::SUBCYCLE_RS2,
+            ecall_cfg.ts.expr() + Tracer::SUBCYCLE_RS2,
             exit_code,
         )?;
 
@@ -97,7 +97,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             RAMType::Register,
             step.rs2().unwrap().addr,
             ceno_emul::Platform::reg_arg0() as u64,
-            step.cycle() + FullTracer::SUBCYCLE_RS2,
+            step.cycle() + Tracer::SUBCYCLE_RS2,
             step.rs2().unwrap().previous_cycle,
             step.rs2().unwrap().value,
             None,
@@ -107,7 +107,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             instance,
             lk_multiplicity,
             rs2_prev_cycle,
-            shard_cycle + FullTracer::SUBCYCLE_RS2,
+            shard_cycle + Tracer::SUBCYCLE_RS2,
         )?;
 
         config

@@ -262,7 +262,9 @@ impl<T: Tracer> EmuContext for VMState<T> {
 
     /// Get the value of a memory word without side-effects.
     fn peek_memory(&self, addr: WordAddr) -> Word {
-        self.memory.read(addr)
+        self.memory
+            .read(addr)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"))
     }
 
     fn fetch(&mut self, pc: WordAddr) -> Option<Instruction> {

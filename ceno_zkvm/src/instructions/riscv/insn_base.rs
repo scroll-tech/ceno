@@ -17,7 +17,7 @@ use crate::{
     uint::Value,
     witness::{LkMultiplicity, set_val},
 };
-use ceno_emul::FullTracer;
+use ceno_emul::FullTracer as Tracer;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::{iter, marker::PhantomData};
 
@@ -45,7 +45,7 @@ impl<E: ExtensionField> StateInOut<E> {
             (None, pc.expr() + PC_STEP_SIZE)
         };
         let ts = circuit_builder.create_witin(|| "ts");
-        let next_ts = ts.expr() + FullTracer::SUBCYCLES_PER_INSN;
+        let next_ts = ts.expr() + Tracer::SUBCYCLES_PER_INSN;
         circuit_builder.state_in(pc.expr(), ts.expr())?;
         circuit_builder.state_out(next_pc_expr, next_ts)?;
 
@@ -96,7 +96,7 @@ impl<E: ExtensionField> ReadRS1<E> {
             || "read_rs1",
             id,
             prev_ts.expr(),
-            cur_ts.expr() + FullTracer::SUBCYCLE_RS1,
+            cur_ts.expr() + Tracer::SUBCYCLE_RS1,
             rs1_read,
         )?;
 
@@ -127,13 +127,13 @@ impl<E: ExtensionField> ReadRS1<E> {
             instance,
             lk_multiplicity,
             shard_prev_cycle,
-            shard_cycle + FullTracer::SUBCYCLE_RS1,
+            shard_cycle + Tracer::SUBCYCLE_RS1,
         )?;
         shard_ctx.send(
             RAMType::Register,
             op.addr,
             op.register_index() as u64,
-            step.cycle() + FullTracer::SUBCYCLE_RS1,
+            step.cycle() + Tracer::SUBCYCLE_RS1,
             op.previous_cycle,
             op.value,
             None,
@@ -163,7 +163,7 @@ impl<E: ExtensionField> ReadRS2<E> {
             || "read_rs2",
             id,
             prev_ts.expr(),
-            cur_ts.expr() + FullTracer::SUBCYCLE_RS2,
+            cur_ts.expr() + Tracer::SUBCYCLE_RS2,
             rs2_read,
         )?;
 
@@ -194,14 +194,14 @@ impl<E: ExtensionField> ReadRS2<E> {
             instance,
             lk_multiplicity,
             shard_prev_cycle,
-            shard_cycle + FullTracer::SUBCYCLE_RS2,
+            shard_cycle + Tracer::SUBCYCLE_RS2,
         )?;
 
         shard_ctx.send(
             RAMType::Register,
             op.addr,
             op.register_index() as u64,
-            step.cycle() + FullTracer::SUBCYCLE_RS2,
+            step.cycle() + Tracer::SUBCYCLE_RS2,
             op.previous_cycle,
             op.value,
             None,
@@ -232,7 +232,7 @@ impl<E: ExtensionField> WriteRD<E> {
             || "write_rd",
             id,
             prev_ts.expr(),
-            cur_ts.expr() + FullTracer::SUBCYCLE_RD,
+            cur_ts.expr() + Tracer::SUBCYCLE_RD,
             prev_value.register_expr(),
             rd_written,
         )?;
@@ -281,13 +281,13 @@ impl<E: ExtensionField> WriteRD<E> {
             instance,
             lk_multiplicity,
             shard_prev_cycle,
-            shard_cycle + FullTracer::SUBCYCLE_RD,
+            shard_cycle + Tracer::SUBCYCLE_RD,
         )?;
         shard_ctx.send(
             RAMType::Register,
             op.addr,
             op.register_index() as u64,
-            cycle + FullTracer::SUBCYCLE_RD,
+            cycle + Tracer::SUBCYCLE_RD,
             op.previous_cycle,
             op.value.after,
             Some(op.value.before),
@@ -316,7 +316,7 @@ impl<E: ExtensionField> ReadMEM<E> {
             || "read_memory",
             &mem_addr,
             prev_ts.expr(),
-            cur_ts.expr() + FullTracer::SUBCYCLE_MEM,
+            cur_ts.expr() + Tracer::SUBCYCLE_MEM,
             mem_read,
         )?;
 
@@ -346,14 +346,14 @@ impl<E: ExtensionField> ReadMEM<E> {
             instance,
             lk_multiplicity,
             shard_prev_cycle,
-            shard_cycle + FullTracer::SUBCYCLE_MEM,
+            shard_cycle + Tracer::SUBCYCLE_MEM,
         )?;
 
         shard_ctx.send(
             RAMType::Memory,
             op.addr,
             op.addr.baddr().0 as u64,
-            step.cycle() + FullTracer::SUBCYCLE_MEM,
+            step.cycle() + Tracer::SUBCYCLE_MEM,
             op.previous_cycle,
             op.value.after,
             None,
@@ -383,7 +383,7 @@ impl WriteMEM {
             || "write_memory",
             &mem_addr,
             prev_ts.expr(),
-            cur_ts.expr() + FullTracer::SUBCYCLE_MEM,
+            cur_ts.expr() + Tracer::SUBCYCLE_MEM,
             prev_value,
             new_value,
         )?;
@@ -419,14 +419,14 @@ impl WriteMEM {
             instance,
             lk_multiplicity,
             shard_prev_cycle,
-            shard_cycle + FullTracer::SUBCYCLE_MEM,
+            shard_cycle + Tracer::SUBCYCLE_MEM,
         )?;
 
         shard_ctx.send(
             RAMType::Memory,
             op.addr,
             op.addr.baddr().0 as u64,
-            cycle + FullTracer::SUBCYCLE_MEM,
+            cycle + Tracer::SUBCYCLE_MEM,
             op.previous_cycle,
             op.value.after,
             Some(op.value.before),
