@@ -1640,14 +1640,22 @@ fn create_proofs_streaming<
                         };
 
                         for proof_input in wit_iter {
-                            tx.send(proof_input).unwrap()
+                            if tx.send(proof_input).is_err() {
+                                tracing::warn!(
+                                    "witness consumer dropped; stopping witness generation early"
+                                );
+                                break;
+                            }
                         }
                     }
                 });
 
                 // gpu consumer
-                rx.iter()
-                    .map(|(zkvm_witness, shard_ctx, pi)| {
+                {
+                    let mut proofs = Vec::new();
+                    let mut proof_err = None;
+                    let mut rx = rx;
+                    while let Ok((zkvm_witness, shard_ctx, pi)) = rx.recv() {
                         if is_mock_proving {
                             MockProver::assert_satisfied_full(
                                 &shard_ctx,
@@ -1662,17 +1670,27 @@ fn create_proofs_streaming<
 
                         let transcript = Transcript::new(b"riscv");
                         let start = std::time::Instant::now();
-                        let zkvm_proof = prover
-                            .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                            .expect("create_proof failed");
-                        tracing::debug!(
-                            "{}th shard proof created in {:?}",
-                            shard_ctx.shard_id,
-                            start.elapsed()
-                        );
-                        zkvm_proof
-                    })
-                    .collect::<Vec<_>>()
+                        match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+                            Ok(zkvm_proof) => {
+                                tracing::debug!(
+                                    "{}th shard proof created in {:?}",
+                                    shard_ctx.shard_id,
+                                    start.elapsed()
+                                );
+                                proofs.push(zkvm_proof);
+                            }
+                            Err(err) => {
+                                proof_err = Some(err);
+                                break;
+                            }
+                        }
+                    }
+                    drop(rx);
+                    if let Some(err) = proof_err {
+                        panic!("create_proof failed: {err:?}");
+                    }
+                    proofs
+                }
             })
         }
 
