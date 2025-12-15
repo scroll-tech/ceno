@@ -26,11 +26,10 @@ use crate::{
     aggregation::{
         InternalVmVerifierInput,
         types::{InternalVmVerifierExtraPvs, InternalVmVerifierPvs, VmVerifierPvs},
-    },
-    zkvm_verifier::{
+    }, arithmetics::_print_ext_arr, zkvm_verifier::{
         binding::{SepticExtensionVariable, SepticPointVariable},
         verifier::add_septic_points_in_place,
-    },
+    }
 };
 use openvm_continuations::verifier::{
     common::{
@@ -136,6 +135,13 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                         &leaf_verifier_commit,
                         proof_vm_pvs.extra_pvs.leaf_verifier_commit,
                     );
+
+
+                    // _debug
+                    builder.print_debug(101);
+                    _print_ext_arr(builder, &ec_sum.x.vs);
+                    _print_ext_arr(builder, &ec_sum.y.vs);
+
                 },
                 |builder| {
                     let right = SepticPointVariable {
@@ -147,6 +153,7 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                         },
                         is_infinity: Usize::uninit(builder),
                     };
+
                     for i in 0..SEPTIC_EXTENSION_DEGREE {
                         let x = Ext::uninit(builder);
                         builder.assign(&x, proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.x[i]);
@@ -160,7 +167,20 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                         proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.is_infinity,
                     ));
                     builder.assign(&right.is_infinity, inf);
+
+                    // _debug
+                    builder.print_debug(102);
+                    _print_ext_arr(builder, &right.x.vs);
+                    _print_ext_arr(builder, &right.y.vs);
+
+
                     add_septic_points_in_place(builder, &ec_sum, &right);
+
+                    // _debug
+                    builder.print_debug(103);
+                    _print_ext_arr(builder, &ec_sum.x.vs);
+                    _print_ext_arr(builder, &ec_sum.y.vs);
+
 
                     builder.assert_eq::<[_; DIGEST_SIZE]>(
                         leaf_verifier_commit,

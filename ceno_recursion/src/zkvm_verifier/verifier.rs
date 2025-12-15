@@ -4,8 +4,7 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        PolyEvaluator, UniPolyExtrapolator, assert_ext_arr_eq, challenger_multi_observe, eq_eval,
-        eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse,
+        _print_ext_arr, PolyEvaluator, UniPolyExtrapolator, assert_ext_arr_eq, challenger_multi_observe, eq_eval, eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -498,6 +497,13 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // logup check
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     builder.assert_ext_eq(logup_sum, zero);
+
+
+    // _debug
+    builder.print_debug(99);
+    _print_ext_arr(builder, &shard_ec_sum.x.vs);
+    _print_ext_arr(builder, &shard_ec_sum.y.vs);
+
 
     shard_ec_sum
 }
