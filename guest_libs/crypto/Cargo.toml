@@ -20,7 +20,7 @@ thiserror.workspace = true
 [dev-dependencies]
 alloy-consensus = { version = "1.0", features = ["crypto-backend"] }
 alloy-primitives = "1.4"
-revm-precompile = "27"
+revm-precompile.workspace = true
 
 [features]
 profiling = ["k256/profiling"]
