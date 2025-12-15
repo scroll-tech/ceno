@@ -73,11 +73,13 @@ pub struct CenoRootVmVerifierConfig {
 
 #[derive(Debug)]
 pub struct CenoRootVmVerifierPvs<T> {
+    pub init_pc: T,
     pub public_values: Vec<T>,
 }
 impl<F: Copy> CenoRootVmVerifierPvs<F> {
     pub fn flatten(self) -> Vec<F> {
         let mut ret = vec![];
+        ret.extend(vec![self.init_pc]);
         ret.extend(self.public_values);
         ret
     }
@@ -121,7 +123,7 @@ impl CenoRootVmVerifierConfig {
                 internal_pcs,
                 internal_advice,
             };
-            let (_merged_pvs, _expected_leaf_commit) =
+            let (merged_pvs, _expected_leaf_commit) =
                 non_leaf_verifier.verify_internal_or_leaf_verifier_proofs(&mut builder, &proofs);
             builder.cycle_tracker_end("VerifyProofs");
 
@@ -140,6 +142,7 @@ impl CenoRootVmVerifierConfig {
             builder.cycle_tracker_end("ExtractPublicValues");
 
             CenoRootVmVerifierPvs {
+                init_pc: merged_pvs.connector.initial_pc,
                 public_values: public_values_vec,
             }
         };
