@@ -474,6 +474,7 @@ impl StepRecord {
         self.memory_op.clone()
     }
 
+    #[inline(always)]
     pub fn is_busy_loop(&self) -> bool {
         self.pc.before == self.pc.after
     }
@@ -521,6 +522,7 @@ impl FullTracer {
     }
 
     /// Return the completed step and advance to the next cycle.
+    #[inline(always)]
     pub fn advance(&mut self) -> StepRecord {
         let next_cycle = self.record.cycle + Self::SUBCYCLES_PER_INSN;
         mem::replace(
@@ -532,15 +534,18 @@ impl FullTracer {
         )
     }
 
+    #[inline(always)]
     pub fn store_pc(&mut self, pc: ByteAddr) {
         self.record.pc.after = pc;
     }
 
+    #[inline(always)]
     pub fn fetch(&mut self, pc: WordAddr, value: Instruction) {
         self.record.pc.before = pc.baddr();
         self.record.insn = value;
     }
 
+    #[inline(always)]
     pub fn load_register(&mut self, idx: RegIdx, value: Word) {
         let addr = Platform::register_vma(idx).into();
 
@@ -563,6 +568,7 @@ impl FullTracer {
         }
     }
 
+    #[inline(always)]
     pub fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
         if self.record.rd.is_some() {
             unimplemented!("Only one register write is supported");
@@ -576,10 +582,12 @@ impl FullTracer {
         });
     }
 
+    #[inline(always)]
     pub fn load_memory(&mut self, addr: WordAddr, value: Word) {
         self.store_memory(addr, Change::new(value, value));
     }
 
+    #[inline(always)]
     pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
         if self.record.memory_op.is_some() {
             unimplemented!("Only one memory access is supported");
@@ -612,6 +620,7 @@ impl FullTracer {
         });
     }
 
+    #[inline(always)]
     pub fn track_syscall(&mut self, effects: SyscallEffects) {
         let witness = effects.finalize(self);
 
@@ -623,6 +632,7 @@ impl FullTracer {
     /// - Return 0 if this is the first access.
     /// - Record the current instruction as the origin of the latest access.
     /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
+    #[inline(always)]
     pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         let cur_cycle = self.record.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
@@ -685,6 +695,7 @@ pub struct PreflightTracer {
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: LatestAccesses,
     next_accesses: NextCycleAccess,
+    register_reads_tracked: u8,
 }
 
 impl PreflightTracer {
@@ -695,14 +706,18 @@ impl PreflightTracer {
     pub const SUBCYCLES_PER_INSN: Cycle = <Self as Tracer>::SUBCYCLES_PER_INSN;
 
     pub fn new(platform: &Platform) -> Self {
-        PreflightTracer {
+        let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
-        }
+            register_reads_tracked: 0,
+        };
+        tracer.reset_register_tracking();
+        tracer
     }
 
+    #[inline(always)]
     fn update_mmio_bounds(&mut self, addr: WordAddr) {
         if let Some((_, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
@@ -718,6 +733,11 @@ impl PreflightTracer {
             }
         }
     }
+
+    #[inline(always)]
+    fn reset_register_tracking(&mut self) {
+        self.register_reads_tracked = 0;
+    }
 }
 
 impl Tracer for PreflightTracer {
@@ -727,35 +747,57 @@ impl Tracer for PreflightTracer {
         PreflightTracer::new(platform)
     }
 
+    #[inline(always)]
     fn advance(&mut self) -> Self::Record {
         self.cycle += Self::SUBCYCLES_PER_INSN;
+        self.reset_register_tracking();
     }
 
     fn is_busy_loop(_: &Self::Record) -> bool {
         false
     }
 
+    #[inline(always)]
     fn store_pc(&mut self, _pc: ByteAddr) {}
 
+    #[inline(always)]
     fn fetch(&mut self, _pc: WordAddr, _value: Instruction) {}
 
-    fn load_register(&mut self, _idx: RegIdx, _value: Word) {}
+    #[inline(always)]
+    fn load_register(&mut self, idx: RegIdx, _value: Word) {
+        let addr = Platform::register_vma(idx).into();
+        let subcycle = match self.register_reads_tracked {
+            0 => Self::SUBCYCLE_RS1,
+            1 => Self::SUBCYCLE_RS2,
+            _ => unimplemented!("Only two register reads are supported"),
+        };
+        self.register_reads_tracked += 1;
+        self.track_access(addr, subcycle);
+    }
 
-    fn store_register(&mut self, _idx: RegIdx, _value: Change<Word>) {}
+    #[inline(always)]
+    fn store_register(&mut self, idx: RegIdx, _value: Change<Word>) {
+        let addr = Platform::register_vma(idx).into();
+        self.track_access(addr, Self::SUBCYCLE_RD);
+    }
 
+    #[inline(always)]
     fn load_memory(&mut self, addr: WordAddr, value: Word) {
         self.store_memory(addr, Change::new(value, value));
     }
 
+    #[inline(always)]
     fn store_memory(&mut self, addr: WordAddr, _value: Change<Word>) {
         self.update_mmio_bounds(addr);
         self.track_access(addr, Self::SUBCYCLE_MEM);
     }
 
+    #[inline(always)]
     fn track_syscall(&mut self, effects: SyscallEffects) {
         let _ = effects.finalize(self);
     }
 
+    #[inline(always)]
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         let cur_cycle = self.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
@@ -815,42 +857,52 @@ impl Tracer for FullTracer {
         FullTracer::new(platform)
     }
 
+    #[inline(always)]
     fn advance(&mut self) -> Self::Record {
         FullTracer::advance(self)
     }
 
+    #[inline(always)]
     fn is_busy_loop(record: &Self::Record) -> bool {
         record.is_busy_loop()
     }
 
+    #[inline(always)]
     fn store_pc(&mut self, pc: ByteAddr) {
         FullTracer::store_pc(self, pc)
     }
 
+    #[inline(always)]
     fn fetch(&mut self, pc: WordAddr, value: Instruction) {
         FullTracer::fetch(self, pc, value)
     }
 
+    #[inline(always)]
     fn load_register(&mut self, idx: RegIdx, value: Word) {
         FullTracer::load_register(self, idx, value)
     }
 
+    #[inline(always)]
     fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
         FullTracer::store_register(self, idx, value)
     }
 
+    #[inline(always)]
     fn load_memory(&mut self, addr: WordAddr, value: Word) {
         FullTracer::load_memory(self, addr, value)
     }
 
+    #[inline(always)]
     fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
         FullTracer::store_memory(self, addr, value)
     }
 
+    #[inline(always)]
     fn track_syscall(&mut self, effects: SyscallEffects) {
         FullTracer::track_syscall(self, effects)
     }
 
+    #[inline(always)]
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         FullTracer::track_access(self, addr, subcycle)
     }
