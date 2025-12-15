@@ -3,12 +3,12 @@ use std::iter::from_fn;
 use ceno_rt::INFO_OUT_ADDR as CENO_RT_INFO_OUT_ADDR;
 use itertools::Itertools;
 
-use crate::{ByteAddr, EmuContext, VMState, Word, WordAddr};
+use crate::{ByteAddr, EmuContext, TraceDriver, VMState, Word, WordAddr};
 
 const WORD_SIZE: usize = 4;
 const INFO_OUT_ADDR: WordAddr = ByteAddr(CENO_RT_INFO_OUT_ADDR).waddr();
 
-pub fn read_all_messages(state: &VMState) -> Vec<Vec<u8>> {
+pub fn read_all_messages<T: TraceDriver>(state: &VMState<T>) -> Vec<Vec<u8>> {
     let mut offset: WordAddr = WordAddr::from(0);
     from_fn(move || match read_message(state, offset) {
         out if out.is_empty() => None,
@@ -20,7 +20,7 @@ pub fn read_all_messages(state: &VMState) -> Vec<Vec<u8>> {
     .collect()
 }
 
-pub fn read_all_messages_as_words(state: &VMState) -> Vec<Vec<Word>> {
+pub fn read_all_messages_as_words<T: TraceDriver>(state: &VMState<T>) -> Vec<Vec<Word>> {
     read_all_messages(state)
         .iter()
         .map(|message| {
@@ -33,7 +33,7 @@ pub fn read_all_messages_as_words(state: &VMState) -> Vec<Vec<Word>> {
         .collect_vec()
 }
 
-fn read_message(state: &VMState, offset: WordAddr) -> Vec<u8> {
+fn read_message<T: TraceDriver>(state: &VMState<T>, offset: WordAddr) -> Vec<u8> {
     let out_addr = INFO_OUT_ADDR + offset;
     let byte_len = state.peek_memory(out_addr) as usize;
 

@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
 use crate::{
-    Change, EmuContext, Platform, SyscallSpec, VMState, Word, WriteOp,
+    Change, EmuContext, Platform, SyscallSpec, TraceDriver, VMState, Word, WriteOp,
     syscalls::{
         SyscallEffects, SyscallWitness,
         bn254::types::{Bn254Fp, Bn254Fp2},
@@ -55,8 +55,9 @@ fn bn254_fptower_binary_op<
         + Into<[Word; WORDS]>
         + std::ops::Add<Output = F>
         + std::ops::Mul<Output = F>,
+    T: TraceDriver,
 >(
-    vm: &VMState,
+    vm: &VMState<T>,
 ) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
     let q_ptr = vm.peek_register(Platform::reg_arg1());
@@ -74,7 +75,7 @@ fn bn254_fptower_binary_op<
             0, // Cycle set later in finalize().
         ),
     ];
-    let [mut p_view, q_view] = [p_ptr, q_ptr].map(|start| MemoryView::<WORDS>::new(vm, start));
+    let [mut p_view, q_view] = [p_ptr, q_ptr].map(|start| MemoryView::<_, WORDS>::new(vm, start));
 
     let p = F::from(p_view.words());
     let q = F::from(q_view.words());
@@ -98,18 +99,18 @@ fn bn254_fptower_binary_op<
     }
 }
 
-pub fn bn254_fp_add(vm: &VMState) -> SyscallEffects {
-    bn254_fptower_binary_op::<BN254_FP_WORDS, true, Bn254Fp>(vm)
+pub fn bn254_fp_add<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+    bn254_fptower_binary_op::<BN254_FP_WORDS, true, Bn254Fp, T>(vm)
 }
 
-pub fn bn254_fp_mul(vm: &VMState) -> SyscallEffects {
-    bn254_fptower_binary_op::<BN254_FP_WORDS, false, Bn254Fp>(vm)
+pub fn bn254_fp_mul<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+    bn254_fptower_binary_op::<BN254_FP_WORDS, false, Bn254Fp, T>(vm)
 }
 
-pub fn bn254_fp2_add(vm: &VMState) -> SyscallEffects {
-    bn254_fptower_binary_op::<BN254_FP2_WORDS, true, Bn254Fp2>(vm)
+pub fn bn254_fp2_add<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+    bn254_fptower_binary_op::<BN254_FP2_WORDS, true, Bn254Fp2, T>(vm)
 }
 
-pub fn bn254_fp2_mul(vm: &VMState) -> SyscallEffects {
-    bn254_fptower_binary_op::<BN254_FP2_WORDS, false, Bn254Fp2>(vm)
+pub fn bn254_fp2_mul<T: TraceDriver>(vm: &VMState<T>) -> SyscallEffects {
+    bn254_fptower_binary_op::<BN254_FP2_WORDS, false, Bn254Fp2, T>(vm)
 }

@@ -41,6 +41,87 @@ pub type NextAccessPair = SmallVec<[(WordAddr, Cycle); 1]>;
 pub type NextCycleAccess = ChunkedVec<NextAccessPair>;
 const ACCESSED_CHUNK_SIZE: usize = 1 << 20;
 
+fn init_mmio_min_max_access(
+    platform: &Platform,
+) -> BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)> {
+    let mut mmio_max_access = BTreeMap::new();
+    mmio_max_access.insert(
+        ByteAddr::from(platform.heap.start).waddr(),
+        (
+            ByteAddr::from(platform.heap.start).waddr(),
+            ByteAddr::from(platform.heap.end).waddr(),
+            ByteAddr::from(platform.heap.end).waddr(),
+            ByteAddr::from(platform.heap.start).waddr(),
+        ),
+    );
+    mmio_max_access.insert(
+        ByteAddr::from(platform.stack.start).waddr(),
+        (
+            ByteAddr::from(platform.stack.start).waddr(),
+            ByteAddr::from(platform.stack.end).waddr(),
+            ByteAddr::from(platform.stack.end).waddr(),
+            ByteAddr::from(platform.stack.start).waddr(),
+        ),
+    );
+    mmio_max_access.insert(
+        ByteAddr::from(platform.hints.start).waddr(),
+        (
+            ByteAddr::from(platform.hints.start).waddr(),
+            ByteAddr::from(platform.hints.end).waddr(),
+            ByteAddr::from(platform.hints.end).waddr(),
+            ByteAddr::from(platform.hints.start).waddr(),
+        ),
+    );
+    mmio_max_access
+}
+
+pub trait TraceDriver {
+    type Record;
+
+    const SUBCYCLE_RS1: Cycle;
+    const SUBCYCLE_RS2: Cycle;
+    const SUBCYCLE_RD: Cycle;
+    const SUBCYCLE_MEM: Cycle;
+    const SUBCYCLES_PER_INSN: Cycle;
+
+    fn new(platform: &Platform) -> Self;
+
+    fn advance(&mut self) -> Self::Record;
+
+    fn is_busy_loop(record: &Self::Record) -> bool;
+
+    fn store_pc(&mut self, pc: ByteAddr);
+
+    fn fetch(&mut self, pc: WordAddr, value: Instruction);
+
+    fn load_register(&mut self, idx: RegIdx, value: Word);
+
+    fn store_register(&mut self, idx: RegIdx, value: Change<Word>);
+
+    fn load_memory(&mut self, addr: WordAddr, value: Word);
+
+    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>);
+
+    fn track_syscall(&mut self, effects: SyscallEffects);
+
+    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle;
+
+    fn final_accesses(&self) -> &LatestAccesses;
+
+    fn into_next_accesses(self) -> NextCycleAccess
+    where
+        Self: Sized;
+
+    fn cycle(&self) -> Cycle;
+
+    fn executed_insts(&self) -> usize;
+
+    fn probe_min_max_address_by_start_addr(
+        &self,
+        start_addr: WordAddr,
+    ) -> Option<(WordAddr, WordAddr)>;
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MemOp<T> {
     /// Virtual Memory Address.
@@ -426,34 +507,7 @@ impl Tracer {
     pub const SUBCYCLES_PER_INSN: Cycle = 4;
 
     pub fn new(platform: &Platform) -> Tracer {
-        let mut mmio_max_access = BTreeMap::new();
-        mmio_max_access.insert(
-            ByteAddr::from(platform.heap.start).waddr(),
-            (
-                ByteAddr::from(platform.heap.start).waddr(),
-                ByteAddr::from(platform.heap.end).waddr(),
-                ByteAddr::from(platform.heap.end).waddr(),
-                ByteAddr::from(platform.heap.start).waddr(),
-            ),
-        );
-        mmio_max_access.insert(
-            ByteAddr::from(platform.stack.start).waddr(),
-            (
-                ByteAddr::from(platform.stack.start).waddr(),
-                ByteAddr::from(platform.stack.end).waddr(),
-                ByteAddr::from(platform.stack.end).waddr(),
-                ByteAddr::from(platform.stack.start).waddr(),
-            ),
-        );
-        mmio_max_access.insert(
-            ByteAddr::from(platform.hints.start).waddr(),
-            (
-                ByteAddr::from(platform.hints.start).waddr(),
-                ByteAddr::from(platform.hints.end).waddr(),
-                ByteAddr::from(platform.hints.end).waddr(),
-                ByteAddr::from(platform.hints.start).waddr(),
-            ),
-        );
+        let mmio_max_access = init_mmio_min_max_access(platform);
 
         Tracer {
             mmio_min_max_access: Some(mmio_max_access),
@@ -622,6 +676,212 @@ impl Tracer {
                     },
                 )
             })
+    }
+}
+
+#[derive(Debug)]
+pub struct PreflightTracer {
+    cycle: Cycle,
+    mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
+    latest_accesses: LatestAccesses,
+    next_accesses: NextCycleAccess,
+}
+
+impl PreflightTracer {
+    pub fn new(platform: &Platform) -> Self {
+        PreflightTracer {
+            cycle: Tracer::SUBCYCLES_PER_INSN,
+            mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
+            latest_accesses: LatestAccesses::new(platform),
+            next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
+        }
+    }
+
+    fn update_mmio_bounds(&mut self, addr: WordAddr) {
+        if let Some((_, (_, end_addr, min_addr, max_addr))) = self
+            .mmio_min_max_access
+            .as_mut()
+            .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
+            && addr < *end_addr
+        {
+            if addr >= *max_addr {
+                *max_addr = addr + WordAddr::from(WORD_SIZE as u32);
+            }
+            if addr < *min_addr {
+                *min_addr = addr;
+            }
+        }
+    }
+}
+
+impl TraceDriver for PreflightTracer {
+    type Record = ();
+
+    const SUBCYCLE_RS1: Cycle = Tracer::SUBCYCLE_RS1;
+    const SUBCYCLE_RS2: Cycle = Tracer::SUBCYCLE_RS2;
+    const SUBCYCLE_RD: Cycle = Tracer::SUBCYCLE_RD;
+    const SUBCYCLE_MEM: Cycle = Tracer::SUBCYCLE_MEM;
+    const SUBCYCLES_PER_INSN: Cycle = Tracer::SUBCYCLES_PER_INSN;
+
+    fn new(platform: &Platform) -> Self {
+        PreflightTracer::new(platform)
+    }
+
+    fn advance(&mut self) -> Self::Record {
+        self.cycle += Self::SUBCYCLES_PER_INSN;
+    }
+
+    fn is_busy_loop(_: &Self::Record) -> bool {
+        false
+    }
+
+    fn store_pc(&mut self, _pc: ByteAddr) {}
+
+    fn fetch(&mut self, _pc: WordAddr, _value: Instruction) {}
+
+    fn load_register(&mut self, _idx: RegIdx, _value: Word) {}
+
+    fn store_register(&mut self, _idx: RegIdx, _value: Change<Word>) {}
+
+    fn load_memory(&mut self, addr: WordAddr, value: Word) {
+        self.store_memory(addr, Change::new(value, value));
+    }
+
+    fn store_memory(&mut self, addr: WordAddr, _value: Change<Word>) {
+        self.update_mmio_bounds(addr);
+        self.track_access(addr, Self::SUBCYCLE_MEM);
+    }
+
+    fn track_syscall(&mut self, effects: SyscallEffects) {
+        let _ = effects.finalize(self);
+    }
+
+    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
+        let cur_cycle = self.cycle + subcycle;
+        let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
+        self.next_accesses
+            .get_or_create(prev_cycle as usize)
+            .push((addr, cur_cycle));
+        prev_cycle
+    }
+
+    fn final_accesses(&self) -> &LatestAccesses {
+        &self.latest_accesses
+    }
+
+    fn into_next_accesses(self) -> NextCycleAccess {
+        self.next_accesses
+    }
+
+    fn cycle(&self) -> Cycle {
+        self.cycle
+    }
+
+    fn executed_insts(&self) -> usize {
+        (self.cycle / Self::SUBCYCLES_PER_INSN)
+            .saturating_sub(1)
+            .try_into()
+            .unwrap()
+    }
+
+    fn probe_min_max_address_by_start_addr(
+        &self,
+        start_addr: WordAddr,
+    ) -> Option<(WordAddr, WordAddr)> {
+        self.mmio_min_max_access
+            .as_ref()
+            .and_then(|mmio_max_access| {
+                mmio_max_access.range(..=start_addr).next_back().and_then(
+                    |(_, &(expected_start_addr, _, min, max))| {
+                        assert_eq!(
+                            start_addr, expected_start_addr,
+                            "please use section start for searching"
+                        );
+                        if start_addr == expected_start_addr && min < max {
+                            Some((min, max))
+                        } else {
+                            None
+                        }
+                    },
+                )
+            })
+    }
+}
+
+impl TraceDriver for Tracer {
+    type Record = StepRecord;
+
+    const SUBCYCLE_RS1: Cycle = Tracer::SUBCYCLE_RS1;
+    const SUBCYCLE_RS2: Cycle = Tracer::SUBCYCLE_RS2;
+    const SUBCYCLE_RD: Cycle = Tracer::SUBCYCLE_RD;
+    const SUBCYCLE_MEM: Cycle = Tracer::SUBCYCLE_MEM;
+    const SUBCYCLES_PER_INSN: Cycle = Tracer::SUBCYCLES_PER_INSN;
+
+    fn new(platform: &Platform) -> Self {
+        Tracer::new(platform)
+    }
+
+    fn advance(&mut self) -> Self::Record {
+        Tracer::advance(self)
+    }
+
+    fn is_busy_loop(record: &Self::Record) -> bool {
+        record.is_busy_loop()
+    }
+
+    fn store_pc(&mut self, pc: ByteAddr) {
+        Tracer::store_pc(self, pc)
+    }
+
+    fn fetch(&mut self, pc: WordAddr, value: Instruction) {
+        Tracer::fetch(self, pc, value)
+    }
+
+    fn load_register(&mut self, idx: RegIdx, value: Word) {
+        Tracer::load_register(self, idx, value)
+    }
+
+    fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
+        Tracer::store_register(self, idx, value)
+    }
+
+    fn load_memory(&mut self, addr: WordAddr, value: Word) {
+        Tracer::load_memory(self, addr, value)
+    }
+
+    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
+        Tracer::store_memory(self, addr, value)
+    }
+
+    fn track_syscall(&mut self, effects: SyscallEffects) {
+        Tracer::track_syscall(self, effects)
+    }
+
+    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
+        Tracer::track_access(self, addr, subcycle)
+    }
+
+    fn final_accesses(&self) -> &LatestAccesses {
+        Tracer::final_accesses(self)
+    }
+
+    fn into_next_accesses(self) -> NextCycleAccess {
+        self.next_accesses()
+    }
+
+    fn cycle(&self) -> Cycle {
+        Tracer::cycle(self)
+    }
+
+    fn executed_insts(&self) -> usize {
+        Tracer::executed_insts(self)
+    }
+
+    fn probe_min_max_address_by_start_addr(
+        &self,
+        start_addr: WordAddr,
+    ) -> Option<(WordAddr, WordAddr)> {
+        Tracer::probe_min_max_address_by_start_addr(self, start_addr)
     }
 }
 

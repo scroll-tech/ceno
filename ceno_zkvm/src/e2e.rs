@@ -21,9 +21,9 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, NextCycleAccess,
-    Platform, Program, StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr,
-    host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, IterAddresses, NextCycleAccess, Platform,
+    PreflightTracer, Program, StepRecord, TraceDriver, Tracer, VM_REG_COUNT, VMState, WORD_SIZE,
+    Word, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -691,24 +691,15 @@ pub fn emulate_program<'a>(
         heap: _,
     } = init_mem_state;
 
-    let mut vm: VMState = VMState::new(platform.clone(), program);
+    let mut vm: VMState<PreflightTracer> = VMState::new_with_tracer(platform.clone(), program);
 
     for record in chain!(hints_init, io_init) {
         vm.init_memory(record.addr.into(), record.value);
     }
 
-    let mut executed_steps = 0usize;
-    let mut exit_code = None;
-    info_span!("emulator.preflight-execute").in_scope(|| {
-        for record in vm.iter_until_halt().take(max_steps) {
-            let record = record.expect("vm exec failed");
-            executed_steps += 1;
-            if record.insn().kind == InsnKind::ECALL
-                && record.rs1().unwrap().value == Platform::ecall_halt()
-            {
-                exit_code = record.rs2().map(|rs2| rs2.value);
-            }
-        }
+    let exit_code = info_span!("emulator.preflight-execute").in_scope(|| {
+        let _ = vm.iter_until_halt().take(max_steps).count();
+        vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
 
     if platform.is_debug {
@@ -747,7 +738,7 @@ pub fn emulate_program<'a>(
         .iter()
         .map(|rec| {
             let index = rec.addr as usize;
-            if index < VMState::REG_COUNT {
+            if index < VM_REG_COUNT {
                 let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
                     ram_type: RAMType::Register,
@@ -871,13 +862,13 @@ pub fn emulate_program<'a>(
     }
 
     let shard_ctx_builder =
-        ShardContextBuilder::new(multi_prover, vm.take_tracer().next_accesses());
+        ShardContextBuilder::new(multi_prover, vm.take_tracer().into_next_accesses());
 
     EmulationResult {
         pi,
         exit_code,
         shard_ctx_builder,
-        executed_steps,
+        executed_steps: insts,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,
@@ -1751,7 +1742,10 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 }
 
 #[cfg(debug_assertions)]
-fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState, mem_final: I) {
+fn debug_memory_ranges<'a, T: TraceDriver, I: Iterator<Item = &'a MemFinalRecord>>(
+    vm: &VMState<T>,
+    mem_final: I,
+) {
     let accessed_addrs = vm
         .tracer()
         .final_accesses()

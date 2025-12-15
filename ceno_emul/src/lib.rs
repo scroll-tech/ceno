@@ -10,12 +10,12 @@ pub use platform::{CENO_PLATFORM, Platform};
 
 mod tracer;
 pub use tracer::{
-    Change, LatestAccesses, MemOp, NextAccessPair, NextCycleAccess, ReadOp, StepRecord, Tracer,
-    WriteOp,
+    Change, LatestAccesses, MemOp, NextAccessPair, NextCycleAccess, PreflightTracer, ReadOp,
+    StepRecord, TraceDriver, Tracer, WriteOp,
 };
 
 mod vm_state;
-pub use vm_state::VMState;
+pub use vm_state::{HaltState, VMState, VM_REG_COUNT};
 
 mod rv32im;
 pub use rv32im::{
