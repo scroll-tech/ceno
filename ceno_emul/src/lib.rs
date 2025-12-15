@@ -3,12 +3,15 @@
 mod addr;
 pub use addr::*;
 
+mod dense_addr_space;
+
 mod platform;
 pub use platform::{CENO_PLATFORM, Platform};
 
 mod tracer;
 pub use tracer::{
-    Change, MemOp, NextAccessPair, NextCycleAccess, ReadOp, StepRecord, Tracer, WriteOp,
+    Change, LatestAccesses, MemOp, NextAccessPair, NextCycleAccess, ReadOp, StepRecord, Tracer,
+    WriteOp,
 };
 
 mod vm_state;

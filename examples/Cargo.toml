@@ -20,7 +20,7 @@ ceno_sha2 = { path = "../guest_libs/sha2" }
 ceno_syscall.workspace = true
 getrandom = { version = "0.3" }
 rand.workspace = true
-revm-precompile = { version = "28", default-features = false }
+revm-precompile.workspace = true
 tiny-keccak.workspace = true
 
 bn = { package = "substrate-bn", git = "https://github.com/scroll-tech/bn", branch = "ceno" }
