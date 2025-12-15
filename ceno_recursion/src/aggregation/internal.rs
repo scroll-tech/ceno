@@ -26,7 +26,7 @@ use crate::{
     aggregation::{
         InternalVmVerifierInput,
         types::{InternalVmVerifierExtraPvs, InternalVmVerifierPvs, VmVerifierPvs},
-    }, arithmetics::_print_ext_arr, zkvm_verifier::{
+    }, zkvm_verifier::{
         binding::{SepticExtensionVariable, SepticPointVariable},
         verifier::add_septic_points_in_place,
     }
@@ -135,13 +135,6 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                         &leaf_verifier_commit,
                         proof_vm_pvs.extra_pvs.leaf_verifier_commit,
                     );
-
-
-                    // _debug
-                    builder.print_debug(101);
-                    _print_ext_arr(builder, &ec_sum.x.vs);
-                    _print_ext_arr(builder, &ec_sum.y.vs);
-
                 },
                 |builder| {
                     let right = SepticPointVariable {
@@ -168,19 +161,7 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                     ));
                     builder.assign(&right.is_infinity, inf);
 
-                    // _debug
-                    builder.print_debug(102);
-                    _print_ext_arr(builder, &right.x.vs);
-                    _print_ext_arr(builder, &right.y.vs);
-
-
                     add_septic_points_in_place(builder, &ec_sum, &right);
-
-                    // _debug
-                    builder.print_debug(103);
-                    _print_ext_arr(builder, &ec_sum.x.vs);
-                    _print_ext_arr(builder, &ec_sum.y.vs);
-
 
                     builder.assert_eq::<[_; DIGEST_SIZE]>(
                         leaf_verifier_commit,
