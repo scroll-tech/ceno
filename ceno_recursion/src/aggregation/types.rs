@@ -1,15 +1,8 @@
-
-use openvm_continuations::F;
-use ceno_zkvm::scheme::{constants::SEPTIC_EXTENSION_DEGREE, septic_curve::SepticPoint};
+use ceno_zkvm::scheme::constants::SEPTIC_EXTENSION_DEGREE;
 use openvm_circuit::{circuit_derive::AlignedBorrow, system::connector::VmConnectorPvs};
+use openvm_native_compiler::ir::{Builder, Config, DIGEST_SIZE, Felt, Variable};
 use p3::field::PrimeField32;
-use crate::zkvm_verifier::binding::{SepticPointVariable, SepticExtensionVariable};
-use openvm_native_compiler::{
-    prelude::*,
-    ir::{Array, Builder, Config, DIGEST_SIZE, Felt, Variable},
-};
-use std::array;
-use std::borrow::BorrowMut;
+use std::{array, borrow::BorrowMut};
 
 #[derive(Clone, Copy, AlignedBorrow)]
 pub struct ContinuationPvs<T> {

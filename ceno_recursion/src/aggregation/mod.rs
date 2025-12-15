@@ -24,10 +24,7 @@ use openvm_stark_backend::config::{PcsProverData, Val};
 use internal::InternalVmVerifierConfig;
 use openvm_continuations::{
     C,
-    verifier::{
-        internal::types::{InternalVmVerifierInput, VmStarkProof},
-        root::types::RootVmVerifierInput,
-    },
+    verifier::{internal::types::InternalVmVerifierInput, root::types::RootVmVerifierInput},
 };
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
@@ -40,7 +37,6 @@ use openvm_native_compiler::{
 use openvm_native_recursion::hints::Hintable;
 use openvm_sdk::{
     SC,
-    commit::AppExecutionCommit,
     config::DEFAULT_NUM_CHILDREN_INTERNAL,
     prover::vm::{new_local_prover, types::VmProvingKey},
 };
@@ -57,21 +53,13 @@ use openvm_stark_sdk::{
     },
     engine::StarkFriEngine,
     openvm_stark_backend::keygen::types::MultiStarkVerifyingKey,
-    p3_bn254_fr::Bn254Fr,
 };
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
-use openvm_circuit::{
-    arch::{
-        CONNECTOR_AIR_ID, PROGRAM_AIR_ID, PROGRAM_CACHED_TRACE_INDEX, PUBLIC_VALUES_AIR_ID,
-        SingleSegmentVmProver,
-        hasher::{Hasher, poseidon2::vm_poseidon2_hasher},
-        instructions::exe::VmExe,
-    },
-    system::{memory::CHUNK, program::trace::compute_exe_commit},
-};
+use crate::aggregation::types::{InternalVmVerifierPvs, VmVerifierPvs};
+use openvm_circuit::arch::{PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver, instructions::exe::VmExe};
 use openvm_continuations::RootSC;
 use openvm_native_compiler::{
     asm::AsmConfig,
@@ -80,7 +68,6 @@ use openvm_native_compiler::{
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
 use openvm_stark_sdk::config::baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine;
-use crate::aggregation::types::{VmVerifierPvs, InternalVmVerifierPvs};
 
 mod internal;
 mod root;
@@ -480,11 +467,16 @@ impl CenoLeafVmVerifierConfig {
                 builder.assign(&stark_pvs.shard_ram_connector.x[i], x);
                 builder.assign(&stark_pvs.shard_ram_connector.y[i], y);
             }
-            builder.if_eq(shard_ec_sum.is_infinity, Usize::from(1)).then_or_else(|builder| {
-                builder.assign(&stark_pvs.shard_ram_connector.is_infinity, F::ONE);
-            }, |builder| {
-                builder.assign(&stark_pvs.shard_ram_connector.is_infinity, F::ZERO);
-            });
+            builder
+                .if_eq(shard_ec_sum.is_infinity, Usize::from(1))
+                .then_or_else(
+                    |builder| {
+                        builder.assign(&stark_pvs.shard_ram_connector.is_infinity, F::ONE);
+                    },
+                    |builder| {
+                        builder.assign(&stark_pvs.shard_ram_connector.is_infinity, F::ZERO);
+                    },
+                );
 
             // builder
             //     .if_eq(ceno_leaf_input.is_last, Usize::from(1))
@@ -619,105 +611,103 @@ pub(crate) fn chunk_ceno_leaf_proof_inputs(
     ret
 }
 
-/* 
 // Source from OpenVm SDK::verify_e2e_stark_proof with abridged key
 // See: https://github.com/openvm-org/openvm
-pub fn verify_e2e_stark_proof(
-    k: &CenoRecursionVerifierKeys<SC>,
-    proof: &VmStarkProof<SC>,
-    _expected_exe_commit: &Bn254Fr,
-    _expected_vm_commit: &Bn254Fr,
-) -> Result<AppExecutionCommit, String> {
-    if proof.inner.per_air.len() < 3 {
-        return Err("Invalid number of AIRs: expected at least 3".into());
-    } else if proof.inner.per_air[0].air_id != PROGRAM_AIR_ID {
-        return Err("Missing program AIR".into());
-    } else if proof.inner.per_air[1].air_id != CONNECTOR_AIR_ID {
-        return Err("Missing connector AIR".into());
-    } else if proof.inner.per_air[2].air_id != PUBLIC_VALUES_AIR_ID {
-        return Err("Missing public values AIR".into());
-    }
-    let public_values_air_proof_data = &proof.inner.per_air[2];
-
-    let program_commit = proof.inner.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref();
-    let internal_commit: &[_; CHUNK] = &k.internal_commit.into();
-
-    let (vm_vk, fri_params, vm_commit) = if program_commit == internal_commit {
-        let internal_pvs: &InternalVmVerifierPvs<_> = public_values_air_proof_data
-            .public_values
-            .as_slice()
-            .borrow();
-        if internal_commit != &internal_pvs.extra_pvs.internal_program_commit {
-            return Err(format!(
-                "Invalid internal program commit: expected {:?}, got {:?}",
-                internal_commit, internal_pvs.extra_pvs.internal_program_commit
-            ));
-        }
-        (
-            &k.internal_vm_vk,
-            k.internal_fri_params,
-            internal_pvs.extra_pvs.leaf_verifier_commit,
-        )
-    } else {
-        (&k.leaf_vm_vk, k.leaf_fri_params, *program_commit)
-    };
-    let e = BabyBearPoseidon2Engine::new(fri_params);
-    e.verify(vm_vk, &proof.inner)
-        .expect("stark e2e proof verification should pass");
-
-    let pvs: &VmVerifierPvs<_> =
-        public_values_air_proof_data.public_values[..VmVerifierPvs::<u8>::width()].borrow();
-
-    // _debug: AIR ordering
-    // if let Some(exit_code) = pvs.connector.exit_code() {
-    // if exit_code != 0 {
-    // return Err(format!(
-    // "Invalid exit code: expected 0, got {}",
-    // exit_code
-    // ));
-    // }
-    // } else {
-    // return Err(format!("Program did not terminate"));
-    // }
-
-    let hasher = vm_poseidon2_hasher();
-    let _public_values_root = hasher.merkle_root(&proof.user_public_values);
-    // _debug: Public value commitment
-    // if public_values_root != pvs.public_values_commit {
-    // return Err(format!(
-    // "Invalid public values root: expected {:?}, got {:?}",
-    // pvs.public_values_commit,
-    // public_values_root
-    // ));
-    // }
-
-    let exe_commit = compute_exe_commit(
-        &hasher,
-        &pvs.app_commit,
-        &pvs.memory.initial_root,
-        pvs.connector.initial_pc,
-    );
-    let app_commit = AppExecutionCommit::from_field_commit(exe_commit, vm_commit);
-    let _exe_commit_bn254 = app_commit.app_exe_commit.to_bn254();
-    let _vm_commit_bn254 = app_commit.app_vm_commit.to_bn254();
-
-    // _debug: execution commit checks
-    // if exe_commit_bn254 != *expected_exe_commit {
-    // return Err(eyre::eyre!(
-    // "Invalid app exe commit: expected {:?}, got {:?}",
-    // expected_exe_commit,
-    // exe_commit_bn254
-    // ));
-    // } else if vm_commit_bn254 != *expected_vm_commit {
-    // return Err(eyre::eyre!(
-    // "Invalid app vm commit: expected {:?}, got {:?}",
-    // expected_vm_commit,
-    // vm_commit_bn254
-    // ));
-    // }
-    Ok(app_commit)
-}
-*/
+// pub fn verify_e2e_stark_proof(
+// k: &CenoRecursionVerifierKeys<SC>,
+// proof: &VmStarkProof<SC>,
+// _expected_exe_commit: &Bn254Fr,
+// _expected_vm_commit: &Bn254Fr,
+// ) -> Result<AppExecutionCommit, String> {
+// if proof.inner.per_air.len() < 3 {
+// return Err("Invalid number of AIRs: expected at least 3".into());
+// } else if proof.inner.per_air[0].air_id != PROGRAM_AIR_ID {
+// return Err("Missing program AIR".into());
+// } else if proof.inner.per_air[1].air_id != CONNECTOR_AIR_ID {
+// return Err("Missing connector AIR".into());
+// } else if proof.inner.per_air[2].air_id != PUBLIC_VALUES_AIR_ID {
+// return Err("Missing public values AIR".into());
+// }
+// let public_values_air_proof_data = &proof.inner.per_air[2];
+//
+// let program_commit = proof.inner.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref();
+// let internal_commit: &[_; CHUNK] = &k.internal_commit.into();
+//
+// let (vm_vk, fri_params, vm_commit) = if program_commit == internal_commit {
+// let internal_pvs: &InternalVmVerifierPvs<_> = public_values_air_proof_data
+// .public_values
+// .as_slice()
+// .borrow();
+// if internal_commit != &internal_pvs.extra_pvs.internal_program_commit {
+// return Err(format!(
+// "Invalid internal program commit: expected {:?}, got {:?}",
+// internal_commit, internal_pvs.extra_pvs.internal_program_commit
+// ));
+// }
+// (
+// &k.internal_vm_vk,
+// k.internal_fri_params,
+// internal_pvs.extra_pvs.leaf_verifier_commit,
+// )
+// } else {
+// (&k.leaf_vm_vk, k.leaf_fri_params, *program_commit)
+// };
+// let e = BabyBearPoseidon2Engine::new(fri_params);
+// e.verify(vm_vk, &proof.inner)
+// .expect("stark e2e proof verification should pass");
+//
+// let pvs: &VmVerifierPvs<_> =
+// public_values_air_proof_data.public_values[..VmVerifierPvs::<u8>::width()].borrow();
+//
+// _debug: AIR ordering
+// if let Some(exit_code) = pvs.connector.exit_code() {
+// if exit_code != 0 {
+// return Err(format!(
+// "Invalid exit code: expected 0, got {}",
+// exit_code
+// ));
+// }
+// } else {
+// return Err(format!("Program did not terminate"));
+// }
+//
+// let hasher = vm_poseidon2_hasher();
+// let _public_values_root = hasher.merkle_root(&proof.user_public_values);
+// _debug: Public value commitment
+// if public_values_root != pvs.public_values_commit {
+// return Err(format!(
+// "Invalid public values root: expected {:?}, got {:?}",
+// pvs.public_values_commit,
+// public_values_root
+// ));
+// }
+//
+// let exe_commit = compute_exe_commit(
+// &hasher,
+// &pvs.app_commit,
+// &pvs.memory.initial_root,
+// pvs.connector.initial_pc,
+// );
+// let app_commit = AppExecutionCommit::from_field_commit(exe_commit, vm_commit);
+// let _exe_commit_bn254 = app_commit.app_exe_commit.to_bn254();
+// let _vm_commit_bn254 = app_commit.app_vm_commit.to_bn254();
+//
+// _debug: execution commit checks
+// if exe_commit_bn254 != *expected_exe_commit {
+// return Err(eyre::eyre!(
+// "Invalid app exe commit: expected {:?}, got {:?}",
+// expected_exe_commit,
+// exe_commit_bn254
+// ));
+// } else if vm_commit_bn254 != *expected_vm_commit {
+// return Err(eyre::eyre!(
+// "Invalid app vm commit: expected {:?}, got {:?}",
+// expected_vm_commit,
+// vm_commit_bn254
+// ));
+// }
+// Ok(app_commit)
+// }
 
 /// Build Ceno's zkVM verifier program from vk in OpenVM's eDSL
 pub fn build_zkvm_verifier_program(

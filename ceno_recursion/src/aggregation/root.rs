@@ -1,11 +1,3 @@
-// TODO: assert that the shard ram ec point is `PointAtInfinity`
-
-//  let is_sum_x_zero = ec_sum.x.is_zero(builder);
-//  let is_sum_y_zero = ec_sum.y.is_zero(builder);
-//  builder.assert_usize_eq(is_sum_x_zero, Usize::from(1));
-//  builder.assert_usize_eq(is_sum_y_zero, Usize::from(1));
-
-use ceno_zkvm::scheme::constants::SEPTIC_EXTENSION_DEGREE;
 use openvm_continuations::{C, F, SC};
 use openvm_instructions::program::Program;
 use openvm_native_compiler::{
@@ -28,7 +20,6 @@ use openvm_stark_sdk::openvm_stark_backend::{
     proof::Proof,
 };
 use serde::{Deserialize, Serialize};
-use p3::field::FieldAlgebra;
 
 #[derive(Serialize, Deserialize)]
 pub struct CenoRootVmVerifierInput<SC: StarkGenericConfig> {
@@ -123,7 +114,7 @@ impl CenoRootVmVerifierConfig {
                 internal_pcs,
                 internal_advice,
             };
-            let (merged_pvs, _expected_leaf_commit) =
+            let (_merged_pvs, _expected_leaf_commit) =
                 non_leaf_verifier.verify_internal_or_leaf_verifier_proofs(&mut builder, &proofs);
             builder.cycle_tracker_end("VerifyProofs");
 

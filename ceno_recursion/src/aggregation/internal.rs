@@ -7,9 +7,9 @@ use ceno_zkvm::scheme::constants::SEPTIC_EXTENSION_DEGREE;
 use openvm_circuit::arch::PUBLIC_VALUES_AIR_ID;
 use openvm_instructions::program::Program;
 use openvm_native_compiler::{
-    prelude::*,
     conversion::CompilerOptions,
     ir::{Array, Builder, Config, DIGEST_SIZE, Felt, RVar, Usize},
+    prelude::*,
 };
 use openvm_native_recursion::{
     challenger::duplex::DuplexChallengerVariable, fri::TwoAdicFriPcsVariable, stark::StarkVerifier,
@@ -22,18 +22,24 @@ use openvm_stark_sdk::{
 };
 use p3::field::FieldAlgebra;
 
+use crate::{
+    aggregation::{
+        InternalVmVerifierInput,
+        types::{InternalVmVerifierExtraPvs, InternalVmVerifierPvs, VmVerifierPvs},
+    },
+    zkvm_verifier::{
+        binding::{SepticExtensionVariable, SepticPointVariable},
+        verifier::add_septic_points_in_place,
+    },
+};
 use openvm_continuations::verifier::{
     common::{
         assert_or_assign_connector_pvs, assert_required_air_for_agg_vm_present,
         assert_single_segment_vm_exit_successfully, get_program_commit,
     },
+    internal::vars::InternalVmVerifierInputVariable,
 };
 use openvm_native_recursion::hints::Hintable;
-use openvm_continuations::verifier::internal::vars::InternalVmVerifierInputVariable;
-use crate::{aggregation::InternalVmVerifierInput, arithmetics::_print_ext_arr, zkvm_verifier::verifier::add_septic_points_in_place};
-use crate::aggregation::types::{InternalVmVerifierPvs, InternalVmVerifierExtraPvs, VmVerifierPvs};
-use crate::zkvm_verifier::binding::SepticPointVariable;
-use crate::zkvm_verifier::binding::SepticExtensionVariable;
 
 use openvm_continuations::{C, F};
 use openvm_native_recursion::types::new_from_inner_multi_vk;
@@ -121,7 +127,9 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                         builder.set(&ec_sum.x.vs, i, x);
                         builder.set(&ec_sum.y.vs, i, y);
                     }
-                    let inf = Usize::Var(builder.cast_felt_to_var(proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.is_infinity));
+                    let inf = Usize::Var(builder.cast_felt_to_var(
+                        proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.is_infinity,
+                    ));
                     builder.assign(&ec_sum.is_infinity, inf);
 
                     builder.assign(
@@ -144,11 +152,13 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                         builder.assign(&x, proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.x[i]);
                         let y = Ext::uninit(builder);
                         builder.assign(&y, proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.y[i]);
-                        
+
                         builder.set(&right.x.vs, i, x);
                         builder.set(&right.y.vs, i, y);
                     }
-                    let inf = Usize::Var(builder.cast_felt_to_var(proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.is_infinity));
+                    let inf = Usize::Var(builder.cast_felt_to_var(
+                        proof_vm_pvs.vm_verifier_pvs.shard_ram_connector.is_infinity,
+                    ));
                     builder.assign(&right.is_infinity, inf);
                     add_septic_points_in_place(builder, &ec_sum, &right);
 
@@ -177,11 +187,16 @@ impl<C: Config> NonLeafVerifierVariables<C> {
                 builder.assign(&pvs.shard_ram_connector.x[i], x);
                 builder.assign(&pvs.shard_ram_connector.y[i], y);
             }
-            builder.if_eq(ec_sum.is_infinity.clone(), Usize::from(1)).then_or_else(|builder| {
-                builder.assign(&pvs.shard_ram_connector.is_infinity, C::F::ONE);
-            }, |builder| {
-                builder.assign(&pvs.shard_ram_connector.is_infinity, C::F::ZERO);
-            });
+            builder
+                .if_eq(ec_sum.is_infinity.clone(), Usize::from(1))
+                .then_or_else(
+                    |builder| {
+                        builder.assign(&pvs.shard_ram_connector.is_infinity, C::F::ONE);
+                    },
+                    |builder| {
+                        builder.assign(&pvs.shard_ram_connector.is_infinity, C::F::ZERO);
+                    },
+                );
 
             // This is only needed when `is_terminate` but branching here won't save much, so we
             // always assign it.
@@ -292,7 +307,7 @@ impl InternalVmVerifierConfig {
                 internal_pcs,
                 internal_advice,
             };
-            
+
             builder.cycle_tracker_start("VerifyProofs");
             let (vm_verifier_pvs, leaf_verifier_commit) =
                 non_leaf_verifier.verify_internal_or_leaf_verifier_proofs(&mut builder, &proofs);
