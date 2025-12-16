@@ -172,6 +172,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         )
         .collect_vec();
 
+        let span_eq = entered_span!("build eqs", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
         let eqs_gpu = layer
             .out_sel_and_eval_exprs
@@ -233,6 +234,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             layer.n_fixed,
             layer.n_instance,
         );
+        exit_span!(span_eq);
 
         // process dag
         // (dag, coeffs, final_out_index, max_dag_depth, max_degree)

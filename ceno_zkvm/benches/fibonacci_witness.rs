@@ -71,6 +71,7 @@ fn fibonacci_witness(c: &mut Criterion) {
                         &[],
                         max_steps,
                         Checkpoint::PrepWitnessGen,
+                        None,
                     );
                     let instant = std::time::Instant::now();
                     result.next_step();

@@ -117,13 +117,20 @@ struct Args {
     #[arg(long, default_value = "1")]
     num_provers: u32,
 
-    // min cycle per shard
-    #[arg(long, default_value = "16777216")] // 16777216 = 2^24
-    min_cycle_per_shard: u64,
-
     // max cycle per shard
     #[arg(long, default_value = "536870912")] // 536870912 = 2^29
     max_cycle_per_shard: u64,
+
+    // max cycle per shard
+    // default value: 16GB VRAM, each cell 4 byte, log explosion 2
+    // => 2^30 * 16 / 4 / 2
+    #[arg(long, default_value = "2147483648")]
+    max_cell_per_shard: u64,
+
+    // for debug purpose
+    // only generate respective shard id and skip others
+    #[arg(long)]
+    shard_id: Option<u64>,
 }
 
 fn main() {
@@ -259,9 +266,11 @@ fn main() {
     let multi_prover = MultiProver::new(
         args.prover_id as usize,
         args.num_provers as usize,
-        args.min_cycle_per_shard,
+        args.max_cell_per_shard,
         args.max_cycle_per_shard,
     );
+
+    let target_shard_id = args.shard_id.map(|v| v as usize);
 
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
@@ -278,6 +287,7 @@ fn main() {
                 args.proof_file,
                 args.vk_file,
                 Checkpoint::Complete,
+                target_shard_id,
             )
         }
         (PcsKind::Basefold, FieldType::BabyBear) => {
@@ -294,6 +304,7 @@ fn main() {
                 args.proof_file,
                 args.vk_file,
                 Checkpoint::Complete,
+                target_shard_id,
             )
         }
         (PcsKind::Whir, FieldType::Goldilocks) => {
@@ -310,6 +321,7 @@ fn main() {
                 args.proof_file,
                 args.vk_file,
                 Checkpoint::PrepVerify, // TODO: when whir and babybear is ready
+                target_shard_id,
             )
         }
         (PcsKind::Whir, FieldType::BabyBear) => {
@@ -326,6 +338,7 @@ fn main() {
                 args.proof_file,
                 args.vk_file,
                 Checkpoint::PrepVerify, // TODO: when whir and babybear is ready
+                target_shard_id,
             )
         }
     };
@@ -353,6 +366,7 @@ fn run_inner<
     proof_file: PathBuf,
     vk_file: PathBuf,
     checkpoint: Checkpoint,
+    target_shard_id: Option<usize>,
 ) {
     let result = run_e2e_with_checkpoint::<E, PCS, _, _>(
         pd,
@@ -363,6 +377,7 @@ fn run_inner<
         public_io,
         max_steps,
         checkpoint,
+        target_shard_id,
     );
 
     let zkvm_proofs = result
@@ -375,7 +390,7 @@ fn run_inner<
     let vk_bytes = bincode::serialize(&vk).unwrap();
     fs::write(&vk_file, vk_bytes).unwrap();
 
-    if checkpoint > Checkpoint::PrepVerify {
+    if checkpoint > Checkpoint::PrepVerify && target_shard_id.is_none() {
         let verifier = ZKVMVerifier::new(vk);
         verify(zkvm_proofs.clone(), &verifier).expect("Verification failed");
         soundness_test(zkvm_proofs.first().cloned().unwrap(), &verifier);

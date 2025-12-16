@@ -36,7 +36,7 @@ use sumcheck::{
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
 
 use crate::{
     chip_handler::MemoryExpr,
@@ -232,11 +232,6 @@ impl<E: ExtensionField> KeccakLayout<E> {
             n_structural_witin: STRUCTURAL_WITIN,
             n_challenges: 0,
         }
-    }
-
-    // 1 instance will derive 24 round result + 8 round padding to pow2 for easiler rotation design
-    pub fn phase1_witin_rmm_height(&self, num_instances: usize) -> usize {
-        num_instances * ROUNDS.next_power_of_two()
     }
 }
 
@@ -1007,12 +1002,12 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
 
 #[tracing::instrument(
     skip_all,
-    name = "run_faster_keccakf",
+    name = "run_lookup_keccakf",
     level = "trace",
     fields(profiling_1)
 )]
-pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
-    (layout, gkr_circuit, num_witin, num_structual_witin): (
+pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>(
+    (layout, gkr_circuit, num_witin, num_structural_witin): (
         TestKeccakLayout<E>,
         GKRCircuit<E>,
         u16,
@@ -1024,7 +1019,8 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
 ) -> Result<GKRProof<E>, BackendError> {
     let mut shard_ctx = ShardContext::default();
     let num_instances = states.len();
-    let num_instances_rounds = num_instances * ROUNDS.next_power_of_two();
+    let num_instances_rounds =
+        next_pow2_instance_padding(num_instances) * ROUNDS.next_power_of_two();
     let log2_num_instance_rounds = ceil_log2(num_instances_rounds);
     let num_threads = optimal_sumcheck_threads(log2_num_instance_rounds);
     let mut instances = Vec::with_capacity(num_instances);
@@ -1059,18 +1055,19 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     let num_instance_per_batch = states.len().div_ceil(nthreads).max(1);
 
     let mut lk_multiplicity = LkMultiplicity::default();
-    let mut phase1_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(states.len()),
+    let mut phase1_witness = RowMajorMatrix::<E::BaseField>::new_by_rotation(
+        states.len(),
+        ROUNDS.next_power_of_two().ilog2() as usize,
         num_witin as usize,
         InstancePaddingStrategy::Default,
     );
-    let mut structural_witness = RowMajorMatrix::<E::BaseField>::new(
-        layout.layout.phase1_witin_rmm_height(states.len()),
-        num_structual_witin as usize,
+    let mut structural_witness = RowMajorMatrix::<E::BaseField>::new_by_rotation(
+        states.len(),
+        ROUNDS.next_power_of_two().ilog2() as usize,
+        num_structural_witin as usize,
         InstancePaddingStrategy::Default,
     );
-    let raw_witin_iter =
-        phase1_witness.par_batch_iter_mut(num_instance_per_batch * ROUNDS.next_power_of_two());
+    let raw_witin_iter = phase1_witness.par_batch_iter_mut(num_instance_per_batch);
     let shard_ctx_vec = shard_ctx.get_forked();
     raw_witin_iter
         .zip_eq(instances.par_chunks(num_instance_per_batch))
@@ -1177,7 +1174,7 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             {
                 assert_eq!(
                     base.evaluations().len(),
-                    (num_instances * ROUNDS.next_power_of_two()).next_power_of_two()
+                    next_pow2_instance_padding(num_instances) * ROUNDS.next_power_of_two(),
                 );
 
                 for (i, instance_output) in
@@ -1278,43 +1275,29 @@ pub fn run_faster_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ff_ext::GoldilocksExt2;
+    use ff_ext::BabyBearExt4;
     use mpcs::BasefoldDefault;
     use rand::{RngCore, SeedableRng};
 
     #[test]
     fn test_keccakf() {
-        type E = GoldilocksExt2;
-        type Pcs = BasefoldDefault<E>;
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-
-        let num_instances = 8;
-        let mut states: Vec<[u64; 25]> = Vec::with_capacity(num_instances);
-        for _ in 0..num_instances {
-            states.push(std::array::from_fn(|_| rng.next_u64()));
+        for num_instances in 1..32 {
+            test_keccakf_helper(num_instances)
         }
-        let _ = run_faster_keccakf::<E, Pcs>(
-            setup_gkr_circuit::<E>().expect("setup gkr circuit failed"),
-            states,
-            true,
-            true,
-        );
     }
 
-    #[test]
-    fn test_keccakf_nonpow2() {
-        type E = GoldilocksExt2;
+    fn test_keccakf_helper(num_instances: usize) {
+        type E = BabyBearExt4;
         type Pcs = BasefoldDefault<E>;
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let num_instances = 5;
         let mut states: Vec<[u64; 25]> = Vec::with_capacity(num_instances);
         for _ in 0..num_instances {
             states.push(std::array::from_fn(|_| rng.next_u64()));
         }
 
-        let _ = run_faster_keccakf::<E, Pcs>(
+        let _ = run_lookup_keccakf::<E, Pcs>(
             setup_gkr_circuit::<E>().expect("setup gkr circuit failed"),
             states,
             true,

@@ -61,7 +61,7 @@ fn bench_add(c: &mut Criterion) {
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
     let device = create_prover(backend);
-    let prover = ZKVMProver::new(pk, device);
+    let prover = ZKVMProver::new_with_single_shard(pk, device);
     let circuit_pk = prover
         .pk
         .circuit_pks

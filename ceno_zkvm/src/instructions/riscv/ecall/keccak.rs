@@ -169,7 +169,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<StepRecord>,
+        steps: Vec<&StepRecord>,
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
         if steps.is_empty() {
@@ -184,20 +184,21 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         let nthreads = max_usable_threads();
         let num_instance_per_batch = steps.len().div_ceil(nthreads).max(1);
 
-        let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
-            config.layout.phase1_witin_rmm_height(steps.len()),
+        let mut raw_witin = RowMajorMatrix::<E::BaseField>::new_by_rotation(
+            steps.len(),
+            KECCAK_ROUNDS.next_power_of_two().ilog2() as usize,
             num_witin,
             InstancePaddingStrategy::Default,
         );
-        let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
-            config.layout.phase1_witin_rmm_height(steps.len()),
+        let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new_by_rotation(
+            steps.len(),
+            KECCAK_ROUNDS.next_power_of_two().ilog2() as usize,
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
 
         // each instance are composed of KECCAK_ROUNDS.next_power_of_two()
-        let raw_witin_iter = raw_witin
-            .par_batch_iter_mut(num_instance_per_batch * KECCAK_ROUNDS.next_power_of_two());
+        let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
         let shard_ctx_vec = shard_ctx.get_forked();
 
         // 1st pass: assign witness outside of gkr-iop scope

@@ -56,10 +56,13 @@ pub mod gpu_prover {
         let hal_arc = CUDA_HAL
             .as_ref()
             .map_err(|e| format!("HAL not available: {:?}", e))?;
-
-        hal_arc
+        let hal = hal_arc
             .lock()
-            .map_err(|e| format!("Failed to lock HAL: {:?}", e))
+            .map_err(|e| format!("Failed to lock HAL: {:?}", e))?;
+        hal.inner()
+            .synchronize()
+            .map_err(|e| format!("Failed to sync: {:?}", e))?;
+        Ok(hal)
     }
 }
 
@@ -146,6 +149,14 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     /// Get reference to internal GPU polynomial
     pub fn inner(&self) -> &GpuFieldType<'_> {
         &self.mle
+    }
+
+    pub fn as_view_chunks(&self, num_fanin: usize) -> Vec<GpuPolynomialExt<'a>> {
+        match &self.mle {
+            GpuFieldType::Base(_) => panic!("not supported yet"),
+            GpuFieldType::Ext(poly) => poly.as_view_chunk(num_fanin),
+            GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
+        }
     }
 
     /// Convert to CPU version of MultilinearExtension
