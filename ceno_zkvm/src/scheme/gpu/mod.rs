@@ -222,6 +222,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     challenges: &[E; 2],
     cuda_hal: &CudaHalBB31,
     big_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
+    ones_buffer: &mut Vec<GpuPolynomialExt<'static>>,
     view_last_layers: &mut Vec<Vec<Vec<GpuPolynomialExt<'static>>>>,
 ) -> Result<
     (
@@ -318,25 +319,47 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             })
             .collect::<Vec<_>>()
     } else {
-        // Case when numerator is empty - create GPU polynomials with scalar E::ONE
+        if lk_denominator_last_layer.is_empty() {
+            vec![]
+        } else {
+            // Case when numerator is empty - create shared ones_buffer and use views
+            // This saves memory by having all p1, p2 polynomials reference the same buffer
+            let nv = lk_denominator_last_layer[0][0].num_vars();
 
-        let res = lk_denominator_last_layer
-            .into_iter()
-            .map(|lk_d_chunks| {
-                let nv = lk_d_chunks[0].num_vars();
-                let p1_gpu = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
-                    .map_err(|e| format!("Failed to create p1 GPU polynomial with scalar: {:?}", e))
+            // Create one shared ones_buffer as Owned (can be 'static)
+            let ones_poly =
+                GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
+                    .map_err(|e| format!("Failed to create shared ones_buffer: {:?}", e))
                     .unwrap();
-                let p2_gpu = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
-                    .map_err(|e| format!("Failed to create p2 GPU polynomial with scalar: {:?}", e))
-                    .unwrap();
-                // Use [1, 1, q1, q2] format for the last layer
-                let mut last_layer = vec![p1_gpu, p2_gpu];
-                last_layer.extend(lk_d_chunks);
-                last_layer
-            })
-            .collect::<Vec<_>>();
-        res
+            // SAFETY: Owned buffer can be safely treated as 'static
+            let ones_poly_static: GpuPolynomialExt<'static> =
+                unsafe { std::mem::transmute(ones_poly) };
+            ones_buffer.push(ones_poly_static);
+
+            // Get reference from storage to ensure proper lifetime
+            let ones_poly_ref = ones_buffer.last().unwrap();
+            let mle_len_bytes =
+                ones_poly_ref.evaluations().len() * std::mem::size_of::<BB31Ext>();
+
+            // Create views referencing the shared ones_buffer for each tower's p1, p2
+            lk_denominator_last_layer
+                .into_iter()
+                .map(|lk_d_chunks| {
+                    // Create views of ones_buffer for p1 and p2
+                    let p1_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
+                    let p2_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
+                    let p1_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p1_view), nv);
+                    let p2_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p2_view), nv);
+                    // SAFETY: views from 'static buffer can be 'static
+                    let p1_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p1_gpu) };
+                    let p2_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p2_gpu) };
+                    // Use [p1, p2, q1, q2] format for the last layer
+                    let mut last_layer = vec![p1_gpu, p2_gpu];
+                    last_layer.extend(lk_d_chunks);
+                    last_layer
+                })
+                .collect::<Vec<_>>()
+        }
     };
     if !logup_last_layers.is_empty() {
         let first_layer = &logup_last_layers[0];
@@ -396,7 +419,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             prod_layers = prod_last_layers.len(),
             profiling_3 = true
         );
-        let last_layers_refs: Vec<&[GpuPolynomialExt]> =
+        let last_layers_refs: Vec<&[GpuPolynomialExt<'_>]> =
             prod_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = {
             cuda_hal.tower.build_prod_tower_from_gpu_polys_batch(
@@ -429,7 +452,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             logup_layers = logup_last_layers.len(),
             profiling_3 = true
         );
-        let last_layers_refs: Vec<&[GpuPolynomialExt]> =
+        let last_layers_refs: Vec<&[GpuPolynomialExt<'_>]> =
             logup_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = cuda_hal
             .tower
@@ -509,7 +532,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             // build_tower_witness_gpu will allocate buffers and build GPU specs
             let span = entered_span!("build_tower_witness", profiling_2 = true);
             let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
-            let mut _view_last_layers: Vec<Vec<Vec<ceno_gpu::bb31::GpuPolynomialExt<'static>>>> =
+            let mut _ones_buffer: Vec<GpuPolynomialExt<'static>> = Vec::new();
+            let mut _view_last_layers: Vec<Vec<Vec<GpuPolynomialExt<'static>>>> =
                 Vec::new();
             let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
                 composed_cs,
@@ -517,8 +541,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
                 records,
                 challenges,
                 &cuda_hal,
-                // &mut _logup_buffers,
                 &mut _big_buffers,
+                &mut _ones_buffer,
                 &mut _view_last_layers,
             )
             .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
