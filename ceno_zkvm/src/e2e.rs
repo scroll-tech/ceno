@@ -1654,7 +1654,7 @@ fn create_proofs_streaming<
                 {
                     let mut proofs = Vec::new();
                     let mut proof_err = None;
-                    let mut rx = rx;
+                    let rx = rx;
                     while let Ok((zkvm_witness, shard_ctx, pi)) = rx.recv() {
                         if is_mock_proving {
                             MockProver::assert_satisfied_full(
