@@ -86,6 +86,8 @@ pub fn get_rust_flags() -> String {
         "-Zlocation-detail=none",
         "-C",
         "passes=lower-atomic",
+        "--cfg",
+        "getrandom_backend=\"custom\"",
     ];
 
     let mut rust_flags = std::env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());

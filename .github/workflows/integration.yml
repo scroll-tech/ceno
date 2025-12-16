@@ -156,6 +156,11 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/uint256_mul_syscall
 
+      - name: Run sha_extend_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/sha_extend_syscall
+
       - name: Run fibonacci (release) in multi-shards with CENO_CROSS_SHARD_LIMIT
         env:
           RUST_LOG: debug
@@ -176,3 +181,10 @@ jobs:
       - name: Test install Ceno cli
         run: |
           cargo make cli
+
+      - name: Run Ceno cli example proof
+        working-directory: ceno_cli/example
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo ceno prove --platform=ceno --hints 10 --public-io 4
