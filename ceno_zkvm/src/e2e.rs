@@ -720,7 +720,9 @@ pub fn emulate_program<'a>(
     let end_cycle = vm.tracer().cycle();
     let insts = vm.tracer().executed_insts();
     tracing::info!("program executed {insts} instructions in {end_cycle} cycles");
+    println!("gogo!");
     metrics::gauge!("cycles").set(insts as f64);
+    println!("here!");
 
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),
