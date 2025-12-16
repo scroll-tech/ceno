@@ -290,7 +290,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             (total_buffer_size * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0)
         );
         let big_buffer = cuda_hal
-            .alloc_ext_elems_on_device(total_buffer_size)
+            .alloc_ext_elems_on_device(total_buffer_size, false)
             .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))?;
         big_buffers.push(big_buffer);
         is_prod_buffer_exists = true;
@@ -376,7 +376,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             (total_buffer_size * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0)
         );
         let big_buffer = cuda_hal
-            .alloc_ext_elems_on_device(total_buffer_size)
+            .alloc_ext_elems_on_device(total_buffer_size, false)
             .unwrap();
         big_buffers.push(big_buffer);
         is_logup_buffer_exists = true;
