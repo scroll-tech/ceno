@@ -91,7 +91,7 @@ pub const LEAF_LOG_BLOWUP: usize = 1;
 pub const INTERNAL_LOG_BLOWUP: usize = 2;
 pub const ROOT_LOG_BLOWUP: usize = 3;
 pub const ROOT_MAX_CONSTRAINT_DEG: usize = (1 << ROOT_LOG_BLOWUP) + 1;
-pub const ROOT_NUM_PUBLIC_VALUES: usize = 14;
+pub const ROOT_NUM_PUBLIC_VALUES: usize = 15;
 pub const SBOX_SIZE: usize = 7;
 const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216,

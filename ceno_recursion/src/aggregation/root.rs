@@ -136,7 +136,7 @@ impl CenoRootVmVerifierConfig {
 
             builder.cycle_tracker_start("ExtractPublicValues");
             // builder.assert_usize_eq(public_values.len(), RVar::from(self.num_user_public_values));
-            let public_values_vec: Vec<Felt<F>> = (0..self.num_user_public_values)
+            let public_values_vec: Vec<Felt<F>> = (0..(self.num_user_public_values - 1))    // The init_pc is read separately
                 .map(|i| builder.get(&public_values, i))
                 .collect();
             builder.cycle_tracker_end("ExtractPublicValues");
