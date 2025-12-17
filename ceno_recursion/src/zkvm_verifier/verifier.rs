@@ -929,7 +929,7 @@ pub fn verify_gkr_circuit<C: Config>(
                 builder.assign(&alpha_idx, end_idx);
             });
         builder.cycle_tracker_end("Calculate Sigma");
-        
+
         // sigma = \sum_b sel(b) * zero_expr(b)
         let max_degree = builder.constant(C::F::from_canonical_usize(layer.max_expr_degree + 1));
 
@@ -1061,7 +1061,6 @@ pub fn verify_gkr_circuit<C: Config>(
         }
         builder.cycle_tracker_end("Check structural witin");
 
-
         builder.cycle_tracker_start("Check instances");
         let pubio_offset = layer.n_witin + layer.n_fixed;
         for (index, instance) in layer.instance_openings.iter().enumerate() {
@@ -1075,7 +1074,6 @@ pub fn verify_gkr_circuit<C: Config>(
             builder.assert_ext_eq(expected_eval, main_eval);
         }
         builder.cycle_tracker_end("Check instances");
-
 
         builder.cycle_tracker_start("Evaluate main sumcheck expression with instance");
         // TODO: we should store alpha_pows in a bigger array to avoid concatenating them
