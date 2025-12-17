@@ -1,40 +1,36 @@
-#![allow(dead_code)]
 use ceno_emul::{Platform, Program};
+use ceno_host::CenoStdin;
 use ceno_recursion::{
-    aggregation::{
-        CenoLeafVmVerifierConfig, CenoRecursionVerifierKeys, INTERNAL_LOG_BLOWUP, LEAF_LOG_BLOWUP,
-        ROOT_LOG_BLOWUP, SBOX_SIZE,
-    },
+    aggregation::{CenoAggregationProver, CenoRecursionProvingKeys, CenoRecursionVerifierKeys},
     zkvm_verifier::binding::E,
 };
 use ceno_zkvm::{
-    e2e::{MultiProver, setup_program},
-    scheme::{hal::ProverDevice, prover::ZKVMProver, verifier::ZKVMVerifier},
+    e2e::{MultiProver, run_e2e_proof, setup_program},
+    scheme::{
+        ZKVMProof, create_backend, create_prover, hal::ProverDevice,
+        mock_prover::LkMultiplicityKey, prover::ZKVMProver, verifier::ZKVMVerifier,
+    },
     structs::{ZKVMProvingKey, ZKVMVerifyingKey},
 };
 use ff_ext::{BabyBearExt4, ExtensionField};
+#[cfg(not(feature = "gpu"))]
+use gkr_iop::cpu::{CpuBackend, CpuProver};
+#[cfg(feature = "gpu")]
+use gkr_iop::gpu::{GpuBackend, GpuProver};
 use gkr_iop::hal::ProverBackend;
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme};
-use openvm_circuit::{
-    arch::{MemoryConfig, SystemConfig, VirtualMachine},
-    system::program::trace::VmCommittedExe,
-};
-use openvm_continuations::verifier::{
-    common::types::VmVerifierPvs,
-    internal::{InternalVmVerifierConfig, types::InternalVmVerifierPvs},
-};
-use openvm_native_circuit::NativeConfig;
-use openvm_native_compiler::conversion::CompilerOptions;
-use openvm_sdk::prover::vm::{local::VmLocalProver, types::VmProvingKey};
+use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
+use openvm_continuations::verifier::internal::types::VmStarkProof;
+#[cfg(feature = "gpu")]
+use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
+use openvm_native_circuit::{NativeBuilder, NativeConfig};
+use openvm_sdk::prover::vm::new_local_prover;
 use openvm_stark_backend::config::StarkGenericConfig;
-use openvm_stark_sdk::{
-    config::{
-        FriParameters,
-        baby_bear_poseidon2::{BabyBearPoseidon2Config, BabyBearPoseidon2Engine},
-    },
-    engine::StarkFriEngine,
-};
-use std::{marker::PhantomData, sync::Arc};
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
+#[cfg(not(feature = "gpu"))]
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
+
+use serde::Serialize;
+use std::sync::Arc;
 
 #[allow(clippy::type_complexity)]
 pub struct Sdk<
@@ -53,23 +49,18 @@ pub struct Sdk<
     pub platform: Option<Platform>,
     pub multi_prover: Option<MultiProver>,
 
+    // base(app) layer
     pub zkvm_pk: Option<Arc<ZKVMProvingKey<E, PCS>>>,
     pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS>>,
+    pub zkvm_prover: Option<ZKVMProver<E, PCS, PB, PD>>,
 
     // aggregation
-    pub zkvm_agg: Option<Arc<ZKVMProvingKey<E, PCS>>>,
-    pub agg_pk: Option<(
-        Arc<VmProvingKey<SC, VC>>,
-        Arc<VmCommittedExe<SC>>,
-        Arc<VmProvingKey<SC, VC>>,
-        Arc<VmCommittedExe<SC>>,
-    )>,
-    phantom: PhantomData<PB>,
+    pub agg_pk: Option<CenoRecursionProvingKeys<SC, VC>>,
 }
 
 impl<
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E> + 'static,
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + 'static + Serialize,
     PB,
     PD,
     SC: StarkGenericConfig,
@@ -87,9 +78,8 @@ where
             multi_prover: None,
             zkvm_pk: None,
             zkvm_vk: None,
-            zkvm_agg: None,
+            zkvm_prover: None,
             agg_pk: None,
-            phantom: Default::default(),
         }
     }
 
@@ -105,33 +95,24 @@ where
             multi_prover: Some(multi_prover),
             zkvm_pk: None,
             zkvm_vk: None,
-            zkvm_agg: None,
+            zkvm_prover: None,
             agg_pk: None,
-            phantom: Default::default(),
         }
     }
     pub fn set_app_pk(&mut self, pk: ZKVMProvingKey<E, PCS>) {
         self.zkvm_pk = Some(Arc::new(pk));
     }
 
+    // allow us to read the app vk from file and then set it
     pub fn set_app_vk(&mut self, vk: ZKVMVerifyingKey<E, PCS>) {
         self.zkvm_vk = Some(vk);
     }
 
-    #[allow(clippy::type_complexity)]
-    pub fn set_agg_pk(
-        &mut self,
-        agg_pk: (
-            Arc<VmProvingKey<SC, VC>>,
-            Arc<VmCommittedExe<SC>>,
-            Arc<VmProvingKey<SC, VC>>,
-            Arc<VmCommittedExe<SC>>,
-        ),
-    ) {
+    pub fn set_agg_pk(&mut self, agg_pk: CenoRecursionProvingKeys<SC, VC>) {
         self.agg_pk = Some(agg_pk);
     }
 
-    pub fn create_zkvm_prover(&mut self, device: PD) -> ZKVMProver<E, PCS, PB, PD> {
+    fn set_zkvm_prover(&mut self, device: PD) {
         let (pk, vk) = self
             .zkvm_pk
             .clone()
@@ -161,13 +142,43 @@ where
 
         self.zkvm_vk = Some(vk.clone());
         self.zkvm_pk = Some(pk.clone());
+        self.zkvm_prover = Some(ZKVMProver::new(pk, device));
+    }
 
-        ZKVMProver::new(pk, device)
+    pub fn generate_base_proof(
+        &self,
+        hints: CenoStdin,
+        pub_io: CenoStdin,
+        max_steps: usize,
+        shard_id: Option<usize>,
+    ) -> Vec<ZKVMProof<E, PCS>> {
+        if let Some(zkvm_prover) = self.zkvm_prover.as_ref() {
+            let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(&hints), &Vec::from(&pub_io));
+            run_e2e_proof::<E, PCS, PB, PD>(zkvm_prover, &init_full_mem, max_steps, false, shard_id)
+        } else {
+            panic!("ZKVMProver is not initialized")
+        }
+    }
+
+    pub fn get_app_pk(&self) -> Arc<ZKVMProvingKey<E, PCS>> {
+        self.zkvm_pk.clone().expect("zkvm pk is not set")
+    }
+
+    pub fn get_app_vk(&self) -> ZKVMVerifyingKey<E, PCS> {
+        self.zkvm_vk.clone().expect("zkvm vk is not set")
+    }
+
+    pub fn get_agg_pk(&self) -> CenoRecursionProvingKeys<SC, VC> {
+        self.agg_pk.clone().expect("agg pk is not set")
+    }
+
+    pub fn get_agg_vk(&self) -> CenoRecursionVerifierKeys<SC> {
+        self.agg_pk.as_ref().expect("agg pk is not set").get_vk()
     }
 
     pub fn create_zkvm_verifier(&self) -> ZKVMVerifier<E, PCS> {
         let Some(app_vk) = self.zkvm_vk.clone() else {
-            panic!("empty zkvm pk");
+            panic!("empty zkvm vk");
         };
         ZKVMVerifier::new(app_vk)
     }
@@ -179,159 +190,63 @@ where
     PB: ProverBackend<E = BabyBearExt4, Pcs = Basefold<E, BasefoldRSParams>> + 'static,
     PD: ProverDevice<PB> + 'static,
 {
-    // initialized agg prover
-    pub fn create_agg_prover(
+    /// aggregating base proofs into a root STARK proof
+    pub fn compress_to_root_proof(
         &mut self,
-    ) -> (
-        VmLocalProver<BabyBearPoseidon2Config, NativeConfig, BabyBearPoseidon2Engine>,
-        VmLocalProver<BabyBearPoseidon2Config, NativeConfig, BabyBearPoseidon2Engine>,
-    ) {
-        let (ceno_leaf_agg_pk, leaf_committed_exe, internal_vm_pk, internal_committed_exe) =
-            self.agg_pk.clone().unwrap_or_else(|| {
-                let Some(app_vk) = self.zkvm_vk.clone() else {
-                    panic!("set app vk first");
-                };
+        base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
+    ) -> VmStarkProof<BabyBearPoseidon2Config> {
+        let vb = NativeBuilder::default();
 
-                tracing::debug!(
-                    "empty agg proving/verifying key detected — running key generation..."
-                );
-                let [leaf_fri_params, internal_fri_params, _root_fri_params] =
-                    [LEAF_LOG_BLOWUP, INTERNAL_LOG_BLOWUP, ROOT_LOG_BLOWUP]
-                        .map(FriParameters::standard_with_100_bits_conjectured_security);
+        // TODO: cache agg_prover
+        let mut agg_prover = if let Some(agg_pk) = self.agg_pk.as_ref() {
+            let leaf_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
+                vb.clone(),
+                &agg_pk.leaf_vm_pk,
+                agg_pk.leaf_committed_exe.exe.clone(),
+            )
+            .expect("leaf prover");
+            let internal_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
+                vb.clone(),
+                &agg_pk.internal_vm_pk,
+                agg_pk.internal_committed_exe.exe.clone(),
+            )
+            .expect("internal prover");
 
-                let leaf_vm_config = NativeConfig {
-                    system: SystemConfig::new(
-                        SBOX_SIZE.min(leaf_fri_params.max_constraint_degree()),
-                        MemoryConfig {
-                            max_access_adapter_n: 16,
-                            ..Default::default()
-                        },
-                        VmVerifierPvs::<u8>::width(),
-                    )
-                    .with_max_segment_len((1 << 24) - 100)
-                    .with_profiling(),
-                    native: Default::default(),
-                };
+            CenoAggregationProver::new(leaf_prover, internal_prover, agg_pk.clone())
+        } else {
+            let agg_prover = CenoAggregationProver::from_base_vk(self.zkvm_vk.clone().unwrap());
+            self.agg_pk = Some(agg_prover.pk.clone());
 
-                let leaf_committed_exe: Arc<VmCommittedExe<BabyBearPoseidon2Config>> = {
-                    let leaf_engine = BabyBearPoseidon2Engine::new(leaf_fri_params);
-                    let leaf_program = CenoLeafVmVerifierConfig {
-                        vk: app_vk,
-                        compiler_options: CompilerOptions::default().with_cycle_tracker(),
-                    }
-                    .build_program();
+            agg_prover
+        };
 
-                    Arc::new(VmCommittedExe::commit(
-                        leaf_program.into(),
-                        leaf_engine.config.pcs(),
-                    ))
-                };
-
-                // let recursion_proving_keys = RecursionProvingKeys::keygen(leaf_fri_params, leaf_vm_config);
-                let ceno_leaf_engine = BabyBearPoseidon2Engine::new(leaf_fri_params);
-                let ceno_leaf_vm_pk = Arc::new({
-                    let vm = VirtualMachine::new(ceno_leaf_engine, leaf_vm_config.clone());
-                    let vm_pk = vm.keygen();
-                    assert!(vm_pk.max_constraint_degree <= leaf_fri_params.max_constraint_degree());
-                    VmProvingKey {
-                        fri_params: leaf_fri_params,
-                        vm_config: leaf_vm_config,
-                        vm_pk,
-                    }
-                });
-
-                // Internal engine and config
-                let internal_engine = BabyBearPoseidon2Engine::new(internal_fri_params);
-                let internal_vm_config = NativeConfig {
-                    system: SystemConfig::new(
-                        SBOX_SIZE.min(internal_fri_params.max_constraint_degree()),
-                        MemoryConfig {
-                            max_access_adapter_n: 8,
-                            ..Default::default()
-                        },
-                        InternalVmVerifierPvs::<u8>::width(),
-                    )
-                    .with_max_segment_len((1 << 24) - 100),
-                    native: Default::default(),
-                };
-
-                // Construct internal vm, pk and vk
-                let internal_vm = VirtualMachine::new(internal_engine, internal_vm_config.clone());
-                let internal_vm_pk = Arc::new({
-                    let vm_pk = internal_vm.keygen();
-                    assert!(
-                        vm_pk.max_constraint_degree <= internal_fri_params.max_constraint_degree()
-                    );
-                    VmProvingKey {
-                        fri_params: internal_fri_params,
-                        vm_config: internal_vm_config,
-                        vm_pk,
-                    }
-                });
-                let internal_vm_vk = internal_vm_pk.vm_pk.get_vk();
-
-                // Commit internal program
-                let internal_program = InternalVmVerifierConfig {
-                    leaf_fri_params,
-                    internal_fri_params,
-                    compiler_options: CompilerOptions::default(),
-                }
-                .build_program(&ceno_leaf_vm_pk.vm_pk.get_vk(), &internal_vm_vk);
-                let internal_committed_exe: Arc<VmCommittedExe<BabyBearPoseidon2Config>> =
-                    Arc::new(VmCommittedExe::commit(
-                        internal_program.into(),
-                        internal_vm.engine.config.pcs(),
-                    ));
-
-                (
-                    ceno_leaf_vm_pk,
-                    leaf_committed_exe,
-                    internal_vm_pk,
-                    internal_committed_exe,
-                )
-            });
-
-        let leaf_prover = VmLocalProver::<_, NativeConfig, BabyBearPoseidon2Engine>::new(
-            ceno_leaf_agg_pk.clone(),
-            leaf_committed_exe.clone(),
-        );
-
-        let internal_prover = VmLocalProver::<_, NativeConfig, BabyBearPoseidon2Engine>::new(
-            internal_vm_pk.clone(),
-            internal_committed_exe.clone(),
-        );
-
-        // set to agg_pk
-        self.agg_pk = Some((
-            ceno_leaf_agg_pk,
-            leaf_committed_exe,
-            internal_vm_pk,
-            internal_committed_exe,
-        ));
-
-        (leaf_prover, internal_prover)
+        agg_prover.generate_root_proof(base_proofs)
     }
 
-    pub fn create_agg_verifier(&self) -> CenoRecursionVerifierKeys {
-        let Some((ceno_leaf_agg_pk, _leaf_committed_exe, internal_vm_pk, internal_committed_exe)) =
-            self.agg_pk.as_ref()
-        else {
+    pub fn init_agg_pk(
+        &mut self,
+    ) -> CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig> {
+        assert!(self.zkvm_vk.is_some(), "zkvm_vk is not set");
+
+        if self.agg_pk.is_none() {
+            let agg_prover = CenoAggregationProver::from_base_vk(self.zkvm_vk.clone().unwrap());
+            self.agg_pk = Some(agg_prover.pk.clone());
+        }
+        self.agg_pk.clone().unwrap()
+    }
+
+    pub fn get_agg_verifier(&self) -> CenoRecursionVerifierKeys<BabyBearPoseidon2Config> {
+        let Some(agg_pk) = self.agg_pk.as_ref() else {
             panic!("empty agg_pk")
         };
 
-        CenoRecursionVerifierKeys {
-            ceno_leaf_vm_vk: ceno_leaf_agg_pk.vm_pk.get_vk(),
-            ceno_leaf_fri_params: ceno_leaf_agg_pk.fri_params,
-            internal_vm_vk: internal_vm_pk.vm_pk.get_vk(),
-            ceno_internal_fri_params: internal_vm_pk.fri_params,
-            internal_commit: internal_committed_exe.get_program_commit().into(),
-        }
+        agg_pk.get_vk()
     }
 }
 
 impl<
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E> + 'static,
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
     PB,
     PD,
     SC: StarkGenericConfig,
@@ -343,5 +258,45 @@ where
 {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(not(feature = "gpu"))]
+pub type CenoSDK<E, PCS, SC, VC> =
+    Sdk<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>, SC, VC>;
+
+#[cfg(not(feature = "gpu"))]
+impl<E, PCS, SC, VC> CenoSDK<E, PCS, SC, VC>
+where
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    SC: StarkGenericConfig,
+    VC: 'static,
+{
+    pub fn init_base_prover(&mut self, max_num_variables: usize, level: SecurityLevel) {
+        let backend = create_backend(max_num_variables, level);
+        let device = create_prover(backend);
+
+        self.set_zkvm_prover(device);
+    }
+}
+
+#[cfg(feature = "gpu")]
+pub type CenoSDK<E, PCS, SC, VC> =
+    Sdk<E, PCS, GpuBackend<E, PCS>, GpuProver<GpuBackend<E, PCS>>, SC, VC>;
+
+#[cfg(feature = "gpu")]
+impl<E, PCS, SC, VC> CenoSDK<E, PCS, SC, VC>
+where
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    SC: StarkGenericConfig,
+    VC: 'static,
+{
+    pub fn init_base_prover(&mut self, max_num_variables: usize, level: SecurityLevel) {
+        let backend = create_backend(max_num_variables, level);
+        let device = create_prover(backend);
+
+        self.set_zkvm_prover(device);
     }
 }

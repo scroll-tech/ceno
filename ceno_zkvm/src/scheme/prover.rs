@@ -24,6 +24,7 @@ use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProverMessage,
 };
+use tracing::info_span;
 use transcript::Transcript;
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
@@ -129,231 +130,239 @@ impl<
         pi: PublicValues,
         mut transcript: impl Transcript<E> + 'static,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
-        let raw_pi = pi.to_vec::<E>();
-        let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
-        let mut chip_proofs = BTreeMap::new();
+        info_span!("create_proof_of_shard", shard_id = shard_ctx.shard_id).in_scope(|| {
+            let raw_pi = pi.to_vec::<E>();
+            let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
+            let mut chip_proofs = BTreeMap::new();
 
-        let span = entered_span!("commit_to_pi", profiling_1 = true);
-        // including raw public input to transcript
-        for v in raw_pi.iter().flatten() {
-            transcript.append_field_element(v);
-        }
-        exit_span!(span);
-
-        let pi: Vec<MultilinearExtension<E>> =
-            raw_pi.iter().map(|p| p.to_vec().into_mle()).collect();
-
-        // commit to fixed commitment
-        let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
-        if let Some(fixed_commit) = &self.pk.fixed_commit
-            && shard_ctx.is_first_shard()
-        {
-            PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
-        } else if let Some(fixed_commit) = &self.pk.fixed_no_omc_init_commit
-            && !shard_ctx.is_first_shard()
-        {
-            PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
-        }
-        exit_span!(span);
-
-        // only keep track of circuits that have non-zero instances
-        for (name, chip_inputs) in &witnesses.witnesses {
-            let pk = self.pk.circuit_pks.get(name).ok_or(ZKVMError::VKNotFound(
-                format!("proving key for circuit {} not found", name).into(),
-            ))?;
-
-            // include omc init tables iff it's in first shard
-            if !shard_ctx.is_first_shard() && pk.get_cs().with_omc_init_only() {
-                continue;
+            let span = entered_span!("commit_to_pi", profiling_1 = true);
+            // including raw public input to transcript
+            for v in raw_pi.iter().flatten() {
+                transcript.append_field_element(v);
             }
+            exit_span!(span);
 
-            // num_instance from witness might include rotation
-            let num_instances = chip_inputs
-                .iter()
-                .flat_map(|chip_input| &chip_input.num_instances)
-                .collect_vec();
+            let pi: Vec<MultilinearExtension<E>> =
+                raw_pi.iter().map(|p| p.to_vec().into_mle()).collect();
 
-            if num_instances.is_empty() {
-                continue;
+            // commit to fixed commitment
+            let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
+            if let Some(fixed_commit) = &self.pk.fixed_commit
+                && shard_ctx.is_first_shard()
+            {
+                PCS::write_commitment(fixed_commit, &mut transcript)
+                    .map_err(ZKVMError::PCSError)?;
+            } else if let Some(fixed_commit) = &self.pk.fixed_no_omc_init_commit
+                && !shard_ctx.is_first_shard()
+            {
+                PCS::write_commitment(fixed_commit, &mut transcript)
+                    .map_err(ZKVMError::PCSError)?;
             }
+            exit_span!(span);
 
-            let circuit_idx = self.pk.circuit_name_to_index.get(name).unwrap();
-            // write (circuit_idx, num_var) to transcript
-            transcript.append_message(&circuit_idx.to_le_bytes());
-            for num_instance in num_instances {
-                transcript.append_message(&num_instance.to_le_bytes());
-            }
-        }
+            // only keep track of circuits that have non-zero instances
+            for (name, chip_inputs) in &witnesses.witnesses {
+                let pk = self.pk.circuit_pks.get(name).ok_or(ZKVMError::VKNotFound(
+                    format!("proving key for circuit {} not found", name).into(),
+                ))?;
 
-        // extract chip meta info before consuming witnesses
-        // (circuit_name, num_instances)
-        let name_and_instances = witnesses.get_witnesses_name_instance();
-
-        let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
-        let mut wits_rmms = BTreeMap::new();
-
-        let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
-        // commit to opcode circuits first and then commit to table circuits, sorted by name
-        for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
-            let [witness_rmm, structural_witness_rmm] = chip_input.witness_rmms;
-
-            if witness_rmm.num_instances() > 0 {
-                wits_rmms.insert(i, witness_rmm);
-            }
-            structural_rmms.push(structural_witness_rmm);
-        }
-
-        tracing::debug!(
-            "witness rmm in {} MB",
-            wits_rmms
-                .values()
-                .map(|v| v.values.len() * std::mem::size_of::<E::BaseField>())
-                .sum::<usize>() as f64
-                / (1024.0 * 1024.0)
-        );
-
-        // commit to witness traces in batch
-        let (mut witness_mles, witness_data, witin_commit) = self.device.commit_traces(wits_rmms);
-        PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
-        exit_span!(commit_to_traces_span);
-
-        // transfer pk to device
-        let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
-        let mut fixed_mles = self
-            .get_device_proving_key(shard_ctx)
-            .map(|dpk| dpk.fixed_mles.clone())
-            .unwrap_or_default();
-        exit_span!(transfer_pk_span);
-
-        // squeeze two challenges from transcript
-        let challenges = [
-            transcript.read_challenge().elements,
-            transcript.read_challenge().elements,
-        ];
-        tracing::debug!("global challenges in prover: {:?}", challenges);
-
-        let public_input_span = entered_span!("public_input", profiling_1 = true);
-        let public_input = self.device.transport_mles(&pi);
-        exit_span!(public_input_span);
-
-        let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
-
-        let mut points = Vec::new();
-        let mut evaluations = Vec::new();
-        let mut witness_iter = self
-            .device
-            .extract_witness_mles(&mut witness_mles, &witness_data);
-        for ((circuit_name, num_instances), structural_rmm) in name_and_instances
-            .into_iter()
-            .zip_eq(structural_rmms.into_iter())
-        {
-            let circuit_idx = self
-                .pk
-                .circuit_name_to_index
-                .get(&circuit_name)
-                .cloned()
-                .expect("invalid circuit {} not exist in ceno zkvm");
-            let pk = self.pk.circuit_pks.get(&circuit_name).unwrap();
-            let cs = pk.get_cs();
-            if !shard_ctx.is_first_shard() && cs.with_omc_init_only() {
-                assert!(num_instances.is_empty());
-                // skip drain respective fixed because we use different set of fixed commitment
-                continue;
-            }
-            if num_instances.is_empty() {
-                // we need to drain respective fixed when num_instances is 0
-                if cs.num_fixed() > 0 {
-                    let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
+                // include omc init tables iff it's in first shard
+                if !shard_ctx.is_first_shard() && pk.get_cs().with_omc_init_only() {
+                    continue;
                 }
-                continue;
+
+                // num_instance from witness might include rotation
+                let num_instances = chip_inputs
+                    .iter()
+                    .flat_map(|chip_input| &chip_input.num_instances)
+                    .collect_vec();
+
+                if num_instances.is_empty() {
+                    continue;
+                }
+
+                let circuit_idx = self.pk.circuit_name_to_index.get(name).unwrap();
+                // write (circuit_idx, num_var) to transcript
+                transcript.append_field_element(&E::BaseField::from_canonical_usize(*circuit_idx));
+                for num_instance in num_instances {
+                    transcript
+                        .append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
+                }
             }
-            transcript.append_field_element(&E::BaseField::from_canonical_u64(circuit_idx as u64));
 
-            // TODO: add an enum for circuit type either in constraint_system or vk
-            let witness_mle = if cs.num_witin() > 0 {
-                let mles = witness_iter.by_ref().take(cs.num_witin()).collect_vec();
-                assert_eq!(
-                    mles.len(),
-                    cs.num_witin(),
-                    "insufficient witness mles for circuit {}",
-                    circuit_name
-                );
-                mles
-            } else {
-                vec![]
-            };
+            // extract chip meta info before consuming witnesses
+            // (circuit_name, num_instances)
+            let name_and_instances = witnesses.get_witnesses_name_instance();
 
-            let structural_witness_span = entered_span!("structural_witness", profiling_2 = true);
-            let structural_mles = structural_rmm.to_mles();
-            let structural_witness = self.device.transport_mles(&structural_mles);
-            exit_span!(structural_witness_span);
+            let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
+            let mut wits_rmms = BTreeMap::new();
 
-            let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
-            let input = ProofInput {
-                witness: witness_mle,
-                fixed,
-                structural_witness,
-                public_input: public_input.clone(),
-                pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
-                num_instances: num_instances.clone(),
-                has_ecc_ops: cs.has_ecc_ops(),
-            };
+            let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
+            // commit to opcode circuits first and then commit to table circuits, sorted by name
+            for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
+                let [witness_rmm, structural_witness_rmm] = chip_input.witness_rmms;
 
-            let (opcode_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
-                circuit_name.as_str(),
-                pk,
-                input,
-                &mut transcript,
-                &challenges,
-            )?;
-            tracing::trace!(
-                "generated proof for opcode {} with num_instances={:?}",
-                circuit_name,
-                num_instances
+                if witness_rmm.num_instances() > 0 {
+                    wits_rmms.insert(i, witness_rmm);
+                }
+                structural_rmms.push(structural_witness_rmm);
+            }
+
+            tracing::debug!(
+                "witness rmm in {} MB",
+                wits_rmms
+                    .values()
+                    .map(|v| v.values.len() * std::mem::size_of::<E::BaseField>())
+                    .sum::<usize>() as f64
+                    / (1024.0 * 1024.0)
             );
-            if cs.num_witin() > 0 || cs.num_fixed() > 0 {
-                points.push(input_opening_point);
-                evaluations.push(vec![
-                    opcode_proof.wits_in_evals.clone(),
-                    opcode_proof.fixed_in_evals.clone(),
-                ]);
-            } else {
-                assert!(opcode_proof.wits_in_evals.is_empty());
-                assert!(opcode_proof.fixed_in_evals.is_empty());
+
+            // commit to witness traces in batch
+            let (mut witness_mles, witness_data, witin_commit) =
+                self.device.commit_traces(wits_rmms);
+            PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
+            exit_span!(commit_to_traces_span);
+
+            // transfer pk to device
+            let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
+            let mut fixed_mles = self
+                .get_device_proving_key(shard_ctx)
+                .map(|dpk| dpk.fixed_mles.clone())
+                .unwrap_or_default();
+            exit_span!(transfer_pk_span);
+
+            // squeeze two challenges from transcript
+            let challenges = [
+                transcript.read_challenge().elements,
+                transcript.read_challenge().elements,
+            ];
+            tracing::debug!("global challenges in prover: {:?}", challenges);
+
+            let public_input_span = entered_span!("public_input", profiling_1 = true);
+            let public_input = self.device.transport_mles(&pi);
+            exit_span!(public_input_span);
+
+            let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
+
+            let mut points = Vec::new();
+            let mut evaluations = Vec::new();
+            let mut witness_iter = self
+                .device
+                .extract_witness_mles(&mut witness_mles, &witness_data);
+            for ((circuit_name, num_instances), structural_rmm) in name_and_instances
+                .into_iter()
+                .zip_eq(structural_rmms.into_iter())
+            {
+                let circuit_idx = self
+                    .pk
+                    .circuit_name_to_index
+                    .get(&circuit_name)
+                    .cloned()
+                    .expect("invalid circuit {} not exist in ceno zkvm");
+                let pk = self.pk.circuit_pks.get(&circuit_name).unwrap();
+                let cs = pk.get_cs();
+                if !shard_ctx.is_first_shard() && cs.with_omc_init_only() {
+                    assert!(num_instances.is_empty());
+                    // skip drain respective fixed because we use different set of fixed commitment
+                    continue;
+                }
+                if num_instances.is_empty() {
+                    // we need to drain respective fixed when num_instances is 0
+                    if cs.num_fixed() > 0 {
+                        let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
+                    }
+                    continue;
+                }
+                transcript
+                    .append_field_element(&E::BaseField::from_canonical_u64(circuit_idx as u64));
+
+                // TODO: add an enum for circuit type either in constraint_system or vk
+                let witness_mle = if cs.num_witin() > 0 {
+                    let mles = witness_iter.by_ref().take(cs.num_witin()).collect_vec();
+                    assert_eq!(
+                        mles.len(),
+                        cs.num_witin(),
+                        "insufficient witness mles for circuit {}",
+                        circuit_name
+                    );
+                    mles
+                } else {
+                    vec![]
+                };
+
+                let structural_witness_span =
+                    entered_span!("structural_witness", profiling_2 = true);
+                let structural_mles = structural_rmm.to_mles();
+                let structural_witness = self.device.transport_mles(&structural_mles);
+                exit_span!(structural_witness_span);
+
+                let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
+                let input = ProofInput {
+                    witness: witness_mle,
+                    fixed,
+                    structural_witness,
+                    public_input: public_input.clone(),
+                    pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
+                    num_instances: num_instances.clone(),
+                    has_ecc_ops: cs.has_ecc_ops(),
+                };
+
+                let (opcode_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
+                    circuit_name.as_str(),
+                    pk,
+                    input,
+                    &mut transcript,
+                    &challenges,
+                )?;
+                tracing::trace!(
+                    "generated proof for opcode {} with num_instances={:?}",
+                    circuit_name,
+                    num_instances
+                );
+                if cs.num_witin() > 0 || cs.num_fixed() > 0 {
+                    points.push(input_opening_point);
+                    evaluations.push(vec![
+                        opcode_proof.wits_in_evals.clone(),
+                        opcode_proof.fixed_in_evals.clone(),
+                    ]);
+                } else {
+                    assert!(opcode_proof.wits_in_evals.is_empty());
+                    assert!(opcode_proof.fixed_in_evals.is_empty());
+                }
+                chip_proofs
+                    .entry(circuit_idx)
+                    .or_insert(vec![])
+                    .push(opcode_proof);
+                for (idx, eval) in pi_in_evals {
+                    pi_evals[idx] = eval;
+                }
             }
-            chip_proofs
-                .entry(circuit_idx)
-                .or_insert(vec![])
-                .push(opcode_proof);
-            for (idx, eval) in pi_in_evals {
-                pi_evals[idx] = eval;
-            }
-        }
-        drop(witness_iter);
-        exit_span!(main_proofs_span);
+            drop(witness_iter);
+            exit_span!(main_proofs_span);
 
-        // batch opening pcs
-        // generate static info from prover key for expected num variable
-        let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
-        let mpcs_opening_proof = self.device.open(
-            witness_data,
-            self.get_device_proving_key(shard_ctx)
-                .map(|dpk| dpk.pcs_data.clone()),
-            points,
-            evaluations,
-            &mut transcript,
-        );
-        exit_span!(pcs_opening);
+            // batch opening pcs
+            // generate static info from prover key for expected num variable
+            let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
+            let mpcs_opening_proof = self.device.open(
+                witness_data,
+                self.get_device_proving_key(shard_ctx)
+                    .map(|dpk| dpk.pcs_data.clone()),
+                points,
+                evaluations,
+                &mut transcript,
+            );
+            exit_span!(pcs_opening);
 
-        let vm_proof = ZKVMProof::new(
-            raw_pi,
-            pi_evals,
-            chip_proofs,
-            witin_commit,
-            mpcs_opening_proof,
-        );
+            let vm_proof = ZKVMProof::new(
+                raw_pi,
+                pi_evals,
+                chip_proofs,
+                witin_commit,
+                mpcs_opening_proof,
+            );
 
-        Ok(vm_proof)
+            Ok(vm_proof)
+        })
     }
 
     /// create proof for opcode and table circuits

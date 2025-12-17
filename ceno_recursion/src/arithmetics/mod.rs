@@ -11,6 +11,7 @@ use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
 use openvm_stark_backend::p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+
 type E = BabyBearExt4;
 const MAX_NUM_VARS: usize = 25;
 
@@ -1045,6 +1046,7 @@ pub fn extend<C: Config>(
 mod tests {
     use ff_ext::BabyBearExt4;
     use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_instructions::exe::VmExe;
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::{
         asm::{AsmBuilder, AsmCompiler},
@@ -1064,11 +1066,10 @@ mod tests {
             .with_max_segment_len((1 << 22) - 100);
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<F, NativeConfig>::new(config);
-
-        executor
-            .execute_and_then(program.clone(), vec![], |_, seg| Ok(seg), |err| err)
-            .unwrap();
+        let executor = VmExecutor::<F, NativeConfig>::new(config).expect("executor initiation");
+        let exe = VmExe::new(program);
+        let interpreter = executor.instance(&exe).unwrap();
+        interpreter.execute(vec![], None).unwrap();
     }
 
     #[test]

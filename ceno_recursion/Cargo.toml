@@ -21,6 +21,19 @@ gkr_iop = { path = "../gkr_iop" }
 itertools.workspace = true
 mpcs.workspace = true
 multilinear_extensions.workspace = true
+openvm.workspace = true
+openvm-circuit.workspace = true
+openvm-continuations.workspace = true
+openvm-cuda-backend = { workspace = true, optional = true }
+openvm-instructions.workspace = true
+openvm-native-circuit.workspace = true
+openvm-native-compiler.workspace = true
+openvm-native-compiler-derive.workspace = true
+openvm-native-recursion.workspace = true
+openvm-rv32im-circuit.workspace = true
+openvm-sdk.workspace = true
+openvm-stark-backend.workspace = true
+openvm-stark-sdk.workspace = true
 p3.workspace = true
 parse-size = "1.1"
 rand.workspace = true
@@ -34,34 +47,14 @@ transcript.workspace = true
 whir.workspace = true
 witness.workspace = true
 
-# openvm
-openvm.workspace = true
-openvm-circuit.workspace = true
-openvm-continuations.workspace = true
-openvm-native-circuit.workspace = true
-openvm-native-compiler.workspace = true
-openvm-native-compiler-derive.workspace = true
-openvm-native-recursion.workspace = true
-openvm-rv32im-circuit.workspace = true
-openvm-sdk.workspace = true
-
-# openvm = { path = "../../openvm-scroll-tech/crates/toolchain/openvm", default-features = false }
-# openvm-circuit = { path = "../../openvm-scroll-tech/crates/vm", default-features = false, features = ["bench-metrics"] }
-# openvm-native-circuit = { path = "../../openvm-scroll-tech/extensions/native/circuit", default-features = false }
-# openvm-sdk = { path = "../../openvm-scroll-tech/crates/sdk", default-features = false }
-# openvm-native-compiler = { path = "../../openvm-scroll-tech/extensions/native/compiler", default-features = false }
-# openvm-native-compiler-derive = { path = "../../openvm-scroll-tech/extensions/native/compiler/derive", default-features = false }
-# openvm-native-recursion = { path = "../../openvm-scroll-tech/extensions/native/recursion", default-features = false }
-# openvm-continuations = { path = "../../openvm-scroll-tech/crates/continuations", default-features = false }
-# openvm-rv32im-circuit = { path = "../../openvm-scroll-tech/extensions/rv32im/circuit", default-features = false }
-
-openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.1.1", default-features = false }
-openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend.git", tag = "v1.1.1", default-features = false }
-p3-monty-31 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "539bbc84085efb609f4f62cb03cf49588388abdb" }
+[[bin]]
+name = "e2e_aggregate"
+path = "src/bin/e2e_aggregate.rs"
 
 [features]
-bench-metrics = ["openvm-circuit/bench-metrics"]
+bench-metrics = ["openvm-circuit/metrics"]
 default = ["parallel", "nightly-features"]
+gpu = ["openvm-circuit/cuda", "openvm-native-circuit/cuda", "dep:openvm-cuda-backend"]
 nightly-features = [
   "ceno_zkvm/nightly-features",
   "openvm-stark-sdk/nightly-features",

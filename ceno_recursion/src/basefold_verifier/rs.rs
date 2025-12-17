@@ -222,6 +222,7 @@ pub(crate) fn encode_small<C: Config>(
 
 pub mod tests {
     use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_instructions::exe::VmExe;
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::{asm::AsmBuilder, prelude::*};
     use openvm_native_recursion::hints::Hintable;
@@ -251,9 +252,7 @@ pub mod tests {
         builder.halt();
 
         // Pass in witness stream
-        let mut witness_stream: Vec<
-            Vec<p3_monty_31::MontyField31<openvm_stark_sdk::p3_baby_bear::BabyBearParameters>>,
-        > = Vec::new();
+        let mut witness_stream: Vec<Vec<F>> = Vec::new();
 
         let verifier_input = DenseMatrix {
             values: vec![E::ONE; 25],
@@ -263,9 +262,7 @@ pub mod tests {
         // Hint for height
         witness_stream.extend(<usize as Hintable<InnerConfig>>::write(&5));
 
-        let program: Program<
-            p3_monty_31::MontyField31<openvm_stark_sdk::p3_baby_bear::BabyBearParameters>,
-        > = builder.compile_isa();
+        let program: Program<F> = builder.compile_isa();
 
         (program, witness_stream)
     }
@@ -279,13 +276,11 @@ pub mod tests {
             .with_max_segment_len((1 << 25) - 100);
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);
-        executor.execute(program, witness).unwrap();
-
-        // _debug
-        // let results = executor.execute_segments(program, witness).unwrap();
-        // for seg in results {
-        //     println!("=> cycle count: {:?}", seg.metrics.cycle_count);
-        // }
+        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
+        let exe = VmExe::new(program);
+        let interpreter = executor.instance(&exe).unwrap();
+        interpreter
+            .execute(witness, None)
+            .expect("test_dense_matrix_pad should not fail");
     }
 }

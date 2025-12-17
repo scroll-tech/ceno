@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-
 use super::rv32im::EmuContext;
 use crate::{
     PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
+    dense_addr_space::DenseAddrSpace,
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
@@ -17,8 +16,9 @@ pub struct VMState {
     program: Arc<Program>,
     platform: Platform,
     pc: Word,
-    /// Map a word-address (addr/4) to a word.
-    memory: HashMap<WordAddr, Word>,
+    /// Emulated main memory backed by a pre-allocated vector covering the
+    /// platform layout in `memory.x`.
+    memory: DenseAddrSpace<Word>,
     registers: [Word; VMState::REG_COUNT],
     // Termination.
     halted: bool,
@@ -37,10 +37,13 @@ impl VMState {
             pc,
             platform: platform.clone(),
             program: program.clone(),
-            memory: HashMap::new(),
+            memory: DenseAddrSpace::new(
+                ByteAddr::from(platform.rom.start).waddr(),
+                ByteAddr::from(platform.heap.end).waddr(),
+            ),
             registers: [0; VMState::REG_COUNT],
             halted: false,
-            tracer: Tracer::new(Some(&platform)),
+            tracer: Tracer::new(&platform),
         };
 
         // init memory from program.image
@@ -82,7 +85,9 @@ impl VMState {
 
     /// Set a word in memory without side effects.
     pub fn init_memory(&mut self, addr: WordAddr, value: Word) {
-        self.memory.insert(addr, value);
+        self.memory
+            .write(addr, value)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
     }
 
     pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
@@ -93,6 +98,13 @@ impl VMState {
                 Some(self.step())
             }
         })
+    }
+
+    pub fn next_step_record(&mut self) -> Result<Option<StepRecord>> {
+        if self.halted() {
+            return Ok(None);
+        }
+        self.step().map(Some)
     }
 
     fn step(&mut self) -> Result<StepRecord> {
@@ -116,7 +128,9 @@ impl VMState {
 
     fn apply_syscall(&mut self, effects: SyscallEffects) -> Result<()> {
         for (addr, value) in effects.iter_mem_values() {
-            self.memory.insert(addr, value);
+            self.memory
+                .write(addr, value)
+                .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
         }
 
         for (idx, value) in effects.iter_reg_values() {
@@ -218,7 +232,9 @@ impl EmuContext for VMState {
     fn store_memory(&mut self, addr: WordAddr, after: Word) -> Result<()> {
         let before = self.peek_memory(addr);
         self.tracer.store_memory(addr, Change { after, before });
-        self.memory.insert(addr, after);
+        self.memory
+            .write(addr, after)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
         Ok(())
     }
 
@@ -229,7 +245,7 @@ impl EmuContext for VMState {
 
     /// Get the value of a memory word without side-effects.
     fn peek_memory(&self, addr: WordAddr) -> Word {
-        *self.memory.get(&addr).unwrap_or(&0)
+        self.memory.read(addr)
     }
 
     fn fetch(&mut self, pc: WordAddr) -> Option<Instruction> {

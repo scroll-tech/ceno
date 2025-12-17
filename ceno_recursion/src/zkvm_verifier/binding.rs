@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{
     arithmetics::{ceil_log2, next_pow2_instance_padding},
     basefold_verifier::basefold::{
@@ -66,7 +68,7 @@ pub struct ZKVMProofInputVariable<C: Config> {
     pub raw_pi: Array<C, Array<C, Felt<C::F>>>,
     pub raw_pi_num_variables: Array<C, Var<C::N>>,
     pub pi_evals: Array<C, Ext<C::F, C::EF>>,
-    pub chip_proofs: Array<C, ZKVMChipProofInputVariable<C>>,
+    pub chip_proofs: Array<C, Array<C, ZKVMChipProofInputVariable<C>>>,
     pub max_num_var: Var<C::N>,
     pub max_width: Var<C::N>,
     pub witin_commit: BasefoldCommitmentVariable<C>,
@@ -90,7 +92,7 @@ pub(crate) struct ZKVMProofInput {
     pub raw_pi: Vec<Vec<F>>,
     // Evaluation of raw_pi.
     pub pi_evals: Vec<E>,
-    pub chip_proofs: Vec<ZKVMChipProofInput>,
+    pub chip_proofs: BTreeMap<usize, ZKVMChipProofs>,
     pub witin_commit: BasefoldCommitment,
     pub opening_proof: BasefoldProof,
 }
@@ -105,11 +107,17 @@ impl From<(usize, ZKVMProof<E, RecPcs>)> for ZKVMProofInput {
                 .1
                 .chip_proofs
                 .into_iter()
-                .map(|(chip_idx, mut proofs)| {
-                    assert_eq!(proofs.len(), 1, "TODO support > 1 proofs per chip");
-                    ZKVMChipProofInput::from((chip_idx, proofs.remove(0)))
+                .map(|(chip_idx, proofs)| {
+                    (
+                        chip_idx,
+                        proofs
+                            .into_iter()
+                            .map(|proof| ZKVMChipProofInput::from((chip_idx, proof)))
+                            .collect::<Vec<ZKVMChipProofInput>>()
+                            .into(),
+                    )
                 })
-                .collect::<Vec<ZKVMChipProofInput>>(),
+                .collect::<BTreeMap<usize, ZKVMChipProofs>>(),
             witin_commit: d.1.witin_commit.into(),
             opening_proof: d.1.opening_proof.into(),
         }
@@ -124,20 +132,12 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let raw_pi = Vec::<Vec<F>>::read(builder);
         let raw_pi_num_variables = Vec::<usize>::read(builder);
         let pi_evals = Vec::<E>::read(builder);
-        let chip_proofs = Vec::<ZKVMChipProofInput>::read(builder);
+        let chip_proofs = Vec::<ZKVMChipProofs>::read(builder);
         let max_num_var = usize::read(builder);
         let max_width = usize::read(builder);
         let witin_commit = BasefoldCommitment::read(builder);
-        let witin_perm: Array<
-            AsmConfig<
-                p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>,
-                BinomialExtensionField<
-                    p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>,
-                    4,
-                >,
-            >,
-            Var<p3_monty_31::MontyField31<p3::babybear::BabyBearParameters>>,
-        > = Vec::<usize>::read(builder);
+        let witin_perm: Array<AsmConfig<F, BinomialExtensionField<F, 4>>, Var<F>> =
+            Vec::<usize>::read(builder);
         let fixed_perm = Vec::<usize>::read(builder);
         let pcs_proof = BasefoldProof::read(builder);
 
@@ -166,22 +166,26 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let witin_num_vars = self
             .chip_proofs
             .iter()
+            .flat_map(|(_, proofs)| proofs.iter())
             .map(|proof| proof.sum_num_instances)
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
             .iter()
+            .flat_map(|(_, proofs)| proofs.iter())
             .map(|proof| proof.wits_in_evals.len().max(1))
             .collect::<Vec<_>>();
         let fixed_num_vars = self
             .chip_proofs
             .iter()
+            .flat_map(|(_, proofs)| proofs.iter())
             .filter(|proof| !proof.fixed_in_evals.is_empty())
             .map(|proof| proof.sum_num_instances)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
             .iter()
+            .flat_map(|(_, proofs)| proofs.iter())
             .filter(|proof| !proof.fixed_in_evals.is_empty())
             .map(|proof| proof.fixed_in_evals.len())
             .collect::<Vec<_>>();
@@ -213,7 +217,10 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         stream.extend(self.raw_pi.write());
         stream.extend(raw_pi_num_variables.write());
         stream.extend(self.pi_evals.write());
-        stream.extend(self.chip_proofs.write());
+        stream.extend(vec![vec![F::from_canonical_usize(self.chip_proofs.len())]]);
+        for proofs in self.chip_proofs.values() {
+            stream.extend(proofs.write());
+        }
         stream.extend(<usize as Hintable<InnerConfig>>::write(&max_num_var));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&max_width));
         stream.extend(self.witin_commit.write());
@@ -311,7 +318,6 @@ impl Hintable<InnerConfig> for TowerProofInput {
 }
 
 pub struct ZKVMChipProofInput {
-    // _debug: binding
     pub idx: usize,
     pub sum_num_instances: usize,
 
@@ -342,7 +348,37 @@ pub struct ZKVMChipProofInput {
     pub wits_in_evals: Vec<E>,
     pub fixed_in_evals: Vec<E>,
 }
+
 impl VecAutoHintable for ZKVMChipProofInput {}
+
+/// wrapper struct to allow us implement VecAutoHintable
+pub struct ZKVMChipProofs(Vec<ZKVMChipProofInput>);
+
+impl From<Vec<ZKVMChipProofInput>> for ZKVMChipProofs {
+    fn from(v: Vec<ZKVMChipProofInput>) -> Self {
+        Self(v)
+    }
+}
+
+impl VecAutoHintable for ZKVMChipProofs {}
+
+impl ZKVMChipProofs {
+    pub fn iter(&self) -> std::slice::Iter<'_, ZKVMChipProofInput> {
+        self.0.iter()
+    }
+}
+
+impl Hintable<InnerConfig> for ZKVMChipProofs {
+    type HintVariable = Array<InnerConfig, ZKVMChipProofInputVariable<InnerConfig>>;
+
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        Vec::<ZKVMChipProofInput>::read(builder)
+    }
+
+    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
+        self.0.write()
+    }
+}
 
 impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
     fn from(d: (usize, ZKVMChipProof<E>)) -> Self {
@@ -660,9 +696,6 @@ impl Hintable<InnerConfig> for LayerProofInput {
 }
 #[derive(Default)]
 pub struct GKRProofInput {
-    // _debug: binding
-    // pub num_var_with_rotation: usize,
-    // pub num_instances: usize,
     pub layer_proofs: Vec<LayerProofInput>,
 }
 
@@ -680,38 +713,17 @@ impl From<GKRProof<E>> for GKRProofInput {
 
 #[derive(DslVariable, Clone)]
 pub struct GKRProofVariable<C: Config> {
-    // _debug: binding
-    // pub num_var_with_rotation: Usize<C::N>,
-    // pub num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
     pub layer_proofs: Array<C, LayerProofVariable<C>>,
 }
 impl Hintable<InnerConfig> for GKRProofInput {
     type HintVariable = GKRProofVariable<InnerConfig>;
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        // let num_var_with_rotation = Usize::Var(usize::read(builder));
-        // let num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
         let layer_proofs = Vec::<LayerProofInput>::read(builder);
-        Self::HintVariable {
-            // _debug: binding
-            // num_var_with_rotation,
-            // num_instances_minus_one_bit_decomposition,
-            layer_proofs,
-        }
+        Self::HintVariable { layer_proofs }
     }
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        // _debug: binding
-        // stream.extend(<usize as Hintable<InnerConfig>>::write(
-        //     &self.num_var_with_rotation,
-        // ));
-
-        // let eq_instance = self.num_instances - 1;
-        // let mut bit_decomp: Vec<F> = vec![];
-        // for i in 0..32usize {
-        //     bit_decomp.push(F::from_canonical_usize((eq_instance >> i) & 1));
-        // }
-        // stream.extend(bit_decomp.write());
         stream.extend(self.layer_proofs.write());
         stream
     }
