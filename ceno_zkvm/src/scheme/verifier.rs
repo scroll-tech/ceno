@@ -210,11 +210,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // write (circuit_idx, num_instance) to transcript
-        for (circuit_idx, proofs) in &vm_proof.chip_proofs {
-            transcript.append_message(&circuit_idx.to_le_bytes());
+        for (circuit_idx, proofs) in vm_proof.chip_proofs.iter() {
+            transcript.append_field_element(&E::BaseField::from_canonical_u32(*circuit_idx as u32));
             // length of proof.num_instances will be constrained in verify_chip_proof
             for num_instance in proofs.iter().flat_map(|proof| &proof.num_instances) {
-                transcript.append_message(&num_instance.to_le_bytes());
+                transcript.append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
             }
         }
 
@@ -234,7 +234,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-        tracing::trace!(
+        tracing::info!(
             "{shard_id}th shard challenges in verifier: {:?}",
             challenges
         );

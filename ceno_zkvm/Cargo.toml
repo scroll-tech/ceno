@@ -48,6 +48,7 @@ crossbeam = { version = "*", optional = true }
 derive = { path = "../derive" }
 generic-array.workspace = true
 generic_static = "0.2"
+metrics.workspace = true
 num.workspace = true
 num-bigint = "0.4.6"
 parse-size = "1.1"

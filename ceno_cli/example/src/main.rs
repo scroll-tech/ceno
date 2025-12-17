@@ -28,5 +28,5 @@ fn main() {
         panic!();
     }
 
-    ceno_rt::commit::<Archived<u32>, _>(&cnt_primes);
+    ceno_rt::commit(&cnt_primes);
 }

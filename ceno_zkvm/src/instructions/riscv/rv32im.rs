@@ -159,7 +159,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub ecall_cells_map: HashMap<String, u64>,
 }
 
-const KECCAK_CELL_BLOWUP_FACTOR: u64 = 2;
+const KECCAK_CELL_BLOWUP_FACTOR: u64 = 6;
 
 impl<E: ExtensionField> Rv32imConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
@@ -954,6 +954,11 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
                 .expect("unable to find name"),
             // phantom
             LogPcCycleSpec::CODE => 0,
+            ceno_emul::BN254_FP_ADD
+            | ceno_emul::BN254_FP_MUL
+            | ceno_emul::BN254_FP2_ADD
+            | ceno_emul::BN254_FP2_MUL
+            | ceno_emul::SHA_EXTEND => 0,
             // other type of ecalls are handled by dummy ecall instruction
             _ => unreachable!("unknow match record {:?}", record),
         }

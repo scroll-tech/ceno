@@ -9,7 +9,7 @@ pub struct Sha256ExtendSpec;
 impl SyscallSpec for Sha256ExtendSpec {
     const NAME: &'static str = "SHA256_EXTEND";
 
-    const REG_OPS_COUNT: usize = 2;
+    const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = SHA_EXTEND_WORDS;
     const CODE: u32 = ceno_syscall::SHA_EXTEND;
 }

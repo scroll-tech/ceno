@@ -1,17 +1,13 @@
 use crate::zkvm_verifier::{
-    binding::{
-        E, F, SepticExtensionVariable, SepticPointVariable, ZKVMProofInput, ZKVMProofInputVariable,
-    },
-    verifier::{add_septic_points_in_place, verify_zkvm_proof},
+    binding::{E, F, ZKVMProofInput, ZKVMProofInputVariable},
+    verifier::verify_zkvm_proof,
 };
-use ceno_emul::Tracer;
 use ceno_zkvm::{
-    instructions::riscv::constants::{
-        END_PC_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
-    },
-    scheme::{ZKVMProof, constants::SEPTIC_EXTENSION_DEGREE},
+    instructions::riscv::constants::{END_PC_IDX, EXIT_CODE_IDX, INIT_PC_IDX},
+    scheme::ZKVMProof,
     structs::ZKVMVerifyingKey,
 };
+use ff_ext::BabyBearExt4;
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{
     arch::{
@@ -20,15 +16,14 @@ use openvm_circuit::{
     system::program::trace::VmCommittedExe,
     utils::air_test_impl,
 };
+use openvm_stark_backend::config::{PcsProverData, Val};
 
+use internal::InternalVmVerifierConfig;
 use openvm_continuations::{
     C,
     verifier::{
         common::types::VmVerifierPvs,
-        internal::{
-            InternalVmVerifierConfig,
-            types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
-        },
+        internal::types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
     },
 };
 #[cfg(feature = "gpu")]
@@ -63,7 +58,7 @@ use openvm_stark_sdk::{
 };
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, fs::File, sync::Arc, time::Instant};
+use std::{borrow::Borrow, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use openvm_circuit::{
     arch::{
@@ -76,10 +71,14 @@ use openvm_circuit::{
 };
 use openvm_native_compiler::{
     asm::AsmConfig,
-    ir::{Array, Builder, Config, Felt},
+    ir::{Builder, Config, Felt},
 };
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
+
+mod internal;
+mod root;
+mod types;
 
 pub type InnerConfig = AsmConfig<F, E>;
 pub const LEAF_LOG_BLOWUP: usize = 1;
@@ -99,9 +98,19 @@ pub struct CenoAggregationProver {
 
 impl CenoAggregationProver {
     pub fn new(
-        vm_builder: NativeBuilder,
-        vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
+        leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
+        internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
+        pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) -> Self {
+        Self {
+            leaf_prover,
+            internal_prover,
+            vk: pk.get_vk(),
+            pk,
+        }
+    }
+
+    pub fn from_base_vk(vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>) -> Self {
         let vb = NativeBuilder::default();
         let [leaf_fri_params, internal_fri_params, _root_fri_params] =
             [LEAF_LOG_BLOWUP, INTERNAL_LOG_BLOWUP, ROOT_LOG_BLOWUP]
@@ -151,7 +160,7 @@ impl CenoAggregationProver {
             leaf_engine.config().pcs(),
         ));
         let leaf_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
-            vm_builder.clone(),
+            vb.clone(),
             &leaf_vm_pk,
             leaf_committed_exe.exe.clone(),
         )
@@ -178,9 +187,12 @@ impl CenoAggregationProver {
 
         // Internal keygen
         let internal_engine = BabyBearPoseidon2Engine::new(internal_fri_params);
-        let (internal_vm, vm_pk) =
-            VirtualMachine::new_with_keygen(internal_engine, vb, internal_vm_config.clone())
-                .expect("internal keygen");
+        let (internal_vm, vm_pk) = VirtualMachine::new_with_keygen(
+            internal_engine,
+            vb.clone(),
+            internal_vm_config.clone(),
+        )
+        .expect("internal keygen");
         check_max_constraint_degrees(&internal_vm_config.system, &internal_fri_params);
         assert!(vm_pk.max_constraint_degree <= internal_fri_params.max_constraint_degree());
         let internal_vm_pk = Arc::new(VmProvingKey {
@@ -202,11 +214,14 @@ impl CenoAggregationProver {
             internal_vm.engine.config().pcs(),
         ));
         let internal_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
-            vm_builder.clone(),
+            vb.clone(),
             &internal_vm_pk,
             internal_committed_exe.exe.clone(),
         )
         .expect("internal prover");
+
+        // TODO: build root program (requires shard ram ec point is zero)
+        // TODO: add root prover
 
         let vk = CenoRecursionVerifierKeys {
             leaf_vm_vk,
@@ -230,6 +245,125 @@ impl CenoAggregationProver {
             pk,
         }
     }
+
+    pub fn generate_root_proof(
+        &mut self,
+        base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
+    ) -> VmStarkProof<SC> {
+        let aggregation_start_timestamp = Instant::now();
+
+        // Construct zkvm proof input
+        let zkvm_proof_inputs: Vec<ZKVMProofInput> = base_proofs
+            .into_iter()
+            .enumerate()
+            .map(|(shard_id, p)| ZKVMProofInput::from((shard_id, p)))
+            .collect();
+        let user_public_values: Vec<F> = zkvm_proof_inputs
+            .iter()
+            .flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>())
+            .collect();
+        let leaf_inputs = chunk_ceno_leaf_proof_inputs(zkvm_proof_inputs);
+
+        let leaf_proofs = leaf_inputs
+            .iter()
+            .enumerate()
+            .map(|(proof_idx, p)| {
+                println!(
+                    "Aggregation - Start leaf proof (idx: {:?}) at: {:?}",
+                    proof_idx,
+                    aggregation_start_timestamp.elapsed()
+                );
+
+                let mut witness_stream: Vec<Vec<F>> = Vec::new();
+                witness_stream.extend(p.write());
+
+                let leaf_proof = SingleSegmentVmProver::prove(
+                    &mut self.leaf_prover,
+                    witness_stream,
+                    VM_MAX_TRACE_HEIGHTS,
+                )
+                .expect("leaf proof generation failed");
+
+                // _debug: export
+                // let file =
+                // File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
+                // bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
+
+                println!(
+                    "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}, public values: {:?}",
+                    proof_idx,
+                    aggregation_start_timestamp.elapsed(),
+                    leaf_proof.per_air[PUBLIC_VALUES_AIR_ID].public_values,
+                );
+
+                leaf_proof
+            })
+            .collect::<Vec<_>>();
+
+        // Aggregate tree to root proof
+        let mut internal_node_idx = -1;
+        let mut internal_node_height = 0;
+        let mut proofs = leaf_proofs;
+
+        println!(
+            "Aggregation - Start internal aggregation at: {:?}",
+            aggregation_start_timestamp.elapsed()
+        );
+        // We will always generate at least one internal proof, even if there is only one leaf
+        // proof, in order to shrink the proof size
+        while proofs.len() > 1 || internal_node_height == 0 {
+            let internal_inputs = InternalVmVerifierInput::chunk_leaf_or_internal_proofs(
+                (*self.internal_prover.program_commitment()).into(),
+                &proofs,
+                DEFAULT_NUM_CHILDREN_INTERNAL,
+            );
+
+            let layer_proofs: Vec<Proof<_>> = internal_inputs
+                .into_iter()
+                .map(|input| {
+                    internal_node_idx += 1;
+                    let internal_proof = SingleSegmentVmProver::prove(
+                        &mut self.internal_prover,
+                        input.write(),
+                        VM_MAX_TRACE_HEIGHTS,
+                    )
+                    .expect("internal proof generation failed");
+
+                    println!(
+                        "Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}",
+                        internal_node_idx,
+                        internal_node_height,
+                        aggregation_start_timestamp.elapsed()
+                    );
+
+                    // _debug: export
+                    // let file = File::create(format!(
+                    // "internal_proof_{:?}_height_{:?}.bin",
+                    // internal_node_idx, internal_node_height
+                    // ))
+                    // .expect("Create export proof file");
+                    // bincode::serialize_into(file, &internal_proof).expect("failed to serialize internal proof");
+                    internal_proof
+                })
+                .collect();
+
+            proofs = layer_proofs;
+            internal_node_height += 1;
+        }
+        println!(
+            "Aggregation - Completed internal aggregation at: {:?}",
+            aggregation_start_timestamp.elapsed()
+        );
+        println!("Aggregation - Final height: {:?}", internal_node_height);
+
+        // TODO: generate root proof from last internal proof
+
+        // Export e2e stark proof (used in verify_e2e_stark_proof)
+        VmStarkProof {
+            inner: proofs.pop().unwrap(),
+            user_public_values,
+        }
+    }
 }
 
 /// Config to generate leaf VM verifier program.
@@ -248,112 +382,65 @@ impl CenoLeafVmVerifierConfig {
 
             builder.cycle_tracker_start("Verify Ceno ZKVM Proof");
             let zkvm_proof = ceno_leaf_input.proof;
-            let shard_raw_pi = zkvm_proof.raw_pi.clone();
-            let calculated_shard_ec_sum = verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
+            let raw_pi = zkvm_proof.raw_pi.clone();
+            let _calculated_shard_ec_sum = verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
             builder.cycle_tracker_end("Verify Ceno ZKVM Proof");
 
             builder.cycle_tracker_start("PV Operations");
-            let pv = ceno_leaf_input.pv;
-            builder
-                .if_eq(ceno_leaf_input.is_last, Usize::from(1))
-                .then(|builder| {
-                    builder.assert_nonzero(&pv.len());
 
-                    // PC and cycle checks
-                    let prev_pc: Ext<_, _> = builder.uninit();
-                    builder.range(0, pv.len()).for_each(|idx_vec, builder| {
-                        let shard_pi = builder.get(&pv, idx_vec[0]);
-                        let init_cycle = builder.get(&shard_pi, INIT_CYCLE_IDX);
-                        let tracer_default: Ext<_, _> =
-                            builder.constant(E::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN));
-                        builder.assert_ext_eq(init_cycle, tracer_default);
-                        let end_pc = builder.get(&shard_pi, END_PC_IDX);
-                        let init_pc = builder.get(&shard_pi, INIT_PC_IDX);
-                        builder.if_eq(idx_vec[0], Usize::from(0)).then_or_else(
-                            |builder| {
-                                let entry_point: Ext<_, _> =
-                                    builder.constant(E::from_canonical_u32(self.vk.entry_pc));
-                                builder.assert_ext_eq(init_pc, entry_point);
-                            },
-                            |builder| {
-                                builder.assert_ext_eq(init_pc, prev_pc);
-                            },
-                        );
-                        builder.assign(&prev_pc, end_pc);
-                    });
+            // TODO: define our own VmVerifierPvs
+            for i in 0..DIGEST_SIZE {
+                builder.assign(&stark_pvs.app_commit[i], F::ZERO);
+            }
 
-                    // EC sum verification
-                    let expected_last_shard_id = Usize::uninit(builder);
-                    builder.assign(&expected_last_shard_id, pv.len() - Usize::from(1));
+            let pv = &raw_pi;
+            let init_pc = {
+                let arr = builder.get(pv, INIT_PC_IDX);
+                builder.get(&arr, 0)
+            };
+            let end_pc = {
+                let arr = builder.get(pv, END_PC_IDX);
+                builder.get(&arr, 0)
+            };
+            let exit_code = {
+                let arr = builder.get(pv, EXIT_CODE_IDX);
+                builder.get(&arr, 0)
+            };
+            builder.assign(&stark_pvs.connector.initial_pc, init_pc);
+            builder.assign(&stark_pvs.connector.final_pc, end_pc);
+            builder.assign(&stark_pvs.connector.exit_code, exit_code);
 
-                    let shard_id_fs = builder.get(&shard_raw_pi, SHARD_ID_IDX);
-                    let shard_id_f = builder.get(&shard_id_fs, 0);
-                    let shard_id = Usize::Var(builder.cast_felt_to_var(shard_id_f));
-                    builder.assert_usize_eq(expected_last_shard_id, shard_id);
+            // TODO: assign shard_ec_sum to stark_pvs.shard_ec_sum
 
-                    let ec_sum = SepticPointVariable {
-                        x: SepticExtensionVariable {
-                            vs: builder.dyn_array(7),
-                        },
-                        y: SepticExtensionVariable {
-                            vs: builder.dyn_array(7),
-                        },
-                        is_infinity: Usize::uninit(builder),
-                    };
-                    builder.assign(&ec_sum.is_infinity, Usize::from(1));
+            // builder
+            //     .if_eq(ceno_leaf_input.is_last, Usize::from(1))
+            //     .then(|builder| {
+            //         builder.assert_nonzero(&pv.len());
 
-                    builder.range(0, pv.len()).for_each(|idx_vec, builder| {
-                        let shard_pv = builder.get(&pv, idx_vec[0]);
-                        let x = SepticExtensionVariable {
-                            vs: shard_pv.slice(
-                                builder,
-                                SHARD_RW_SUM_IDX,
-                                SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
-                            ),
-                        };
-                        let y = SepticExtensionVariable {
-                            vs: shard_pv.slice(
-                                builder,
-                                SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE,
-                                SHARD_RW_SUM_IDX + 2 * SEPTIC_EXTENSION_DEGREE,
-                            ),
-                        };
-                        let shard_ec = SepticPointVariable {
-                            x: x.clone(),
-                            y: y.clone(),
-                            is_infinity: Usize::uninit(builder),
-                        };
-                        let is_x_zero = x.is_zero(builder);
-                        let is_y_zero = y.is_zero(builder);
-                        builder.if_eq(is_x_zero, Usize::from(1)).then_or_else(
-                            |builder| {
-                                builder
-                                    .if_eq(is_y_zero.clone(), Usize::from(1))
-                                    .then_or_else(
-                                        |builder| {
-                                            builder.assign(&shard_ec.is_infinity, Usize::from(1));
-                                        },
-                                        |builder| {
-                                            builder.assign(&shard_ec.is_infinity, Usize::from(0));
-                                        },
-                                    );
-                            },
-                            |builder| {
-                                builder.assign(&shard_ec.is_infinity, Usize::from(0));
-                            },
-                        );
+            //         // PC and cycle checks
+            //         let prev_pc: Ext<_, _> = builder.uninit();
+            //         builder.range(0, pv.len()).for_each(|idx_vec, builder| {
+            //             let shard_pi = builder.get(&pv, idx_vec[0]);
+            //             let init_cycle = builder.get(&shard_pi, INIT_CYCLE_IDX);
+            //             let tracer_default: Ext<_, _> =
+            //                 builder.constant(E::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN));
+            //             builder.assert_ext_eq(init_cycle, tracer_default);
+            //             let end_pc = builder.get(&shard_pi, END_PC_IDX);
+            //             let init_pc = builder.get(&shard_pi, INIT_PC_IDX);
+            //             builder.if_eq(idx_vec[0], Usize::from(0)).then_or_else(
+            //                 |builder| {
+            //                     let entry_point: Ext<_, _> =
+            //                         builder.constant(E::from_canonical_u32(self.vk.entry_pc));
+            //                     builder.assert_ext_eq(init_pc, entry_point);
+            //                 },
+            //                 |builder| {
+            //                     builder.assert_ext_eq(init_pc, prev_pc);
+            //                 },
+            //             );
+            //             builder.assign(&prev_pc, end_pc);
+            //         });
 
-                        add_septic_points_in_place(builder, &ec_sum, &shard_ec);
-                    });
-
-                    add_septic_points_in_place(builder, &ec_sum, &calculated_shard_ec_sum);
-
-                    let is_sum_x_zero = ec_sum.x.is_zero(builder);
-                    let is_sum_y_zero = ec_sum.y.is_zero(builder);
-
-                    builder.assert_usize_eq(is_sum_x_zero, Usize::from(1));
-                    builder.assert_usize_eq(is_sum_y_zero, Usize::from(1));
-                });
+            //     });
 
             for pv in stark_pvs.flatten() {
                 builder.commit_public_value(pv);
@@ -379,6 +466,11 @@ pub struct CenoRecursionVerifierKeys<SC: StarkGenericConfig> {
     pub internal_commit: Com<SC>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "VmExe<Val<SC>>: Serialize, PcsProverData<SC>: Serialize, VC: Serialize",
+    deserialize = "VmExe<Val<SC>>: Deserialize<'de>, PcsProverData<SC>: Deserialize<'de>, VC: Deserialize<'de>"
+))]
 pub struct CenoRecursionProvingKeys<SC: StarkGenericConfig, VC> {
     pub leaf_vm_pk: Arc<VmProvingKey<SC, VC>>,
     pub leaf_committed_exe: Arc<VmCommittedExe<SC>>,
@@ -411,14 +503,12 @@ impl<SC: StarkGenericConfig, VC> CenoRecursionProvingKeys<SC, VC> {
 pub(crate) struct CenoLeafVmVerifierInput {
     pub proof: ZKVMProofInput,
     pub is_last: usize,
-    pub pv: Vec<Vec<E>>,
 }
 
 #[derive(DslVariable, Clone)]
 pub(crate) struct CenoLeafVmVerifierInputVariable<C: Config> {
     pub proof: ZKVMProofInputVariable<C>,
     pub is_last: Usize<C::N>,
-    pub pv: Array<C, Array<C, Ext<C::F, C::EF>>>,
 }
 
 impl Hintable<InnerConfig> for CenoLeafVmVerifierInput {
@@ -427,16 +517,14 @@ impl Hintable<InnerConfig> for CenoLeafVmVerifierInput {
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let proof = ZKVMProofInput::read(builder);
         let is_last = Usize::Var(usize::read(builder));
-        let pv = Vec::<Vec<E>>::read(builder);
 
-        Self::HintVariable { proof, is_last, pv }
+        Self::HintVariable { proof, is_last }
     }
 
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
         stream.extend(self.proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.is_last));
-        stream.extend(<Vec<Vec<E>> as Hintable<InnerConfig>>::write(&self.pv));
         stream
     }
 }
@@ -444,151 +532,18 @@ impl Hintable<InnerConfig> for CenoLeafVmVerifierInput {
 pub(crate) fn chunk_ceno_leaf_proof_inputs(
     zkvm_proofs: Vec<ZKVMProofInput>,
 ) -> Vec<CenoLeafVmVerifierInput> {
-    let user_public_values = zkvm_proofs
-        .iter()
-        .map(|p| p.pi_evals.clone())
-        .collect::<Vec<Vec<E>>>();
     let mut ret: Vec<CenoLeafVmVerifierInput> = zkvm_proofs
         .into_iter()
         .map(|p| CenoLeafVmVerifierInput {
             proof: p,
             is_last: 0,
-            pv: vec![],
         })
         .collect();
 
     let last = ret.last_mut().unwrap();
-    last.pv = user_public_values;
     last.is_last = 1;
 
     ret
-}
-
-pub fn compress_to_root_proof(
-    zkvm_proofs: Vec<ZKVMProof<E, RecPcs>>,
-    vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
-) -> (CenoRecursionVerifierKeys<SC>, VmStarkProof<SC>) {
-    let aggregation_start_timestamp = Instant::now();
-
-    // Construct zkvm proof input
-    let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs
-        .into_iter()
-        .enumerate()
-        .map(|(shard_id, p)| ZKVMProofInput::from((shard_id, p)))
-        .collect();
-    let user_public_values: Vec<F> = zkvm_proof_inputs
-        .iter()
-        .flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>())
-        .collect();
-    let leaf_inputs = chunk_ceno_leaf_proof_inputs(zkvm_proof_inputs);
-
-    let vm_builder = NativeBuilder::default();
-    let mut ceno_aggregation_prover = CenoAggregationProver::new(vm_builder, vk);
-
-    let leaf_proofs = leaf_inputs
-        .iter()
-        .enumerate()
-        .map(|(proof_idx, p)| {
-            println!(
-                "Aggregation - Start leaf proof (idx: {:?}) at: {:?}",
-                proof_idx,
-                aggregation_start_timestamp.elapsed()
-            );
-
-            let mut witness_stream: Vec<Vec<F>> = Vec::new();
-            witness_stream.extend(p.write());
-
-            let leaf_proof = SingleSegmentVmProver::prove(
-                &mut ceno_aggregation_prover.leaf_prover,
-                witness_stream,
-                VM_MAX_TRACE_HEIGHTS,
-            );
-
-            // _debug: export
-            // let file =
-            // File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
-            // bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
-
-            println!(
-                "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}",
-                proof_idx,
-                aggregation_start_timestamp.elapsed()
-            );
-
-            leaf_proof.expect("leaf proof")
-        })
-        .collect::<Vec<_>>();
-
-    // Aggregate tree to root proof
-    let mut internal_node_idx = -1;
-    let mut internal_node_height = 0;
-    let mut proofs = leaf_proofs;
-
-    println!(
-        "Aggregation - Start internal aggregation at: {:?}",
-        aggregation_start_timestamp.elapsed()
-    );
-    // We will always generate at least one internal proof, even if there is only one leaf
-    // proof, in order to shrink the proof size
-    while proofs.len() > 1 || internal_node_height == 0 {
-        let internal_inputs = InternalVmVerifierInput::chunk_leaf_or_internal_proofs(
-            (*ceno_aggregation_prover.internal_prover.program_commitment()).into(),
-            &proofs,
-            DEFAULT_NUM_CHILDREN_INTERNAL,
-        );
-
-        let layer_proofs: Vec<Proof<_>> = internal_inputs
-            .into_iter()
-            .map(|input| {
-                internal_node_idx += 1;
-                let internal_proof = SingleSegmentVmProver::prove(
-                    &mut ceno_aggregation_prover.internal_prover,
-                    input.write(),
-                    VM_MAX_TRACE_HEIGHTS,
-                );
-
-                println!(
-                    "Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}",
-                    internal_node_idx,
-                    internal_node_height,
-                    aggregation_start_timestamp.elapsed()
-                );
-
-                // _debug: export
-                // let file = File::create(format!(
-                // "internal_proof_{:?}_height_{:?}.bin",
-                // internal_node_idx, internal_node_height
-                // ))
-                // .expect("Create export proof file");
-                // bincode::serialize_into(file, &internal_proof).expect("failed to serialize internal proof");
-                internal_proof.expect("internal_proof")
-            })
-            .collect();
-
-        proofs = layer_proofs;
-        internal_node_height += 1;
-    }
-    println!(
-        "Aggregation - Completed internal aggregation at: {:?}",
-        aggregation_start_timestamp.elapsed()
-    );
-    println!("Aggregation - Final height: {:?}", internal_node_height);
-
-    // Export e2e stark proof (used in verify_e2e_stark_proof)
-    let root_stark_proof = VmStarkProof {
-        inner: proofs.pop().unwrap(),
-        user_public_values,
-    };
-    // let file = File::create("root_stark_proof.bin").expect("Create export proof file");
-    // bincode::serialize_into(file, &root_stark_proof).expect("failed to serialize internal proof");
-
-    // Export aggregation key (used in verify_e2e_stark_proof)
-    let vk = ceno_aggregation_prover.vk;
-
-    let file = File::create("ceno_vk.bin").expect("Create export proof file");
-    bincode::serialize_into(file, &vk).expect("failed to serialize internal proof");
-
-    (vk, root_stark_proof)
 }
 
 // Source from OpenVm SDK::verify_e2e_stark_proof with abridged key
@@ -749,7 +704,7 @@ pub fn verify_proofs(
 mod tests {
     use super::verify_e2e_stark_proof;
     use crate::{
-        aggregation::{compress_to_root_proof, verify_proofs},
+        aggregation::{CenoAggregationProver, verify_proofs},
         zkvm_verifier::binding::E,
     };
     use ceno_zkvm::{
@@ -776,11 +731,17 @@ mod tests {
             bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
                 .expect("Failed to deserialize vk file");
 
-        let (vk, root_stark_proof) = compress_to_root_proof(zkvm_proofs, vk);
+        let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
+        let root_stark_proof = agg_prover.generate_root_proof(zkvm_proofs);
 
         // _debug
-        verify_e2e_stark_proof(&vk, &root_stark_proof, &Bn254Fr::ZERO, &Bn254Fr::ZERO)
-            .expect("Verify e2e stark proof should pass");
+        verify_e2e_stark_proof(
+            &agg_prover.vk,
+            &root_stark_proof,
+            &Bn254Fr::ZERO,
+            &Bn254Fr::ZERO,
+        )
+        .expect("Verify e2e stark proof should pass");
     }
 
     pub fn verify_single_inner_thread() {
