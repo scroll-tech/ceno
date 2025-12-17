@@ -1,7 +1,8 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
     arithmetics::{
-        _print_usize_arr, UniPolyExtrapolator, challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend, exts_to_felts, reverse
+        UniPolyExtrapolator, challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend,
+        exts_to_felts, reverse,
     },
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::transcript_observe_label,
@@ -375,7 +376,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.set(&input_ctx, 7, Usize::from(1));
         let n_v = builder.get(&num_variables, 0);
         builder.set(&input_ctx, 8, n_v);
-    
+
         let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
         builder.set(&challenges, 0, alpha);
 
