@@ -25,7 +25,7 @@ use std::{collections::BTreeMap, fmt, mem};
 pub struct StepRecord {
     cycle: Cycle,
     pc: Change<ByteAddr>,
-    heap_watermark_ptr: Change<ByteAddr>,
+    pub heap_watermark_ptr: Change<ByteAddr>,
     pub insn: Instruction,
 
     rs1: Option<ReadOp>,

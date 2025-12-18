@@ -229,7 +229,7 @@ impl<'a> Default for ShardContext<'a> {
             max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
             platform: CENO_PLATFORM,
-            shard_heap_addr_range: 0..Addr::MAX,
+            shard_heap_addr_range: CENO_PLATFORM.heap,
         }
     }
 }
@@ -543,7 +543,6 @@ pub trait StepCellExtractor {
     fn extract_cells(&self, step: &StepRecord) -> u64;
 }
 
-#[derive(Default)]
 pub struct ShardContextBuilder {
     pub cur_shard_id: usize,
     addr_future_accesses: Arc<NextCycleAccess>,
@@ -555,11 +554,33 @@ pub struct ShardContextBuilder {
     prev_shard_cycle_range: Vec<Cycle>,
     // holds the first step for the next shard once the current shard hits its limit
     pending_step: Option<StepRecord>,
+    platform: Platform,
+}
+
+impl Default for ShardContextBuilder {
+    fn default() -> Self {
+        ShardContextBuilder {
+            cur_shard_id: 0,
+            addr_future_accesses: Arc::new(Default::default()),
+            cur_cells: 0,
+            cur_acc_cycle: 0,
+            max_cell_per_shard: 0,
+            max_cycle_per_shard: 0,
+            target_cell_first_shard: 0,
+            prev_shard_cycle_range: vec![],
+            pending_step: None,
+            platform: CENO_PLATFORM,
+        }
+    }
 }
 
 impl ShardContextBuilder {
     /// set max_cell_per_shard == u64::MAX if target for single shard
-    pub fn new(multi_prover: &MultiProver, addr_future_accesses: NextCycleAccess) -> Self {
+    pub fn new(
+        multi_prover: &MultiProver,
+        platform: Platform,
+        addr_future_accesses: NextCycleAccess,
+    ) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
         ShardContextBuilder {
@@ -578,6 +599,7 @@ impl ShardContextBuilder {
             addr_future_accesses: Arc::new(addr_future_accesses),
             prev_shard_cycle_range: vec![0],
             pending_step: None,
+            platform,
         }
     }
 
@@ -637,6 +659,15 @@ impl ShardContextBuilder {
                 ..(steps.last().unwrap().cycle() + FullTracer::SUBCYCLES_PER_INSN) as usize,
             addr_future_accesses: self.addr_future_accesses.clone(),
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
+            platform: self.platform.clone(),
+            shard_heap_addr_range: steps
+                .first()
+                .map(|step| step.heap_watermark_ptr.before.0)
+                .unwrap_or_default()
+                ..steps
+                    .last()
+                    .map(|step| step.heap_watermark_ptr.after.0)
+                    .unwrap_or_default(),
             ..Default::default()
         };
         self.prev_shard_cycle_range
@@ -884,8 +915,11 @@ pub fn emulate_program<'a>(
         );
     }
 
-    let shard_ctx_builder =
-        ShardContextBuilder::new(multi_prover, vm.take_tracer().into_next_accesses());
+    let shard_ctx_builder = ShardContextBuilder::new(
+        multi_prover,
+        platform.clone(),
+        vm.take_tracer().into_next_accesses(),
+    );
 
     EmulationResult {
         pi,
@@ -1878,7 +1912,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 #[cfg(test)]
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
-    use ceno_emul::{Cycle, FullTracer, NextCycleAccess, StepRecord};
+    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepRecord};
     use itertools::Itertools;
 
     struct UniformStepExtractor;
@@ -1917,6 +1951,7 @@ mod tests {
     ) {
         let mut shard_ctx_builder = ShardContextBuilder::new(
             &MultiProver::new(0, 1, u64::MAX, max_cycle_per_shard),
+            CENO_PLATFORM,
             NextCycleAccess::default(),
         );
 
