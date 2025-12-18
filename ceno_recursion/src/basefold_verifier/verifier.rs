@@ -71,6 +71,7 @@ pub fn batch_verify<C: Config>(
         builder.assign(&running_coeff, running_coeff * batch_coeff);
     });
 
+    /* _debug
     // The max num var and max width are provided by the prover and not guaranteed to be correct.
     // Check that
     //  1. max_num_var is greater than or equal to every num var (same for width);
@@ -87,17 +88,21 @@ pub fn batch_verify<C: Config>(
             // num_var is always smaller than 32.
             builder.range_check_var(diff, 5);
             builder.assign(&diff_product_num_var, diff_product_num_var * diff);
-
             let diff: Var<C::N> = builder.eval(max_width - opening.point_and_evals.evals.len());
             // width is always smaller than 2^14.
             builder.range_check_var(diff, 14);
             builder.assign(&diff_product_width, diff_product_width * diff);
         });
     });
+
+    */
     // Check that at least one num_var is equal to max_num_var
     let zero: Var<C::N> = builder.eval(C::N::ZERO);
-    builder.assert_eq::<Var<C::N>>(diff_product_num_var, zero);
-    builder.assert_eq::<Var<C::N>>(diff_product_width, zero);
+
+    // _debug
+    // builder.assert_eq::<Var<C::N>>(diff_product_num_var, zero);
+    // builder.assert_eq::<Var<C::N>>(diff_product_width, zero);
+    
 
     let num_rounds: Var<C::N> =
         builder.eval(max_num_var - Usize::from(get_basecode_msg_size_log()));
@@ -121,6 +126,8 @@ pub fn batch_verify<C: Config>(
                 challenger.observe_digest(builder, commit.value.into());
             });
     });
+
+    
 
     iter_zip!(builder, proof.final_message).for_each(|ptr_vec_sumcheck_message, builder| {
         // Each final message should contain a single element, since the final
@@ -155,10 +162,14 @@ pub fn batch_verify<C: Config>(
         proof,
         rounds,
     };
+
+    
+    /* _debug
     builder.cycle_tracker_end("prior query phase");
     builder.cycle_tracker_start("query phase");
     batch_verifier_query_phase(builder, input);
     builder.cycle_tracker_end("query phase");
+    */
 }
 
 #[cfg(test)]

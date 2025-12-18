@@ -189,7 +189,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .filter(|proof| !proof.fixed_in_evals.is_empty())
             .map(|proof| proof.fixed_in_evals.len())
             .collect::<Vec<_>>();
-        let max_num_var = witin_num_vars.iter().copied().max().unwrap_or(0);
+        let max_num_var = witin_num_vars.iter().chain(fixed_num_vars.iter()).copied().map(|n| ceil_log2(n)).max().unwrap_or(0);
         let max_width = witin_max_widths
             .iter()
             .chain(fixed_max_widths.iter())
