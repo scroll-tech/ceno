@@ -406,7 +406,10 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
-        cb.set_omc_init_only();
+        if DVRAM::INIT_ONCE {
+            assert!(DVRAM::ZERO_INIT);
+            cb.set_omc_init_only();
+        }
 
         let (addr_expr, addr) = DVRAM::addr_expr(cb, params)?;
 
