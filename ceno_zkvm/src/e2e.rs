@@ -21,9 +21,9 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, NextCycleAccess,
-    Platform, PreflightTracer, Program, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word,
-    WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, MemorySection,
+    NextCycleAccess, Platform, PreflightTracer, Program, StepRecord, Tracer, VM_REG_COUNT, VMState,
+    WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -43,6 +43,7 @@ use std::collections::{HashMap, HashSet};
 use std::{
     collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
+    ops::Range,
     sync::Arc,
 };
 use tracing::info_span;
@@ -192,6 +193,8 @@ pub struct ShardContext<'a> {
     pub max_num_cross_shard_accesses: usize,
     // shard 0: [v[0], v[1]), shard 1: [v[1], v[2]), shard 2: [v[2], v[3])
     pub prev_shard_cycle_range: Vec<Cycle>,
+    pub platform: Platform,
+    pub shard_heap_addr_range: Range<Addr>,
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -225,6 +228,8 @@ impl<'a> Default for ShardContext<'a> {
             expected_inst_per_shard: usize::MAX,
             max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
+            platform: CENO_PLATFORM,
+            shard_heap_addr_range: 0..Addr::MAX,
         }
     }
 }
@@ -269,6 +274,8 @@ impl<'a> ShardContext<'a> {
                         expected_inst_per_shard: self.expected_inst_per_shard,
                         max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
                         prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
+                        platform: self.platform.clone(),
+                        shard_heap_addr_range: self.shard_heap_addr_range.clone(),
                     },
                 )
                 .collect_vec(),
@@ -380,30 +387,44 @@ impl<'a> ShardContext<'a> {
     ) {
         // check read from external mem bus
         // exclude first shard
-        if self.before_current_shard_cycle(prev_cycle)
-            && self.is_in_current_shard(cycle)
-            && !self.is_first_shard()
-        {
-            let prev_shard_id = self.extract_shard_id(prev_cycle);
-            let ram_record = self
-                .read_records_tbs
-                .as_mut()
-                .right()
-                .expect("illegal type");
-            ram_record.insert(
-                addr,
-                RAMRecord {
-                    ram_type,
-                    reg_id: id,
+        if !self.is_first_shard() {
+            // read from global shard
+            // 1. for non heap record and before current shared
+            // 2. for heap record initial read, and addr is outside of range
+            if (!matches!(ram_type, RAMType::Memory)
+                && self.before_current_shard_cycle(prev_cycle)
+                && self.is_in_current_shard(cycle))
+                || (matches!(ram_type, RAMType::Memory)
+                    && prev_cycle == 0
+                    && self.is_in_current_shard(cycle))
+                    && #[allow(unused_variables)]
+                    {
+                        let mem_section = MemorySection::from_addr(&self.platform, addr);
+                        matches!(MemorySection::Heap, mem_section)
+                    }
+                    && !self.shard_heap_addr_range.contains(&addr.baddr().0)
+            {
+                let prev_shard_id = self.extract_shard_id(prev_cycle);
+                let ram_record = self
+                    .read_records_tbs
+                    .as_mut()
+                    .right()
+                    .expect("illegal type");
+                ram_record.insert(
                     addr,
-                    prev_cycle,
-                    cycle,
-                    shard_cycle: 0,
-                    prev_value,
-                    value,
-                    shard_id: prev_shard_id,
-                },
-            );
+                    RAMRecord {
+                        ram_type,
+                        reg_id: id,
+                        addr,
+                        prev_cycle,
+                        cycle,
+                        shard_cycle: 0,
+                        prev_value,
+                        value,
+                        shard_id: prev_shard_id,
+                    },
+                );
+            }
         }
 
         // check write to external mem bus
