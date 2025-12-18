@@ -1744,6 +1744,18 @@ fn create_proofs_streaming<
         }
     });
     metrics::gauge!("num_shards").set(proofs.len() as f64);
+
+    // Currently, due to mixed usage with other GPU backends,
+    // we need to trim ceno-gpu's memory pool while still retaining 424MB.
+    // Once the GPU backend is unified, skipping this trim
+    // could improve performance by a few seconds.
+    #[cfg(feature = "gpu")]
+    {
+        use gkr_iop::gpu::gpu_prover::*;
+        let cuda_hal = get_cuda_hal().unwrap();
+        cuda_hal.inner().trim_mem_pool().unwrap();
+    };
+
     proofs
 }
 
