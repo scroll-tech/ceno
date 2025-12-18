@@ -6,7 +6,7 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelExtend, ParallelIterator,
 };
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Range};
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 use super::{
@@ -518,25 +518,35 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
     }
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
+    #[allow(clippy::type_complexity)]
     pub fn assign_instances<F: SmallField>(
         &self,
         shard_ctx: &ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        final_mem: &[(&'static str, &[MemFinalRecord])],
+        final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
 
-        let is_current_shard_mem_record = |record: &&MemFinalRecord| -> bool {
-            (shard_ctx.is_first_shard() && record.cycle == 0)
-                || shard_ctx.is_in_current_shard(record.cycle)
-        };
+        let is_current_shard_mem_record =
+            |range: Option<&Range<Addr>>, record: &&MemFinalRecord| -> bool {
+                shard_ctx.is_in_current_shard(record.cycle)
+                    || if let Some(range) = range {
+                        range.contains(&record.addr) && record.cycle == 0
+                    } else {
+                        shard_ctx.is_first_shard() && record.cycle == 0
+                    }
+            };
 
         // collect each raw mem belong to this shard, BEFORE padding length
         let mem_lens: Vec<usize> = final_mem
             .par_iter()
-            .map(|(_, mem)| mem.par_iter().filter(is_current_shard_mem_record).count())
+            .map(|(_, range, mem)| {
+                mem.par_iter()
+                    .filter(|mem| is_current_shard_mem_record(range.as_ref(), mem))
+                    .count()
+            })
             .collect();
 
         // calculate mem length
@@ -581,11 +591,15 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
             .par_iter_mut()
             .zip_eq(structural_witness_mut_slices.par_iter_mut())
             .zip_eq(final_mem.par_iter())
-            .for_each(|((witness, structural_witness), (_, final_mem))| {
+            .for_each(|((witness, structural_witness), (_, range, final_mem))| {
                 witness
                     .chunks_mut(num_witin)
                     .zip_eq(structural_witness.chunks_mut(num_structural_witin))
-                    .zip(final_mem.iter().filter(is_current_shard_mem_record))
+                    .zip(
+                        final_mem
+                            .iter()
+                            .filter(|record| is_current_shard_mem_record(range.as_ref(), record)),
+                    )
                     .for_each(|((row, structural_row), rec)| {
                         if self.final_v.len() == 1 {
                             // Assign value directly.

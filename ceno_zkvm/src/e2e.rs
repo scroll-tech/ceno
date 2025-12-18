@@ -1209,6 +1209,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     &system_config.zkvm_cs,
                     &shard_ctx,
                     &mut zkvm_witness,
+                    &pi,
                     &emul_result.final_mem_state.reg,
                     &emul_result.final_mem_state.mem,
                     &emul_result.final_mem_state.io,

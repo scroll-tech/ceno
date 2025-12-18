@@ -164,6 +164,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &ShardContext,
         witness: &mut ZKVMWitnesses<E>,
+        pv: &PublicValues,
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
         io_final: &[MemFinalRecord],
@@ -172,15 +173,22 @@ impl<E: ExtensionField> MmuConfig<E> {
         heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         let all_records = vec![
-            (PubIOTable::name(), io_final),
-            (RegTable::name(), reg_final),
-            (StaticMemTable::name(), static_mem_final),
-            (StackTable::name(), stack_final),
-            (HintsTable::name(), hints_final),
-            (HeapTable::name(), heap_final),
+            (PubIOTable::name(), None, io_final),
+            (RegTable::name(), None, reg_final),
+            (StaticMemTable::name(), None, static_mem_final),
+            (StackTable::name(), None, stack_final),
+            (HintsTable::name(), None, hints_final),
+            (
+                HeapTable::name(),
+                Some(
+                    pv.heap_start_addr
+                        ..(pv.heap_start_addr + pv.heap_shard_len * (WORD_SIZE as u32)),
+                ),
+                heap_final,
+            ),
         ]
         .into_iter()
-        .filter(|(_, record)| !record.is_empty())
+        .filter(|(_, _, record)| !record.is_empty())
         .collect_vec();
 
         witness.assign_table_circuit::<LocalFinalCircuit<E>>(

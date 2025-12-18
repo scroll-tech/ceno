@@ -1,5 +1,3 @@
-use std::{collections::HashMap, marker::PhantomData};
-
 use super::ram_impl::{
     LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableInitConfig,
 };
@@ -21,6 +19,7 @@ use gkr_iop::{
 };
 use itertools::Itertools;
 use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
+use std::{collections::HashMap, marker::PhantomData, ops::Range};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 #[derive(Clone, Debug)]
@@ -318,7 +317,7 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
     type FixedInput = ();
     type WitnessInput<'a> = (
         &'a ShardContext<'a>,
-        &'a [(&'static str, &'a [MemFinalRecord])],
+        &'a [(&'static str, Option<Range<Addr>>, &'a [MemFinalRecord])],
     );
 
     fn name() -> String {

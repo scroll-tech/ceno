@@ -51,6 +51,12 @@ impl DynVolatileRamTable for HeapTable {
         Ok((addr.expr(), addr))
     }
 
+    fn max_len(params: &ProgramParams) -> usize {
+        let max_size = (params.platform.heap.end - params.platform.heap.start)
+            .div_ceil(WORD_SIZE as u32) as Addr;
+        1 << (u32::BITS - 1 - max_size.leading_zeros())
+    }
+
     fn offset_addr(_params: &ProgramParams) -> Addr {
         unimplemented!("heap offset is dynamic")
     }
