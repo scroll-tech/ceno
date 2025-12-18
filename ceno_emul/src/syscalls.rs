@@ -30,7 +30,7 @@ pub trait SyscallSpec {
 }
 
 /// Trace the inputs and effects of a syscall.
-pub fn handle_syscall(vm: &VMState, function_code: u32) -> Result<SyscallEffects> {
+pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<SyscallEffects> {
     match function_code {
         KECCAK_PERMUTE => Ok(keccak_permute::keccak_permute(vm)),
         SECP256K1_ADD => Ok(secp256k1::secp256k1_add(vm)),
@@ -100,12 +100,12 @@ impl SyscallEffects {
     }
 
     /// Keep track of the cycles of registers and memory accesses.
-    pub fn finalize(mut self, tracer: &mut Tracer) -> SyscallWitness {
+    pub fn finalize<T: Tracer>(mut self, tracer: &mut T) -> SyscallWitness {
         for op in &mut self.witness.reg_ops {
-            op.previous_cycle = tracer.track_access(op.addr, Tracer::SUBCYCLE_RD);
+            op.previous_cycle = tracer.track_access(op.addr, T::SUBCYCLE_RD);
         }
         for op in &mut self.witness.mem_ops {
-            op.previous_cycle = tracer.track_access(op.addr, Tracer::SUBCYCLE_MEM);
+            op.previous_cycle = tracer.track_access(op.addr, T::SUBCYCLE_MEM);
         }
         self.witness
     }

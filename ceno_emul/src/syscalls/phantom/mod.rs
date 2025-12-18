@@ -1,5 +1,5 @@
 use crate::{
-    Change, EmuContext, Platform, SyscallSpec, VMState, WordAddr, WriteOp,
+    Change, EmuContext, Platform, SyscallSpec, Tracer, VMState, WordAddr, WriteOp,
     syscalls::{SyscallEffects, SyscallWitness},
 };
 use itertools::Itertools;
@@ -13,7 +13,7 @@ impl SyscallSpec for LogPcCycleSpec {
     const CODE: u32 = ceno_syscall::PHANTOM_LOG_PC_CYCLE;
 }
 
-pub fn log_pc_cycle(vm: &VMState) -> SyscallEffects {
+pub fn log_pc_cycle<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let lable_ptr = vm.peek_register(Platform::reg_arg0());
     let lable_len = vm.peek_register(Platform::reg_arg1());
 

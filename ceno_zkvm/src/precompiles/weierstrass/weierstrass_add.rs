@@ -24,7 +24,7 @@
 
 use std::{array, fmt::Debug, sync::Arc};
 
-use ceno_emul::{ByteAddr, MemOp, StepRecord};
+use ceno_emul::{ByteAddr, MemOp, MemorySection, StepRecord};
 use core::{borrow::BorrowMut, mem::size_of};
 use derive::AlignedBorrow;
 use ff_ext::{ExtensionField, SmallField};
@@ -615,6 +615,7 @@ pub fn run_weierstrass_add<
                                     previous_cycle: 0,
                                     addr: ByteAddr::from(0).waddr(),
                                     value: Default::default(),
+                                    section: MemorySection::Other,
                                 },
                             )
                             .expect("assign error");

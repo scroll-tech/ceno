@@ -206,7 +206,7 @@ impl Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{VMState, WORD_SIZE};
+    use crate::{PreflightTracer, VMState, WORD_SIZE};
 
     #[test]
     fn test_no_overlap() {
@@ -219,7 +219,7 @@ mod tests {
         // Registers do not overlap with ROM or RAM.
         for reg in [
             Platform::register_vma(0),
-            Platform::register_vma(VMState::REG_COUNT - 1),
+            Platform::register_vma(VMState::<PreflightTracer>::REG_COUNT - 1),
         ] {
             assert!(!p.is_rom(reg));
             assert!(!p.is_ram(reg));

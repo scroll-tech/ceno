@@ -1,4 +1,4 @@
-use ceno_emul::{ByteAddr, Cycle, MemOp, StepRecord};
+use ceno_emul::{ByteAddr, Cycle, MemOp, MemorySection, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
     OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
@@ -1100,6 +1100,7 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                                             previous_cycle: 0,
                                             addr: ByteAddr::from(0).waddr(),
                                             value: Default::default(),
+                                            section: MemorySection::Other,
                                         },
                                     )
                                     .expect("assign error");

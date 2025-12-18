@@ -1,18 +1,20 @@
 use itertools::{Itertools, izip};
 
-use crate::{Change, EmuContext, VMState, WORD_SIZE, Word, WordAddr, WriteOp};
+use crate::{
+    Change, EmuContext, MemorySection, Tracer, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+};
 
 /// Utilities for reading/manipulating a memory segment of fixed length
-pub struct MemoryView<'a, const LENGTH: usize> {
-    vm: &'a VMState,
+pub struct MemoryView<'a, T: Tracer, const LENGTH: usize> {
+    vm: &'a VMState<T>,
     start: WordAddr,
     writes: Option<[Word; LENGTH]>,
 }
 
-impl<'a, const LENGTH: usize> MemoryView<'a, LENGTH> {
+impl<'a, T: Tracer, const LENGTH: usize> MemoryView<'a, T, LENGTH> {
     /// Creates a new memory segment view
     /// Asserts that `start` is a multiple of `WORD_SIZE`
-    pub fn new(vm: &'a VMState, start: u32) -> Self {
+    pub fn new(vm: &'a VMState<T>, start: u32) -> Self {
         assert!(start.is_multiple_of(WORD_SIZE as u32));
         // TODO: do we need stricter alignment requirements for keccak (u64 array)
         MemoryView {
@@ -57,10 +59,14 @@ impl<'a, const LENGTH: usize> MemoryView<'a, LENGTH> {
             self.words(),
             self.writes.unwrap_or(self.words())
         )
-        .map(|(addr, before, after)| WriteOp {
-            addr,
-            value: Change { before, after },
-            previous_cycle: 0, // Cycle set later in finalize().
+        .map(|(addr, before, after)| {
+            let section = MemorySection::from_addr(self.vm.platform(), addr);
+            WriteOp {
+                addr,
+                value: Change { before, after },
+                previous_cycle: 0, // Cycle set later in finalize().
+                section,
+            }
         })
         .collect_vec()
         .try_into()

@@ -1,5 +1,5 @@
 use crate::{
-    Change, EmuContext, Platform, SyscallSpec, VMState, Word, WriteOp,
+    Change, EmuContext, Platform, SyscallSpec, Tracer, VMState, Word, WriteOp,
     syscalls::{SyscallEffects, SyscallWitness, bn254::types::Bn254Point},
     utils::MemoryView,
 };
@@ -25,7 +25,7 @@ impl SyscallSpec for Bn254DoubleSpec {
     const CODE: u32 = ceno_syscall::BN254_DOUBLE;
 }
 
-pub fn bn254_add(vm: &VMState) -> SyscallEffects {
+pub fn bn254_add<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
     let q_ptr = vm.peek_register(Platform::reg_arg1());
 
@@ -45,7 +45,7 @@ pub fn bn254_add(vm: &VMState) -> SyscallEffects {
 
     // Memory segments of P and Q
     let [mut p_view, q_view] =
-        [p_ptr, q_ptr].map(|start| MemoryView::<BN254_POINT_WORDS>::new(vm, start));
+        [p_ptr, q_ptr].map(|start| MemoryView::<_, BN254_POINT_WORDS>::new(vm, start));
 
     // Read P and Q from words via wrapper type
     let [p, q] = [&p_view, &q_view].map(|view| Bn254Point::from(view.words()));
@@ -69,7 +69,7 @@ pub fn bn254_add(vm: &VMState) -> SyscallEffects {
     }
 }
 
-pub fn bn254_double(vm: &VMState) -> SyscallEffects {
+pub fn bn254_double<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
 
     // for compatibility with sp1 spec
@@ -83,7 +83,7 @@ pub fn bn254_double(vm: &VMState) -> SyscallEffects {
     )];
 
     // P's memory segment
-    let mut p_view = MemoryView::<BN254_POINT_WORDS>::new(vm, p_ptr);
+    let mut p_view = MemoryView::<_, BN254_POINT_WORDS>::new(vm, p_ptr);
     // Create point from words via wrapper type
     let p = Bn254Point::from(p_view.words());
 

@@ -34,7 +34,7 @@ use crate::{
     structs::PointAndEval,
     witness::LkMultiplicity,
 };
-use ceno_emul::{ByteAddr, MemOp, StepRecord};
+use ceno_emul::{ByteAddr, MemOp, MemorySection, StepRecord};
 use derive::AlignedBorrow;
 use ff_ext::{ExtensionField, SmallField};
 use generic_array::{GenericArray, sequence::GenericSequence};
@@ -797,6 +797,7 @@ pub fn run_uint256_mul<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + '
                                     previous_cycle: 0,
                                     addr: ByteAddr::from(0).waddr(),
                                     value: Default::default(),
+                                    section: MemorySection::Other,
                                 },
                             )
                             .expect("assign error");

@@ -407,8 +407,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
         if DVRAM::INIT_ONCE {
-            assert!(DVRAM::ZERO_INIT);
             cb.set_omc_init_only();
+        } else {
+            assert!(DVRAM::ZERO_INIT);
         }
 
         let (addr_expr, addr) = DVRAM::addr_expr(cb, params)?;
