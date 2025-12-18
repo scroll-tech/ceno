@@ -50,7 +50,7 @@ pub trait TableCircuit<E: ExtensionField> {
         let lk_table_len = cb.cs.lk_table_expressions.len() * 2;
 
         let selector = cb.create_placeholder_structural_witin(|| "selector");
-        let selector_type = SelectorType::Whole(selector.expr());
+        let selector_type = SelectorType::Prefix(selector.expr());
 
         // all shared the same selector
         let (out_evals, mut chip) = (

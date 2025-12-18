@@ -318,7 +318,7 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
     type FixedInput = ();
     type WitnessInput<'a> = (
         &'a ShardContext<'a>,
-        &'a [(&'static str, InstancePaddingStrategy, &'a [MemFinalRecord])],
+        &'a [(&'static str, &'a [MemFinalRecord])],
     );
 
     fn name() -> String {

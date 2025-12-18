@@ -13,8 +13,7 @@ use crate::{
 use ceno_emul::{Addr, IterAddresses, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
-use std::{collections::HashSet, iter::zip, ops::Range, sync::Arc};
-use witness::InstancePaddingStrategy;
+use std::{collections::HashSet, iter::zip, ops::Range};
 
 pub struct MmuConfig<E: ExtensionField> {
     /// Initialization of registers.
@@ -173,48 +172,15 @@ impl<E: ExtensionField> MmuConfig<E> {
         heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         let all_records = vec![
-            (
-                PubIOTable::name(),
-                InstancePaddingStrategy::Default,
-                io_final,
-            ),
-            (
-                RegTable::name(),
-                InstancePaddingStrategy::Default,
-                reg_final,
-            ),
-            (
-                StaticMemTable::name(),
-                InstancePaddingStrategy::Default,
-                static_mem_final,
-            ),
-            (
-                StackTable::name(),
-                InstancePaddingStrategy::Custom({
-                    let params = cs.params.clone();
-                    Arc::new(move |row: u64, _: u64| StackTable::addr(&params, row as usize) as u64)
-                }),
-                stack_final,
-            ),
-            (
-                HintsTable::name(),
-                InstancePaddingStrategy::Custom({
-                    let params = cs.params.clone();
-                    Arc::new(move |row: u64, _: u64| HintsTable::addr(&params, row as usize) as u64)
-                }),
-                hints_final,
-            ),
-            (
-                HeapTable::name(),
-                InstancePaddingStrategy::Custom({
-                    let params = cs.params.clone();
-                    Arc::new(move |row: u64, _: u64| HeapTable::addr(&params, row as usize) as u64)
-                }),
-                heap_final,
-            ),
+            (PubIOTable::name(), io_final),
+            (RegTable::name(), reg_final),
+            (StaticMemTable::name(), static_mem_final),
+            (StackTable::name(), stack_final),
+            (HintsTable::name(), hints_final),
+            (HeapTable::name(), heap_final),
         ]
         .into_iter()
-        .filter(|(_, _, record)| !record.is_empty())
+        .filter(|(_, record)| !record.is_empty())
         .collect_vec();
 
         witness.assign_table_circuit::<LocalFinalCircuit<E>>(
