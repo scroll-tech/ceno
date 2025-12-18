@@ -427,73 +427,7 @@ pub fn verify_tower_proof<C: Config>(
             &next_layer_evals,
         );
 
-        let next_round = builder.eval_expr(round_var + RVar::from(1));
-        builder
-            .range(0, num_prod_spec.clone())
-            .for_each(|i_vec, builder| {
-                let spec_index = i_vec[0];
-                let skip = builder.get(&should_skip, spec_index);
-                let max_round = builder.get(&num_variables, spec_index);
-                let round_limit: RVar<C::N> = builder.eval_expr(max_round - RVar::from(1));
-
-                // now skip is 0 if and only if current round_var is smaller than round_limit.
-                builder.if_eq(skip, var_zero).then(|builder| {
-                    builder.if_eq(next_round, round_limit).then(|builder| {
-                        let evals_idx: Usize<C::N> = builder.eval(spec_index + Usize::from(1));
-                        let evals = builder.get(&next_layer_evals, evals_idx);
-
-                        let point_and_eval: PointAndEvalVariable<C> =
-                            builder.eval(PointAndEvalVariable {
-                                point: PointVariable {
-                                    fs: rt_prime.clone(),
-                                },
-                                eval: evals,
-                            });
-                        builder.set_value(&prod_spec_point_n_eval, spec_index, point_and_eval);
-                    });
-                });
-            });
-
-        let num_variables_len = num_variables.len();
-        let logup_num_variables_slice =
-            num_variables.slice(builder, num_prod_spec.clone(), num_variables_len.clone());
-
-        builder
-            .range(0, num_logup_spec.clone())
-            .for_each(|i_vec, builder| {
-                let spec_index = i_vec[0];
-                let max_round = builder.get(&logup_num_variables_slice, spec_index);
-                let round_limit: RVar<C::N> = builder.eval_expr(max_round - RVar::from(1));
-                let idx: Var<C::N> = builder.eval(spec_index.variable() + num_prod_spec.get_var());
-                let skip = builder.get(&should_skip, idx);
-
-                // now skip is 0 if and only if current round_var is smaller than round_limit.
-                builder.if_eq(skip, var_zero).then(|builder| {
-                    builder.if_eq(next_round, round_limit).then(|builder| {
-                        let p_idx: Usize<C::N> = builder.eval(idx + Usize::from(1));
-                        let q_idx: Usize<C::N> =
-                            builder.eval(idx + Usize::from(1) + num_logup_spec.clone());
-                        let p_eval = builder.get(&next_layer_evals, p_idx);
-                        let q_eval = builder.get(&next_layer_evals, q_idx);
-
-                        let p_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                            point: PointVariable {
-                                fs: rt_prime.clone(),
-                            },
-                            eval: p_eval,
-                        });
-                        let q_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                            point: PointVariable {
-                                fs: rt_prime.clone(),
-                            },
-                            eval: q_eval,
-                        });
-                        builder.set_value(&logup_spec_p_point_n_eval, spec_index, p_eval);
-                        builder.set_value(&logup_spec_q_point_n_eval, spec_index, q_eval);
-                    });
-                });
-            });
-
+        // extract next layer's expected sum
         let output_eval = builder.get(&next_layer_evals, 0);
         builder.assign(&curr_pt, rt_prime.clone());
         builder.assign(&curr_eval, output_eval);
@@ -510,6 +444,57 @@ pub fn verify_tower_proof<C: Config>(
                 eval: curr_eval,
             },
         );
+    });
+
+    builder.if_ne(op_range, Usize::from(0)).then(|builder| {
+        // update prod_spec and logup_spec evaluations at next_rt
+        let product_evals = {
+            let start: Var<C::N> = builder.eval(Usize::from(1));
+            let end: Var<C::N> = builder.eval(start + num_prod_spec.clone());
+            next_layer_evals.slice(builder, start, end)
+        };
+        let logup_evals = {
+            let start: Var<C::N> = builder.eval(Usize::from(1) + num_prod_spec.clone());
+            let end: Var<C::N> = builder.eval(start + Usize::from(2) * num_logup_spec.clone());
+            next_layer_evals.slice(builder, start, end)
+        };
+
+        builder
+            .range(0, num_prod_spec.clone())
+            .for_each(|i_vec, builder| {
+                let i = i_vec[0];
+                let eval = builder.get(&product_evals, i);
+
+                let point_and_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                    point: next_rt.point.clone(),
+                    // point: PointVariable { fs: next_rt.point.fs.clone() },
+                    eval: eval,
+                });
+                builder.set_value(&prod_spec_point_n_eval, i, point_and_eval);
+            });
+        builder
+            .range(0, num_logup_spec.clone())
+            .for_each(|i_vec, builder| {
+                let i = i_vec[0];
+                let p_idx = i.clone();
+                let q_idx: Var<C::N> = builder.eval(num_logup_spec.clone() + i);
+                let p_eval = builder.get(&logup_evals, p_idx);
+                let q_eval = builder.get(&logup_evals, q_idx);
+
+                let p_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                    point: next_rt.point.clone(),
+                    eval: p_eval,
+                });
+                let q_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                    point: PointVariable {
+                        fs: next_rt.point.fs.clone(),
+                    },
+                    // point: next_rt.point.clone(),
+                    eval: q_eval,
+                });
+                builder.set_value(&logup_spec_p_point_n_eval, i, p_eval);
+                builder.set_value(&logup_spec_q_point_n_eval, i, q_eval);
+            });
     });
 
     (
