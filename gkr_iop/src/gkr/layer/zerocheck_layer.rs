@@ -5,7 +5,10 @@ use multilinear_extensions::{
     macros::{entered_span, exit_span},
     mle::{IntoMLE, Point},
     monomialize_expr_to_wit_terms,
-    utils::{eval_by_expr, eval_by_expr_with_instance, expr_convert_to_witins},
+    utils::{
+        build_factored_dag_commutative, dag_stats, eval_by_expr, eval_by_expr_with_instance,
+        expr_convert_to_witins,
+    },
     virtual_poly::VPAuxInfo,
 };
 use p3::field::{FieldAlgebra, dot_product};
@@ -165,18 +168,44 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             self.n_fixed as WitnessId,
             self.n_instance,
         );
-        tracing::debug!("main sumcheck degree: {}", zero_expr.degree());
+        let zero_expr_degree = zero_expr.degree();
         self.main_sumcheck_expression = Some(zero_expr);
         self.main_sumcheck_expression_monomial_terms = self
             .main_sumcheck_expression
             .as_ref()
             .map(|expr| expr.get_monomial_terms());
-        tracing::debug!(
-            "main sumcheck monomial terms count: {}",
+
+        {
+            if let Some(terms) = self.main_sumcheck_expression_monomial_terms.as_ref() {
+                let num_mul: usize = terms.iter().map(|term| term.product.len()).sum();
+                let num_add = terms.iter().len() - 1;
+
+                tracing::debug!(
+                    "layer name {} monomial num_add: {num_add} num_mul: {num_mul}",
+                    self.name,
+                );
+            }
+        }
+
+        self.main_sumcheck_expression_dag = {
             self.main_sumcheck_expression_monomial_terms
                 .as_ref()
-                .map_or(0, |terms| terms.len()),
-        );
+                .map(|terms| {
+                    // selector are structural witin, which is used to be the largest id.
+                    let (dag, coeffs, Some(final_out_index), max_dag_depth) = build_factored_dag_commutative(terms, false) else { panic!() };
+                    let max_degree = zero_expr_degree;
+
+                    let (num_add, num_mul) = dag_stats(&dag);
+                    tracing::debug!(
+                        "layer name {} dag got num_add {num_add} num_mul {num_mul} max_degree {max_degree} \
+                        max_dag_depth {max_dag_depth} num_scalar {} final_out_index {final_out_index}",
+                        self.name,
+                        coeffs.len(),
+                    );
+                    (dag, coeffs, final_out_index, max_dag_depth as usize, zero_expr_degree)
+                })
+        };
+
         exit_span!(span);
     }
 
