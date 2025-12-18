@@ -28,6 +28,8 @@ use sumcheck::{
 use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
+use tracing::info_span;
+
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::gpu_prover::*;
 
@@ -327,10 +329,9 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             let nv = lk_denominator_last_layer[0][0].num_vars();
 
             // Create one shared ones_buffer as Owned (can be 'static)
-            let ones_poly =
-                GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
-                    .map_err(|e| format!("Failed to create shared ones_buffer: {:?}", e))
-                    .unwrap();
+            let ones_poly = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
+                .map_err(|e| format!("Failed to create shared ones_buffer: {:?}", e))
+                .unwrap();
             // SAFETY: Owned buffer can be safely treated as 'static
             let ones_poly_static: GpuPolynomialExt<'static> =
                 unsafe { std::mem::transmute(ones_poly) };
@@ -338,8 +339,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
 
             // Get reference from storage to ensure proper lifetime
             let ones_poly_ref = ones_buffer.last().unwrap();
-            let mle_len_bytes =
-                ones_poly_ref.evaluations().len() * std::mem::size_of::<BB31Ext>();
+            let mle_len_bytes = ones_poly_ref.evaluations().len() * std::mem::size_of::<BB31Ext>();
 
             // Create views referencing the shared ones_buffer for each tower's p1, p2
             lk_denominator_last_layer
@@ -533,20 +533,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             let span = entered_span!("build_tower_witness", profiling_2 = true);
             let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let mut _ones_buffer: Vec<GpuPolynomialExt<'static>> = Vec::new();
-            let mut _view_last_layers: Vec<Vec<Vec<GpuPolynomialExt<'static>>>> =
-                Vec::new();
-            let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
-                composed_cs,
-                input,
-                records,
-                challenges,
-                &cuda_hal,
-                &mut _big_buffers,
-                &mut _ones_buffer,
-                &mut _view_last_layers,
-            )
-            .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
-            .unwrap();
+            let mut _view_last_layers: Vec<Vec<Vec<GpuPolynomialExt<'static>>>> = Vec::new();
+            let (prod_gpu, logup_gpu) =
+                info_span!("[ceno] build_tower_witness_gpu").in_scope(|| {
+                    build_tower_witness_gpu(
+                        composed_cs,
+                        input,
+                        records,
+                        challenges,
+                        &cuda_hal,
+                        &mut _big_buffers,
+                        &mut _ones_buffer,
+                        &mut _view_last_layers,
+                    )
+                    .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
+                    .unwrap()
+                });
             exit_span!(span);
 
             // GPU optimization: Extract out_evals from GPU-built towers before consuming them
@@ -566,10 +568,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             };
 
             let span = entered_span!("prove_tower_relation", profiling_2 = true);
-            let (point_gl, proof_gpu) = cuda_hal
-                .tower
-                .create_proof(&cuda_hal, &input, NUM_FANIN, basic_tr)
-                .expect("gpu tower create_proof failed");
+            let (point_gl, proof_gpu) =
+                info_span!("[ceno] prove_tower_relation_gpu").in_scope(|| {
+                    cuda_hal
+                        .tower
+                        .create_proof(&cuda_hal, &input, NUM_FANIN, basic_tr)
+                        .expect("gpu tower create_proof failed")
+                });
             exit_span!(span);
 
             // TowerProofs
@@ -577,10 +582,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             let proof: TowerProofs<E> = unsafe { std::mem::transmute(proof_gpu) };
             (point, proof, lk_out_evals, w_out_evals, r_out_evals)
         };
-
-        let span_sync = entered_span!("wait for GPU to free memory", profiling_3 = true);
-        cuda_hal.inner().synchronize().unwrap();
-        exit_span!(span_sync);
 
         (point, proof, lk_out_evals, w_out_evals, r_out_evals)
     }

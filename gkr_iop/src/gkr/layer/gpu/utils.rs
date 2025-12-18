@@ -178,7 +178,9 @@ pub fn build_rotation_mles_gpu<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     GpuFieldType::Ext(_) => panic!("should be base field"),
                     _ => panic!("unimplemented input mle"),
                 };
-                let mut output_buf = cuda_hal.alloc_elems_on_device(input_buf.len(), false).unwrap();
+                let mut output_buf = cuda_hal
+                    .alloc_elems_on_device(input_buf.len(), false)
+                    .unwrap();
 
                 // Safety: GPU buffers are actually 'static lifetime. We only read from input_buf
                 // during the GPU kernel execution, which completes synchronously before returning.
@@ -219,7 +221,9 @@ pub fn build_rotation_selector_gpu<E: ExtensionField, PCS: PolynomialCommitmentS
 ) -> MultilinearExtensionGpu<'static, E> {
     let total_len = wit[0].evaluations_len(); // Take first mle just to retrieve total length
     assert!(total_len.is_power_of_two());
-    let mut output_buf = cuda_hal.alloc_ext_elems_on_device(total_len, false).unwrap();
+    let mut output_buf = cuda_hal
+        .alloc_ext_elems_on_device(total_len, false)
+        .unwrap();
 
     let eq = build_eq_x_r_gpu(cuda_hal, rt);
     let eq_buf_owned = match eq.mle {

@@ -699,7 +699,7 @@ pub fn emulate_program<'a>(
 
     let mut executed_steps = 0usize;
     let mut exit_code = None;
-    info_span!("emulator.preflight-execute").in_scope(|| {
+    info_span!("[ceno] emulator.preflight-execute").in_scope(|| {
         for record in vm.iter_until_halt().take(max_steps) {
             let record = record.expect("vm exec failed");
             executed_steps += 1;
@@ -1079,7 +1079,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
     std::iter::from_fn(move || {
         info_span!(
-            "app_prove.generate_witness",
+            "[ceno] app_prove.generate_witness",
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
@@ -1614,7 +1614,7 @@ fn create_proofs_streaming<
     init_mem_state: &InitMemState,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
-    let proofs = info_span!("app_prove.inner").in_scope(|| {
+    let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
         #[cfg(feature = "gpu")]
         {
             use crossbeam::channel;
