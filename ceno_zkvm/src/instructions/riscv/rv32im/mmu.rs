@@ -1,6 +1,7 @@
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
+    scheme::PublicValues,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, HintsTable,
@@ -101,17 +102,32 @@ impl<E: ExtensionField> MmuConfig<E> {
         // fixed.register_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, &());
     }
 
+    pub fn assign_dynamic_init_table_circuit(
+        &self,
+        cs: &ZKVMConstraintSystem<E>,
+        witness: &mut ZKVMWitnesses<E>,
+        pv: &PublicValues,
+        heap_final: &[MemFinalRecord],
+    ) -> Result<(), ZKVMError> {
+        witness.assign_table_circuit::<HeapInitCircuit<E>>(
+            cs,
+            &self.heap_init_config,
+            &(heap_final, pv, pv.heap_shard_len as usize),
+        )?;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn assign_init_table_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
+        pv: &PublicValues,
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
         io_final: &[MemFinalRecord],
         hints_final: &[MemFinalRecord],
         stack_final: &[MemFinalRecord],
-        heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<RegTableInitCircuit<E>>(
             cs,
@@ -133,17 +149,12 @@ impl<E: ExtensionField> MmuConfig<E> {
         witness.assign_table_circuit::<HintsInitCircuit<E>>(
             cs,
             &self.hints_init_config,
-            hints_final,
+            &(hints_final, pv, hints_final.len()),
         )?;
         witness.assign_table_circuit::<StackInitCircuit<E>>(
             cs,
             &self.stack_init_config,
-            stack_final,
-        )?;
-        witness.assign_table_circuit::<HeapInitCircuit<E>>(
-            cs,
-            &self.heap_init_config,
-            heap_final,
+            &(stack_final, pv, stack_final.len()),
         )?;
         Ok(())
     }

@@ -11,7 +11,8 @@ pub const END_PC_IDX: usize = INIT_CYCLE_IDX + 1;
 pub const END_CYCLE_IDX: usize = END_PC_IDX + 1;
 pub const SHARD_ID_IDX: usize = END_CYCLE_IDX + 1;
 pub const HEAP_START_ADDR_IDX: usize = SHARD_ID_IDX + 1;
-pub const PUBLIC_IO_IDX: usize = HEAP_START_ADDR_IDX + 1;
+pub const HEAP_LENGTH_IDX: usize = HEAP_START_ADDR_IDX + 1;
+pub const PUBLIC_IO_IDX: usize = HEAP_LENGTH_IDX + 1;
 pub const SHARD_RW_SUM_IDX: usize = PUBLIC_IO_IDX + 2;
 
 pub const LIMB_BITS: usize = 16;

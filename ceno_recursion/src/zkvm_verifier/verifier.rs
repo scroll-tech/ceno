@@ -975,6 +975,7 @@ pub fn verify_gkr_circuit<C: Config>(
                     &in_point,
                     descending,
                 ),
+                StructuralWitInType::EqualDistanceDynamicSequence { .. } => todo!(),
                 StructuralWitInType::StackedIncrementalSequence { .. } => {
                     let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
                     let one_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);

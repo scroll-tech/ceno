@@ -333,6 +333,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     &in_point,
                     *descending,
                 ),
+                StructuralWitInType::EqualDistanceDynamicSequence { .. } => todo!(),
                 StructuralWitInType::StackedIncrementalSequence { .. } => {
                     eval_stacked_wellform_address_vec(&in_point)
                 }

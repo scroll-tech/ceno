@@ -78,6 +78,8 @@ pub struct PublicValues {
     pub end_pc: u32,
     pub end_cycle: u64,
     pub shard_id: u32,
+    pub heap_start_addr: u32,
+    pub heap_shard_len: u32,
     pub public_io: Vec<u32>,
     pub shard_rw_sum: Vec<u32>,
 }
@@ -91,6 +93,8 @@ impl PublicValues {
         end_pc: u32,
         end_cycle: u64,
         shard_id: u32,
+        heap_start_addr: u32,
+        heap_shard_len: u32,
         public_io: Vec<u32>,
         shard_rw_sum: Vec<u32>,
     ) -> Self {
@@ -101,6 +105,8 @@ impl PublicValues {
             end_pc,
             end_cycle,
             shard_id,
+            heap_start_addr,
+            heap_shard_len,
             public_io,
             shard_rw_sum,
         }
@@ -116,6 +122,8 @@ impl PublicValues {
             vec![E::BaseField::from_canonical_u32(self.end_pc)],
             vec![E::BaseField::from_canonical_u64(self.end_cycle)],
             vec![E::BaseField::from_canonical_u32(self.shard_id)],
+            vec![E::BaseField::from_canonical_u32(self.heap_start_addr)],
+            vec![E::BaseField::from_canonical_u32(self.heap_shard_len)],
         ]
         .into_iter()
         .chain(

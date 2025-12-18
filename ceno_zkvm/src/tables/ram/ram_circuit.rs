@@ -7,6 +7,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    scheme::PublicValues,
     structs::{ProgramParams, RAMType},
     tables::{RMMCollections, TableCircuit},
 };
@@ -183,6 +184,7 @@ pub trait DynVolatileRamTable {
     const V_LIMBS: usize;
     const ZERO_INIT: bool;
     const DESCENDING: bool;
+    const DYNAMIC_OFFSET: bool = false;
 
     fn addr_expr<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
@@ -202,6 +204,11 @@ pub trait DynVolatileRamTable {
     }
 
     fn offset_addr(params: &ProgramParams) -> Addr;
+
+    fn dynamic_offset_addr(_params: &ProgramParams, _pv: &PublicValues) -> Addr {
+        unimplemented!()
+    }
+
     fn end_addr(params: &ProgramParams) -> Addr;
 
     fn name() -> &'static str;
@@ -224,10 +231,15 @@ pub trait DynVolatileRamTable {
             Self::offset_addr(params) + (entry_index * WORD_SIZE) as Addr
         }
     }
+
+    fn dynamic_addr(_params: &ProgramParams, _entry_index: usize, _pv: &PublicValues) -> Addr {
+        unimplemented!()
+    }
 }
 
 pub trait DynVolatileRamTableConfigTrait<DVRAM>: Sized + Send + Sync {
     type Config: Sized + Send + Sync;
+    type WitnessInput<'a>: Send + Sync + ?Sized;
     fn construct_circuit<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
@@ -236,7 +248,7 @@ pub trait DynVolatileRamTableConfigTrait<DVRAM>: Sized + Send + Sync {
         config: &Self::Config,
         num_witin: usize,
         num_structural_witin: usize,
-        final_mem: &[MemFinalRecord],
+        data: &Self::WitnessInput<'_>,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError>;
 }
 
@@ -258,7 +270,7 @@ impl<
 {
     type TableConfig = C::Config;
     type FixedInput = ();
-    type WitnessInput<'a> = [MemFinalRecord];
+    type WitnessInput<'a> = C::WitnessInput<'a>;
 
     fn name() -> String {
         format!("{}_{:?}_RAM", DVRAM::name(), DVRAM::RAM_TYPE,)
@@ -284,7 +296,7 @@ impl<
         num_witin: usize,
         num_structural_witin: usize,
         _multiplicity: &[HashMap<u64, usize>],
-        final_v: &Self::WitnessInput<'_>,
+        data: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
         Ok(
@@ -292,7 +304,7 @@ impl<
                 config,
                 num_witin,
                 num_structural_witin,
-                final_v,
+                data,
             )?,
         )
     }

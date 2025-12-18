@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use gkr_iop::error::CircuitBuilderError;
 use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamInitCircuit};
-use rand::rngs::adapter::ReseedingRng;
 
 use crate::{
     instructions::riscv::constants::UINT_LIMBS,
@@ -15,6 +14,8 @@ mod ram_impl;
 use crate::{
     chip_handler::general::PublicIOQuery,
     circuit_builder::CircuitBuilder,
+    scheme::PublicValues,
+    structs::WitnessId,
     tables::ram::{
         ram_circuit::LocalFinalRamCircuit,
         ram_impl::{DynVolatileRamTableInitConfig, NonVolatileInitTableConfig},
@@ -30,6 +31,7 @@ impl DynVolatileRamTable for HeapTable {
     const V_LIMBS: usize = UINT_LIMBS;
     const ZERO_INIT: bool = true;
     const DESCENDING: bool = false;
+    const DYNAMIC_OFFSET: bool = true;
 
     fn addr_expr<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
@@ -38,19 +40,25 @@ impl DynVolatileRamTable for HeapTable {
         let max_len = Self::max_len(params);
         let addr = cb.create_structural_witin(
             || "addr",
-            StructuralWitInType::EqualDistanceSequence {
+            StructuralWitInType::EqualDistanceDynamicSequence {
                 max_len,
-                offset: Self::offset_addr(params),
+                offset_instance_id: cb.query_heap_start_addr()?.0 as WitnessId,
+                length_instance_id: cb.query_heap_shard_len()?.0 as WitnessId,
                 multi_factor: WORD_SIZE,
                 descending: Self::DESCENDING,
             },
         );
-        let offset_addr = cb.query_heap_start_addr()?;
-        Ok((offset_addr.expr() + addr.expr(), addr))
+        Ok((addr.expr(), addr))
     }
 
-    fn offset_addr(params: &ProgramParams) -> Addr {
-        params.platform.heap.start
+    fn offset_addr(_params: &ProgramParams) -> Addr {
+        unimplemented!("heap offset is dynamic")
+    }
+
+    fn dynamic_offset_addr(params: &ProgramParams, pv: &PublicValues) -> Addr {
+        let heap_start = pv.heap_start_addr;
+        assert!(heap_start >= params.platform.heap.start);
+        heap_start
     }
 
     fn end_addr(params: &ProgramParams) -> Addr {
@@ -59,6 +67,10 @@ impl DynVolatileRamTable for HeapTable {
 
     fn name() -> &'static str {
         "HeapTable"
+    }
+
+    fn dynamic_addr(params: &ProgramParams, entry_index: usize, pv: &PublicValues) -> Addr {
+        Self::dynamic_offset_addr(params, pv) + (entry_index * WORD_SIZE) as Addr
     }
 }
 

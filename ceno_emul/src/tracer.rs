@@ -1,5 +1,5 @@
 use crate::{
-    CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform, Program,
+    CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     chunked_vec::ChunkedVec,
     dense_addr_space::DenseAddrSpace,
@@ -8,7 +8,7 @@ use crate::{
 };
 use ceno_rt::WORD_SIZE;
 use smallvec::SmallVec;
-use std::{collections::BTreeMap, fmt, mem, sync::Arc};
+use std::{collections::BTreeMap, fmt, mem};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -193,6 +193,7 @@ impl StepRecord {
             Some(rd),
             None,
             prev_cycle,
+            Change::default(),
         )
     }
 
@@ -213,6 +214,7 @@ impl StepRecord {
             None,
             None,
             prev_cycle,
+            Change::default(),
         )
     }
 
@@ -233,6 +235,7 @@ impl StepRecord {
             Some(rd),
             None,
             prev_cycle,
+            Change::default(),
         )
     }
 
@@ -262,6 +265,7 @@ impl StepRecord {
                 previous_cycle: mem_op.previous_cycle,
             }),
             prev_cycle,
+            Change::default(),
         )
     }
 
@@ -273,7 +277,17 @@ impl StepRecord {
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
-        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), None, prev_cycle)
+        StepRecord::new_insn(
+            cycle,
+            pc,
+            insn_code,
+            None,
+            None,
+            Some(rd),
+            None,
+            prev_cycle,
+            Change::default(),
+        )
     }
 
     pub fn new_j_instruction(
@@ -283,7 +297,17 @@ impl StepRecord {
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
-        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), None, prev_cycle)
+        StepRecord::new_insn(
+            cycle,
+            pc,
+            insn_code,
+            None,
+            None,
+            Some(rd),
+            None,
+            prev_cycle,
+            Change::default(),
+        )
     }
 
     pub fn new_s_instruction(
@@ -305,6 +329,7 @@ impl StepRecord {
             None,
             Some(memory_op),
             prev_cycle,
+            Change::default(),
         )
     }
 
@@ -327,6 +352,7 @@ impl StepRecord {
                 previous_cycle: 0,
             }),
             0,
+            Change::default(),
         )
     }
 

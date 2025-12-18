@@ -731,17 +731,6 @@ pub fn emulate_program<'a>(
     tracing::info!("program executed {insts} instructions in {end_cycle} cycles");
     metrics::gauge!("cycles").set(insts as f64);
 
-    let pi = PublicValues::new(
-        exit_code.unwrap_or(0),
-        vm.program().entry,
-        Tracer::SUBCYCLES_PER_INSN,
-        vm.get_pc().into(),
-        end_cycle,
-        multi_prover.prover_id as u32,
-        io_init.iter().map(|rec| rec.value).collect_vec(),
-        vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
-    );
-
     // Find the final register values and cycles.
     let reg_final = reg_init
         .iter()
@@ -855,6 +844,19 @@ pub fn emulate_program<'a>(
     } else {
         vec![]
     };
+
+    let pi = PublicValues::new(
+        exit_code.unwrap_or(0),
+        vm.program().entry,
+        Tracer::SUBCYCLES_PER_INSN,
+        vm.get_pc().into(),
+        end_cycle,
+        multi_prover.prover_id as u32,
+        platform.heap.start,
+        heap_final.len() as u32,
+        io_init.iter().map(|rec| rec.value).collect_vec(),
+        vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
+    );
 
     #[cfg(debug_assertions)]
     {
@@ -1160,12 +1162,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .assign_init_table_circuit(
                         &system_config.zkvm_cs,
                         &mut zkvm_witness,
+                        &pi,
                         &emul_result.final_mem_state.reg,
                         &emul_result.final_mem_state.mem,
                         &emul_result.final_mem_state.io,
                         &emul_result.final_mem_state.hints,
                         &emul_result.final_mem_state.stack,
-                        &emul_result.final_mem_state.heap,
                     )
                     .unwrap();
                 tracing::debug!("assign_init_table_circuit finish in {:?}", time.elapsed());
@@ -1175,7 +1177,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .assign_init_table_circuit(
                         &system_config.zkvm_cs,
                         &mut zkvm_witness,
-                        &[],
+                        &pi,
                         &[],
                         &[],
                         &[],
@@ -1184,6 +1186,21 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     )
                     .unwrap();
             }
+
+            let time = std::time::Instant::now();
+            system_config
+                .mmu_config
+                .assign_dynamic_init_table_circuit(
+                    &system_config.zkvm_cs,
+                    &mut zkvm_witness,
+                    &pi,
+                    &emul_result.final_mem_state.heap,
+                )
+                .unwrap();
+            tracing::debug!(
+                "assign_dynamic_init_table_circuit finish in {:?}",
+                time.elapsed()
+            );
 
             let time = std::time::Instant::now();
             system_config
