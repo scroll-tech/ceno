@@ -1752,8 +1752,12 @@ fn create_proofs_streaming<
     #[cfg(feature = "gpu")]
     {
         use gkr_iop::gpu::gpu_prover::*;
-        let cuda_hal = get_cuda_hal().unwrap();
-        cuda_hal.inner().trim_mem_pool().unwrap();
+
+        info_span!("[ceno] trim_gpu_mem_pool").in_scope(|| {
+            let cuda_hal = get_cuda_hal().unwrap();
+            cuda_hal.inner().trim_mem_pool().unwrap();
+            cuda_hal.inner().synchronize().unwrap();
+        });
     };
 
     proofs
