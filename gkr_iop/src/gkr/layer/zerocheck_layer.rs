@@ -165,14 +165,15 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             self.n_fixed as WitnessId,
             self.n_instance,
         );
-        tracing::debug!("main sumcheck degree: {}", zero_expr.degree());
+        tracing::trace!("{} main sumcheck degree: {}", self.name, zero_expr.degree());
         self.main_sumcheck_expression = Some(zero_expr);
         self.main_sumcheck_expression_monomial_terms = self
             .main_sumcheck_expression
             .as_ref()
             .map(|expr| expr.get_monomial_terms());
-        tracing::debug!(
-            "main sumcheck monomial terms count: {}",
+        tracing::trace!(
+            "{} main sumcheck monomial terms count: {}",
+            self.name,
             self.main_sumcheck_expression_monomial_terms
                 .as_ref()
                 .map_or(0, |terms| terms.len()),

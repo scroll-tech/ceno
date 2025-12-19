@@ -185,9 +185,6 @@ pub trait DynVolatileRamTable {
     const DESCENDING: bool;
     const DYNAMIC_OFFSET: bool = false;
 
-    // define whether offline memory check only init in one shard or multi-shard
-    const INIT_ONCE: bool = true;
-
     fn addr_expr<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,

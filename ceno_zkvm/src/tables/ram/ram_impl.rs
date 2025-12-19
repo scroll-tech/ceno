@@ -390,7 +390,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
                     config.addr,
                     DVRAM::dynamic_addr(&config.params, i, pv) as u64
                 );
-                *structural_row.last_mut().unwrap() = F::ONE;
+                if i < *num_instances {
+                    *structural_row.last_mut().unwrap() = F::ONE;
+                }
             });
         Ok([RowMajorMatrix::empty(), structural_witness])
     }
@@ -406,10 +408,10 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
-        if DVRAM::INIT_ONCE {
-            cb.set_omc_init_only();
-        } else {
+        if DVRAM::DYNAMIC_OFFSET {
             assert!(DVRAM::ZERO_INIT);
+        } else {
+            cb.set_omc_init_only();
         }
 
         let (addr_expr, addr) = DVRAM::addr_expr(cb, params)?;
@@ -460,6 +462,11 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
         assert_eq!(num_structural_witin, 2);
+        println!("init name {}, num_instances {}", DVRAM::name(), data.2);
+        println!(
+            "first record addr {:x} value {:x} cycle {}",
+            data.0[0].addr, data.0[0].value, data.0[0].cycle
+        );
         if DVRAM::DYNAMIC_OFFSET {
             Self::assign_instances_dynamic(config, num_witin, num_structural_witin, data)
         } else {
@@ -533,21 +540,32 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
 
-        let is_current_shard_mem_record =
-            |range: Option<&Range<Addr>>, record: &&MemFinalRecord| -> bool {
-                shard_ctx.is_in_current_shard(record.cycle)
-                    || if let Some(range) = range {
-                        range.contains(&record.addr) && record.cycle == 0
-                    } else {
-                        shard_ctx.is_first_shard() && record.cycle == 0
+        let is_current_shard_mem_record = |range: Option<&Range<Addr>>,
+                                           record: &&MemFinalRecord|
+         -> bool {
+            shard_ctx.is_in_current_shard(record.cycle)
+                || if let Some(range) = range {
+                    if range.contains(&record.addr) && record.cycle == 0 {
+                        println!(
+                            "in local final ram table, range.start {:x} range.end {:x} addr {:x} cycle {}, range.contains(&record.addr) && record.cycle == 0 {}",
+                            range.start,
+                            range.end,
+                            record.addr,
+                            record.cycle,
+                            range.contains(&record.addr) && record.cycle == 0
+                        );
                     }
-            };
+                    range.contains(&record.addr) && record.cycle == 0
+                } else {
+                    shard_ctx.is_first_shard() && record.cycle == 0
+                }
+        };
 
         // collect each raw mem belong to this shard, BEFORE padding length
         let mem_lens: Vec<usize> = final_mem
-            .par_iter()
+            .iter()
             .map(|(_, range, mem)| {
-                mem.par_iter()
+                mem.iter()
                     .filter(|mem| is_current_shard_mem_record(range.as_ref(), mem))
                     .count()
             })
@@ -589,8 +607,6 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
             structural_witness_value_rest = structural_witness_r;
         }
 
-        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
-
         witness_mut_slices
             .par_iter_mut()
             .zip_eq(structural_witness_mut_slices.par_iter_mut())
@@ -615,7 +631,8 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
                                 set_val!(row, limb, val as u64);
                             });
                         }
-                        let shard_cycle = rec.cycle - current_shard_offset_cycle;
+
+                        let shard_cycle = shard_ctx.aligned_current_ts(rec.cycle);
                         set_val!(row, self.final_cycle, shard_cycle);
 
                         set_val!(row, self.ram_type, rec.ram_type as u64);

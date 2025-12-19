@@ -181,9 +181,7 @@ pub struct ShardContext<'a> {
     num_shards: usize,
     max_cycle: Cycle,
     pub addr_future_accesses: Arc<NextCycleAccess>,
-    // this is only updated in first shard
-    addr_accessed_thread_based_first_shard:
-        Either<Vec<FxHashSet<WordAddr>>, &'a mut FxHashSet<WordAddr>>,
+    addr_accessed_tbs: Either<Vec<FxHashSet<WordAddr>>, &'a mut FxHashSet<WordAddr>>,
     read_records_tbs:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     write_records_tbs:
@@ -193,6 +191,7 @@ pub struct ShardContext<'a> {
     pub max_num_cross_shard_accesses: usize,
     // shard 0: [v[0], v[1]), shard 1: [v[1], v[2]), shard 2: [v[2], v[3])
     pub prev_shard_cycle_range: Vec<Cycle>,
+    pub prev_shard_heap_range: Vec<Addr>,
     pub platform: Platform,
     pub shard_heap_addr_range: Range<Addr>,
 }
@@ -209,7 +208,7 @@ impl<'a> Default for ShardContext<'a> {
             num_shards: 1,
             max_cycle: Cycle::MAX,
             addr_future_accesses: Arc::new(Default::default()),
-            addr_accessed_thread_based_first_shard: Either::Left(
+            addr_accessed_tbs: Either::Left(
                 (0..max_threads)
                     .map(|_| Default::default())
                     .collect::<Vec<_>>(),
@@ -228,6 +227,7 @@ impl<'a> Default for ShardContext<'a> {
             expected_inst_per_shard: usize::MAX,
             max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
+            prev_shard_heap_range: vec![],
             platform: CENO_PLATFORM,
             shard_heap_addr_range: CENO_PLATFORM.heap,
         }
@@ -249,35 +249,32 @@ impl<'a> ShardContext<'a> {
         match (
             &mut self.read_records_tbs,
             &mut self.write_records_tbs,
-            &mut self.addr_accessed_thread_based_first_shard,
+            &mut self.addr_accessed_tbs,
         ) {
             (
                 Either::Left(read_thread_based_record_storage),
                 Either::Left(write_thread_based_record_storage),
-                Either::Left(addr_accessed_thread_based_first_shard),
+                Either::Left(addr_accessed_tbs),
             ) => read_thread_based_record_storage
                 .iter_mut()
                 .zip(write_thread_based_record_storage.iter_mut())
-                .zip(addr_accessed_thread_based_first_shard.iter_mut())
-                .map(
-                    |((read, write), addr_accessed_thread_based_first_shard)| ShardContext {
-                        shard_id: self.shard_id,
-                        num_shards: self.num_shards,
-                        max_cycle: self.max_cycle,
-                        addr_future_accesses: self.addr_future_accesses.clone(),
-                        addr_accessed_thread_based_first_shard: Either::Right(
-                            addr_accessed_thread_based_first_shard,
-                        ),
-                        read_records_tbs: Either::Right(read),
-                        write_records_tbs: Either::Right(write),
-                        cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
-                        expected_inst_per_shard: self.expected_inst_per_shard,
-                        max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
-                        prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
-                        platform: self.platform.clone(),
-                        shard_heap_addr_range: self.shard_heap_addr_range.clone(),
-                    },
-                )
+                .zip(addr_accessed_tbs.iter_mut())
+                .map(|((read, write), addr_accessed_tbs)| ShardContext {
+                    shard_id: self.shard_id,
+                    num_shards: self.num_shards,
+                    max_cycle: self.max_cycle,
+                    addr_future_accesses: self.addr_future_accesses.clone(),
+                    addr_accessed_tbs: Either::Right(addr_accessed_tbs),
+                    read_records_tbs: Either::Right(read),
+                    write_records_tbs: Either::Right(write),
+                    cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
+                    expected_inst_per_shard: self.expected_inst_per_shard,
+                    max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
+                    prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
+                    prev_shard_heap_range: self.prev_shard_heap_range.clone(),
+                    platform: self.platform.clone(),
+                    shard_heap_addr_range: self.shard_heap_addr_range.clone(),
+                })
                 .collect_vec(),
             _ => panic!("invalid type"),
         }
@@ -322,11 +319,18 @@ impl<'a> ShardContext<'a> {
         (cycle as usize) >= self.cur_shard_cycle_range.end
     }
 
-    /// Extract shard_id which produce this record
+    /// Extract shard_id which produce this record by cycle
     /// NOTE prev_shard_cycle_range[0] should be 0 otherwise it will panic with subtract-overflow
     #[inline(always)]
-    pub fn extract_shard_id(&self, cycle: Cycle) -> usize {
+    pub fn extract_shard_id_by_cycle(&self, cycle: Cycle) -> usize {
         self.prev_shard_cycle_range.partition_point(|&t| t <= cycle) - 1
+    }
+
+    /// Extract shard_id which produce this record by heap addr
+    /// NOTE prev_shard_heap_range[0] should be 0 otherwise it will panic with subtract-overflow
+    #[inline(always)]
+    pub fn extract_shard_id_by_heap_addr(&self, addr: Addr) -> usize {
+        self.prev_shard_heap_range.partition_point(|&a| a <= addr) - 1
     }
 
     #[inline(always)]
@@ -387,44 +391,77 @@ impl<'a> ShardContext<'a> {
     ) {
         // check read from external mem bus
         // exclude first shard
-        if !self.is_first_shard() {
-            // read from global shard
-            // 1. for non heap record and before current shared
-            // 2. for heap record initial read, and addr is outside of range
-            if (!matches!(ram_type, RAMType::Memory)
-                && self.before_current_shard_cycle(prev_cycle)
-                && self.is_in_current_shard(cycle))
-                || (matches!(ram_type, RAMType::Memory)
-                    && prev_cycle == 0
-                    && self.is_in_current_shard(cycle))
-                    && #[allow(unused_variables)]
-                    {
-                        let mem_section = MemorySection::from_addr(&self.platform, addr);
-                        matches!(MemorySection::Heap, mem_section)
-                    }
-                    && !self.shard_heap_addr_range.contains(&addr.baddr().0)
-            {
-                let prev_shard_id = self.extract_shard_id(prev_cycle);
-                let ram_record = self
-                    .read_records_tbs
-                    .as_mut()
-                    .right()
-                    .expect("illegal type");
-                ram_record.insert(
+        if !self.is_first_shard()
+            && !matches!(ram_type, RAMType::Memory)
+            && self.before_current_shard_cycle(prev_cycle)
+            && self.is_in_current_shard(cycle)
+        {
+            let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
+            let ram_record = self
+                .read_records_tbs
+                .as_mut()
+                .right()
+                .expect("illegal type");
+            ram_record.insert(
+                addr,
+                RAMRecord {
+                    ram_type,
+                    reg_id: id,
                     addr,
-                    RAMRecord {
-                        ram_type,
-                        reg_id: id,
-                        addr,
-                        prev_cycle,
-                        cycle,
-                        shard_cycle: 0,
-                        prev_value,
-                        value,
-                        shard_id: prev_shard_id,
-                    },
-                );
-            }
+                    prev_cycle,
+                    cycle,
+                    shard_cycle: 0,
+                    prev_value,
+                    value,
+                    shard_id: prev_shard_id,
+                },
+            );
+        }
+
+        // 2. for heap record initial read, and addr is outside of range
+        if !self.is_first_shard()
+            && matches!(ram_type, RAMType::Memory)
+            && prev_cycle == 0
+            && self.is_in_current_shard(cycle)
+            && matches!(
+                MemorySection::from_addr(&self.platform, addr),
+                MemorySection::Heap
+            )
+            && !self.shard_heap_addr_range.contains(&addr.baddr().0)
+        {
+            let byte_addr: Addr = addr.into();
+            let mem_section = MemorySection::from_addr(&self.platform, addr);
+            println!(
+                "self.shard_heap_addr_range start {:x} end {:x} platform heap start {:x} platform heap end {:x} addr.into() {:x} addr.baddr().0 {:x} !! {}, {:?}",
+                self.shard_heap_addr_range.start,
+                self.shard_heap_addr_range.end,
+                self.platform.heap.start,
+                self.platform.heap.end,
+                byte_addr,
+                addr.baddr().0,
+                self.platform.heap.contains(&byte_addr),
+                mem_section,
+            );
+            let prev_shard_id = self.extract_shard_id_by_heap_addr(addr.baddr().0);
+            let ram_record = self
+                .read_records_tbs
+                .as_mut()
+                .right()
+                .expect("illegal type");
+            ram_record.insert(
+                addr,
+                RAMRecord {
+                    ram_type,
+                    reg_id: id,
+                    addr,
+                    prev_cycle,
+                    cycle,
+                    shard_cycle: 0,
+                    prev_value,
+                    value,
+                    shard_id: prev_shard_id,
+                },
+            );
         }
 
         // check write to external mem bus
@@ -454,28 +491,23 @@ impl<'a> ShardContext<'a> {
             );
         }
 
-        if self.is_first_shard() {
-            let addr_accessed = self
-                .addr_accessed_thread_based_first_shard
-                .as_mut()
-                .right()
-                .expect("illegal type");
-            addr_accessed.insert(addr);
-        }
+        let addr_accessed = self
+            .addr_accessed_tbs
+            .as_mut()
+            .right()
+            .expect("illegal type");
+        addr_accessed.insert(addr);
     }
 
-    /// merge map from different thread, which keep the largest cycle when matched same address
-    pub fn get_addr_accessed_first_shard(&self) -> FxHashSet<WordAddr> {
+    /// merge addr accessed in different threads
+    pub fn get_addr_accessed(&self) -> FxHashSet<WordAddr> {
         let mut merged = FxHashSet::default();
-        let addr_accessed_thread_based_first_shard =
-            match &self.addr_accessed_thread_based_first_shard {
-                Either::Left(addr_accessed_thread_based_first_shard) => {
-                    addr_accessed_thread_based_first_shard
-                }
-                Either::Right(_) => panic!("invalid type"),
-            };
+        let addr_accessed_tbs = match &self.addr_accessed_tbs {
+            Either::Left(addr_accessed_tbs) => addr_accessed_tbs,
+            Either::Right(_) => panic!("invalid type"),
+        };
 
-        for s in addr_accessed_thread_based_first_shard {
+        for s in addr_accessed_tbs {
             merged.extend(s);
         }
         merged
@@ -552,6 +584,7 @@ pub struct ShardContextBuilder {
     max_cycle_per_shard: Cycle,
     target_cell_first_shard: u64,
     prev_shard_cycle_range: Vec<Cycle>,
+    prev_shard_heap_range: Vec<Addr>,
     // holds the first step for the next shard once the current shard hits its limit
     pending_step: Option<StepRecord>,
     platform: Platform,
@@ -568,6 +601,7 @@ impl Default for ShardContextBuilder {
             max_cycle_per_shard: 0,
             target_cell_first_shard: 0,
             prev_shard_cycle_range: vec![],
+            prev_shard_heap_range: vec![],
             pending_step: None,
             platform: CENO_PLATFORM,
         }
@@ -598,6 +632,7 @@ impl ShardContextBuilder {
             },
             addr_future_accesses: Arc::new(addr_future_accesses),
             prev_shard_cycle_range: vec![0],
+            prev_shard_heap_range: vec![0],
             pending_step: None,
             platform,
         }
@@ -651,6 +686,17 @@ impl ShardContextBuilder {
                     .copied()
                     .unwrap_or(FullTracer::SUBCYCLES_PER_INSN)
             );
+            assert_eq!(
+                steps
+                    .first()
+                    .map(|step| step.heap_watermark_ptr.before)
+                    .unwrap_or_default(),
+                self.prev_shard_heap_range
+                    .last()
+                    .copied()
+                    .unwrap_or(self.platform.heap.start)
+                    .into()
+            );
         }
 
         let shard_ctx = ShardContext {
@@ -659,6 +705,7 @@ impl ShardContextBuilder {
                 ..(steps.last().unwrap().cycle() + FullTracer::SUBCYCLES_PER_INSN) as usize,
             addr_future_accesses: self.addr_future_accesses.clone(),
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
+            prev_shard_heap_range: self.prev_shard_heap_range.clone(),
             platform: self.platform.clone(),
             shard_heap_addr_range: steps
                 .first()
@@ -670,8 +717,17 @@ impl ShardContextBuilder {
                     .unwrap_or_default(),
             ..Default::default()
         };
+        println!(
+            "{}th shard shard_heap_addr_range {:x} - {:x}, cycle range {:?}",
+            shard_ctx.shard_id,
+            shard_ctx.shard_heap_addr_range.start,
+            shard_ctx.shard_heap_addr_range.end,
+            shard_ctx.cur_shard_cycle_range
+        );
         self.prev_shard_cycle_range
             .push(shard_ctx.cur_shard_cycle_range.end as u64);
+        self.prev_shard_heap_range
+            .push(shard_ctx.shard_heap_addr_range.end as u32);
         self.cur_cells = 0;
         self.cur_acc_cycle = 0;
         self.cur_shard_id += 1;
