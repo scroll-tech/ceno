@@ -1160,6 +1160,16 @@ pub fn generate_witness<'a, E: ExtensionField>(
             };
             let current_shard_end_pc = last_step.pc().after.0;
 
+            pi.init_pc = current_shard_init_pc;
+            pi.init_cycle = FullTracer::SUBCYCLES_PER_INSN;
+            pi.shard_id = shard_ctx.shard_id as u32;
+            pi.end_pc = current_shard_end_pc;
+            pi.end_cycle = current_shard_end_cycle;
+            pi.heap_start_addr = shard_ctx.shard_heap_addr_range.start;
+            pi.heap_shard_len = (shard_ctx.shard_heap_addr_range.end
+                - shard_ctx.shard_heap_addr_range.start)
+                / (WORD_SIZE as u32);
+
             if let Some(target_shard_id) = target_shard_id {
                 if shard_ctx.shard_id < target_shard_id {
                     tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
@@ -1275,12 +1285,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 )
                 .unwrap();
             tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
-
-            pi.init_pc = current_shard_init_pc;
-            pi.init_cycle = FullTracer::SUBCYCLES_PER_INSN;
-            pi.shard_id = shard_ctx.shard_id as u32;
-            pi.end_pc = current_shard_end_pc;
-            pi.end_cycle = current_shard_end_cycle;
 
             if let Some(shard_ram_witnesses) =
                 zkvm_witness.get_witness(&ShardRamCircuit::<E>::name())

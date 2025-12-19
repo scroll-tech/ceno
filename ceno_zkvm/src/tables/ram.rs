@@ -63,7 +63,12 @@ impl DynVolatileRamTable for HeapTable {
 
     fn dynamic_offset_addr(params: &ProgramParams, pv: &PublicValues) -> Addr {
         let heap_start = pv.heap_start_addr;
-        assert!(heap_start >= params.platform.heap.start);
+        assert!(
+            heap_start >= params.platform.heap.start,
+            "heap_start {:x} < platform min heap start {:x}",
+            heap_start,
+            params.platform.heap.start
+        );
         heap_start
     }
 
