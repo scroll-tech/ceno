@@ -1,10 +1,3 @@
-// TODO: assert that the shard ram ec point is `PointAtInfinity`
-
-//  let is_sum_x_zero = ec_sum.x.is_zero(builder);
-//  let is_sum_y_zero = ec_sum.y.is_zero(builder);
-//  builder.assert_usize_eq(is_sum_x_zero, Usize::from(1));
-//  builder.assert_usize_eq(is_sum_y_zero, Usize::from(1));
-
 use openvm_continuations::{C, F, SC};
 use openvm_instructions::program::Program;
 use openvm_native_compiler::{
@@ -19,13 +12,14 @@ use openvm_stark_backend::keygen::types::MultiStarkVerifyingKey;
 use openvm_stark_sdk::config::FriParameters;
 use std::array;
 
-use crate::aggregation::internal::NonLeafVerifierVariables;
+use crate::aggregation::{SEPTIC_EXTENSION_DEGREE, internal::NonLeafVerifierVariables};
 use openvm_native_compiler::prelude::*;
 use openvm_native_recursion::vars::StarkProofVariable;
 use openvm_stark_sdk::openvm_stark_backend::{
     config::{StarkGenericConfig, Val},
     proof::Proof,
 };
+use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -126,6 +120,15 @@ impl CenoRootVmVerifierConfig {
             let (merged_pvs, _expected_leaf_commit) =
                 non_leaf_verifier.verify_internal_or_leaf_verifier_proofs(&mut builder, &proofs);
             builder.cycle_tracker_end("VerifyProofs");
+
+            // Assert final ec sum is zero
+            let z: Felt<_> = builder.constant(<C as openvm_native_compiler::ir::Config>::F::ZERO);
+            for i in 0..SEPTIC_EXTENSION_DEGREE {
+                builder.assert_felt_eq(merged_pvs.shard_ram_connector.x[i], z);
+                builder.assert_felt_eq(merged_pvs.shard_ram_connector.y[i], z);
+            }
+            let one: Felt<_> = builder.constant(<C as openvm_native_compiler::ir::Config>::F::ONE);
+            builder.assert_felt_eq(merged_pvs.shard_ram_connector.is_infinity, one);
 
             /* _todo: Change merged pv operations, including checking final ec sum is infinity
             // App Program should terminate

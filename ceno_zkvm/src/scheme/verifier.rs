@@ -122,14 +122,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 let end_pc = vm_proof.pi_evals[END_PC_IDX];
 
                 // add to shard ec sum
-                // _debug
-                // println!("=> shard pi: {:?}", vm_proof.pi_evals.clone());
                 let shard_ec = self.verify_proof_validity(shard_id, vm_proof, transcript)?;
-                // println!("=> start_ec_sum: {:?}", shard_ec_sum);
-                // println!("=> shard_ec: {:?}", shard_ec);
-                // shard_ec_sum = shard_ec_sum + self.verify_proof_validity(shard_id, vm_proof, transcript)?;
                 shard_ec_sum = shard_ec_sum + shard_ec;
-                // println!("=> new_ec_sum: {:?}", shard_ec_sum);
 
                 Ok((Some(end_pc), shard_ec_sum))
             })?;
