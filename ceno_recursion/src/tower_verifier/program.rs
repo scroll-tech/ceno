@@ -467,8 +467,7 @@ pub fn verify_tower_proof<C: Config>(
 
                 let point_and_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
                     point: next_rt.point.clone(),
-                    // point: PointVariable { fs: next_rt.point.fs.clone() },
-                    eval: eval,
+                    eval,
                 });
                 builder.set_value(&prod_spec_point_n_eval, i, point_and_eval);
             });
@@ -476,7 +475,7 @@ pub fn verify_tower_proof<C: Config>(
             .range(0, num_logup_spec.clone())
             .for_each(|i_vec, builder| {
                 let i = i_vec[0];
-                let p_idx = i.clone();
+                let p_idx = i;
                 let q_idx: Var<C::N> = builder.eval(num_logup_spec.clone() + i);
                 let p_eval = builder.get(&logup_evals, p_idx);
                 let q_eval = builder.get(&logup_evals, q_idx);
@@ -486,10 +485,7 @@ pub fn verify_tower_proof<C: Config>(
                     eval: p_eval,
                 });
                 let q_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                    point: PointVariable {
-                        fs: next_rt.point.fs.clone(),
-                    },
-                    // point: next_rt.point.clone(),
+                    point: next_rt.point.clone(),
                     eval: q_eval,
                 });
                 builder.set_value(&logup_spec_p_point_n_eval, i, p_eval);
