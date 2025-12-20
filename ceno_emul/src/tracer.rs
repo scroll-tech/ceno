@@ -580,6 +580,10 @@ impl FullTracer {
             mmio_min_max_access: Some(mmio_max_access),
             record: StepRecord {
                 cycle: Self::SUBCYCLES_PER_INSN,
+                heap_watermark_ptr: Change::new(
+                    ByteAddr::from(platform.heap.start),
+                    ByteAddr::from(platform.heap.start),
+                ),
                 ..StepRecord::default()
             },
             platform: platform.clone(),
@@ -613,13 +617,13 @@ impl FullTracer {
     }
 
     #[inline(always)]
-    pub fn track_heap_watermark_before(&mut self, _heap_watermark: Word) {
-        self.record.heap_watermark_ptr.before = self.current_heap_watermark();
+    pub fn track_heap_watermark_before(&mut self, heap_watermark: Word) {
+        self.record.heap_watermark_ptr.before = ByteAddr::from(heap_watermark);
     }
 
     #[inline(always)]
-    pub fn track_heap_watermark_after(&mut self, _heap_watermark: Word) {
-        self.record.heap_watermark_ptr.after = self.current_heap_watermark();
+    pub fn track_heap_watermark_after(&mut self, heap_watermark: Word) {
+        self.record.heap_watermark_ptr.after = ByteAddr::from(heap_watermark);
     }
 
     #[inline(always)]
@@ -771,18 +775,6 @@ impl FullTracer {
 
     fn classify_memory_section(&self, addr: WordAddr) -> MemorySection {
         MemorySection::from_addr(&self.platform, addr)
-    }
-
-    #[inline(always)]
-    fn current_heap_watermark(&self) -> ByteAddr {
-        self.mmio_min_max_access
-            .as_ref()
-            .and_then(|regions| {
-                regions
-                    .get(&ByteAddr::from(self.platform.heap.start).waddr())
-                    .map(|(_, _, _, max)| max.baddr())
-            })
-            .expect("no heap registration")
     }
 }
 
