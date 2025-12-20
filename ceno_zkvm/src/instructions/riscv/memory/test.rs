@@ -17,7 +17,7 @@ use crate::{
     structs::ProgramParams,
 };
 use ceno_emul::{
-    ByteAddr, Change, InsnKind, MemorySection, ReadOp, StepRecord, Word, WriteOp, encode_rv32,
+    ByteAddr, Change, InsnKind, ReadOp, StepRecord, Word, WriteOp, encode_rv32,
 };
 #[cfg(feature = "u16limb_circuit")]
 use ff_ext::BabyBearExt4;
@@ -121,7 +121,6 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
                     after: new_mem_value,
                 },
                 previous_cycle: 4,
-                section: MemorySection::Other,
             },
             8,
         )],
@@ -181,7 +180,6 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
                 addr: unaligned_addr.waddr(),
                 value: mem_value,
                 previous_cycle: 4,
-                section: MemorySection::Other,
             },
             8,
         )],

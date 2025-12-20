@@ -1,6 +1,6 @@
 use crate::{
     CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
-    addr::{Addr, ByteAddr, Cycle, RegIdx, Word, WordAddr},
+    addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     chunked_vec::ChunkedVec,
     dense_addr_space::DenseAddrSpace,
     encode_rv32,
@@ -136,7 +136,6 @@ pub struct MemOp<T> {
     pub value: T,
     /// The cycle when this memory address was last accessed before this operation.
     pub previous_cycle: Cycle,
-    pub section: MemorySection,
 }
 
 impl<T> MemOp<T> {
@@ -145,7 +144,6 @@ impl<T> MemOp<T> {
             addr: Platform::register_vma(idx).into(),
             value,
             previous_cycle,
-            section: MemorySection::Register,
         }
     }
 
@@ -157,31 +155,6 @@ impl<T> MemOp<T> {
 
 pub type ReadOp = MemOp<Word>;
 pub type WriteOp = MemOp<Change<Word>>;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum MemorySection {
-    #[default]
-    Other,
-    Heap,
-    Stack,
-    Hints,
-    Register,
-}
-
-impl MemorySection {
-    pub fn from_addr(platform: &Platform, addr: WordAddr) -> Self {
-        let byte_addr: Addr = addr.into();
-        if platform.heap.contains(&byte_addr) {
-            MemorySection::Heap
-        } else if platform.stack.contains(&byte_addr) {
-            MemorySection::Stack
-        } else if platform.hints.contains(&byte_addr) {
-            MemorySection::Hints
-        } else {
-            MemorySection::Other
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct LatestAccesses {
@@ -375,7 +348,6 @@ impl StepRecord {
                     after: mem_op.value,
                 },
                 previous_cycle: mem_op.previous_cycle,
-                section: mem_op.section,
             }),
             prev_cycle,
             Change::default(),
@@ -463,7 +435,6 @@ impl StepRecord {
                     after: value,
                 },
                 previous_cycle: 0,
-                section: MemorySection::Heap,
             }),
             0,
             Change::default(),
@@ -489,19 +460,16 @@ impl StepRecord {
                 addr: Platform::register_vma(insn.rs1).into(),
                 value: rs1,
                 previous_cycle,
-                section: MemorySection::Register,
             }),
             rs2: rs2_read.map(|rs2| ReadOp {
                 addr: Platform::register_vma(insn.rs2).into(),
                 value: rs2,
                 previous_cycle,
-                section: MemorySection::Register,
             }),
             rd: rd.map(|rd| WriteOp {
                 addr: Platform::register_vma(insn.rd_internal() as RegIdx).into(),
                 value: rd,
                 previous_cycle,
-                section: MemorySection::Register,
             }),
             insn,
             memory_op,
@@ -634,7 +602,6 @@ impl FullTracer {
                     addr,
                     value,
                     previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS1),
-                    section: MemorySection::Register,
                 });
             }
             (Some(_), None) => {
@@ -642,7 +609,6 @@ impl FullTracer {
                     addr,
                     value,
                     previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS2),
-                    section: MemorySection::Register,
                 });
             }
             _ => unimplemented!("Only two register reads are supported"),
@@ -660,7 +626,6 @@ impl FullTracer {
             addr,
             value,
             previous_cycle: self.track_access(addr, Self::SUBCYCLE_RD),
-            section: MemorySection::Register,
         });
     }
 
@@ -706,7 +671,6 @@ impl FullTracer {
             addr,
             value,
             previous_cycle: self.track_access(addr, Self::SUBCYCLE_MEM),
-            section: MemorySection::from_addr(&self.platform, addr),
         });
     }
 

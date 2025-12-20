@@ -1,8 +1,6 @@
 use itertools::{Itertools, izip};
 
-use crate::{
-    Change, EmuContext, MemorySection, Tracer, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
-};
+use crate::{Change, EmuContext, Tracer, VMState, WORD_SIZE, Word, WordAddr, WriteOp};
 
 /// Utilities for reading/manipulating a memory segment of fixed length
 pub struct MemoryView<'a, T: Tracer, const LENGTH: usize> {
@@ -59,14 +57,10 @@ impl<'a, T: Tracer, const LENGTH: usize> MemoryView<'a, T, LENGTH> {
             self.words(),
             self.writes.unwrap_or(self.words())
         )
-        .map(|(addr, before, after)| {
-            let section = MemorySection::from_addr(self.vm.platform(), addr);
-            WriteOp {
-                addr,
-                value: Change { before, after },
-                previous_cycle: 0, // Cycle set later in finalize().
-                section,
-            }
+        .map(|(addr, before, after)| WriteOp {
+            addr,
+            value: Change { before, after },
+            previous_cycle: 0, // Cycle set later in finalize().
         })
         .collect_vec()
         .try_into()

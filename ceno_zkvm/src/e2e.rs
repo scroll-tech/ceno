@@ -21,9 +21,9 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, MemorySection,
-    NextCycleAccess, Platform, PreflightTracer, Program, StepRecord, Tracer, VM_REG_COUNT, VMState,
-    WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, NextCycleAccess,
+    Platform, PreflightTracer, Program, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word,
+    WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -385,12 +385,18 @@ impl<'a> ShardContext<'a> {
         value: Word,
         prev_value: Option<Word>,
     ) {
-        if !self.is_first_shard() && self.is_in_current_shard(cycle) {
-            let mem_section = MemorySection::from_addr(&self.platform, addr);
-            let is_heap = matches!(mem_section, MemorySection::Heap);
-            let addr_byte = addr.baddr();
+        let addr_byte = addr.baddr();
+        let addr_raw = addr_byte.0;
+        let is_heap = self.platform.heap.contains(&addr_raw);
+        let before_current = self.before_current_shard_cycle(prev_cycle);
+        let is_initial_heap_read = is_heap && prev_cycle == 0;
+
+        if !self.is_first_shard()
+            && self.is_in_current_shard(cycle)
+            && (before_current || is_initial_heap_read)
+        {
             // 1. exclude heap records when checking reads from the external bus
-            if !is_heap && self.before_current_shard_cycle(prev_cycle) {
+            if !is_heap && before_current {
                 let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
                 let ram_record = self
                     .read_records_tbs
@@ -414,8 +420,8 @@ impl<'a> ShardContext<'a> {
             }
 
             // 2. For heap initial reads outside of the shard range.
-            if is_heap && prev_cycle == 0 && !self.shard_heap_addr_range.contains(&addr_byte.0) {
-                let prev_shard_id = self.extract_shard_id_by_heap_addr(addr_byte.0);
+            if is_initial_heap_read && !self.shard_heap_addr_range.contains(&addr_raw) {
+                let prev_shard_id = self.extract_shard_id_by_heap_addr(addr_raw);
                 let ram_record = self
                     .read_records_tbs
                     .as_mut()
