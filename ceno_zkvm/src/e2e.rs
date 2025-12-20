@@ -181,7 +181,7 @@ pub struct ShardContext<'a> {
     num_shards: usize,
     max_cycle: Cycle,
     pub addr_future_accesses: Arc<NextCycleAccess>,
-    addr_accessed_tbs: Either<Vec<FxHashSet<WordAddr>>, &'a mut FxHashSet<WordAddr>>,
+    addr_accessed_tbs: Either<Vec<Vec<WordAddr>>, &'a mut Vec<WordAddr>>,
     read_records_tbs:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     write_records_tbs:
@@ -208,11 +208,7 @@ impl<'a> Default for ShardContext<'a> {
             num_shards: 1,
             max_cycle: Cycle::MAX,
             addr_future_accesses: Arc::new(Default::default()),
-            addr_accessed_tbs: Either::Left(
-                (0..max_threads)
-                    .map(|_| Default::default())
-                    .collect::<Vec<_>>(),
-            ),
+            addr_accessed_tbs: Either::Left(vec![Vec::new(); max_threads]),
             read_records_tbs: Either::Left(
                 (0..max_threads)
                     .map(|_| BTreeMap::new())
@@ -390,62 +386,57 @@ impl<'a> ShardContext<'a> {
         prev_value: Option<Word>,
     ) {
         let mem_section = MemorySection::from_addr(&self.platform, addr);
-        // check read from external mem bus
-        // 1. exclude first shard or heap records
-        if !self.is_first_shard()
-            && !matches!(mem_section, MemorySection::Heap)
-            && self.before_current_shard_cycle(prev_cycle)
-            && self.is_in_current_shard(cycle)
-        {
-            let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
-            let ram_record = self
-                .read_records_tbs
-                .as_mut()
-                .right()
-                .expect("illegal type");
-            ram_record.insert(
-                addr,
-                RAMRecord {
-                    ram_type,
-                    reg_id: id,
-                    addr,
-                    prev_cycle,
-                    cycle,
-                    shard_cycle: 0,
-                    prev_value,
-                    value,
-                    shard_id: prev_shard_id,
-                },
-            );
-        }
+        let is_heap = matches!(mem_section, MemorySection::Heap);
+        let addr_byte = addr.baddr();
 
-        // 2. for heap record initial read, and addr is outside of range
-        if !self.is_first_shard()
-            && prev_cycle == 0
-            && matches!(mem_section, MemorySection::Heap)
-            && self.is_in_current_shard(cycle)
-            && !self.shard_heap_addr_range.contains(&addr.baddr().0)
-        {
-            let prev_shard_id = self.extract_shard_id_by_heap_addr(addr.baddr().0);
-            let ram_record = self
-                .read_records_tbs
-                .as_mut()
-                .right()
-                .expect("illegal type");
-            ram_record.insert(
-                addr,
-                RAMRecord {
-                    ram_type,
-                    reg_id: id,
+        if !self.is_first_shard() && self.is_in_current_shard(cycle) {
+            // 1. exclude heap records when checking reads from the external bus
+            if !is_heap && self.before_current_shard_cycle(prev_cycle) {
+                let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
+                let ram_record = self
+                    .read_records_tbs
+                    .as_mut()
+                    .right()
+                    .expect("illegal type");
+                ram_record.insert(
                     addr,
-                    prev_cycle,
-                    cycle,
-                    shard_cycle: 0,
-                    prev_value,
-                    value,
-                    shard_id: prev_shard_id,
-                },
-            );
+                    RAMRecord {
+                        ram_type,
+                        reg_id: id,
+                        addr,
+                        prev_cycle,
+                        cycle,
+                        shard_cycle: 0,
+                        prev_value,
+                        value,
+                        shard_id: prev_shard_id,
+                    },
+                );
+            }
+
+            // 2. For heap initial reads outside of the shard range.
+            if is_heap && prev_cycle == 0 && !self.shard_heap_addr_range.contains(&addr_byte.0) {
+                let prev_shard_id = self.extract_shard_id_by_heap_addr(addr_byte.0);
+                let ram_record = self
+                    .read_records_tbs
+                    .as_mut()
+                    .right()
+                    .expect("illegal type");
+                ram_record.insert(
+                    addr,
+                    RAMRecord {
+                        ram_type,
+                        reg_id: id,
+                        addr,
+                        prev_cycle,
+                        cycle,
+                        shard_cycle: 0,
+                        prev_value,
+                        value,
+                        shard_id: prev_shard_id,
+                    },
+                );
+            }
         }
 
         // check write to external mem bus
@@ -480,19 +471,18 @@ impl<'a> ShardContext<'a> {
             .as_mut()
             .right()
             .expect("illegal type");
-        addr_accessed.insert(addr);
+        addr_accessed.push(addr);
     }
 
     /// merge addr accessed in different threads
     pub fn get_addr_accessed(&self) -> FxHashSet<WordAddr> {
         let mut merged = FxHashSet::default();
-        let addr_accessed_tbs = match &self.addr_accessed_tbs {
-            Either::Left(addr_accessed_tbs) => addr_accessed_tbs,
-            Either::Right(_) => panic!("invalid type"),
-        };
-
-        for s in addr_accessed_tbs {
-            merged.extend(s);
+        if let Either::Left(addr_accessed_tbs) = &self.addr_accessed_tbs {
+            for addrs in addr_accessed_tbs {
+                merged.extend(addrs.iter().copied());
+            }
+        } else {
+            panic!("invalid type");
         }
         merged
     }
