@@ -697,7 +697,7 @@ pub fn emulate_program<'a>(
         vm.init_memory(record.addr.into(), record.value);
     }
 
-    let exit_code = info_span!("emulator.preflight-execute").in_scope(|| {
+    let exit_code = info_span!("[ceno] emulator.preflight-execute").in_scope(|| {
         let _ = vm.iter_until_halt().take(max_steps).count();
         vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
@@ -1070,7 +1070,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
     std::iter::from_fn(move || {
         info_span!(
-            "app_prove.generate_witness",
+            "[ceno] app_prove.generate_witness",
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
@@ -1605,7 +1605,7 @@ fn create_proofs_streaming<
     init_mem_state: &InitMemState,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
-    let proofs = info_span!("app_prove.inner").in_scope(|| {
+    let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
         #[cfg(feature = "gpu")]
         {
             use crossbeam::channel;
@@ -1735,6 +1735,22 @@ fn create_proofs_streaming<
         }
     });
     metrics::gauge!("num_shards").set(proofs.len() as f64);
+
+    // Currently, due to mixed usage with other GPU backends,
+    // we need to trim ceno-gpu's memory pool while still retaining 424MB.
+    // Once the GPU backend is unified, skipping this trim
+    // could improve performance by a few seconds.
+    #[cfg(feature = "gpu")]
+    {
+        use gkr_iop::gpu::gpu_prover::*;
+
+        info_span!("[ceno] trim_gpu_mem_pool").in_scope(|| {
+            let cuda_hal = get_cuda_hal().unwrap();
+            cuda_hal.inner().trim_mem_pool().unwrap();
+            cuda_hal.inner().synchronize().unwrap();
+        });
+    };
+
     proofs
 }
 

@@ -130,7 +130,11 @@ impl<
         pi: PublicValues,
         mut transcript: impl Transcript<E> + 'static,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
-        info_span!("create_proof_of_shard", shard_id = shard_ctx.shard_id).in_scope(|| {
+        info_span!(
+            "[ceno] create_proof_of_shard",
+            shard_id = shard_ctx.shard_id
+        )
+        .in_scope(|| {
             let raw_pi = pi.to_vec::<E>();
             let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
             let mut chip_proofs = BTreeMap::new();
@@ -218,8 +222,8 @@ impl<
             );
 
             // commit to witness traces in batch
-            let (mut witness_mles, witness_data, witin_commit) =
-                self.device.commit_traces(wits_rmms);
+            let (mut witness_mles, witness_data, witin_commit) = info_span!("[ceno] commit_traces")
+                .in_scope(|| self.device.commit_traces(wits_rmms));
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
 
@@ -277,24 +281,26 @@ impl<
                     .append_field_element(&E::BaseField::from_canonical_u64(circuit_idx as u64));
 
                 // TODO: add an enum for circuit type either in constraint_system or vk
-                let witness_mle = if cs.num_witin() > 0 {
-                    let mles = witness_iter.by_ref().take(cs.num_witin()).collect_vec();
-                    assert_eq!(
-                        mles.len(),
-                        cs.num_witin(),
-                        "insufficient witness mles for circuit {}",
-                        circuit_name
-                    );
-                    mles
-                } else {
-                    vec![]
-                };
+                let witness_mle = info_span!("[ceno] extract_witness_mles").in_scope(|| {
+                    if cs.num_witin() > 0 {
+                        let mles = witness_iter.by_ref().take(cs.num_witin()).collect_vec();
+                        assert_eq!(
+                            mles.len(),
+                            cs.num_witin(),
+                            "insufficient witness mles for circuit {}",
+                            circuit_name
+                        );
+                        mles
+                    } else {
+                        vec![]
+                    }
+                });
 
-                let structural_witness_span =
-                    entered_span!("structural_witness", profiling_2 = true);
-                let structural_mles = structural_rmm.to_mles();
-                let structural_witness = self.device.transport_mles(&structural_mles);
-                exit_span!(structural_witness_span);
+                let structural_witness = info_span!("[ceno] transport_structural_witness")
+                    .in_scope(|| {
+                        let structural_mles = structural_rmm.to_mles();
+                        self.device.transport_mles(&structural_mles)
+                    });
 
                 let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
                 let input = ProofInput {
@@ -307,18 +313,24 @@ impl<
                     has_ecc_ops: cs.has_ecc_ops(),
                 };
 
-                let (opcode_proof, pi_in_evals, input_opening_point) = self.create_chip_proof(
-                    circuit_name.as_str(),
-                    pk,
-                    input,
-                    &mut transcript,
-                    &challenges,
-                )?;
+                let (opcode_proof, pi_in_evals, input_opening_point) =
+                    info_span!("[ceno] create_chip_proof", name = circuit_name.as_str()).in_scope(
+                        || {
+                            self.create_chip_proof(
+                                circuit_name.as_str(),
+                                pk,
+                                input,
+                                &mut transcript,
+                                &challenges,
+                            )
+                        },
+                    )?;
                 tracing::trace!(
                     "generated proof for opcode {} with num_instances={:?}",
                     circuit_name,
                     num_instances
                 );
+
                 if cs.num_witin() > 0 || cs.num_fixed() > 0 {
                     points.push(input_opening_point);
                     evaluations.push(vec![
@@ -343,14 +355,16 @@ impl<
             // batch opening pcs
             // generate static info from prover key for expected num variable
             let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
-            let mpcs_opening_proof = self.device.open(
-                witness_data,
-                self.get_device_proving_key(shard_ctx)
-                    .map(|dpk| dpk.pcs_data.clone()),
-                points,
-                evaluations,
-                &mut transcript,
-            );
+            let mpcs_opening_proof = info_span!("[ceno] pcs_opening").in_scope(|| {
+                self.device.open(
+                    witness_data,
+                    self.get_device_proving_key(shard_ctx)
+                        .map(|dpk| dpk.pcs_data.clone()),
+                    points,
+                    evaluations,
+                    &mut transcript,
+                )
+            });
             exit_span!(pcs_opening);
 
             let vm_proof = ZKVMProof::new(
@@ -406,13 +420,10 @@ impl<
                     _ => unreachable!("slope's expression must be WitIn"),
                 })
                 .collect_vec();
-            let ecc_proof = Some(self.device.prove_ec_sum_quark(
-                input.num_instances(),
-                xs,
-                ys,
-                slopes,
-                transcript,
-            )?);
+            let ecc_proof = Some(info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
+                self.device
+                    .prove_ec_sum_quark(input.num_instances(), xs, ys, slopes, transcript)
+            })?);
             exit_span!(span);
             ecc_proof
         } else {
@@ -420,14 +431,17 @@ impl<
         };
 
         // build main witness
-        let records = build_main_witness::<E, PCS, PB, PD>(cs, &input, challenges);
+        let records = info_span!("[ceno] build_main_witness")
+            .in_scope(|| build_main_witness::<E, PCS, PB, PD>(cs, &input, challenges));
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
         // (internally calls build_tower_witness)
-        let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) = self
-            .device
-            .prove_tower_relation(cs, &input, &records, challenges, transcript);
+        let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
+            info_span!("[ceno] prove_tower_relation").in_scope(|| {
+                self.device
+                    .prove_tower_relation(cs, &input, &records, challenges, transcript)
+            });
         exit_span!(span);
 
         assert_eq!(
@@ -447,9 +461,11 @@ impl<
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
         let span = entered_span!("prove_main_constraints", profiling_2 = true);
-        let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) = self
-            .device
-            .prove_main_constraints(rt_tower, &input, cs, challenges, transcript)?;
+        let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
+            info_span!("[ceno] prove_main_constraints").in_scope(|| {
+                self.device
+                    .prove_main_constraints(rt_tower, &input, cs, challenges, transcript)
+            })?;
         let MainSumcheckEvals {
             wits_in_evals,
             fixed_in_evals,
