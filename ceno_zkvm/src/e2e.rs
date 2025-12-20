@@ -224,8 +224,8 @@ impl<'a> Default for ShardContext<'a> {
             max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
-            platform: CENO_PLATFORM,
-            shard_heap_addr_range: CENO_PLATFORM.heap,
+            platform: CENO_PLATFORM.clone(),
+            shard_heap_addr_range: CENO_PLATFORM.heap.clone(),
         }
     }
 }
@@ -582,7 +582,7 @@ impl Default for ShardContextBuilder {
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
             pending_step: None,
-            platform: CENO_PLATFORM,
+            platform: CENO_PLATFORM.clone(),
         }
     }
 }
@@ -1009,11 +1009,11 @@ fn setup_platform_inner(
     let preset = match preset {
         Preset::Ceno => Platform {
             is_debug,
-            ..CENO_PLATFORM
+            ..CENO_PLATFORM.clone()
         },
     };
 
-    let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
+    let prog_data = Arc::new(program.image.keys().copied().collect::<BTreeSet<_>>());
 
     let stack = if preset.is_debug {
         (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end)
@@ -2005,7 +2005,7 @@ mod tests {
     ) {
         let mut shard_ctx_builder = ShardContextBuilder::new(
             &MultiProver::new(0, 1, u64::MAX, max_cycle_per_shard),
-            CENO_PLATFORM,
+            CENO_PLATFORM.clone(),
             NextCycleAccess::default(),
         );
 

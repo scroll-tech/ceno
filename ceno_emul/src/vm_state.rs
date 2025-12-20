@@ -72,7 +72,7 @@ impl<T: Tracer> VMState<T> {
     pub fn new_from_elf_with_tracer(platform: Platform, elf: &[u8]) -> Result<Self> {
         let program = Arc::new(Program::load_elf(elf, u32::MAX)?);
         let platform = Platform {
-            prog_data: program.image.keys().copied().collect(),
+            prog_data: Arc::new(program.image.keys().copied().collect()),
             ..platform
         };
         Ok(Self::new_with_tracer(platform, program))

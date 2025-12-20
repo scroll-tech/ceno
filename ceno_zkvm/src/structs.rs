@@ -109,7 +109,7 @@ pub struct ProgramParams {
 impl Default for ProgramParams {
     fn default() -> Self {
         ProgramParams {
-            platform: CENO_PLATFORM,
+            platform: CENO_PLATFORM.clone(),
             program_size: (1 << 14),
             pubio_len: (1 << 2),
             static_memory_len: (1 << 16),

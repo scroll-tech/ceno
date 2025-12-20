@@ -1080,6 +1080,7 @@ dependencies = [
  "num",
  "num-derive",
  "num-traits",
+ "once_cell",
  "rayon",
  "rrs-succinct",
  "rustc-hash",

@@ -144,7 +144,7 @@ pub fn run(
 ) -> Vec<Vec<u8>> {
     let program = Program::load_elf(elf, u32::MAX).unwrap();
     let platform = Platform {
-        prog_data: program.image.keys().copied().collect(),
+        prog_data: Arc::new(program.image.keys().copied().collect()),
         ..platform
     };
 
