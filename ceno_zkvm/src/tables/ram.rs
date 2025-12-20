@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, VMState, WORD_SIZE};
+use ceno_emul::{Addr, VM_REG_COUNT, WORD_SIZE};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamInitCircuit};
 
 use crate::{
@@ -111,7 +111,7 @@ impl NonVolatileTable for RegTable {
     }
 
     fn len(_params: &ProgramParams) -> usize {
-        VMState::REG_COUNT.next_power_of_two()
+        VM_REG_COUNT.next_power_of_two()
     }
 }
 

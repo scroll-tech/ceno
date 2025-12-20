@@ -18,7 +18,7 @@ use crate::{
         ZKVMVerifyingKey,
     },
 };
-use ceno_emul::Tracer;
+use ceno_emul::FullTracer as Tracer;
 use gkr_iop::{
     self,
     selector::{SelectorContext, SelectorType},
