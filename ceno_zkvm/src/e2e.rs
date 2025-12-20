@@ -385,11 +385,10 @@ impl<'a> ShardContext<'a> {
         value: Word,
         prev_value: Option<Word>,
     ) {
-        let mem_section = MemorySection::from_addr(&self.platform, addr);
-        let is_heap = matches!(mem_section, MemorySection::Heap);
-        let addr_byte = addr.baddr();
-
         if !self.is_first_shard() && self.is_in_current_shard(cycle) {
+            let mem_section = MemorySection::from_addr(&self.platform, addr);
+            let is_heap = matches!(mem_section, MemorySection::Heap);
+            let addr_byte = addr.baddr();
             // 1. exclude heap records when checking reads from the external bus
             if !is_heap && self.before_current_shard_cycle(prev_cycle) {
                 let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
