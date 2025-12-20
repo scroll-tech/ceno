@@ -20,7 +20,6 @@ use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSlice,
 };
-use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -520,7 +519,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             vec![]
         };
 
-        // 2. process record which init within shard-range and read by others later.
+        // 2. process record which init within shard-range and read by later shards.
         let current_shard_access_later = final_mem
             .par_iter()
             // only process no range restriction memory record

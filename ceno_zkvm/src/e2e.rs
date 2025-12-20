@@ -389,10 +389,11 @@ impl<'a> ShardContext<'a> {
         value: Word,
         prev_value: Option<Word>,
     ) {
+        let mem_section = MemorySection::from_addr(&self.platform, addr);
         // check read from external mem bus
-        // exclude first shard
+        // 1. exclude first shard or heap records
         if !self.is_first_shard()
-            && !matches!(ram_type, RAMType::Memory)
+            && !matches!(mem_section, MemorySection::Heap)
             && self.before_current_shard_cycle(prev_cycle)
             && self.is_in_current_shard(cycle)
         {
@@ -420,29 +421,13 @@ impl<'a> ShardContext<'a> {
 
         // 2. for heap record initial read, and addr is outside of range
         if !self.is_first_shard()
-            && matches!(ram_type, RAMType::Memory)
             && prev_cycle == 0
+            && matches!(mem_section, MemorySection::Heap)
             && self.is_in_current_shard(cycle)
-            && matches!(
-                MemorySection::from_addr(&self.platform, addr),
-                MemorySection::Heap
-            )
             && !self.shard_heap_addr_range.contains(&addr.baddr().0)
         {
-            let byte_addr: Addr = addr.into();
-            let mem_section = MemorySection::from_addr(&self.platform, addr);
-            println!(
-                "self.shard_heap_addr_range start {:x} end {:x} platform heap start {:x} platform heap end {:x} addr.into() {:x} addr.baddr().0 {:x} !! {}, {:?}",
-                self.shard_heap_addr_range.start,
-                self.shard_heap_addr_range.end,
-                self.platform.heap.start,
-                self.platform.heap.end,
-                byte_addr,
-                addr.baddr().0,
-                self.platform.heap.contains(&byte_addr),
-                mem_section,
-            );
             let prev_shard_id = self.extract_shard_id_by_heap_addr(addr.baddr().0);
+            println!("extract prev_shard_id {prev_shard_id} via addr");
             let ram_record = self
                 .read_records_tbs
                 .as_mut()
@@ -727,7 +712,7 @@ impl ShardContextBuilder {
         self.prev_shard_cycle_range
             .push(shard_ctx.cur_shard_cycle_range.end as u64);
         self.prev_shard_heap_range
-            .push(shard_ctx.shard_heap_addr_range.end as u32);
+            .push(shard_ctx.shard_heap_addr_range.end);
         self.cur_cells = 0;
         self.cur_acc_cycle = 0;
         self.cur_shard_id += 1;

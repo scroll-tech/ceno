@@ -385,6 +385,12 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
             .par_rows_mut()
             .enumerate()
             .for_each(|(i, structural_row)| {
+                if DVRAM::name() == "HeapTable" {
+                    println!(
+                        "init heap {i}th address {:x}",
+                        DVRAM::dynamic_addr(&config.params, i, pv) as u64
+                    );
+                }
                 set_val!(
                     structural_row,
                     config.addr,
@@ -545,16 +551,6 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
          -> bool {
             shard_ctx.is_in_current_shard(record.cycle)
                 || if let Some(range) = range {
-                    if range.contains(&record.addr) && record.cycle == 0 {
-                        println!(
-                            "in local final ram table, range.start {:x} range.end {:x} addr {:x} cycle {}, range.contains(&record.addr) && record.cycle == 0 {}",
-                            range.start,
-                            range.end,
-                            record.addr,
-                            record.cycle,
-                            range.contains(&record.addr) && record.cycle == 0
-                        );
-                    }
                     range.contains(&record.addr) && record.cycle == 0
                 } else {
                     shard_ctx.is_first_shard() && record.cycle == 0
