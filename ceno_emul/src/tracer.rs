@@ -95,9 +95,9 @@ pub trait Tracer {
 
     fn fetch(&mut self, pc: WordAddr, value: Instruction);
 
-    fn track_heap_watermark_before(&mut self, heap_watermark: Word);
+    fn track_heap_watermark_before(&mut self);
 
-    fn track_heap_watermark_after(&mut self, heap_watermark: Word);
+    fn track_heap_watermark_after(&mut self);
 
     fn load_register(&mut self, idx: RegIdx, value: Word);
 
@@ -556,6 +556,7 @@ pub struct FullTracer {
     // record each section max access address
     // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
+    max_heap_addr_access: ByteAddr,
     platform: Platform,
 
     // keep track of each address that the cycle when they were last accessed.
@@ -585,6 +586,7 @@ impl FullTracer {
             platform: platform.clone(),
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
+            max_heap_addr_access: ByteAddr::from(platform.heap.start),
         }
     }
 
@@ -613,13 +615,13 @@ impl FullTracer {
     }
 
     #[inline(always)]
-    pub fn track_heap_watermark_before(&mut self, _heap_watermark: Word) {
-        self.record.heap_watermark_ptr.before = self.current_heap_watermark();
+    pub fn track_heap_watermark_before(&mut self) {
+        self.record.heap_watermark_ptr.before = self.max_heap_addr_access;
     }
 
     #[inline(always)]
-    pub fn track_heap_watermark_after(&mut self, _heap_watermark: Word) {
-        self.record.heap_watermark_ptr.after = self.current_heap_watermark();
+    pub fn track_heap_watermark_after(&mut self) {
+        self.record.heap_watermark_ptr.after = self.max_heap_addr_access;
     }
 
     #[inline(always)]
@@ -673,7 +675,7 @@ impl FullTracer {
             unimplemented!("Only one memory access is supported");
         }
         // update min/max mmio access
-        if let Some((_, (_, end_addr, min_addr, max_addr))) = self
+        if let Some((start_addr, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
             // find the MMIO region whose start address is less than or equal to the target address
@@ -690,6 +692,11 @@ impl FullTracer {
                 if addr < *min_addr {
                     *min_addr = addr; // start is inclusive
                 }
+            }
+            if start_addr.baddr().0 == self.platform.heap.start
+                && addr.baddr() > self.max_heap_addr_access
+            {
+                self.max_heap_addr_access = addr.baddr();
             }
         }
 
@@ -768,18 +775,6 @@ impl FullTracer {
                 )
             })
     }
-
-    #[inline(always)]
-    fn current_heap_watermark(&self) -> ByteAddr {
-        self.mmio_min_max_access
-            .as_ref()
-            .and_then(|regions| {
-                regions
-                    .get(&ByteAddr::from(self.platform.heap.start).waddr())
-                    .map(|(_, _, _, max)| max.baddr())
-            })
-            .expect("no heap registration")
-    }
 }
 
 #[derive(Debug)]
@@ -857,10 +852,10 @@ impl Tracer for PreflightTracer {
     fn fetch(&mut self, _pc: WordAddr, _value: Instruction) {}
 
     #[inline(always)]
-    fn track_heap_watermark_before(&mut self, _heap_watermark: Word) {}
+    fn track_heap_watermark_before(&mut self) {}
 
     #[inline(always)]
-    fn track_heap_watermark_after(&mut self, _heap_watermark: Word) {}
+    fn track_heap_watermark_after(&mut self) {}
 
     #[inline(always)]
     fn load_register(&mut self, idx: RegIdx, _value: Word) {
@@ -976,12 +971,12 @@ impl Tracer for FullTracer {
         FullTracer::fetch(self, pc, value)
     }
 
-    fn track_heap_watermark_before(&mut self, heap_watermark: Word) {
-        FullTracer::track_heap_watermark_before(self, heap_watermark)
+    fn track_heap_watermark_before(&mut self) {
+        FullTracer::track_heap_watermark_before(self)
     }
 
-    fn track_heap_watermark_after(&mut self, heap_watermark: Word) {
-        FullTracer::track_heap_watermark_after(self, heap_watermark)
+    fn track_heap_watermark_after(&mut self) {
+        FullTracer::track_heap_watermark_after(self)
     }
 
     #[inline(always)]
