@@ -697,7 +697,7 @@ impl FullTracer {
             addr,
             value,
             previous_cycle: self.track_access(addr, Self::SUBCYCLE_MEM),
-            section: self.classify_memory_section(addr),
+            section: MemorySection::from_addr(&self.platform, addr),
         });
     }
 
@@ -767,10 +767,6 @@ impl FullTracer {
                     },
                 )
             })
-    }
-
-    fn classify_memory_section(&self, addr: WordAddr) -> MemorySection {
-        MemorySection::from_addr(&self.platform, addr)
     }
 
     #[inline(always)]
