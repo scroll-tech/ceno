@@ -385,12 +385,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
             .par_rows_mut()
             .enumerate()
             .for_each(|(i, structural_row)| {
-                if DVRAM::name() == "HeapTable" {
-                    println!(
-                        "init heap {i}th address {:x}",
-                        DVRAM::dynamic_addr(&config.params, i, pv) as u64
-                    );
-                }
                 set_val!(
                     structural_row,
                     config.addr,
@@ -469,10 +463,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         }
         assert_eq!(num_structural_witin, 2);
         println!("init name {}, num_instances {}", DVRAM::name(), data.2);
-        println!(
-            "first record addr {:x} value {:x} cycle {}",
-            data.0[0].addr, data.0[0].value, data.0[0].cycle
-        );
         if DVRAM::DYNAMIC_OFFSET {
             Self::assign_instances_dynamic(config, num_witin, num_structural_witin, data)
         } else {
@@ -546,16 +536,15 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
 
-        let is_current_shard_mem_record = |range: Option<&Range<Addr>>,
-                                           record: &&MemFinalRecord|
-         -> bool {
-            shard_ctx.is_in_current_shard(record.cycle)
-                || if let Some(range) = range {
-                    range.contains(&record.addr) && record.cycle == 0
-                } else {
-                    shard_ctx.is_first_shard() && record.cycle == 0
-                }
-        };
+        let is_current_shard_mem_record =
+            |range: Option<&Range<Addr>>, record: &&MemFinalRecord| -> bool {
+                shard_ctx.is_in_current_shard(record.cycle)
+                    || if let Some(range) = range {
+                        range.contains(&record.addr) && record.cycle == 0
+                    } else {
+                        shard_ctx.is_first_shard() && record.cycle == 0
+                    }
+            };
 
         // collect each raw mem belong to this shard, BEFORE padding length
         let mem_lens: Vec<usize> = final_mem

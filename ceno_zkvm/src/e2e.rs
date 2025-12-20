@@ -427,7 +427,6 @@ impl<'a> ShardContext<'a> {
             && !self.shard_heap_addr_range.contains(&addr.baddr().0)
         {
             let prev_shard_id = self.extract_shard_id_by_heap_addr(addr.baddr().0);
-            println!("extract prev_shard_id {prev_shard_id} via addr");
             let ram_record = self
                 .read_records_tbs
                 .as_mut()

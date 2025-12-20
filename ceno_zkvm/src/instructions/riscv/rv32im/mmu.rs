@@ -190,12 +190,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         .into_iter()
         .filter(|(_, _, record)| !record.is_empty())
         .collect_vec();
-
-        println!(
-            "heap final first record addr {:x} value {:x} cycle {}",
-            heap_final[0].addr, heap_final[0].value, heap_final[0].cycle
-        );
-
+        
         witness.assign_table_circuit::<LocalFinalCircuit<E>>(
             cs,
             &self.local_final_circuit,
