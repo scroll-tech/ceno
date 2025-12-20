@@ -548,9 +548,9 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
 
         // collect each raw mem belong to this shard, BEFORE padding length
         let mem_lens: Vec<usize> = final_mem
-            .iter()
+            .par_iter()
             .map(|(_, range, mem)| {
-                mem.iter()
+                mem.par_iter()
                     .filter(|mem| is_current_shard_mem_record(range.as_ref(), mem))
                     .count()
             })
