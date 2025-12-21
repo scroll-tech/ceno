@@ -29,6 +29,7 @@ use crate::{
         EccQuarkProofVariable, GKRProofVariable, LayerProofVariable, SelectorContextVariable,
         SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable,
     },
+    basefold_verifier::verifier::batch_verify,
 };
 use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
@@ -466,15 +467,14 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             });
     }
 
-    // _debug
-    // batch_verify(
-    //     builder,
-    //     zkvm_proof_input.max_num_var,
-    //     zkvm_proof_input.max_width,
-    //     rounds,
-    //     zkvm_proof_input.pcs_proof,
-    //     &mut challenger,
-    // );
+    batch_verify(
+        builder,
+        zkvm_proof_input.max_num_var,
+        zkvm_proof_input.max_width,
+        rounds,
+        zkvm_proof_input.pcs_proof,
+        &mut challenger,
+    );
 
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     let initial_global_state = eval_ceno_expr_with_instance(

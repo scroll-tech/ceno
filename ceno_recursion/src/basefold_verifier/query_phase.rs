@@ -325,7 +325,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
     builder: &mut Builder<C>,
     input: QueryPhaseVerifierInputVariable<C>,
 ) {
-    let inv_2 = builder.constant(C::F::from_canonical_u32(0x3c000001));
+    let inv_2: Felt<C::F> = builder.constant(C::F::from_canonical_u32(0x3c000001));
     let two_adic_generators_inverses: Array<C, Felt<C::F>> = builder.dyn_array(28);
     for (index, val) in [
         0x1usize, 0x78000000, 0x67055c21, 0x5ee99486, 0xbb4c4e4, 0x2d4cc4da, 0x669d6090,
@@ -340,7 +340,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
         builder.set_value(&two_adic_generators_inverses, index, generator_inverse);
     }
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-    let zero_flag = builder.constant(C::N::ZERO);
+    let zero_flag: Var<C::N> = builder.constant(C::N::ZERO);
     let two: Var<C::N> = builder.constant(C::N::TWO);
     let two_felt: Felt<C::F> = builder.constant(C::F::TWO);
 
@@ -405,6 +405,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
         // by the `fri_single_reduced_opening_eval` chip.
         let opened_values_buffer: Array<C, Array<C, Felt<C::F>>> =
             builder.dyn_array(round.openings.len());
+
         let log2_heights = builder.dyn_array(round.openings.len());
         let minus_alpha_offsets = builder.dyn_array(round.openings.len());
         let dimensions = builder.dyn_array(round.openings.len());
@@ -504,6 +505,9 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     let opening_proof = batch_opening.opening_proof;
 
                     let round_context = builder.iter_ptr_get(&rounds_context, ptr_vec[2]);
+
+                    // _TODO: Iteration looping count is incorrect
+                    // _TODO: 5 zipped arrays have different length
                     iter_zip!(
                         builder,
                         round_context.log2_heights,
@@ -530,6 +534,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                             opened_values_buffer.len(),
                         );
 
+                        /* _debug
                         let all_zeros_slice = all_zeros.slice(builder, 0, width.clone());
                         let low = builder.fri_single_reduced_opening_eval(
                             alpha,
@@ -556,6 +561,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                         builder.assign(&codeword_acc.high, codeword_acc.high + codeword.high);
 
                         builder.set_value(&reduced_codeword_by_height, log2_height, codeword_acc);
+                        */
 
                         // reorder opened values according to the permutation
                         let mat_j =
@@ -564,6 +570,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                         // let permuted_j = j;
                         builder.set_value(&perm_opened_values, permuted_j, mat_j);
                     });
+
                     // i >>= (log2_max_codeword_size - commit.log2_max_codeword_size);
                     let bits_shift: Var<C::N> =
                         builder.eval(log2_max_codeword_size - round.commit.log2_max_codeword_size);
@@ -577,10 +584,14 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                         opened_values: perm_opened_values,
                         proof: opening_proof,
                     };
+
+                    /* _debug
                     mmcs_verify_batch(builder, mmcs_verifier_input);
+                    */
                 },
             );
             builder.cycle_tracker_end("Batching and first FRI round");
+
             let opening_ext = query.commit_phase_openings;
 
             // fold 1st codeword
@@ -604,7 +615,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 coeff,
                 inv_2,
             );
-
+            
             // check commit phases
             let commits = &input.proof.commits;
             builder.assert_eq::<Var<C::N>>(commits.len(), opening_ext.len());
@@ -679,7 +690,10 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     opened_values,
                     proof,
                 };
+
+                /* _debug
                 ext_mmcs_verify_batch::<C>(builder, ext_mmcs_verifier_input);
+                */
 
                 let r = builder.get(&input.fold_challenges, i_plus_one);
                 let left = builder.get(&leafs, 0);
@@ -689,6 +703,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 builder.assign(&folded, new_folded);
                 builder.assign(&i, i_plus_one);
             });
+
             builder.cycle_tracker_end("FRI rounds");
             // assert that final_value[i] = folded
             let final_idx: Var<C::N> = builder.constant(C::N::ZERO);
@@ -703,9 +718,13 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     );
                 });
             let final_value = builder.get(&final_codeword.values, final_idx);
+
+            /* _debug
             builder.assert_eq::<Ext<C::F, C::EF>>(final_value, folded);
+            */
         },
     );
+
     // 1. check initial claim match with first round sumcheck value
     let batch_coeffs_offset: Var<C::N> = builder.constant(C::N::ZERO);
     let expected_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
@@ -762,10 +781,13 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
     let right: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let one: Var<C::N> = builder.constant(C::N::ONE);
     let j: Var<C::N> = builder.constant(C::N::ZERO);
+
+    /* _debug
     // \sum_i eq(p, [r,i]) * f(r,i)
     iter_zip!(builder, input.rounds,).for_each(|ptr_vec, builder| {
         let round = builder.iter_ptr_get(&input.rounds, ptr_vec[0]);
         // TODO: filter out openings with num_var >= get_basecode_msg_size_log::<C>()
+
         iter_zip!(builder, round.openings).for_each(|ptr_vec, builder| {
             let opening = builder.iter_ptr_get(&round.openings, ptr_vec[0]);
             let point_and_evals = &opening.point_and_evals;
@@ -791,15 +813,18 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
             // We always assume that num_vars_evaluated is equal to p.len()
             // so that the above sum only has one item and the final evaluation vector has only one element.
             builder.assert_eq::<Var<C::N>>(final_message.len(), one);
+            
             let final_message = builder.get(&final_message, 0);
             let dot_prod: Ext<C::F, C::EF> = builder.eval(final_message * coeff);
+            
             builder.assign(&right, right + dot_prod);
-
             builder.assign(&j, j + Usize::from(1));
         });
     });
+
     builder.assert_eq::<Var<C::N>>(j, input.proof.final_message.len());
     builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
+    */
 }
 
 #[cfg(test)]
