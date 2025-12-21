@@ -163,13 +163,10 @@ pub fn batch_verify<C: Config>(
         rounds,
     };
 
-    
-    /* _debug
     builder.cycle_tracker_end("prior query phase");
     builder.cycle_tracker_start("query phase");
     batch_verifier_query_phase(builder, input);
     builder.cycle_tracker_end("query phase");
-    */
 }
 
 #[cfg(test)]

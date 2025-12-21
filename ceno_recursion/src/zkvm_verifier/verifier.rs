@@ -467,8 +467,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             });
     }
 
-
-
     // _debug
     builder.print_debug(997);
     builder.print_v(zkvm_proof_input.max_num_var);
@@ -481,11 +479,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         zkvm_proof_input.pcs_proof,
         &mut challenger,
     );
-
-
-
-
-
 
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     let initial_global_state = eval_ceno_expr_with_instance(
