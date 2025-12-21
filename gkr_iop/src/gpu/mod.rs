@@ -407,7 +407,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let mut next_witness_buf = (0..num_non_zero_expr)
             .map(|_| {
                 cuda_hal
-                    .alloc_ext_elems_on_device(1 << num_vars)
+                    .alloc_ext_elems_on_device(1 << num_vars, false)
                     .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
             })
             .collect::<Result<Vec<_>, _>>()

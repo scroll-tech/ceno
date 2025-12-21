@@ -14,7 +14,7 @@ use crate::{
     structs::{ProgramParams, RAMType},
     witness::LkMultiplicity,
 };
-use ceno_emul::{StepRecord, Tracer};
+use ceno_emul::{FullTracer as Tracer, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
 use p3::field::FieldAlgebra;

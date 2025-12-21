@@ -1,4 +1,4 @@
-use crate::{Change, EmuContext, Platform, VMState, Word, WriteOp, utils::MemoryView};
+use crate::{Change, EmuContext, Platform, Tracer, VMState, Word, WriteOp, utils::MemoryView};
 
 use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
@@ -41,7 +41,7 @@ pub fn sha_extend(w: &mut [u32]) {
     }
 }
 
-pub fn extend(vm: &VMState) -> SyscallEffects {
+pub fn extend<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
     // Read the argument `state_ptr`.
@@ -51,7 +51,7 @@ pub fn extend(vm: &VMState) -> SyscallEffects {
         0, // Cycle set later in finalize().
     )];
 
-    let mut state_view = MemoryView::<SHA_EXTEND_WORDS>::new(vm, state_ptr);
+    let mut state_view = MemoryView::<_, SHA_EXTEND_WORDS>::new(vm, state_ptr);
     let mut sha_extend_words = ShaExtendWords::from(state_view.words());
     sha_extend(&mut sha_extend_words.0);
     let output_words: [Word; SHA_EXTEND_WORDS] = sha_extend_words.into();
