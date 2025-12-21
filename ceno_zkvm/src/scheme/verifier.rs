@@ -18,7 +18,7 @@ use crate::{
         ZKVMVerifyingKey,
     },
 };
-use ceno_emul::Tracer;
+use ceno_emul::FullTracer as Tracer;
 use gkr_iop::{
     self,
     selector::{SelectorContext, SelectorType},
@@ -228,7 +228,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-        tracing::info!(
+        tracing::debug!(
             "{shard_id}th shard challenges in verifier: {:?}",
             challenges
         );

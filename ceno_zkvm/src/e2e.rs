@@ -21,9 +21,9 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, NextCycleAccess,
-    Platform, Program, StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr,
-    host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, NextCycleAccess,
+    Platform, PreflightTracer, Program, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word,
+    WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -221,7 +221,7 @@ impl<'a> Default for ShardContext<'a> {
                     .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
-            cur_shard_cycle_range: Tracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
+            cur_shard_cycle_range: FullTracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
             expected_inst_per_shard: usize::MAX,
             max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
@@ -325,7 +325,7 @@ impl<'a> ShardContext<'a> {
     #[inline(always)]
     pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
         let mut ts = prev_cycle.saturating_sub(self.current_shard_offset_cycle());
-        if ts < Tracer::SUBCYCLES_PER_INSN {
+        if ts < FullTracer::SUBCYCLES_PER_INSN {
             ts = 0
         }
         ts
@@ -338,7 +338,7 @@ impl<'a> ShardContext<'a> {
 
     pub fn current_shard_offset_cycle(&self) -> Cycle {
         // cycle of each local shard start from Tracer::SUBCYCLES_PER_INSN
-        (self.cur_shard_cycle_range.start as Cycle) - Tracer::SUBCYCLES_PER_INSN
+        (self.cur_shard_cycle_range.start as Cycle) - FullTracer::SUBCYCLES_PER_INSN
     }
 
     /// Finds the **next** future access cycle for the given address, starting from
@@ -582,7 +582,7 @@ impl ShardContextBuilder {
                 }
             };
             let next_cells = self.cur_cells + step_cell_extractor.extract_cells(&step);
-            let next_cycle = self.cur_acc_cycle + Tracer::SUBCYCLES_PER_INSN;
+            let next_cycle = self.cur_acc_cycle + FullTracer::SUBCYCLES_PER_INSN;
             if next_cells >= target_cost_current_shard || next_cycle >= self.max_cycle_per_shard {
                 assert!(
                     !steps.is_empty(),
@@ -606,14 +606,14 @@ impl ShardContextBuilder {
                 self.prev_shard_cycle_range
                     .last()
                     .copied()
-                    .unwrap_or(Tracer::SUBCYCLES_PER_INSN)
+                    .unwrap_or(FullTracer::SUBCYCLES_PER_INSN)
             );
         }
 
         let shard_ctx = ShardContext {
             shard_id: self.cur_shard_id,
             cur_shard_cycle_range: steps.first().map(|step| step.cycle() as usize).unwrap()
-                ..(steps.last().unwrap().cycle() + Tracer::SUBCYCLES_PER_INSN) as usize,
+                ..(steps.last().unwrap().cycle() + FullTracer::SUBCYCLES_PER_INSN) as usize,
             addr_future_accesses: self.addr_future_accesses.clone(),
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
             ..Default::default()
@@ -691,24 +691,15 @@ pub fn emulate_program<'a>(
         heap: _,
     } = init_mem_state;
 
-    let mut vm: VMState = VMState::new(platform.clone(), program);
+    let mut vm: VMState<PreflightTracer> = VMState::new_with_tracer(platform.clone(), program);
 
     for record in chain!(hints_init, io_init) {
         vm.init_memory(record.addr.into(), record.value);
     }
 
-    let mut executed_steps = 0usize;
-    let mut exit_code = None;
-    info_span!("emulator.preflight-execute").in_scope(|| {
-        for record in vm.iter_until_halt().take(max_steps) {
-            let record = record.expect("vm exec failed");
-            executed_steps += 1;
-            if record.insn().kind == InsnKind::ECALL
-                && record.rs1().unwrap().value == Platform::ecall_halt()
-            {
-                exit_code = record.rs2().map(|rs2| rs2.value);
-            }
-        }
+    let exit_code = info_span!("[ceno] emulator.preflight-execute").in_scope(|| {
+        let _ = vm.iter_until_halt().take(max_steps).count();
+        vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
 
     if platform.is_debug {
@@ -734,7 +725,7 @@ pub fn emulate_program<'a>(
     let pi = PublicValues::new(
         exit_code.unwrap_or(0),
         vm.program().entry,
-        Tracer::SUBCYCLES_PER_INSN,
+        FullTracer::SUBCYCLES_PER_INSN,
         vm.get_pc().into(),
         end_cycle,
         multi_prover.prover_id as u32,
@@ -747,7 +738,7 @@ pub fn emulate_program<'a>(
         .iter()
         .map(|rec| {
             let index = rec.addr as usize;
-            if index < VMState::REG_COUNT {
+            if index < VM_REG_COUNT {
                 let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
                     ram_type: RAMType::Register,
@@ -871,13 +862,13 @@ pub fn emulate_program<'a>(
     }
 
     let shard_ctx_builder =
-        ShardContextBuilder::new(multi_prover, vm.take_tracer().next_accesses());
+        ShardContextBuilder::new(multi_prover, vm.take_tracer().into_next_accesses());
 
     EmulationResult {
         pi,
         exit_code,
         shard_ctx_builder,
-        executed_steps,
+        executed_steps: insts,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,
@@ -1079,7 +1070,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
     std::iter::from_fn(move || {
         info_span!(
-            "app_prove.generate_witness",
+            "[ceno] app_prove.generate_witness",
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
@@ -1104,7 +1095,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
             let last_step = shard_steps.last().expect("shard must contain steps");
             let current_shard_end_cycle =
-                last_step.cycle() + Tracer::SUBCYCLES_PER_INSN - current_shard_offset_cycle;
+                last_step.cycle() + FullTracer::SUBCYCLES_PER_INSN - current_shard_offset_cycle;
             let current_shard_init_pc = if shard_ctx.is_first_shard() {
                 program.entry
             } else {
@@ -1213,7 +1204,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
 
             pi.init_pc = current_shard_init_pc;
-            pi.init_cycle = Tracer::SUBCYCLES_PER_INSN;
+            pi.init_cycle = FullTracer::SUBCYCLES_PER_INSN;
             pi.shard_id = shard_ctx.shard_id as u32;
             pi.end_pc = current_shard_end_pc;
             pi.end_cycle = current_shard_end_cycle;
@@ -1614,7 +1605,7 @@ fn create_proofs_streaming<
     init_mem_state: &InitMemState,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
-    let proofs = info_span!("app_prove.inner").in_scope(|| {
+    let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
         #[cfg(feature = "gpu")]
         {
             use crossbeam::channel;
@@ -1744,6 +1735,22 @@ fn create_proofs_streaming<
         }
     });
     metrics::gauge!("num_shards").set(proofs.len() as f64);
+
+    // Currently, due to mixed usage with other GPU backends,
+    // we need to trim ceno-gpu's memory pool while still retaining 424MB.
+    // Once the GPU backend is unified, skipping this trim
+    // could improve performance by a few seconds.
+    #[cfg(feature = "gpu")]
+    {
+        use gkr_iop::gpu::gpu_prover::*;
+
+        info_span!("[ceno] trim_gpu_mem_pool").in_scope(|| {
+            let cuda_hal = get_cuda_hal().unwrap();
+            cuda_hal.inner().trim_mem_pool().unwrap();
+            cuda_hal.inner().synchronize().unwrap();
+        });
+    };
+
     proofs
 }
 
@@ -1769,7 +1776,10 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 }
 
 #[cfg(debug_assertions)]
-fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState, mem_final: I) {
+fn debug_memory_ranges<'a, T: Tracer, I: Iterator<Item = &'a MemFinalRecord>>(
+    vm: &VMState<T>,
+    mem_final: I,
+) {
     let accessed_addrs = vm
         .tracer()
         .final_accesses()
@@ -1845,7 +1855,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 #[cfg(test)]
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
-    use ceno_emul::{Cycle, NextCycleAccess, StepRecord, Tracer};
+    use ceno_emul::{Cycle, FullTracer, NextCycleAccess, StepRecord};
     use itertools::Itertools;
 
     struct UniformStepExtractor;
@@ -1888,7 +1898,7 @@ mod tests {
         );
 
         let mut steps_iter = (0..executed_instruction).map(|i| {
-            StepRecord::new_ecall_any(Tracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
+            StepRecord::new_ecall_any(FullTracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
         });
         let mut steps = Vec::new();
 

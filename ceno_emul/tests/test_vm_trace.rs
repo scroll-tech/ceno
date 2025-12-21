@@ -4,8 +4,8 @@ use rustc_hash::FxHashMap;
 use std::{collections::BTreeMap, sync::Arc};
 
 use ceno_emul::{
-    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Instruction, Platform, Program, StepRecord, Tracer,
-    VMState, WordAddr, encode_rv32,
+    CENO_PLATFORM, Cycle, EmuContext, FullTracer as Tracer, InsnKind, Instruction, Platform,
+    Program, StepRecord, VMState, WordAddr, encode_rv32,
 };
 
 #[test]
