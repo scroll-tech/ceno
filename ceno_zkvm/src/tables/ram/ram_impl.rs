@@ -724,8 +724,10 @@ mod tests {
         let def_params = ProgramParams::default();
         let lkm = LkMultiplicity::default().into_finalize_result();
 
-        let mut pv = PublicValues::default();
-        pv.hint_start_addr = CENO_PLATFORM.hints.start;
+        let pv = PublicValues {
+            hint_start_addr: CENO_PLATFORM.hints.start,
+            ..Default::default()
+        };
         // ensure non-empty padding is required
         let some_non_2_pow = 26;
         let input = (0..some_non_2_pow)
