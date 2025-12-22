@@ -192,8 +192,10 @@ pub struct ShardContext<'a> {
     // shard 0: [v[0], v[1]), shard 1: [v[1], v[2]), shard 2: [v[2], v[3])
     pub prev_shard_cycle_range: Vec<Cycle>,
     pub prev_shard_heap_range: Vec<Addr>,
+    pub prev_shard_hint_range: Vec<Addr>,
     pub platform: Platform,
     pub shard_heap_addr_range: Range<Addr>,
+    pub shard_hint_addr_range: Range<Addr>,
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -224,8 +226,10 @@ impl<'a> Default for ShardContext<'a> {
             max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
+            prev_shard_hint_range: vec![],
             platform: CENO_PLATFORM.clone(),
             shard_heap_addr_range: CENO_PLATFORM.heap.clone(),
+            shard_hint_addr_range: CENO_PLATFORM.hints.clone(),
         }
     }
 }
@@ -268,8 +272,10 @@ impl<'a> ShardContext<'a> {
                     max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
                     prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
                     prev_shard_heap_range: self.prev_shard_heap_range.clone(),
+                    prev_shard_hint_range: self.prev_shard_hint_range.clone(),
                     platform: self.platform.clone(),
                     shard_heap_addr_range: self.shard_heap_addr_range.clone(),
+                    shard_hint_addr_range: self.shard_hint_addr_range.clone(),
                 })
                 .collect_vec(),
             _ => panic!("invalid type"),
@@ -327,6 +333,13 @@ impl<'a> ShardContext<'a> {
     #[inline(always)]
     pub fn extract_shard_id_by_heap_addr(&self, addr: Addr) -> usize {
         self.prev_shard_heap_range.partition_point(|&a| a <= addr) - 1
+    }
+
+    /// Extract shard_id which produce this record by hint addr
+    /// NOTE prev_shard_hint_range[0] should be 0 otherwise it will panic with subtract-overflow
+    #[inline(always)]
+    pub fn extract_shard_id_by_hint_addr(&self, addr: Addr) -> usize {
+        self.prev_shard_hint_range.partition_point(|&a| a <= addr) - 1
     }
 
     #[inline(always)]
@@ -391,8 +404,9 @@ impl<'a> ShardContext<'a> {
         {
             let addr_raw = addr.baddr().0;
             let is_heap = self.platform.heap.contains(&addr_raw);
+            let is_hint = self.platform.hints.contains(&addr_raw);
             // 1. checking reads from the external bus
-            if prev_cycle > 0 || (prev_cycle == 0 && !is_heap) {
+            if prev_cycle > 0 || (prev_cycle == 0 && (!is_heap && !is_hint)) {
                 let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
                 let ram_record = self
                     .read_records_tbs
@@ -415,15 +429,18 @@ impl<'a> ShardContext<'a> {
                 );
             } else {
                 assert!(
-                    prev_cycle == 0 && is_heap,
-                    "addr {:x} prev_cycle {}, is_heap {}",
-                    addr_raw,
-                    prev_cycle,
-                    is_heap
+                    prev_cycle == 0 && (is_heap || is_hint),
+                    "addr {addr_raw:x} prev_cycle {prev_cycle}, is_heap {is_heap}, is_hint {is_hint}",
                 );
                 // 2. handle heap initial reads outside of the shard range.
                 if !self.shard_heap_addr_range.contains(&addr_raw) {
-                    let prev_shard_id = self.extract_shard_id_by_heap_addr(addr_raw);
+                    let prev_shard_id = if is_heap {
+                        self.extract_shard_id_by_heap_addr(addr_raw)
+                    } else if is_hint {
+                        self.extract_shard_id_by_hint_addr(addr_raw)
+                    } else {
+                        unreachable!()
+                    };
                     let ram_record = self
                         .read_records_tbs
                         .as_mut()
@@ -567,6 +584,7 @@ pub struct ShardContextBuilder {
     target_cell_first_shard: u64,
     prev_shard_cycle_range: Vec<Cycle>,
     prev_shard_heap_range: Vec<Addr>,
+    prev_shard_hint_range: Vec<Addr>,
     // holds the first step for the next shard once the current shard hits its limit
     pending_step: Option<StepRecord>,
     platform: Platform,
@@ -584,6 +602,7 @@ impl Default for ShardContextBuilder {
             target_cell_first_shard: 0,
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
+            prev_shard_hint_range: vec![],
             pending_step: None,
             platform: CENO_PLATFORM.clone(),
         }
@@ -615,6 +634,7 @@ impl ShardContextBuilder {
             addr_future_accesses: Arc::new(addr_future_accesses),
             prev_shard_cycle_range: vec![0],
             prev_shard_heap_range: vec![0],
+            prev_shard_hint_range: vec![0],
             pending_step: None,
             platform,
         }
@@ -671,12 +691,23 @@ impl ShardContextBuilder {
             assert_eq!(
                 steps
                     .first()
-                    .map(|step| step.heap_watermark_ptr.before)
+                    .map(|step| step.heap_maxtouch_addr.before)
                     .unwrap_or_default(),
                 self.prev_shard_heap_range
                     .last()
                     .copied()
                     .unwrap_or(self.platform.heap.start)
+                    .into()
+            );
+            assert_eq!(
+                steps
+                    .first()
+                    .map(|step| step.hint_maxtouch_addr.before)
+                    .unwrap_or_default(),
+                self.prev_shard_hint_range
+                    .last()
+                    .copied()
+                    .unwrap_or(self.platform.hints.start)
                     .into()
             );
         }
@@ -688,14 +719,23 @@ impl ShardContextBuilder {
             addr_future_accesses: self.addr_future_accesses.clone(),
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
             prev_shard_heap_range: self.prev_shard_heap_range.clone(),
+            prev_shard_hint_range: self.prev_shard_hint_range.clone(),
             platform: self.platform.clone(),
             shard_heap_addr_range: steps
                 .first()
-                .map(|step| step.heap_watermark_ptr.before.0)
+                .map(|step| step.heap_maxtouch_addr.before.0)
                 .unwrap_or_default()
                 ..steps
                     .last()
-                    .map(|step| step.heap_watermark_ptr.after.0)
+                    .map(|step| step.heap_maxtouch_addr.after.0)
+                    .unwrap_or_default(),
+            shard_hint_addr_range: steps
+                .first()
+                .map(|step| step.hint_maxtouch_addr.before.0)
+                .unwrap_or_default()
+                ..steps
+                    .last()
+                    .map(|step| step.hint_maxtouch_addr.after.0)
                     .unwrap_or_default(),
             ..Default::default()
         };
@@ -710,6 +750,8 @@ impl ShardContextBuilder {
             .push(shard_ctx.cur_shard_cycle_range.end as u64);
         self.prev_shard_heap_range
             .push(shard_ctx.shard_heap_addr_range.end);
+        self.prev_shard_hint_range
+            .push(shard_ctx.shard_hint_addr_range.end);
         self.cur_cells = 0;
         self.cur_acc_cycle = 0;
         self.cur_shard_id += 1;

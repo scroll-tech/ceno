@@ -25,7 +25,8 @@ use std::{collections::BTreeMap, fmt, mem};
 pub struct StepRecord {
     cycle: Cycle,
     pc: Change<ByteAddr>,
-    pub heap_watermark_ptr: Change<ByteAddr>,
+    pub heap_maxtouch_addr: Change<ByteAddr>,
+    pub hint_maxtouch_addr: Change<ByteAddr>,
     pub insn: Instruction,
 
     rs1: Option<ReadOp>,
@@ -95,9 +96,9 @@ pub trait Tracer {
 
     fn fetch(&mut self, pc: WordAddr, value: Instruction);
 
-    fn track_heap_watermark_before(&mut self);
+    fn track_mmu_maxtouch_before(&mut self);
 
-    fn track_heap_watermark_after(&mut self);
+    fn track_mmu_maxtouch_after(&mut self);
 
     fn load_register(&mut self, idx: RegIdx, value: Word);
 
@@ -279,6 +280,7 @@ impl StepRecord {
             None,
             prev_cycle,
             Change::default(),
+            Change::default(),
         )
     }
 
@@ -299,7 +301,7 @@ impl StepRecord {
             None,
             None,
             prev_cycle,
-            Change::default(),
+            Change::default(),Change::default(),
         )
     }
 
@@ -320,6 +322,7 @@ impl StepRecord {
             Some(rd),
             None,
             prev_cycle,
+            Change::default(),
             Change::default(),
         )
     }
@@ -351,6 +354,7 @@ impl StepRecord {
             }),
             prev_cycle,
             Change::default(),
+            Change::default(),
         )
     }
 
@@ -372,6 +376,7 @@ impl StepRecord {
             None,
             prev_cycle,
             Change::default(),
+            Change::default(),
         )
     }
 
@@ -391,6 +396,7 @@ impl StepRecord {
             Some(rd),
             None,
             prev_cycle,
+            Change::default(),
             Change::default(),
         )
     }
@@ -415,6 +421,7 @@ impl StepRecord {
             Some(memory_op),
             prev_cycle,
             Change::default(),
+            Change::default(),
         )
     }
 
@@ -438,6 +445,7 @@ impl StepRecord {
             }),
             0,
             Change::default(),
+            Change::default(),
         )
     }
 
@@ -451,7 +459,8 @@ impl StepRecord {
         rd: Option<Change<Word>>,
         memory_op: Option<WriteOp>,
         previous_cycle: Cycle,
-        heap_watermark_ptr: Change<ByteAddr>,
+        heap_maxtouch_addr: Change<ByteAddr>,
+        hint_maxtouch_addr: Change<ByteAddr>,
     ) -> StepRecord {
         StepRecord {
             cycle,
@@ -474,7 +483,8 @@ impl StepRecord {
             insn,
             memory_op,
             syscall: None,
-            heap_watermark_ptr,
+            heap_maxtouch_addr,
+            hint_maxtouch_addr,
         }
     }
 
@@ -525,6 +535,7 @@ pub struct FullTracer {
     // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     max_heap_addr_access: ByteAddr,
+    max_hint_addr_access: ByteAddr,
     platform: Platform,
 
     // keep track of each address that the cycle when they were last accessed.
@@ -555,6 +566,7 @@ impl FullTracer {
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
             max_heap_addr_access: ByteAddr::from(platform.heap.start),
+            max_hint_addr_access: ByteAddr::from(platform.hints.start),
         }
     }
 
@@ -583,13 +595,15 @@ impl FullTracer {
     }
 
     #[inline(always)]
-    pub fn track_heap_watermark_before(&mut self) {
-        self.record.heap_watermark_ptr.before = self.max_heap_addr_access;
+    pub fn track_mmu_maxtouch_before(&mut self) {
+        self.record.heap_maxtouch_addr.before = self.max_heap_addr_access;
+        self.record.hint_maxtouch_addr.before = self.max_hint_addr_access;
     }
 
     #[inline(always)]
-    pub fn track_heap_watermark_after(&mut self) {
-        self.record.heap_watermark_ptr.after = self.max_heap_addr_access;
+    pub fn track_mmu_maxtouch_after(&mut self) {
+        self.record.heap_maxtouch_addr.after = self.max_heap_addr_access;
+        self.record.hint_maxtouch_addr.after = self.max_hint_addr_access;
     }
 
     #[inline(always)]
@@ -663,6 +677,12 @@ impl FullTracer {
                 let access_end_byte = access_end.baddr();
                 if access_end_byte > self.max_heap_addr_access {
                     self.max_heap_addr_access = access_end_byte;
+                }
+            } else if start_addr.baddr().0 == self.platform.hints.start {
+                let access_end = addr + WordAddr::from(WORD_SIZE as u32);
+                let access_end_byte = access_end.baddr();
+                if access_end_byte > self.max_hint_addr_access {
+                    self.max_hint_addr_access = access_end_byte;
                 }
             }
         }
@@ -818,10 +838,10 @@ impl Tracer for PreflightTracer {
     fn fetch(&mut self, _pc: WordAddr, _value: Instruction) {}
 
     #[inline(always)]
-    fn track_heap_watermark_before(&mut self) {}
+    fn track_mmu_maxtouch_before(&mut self) {}
 
     #[inline(always)]
-    fn track_heap_watermark_after(&mut self) {}
+    fn track_mmu_maxtouch_after(&mut self) {}
 
     #[inline(always)]
     fn load_register(&mut self, idx: RegIdx, _value: Word) {
@@ -937,12 +957,12 @@ impl Tracer for FullTracer {
         FullTracer::fetch(self, pc, value)
     }
 
-    fn track_heap_watermark_before(&mut self) {
-        FullTracer::track_heap_watermark_before(self)
+    fn track_mmu_maxtouch_before(&mut self) {
+        FullTracer::track_mmu_maxtouch_before(self)
     }
 
-    fn track_heap_watermark_after(&mut self) {
-        FullTracer::track_heap_watermark_after(self)
+    fn track_mmu_maxtouch_after(&mut self) {
+        FullTracer::track_mmu_maxtouch_after(self)
     }
 
     #[inline(always)]

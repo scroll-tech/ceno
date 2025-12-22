@@ -212,7 +212,7 @@ impl<T: Tracer> EmuContext for VMState<T> {
 
     fn on_normal_end(&mut self, _decoded: &Instruction) {
         self.tracer.store_pc(ByteAddr(self.pc));
-        self.tracer.track_heap_watermark_after();
+        self.tracer.track_mmu_maxtouch_after();
     }
 
     fn get_pc(&self) -> ByteAddr {
@@ -274,7 +274,7 @@ impl<T: Tracer> EmuContext for VMState<T> {
         let idx = (relative_pc / WORD_SIZE as u32) as usize;
         let word = self.program.instructions.get(idx).copied()?;
         self.tracer.fetch(pc, word);
-        self.tracer.track_heap_watermark_before();
+        self.tracer.track_mmu_maxtouch_before();
         Some(word)
     }
 
