@@ -334,7 +334,15 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     &in_point,
                     *descending,
                 ),
-                StructuralWitInType::EqualDistanceDynamicSequence { .. } => todo!(),
+                StructuralWitInType::EqualDistanceDynamicSequence {
+                    offset_instance_id,
+                    multi_factor,
+                    descending,
+                    ..
+                } => {
+                    let offset = pub_io_evals[*offset_instance_id as usize].to_canonical_u64();
+                    eval_wellform_address_vec(offset, *multi_factor as u64, &in_point, *descending)
+                }
                 StructuralWitInType::StackedIncrementalSequence { .. } => {
                     eval_stacked_wellform_address_vec(&in_point)
                 }

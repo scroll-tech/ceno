@@ -1968,6 +1968,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
     use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepRecord};
+    use itertools::Itertools;
 
     struct UniformStepExtractor;
 

@@ -16,9 +16,7 @@ use crate::{
     scheme::mock_prover::{MOCK_PC_START, MockProver},
     structs::ProgramParams,
 };
-use ceno_emul::{
-    ByteAddr, Change, InsnKind, ReadOp, StepRecord, Word, WriteOp, encode_rv32,
-};
+use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, Word, WriteOp, encode_rv32};
 #[cfg(feature = "u16limb_circuit")]
 use ff_ext::BabyBearExt4;
 use ff_ext::{ExtensionField, GoldilocksExt2};

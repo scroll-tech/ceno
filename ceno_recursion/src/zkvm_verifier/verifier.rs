@@ -33,6 +33,7 @@ use crate::{
 use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
 
+use ceno_zkvm::instructions::riscv::constants::HEAP_START_ADDR_IDX;
 use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{
@@ -956,6 +957,7 @@ pub fn verify_gkr_circuit<C: Config>(
                 builder.assert_ext_eq(main_eval, expected_eval);
             });
 
+        let zero_const = builder.constant::<Ext<C::F, C::EF>>(C::EF::ZERO);
         // check structural witin
         for s in &layer.structural_witins {
             let id = s.id;
@@ -968,14 +970,36 @@ pub fn verify_gkr_circuit<C: Config>(
                     multi_factor,
                     descending,
                     ..
-                } => eval_wellform_address_vec(
-                    builder,
-                    offset,
-                    multi_factor as u32,
-                    &in_point,
+                } => {
+                    let offset =
+                        builder.constant::<Ext<C::F, C::EF>>(C::EF::from_canonical_u32(offset));
+                    eval_wellform_address_vec(
+                        builder,
+                        offset,
+                        multi_factor as u32,
+                        &in_point,
+                        descending,
+                    )
+                }
+                StructuralWitInType::EqualDistanceDynamicSequence {
+                    multi_factor,
                     descending,
-                ),
-                StructuralWitInType::EqualDistanceDynamicSequence { .. } => todo!(),
+                    offset_instance_id,
+                    ..
+                } => {
+                    // retrieve offset from public io
+                    let offset = builder.get(pub_io_evals, offset_instance_id as usize);
+                    builder.print_debug(6666);
+                    builder.print_e(offset);
+                    builder.print_debug(66666666);
+                    eval_wellform_address_vec(
+                        builder,
+                        offset,
+                        multi_factor as u32,
+                        &in_point,
+                        descending,
+                    )
+                }
                 StructuralWitInType::StackedIncrementalSequence { .. } => {
                     let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
                     let one_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
@@ -995,7 +1019,7 @@ pub fn verify_gkr_circuit<C: Config>(
 
                                             let r_slice = &in_point.slice(builder, 0, i);
                                             let eval = eval_wellform_address_vec(
-                                                builder, 0, 1, r_slice, false,
+                                                builder, zero_const, 1, r_slice, false,
                                             );
                                             builder
                                                 .assign(&res, res * (one_ext - r_i) + eval * r_i);
@@ -1034,12 +1058,11 @@ pub fn verify_gkr_circuit<C: Config>(
                 }
                 StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
                     let r_slice = in_point.slice(builder, k, in_point.len());
-
-                    eval_wellform_address_vec(builder, 0, 1, &r_slice, false)
+                    eval_wellform_address_vec(builder, zero_const, 1, &r_slice, false)
                 }
                 StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
                     let r_slice = in_point.slice(builder, 0, k);
-                    eval_wellform_address_vec(builder, 0, 1, &r_slice, false)
+                    eval_wellform_address_vec(builder, zero_const, 1, &r_slice, false)
                 }
                 StructuralWitInType::Empty => continue,
             };
