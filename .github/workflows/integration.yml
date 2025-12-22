@@ -98,7 +98,7 @@ jobs:
           RUST_LOG: debug
           RUSTFLAGS: "-C opt-level=3"
           MOCK_PROVING: 1
-        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=300 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/ceno_rt_alloc
+        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=420 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/ceno_rt_alloc
 
       - name: Run multi-shards Guest Heap Alloc (release)
         env:

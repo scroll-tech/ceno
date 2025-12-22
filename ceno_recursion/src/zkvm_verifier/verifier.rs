@@ -33,7 +33,6 @@ use crate::{
 use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
 
-use ceno_zkvm::instructions::riscv::constants::HEAP_START_ADDR_IDX;
 use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{

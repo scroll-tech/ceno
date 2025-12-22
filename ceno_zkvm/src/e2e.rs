@@ -385,18 +385,14 @@ impl<'a> ShardContext<'a> {
         value: Word,
         prev_value: Option<Word>,
     ) {
-        let addr_byte = addr.baddr();
-        let addr_raw = addr_byte.0;
-        let is_heap = self.platform.heap.contains(&addr_raw);
-        let before_current = self.before_current_shard_cycle(prev_cycle);
-        let is_initial_heap_read = is_heap && prev_cycle == 0;
-
         if !self.is_first_shard()
             && self.is_in_current_shard(cycle)
-            && (before_current || is_initial_heap_read)
+            && self.before_current_shard_cycle(prev_cycle)
         {
-            // 1. exclude heap records when checking reads from the external bus
-            if !is_heap && before_current {
+            let addr_raw = addr.baddr().0;
+            let is_heap = self.platform.heap.contains(&addr_raw);
+            // 1. checking reads from the external bus
+            if prev_cycle > 0 || (prev_cycle == 0 && !is_heap) {
                 let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
                 let ram_record = self
                     .read_records_tbs
@@ -417,30 +413,37 @@ impl<'a> ShardContext<'a> {
                         shard_id: prev_shard_id,
                     },
                 );
-            }
-
-            // 2. For heap initial reads outside of the shard range.
-            if is_initial_heap_read && !self.shard_heap_addr_range.contains(&addr_raw) {
-                let prev_shard_id = self.extract_shard_id_by_heap_addr(addr_raw);
-                let ram_record = self
-                    .read_records_tbs
-                    .as_mut()
-                    .right()
-                    .expect("illegal type");
-                ram_record.insert(
-                    addr,
-                    RAMRecord {
-                        ram_type,
-                        reg_id: id,
-                        addr,
-                        prev_cycle,
-                        cycle,
-                        shard_cycle: 0,
-                        prev_value,
-                        value,
-                        shard_id: prev_shard_id,
-                    },
+            } else {
+                assert!(
+                    prev_cycle == 0 && is_heap,
+                    "addr {:x} prev_cycle {}, is_heap {}",
+                    addr_raw,
+                    prev_cycle,
+                    is_heap
                 );
+                // 2. handle heap initial reads outside of the shard range.
+                if !self.shard_heap_addr_range.contains(&addr_raw) {
+                    let prev_shard_id = self.extract_shard_id_by_heap_addr(addr_raw);
+                    let ram_record = self
+                        .read_records_tbs
+                        .as_mut()
+                        .right()
+                        .expect("illegal type");
+                    ram_record.insert(
+                        addr,
+                        RAMRecord {
+                            ram_type,
+                            reg_id: id,
+                            addr,
+                            prev_cycle,
+                            cycle,
+                            shard_cycle: 0,
+                            prev_value,
+                            value,
+                            shard_id: prev_shard_id,
+                        },
+                    );
+                }
             }
         }
 
