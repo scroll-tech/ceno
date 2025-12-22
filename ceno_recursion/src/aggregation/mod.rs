@@ -59,7 +59,7 @@ use openvm_stark_sdk::{
 };
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc, time::Instant, fs::File};
+use std::{fs::File, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use crate::aggregation::types::{InternalVmVerifierPvs, VmVerifierPvs};
 use openvm_circuit::arch::{PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver, instructions::exe::VmExe};
@@ -422,18 +422,18 @@ impl CenoAggregationProver {
         .expect("root proof generation should pass");
 
         // Export root proof
-        let file = File::create(format!("root_proof.bin")).expect("Create export proof file");
+        let file = File::create("root_proof.bin").expect("Create export proof file");
         bincode::serialize_into(file, &root_proof).expect("failed to serialize internal proof");
 
         root_proof
     }
 
-    pub fn verify_root_proof(
-        &self,
-        root_proof: &Proof<RootSC>
-    ) -> Result<(), VerificationError> {
-       self.root_prover.vm.engine.verify(&self.vk.root_vm_vk, root_proof)?;
-       Ok(())
+    pub fn verify_root_proof(&self, root_proof: &Proof<RootSC>) -> Result<(), VerificationError> {
+        self.root_prover
+            .vm
+            .engine
+            .verify(&self.vk.root_vm_vk, root_proof)?;
+        Ok(())
     }
 }
 
@@ -720,16 +720,10 @@ mod tests {
                 .expect("Failed to deserialize vk file");
 
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
-        let _root_proof = agg_prover.generate_root_proof(zkvm_proofs);
-
-        // _todo: add a verification step after root proof generation
-        // verify_e2e_stark_proof(
-        //     &agg_prover.vk,
-        //     &root_stark_proof,
-        //     &Bn254Fr::ZERO,
-        //     &Bn254Fr::ZERO,
-        // )
-        // .expect("Verify e2e stark proof should pass");
+        let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
+        agg_prover
+            .verify_root_proof(&root_proof)
+            .expect("root proof verification should pass");
     }
 
     pub fn verify_single_inner_thread() {
@@ -768,7 +762,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
@@ -781,7 +775,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_single() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
