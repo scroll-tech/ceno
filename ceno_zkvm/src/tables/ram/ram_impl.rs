@@ -370,6 +370,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
         }
     }
 
+    /// support offset address and length from public io
     fn assign_instances_dynamic<F: SmallField>(
         config: &Self,
         num_witin: usize,
@@ -705,7 +706,7 @@ mod tests {
     };
 
     use crate::scheme::PublicValues;
-    use ceno_emul::WORD_SIZE;
+    use ceno_emul::{CENO_PLATFORM, WORD_SIZE};
     use ff_ext::GoldilocksExt2 as E;
     use gkr_iop::RAMType;
     use itertools::Itertools;
@@ -723,12 +724,14 @@ mod tests {
         let def_params = ProgramParams::default();
         let lkm = LkMultiplicity::default().into_finalize_result();
 
+        let mut pv = PublicValues::default();
+        pv.hint_start_addr = CENO_PLATFORM.hints.start;
         // ensure non-empty padding is required
         let some_non_2_pow = 26;
         let input = (0..some_non_2_pow)
             .map(|i| MemFinalRecord {
                 ram_type: RAMType::Memory,
-                addr: HintsTable::addr(&def_params, i),
+                addr: HintsTable::dynamic_addr(&def_params, i, &pv),
                 cycle: 0,
                 value: 0,
                 init_value: 0,
@@ -739,7 +742,7 @@ mod tests {
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
             &lkm.0,
-            &(&input, &PublicValues::default(), 0),
+            &(&input, &pv, 0),
         )
         .unwrap();
 

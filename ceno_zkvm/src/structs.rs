@@ -432,7 +432,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&TC::name()).unwrap();
-
         let witness = TC::assign_instances(
             config,
             cs.zkvm_v1_css.num_witin as usize,

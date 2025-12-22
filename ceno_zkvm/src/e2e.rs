@@ -55,7 +55,7 @@ pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
 pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
 // define a relative small number to make first shard handle much less instruction
-pub const DEFAULT_MAX_CELL_FIRST_SHARD: u64 = 1 << 28;
+pub const DEFAULT_MAX_CELL_FIRST_SHARD: u64 = 1 << 20;
 
 /// The polynomial commitment scheme kind
 #[derive(
@@ -432,7 +432,7 @@ impl<'a> ShardContext<'a> {
                     prev_cycle == 0 && (is_heap || is_hint),
                     "addr {addr_raw:x} prev_cycle {prev_cycle}, is_heap {is_heap}, is_hint {is_hint}",
                 );
-                // 2. handle heap initial reads outside of the shard range.
+                // 2. handle heap/hint initial reads outside the shard range.
                 if !self.shard_heap_addr_range.contains(&addr_raw) {
                     let prev_shard_id = if is_heap {
                         self.extract_shard_id_by_heap_addr(addr_raw)
