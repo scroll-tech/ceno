@@ -5,7 +5,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     instructions::riscv::constants::{
         END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
-        INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX, SHARD_ID_IDX, SHARD_RW_SUM_IDX, UINT_LIMBS,
+        HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
+        SHARD_ID_IDX, SHARD_RW_SUM_IDX, UINT_LIMBS,
     },
     scheme::constants::SEPTIC_EXTENSION_DEGREE,
     tables::InsnRecord,
@@ -28,6 +29,8 @@ pub trait PublicIOQuery {
     fn query_shard_id(&mut self) -> Result<Instance, CircuitBuilderError>;
     fn query_heap_start_addr(&self) -> Result<Instance, CircuitBuilderError>;
     fn query_heap_shard_len(&self) -> Result<Instance, CircuitBuilderError>;
+    fn query_hint_start_addr(&self) -> Result<Instance, CircuitBuilderError>;
+    fn query_hint_shard_len(&self) -> Result<Instance, CircuitBuilderError>;
 }
 
 impl<'a, E: ExtensionField> InstFetch<E> for CircuitBuilder<'a, E> {
@@ -75,6 +78,14 @@ impl<'a, E: ExtensionField> PublicIOQuery for CircuitBuilder<'a, E> {
 
     fn query_heap_shard_len(&self) -> Result<Instance, CircuitBuilderError> {
         self.cs.query_instance(HEAP_LENGTH_IDX)
+    }
+
+    fn query_hint_start_addr(&self) -> Result<Instance, CircuitBuilderError> {
+        self.cs.query_instance(HINT_START_ADDR_IDX)
+    }
+
+    fn query_hint_shard_len(&self) -> Result<Instance, CircuitBuilderError> {
+        self.cs.query_instance(HINT_LENGTH_IDX)
     }
 
     fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError> {

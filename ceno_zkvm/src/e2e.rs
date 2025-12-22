@@ -55,7 +55,7 @@ pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
 pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
 // define a relative small number to make first shard handle much less instruction
-pub const DEFAULT_MAX_CELL_FIRST_SHARD: u64 = 1 << 20;
+pub const DEFAULT_MAX_CELL_FIRST_SHARD: u64 = 1 << 28;
 
 /// The polynomial commitment scheme kind
 #[derive(
@@ -739,13 +739,6 @@ impl ShardContextBuilder {
                     .unwrap_or_default(),
             ..Default::default()
         };
-        println!(
-            "{}th shard shard_heap_addr_range {:x} - {:x}, cycle range {:?}",
-            shard_ctx.shard_id,
-            shard_ctx.shard_heap_addr_range.start,
-            shard_ctx.shard_heap_addr_range.end,
-            shard_ctx.cur_shard_cycle_range
-        );
         self.prev_shard_cycle_range
             .push(shard_ctx.cur_shard_cycle_range.end as u64);
         self.prev_shard_heap_range
@@ -977,6 +970,8 @@ pub fn emulate_program<'a>(
         multi_prover.prover_id as u32,
         platform.heap.start,
         heap_final.len() as u32,
+        platform.hints.start,
+        hints_final.len() as u32,
         io_init.iter().map(|rec| rec.value).collect_vec(),
         vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );
@@ -1222,11 +1217,14 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
             let mut zkvm_witness = ZKVMWitnesses::default();
             let mut pi = pi_template.clone();
-
             tracing::debug!(
-                "{}th shard collect {} steps",
+                "{}th shard collect {} steps, heap_addr_range {:x} - {:x}, hint_addr_range {:x} - {:x}",
                 shard_ctx.shard_id,
-                shard_steps.len()
+                shard_steps.len(),
+                shard_ctx.shard_heap_addr_range.start,
+                shard_ctx.shard_heap_addr_range.end,
+                shard_ctx.shard_hint_addr_range.start,
+                shard_ctx.shard_hint_addr_range.end,
             );
 
             let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
@@ -1248,6 +1246,10 @@ pub fn generate_witness<'a, E: ExtensionField>(
             pi.heap_start_addr = shard_ctx.shard_heap_addr_range.start;
             pi.heap_shard_len = (shard_ctx.shard_heap_addr_range.end
                 - shard_ctx.shard_heap_addr_range.start)
+                / (WORD_SIZE as u32);
+            pi.hint_start_addr = shard_ctx.shard_hint_addr_range.start;
+            pi.hint_shard_len = (shard_ctx.shard_hint_addr_range.end
+                - shard_ctx.shard_hint_addr_range.start)
                 / (WORD_SIZE as u32);
 
             if let Some(target_shard_id) = target_shard_id {

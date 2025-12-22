@@ -264,6 +264,10 @@ pub struct DynVolatileRamTableInitConfig<DVRAM: DynVolatileRamTable + Send + Syn
 }
 
 impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitConfig<DVRAM> {
+    fn find_record_index(final_mem: &[MemFinalRecord], addr: Addr) -> Option<usize> {
+        final_mem.binary_search_by_key(&addr, |rec| rec.addr).ok()
+    }
+
     fn assign_instances<F: SmallField>(
         config: &Self,
         num_witin: usize,
@@ -368,33 +372,95 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
 
     fn assign_instances_dynamic<F: SmallField>(
         config: &Self,
-        _num_witin: usize,
+        num_witin: usize,
         num_structural_witin: usize,
-        (_final_mem, pv, num_instances): &(&[MemFinalRecord], &PublicValues, usize),
+        (final_mem, pv, num_instances): &(&[MemFinalRecord], &PublicValues, usize),
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        assert!(
-            DVRAM::ZERO_INIT,
-            "do not support dynamic address with non-zero init"
-        );
-        let mut structural_witness = RowMajorMatrix::<F>::new(
-            *num_instances,
-            num_structural_witin,
-            InstancePaddingStrategy::Default,
-        );
-        structural_witness
-            .par_rows_mut()
-            .enumerate()
-            .for_each(|(i, structural_row)| {
-                set_val!(
-                    structural_row,
-                    config.addr,
-                    DVRAM::dynamic_addr(&config.params, i, pv) as u64
-                );
-                if i < *num_instances {
-                    *structural_row.last_mut().unwrap() = F::ONE;
-                }
-            });
-        Ok([RowMajorMatrix::empty(), structural_witness])
+        // got some duplicated code segment to simplify parallel assignment flow
+        let start_addr = DVRAM::dynamic_addr(&config.params, 0, pv);
+        let start_index = Self::find_record_index(final_mem, start_addr);
+        let fetch_rec = |entry_index: usize| -> (Addr, Option<&MemFinalRecord>) {
+            let expected_addr = DVRAM::dynamic_addr(&config.params, entry_index, pv);
+            let rec = start_index
+                .and_then(|start| start.checked_add(entry_index))
+                .and_then(|idx| final_mem.get(idx));
+            (expected_addr, rec)
+        };
+
+        if let Some(init_v) = config.init_v.as_ref() {
+            let mut witness = RowMajorMatrix::<F>::new(
+                *num_instances,
+                num_witin,
+                InstancePaddingStrategy::Default,
+            );
+            let mut structural_witness = RowMajorMatrix::<F>::new(
+                *num_instances,
+                num_structural_witin,
+                InstancePaddingStrategy::Default,
+            );
+
+            witness
+                .par_rows_mut()
+                .zip_eq(structural_witness.par_rows_mut())
+                .enumerate()
+                .for_each(|(i, (row, structural_row))| {
+                    let (expected_addr, rec_opt) = fetch_rec(i);
+                    if cfg!(debug_assertions)
+                        && let Some(rec) = rec_opt
+                    {
+                        debug_assert_eq!(
+                            rec.addr, expected_addr,
+                            "rec.addr {:x} != expected {:x}",
+                            rec.addr, expected_addr,
+                        );
+                    }
+                    if let Some(rec) = rec_opt {
+                        if init_v.len() == 1 {
+                            // Assign value directly.
+                            set_val!(row, init_v[0], rec.init_value as u64);
+                        } else {
+                            // Assign value limbs.
+                            init_v.iter().enumerate().for_each(|(l, limb)| {
+                                let val = (rec.init_value >> (l * LIMB_BITS)) & LIMB_MASK;
+                                set_val!(row, limb, val as u64);
+                            });
+                        }
+                    }
+                    set_val!(structural_row, config.addr, expected_addr as u64);
+                    if i < *num_instances {
+                        *structural_row.last_mut().unwrap() = F::ONE;
+                    }
+                });
+
+            Ok([witness, structural_witness])
+        } else {
+            let mut structural_witness = RowMajorMatrix::<F>::new(
+                *num_instances,
+                num_structural_witin,
+                InstancePaddingStrategy::Default,
+            );
+
+            structural_witness
+                .par_rows_mut()
+                .enumerate()
+                .for_each(|(i, structural_row)| {
+                    let (expected_addr, rec_opt) = fetch_rec(i);
+                    if cfg!(debug_assertions)
+                        && let Some(rec) = rec_opt
+                    {
+                        debug_assert_eq!(
+                            rec.addr, expected_addr,
+                            "rec.addr {:x} != expected {:x}",
+                            rec.addr, expected_addr,
+                        );
+                    }
+                    set_val!(structural_row, config.addr, expected_addr as u64);
+                    if i < *num_instances {
+                        *structural_row.last_mut().unwrap() = F::ONE;
+                    }
+                });
+            Ok([RowMajorMatrix::empty(), structural_witness])
+        }
     }
 }
 
@@ -408,9 +474,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
-        if DVRAM::DYNAMIC_OFFSET {
-            assert!(DVRAM::ZERO_INIT);
-        } else {
+        if !DVRAM::DYNAMIC_OFFSET {
             cb.set_omc_init_only();
         }
 
@@ -462,7 +526,6 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
         assert_eq!(num_structural_witin, 2);
-        println!("init name {}, num_instances {}", DVRAM::name(), data.2);
         if DVRAM::DYNAMIC_OFFSET {
             Self::assign_instances_dynamic(config, num_witin, num_structural_witin, data)
         } else {

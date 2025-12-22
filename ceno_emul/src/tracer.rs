@@ -301,7 +301,8 @@ impl StepRecord {
             None,
             None,
             prev_cycle,
-            Change::default(),Change::default(),
+            Change::default(),
+            Change::default(),
         )
     }
 

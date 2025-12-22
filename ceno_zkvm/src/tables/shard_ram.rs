@@ -758,6 +758,8 @@ mod tests {
             0,
             0,
             0,
+            0,
+            0,
             vec![0], // dummy
             global_ec_sum
                 .x

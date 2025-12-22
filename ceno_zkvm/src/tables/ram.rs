@@ -130,13 +130,53 @@ impl DynVolatileRamTable for HintsTable {
     const V_LIMBS: usize = UINT_LIMBS;
     const ZERO_INIT: bool = false;
     const DESCENDING: bool = false;
+    const DYNAMIC_OFFSET: bool = true;
 
-    fn offset_addr(params: &ProgramParams) -> Addr {
-        params.platform.hints.start
+    fn addr_expr<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
+        let max_len = Self::max_len(params);
+        let addr = cb.create_structural_witin(
+            || "addr",
+            StructuralWitInType::EqualDistanceDynamicSequence {
+                max_len,
+                offset_instance_id: cb.query_hint_start_addr()?.0 as WitnessId,
+                length_instance_id: cb.query_hint_shard_len()?.0 as WitnessId,
+                multi_factor: WORD_SIZE,
+                descending: Self::DESCENDING,
+            },
+        );
+        Ok((addr.expr(), addr))
+    }
+
+    fn max_len(params: &ProgramParams) -> usize {
+        let max_size = (params.platform.hints.end - params.platform.hints.start)
+            .div_ceil(WORD_SIZE as u32) as Addr;
+        1 << (u32::BITS - 1 - max_size.leading_zeros())
+    }
+
+    fn offset_addr(_params: &ProgramParams) -> Addr {
+        unimplemented!("hints offset is dynamic")
+    }
+
+    fn dynamic_offset_addr(params: &ProgramParams, pv: &PublicValues) -> Addr {
+        let hint_start = pv.hint_start_addr;
+        assert!(
+            hint_start >= params.platform.hints.start,
+            "hint_start {:x} < platform min hint start {:x}",
+            hint_start,
+            params.platform.hints.start
+        );
+        hint_start
     }
 
     fn end_addr(params: &ProgramParams) -> Addr {
         params.platform.hints.end
+    }
+
+    fn dynamic_addr(params: &ProgramParams, entry_index: usize, pv: &PublicValues) -> Addr {
+        Self::dynamic_offset_addr(params, pv) + (entry_index * WORD_SIZE) as Addr
     }
 
     fn name() -> &'static str {
