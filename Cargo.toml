@@ -3,6 +3,7 @@ members = [
   "ceno_cli",
   "ceno_emul",
   "ceno_host",
+  "ceno_serde",
   "ceno_rt",
   "ceno_zkvm",
   "ceno_recursion",

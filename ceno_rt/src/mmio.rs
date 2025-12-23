@@ -97,6 +97,18 @@ where
     rkyv::access::<T, Failure>(read_slice()).expect("Deserialised access failed.")
 }
 
+#[allow(dead_code)]
+pub fn read_owned<T>() -> T
+where
+    T: rkyv::Archive,
+    T::Archived:
+        for<'c> CheckBytes<HighValidator<'c, Failure>> + Deserialize<T, HighDeserializer<Failure>>,
+{
+    let archived = rkyv::access::<Archived<T>, Failure>(read_slice())
+        .expect("Deserialised access failed.");
+    rkyv::deserialize::<T, Failure>(archived).expect("Deserialised value failed.")
+}
+
 pub fn pubio_read_slice<'a>() -> &'a [u8] {
     unsafe {
         PUBIO_STATE.with_mut(|state| state.take_slice(&raw const _lengths_of_pubio_start, &_pubio_start))

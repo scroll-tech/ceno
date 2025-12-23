@@ -8,12 +8,7 @@ use rkyv::{
     Serialize, api::high::HighSerializer, rancor::Error, ser::allocator::ArenaHandle, to_bytes,
     util::AlignedVec,
 };
-use std::{
-    fs, io,
-    iter::zip,
-    path::Path,
-    sync::Arc,
-};
+use std::{fs, io, iter::zip, path::Path, sync::Arc};
 
 // We want to get access to the default value of `AlignedVec::ALIGNMENT`, and using it directly like this
 //   pub const RKVY_ALIGNMENT: usize = rkyv::util::AlignedVec::ALIGNMENT;
@@ -130,11 +125,24 @@ impl CenoStdin {
         self
     }
 
+    pub fn write_bytes(&mut self, bytes: &[u8]) -> &mut Self {
+        let mut aligned = AlignedVec::with_capacity(bytes.len());
+        aligned.extend_from_slice(bytes);
+        self.write_slice(aligned)
+    }
+
     pub fn write(
         &mut self,
         item: &impl for<'a> Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
     ) -> Result<&mut Self, Error> {
         to_bytes::<Error>(item).map(|bytes| self.write_slice(bytes))
+    }
+
+    pub fn write_serializable(
+        &mut self,
+        value: &impl for<'a> Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
+    ) -> Result<&mut Self, Error> {
+        self.write(value)
     }
 }
 

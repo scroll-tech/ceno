@@ -1169,6 +1169,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ceno_serde"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "chrono",
+ "serde",
+]
+
+[[package]]
 name = "ceno_sha2"
 version = "0.1.0"
 dependencies = [

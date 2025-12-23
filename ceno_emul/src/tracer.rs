@@ -679,6 +679,7 @@ impl FullTracer {
                         self.max_heap_addr_access = access_end_byte;
                     }
                 } else if start_addr.baddr().0 == self.platform.hints.start {
+                    println!("hint address {:x}", addr.baddr().0);
                     let access_end = addr + WordAddr::from(WORD_SIZE as u32);
                     let access_end_byte = access_end.baddr();
                     if access_end_byte > self.max_hint_addr_access {
