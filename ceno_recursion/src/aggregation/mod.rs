@@ -87,6 +87,7 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216,
     2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
+
 pub struct CenoAggregationProver {
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
@@ -284,6 +285,7 @@ impl CenoAggregationProver {
             internal_vm_pk,
             internal_committed_exe,
             root_vm_pk,
+            root_committed_exe,
         };
 
         Self {
@@ -437,6 +439,17 @@ impl CenoAggregationProver {
     }
 }
 
+pub fn verify_root_proof(
+    vk: &MultiStarkVerifyingKey<RootSC>,
+    root_proof: &Proof<RootSC>,
+) -> Result<(), VerificationError> {
+    let root_fri_params =
+        FriParameters::standard_with_100_bits_conjectured_security(ROOT_LOG_BLOWUP);
+    let root_engine = BabyBearPoseidon2RootEngine::new(root_fri_params);
+    root_engine.verify(vk, root_proof)?;
+    Ok(())
+}
+
 /// Config to generate leaf VM verifier program.
 pub struct CenoLeafVmVerifierConfig {
     pub vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
@@ -562,6 +575,7 @@ pub struct CenoRecursionProvingKeys<SC: StarkGenericConfig, VC> {
     pub internal_vm_pk: Arc<VmProvingKey<SC, VC>>,
     pub internal_committed_exe: Arc<VmCommittedExe<SC>>,
     pub root_vm_pk: Arc<VmProvingKey<RootSC, VC>>,
+    pub root_committed_exe: Arc<VmCommittedExe<RootSC>>,
 }
 
 impl<SC: StarkGenericConfig, VC> Clone for CenoRecursionProvingKeys<SC, VC> {
@@ -572,6 +586,7 @@ impl<SC: StarkGenericConfig, VC> Clone for CenoRecursionProvingKeys<SC, VC> {
             internal_vm_pk: self.internal_vm_pk.clone(),
             internal_committed_exe: self.internal_committed_exe.clone(),
             root_vm_pk: self.root_vm_pk.clone(),
+            root_committed_exe: self.root_committed_exe.clone(),
         }
     }
 }
@@ -693,7 +708,7 @@ pub fn verify_proofs(
 #[cfg(test)]
 mod tests {
     use crate::{
-        aggregation::{CenoAggregationProver, verify_proofs},
+        aggregation::{CenoAggregationProver, verify_proofs, verify_root_proof},
         zkvm_verifier::binding::E,
     };
     use ceno_zkvm::{
@@ -721,9 +736,16 @@ mod tests {
 
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
         let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
+
+        // Verify generated aggregated root_proof
+        // Method 1: Verify the root proof using the aggregation prover
         agg_prover
             .verify_root_proof(&root_proof)
             .expect("root proof verification should pass");
+
+        // Method 2: Use stand-alone verification with only vk
+        let vk = agg_prover.vk.root_vm_vk;
+        verify_root_proof(&vk, &root_proof).expect("root proof verification should pass");
     }
 
     pub fn verify_single_inner_thread() {

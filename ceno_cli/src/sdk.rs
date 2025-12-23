@@ -21,10 +21,15 @@ use gkr_iop::hal::ProverBackend;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
-use openvm_native_circuit::NativeConfig;
-use openvm_sdk::RootSC;
+use openvm_native_circuit::{NativeBuilder, NativeConfig};
+use openvm_sdk::{RootSC, prover::vm::new_local_prover};
 use openvm_stark_backend::{config::StarkGenericConfig, proof::Proof};
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
+#[cfg(not(feature = "gpu"))]
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
+use openvm_stark_sdk::config::{
+    baby_bear_poseidon2::BabyBearPoseidon2Config,
+    baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
+};
 
 use serde::Serialize;
 use std::sync::Arc;
@@ -192,11 +197,30 @@ where
         &mut self,
         base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
     ) -> Proof<RootSC> {
+        let vb = NativeBuilder::default();
+
         // TODO: cache agg_prover
-        let mut agg_prover = if let Some(_agg_pk) = self.agg_pk.as_ref() {
-            CenoAggregationProver::from_base_vk(
-                self.zkvm_vk.clone().expect("zkvm_vk need to be set"),
+        let mut agg_prover = if let Some(agg_pk) = self.agg_pk.as_ref() {
+            let leaf_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
+                vb.clone(),
+                &agg_pk.leaf_vm_pk,
+                agg_pk.leaf_committed_exe.exe.clone(),
             )
+            .expect("leaf prover");
+            let internal_prover = new_local_prover::<BabyBearPoseidon2Engine, NativeBuilder>(
+                vb.clone(),
+                &agg_pk.internal_vm_pk,
+                agg_pk.internal_committed_exe.exe.clone(),
+            )
+            .expect("internal prover");
+            let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeBuilder>(
+                vb.clone(),
+                &agg_pk.root_vm_pk,
+                agg_pk.root_committed_exe.exe.clone(),
+            )
+            .expect("root prover");
+
+            CenoAggregationProver::new(leaf_prover, internal_prover, root_prover, agg_pk.clone())
         } else {
             let agg_prover = CenoAggregationProver::from_base_vk(self.zkvm_vk.clone().unwrap());
             self.agg_pk = Some(agg_prover.pk.clone());
