@@ -2,14 +2,15 @@ use anyhow::Result;
 use ceno_emul::{
     IterAddresses, Platform, Program, VMState, WORD_SIZE, Word, host_utils::read_all_messages,
 };
-use itertools::{Itertools, chain};
+use core::mem::size_of;
+use itertools::Itertools;
 use rkyv::{
     Serialize, api::high::HighSerializer, rancor::Error, ser::allocator::ArenaHandle, to_bytes,
     util::AlignedVec,
 };
 use std::{
     fs, io,
-    iter::{repeat, zip},
+    iter::zip,
     path::Path,
     sync::Arc,
 };
@@ -29,12 +30,12 @@ pub const RKYV_ALIGNMENT: usize = {
 ///
 /// Our guest programs have two requirements on the format:
 /// 1. The start of the hints buffer consists of a sequence of `usize` values, each representing the
-///    length of the next hint (from the start of the whole buffer).
+///    metadata describing the layout: first the offset where the serialized bytes begin, then the
+///    alignment used for each record, followed by the length of every hint in order.
 /// 2. hints[..current_hint_len] can deserialise into the expected type via rkyv.
 ///
-/// Note how we overlap the two areas, and don't specify starts for our hints.  That's a simplification
-/// and performance improvement we can make because of how rkyv works: you can add arbitrary padding to
-/// the left of a serialised buffer, and it will still work.
+/// After the metadata we place every serialized blob back-to-back (with alignment padding), so the
+/// runtime can walk forward from the lowest address without needing any random access.
 #[derive(Default)]
 pub struct CenoStdin {
     pub items: Vec<AlignedVec>,
@@ -58,17 +59,17 @@ impl From<&AlignedVec> for Item {
 impl From<Vec<u32>> for Item {
     fn from(data: Vec<u32>) -> Self {
         let data: Vec<u8> = data.into_iter().flat_map(u32::to_le_bytes).collect();
-        Item {
-            end_of_data: data.len(),
-            data,
-        }
+        let end_of_data = data.len();
+        let mut data = data;
+        data.resize(data.len().next_multiple_of(RKYV_ALIGNMENT), 0);
+        Item { data, end_of_data }
     }
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct Items {
     pub data: Vec<u8>,
-    pub ends: Vec<usize>,
+    pub lens: Vec<usize>,
 }
 
 impl Items {
@@ -76,29 +77,30 @@ impl Items {
         self.data.len()
     }
     pub fn append(&mut self, item: Item) {
-        let end = self.total_length() + item.end_of_data;
         self.data.extend_from_slice(&item.data);
-        self.ends.push(end);
+        self.lens.push(item.end_of_data);
     }
 
-    /// Shift all the end cursors by `n`
-    pub fn shift(&mut self, n: usize) {
-        for end in &mut self.ends {
-            *end += n;
-        }
-    }
+    /// Prepend metadata to the data buffer so that the raw
+    /// serialized bytes live at the lowest addresses and can be
+    /// consumed sequentially at runtime.
+    pub fn finalise(self) -> Vec<u8> {
+        let Items { data, lens } = self;
+        let header_words = lens.len() + 2;
+        let data_offset = (size_of::<u32>() * header_words).next_multiple_of(RKYV_ALIGNMENT);
 
-    /// Prepend the end cursors to the data buffer
-    ///
-    /// Taking care to adjust the recorded ends to account
-    /// for the space the ends themselves take up.
-    pub fn finalise(mut self) -> Vec<u8> {
-        let start_of_data = (size_of::<u32>() * self.ends.len()).next_multiple_of(RKYV_ALIGNMENT);
-        self.shift(start_of_data);
-        let lengths = self.ends.iter().map(|&end| end as u32);
-        let padded_lengths =
-            chain!(lengths.flat_map(u32::to_le_bytes), repeat(0_u8)).take(start_of_data);
-        chain!(padded_lengths, self.data.clone()).collect()
+        let mut header = Vec::with_capacity(header_words);
+        header.push(data_offset as u32);
+        header.push(RKYV_ALIGNMENT as u32);
+        header.extend(lens.into_iter().map(|len| len as u32));
+
+        let mut bytes = header
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+        bytes.resize(data_offset, 0);
+        bytes.extend_from_slice(&data);
+        bytes
     }
 }
 
