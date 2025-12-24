@@ -628,7 +628,7 @@ impl ShardContextBuilder {
                 if multi_prover.max_cell_per_shard == u64::MAX {
                     u64::MAX
                 } else {
-                    multi_prover.max_cell_per_shard >> 2
+                    multi_prover.max_cell_per_shard
                 }
             },
             addr_future_accesses: Arc::new(addr_future_accesses),
