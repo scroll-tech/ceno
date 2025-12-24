@@ -28,7 +28,7 @@ use std::{
 };
 use sumcheck::structs::{IOPProof, IOPProverMessage};
 use tracing::Level;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::RowMajorMatrix;
 
 /// proof that the sum of N=2^n EC points is equal to `sum`
 /// in one layer instead of GKR layered circuit approach
@@ -458,10 +458,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     pub fn assign_shared_circuit(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
-        (shard_ctx, final_mem): &(
-            &ShardContext,
-            &[(&'static str, InstancePaddingStrategy, &[MemFinalRecord])],
-        ),
+        (shard_ctx, final_mem): &(&ShardContext, &[(&'static str, &[MemFinalRecord])]),
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
         let perm = <E::BaseField as PoseidonField>::get_default_perm();
@@ -474,7 +471,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let non_first_shard_records = if shard_ctx.is_first_shard() {
             final_mem
                 .par_iter()
-                .flat_map(|(mem_name, _, final_mem)| {
+                .flat_map(|(mem_name, final_mem)| {
                     final_mem.par_iter().filter_map(|mem_record| {
                         // prepare cross shard writes record for those record which not accessed in first record
                         // but access in future shard
