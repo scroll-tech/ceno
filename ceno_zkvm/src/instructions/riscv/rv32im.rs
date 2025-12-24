@@ -20,9 +20,9 @@ use crate::{
             },
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
-                KeccakInstruction, Secp256k1InvInstruction, Uint256MulInstruction,
-                WeierstrassAddAssignInstruction, WeierstrassDecompressInstruction,
-                WeierstrassDoubleAssignInstruction,
+                KeccakInstruction, Secp256k1InvInstruction, ShaExtendInstruction,
+                Uint256MulInstruction, WeierstrassAddAssignInstruction,
+                WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
@@ -128,6 +128,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     // Ecall Opcodes
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub sha_extend_config: <ShaExtendInstruction<E> as Instruction<E>>::InstructionConfig,
     pub bn254_add_config:
         <WeierstrassAddAssignInstruction<E, SwCurve<Bn254>> as Instruction<E>>::InstructionConfig,
     pub bn254_double_config:
@@ -296,6 +297,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .is_none()
         );
         let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
+        let sha_extend_config = register_ecall_circuit!(ShaExtendInstruction<E>, ecall_cells_map);
         let bn254_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
         let secp256k1_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
         let secp256k1_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
@@ -371,6 +373,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             // ecall opcodes
             halt_config,
             keccak_config,
+            sha_extend_config,
             bn254_add_config,
             bn254_double_config,
             secp256k1_add_config,
@@ -455,6 +458,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // system
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config);
         fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs, &self.keccak_config);
+        fixed.register_opcode_circuit::<ShaExtendInstruction<E>>(cs, &self.sha_extend_config);
         fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
             cs,
             &self.bn254_add_config,
@@ -508,6 +512,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             .collect();
         let mut halt_records = Vec::new();
         let mut keccak_records = Vec::new();
+        let mut sha_extend_records = Vec::new();
         let mut bn254_add_records = Vec::new();
         let mut bn254_double_records = Vec::new();
         let mut secp256k1_add_records = Vec::new();
@@ -524,6 +529,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 }
                 InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => {
                     keccak_records.push(record);
+                }
+                InsnKind::ECALL if record.rs1().unwrap().value == Sha256ExtendSpec::CODE => {
+                    sha_extend_records.push(record);
                 }
                 InsnKind::ECALL if record.rs1().unwrap().value == Bn254AddSpec::CODE => {
                     bn254_add_records.push(record);
@@ -563,6 +571,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         }
         tracing::debug!("tracer generated HALT {} records", halt_records.len());
         tracing::debug!("tracer generated KECCAK {} records", keccak_records.len());
+        tracing::debug!(
+            "tracer generated sha_extend_records {} records",
+            sha_extend_records.len()
+        );
         tracing::debug!(
             "tracer generated bn254_add_records {} records",
             bn254_add_records.len()
@@ -668,6 +680,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             &self.keccak_config,
             keccak_records,
         )?;
+        witness.assign_opcode_circuit::<ShaExtendInstruction<E>>(
+            cs,
+            shard_ctx,
+            &self.sha_extend_config,
+            sha_extend_records,
+        )?;
         witness.assign_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
             cs,
             shard_ctx,
@@ -753,8 +771,6 @@ pub struct GroupedSteps<'a>(BTreeMap<InsnKind, Vec<&'a StepRecord>>);
 pub struct DummyExtraConfig<E: ExtensionField> {
     ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
 
-    sha256_extend_config:
-        <LargeEcallDummy<E, Sha256ExtendSpec> as Instruction<E>>::InstructionConfig,
     bn254_fp_add_config: <LargeEcallDummy<E, Bn254FpAddSpec> as Instruction<E>>::InstructionConfig,
     bn254_fp_mul_config: <LargeEcallDummy<E, Bn254FpMulSpec> as Instruction<E>>::InstructionConfig,
     bn254_fp2_add_config:
@@ -768,8 +784,7 @@ pub struct DummyExtraConfig<E: ExtensionField> {
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
         let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
-        let sha256_extend_config =
-            cs.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>();
+
         let bn254_fp_add_config =
             cs.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>();
         let bn254_fp_mul_config =
@@ -783,7 +798,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
 
         Self {
             ecall_config,
-            sha256_extend_config,
             bn254_fp_add_config,
             bn254_fp_mul_config,
             bn254_fp2_add_config,
@@ -798,10 +812,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
         fixed.register_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
-            cs,
-            &self.sha256_extend_config,
-        );
         fixed.register_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(
             cs,
             &self.bn254_fp_add_config,
@@ -833,7 +843,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
     ) -> Result<(), ZKVMError> {
         let mut steps = steps.0;
 
-        let mut sha256_extend_steps = Vec::new();
         let mut bn254_fp_add_steps = Vec::new();
         let mut bn254_fp_mul_steps = Vec::new();
         let mut bn254_fp2_add_steps = Vec::new();
@@ -844,7 +853,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         if let Some(ecall_steps) = steps.remove(&ECALL) {
             for step in ecall_steps {
                 match step.rs1().unwrap().value {
-                    Sha256ExtendSpec::CODE => sha256_extend_steps.push(step),
                     Bn254FpAddSpec::CODE => bn254_fp_add_steps.push(step),
                     Bn254FpMulSpec::CODE => bn254_fp_mul_steps.push(step),
                     Bn254Fp2AddSpec::CODE => bn254_fp2_add_steps.push(step),
@@ -855,12 +863,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             }
         }
 
-        witness.assign_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
-            cs,
-            shard_ctx,
-            &self.sha256_extend_config,
-            sha256_extend_steps,
-        )?;
         witness.assign_opcode_circuit::<LargeEcallDummy<E, Bn254FpAddSpec>>(
             cs,
             shard_ctx,

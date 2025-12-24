@@ -78,6 +78,9 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
         SelectorType::OrderedSparse32 { indices, .. } => {
             (selector_ctx.num_instances, true, indices.clone())
         }
+        SelectorType::OrderedSparse64 { .. } => {
+            unimplemented!("OrderedSparse64 is not supported in GPU selector path")
+        }
         SelectorType::QuarkBinaryTreeLessThan(..) => unimplemented!(),
     };
 

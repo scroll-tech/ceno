@@ -16,6 +16,7 @@ pub use ceno_syscall::{
     SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SECP256K1_SCALAR_INVERT, SECP256R1_ADD,
     SECP256R1_DECOMPRESS, SECP256R1_DOUBLE, SHA_EXTEND, UINT256_MUL,
 };
+pub use sha256::ShaExtendState;
 
 pub trait SyscallSpec {
     const NAME: &'static str;
