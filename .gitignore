@@ -13,3 +13,4 @@ proptest-regressions/
 
 # ceno serialized files
 *.bin
+*.json
