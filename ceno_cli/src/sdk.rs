@@ -21,7 +21,7 @@ use gkr_iop::hal::ProverBackend;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
-use openvm_native_circuit::{NativeBuilder, NativeConfig};
+use openvm_native_circuit::{NativeBuilder, NativeConfig, NativeCpuBuilder};
 use openvm_sdk::{RootSC, prover::vm::new_local_prover};
 use openvm_stark_backend::{config::StarkGenericConfig, proof::Proof};
 #[cfg(not(feature = "gpu"))]
@@ -213,8 +213,8 @@ where
                 agg_pk.internal_committed_exe.exe.clone(),
             )
             .expect("internal prover");
-            let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeBuilder>(
-                vb.clone(),
+            let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeCpuBuilder>(
+                Default::default(),
                 &agg_pk.root_vm_pk,
                 agg_pk.root_committed_exe.exe.clone(),
             )

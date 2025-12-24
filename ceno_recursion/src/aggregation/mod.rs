@@ -31,7 +31,7 @@ use openvm_continuations::{
 };
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
-use openvm_native_circuit::{NativeBuilder, NativeConfig};
+use openvm_native_circuit::{NativeBuilder, NativeConfig, NativeCpuBuilder};
 use openvm_native_compiler::{
     asm::AsmBuilder,
     conversion::{CompilerOptions, convert_program},
@@ -52,6 +52,7 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
 use openvm_stark_sdk::{
     config::{
         FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Config,
+        baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
         fri_params::standard_fri_params_with_100_bits_conjectured_security,
     },
     engine::StarkFriEngine,
@@ -70,7 +71,6 @@ use openvm_native_compiler::{
 };
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
-use openvm_stark_sdk::config::baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine;
 
 mod internal;
 mod root;
@@ -91,7 +91,7 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
 pub struct CenoAggregationProver {
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-    pub root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeBuilder>,
+    pub root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
     pub vk: CenoRecursionVerifierKeys<BabyBearPoseidon2Config>,
     pub pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
 }
@@ -100,7 +100,7 @@ impl CenoAggregationProver {
     pub fn new(
         leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
         internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-        root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeBuilder>,
+        root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
         pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) -> Self {
         Self {
@@ -242,9 +242,12 @@ impl CenoAggregationProver {
 
         let mut root_engine = BabyBearPoseidon2RootEngine::new(root_fri_params);
         root_engine.max_constraint_degree = ROOT_MAX_CONSTRAINT_DEG;
-        let (root_vm, root_vm_pk) =
-            VirtualMachine::new_with_keygen(root_engine, vb.clone(), root_vm_config.clone())
-                .expect("root keygen");
+        let (root_vm, root_vm_pk) = VirtualMachine::<_, NativeCpuBuilder>::new_with_keygen(
+            root_engine,
+            Default::default(),
+            root_vm_config.clone(),
+        )
+        .expect("root keygen");
         let root_program = CenoRootVmVerifierConfig {
             leaf_fri_params,
             internal_fri_params,
@@ -263,8 +266,8 @@ impl CenoAggregationProver {
             vm_config: root_vm_config,
             vm_pk: root_vm_pk,
         });
-        let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeBuilder>(
-            vb.clone(),
+        let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeCpuBuilder>(
+            Default::default(),
             &root_vm_pk,
             root_committed_exe.exe.clone(),
         )
@@ -416,12 +419,17 @@ impl CenoAggregationProver {
             public_values: user_public_values,
         };
 
+        let root_start_timestamp = Instant::now();
         let root_proof = SingleSegmentVmProver::prove(
             &mut self.root_prover,
             root_input.write(),
             VM_MAX_TRACE_HEIGHTS,
         )
         .expect("root proof generation should pass");
+        println!(
+            "Root - Completed root proof at: {:?}",
+            root_start_timestamp.elapsed()
+        );
 
         // Export root proof
         let file = File::create("root_proof.bin").expect("Create export proof file");
@@ -440,13 +448,13 @@ impl CenoAggregationProver {
 }
 
 pub fn verify_root_proof(
-    vk: &MultiStarkVerifyingKey<RootSC>,
+    vk: &CenoRecursionVerifierKeys<SC>,
     root_proof: &Proof<RootSC>,
 ) -> Result<(), VerificationError> {
     let root_fri_params =
         FriParameters::standard_with_100_bits_conjectured_security(ROOT_LOG_BLOWUP);
     let root_engine = BabyBearPoseidon2RootEngine::new(root_fri_params);
-    root_engine.verify(vk, root_proof)?;
+    root_engine.verify(&vk.root_vm_vk, root_proof)?;
     Ok(())
 }
 
@@ -744,8 +752,8 @@ mod tests {
             .expect("root proof verification should pass");
 
         // Method 2: Use stand-alone verification with only vk
-        let vk = agg_prover.vk.root_vm_vk;
-        verify_root_proof(&vk, &root_proof).expect("root proof verification should pass");
+        verify_root_proof(&agg_prover.vk, &root_proof)
+            .expect("root proof verification should pass");
     }
 
     pub fn verify_single_inner_thread() {
