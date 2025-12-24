@@ -60,7 +60,6 @@ rand = "0.8"
 rand_chacha = { version = "0.3", features = ["serde1"] }
 rand_core = "0.6"
 rayon = "1.10"
-rkyv = { version = "0.8", features = ["pointer_width_32"] }
 rustc-hash = "2.0.0"
 secp = "0.4.1"
 serde = { version = "1.0", features = ["derive", "rc"] }

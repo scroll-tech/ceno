@@ -11,9 +11,10 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+ceno_serde = { path = "../ceno_serde" }
 ceno_emul = { path = "../ceno_emul" }
 itertools.workspace = true
-rkyv.workspace = true
+serde.workspace = true
 tiny-keccak.workspace = true
 
 [dev-dependencies]

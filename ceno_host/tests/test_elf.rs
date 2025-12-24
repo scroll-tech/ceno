@@ -139,7 +139,8 @@ fn test_bubble_sorting() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::quadratic_sorting,
         // Provide some random numbers to sort.
-        CenoStdin::default().write(&(0..1_000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
+        CenoStdin::default()
+            .write(&(0..1_000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
         None,
     ));
     for msg in &all_messages {
@@ -154,7 +155,8 @@ fn test_sorting() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::sorting,
         // Provide some random numbers to sort.
-        CenoStdin::default().write(&(0..1000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
+        CenoStdin::default()
+            .write(&(0..1000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
         None,
     ));
     for (i, msg) in enumerate(&all_messages) {

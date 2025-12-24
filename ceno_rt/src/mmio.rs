@@ -1,13 +1,8 @@
 //! Memory-mapped I/O (MMIO) functions.
 
-use rkyv::{
-    Archived, Deserialize, Portable,
-    api::high::{HighDeserializer, HighValidator},
-    bytecheck::CheckBytes,
-    rancor::Failure,
-};
-
+use ceno_serde::from_slice;
 use core::{cell::UnsafeCell, ptr, slice::from_raw_parts};
+use serde::de::DeserializeOwned;
 
 struct RegionState {
     next_len_at: *const usize,
@@ -90,23 +85,18 @@ pub fn read_slice<'a>() -> &'a [u8] {
     }
 }
 
-pub fn read<'a, T>() -> &'a T
-where
-    T: Portable + for<'c> CheckBytes<HighValidator<'c, Failure>>,
-{
-    rkyv::access::<T, Failure>(read_slice()).expect("Deserialised access failed.")
-}
-
-#[allow(dead_code)]
 pub fn read_owned<T>() -> T
 where
-    T: rkyv::Archive,
-    T::Archived:
-        for<'c> CheckBytes<HighValidator<'c, Failure>> + Deserialize<T, HighDeserializer<Failure>>,
+    T: DeserializeOwned,
 {
-    let archived = rkyv::access::<Archived<T>, Failure>(read_slice())
-        .expect("Deserialised access failed.");
-    rkyv::deserialize::<T, Failure>(archived).expect("Deserialised value failed.")
+    from_slice(read_slice()).expect("Deserialised value failed.")
+}
+
+pub fn read<T>() -> T
+where
+    T: DeserializeOwned,
+{
+    read_owned()
 }
 
 pub fn pubio_read_slice<'a>() -> &'a [u8] {
@@ -118,13 +108,8 @@ pub fn pubio_read_slice<'a>() -> &'a [u8] {
 /// Read a value from public io, deserialize it, and assert that it matches the given value.
 pub fn commit<T>(v: &T)
 where
-    T: rkyv::Archive + core::fmt::Debug + PartialEq,
-    T::Archived:
-        for<'c> CheckBytes<HighValidator<'c, Failure>> + Deserialize<T, HighDeserializer<Failure>>,
+    T: DeserializeOwned + core::fmt::Debug + PartialEq,
 {
-    let expected = rkyv::access::<Archived<T>, Failure>(pubio_read_slice())
-        .expect("Deserialised access failed.");
-    let expected_deserialized: T =
-        rkyv::deserialize::<T, Failure>(expected).expect("Deserialised value failed.");
-    assert_eq!(*v, expected_deserialized);
+    let expected: T = from_slice(pubio_read_slice()).expect("Deserialised value failed.");
+    assert_eq!(*v, expected);
 }

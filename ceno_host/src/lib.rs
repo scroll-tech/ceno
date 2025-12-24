@@ -2,21 +2,13 @@ use anyhow::Result;
 use ceno_emul::{
     IterAddresses, Platform, Program, VMState, WORD_SIZE, Word, host_utils::read_all_messages,
 };
+use ceno_serde::to_vec;
 use core::mem::size_of;
 use itertools::Itertools;
-use rkyv::{
-    Serialize, api::high::HighSerializer, rancor::Error, ser::allocator::ArenaHandle, to_bytes,
-    util::AlignedVec,
-};
+use serde::Serialize;
 use std::{fs, io, iter::zip, path::Path, sync::Arc};
 
-// We want to get access to the default value of `AlignedVec::ALIGNMENT`, and using it directly like this
-//   pub const RKVY_ALIGNMENT: usize = rkyv::util::AlignedVec::ALIGNMENT;
-// doesn't work:
-pub const RKYV_ALIGNMENT: usize = {
-    type AlignedVec = rkyv::util::AlignedVec;
-    AlignedVec::ALIGNMENT
-};
+pub const WORD_ALIGNMENT: usize = size_of::<u32>();
 
 /// A structure for building the hints input to the Ceno emulator.
 ///
@@ -27,13 +19,13 @@ pub const RKYV_ALIGNMENT: usize = {
 /// 1. The start of the hints buffer consists of a sequence of `usize` values, each representing the
 ///    metadata describing the layout: first the offset where the serialized bytes begin, then the
 ///    alignment used for each record, followed by the length of every hint in order.
-/// 2. hints[..current_hint_len] can deserialise into the expected type via rkyv.
+/// 2. hints[..current_hint_len] can deserialise into the expected type via `ceno_serde`.
 ///
 /// After the metadata we place every serialized blob back-to-back (with alignment padding), so the
 /// runtime can walk forward from the lowest address without needing any random access.
 #[derive(Default)]
 pub struct CenoStdin {
-    pub items: Vec<AlignedVec>,
+    pub items: Vec<Item>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -42,21 +34,12 @@ pub struct Item {
     pub end_of_data: usize,
 }
 
-impl From<&AlignedVec> for Item {
-    fn from(data: &AlignedVec) -> Self {
-        let mut data = data.to_vec();
-        let end_of_data = data.len();
-        data.resize(data.len().next_multiple_of(RKYV_ALIGNMENT), 0);
-        Item { data, end_of_data }
-    }
-}
-
 impl From<Vec<u32>> for Item {
     fn from(data: Vec<u32>) -> Self {
         let data: Vec<u8> = data.into_iter().flat_map(u32::to_le_bytes).collect();
         let end_of_data = data.len();
         let mut data = data;
-        data.resize(data.len().next_multiple_of(RKYV_ALIGNMENT), 0);
+        data.resize(data.len().next_multiple_of(WORD_ALIGNMENT), 0);
         Item { data, end_of_data }
     }
 }
@@ -71,7 +54,7 @@ impl Items {
     pub fn total_length(&self) -> usize {
         self.data.len()
     }
-    pub fn append(&mut self, item: Item) {
+    pub fn append(&mut self, item: &Item) {
         self.data.extend_from_slice(&item.data);
         self.lens.push(item.end_of_data);
     }
@@ -82,11 +65,11 @@ impl Items {
     pub fn finalise(self) -> Vec<u8> {
         let Items { data, lens } = self;
         let header_words = lens.len() + 2;
-        let data_offset = (size_of::<u32>() * header_words).next_multiple_of(RKYV_ALIGNMENT);
+        let data_offset = (size_of::<u32>() * header_words).next_multiple_of(WORD_ALIGNMENT);
 
         let mut header = Vec::with_capacity(header_words);
         header.push(data_offset as u32);
-        header.push(RKYV_ALIGNMENT as u32);
+        header.push(WORD_ALIGNMENT as u32);
         header.extend(lens.into_iter().map(|len| len as u32));
 
         let mut bytes = header
@@ -103,7 +86,7 @@ impl From<&CenoStdin> for Vec<u8> {
     fn from(stdin: &CenoStdin) -> Vec<u8> {
         let mut items = Items::default();
         for item in &stdin.items {
-            items.append(Item::from(item));
+            items.append(item);
         }
         items.finalise()
     }
@@ -120,29 +103,10 @@ impl From<&CenoStdin> for Vec<u32> {
 }
 
 impl CenoStdin {
-    pub fn write_slice(&mut self, bytes: AlignedVec) -> &mut Self {
-        self.items.push(bytes);
-        self
-    }
-
-    pub fn write_bytes(&mut self, bytes: &[u8]) -> &mut Self {
-        let mut aligned = AlignedVec::with_capacity(bytes.len());
-        aligned.extend_from_slice(bytes);
-        self.write_slice(aligned)
-    }
-
-    pub fn write(
-        &mut self,
-        item: &impl for<'a> Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
-    ) -> Result<&mut Self, Error> {
-        to_bytes::<Error>(item).map(|bytes| self.write_slice(bytes))
-    }
-
-    pub fn write_serializable(
-        &mut self,
-        value: &impl for<'a> Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
-    ) -> Result<&mut Self, Error> {
-        self.write(value)
+    pub fn write(&mut self, value: &impl Serialize) -> Result<&mut Self, ceno_serde::Error> {
+        let item = Item::from(to_vec(value)?);
+        self.items.push(item);
+        Ok(self)
     }
 }
 
