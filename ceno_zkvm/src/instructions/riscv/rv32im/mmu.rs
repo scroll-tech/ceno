@@ -106,12 +106,18 @@ impl<E: ExtensionField> MmuConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
         pv: &PublicValues,
+        hints_final: &[MemFinalRecord],
         heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<HeapInitCircuit<E>>(
             cs,
             &self.heap_init_config,
             &(heap_final, pv, pv.heap_shard_len as usize),
+        )?;
+        witness.assign_table_circuit::<HintsInitCircuit<E>>(
+            cs,
+            &self.hints_init_config,
+            &(hints_final, pv, pv.hint_shard_len as usize),
         )?;
         Ok(())
     }
@@ -125,7 +131,6 @@ impl<E: ExtensionField> MmuConfig<E> {
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
         io_final: &[MemFinalRecord],
-        hints_final: &[MemFinalRecord],
         stack_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<RegTableInitCircuit<E>>(
@@ -145,11 +150,7 @@ impl<E: ExtensionField> MmuConfig<E> {
             &self.public_io_init_config,
             io_final,
         )?;
-        witness.assign_table_circuit::<HintsInitCircuit<E>>(
-            cs,
-            &self.hints_init_config,
-            &(hints_final, pv, hints_final.len()),
-        )?;
+
         witness.assign_table_circuit::<StackInitCircuit<E>>(
             cs,
             &self.stack_init_config,
@@ -177,7 +178,14 @@ impl<E: ExtensionField> MmuConfig<E> {
             (RegTable::name(), None, reg_final),
             (StaticMemTable::name(), None, static_mem_final),
             (StackTable::name(), None, stack_final),
-            (HintsTable::name(), None, hints_final),
+            (
+                HintsTable::name(),
+                Some(
+                    pv.hint_start_addr
+                        ..(pv.hint_start_addr + pv.hint_shard_len * (WORD_SIZE as u32)),
+                ),
+                hints_final,
+            ),
             (
                 HeapTable::name(),
                 Some(

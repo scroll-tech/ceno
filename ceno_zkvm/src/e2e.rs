@@ -1304,7 +1304,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &emul_result.final_mem_state.reg,
                         &emul_result.final_mem_state.mem,
                         &emul_result.final_mem_state.io,
-                        &emul_result.final_mem_state.hints,
                         &emul_result.final_mem_state.stack,
                     )
                     .unwrap();
@@ -1320,7 +1319,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &[],
                         &[],
                         &[],
-                        &[],
                     )
                     .unwrap();
             }
@@ -1332,6 +1330,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     &system_config.zkvm_cs,
                     &mut zkvm_witness,
                     &pi,
+                    &emul_result.final_mem_state.hints,
                     &emul_result.final_mem_state.heap,
                 )
                 .unwrap();
