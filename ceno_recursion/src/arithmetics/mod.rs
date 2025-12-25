@@ -713,12 +713,11 @@ pub fn evaluate_ceno_expr<C: Config, T>(
 /// the result M(r0, r1,... rn) = r0 + r1 * 2 + r2 * 2^2 + .... rn * 2^n
 pub fn eval_wellform_address_vec<C: Config>(
     builder: &mut Builder<C>,
-    offset: u32,
+    offset: impl Into<<Ext<C::F, C::EF> as Variable<C>>::Expression>,
     scaled: u32,
     r: &Array<C, Ext<C::F, C::EF>>,
     descending: bool,
 ) -> Ext<C::F, C::EF> {
-    let offset: Ext<C::F, C::EF> = builder.constant(C::EF::from_canonical_u32(offset));
     let scaled: Ext<C::F, C::EF> = builder.constant(C::EF::from_canonical_u32(scaled));
 
     let r_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
@@ -737,7 +736,7 @@ pub fn eval_wellform_address_vec<C: Config>(
         builder.assign(&shift, zero - shift);
     }
 
-    let res: Ext<C::F, C::EF> = builder.eval(offset + shift);
+    let res: Ext<C::F, C::EF> = builder.eval(offset.into() + shift);
 
     res
 }

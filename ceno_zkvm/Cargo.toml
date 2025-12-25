@@ -21,7 +21,7 @@ ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
 mpcs.workspace = true
 multilinear_extensions.workspace = true
-once_cell = "1.21.3"
+once_cell.workspace = true
 p3.workspace = true
 rayon.workspace = true
 serde.workspace = true

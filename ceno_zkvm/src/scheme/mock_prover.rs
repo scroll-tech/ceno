@@ -12,7 +12,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use ceno_emul::{ByteAddr, CENO_PLATFORM, Platform, Program};
+use ceno_emul::{ByteAddr, CENO_PLATFORM, Program};
 use either::Either;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
@@ -49,19 +49,7 @@ use witness::next_pow2_instance_padding;
 
 const MAX_CONSTRAINT_DEGREE: usize = 3;
 const MOCK_PROGRAM_SIZE: usize = 32;
-pub const MOCK_PC_START: ByteAddr = ByteAddr({
-    // This needs to be a static, because otherwise the compiler complains
-    // that 'the destructor for [Platform] cannot be evaluated in constants'
-    // The `static` keyword means that we keep exactly one copy of the variable
-    // around per process, and never deallocate it.  Thus never having to call
-    // the destructor.
-    //
-    // At least conceptually.  In practice with anything beyond -O0, the optimizer
-    // will inline and fold constants and replace `MOCK_PC_START` with
-    // a simple number.
-    static CENO_PLATFORM: Platform = ceno_emul::CENO_PLATFORM;
-    CENO_PLATFORM.pc_base()
-});
+pub const MOCK_PC_START: ByteAddr = ByteAddr(0x0800_0000);
 
 /// Allow LK Multiplicity's key to be used with `u64` and `GoldilocksExt2`.
 pub trait LkMultiplicityKey: Copy + Clone + Debug + Eq + Hash + Send {
@@ -854,7 +842,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let mut t_vec = vec![];
         let mut cs = ConstraintSystem::<E>::new(|| "mock_program");
         let params = ProgramParams {
-            platform: CENO_PLATFORM,
+            platform: CENO_PLATFORM.clone(),
             program_size: max(
                 next_pow2_instance_padding(program.instructions.len()),
                 MOCK_PROGRAM_SIZE,
