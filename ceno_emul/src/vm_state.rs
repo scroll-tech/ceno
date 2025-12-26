@@ -129,7 +129,7 @@ impl<T: Tracer> VMState<T> {
     fn step(&mut self) -> Result<T::Record> {
         crate::rv32im::step(self)?;
         let step = self.tracer.advance();
-        if T::is_busy_loop(&step) && !self.halted() {
+        if self.tracer.is_busy_loop(&step) && !self.halted() {
             Err(anyhow!("Stuck in loop {}", "{}"))
         } else {
             Ok(step)

@@ -88,7 +88,7 @@ pub trait Tracer {
 
     fn advance(&mut self) -> Self::Record;
 
-    fn is_busy_loop(record: &Self::Record) -> bool;
+    fn is_busy_loop(&self, record: &Self::Record) -> bool;
 
     fn store_pc(&mut self, pc: ByteAddr);
 
@@ -592,6 +592,7 @@ impl FullTracer {
         if self.record.memory_op.is_some() {
             unimplemented!("Only one memory access is supported");
         }
+
         // update min/max mmio access
         if let Some((_, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
@@ -692,6 +693,7 @@ impl FullTracer {
 #[derive(Debug)]
 pub struct PreflightTracer {
     cycle: Cycle,
+    pc: Change<ByteAddr>,
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: LatestAccesses,
     next_accesses: NextCycleAccess,
@@ -708,6 +710,7 @@ impl PreflightTracer {
     pub fn new(platform: &Platform) -> Self {
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
+            pc: Default::default(),
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
@@ -725,6 +728,8 @@ impl PreflightTracer {
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
             && addr < *end_addr
         {
+            // skip if the target address is not within the range tracked by this MMIO region
+            // this condition ensures the address is within the MMIO region's end address
             if addr >= *max_addr {
                 *max_addr = addr + WordAddr::from(WORD_SIZE as u32);
             }
@@ -753,15 +758,19 @@ impl Tracer for PreflightTracer {
         self.reset_register_tracking();
     }
 
-    fn is_busy_loop(_: &Self::Record) -> bool {
-        false
+    fn is_busy_loop(&self, _: &Self::Record) -> bool {
+        self.pc.before == self.pc.after
     }
 
     #[inline(always)]
-    fn store_pc(&mut self, _pc: ByteAddr) {}
+    fn store_pc(&mut self, pc: ByteAddr) {
+        self.pc.after = pc;
+    }
 
     #[inline(always)]
-    fn fetch(&mut self, _pc: WordAddr, _value: Instruction) {}
+    fn fetch(&mut self, pc: WordAddr, _value: Instruction) {
+        self.pc.before = pc.baddr();
+    }
 
     #[inline(always)]
     fn load_register(&mut self, idx: RegIdx, _value: Word) {
@@ -863,7 +872,7 @@ impl Tracer for FullTracer {
     }
 
     #[inline(always)]
-    fn is_busy_loop(record: &Self::Record) -> bool {
+    fn is_busy_loop(&self, record: &Self::Record) -> bool {
         record.is_busy_loop()
     }
 
