@@ -11,8 +11,8 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-ceno_serde = { path = "../ceno_serde" }
 ceno_emul = { path = "../ceno_emul" }
+ceno_serde = { path = "../ceno_serde" }
 itertools.workspace = true
 serde.workspace = true
 tiny-keccak.workspace = true
