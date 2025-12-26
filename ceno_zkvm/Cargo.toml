@@ -26,6 +26,7 @@ p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+smallvec.workspace = true
 sumcheck.workspace = true
 transcript.workspace = true
 whir.workspace = true
