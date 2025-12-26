@@ -1,0 +1,20 @@
+[package]
+categories.workspace = true
+description = "Serde helpers for word-based serialization"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "ceno_serde"
+readme = "README.md"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+bytemuck = { version = "1.14", features = ["extern_crate_alloc"] }
+serde.workspace = true
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
+
+[features]
+default = []

@@ -1,110 +1,117 @@
 //! Memory-mapped I/O (MMIO) functions.
 
-use rkyv::{
-    Archived, Deserialize, Portable,
-    api::high::{HighDeserializer, HighValidator},
-    bytecheck::CheckBytes,
-    rancor::Failure,
-};
+use ceno_serde::from_slice;
+use core::{cell::UnsafeCell, ptr, slice::from_raw_parts};
+use serde::de::DeserializeOwned;
 
-use core::slice::from_raw_parts;
-
-/// The memory region with our hints.
-///
-/// Logically, this is a static constant, but the type system doesn't see it that way.
-/// (We hope that the optimiser is smart enough to see that it is a constant.)
-fn hints_region<'a>() -> &'a [u8] {
-    unsafe extern "C" {
-        /// The address of this variable is the start of the hints ROM.
-        ///
-        /// It is defined in the linker script.  The value of this variable is undefined.
-        static _hints_start: u8;
-        /// The _address_ of this variable is the length of the hints ROM
-        ///
-        /// It is defined in the linker script.  The value of this variable is undefined.
-        static _hints_length: usize;
-    }
-    unsafe {
-        let hints_length = &_hints_length as *const usize as usize;
-        from_raw_parts(&_hints_start, hints_length)
-    }
+struct RegionState {
+    next_len_at: *const usize,
+    next_data_at: *const u8,
+    alignment: usize,
+    initialized: bool,
 }
 
-/// Get the length of the next hint
-fn hint_len() -> usize {
-    unsafe extern "C" {
-        /// The address of this variable is the start of the slice that holds the length of the hints.
-        ///
-        /// It is defined in the linker script.  The value of this variable is undefined.
-        static _lengths_of_hints_start: usize;
+impl RegionState {
+    const fn new() -> Self {
+        Self {
+            next_len_at: ptr::null(),
+            next_data_at: ptr::null(),
+            alignment: 1,
+            initialized: false,
+        }
     }
-    static mut NEXT_HINT_LEN_AT: *const usize = &raw const _lengths_of_hints_start;
-    unsafe {
-        let len: usize = core::ptr::read(NEXT_HINT_LEN_AT);
-        NEXT_HINT_LEN_AT = NEXT_HINT_LEN_AT.add(1);
+
+    unsafe fn ensure_initialized(&mut self, len_start: *const usize, data_start: *const u8) {
+        if self.initialized {
+            return;
+        }
+        let mut cursor = len_start;
+        let data_offset = unsafe { ptr::read(cursor) };
+        cursor = unsafe { cursor.add(1) };
+        self.alignment = unsafe { ptr::read(cursor) };
+        cursor = unsafe { cursor.add(1) };
+        self.next_len_at = cursor;
+        self.next_data_at = unsafe { data_start.add(data_offset) };
+        self.initialized = true;
+    }
+
+    unsafe fn take_len(&mut self, len_start: *const usize, data_start: *const u8) -> usize {
+        unsafe { self.ensure_initialized(len_start, data_start) };
+        let len = unsafe { ptr::read(self.next_len_at) };
+        self.next_len_at = unsafe { self.next_len_at.add(1) };
         len
     }
+
+    unsafe fn take_slice<'a>(
+        &mut self,
+        len_start: *const usize,
+        data_start: *const u8,
+    ) -> &'a [u8] {
+        let len = unsafe { self.take_len(len_start, data_start) };
+        let ptr = self.next_data_at;
+        let padded = len.next_multiple_of(self.alignment);
+        self.next_data_at = unsafe { self.next_data_at.add(padded) };
+        unsafe { from_raw_parts(ptr, len) }
+    }
 }
+
+unsafe extern "C" {
+    static _hints_start: u8;
+    static _lengths_of_hints_start: usize;
+    static _pubio_start: u8;
+    static _lengths_of_pubio_start: usize;
+}
+
+struct RegionStateCell(UnsafeCell<RegionState>);
+
+impl RegionStateCell {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(RegionState::new()))
+    }
+
+    unsafe fn with_mut<R>(&self, f: impl FnOnce(&mut RegionState) -> R) -> R {
+        f(unsafe { &mut *self.0.get() })
+    }
+}
+
+unsafe impl Sync for RegionStateCell {}
+
+static HINT_STATE: RegionStateCell = RegionStateCell::new();
+static PUBIO_STATE: RegionStateCell = RegionStateCell::new();
 
 pub fn read_slice<'a>() -> &'a [u8] {
-    &hints_region()[..hint_len()]
+    unsafe {
+        HINT_STATE
+            .with_mut(|state| state.take_slice(&raw const _lengths_of_hints_start, &_hints_start))
+    }
 }
 
-pub fn read<'a, T>() -> &'a T
+pub fn read_owned<T>() -> T
 where
-    T: Portable + for<'c> CheckBytes<HighValidator<'c, Failure>>,
+    T: DeserializeOwned,
 {
-    rkyv::access::<T, Failure>(read_slice()).expect("Deserialised access failed.")
+    from_slice(read_slice()).expect("Deserialised value failed.")
 }
 
-/// The memory region with public io.
-fn pubio_region<'a>() -> &'a [u8] {
-    unsafe extern "C" {
-        /// The address of this variable is the start of the hints ROM.
-        ///
-        /// It is defined in the linker script.  The value of this variable is undefined.
-        static _pubio_start: u8;
-        /// The _address_ of this variable is the length of the hints ROM
-        ///
-        /// It is defined in the linker script.  The value of this variable is undefined.
-        static _pubio_length: usize;
-    }
-    unsafe {
-        let pubio_length = &_pubio_length as *const usize as usize;
-        from_raw_parts(&_pubio_start, pubio_length)
-    }
-}
-
-/// Get the length of the next pubio
-fn pubio_len() -> usize {
-    unsafe extern "C" {
-        /// The address of this variable is the start of the slice that holds the length of the hints.
-        ///
-        /// It is defined in the linker script.  The value of this variable is undefined.
-        static _lengths_of_pubio_start: usize;
-    }
-    static mut NEXT_PUBIO_LEN_AT: *const usize = &raw const _lengths_of_pubio_start;
-    unsafe {
-        let len: usize = core::ptr::read(NEXT_PUBIO_LEN_AT);
-        NEXT_PUBIO_LEN_AT = NEXT_PUBIO_LEN_AT.add(1);
-        len
-    }
+pub fn read<T>() -> T
+where
+    T: DeserializeOwned,
+{
+    read_owned()
 }
 
 pub fn pubio_read_slice<'a>() -> &'a [u8] {
-    &pubio_region()[..pubio_len()]
+    unsafe {
+        PUBIO_STATE
+            .with_mut(|state| state.take_slice(&raw const _lengths_of_pubio_start, &_pubio_start))
+    }
 }
 
 /// Read a value from public io, deserialize it, and assert that it matches the given value.
 pub fn commit<T>(v: &T)
 where
-    T: rkyv::Archive + core::fmt::Debug + PartialEq,
-    T::Archived:
-        for<'c> CheckBytes<HighValidator<'c, Failure>> + Deserialize<T, HighDeserializer<Failure>>,
+    T: DeserializeOwned + core::fmt::Debug + PartialEq,
 {
-    let expected = rkyv::access::<Archived<T>, Failure>(pubio_read_slice())
-        .expect("Deserialised access failed.");
-    let expected_deserialized: T =
-        rkyv::deserialize::<T, Failure>(expected).expect("Deserialised value failed.");
-    assert_eq!(*v, expected_deserialized);
+    let expected: T = from_slice(pubio_read_slice()).expect("Deserialised value failed.");
+    assert_eq!(*v, expected);
 }

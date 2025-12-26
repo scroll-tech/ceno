@@ -5,13 +5,11 @@ extern crate ceno_rt;
 use ceno_rt::debug_println;
 #[cfg(debug_assertions)]
 use core::fmt::Write;
-use rkyv::{Archived, vec::ArchivedVec};
 
 fn main() {
-    let numbers: &ArchivedVec<u32> = ceno_rt::read();
-    let median_candidate: &Archived<u32> = ceno_rt::read();
-    let median_candidate = &&median_candidate.to_native();
-    let smaller = numbers.iter().filter(move |x| x < median_candidate).count();
+    let numbers: Vec<u32> = ceno_rt::read();
+    let median_candidate: u32 = ceno_rt::read();
+    let smaller = numbers.iter().filter(|x| **x < median_candidate).count();
     assert_eq!(smaller, numbers.len() / 2);
     debug_println!("{}", median_candidate);
 }

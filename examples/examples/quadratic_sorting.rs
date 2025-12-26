@@ -1,5 +1,4 @@
 extern crate ceno_rt;
-use rkyv::vec::ArchivedVec;
 
 fn sort<T: Ord>(slice: &mut [T]) {
     let len = slice.len();
@@ -13,8 +12,7 @@ fn sort<T: Ord>(slice: &mut [T]) {
 }
 
 fn main() {
-    let input: &ArchivedVec<u32> = ceno_rt::read();
-    let mut scratch = input.to_vec();
+    let mut scratch: Vec<u32> = ceno_rt::read();
     sort(&mut scratch);
     // Print any output you feel like, eg the first element of the sorted vector:
     // println!("{}", scratch[0]);

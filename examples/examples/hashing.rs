@@ -8,15 +8,14 @@ extern crate ceno_rt;
 use ceno_rt::debug_println;
 #[cfg(debug_assertions)]
 use core::fmt::Write;
-use rkyv::vec::ArchivedVec;
 use std::collections::HashSet;
 
 /// Check that the input is a set of unique numbers.
 fn main() {
-    let input: &ArchivedVec<u32> = ceno_rt::read();
+    let input: Vec<u32> = ceno_rt::read();
     let mut set = HashSet::new();
-    for i in input.iter() {
-        assert!(set.insert(i));
+    for value in input {
+        assert!(set.insert(value));
     }
     debug_println!("The input is a set of unique numbers.");
 }

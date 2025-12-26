@@ -1,5 +1,4 @@
 extern crate ceno_rt;
-use rkyv::Archived;
 
 fn is_prime(n: u32) -> bool {
     if n < 2 {
@@ -17,10 +16,10 @@ fn is_prime(n: u32) -> bool {
 }
 
 fn main() {
-    let n: &Archived<u32> = ceno_rt::read();
+    let n: u32 = ceno_rt::read();
     let mut cnt_primes = 0;
 
-    for i in 0..=n.into() {
+    for i in 0..=n {
         cnt_primes += is_prime(i) as u32;
     }
 
