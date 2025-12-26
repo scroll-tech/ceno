@@ -162,6 +162,52 @@ pub struct KeccakLayout<E: ExtensionField> {
     pub n_challenges: usize,
 }
 
+const ROTATION_WITNESS_LEN: usize = 196;
+const C_TEMP_SPLIT_SIZES: [usize; 8] = [15, 1, 15, 1, 15, 1, 15, 1];
+
+#[inline(always)]
+fn split_u64_into_bytes(value: u64) -> [u64; 8] {
+    let bytes = value.to_le_bytes();
+    [
+        bytes[0] as u64,
+        bytes[1] as u64,
+        bytes[2] as u64,
+        bytes[3] as u64,
+        bytes[4] as u64,
+        bytes[5] as u64,
+        bytes[6] as u64,
+        bytes[7] as u64,
+    ]
+}
+
+#[inline(always)]
+fn split_u64_into_chunks<const N: usize>(mut value: u64, sizes: &[usize; N]) -> [u64; N] {
+    let mut out = [0u64; N];
+    for (slot, &size) in out.iter_mut().zip(sizes.iter()) {
+        let mask = if size == 64 {
+            u64::MAX
+        } else {
+            (1u64 << size) - 1
+        };
+        *slot = value & mask;
+        value >>= size;
+    }
+    out
+}
+
+#[inline(always)]
+fn fill_chunk_slice(mut value: u64, sizes: &[usize], dst: &mut [u64]) {
+    for (slot, &size) in dst.iter_mut().zip(sizes.iter()) {
+        let mask = if size == 64 {
+            u64::MAX
+        } else {
+            (1u64 << size) - 1
+        };
+        *slot = value & mask;
+        value >>= size;
+    }
+}
+
 impl<E: ExtensionField> KeccakLayout<E> {
     fn new(cb: &mut CircuitBuilder<E>, params: KeccakParams) -> Self {
         // allocate witnesses, fixed, and eqs
@@ -639,14 +685,6 @@ where
 
         let num_instances = phase1.instances.len();
 
-        fn conv64to8(input: u64) -> [u64; 8] {
-            MaskRepresentation::new(vec![(64, input).into()])
-                .convert(vec![8; 8])
-                .values()
-                .try_into()
-                .unwrap()
-        }
-
         // keccak instance full rounds (24 rounds + 8 round padding) as chunk size
         // we need to do assignment on respective 31 cyclic group index
         wits.values
@@ -729,7 +767,7 @@ where
                     let mut state8 = [[[0u64; 8]; 5]; 5];
                     for x in 0..5 {
                         for y in 0..5 {
-                            state8[x][y] = conv64to8(state64[x][y]);
+                            state8[x][y] = split_u64_into_bytes(state64[x][y]);
                         }
                     }
 
@@ -744,14 +782,14 @@ where
 
                     for i in 0..5 {
                         c_aux64[i][0] = state64[0][i];
-                        c_aux8[i][0] = conv64to8(c_aux64[i][0]);
+                        c_aux8[i][0] = split_u64_into_bytes(c_aux64[i][0]);
                         for j in 1..5 {
                             c_aux64[i][j] = state64[j][i] ^ c_aux64[i][j - 1];
                             for k in 0..8 {
                                 lk_multiplicity
                                     .lookup_xor_byte(c_aux8[i][j - 1][k], state8[j][i][k]);
                             }
-                            c_aux8[i][j] = conv64to8(c_aux64[i][j]);
+                            c_aux8[i][j] = split_u64_into_bytes(c_aux64[i][j]);
                         }
                     }
 
@@ -760,25 +798,23 @@ where
 
                     for x in 0..5 {
                         c64[x] = c_aux64[x][4];
-                        c8[x] = conv64to8(c64[x]);
+                        c8[x] = split_u64_into_bytes(c64[x]);
                     }
 
                     let mut c_temp = [[0u64; 8]; 5];
                     for i in 0..5 {
-                        let rep = MaskRepresentation::new(vec![(64, c64[i]).into()])
-                            .convert(vec![15, 1, 15, 1, 15, 1, 15, 1])
-                            .values();
-                        for (j, size) in [15, 1, 15, 1, 15, 1, 15, 1].iter().enumerate() {
-                            lk_multiplicity.assert_const_range(rep[j], *size);
+                        let chunks = split_u64_into_chunks(c64[i], &C_TEMP_SPLIT_SIZES);
+                        for (chunk, size) in chunks.iter().zip(C_TEMP_SPLIT_SIZES.iter()) {
+                            lk_multiplicity.assert_const_range(*chunk, *size);
                         }
-                        c_temp[i] = rep.try_into().unwrap();
+                        c_temp[i] = chunks;
                     }
 
                     let mut crot64 = [0u64; 5];
                     let mut crot8 = [[0u64; 8]; 5];
                     for i in 0..5 {
                         crot64[i] = c64[i].rotate_left(1);
-                        crot8[i] = conv64to8(crot64[i]);
+                        crot8[i] = split_u64_into_bytes(crot64[i]);
                     }
 
                     let mut d64 = [0u64; 5];
@@ -791,12 +827,12 @@ where
                                 crot8[(x + 1) % 5][k],
                             );
                         }
-                        d8[x] = conv64to8(d64[x]);
+                        d8[x] = split_u64_into_bytes(d64[x]);
                     }
 
                     let mut theta_state64 = state64;
                     let mut theta_state8 = [[[0u64; 8]; 5]; 5];
-                    let mut rotation_witness = vec![];
+                    let mut rotation_witness = Vec::with_capacity(ROTATION_WITNESS_LEN);
 
                     for x in 0..5 {
                         for y in 0..5 {
@@ -804,17 +840,23 @@ where
                             for k in 0..8 {
                                 lk_multiplicity.lookup_xor_byte(state8[y][x][k], d8[x][k])
                             }
-                            theta_state8[y][x] = conv64to8(theta_state64[y][x]);
+                            theta_state8[y][x] = split_u64_into_bytes(theta_state64[y][x]);
 
                             let (sizes, _) = rotation_split(ROTATION_CONSTANTS[y][x]);
-                            let rep =
-                                MaskRepresentation::new(vec![(64, theta_state64[y][x]).into()])
-                                    .convert(sizes.clone())
-                                    .values();
-                            for (j, size) in sizes.iter().enumerate() {
-                                lk_multiplicity.assert_const_range(rep[j], *size);
+                            let len = sizes.len();
+                            let start = rotation_witness.len();
+                            rotation_witness.resize(start + len, 0);
+                            fill_chunk_slice(
+                                theta_state64[y][x],
+                                &sizes,
+                                &mut rotation_witness[start..start + len],
+                            );
+                            for (chunk, size) in rotation_witness[start..start + len]
+                                .iter()
+                                .zip(sizes.iter())
+                            {
+                                lk_multiplicity.assert_const_range(*chunk, *size);
                             }
-                            rotation_witness.extend(rep);
                         }
                     }
                     assert_eq!(rotation_witness.len(), rotation_witness_witin.len());
@@ -832,7 +874,7 @@ where
 
                     for x in 0..5 {
                         for y in 0..5 {
-                            rhopi_output8[x][y] = conv64to8(rhopi_output64[x][y]);
+                            rhopi_output8[x][y] = split_u64_into_bytes(rhopi_output64[x][y]);
                         }
                     }
 
@@ -849,7 +891,7 @@ where
                                     rhopi_output8[y][(x + 2) % 5][k],
                                 );
                             }
-                            nonlinear8[y][x] = conv64to8(nonlinear64[y][x]);
+                            nonlinear8[y][x] = split_u64_into_bytes(nonlinear64[y][x]);
                         }
                     }
 
@@ -862,7 +904,7 @@ where
                                 lk_multiplicity
                                     .lookup_xor_byte(rhopi_output8[y][x][k], nonlinear8[y][x][k]);
                             }
-                            chi_output8[y][x] = conv64to8(chi_output64[y][x]);
+                            chi_output8[y][x] = split_u64_into_bytes(chi_output64[y][x]);
                         }
                     }
 
@@ -873,13 +915,13 @@ where
                     iota_output64[0][0] ^= RC[round];
 
                     for k in 0..8 {
-                        let rc8 = conv64to8(RC[round]);
+                        let rc8 = split_u64_into_bytes(RC[round]);
                         lk_multiplicity.lookup_xor_byte(chi_output8[0][0][k], rc8[k]);
                     }
 
                     for x in 0..5 {
                         for y in 0..5 {
-                            iota_output8[x][y] = conv64to8(iota_output64[x][y]);
+                            iota_output8[x][y] = split_u64_into_bytes(iota_output64[x][y]);
                         }
                     }
 
