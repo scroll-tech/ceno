@@ -1,6 +1,5 @@
 extern crate alloc;
 extern crate ceno_rt;
-use alloc::string::String;
 use ceno_rt::debug_println;
 #[cfg(debug_assertions)]
 use core::fmt::Write;
@@ -10,6 +9,7 @@ fn main() {
     assert!(condition);
     #[cfg(debug_assertions)]
     {
+        use alloc::string::String;
         let msg: String = ceno_rt::read();
         debug_println!("This message is a hint: {msg}");
     }

@@ -81,7 +81,8 @@ static PUBIO_STATE: RegionStateCell = RegionStateCell::new();
 
 pub fn read_slice<'a>() -> &'a [u8] {
     unsafe {
-        HINT_STATE.with_mut(|state| state.take_slice(&raw const _lengths_of_hints_start, &_hints_start))
+        HINT_STATE
+            .with_mut(|state| state.take_slice(&raw const _lengths_of_hints_start, &_hints_start))
     }
 }
 
@@ -101,7 +102,8 @@ where
 
 pub fn pubio_read_slice<'a>() -> &'a [u8] {
     unsafe {
-        PUBIO_STATE.with_mut(|state| state.take_slice(&raw const _lengths_of_pubio_start, &_pubio_start))
+        PUBIO_STATE
+            .with_mut(|state| state.take_slice(&raw const _lengths_of_pubio_start, &_pubio_start))
     }
 }
 

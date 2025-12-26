@@ -3,7 +3,10 @@ use alloc::{string::String, vec, vec::Vec};
 use bytemuck::Pod;
 use serde::de::{DeserializeOwned, DeserializeSeed, IntoDeserializer, Visitor};
 
-use crate::{align_up, err::{Error, Result}, WORD_SIZE};
+use crate::{
+    WORD_SIZE, align_up,
+    err::{Error, Result},
+};
 
 /// A reader for reading streams with serialized word-based data
 pub trait WordRead {

@@ -1,6 +1,9 @@
 use alloc::{string::ToString, vec::Vec};
 
-use crate::{err::{Error, Result}, WORD_SIZE};
+use crate::{
+    WORD_SIZE,
+    err::{Error, Result},
+};
 
 /// A writer for writing streams preferring word-based data.
 pub trait WordWrite {
