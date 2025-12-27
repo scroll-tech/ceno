@@ -1,4 +1,5 @@
 mod bitwise_keccakf;
+mod fptower;
 mod lookup_keccakf;
 mod uint256;
 mod utils;
@@ -16,6 +17,11 @@ pub use bitwise_keccakf::{
     setup_gkr_circuit as setup_bitwise_keccak_gkr_circuit,
 };
 use ff_ext::ExtensionField;
+pub use fptower::{
+    fp::{FpOpInstance, FpOpLayout, FpOpTrace},
+    fp2_addsub::{Fp2AddSubAssignLayout, Fp2AddSubInstance, Fp2AddSubTrace},
+    fp2_mul::{Fp2MulAssignLayout, Fp2MulInstance, Fp2MulTrace},
+};
 use gkr_iop::selector::SelectorType;
 pub use uint256::{
     Uint256InvLayout, Uint256InvSpec, Uint256InvTrace, Uint256MulInstance, Uint256MulLayout,

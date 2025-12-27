@@ -43,14 +43,23 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
 
     fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>);
 
-    fn n_committed(&self) -> usize;
-    fn n_fixed(&self) -> usize;
-    fn n_challenges(&self) -> usize;
-    fn n_evaluations(&self) -> usize;
+    fn n_committed(&self) -> usize {
+        todo!()
+    }
+    fn n_fixed(&self) -> usize {
+        todo!()
+    }
+    fn n_challenges(&self) -> usize {
+        todo!()
+    }
+    fn n_evaluations(&self) -> usize {
+        todo!()
+    }
 
-    fn n_layers(&self) -> usize;
+    fn n_layers(&self) -> usize {
+        todo!()
+    }
 }
-
 pub trait ProtocolWitnessGenerator<E: ExtensionField> {
     type Trace;
 
