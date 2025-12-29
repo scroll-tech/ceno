@@ -986,7 +986,7 @@ pub fn verify_gkr_circuit<C: Config>(
                     offset_instance_id,
                     ..
                 } => {
-                    // retrieve offset from public io
+                    // retrieve offset from public values
                     let offset = builder.get(pub_io_evals, offset_instance_id as usize);
                     eval_wellform_address_vec(
                         builder,

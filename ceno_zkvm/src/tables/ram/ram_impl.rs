@@ -370,7 +370,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
         }
     }
 
-    /// support offset address and length from public io
+    /// support offset address and length from public values
     fn assign_instances_dynamic<F: SmallField>(
         config: &Self,
         num_witin: usize,
