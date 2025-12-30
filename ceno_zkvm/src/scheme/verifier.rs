@@ -8,7 +8,9 @@ use ff_ext::{Instrumented, PoseidonField};
 use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
-    instructions::riscv::constants::{END_PC_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX},
+    instructions::riscv::constants::{
+        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX,
+    },
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
@@ -18,7 +20,7 @@ use crate::{
         ZKVMVerifyingKey,
     },
 };
-use ceno_emul::FullTracer as Tracer;
+use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
 use gkr_iop::{
     self,
     selector::{SelectorContext, SelectorType},
@@ -92,13 +94,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     ) -> Result<bool, ZKVMError> {
         assert!(!vm_proofs.is_empty());
         let num_proofs = vm_proofs.len();
-        let (_end_pc, shard_ec_sum) = vm_proofs
+        let (_end_pc, _end_heap_addr, shard_ec_sum) = vm_proofs
             .into_iter()
             .zip_eq(transcripts)
             // optionally halt on last chunk
             .zip_eq(iter::repeat_n(false, num_proofs - 1).chain(iter::once(expect_halt)))
             .enumerate()
-            .try_fold((None, SepticPoint::<E::BaseField>::default()), |(prev_pc, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
+            .try_fold((None, None, SepticPoint::<E::BaseField>::default()), |(prev_pc, prev_heap_addr_end, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
                 // require ecall/halt proof to exist, depend on whether we expect a halt.
                 let has_halt = vm_proof.has_halt(&self.vk);
                 if has_halt != expect_halt {
@@ -121,6 +123,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 }
                 let end_pc = vm_proof.pi_evals[END_PC_IDX];
 
+                // check memory continuation consistency
+                let heap_addr_start_u32 = vm_proof.pi_evals[HEAP_START_ADDR_IDX].to_canonical_u64() as u32;
+                let heap_len= vm_proof.pi_evals[HEAP_LENGTH_IDX].to_canonical_u64() as u32;
+                if let Some(prev_heap_addr_end) = prev_heap_addr_end {
+                    assert_eq!(heap_addr_start_u32, prev_heap_addr_end);
+                    // TODO check heap addr in prime field within range
+                } else {
+                    // TODO first chunk, check initial heap addr
+                };
+                // TODO check heap_len == heap chip num_instances
+                let next_heap_addr_end: u32 = heap_addr_start_u32 + heap_len * WORD_SIZE as u32;
+
                 // add to shard ec sum
                 // _debug
                 // println!("=> shard pi: {:?}", vm_proof.pi_evals.clone());
@@ -131,8 +145,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 shard_ec_sum = shard_ec_sum + shard_ec;
                 // println!("=> new_ec_sum: {:?}", shard_ec_sum);
 
-                Ok((Some(end_pc), shard_ec_sum))
+                Ok((Some(end_pc), Some(next_heap_addr_end), shard_ec_sum))
             })?;
+        // TODO check _end_heap_addr within heap range from vk
         // check shard ec_sum is_infinity
         if !shard_ec_sum.is_infinity {
             return Err(ZKVMError::VerifyError(
