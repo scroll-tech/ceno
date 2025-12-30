@@ -262,9 +262,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
-            .sumcheck
             .prove_generic_sumcheck_gpu(
-                &cuda_hal,
                 all_witins_gpu_type_gl64,
                 &mle_size_info,
                 &term_coefficients_gl64,
@@ -384,9 +382,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
     // gpu prover
     let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
-        .sumcheck
         .prove_generic_sumcheck_gpu(
-            &cuda_hal,
             all_witins_gpu_type_gl64,
             &mle_size_info,
             &term_coefficients_gl64,
