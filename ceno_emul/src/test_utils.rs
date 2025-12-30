@@ -23,7 +23,7 @@ pub fn keccak_step() -> (StepRecord, Vec<Instruction>) {
         instructions.clone(),
         Default::default(),
     );
-    let mut vm = VMState::new(CENO_PLATFORM, program.into());
+    let mut vm = VMState::new(CENO_PLATFORM.clone(), program.into());
     let steps = vm.iter_until_halt().collect::<Result<Vec<_>>>().unwrap();
 
     (steps[2].clone(), instructions)

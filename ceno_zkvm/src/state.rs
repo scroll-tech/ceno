@@ -1,7 +1,7 @@
 use ff_ext::ExtensionField;
 
 use crate::{
-    chip_handler::general::PublicIOQuery, circuit_builder::CircuitBuilder, error::ZKVMError,
+    chip_handler::general::PublicValuesQuery, circuit_builder::CircuitBuilder, error::ZKVMError,
     structs::RAMType,
 };
 use multilinear_extensions::{Expression, ToExpr};

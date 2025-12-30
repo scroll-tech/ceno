@@ -59,6 +59,7 @@ itertools = "0.13"
 ndarray = "*"
 num-derive = "0.4"
 num-traits = "0.2"
+once_cell = "1.21.3"
 
 metrics = "*"
 num = "*"
