@@ -12,7 +12,7 @@ use crate::{
 mod ram_circuit;
 mod ram_impl;
 use crate::{
-    chip_handler::general::PublicIOQuery,
+    chip_handler::general::PublicValuesQuery,
     circuit_builder::CircuitBuilder,
     scheme::PublicValues,
     structs::WitnessId,
@@ -43,7 +43,6 @@ impl DynVolatileRamTable for HeapTable {
             StructuralWitInType::EqualDistanceDynamicSequence {
                 max_len,
                 offset_instance_id: cb.query_heap_start_addr()?.0 as WitnessId,
-                length_instance_id: cb.query_heap_shard_len()?.0 as WitnessId,
                 multi_factor: WORD_SIZE,
                 descending: Self::DESCENDING,
             },
@@ -149,7 +148,6 @@ impl DynVolatileRamTable for HintsTable {
             StructuralWitInType::EqualDistanceDynamicSequence {
                 max_len,
                 offset_instance_id: cb.query_hint_start_addr()?.0 as WitnessId,
-                length_instance_id: cb.query_hint_shard_len()?.0 as WitnessId,
                 multi_factor: WORD_SIZE,
                 descending: Self::DESCENDING,
             },

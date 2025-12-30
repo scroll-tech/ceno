@@ -674,15 +674,15 @@ impl FullTracer {
                 }
                 if start_addr.baddr().0 == self.platform.heap.start {
                     let access_end = addr + WordAddr::from(WORD_SIZE as u32);
-                    let access_end_byte = access_end.baddr();
-                    if access_end_byte > self.max_heap_addr_access {
-                        self.max_heap_addr_access = access_end_byte;
+                    let access_end_baddr = access_end.baddr();
+                    if access_end_baddr > self.max_heap_addr_access {
+                        self.max_heap_addr_access = access_end_baddr;
                     }
                 } else if start_addr.baddr().0 == self.platform.hints.start {
                     let access_end = addr + WordAddr::from(WORD_SIZE as u32);
-                    let access_end_byte = access_end.baddr();
-                    if access_end_byte > self.max_hint_addr_access {
-                        self.max_hint_addr_access = access_end_byte;
+                    let access_end_baddr = access_end.baddr();
+                    if access_end_baddr > self.max_hint_addr_access {
+                        self.max_hint_addr_access = access_end_baddr;
                     }
                 }
             }

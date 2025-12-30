@@ -2,7 +2,7 @@ use std::{collections::HashMap, iter::repeat_n, marker::PhantomData};
 
 use crate::{
     Value,
-    chip_handler::general::PublicIOQuery,
+    chip_handler::general::PublicValuesQuery,
     e2e::RAMRecord,
     error::ZKVMError,
     gadgets::Poseidon2Config,

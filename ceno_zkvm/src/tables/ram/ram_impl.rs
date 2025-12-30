@@ -14,7 +14,7 @@ use super::{
     ram_circuit::{DynVolatileRamTable, MemFinalRecord, NonVolatileTable},
 };
 use crate::{
-    chip_handler::general::PublicIOQuery,
+    chip_handler::general::PublicValuesQuery,
     circuit_builder::{CircuitBuilder, SetTableSpec},
     e2e::ShardContext,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
