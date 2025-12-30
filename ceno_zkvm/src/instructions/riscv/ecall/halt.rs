@@ -1,5 +1,5 @@
 use crate::{
-    chip_handler::{RegisterChipOperations, general::PublicIOQuery},
+    chip_handler::{RegisterChipOperations, general::PublicValuesQuery},
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,

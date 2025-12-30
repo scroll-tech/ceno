@@ -1286,6 +1286,39 @@ pub fn generate_witness<'a, E: ExtensionField>(
             tracing::debug!("assign_dummy_config finish in {:?}", time.elapsed());
             zkvm_witness.finalize_lk_multiplicities();
 
+            // Memory record routing (per address / waddr)
+            //
+            // Legend:
+            //   init shard  = where the "initialization record" happens
+            //   rw shard    = shards that read/write the address
+            //   later rw?   = whether there is any rw in shards > current shard
+            // Output:
+            // - LocalFinalize = local finalize circuit
+            // - ShardRAM      = shard ram circuit
+            // - ShardRAM+LF   = both
+            //
+            // Root
+            // └─ Is the init record in shard 0?
+            // ├─ YES: Static initialized memory (init only exists in shard 0)
+            // │  └─ Where does the rw happen (relative to current shard)?
+            // │     ├─ rw only in shard 0
+            // │     │  ├─ later rw? NO  (no rw in >0)      -> LocalFinalize
+            // │     │  └─ later rw? YES (rw in >0 exists)  -> ShardRAM
+            // │     │
+            // │     └─ rw occurs in current shard (current shard may be >0)
+            // │        ├─ later rw? NO  (no rw in later)   -> ShardRAM + LocalFinalize
+            // │        └─ later rw? YES (rw continues)     -> ShardRAM
+            // │
+            // └─ NO: Dynamic init across shards (init can happen in any shard)
+            // └─ Is the init record in the current shard?
+            // ├─ YES: init in current shard
+            // │  ├─ later rw? NO  -> LocalFinalize
+            // │  └─ later rw? YES -> ShardRAM
+            // │
+            // └─ NO: init in a previous shard
+            // ├─ later rw? NO  -> LocalFinalize
+            // └─ later rw? YES -> ShardRAM
+
             let time = std::time::Instant::now();
             system_config
                 .config

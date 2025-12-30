@@ -12,7 +12,7 @@ use crate::{
 mod ram_circuit;
 mod ram_impl;
 use crate::{
-    chip_handler::general::PublicIOQuery,
+    chip_handler::general::PublicValuesQuery,
     circuit_builder::CircuitBuilder,
     scheme::PublicValues,
     structs::WitnessId,
@@ -43,7 +43,6 @@ impl DynVolatileRamTable for HeapTable {
             StructuralWitInType::EqualDistanceDynamicSequence {
                 max_len,
                 offset_instance_id: cb.query_heap_start_addr()?.0 as WitnessId,
-                length_instance_id: cb.query_heap_shard_len()?.0 as WitnessId,
                 multi_factor: WORD_SIZE,
                 descending: Self::DESCENDING,
             },
@@ -72,8 +71,8 @@ impl DynVolatileRamTable for HeapTable {
         heap_start
     }
 
-    fn end_addr(params: &ProgramParams) -> Addr {
-        params.platform.heap.end
+    fn end_addr(_params: &ProgramParams) -> Addr {
+        unimplemented!("heap end address is dynamic")
     }
 
     fn name() -> &'static str {
@@ -81,7 +80,14 @@ impl DynVolatileRamTable for HeapTable {
     }
 
     fn dynamic_addr(params: &ProgramParams, entry_index: usize, pv: &PublicValues) -> Addr {
-        Self::dynamic_offset_addr(params, pv) + (entry_index * WORD_SIZE) as Addr
+        let addr = Self::dynamic_offset_addr(params, pv) + (entry_index * WORD_SIZE) as Addr;
+        assert!(
+            addr < params.platform.heap.end,
+            "heap addr {:x} >= platform max heap end {:x}",
+            addr,
+            params.platform.heap.end
+        );
+        addr
     }
 }
 
@@ -142,7 +148,6 @@ impl DynVolatileRamTable for HintsTable {
             StructuralWitInType::EqualDistanceDynamicSequence {
                 max_len,
                 offset_instance_id: cb.query_hint_start_addr()?.0 as WitnessId,
-                length_instance_id: cb.query_hint_shard_len()?.0 as WitnessId,
                 multi_factor: WORD_SIZE,
                 descending: Self::DESCENDING,
             },
@@ -171,12 +176,19 @@ impl DynVolatileRamTable for HintsTable {
         hint_start
     }
 
-    fn end_addr(params: &ProgramParams) -> Addr {
-        params.platform.hints.end
+    fn end_addr(_params: &ProgramParams) -> Addr {
+        unimplemented!("hints end address is dynamic")
     }
 
     fn dynamic_addr(params: &ProgramParams, entry_index: usize, pv: &PublicValues) -> Addr {
-        Self::dynamic_offset_addr(params, pv) + (entry_index * WORD_SIZE) as Addr
+        let addr = Self::dynamic_offset_addr(params, pv) + (entry_index * WORD_SIZE) as Addr;
+        assert!(
+            addr < params.platform.hints.end,
+            "hint addr {:x} >= platform max hint end {:x}",
+            addr,
+            params.platform.hints.end
+        );
+        addr
     }
 
     fn name() -> &'static str {

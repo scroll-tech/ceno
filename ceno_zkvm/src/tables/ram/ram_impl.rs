@@ -14,7 +14,7 @@ use super::{
     ram_circuit::{DynVolatileRamTable, MemFinalRecord, NonVolatileTable},
 };
 use crate::{
-    chip_handler::general::PublicIOQuery,
+    chip_handler::general::PublicValuesQuery,
     circuit_builder::{CircuitBuilder, SetTableSpec},
     e2e::ShardContext,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
@@ -370,7 +370,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
         }
     }
 
-    /// support offset address and length from public io
+    /// support offset address and length from public values
     fn assign_instances_dynamic<F: SmallField>(
         config: &Self,
         num_witin: usize,
