@@ -6,7 +6,7 @@ mod weierstrass_decompress;
 mod weierstrass_double;
 
 pub use keccak::KeccakInstruction;
-pub use uint256::{Secp256k1InvInstruction, Uint256MulInstruction};
+pub use uint256::{Secp256k1InvInstruction, Secp256r1InvInstruction, Uint256MulInstruction};
 pub use weierstrass_add::WeierstrassAddAssignInstruction;
 pub use weierstrass_decompress::WeierstrassDecompressInstruction;
 pub use weierstrass_double::WeierstrassDoubleAssignInstruction;

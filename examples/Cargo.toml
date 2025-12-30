@@ -25,9 +25,10 @@ tiny-keccak.workspace = true
 
 bn = { package = "substrate-bn", git = "https://github.com/scroll-tech/bn", branch = "ceno" }
 k256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa"] }
+p256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa"] }
 rkyv = { version = "0.8", default-features = false, features = [
-  "alloc",
-  "bytecheck",
+    "alloc",
+    "bytecheck",
 ] }
 substrate-bn.workspace = true
 

@@ -1060,7 +1060,7 @@ dependencies = [
 [[package]]
 name = "ceno_crypto_primitives"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#0cb2c93e02e2e859e55d5d889ca8abd0a13b13be"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#3974b5d7d54b9a0378fb02d5f604000512b3d9a6"
 dependencies = [
  "ceno_syscall",
  "elliptic-curve",
@@ -1081,6 +1081,7 @@ dependencies = [
  "num",
  "num-derive",
  "num-traits",
+ "p256 0.13.2 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
  "rayon",
  "rrs-succinct",
  "rustc-hash",
@@ -1179,7 +1180,7 @@ dependencies = [
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#0cb2c93e02e2e859e55d5d889ca8abd0a13b13be"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#3974b5d7d54b9a0378fb02d5f604000512b3d9a6"
 
 [[package]]
 name = "ceno_zkvm"
@@ -2146,6 +2147,7 @@ dependencies = [
  "ceno_syscall",
  "getrandom 0.3.2",
  "k256 0.13.4 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
+ "p256 0.13.2 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
  "rand 0.8.5",
  "revm-precompile",
  "rkyv",
