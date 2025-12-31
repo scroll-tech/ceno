@@ -152,6 +152,16 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_scalar_algebra
 
+      - name: Run p256 verify hash (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256r1_verify_prehash
+
+      - name: Run p256 scalar algebra (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256r1_scalar_algebra
+
       - name: Run uint256_mul_syscall (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
