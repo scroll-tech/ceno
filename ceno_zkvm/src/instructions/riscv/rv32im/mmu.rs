@@ -1,6 +1,7 @@
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
+    scheme::PublicValues,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, HintsTable,
@@ -12,8 +13,7 @@ use crate::{
 use ceno_emul::{Addr, IterAddresses, WORD_SIZE, Word};
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
-use std::{collections::HashSet, iter::zip, ops::Range, sync::Arc};
-use witness::InstancePaddingStrategy;
+use std::{collections::HashSet, iter::zip, ops::Range};
 
 pub struct MmuConfig<E: ExtensionField> {
     /// Initialization of registers.
@@ -101,17 +101,37 @@ impl<E: ExtensionField> MmuConfig<E> {
         // fixed.register_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, &());
     }
 
+    pub fn assign_dynamic_init_table_circuit(
+        &self,
+        cs: &ZKVMConstraintSystem<E>,
+        witness: &mut ZKVMWitnesses<E>,
+        pv: &PublicValues,
+        hints_final: &[MemFinalRecord],
+        heap_final: &[MemFinalRecord],
+    ) -> Result<(), ZKVMError> {
+        witness.assign_table_circuit::<HeapInitCircuit<E>>(
+            cs,
+            &self.heap_init_config,
+            &(heap_final, pv, pv.heap_shard_len as usize),
+        )?;
+        witness.assign_table_circuit::<HintsInitCircuit<E>>(
+            cs,
+            &self.hints_init_config,
+            &(hints_final, pv, pv.hint_shard_len as usize),
+        )?;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn assign_init_table_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
+        pv: &PublicValues,
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
         io_final: &[MemFinalRecord],
-        hints_final: &[MemFinalRecord],
         stack_final: &[MemFinalRecord],
-        heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<RegTableInitCircuit<E>>(
             cs,
@@ -130,20 +150,11 @@ impl<E: ExtensionField> MmuConfig<E> {
             &self.public_io_init_config,
             io_final,
         )?;
-        witness.assign_table_circuit::<HintsInitCircuit<E>>(
-            cs,
-            &self.hints_init_config,
-            hints_final,
-        )?;
+
         witness.assign_table_circuit::<StackInitCircuit<E>>(
             cs,
             &self.stack_init_config,
-            stack_final,
-        )?;
-        witness.assign_table_circuit::<HeapInitCircuit<E>>(
-            cs,
-            &self.heap_init_config,
-            heap_final,
+            &(stack_final, pv, stack_final.len()),
         )?;
         Ok(())
     }
@@ -154,6 +165,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &ShardContext,
         witness: &mut ZKVMWitnesses<E>,
+        pv: &PublicValues,
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
         io_final: &[MemFinalRecord],
@@ -162,43 +174,24 @@ impl<E: ExtensionField> MmuConfig<E> {
         heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         let all_records = vec![
-            (
-                PubIOTable::name(),
-                InstancePaddingStrategy::Default,
-                io_final,
-            ),
-            (
-                RegTable::name(),
-                InstancePaddingStrategy::Default,
-                reg_final,
-            ),
-            (
-                StaticMemTable::name(),
-                InstancePaddingStrategy::Default,
-                static_mem_final,
-            ),
-            (
-                StackTable::name(),
-                InstancePaddingStrategy::Custom({
-                    let params = cs.params.clone();
-                    Arc::new(move |row: u64, _: u64| StackTable::addr(&params, row as usize) as u64)
-                }),
-                stack_final,
-            ),
+            (PubIOTable::name(), None, io_final),
+            (RegTable::name(), None, reg_final),
+            (StaticMemTable::name(), None, static_mem_final),
+            (StackTable::name(), None, stack_final),
             (
                 HintsTable::name(),
-                InstancePaddingStrategy::Custom({
-                    let params = cs.params.clone();
-                    Arc::new(move |row: u64, _: u64| HintsTable::addr(&params, row as usize) as u64)
-                }),
+                Some(
+                    pv.hint_start_addr
+                        ..(pv.hint_start_addr + pv.hint_shard_len * (WORD_SIZE as u32)),
+                ),
                 hints_final,
             ),
             (
                 HeapTable::name(),
-                InstancePaddingStrategy::Custom({
-                    let params = cs.params.clone();
-                    Arc::new(move |row: u64, _: u64| HeapTable::addr(&params, row as usize) as u64)
-                }),
+                Some(
+                    pv.heap_start_addr
+                        ..(pv.heap_start_addr + pv.heap_shard_len * (WORD_SIZE as u32)),
+                ),
                 heap_final,
             ),
         ]

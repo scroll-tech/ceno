@@ -857,29 +857,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7575182f7272186991736b70173b0ea045398f984bf5ebbb3804736ce1330c9d"
 
 [[package]]
-name = "bytecheck"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50690fb3370fb9fe3550372746084c46f2ac8c9685c583d2be10eefd89d3d1a3"
-dependencies = [
- "bytecheck_derive",
- "ptr_meta",
- "rancor",
- "simdutf8",
-]
-
-[[package]]
-name = "bytecheck_derive"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efb7846e0cb180355c2dec69e721edafa36919850f1a9f52ffba4ebc0393cb71"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "bytemuck"
 version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1081,6 +1058,7 @@ dependencies = [
  "num",
  "num-derive",
  "num-traits",
+ "once_cell",
  "p256 0.13.2 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
  "rayon",
  "rrs-succinct",
@@ -1104,9 +1082,10 @@ dependencies = [
  "anyhow",
  "ceno-examples",
  "ceno_emul",
+ "ceno_serde",
  "itertools 0.13.0",
  "rand 0.8.5",
- "rkyv",
+ "serde",
  "tiny-keccak",
 ]
 
@@ -1164,9 +1143,19 @@ dependencies = [
 name = "ceno_rt"
 version = "0.1.0"
 dependencies = [
+ "ceno_serde",
  "getrandom 0.2.16",
  "getrandom 0.3.2",
- "rkyv",
+ "serde",
+]
+
+[[package]]
+name = "ceno_serde"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "chrono",
+ "serde",
 ]
 
 [[package]]
@@ -2135,7 +2124,6 @@ dependencies = [
  "p256 0.13.2 (git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4)",
  "rand 0.8.5",
  "revm-precompile",
- "rkyv",
  "substrate-bn 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "substrate-bn 0.6.0 (git+https://github.com/scroll-tech/bn?branch=ceno)",
  "tiny-keccak",
@@ -2221,7 +2209,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "once_cell",
  "p3",
@@ -3225,7 +3213,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "bincode 1.3.3",
  "clap",
@@ -3249,7 +3237,7 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "either",
  "ff_ext",
@@ -3259,26 +3247,6 @@ dependencies = [
  "rayon",
  "serde",
  "tracing",
-]
-
-[[package]]
-name = "munge"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e22e7961c873e8b305b176d2a4e1d41ce7ba31bc1c52d2a107a89568ec74c55"
-dependencies = [
- "munge_macro",
-]
-
-[[package]]
-name = "munge_macro"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ac7d860b767c6398e88fe93db73ce53eb496057aa6895ffa4d60cb02e1d1c6b"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
 ]
 
 [[package]]
@@ -4557,7 +4525,7 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "p3-air",
  "p3-baby-bear",
@@ -5125,7 +5093,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "ff_ext",
  "p3",
@@ -5292,26 +5260,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ptr_meta"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe9e76f66d3f9606f44e45598d155cb13ecf09f4a28199e48daf8c8fc937ea90"
-dependencies = [
- "ptr_meta_derive",
-]
-
-[[package]]
-name = "ptr_meta_derive"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca414edb151b4c8d125c12566ab0d74dc9cdba36fb80eb7b848c15f495fd32d1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "quanta"
 version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5370,15 +5318,6 @@ checksum = "c069c179fcdc6a2fe24d8d18305cf085fdbd4f922c041943e203685d6a1c58fd"
 dependencies = [
  "endian-type",
  "nibble_vec",
-]
-
-[[package]]
-name = "rancor"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caf5f7161924b9d1cea0e4cabc97c372cea92b5f927fc13c6bca67157a0ad947"
-dependencies = [
- "ptr_meta",
 ]
 
 [[package]]
@@ -5572,15 +5511,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
-name = "rend"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a35e8a6bf28cd121053a66aa2e6a2e3eaffad4a60012179f0e864aa5ffeff215"
-dependencies = [
- "bytecheck",
-]
-
-[[package]]
 name = "revm-precompile"
 version = "27.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5647,36 +5577,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd124222d17ad93a644ed9d011a40f4fb64aa54275c08cc216524a9ea82fb09f"
 dependencies = [
  "digest 0.10.7",
-]
-
-[[package]]
-name = "rkyv"
-version = "0.8.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e147371c75553e1e2fcdb483944a8540b8438c31426279553b9a8182a9b7b65"
-dependencies = [
- "bytecheck",
- "bytes",
- "hashbrown 0.15.3",
- "indexmap 2.9.0",
- "munge",
- "ptr_meta",
- "rancor",
- "rend",
- "rkyv_derive",
- "tinyvec",
- "uuid",
-]
-
-[[package]]
-name = "rkyv_derive"
-version = "0.8.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "246b40ac189af6c675d124b802e8ef6d5246c53e17367ce9501f8f66a81abb7a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
 ]
 
 [[package]]
@@ -6122,12 +6022,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "simdutf8"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
-
-[[package]]
 name = "sketches-ddsketch"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6155,7 +6049,7 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -6280,7 +6174,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "either",
  "ff_ext",
@@ -6298,7 +6192,7 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "itertools 0.13.0",
  "p3",
@@ -6547,21 +6441,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tinyvec"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09b3661f17e86524eccd4371ab0429194e0d7c008abb45f7a7495b1719463c71"
-dependencies = [
- "tinyvec_macros",
-]
-
-[[package]]
-name = "tinyvec_macros"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
-
-[[package]]
 name = "toml"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6720,7 +6599,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -7014,7 +6893,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "bincode 1.3.3",
  "clap",
@@ -7301,7 +7180,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.18#f53336217179d70df37852fc850b786d4bc82f15"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",

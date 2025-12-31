@@ -2,9 +2,9 @@ extern crate ceno_rt;
 
 use alloy_primitives::hex;
 use p256::{
-    AffinePoint, EncodedPoint, Scalar,
+    AffinePoint, EncodedPoint,
     ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier},
-    elliptic_curve::{Field, generic_array::GenericArray, sec1::FromEncodedPoint},
+    elliptic_curve::{generic_array::GenericArray, sec1::FromEncodedPoint},
 };
 
 fn main() {

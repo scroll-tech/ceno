@@ -25,6 +25,8 @@ use std::{collections::BTreeMap, fmt, mem};
 pub struct StepRecord {
     cycle: Cycle,
     pc: Change<ByteAddr>,
+    pub heap_maxtouch_addr: Change<ByteAddr>,
+    pub hint_maxtouch_addr: Change<ByteAddr>,
     pub insn: Instruction,
 
     rs1: Option<ReadOp>,
@@ -88,11 +90,15 @@ pub trait Tracer {
 
     fn advance(&mut self) -> Self::Record;
 
-    fn is_busy_loop(record: &Self::Record) -> bool;
+    fn is_busy_loop(&self, record: &Self::Record) -> bool;
 
     fn store_pc(&mut self, pc: ByteAddr);
 
     fn fetch(&mut self, pc: WordAddr, value: Instruction);
+
+    fn track_mmu_maxtouch_before(&mut self);
+
+    fn track_mmu_maxtouch_after(&mut self);
 
     fn load_register(&mut self, idx: RegIdx, value: Word);
 
@@ -273,6 +279,8 @@ impl StepRecord {
             Some(rd),
             None,
             prev_cycle,
+            Change::default(),
+            Change::default(),
         )
     }
 
@@ -293,6 +301,8 @@ impl StepRecord {
             None,
             None,
             prev_cycle,
+            Change::default(),
+            Change::default(),
         )
     }
 
@@ -313,6 +323,8 @@ impl StepRecord {
             Some(rd),
             None,
             prev_cycle,
+            Change::default(),
+            Change::default(),
         )
     }
 
@@ -342,6 +354,8 @@ impl StepRecord {
                 previous_cycle: mem_op.previous_cycle,
             }),
             prev_cycle,
+            Change::default(),
+            Change::default(),
         )
     }
 
@@ -353,7 +367,18 @@ impl StepRecord {
         prev_cycle: Cycle,
     ) -> StepRecord {
         let pc = Change::new(pc, pc + PC_STEP_SIZE);
-        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), None, prev_cycle)
+        StepRecord::new_insn(
+            cycle,
+            pc,
+            insn_code,
+            None,
+            None,
+            Some(rd),
+            None,
+            prev_cycle,
+            Change::default(),
+            Change::default(),
+        )
     }
 
     pub fn new_j_instruction(
@@ -363,7 +388,18 @@ impl StepRecord {
         rd: Change<Word>,
         prev_cycle: Cycle,
     ) -> StepRecord {
-        StepRecord::new_insn(cycle, pc, insn_code, None, None, Some(rd), None, prev_cycle)
+        StepRecord::new_insn(
+            cycle,
+            pc,
+            insn_code,
+            None,
+            None,
+            Some(rd),
+            None,
+            prev_cycle,
+            Change::default(),
+            Change::default(),
+        )
     }
 
     pub fn new_s_instruction(
@@ -385,6 +421,8 @@ impl StepRecord {
             None,
             Some(memory_op),
             prev_cycle,
+            Change::default(),
+            Change::default(),
         )
     }
 
@@ -407,6 +445,8 @@ impl StepRecord {
                 previous_cycle: 0,
             }),
             0,
+            Change::default(),
+            Change::default(),
         )
     }
 
@@ -420,6 +460,8 @@ impl StepRecord {
         rd: Option<Change<Word>>,
         memory_op: Option<WriteOp>,
         previous_cycle: Cycle,
+        heap_maxtouch_addr: Change<ByteAddr>,
+        hint_maxtouch_addr: Change<ByteAddr>,
     ) -> StepRecord {
         StepRecord {
             cycle,
@@ -442,6 +484,8 @@ impl StepRecord {
             insn,
             memory_op,
             syscall: None,
+            heap_maxtouch_addr,
+            hint_maxtouch_addr,
         }
     }
 
@@ -491,6 +535,9 @@ pub struct FullTracer {
     // record each section max access address
     // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
+    max_heap_addr_access: ByteAddr,
+    max_hint_addr_access: ByteAddr,
+    platform: Platform,
 
     // keep track of each address that the cycle when they were last accessed.
     latest_accesses: LatestAccesses,
@@ -516,8 +563,11 @@ impl FullTracer {
                 cycle: Self::SUBCYCLES_PER_INSN,
                 ..StepRecord::default()
             },
+            platform: platform.clone(),
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
+            max_heap_addr_access: ByteAddr::from(platform.heap.start),
+            max_hint_addr_access: ByteAddr::from(platform.hints.start),
         }
     }
 
@@ -543,6 +593,18 @@ impl FullTracer {
     pub fn fetch(&mut self, pc: WordAddr, value: Instruction) {
         self.record.pc.before = pc.baddr();
         self.record.insn = value;
+    }
+
+    #[inline(always)]
+    pub fn track_mmu_maxtouch_before(&mut self) {
+        self.record.heap_maxtouch_addr.before = self.max_heap_addr_access;
+        self.record.hint_maxtouch_addr.before = self.max_hint_addr_access;
+    }
+
+    #[inline(always)]
+    pub fn track_mmu_maxtouch_after(&mut self) {
+        self.record.heap_maxtouch_addr.after = self.max_heap_addr_access;
+        self.record.hint_maxtouch_addr.after = self.max_hint_addr_access;
     }
 
     #[inline(always)]
@@ -592,8 +654,9 @@ impl FullTracer {
         if self.record.memory_op.is_some() {
             unimplemented!("Only one memory access is supported");
         }
+
         // update min/max mmio access
-        if let Some((_, (_, end_addr, min_addr, max_addr))) = self
+        if let Some((start_addr, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
             // find the MMIO region whose start address is less than or equal to the target address
@@ -609,6 +672,19 @@ impl FullTracer {
                 // shrink the min bound if the address is below the current min
                 if addr < *min_addr {
                     *min_addr = addr; // start is inclusive
+                }
+                if start_addr.baddr().0 == self.platform.heap.start {
+                    let access_end = addr + WordAddr::from(WORD_SIZE as u32);
+                    let access_end_baddr = access_end.baddr();
+                    if access_end_baddr > self.max_heap_addr_access {
+                        self.max_heap_addr_access = access_end_baddr;
+                    }
+                } else if start_addr.baddr().0 == self.platform.hints.start {
+                    let access_end = addr + WordAddr::from(WORD_SIZE as u32);
+                    let access_end_baddr = access_end.baddr();
+                    if access_end_baddr > self.max_hint_addr_access {
+                        self.max_hint_addr_access = access_end_baddr;
+                    }
                 }
             }
         }
@@ -692,6 +768,7 @@ impl FullTracer {
 #[derive(Debug)]
 pub struct PreflightTracer {
     cycle: Cycle,
+    pc: Change<ByteAddr>,
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: LatestAccesses,
     next_accesses: NextCycleAccess,
@@ -708,6 +785,7 @@ impl PreflightTracer {
     pub fn new(platform: &Platform) -> Self {
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
+            pc: Default::default(),
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
@@ -725,6 +803,8 @@ impl PreflightTracer {
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
             && addr < *end_addr
         {
+            // skip if the target address is not within the range tracked by this MMIO region
+            // this condition ensures the address is within the MMIO region's end address
             if addr >= *max_addr {
                 *max_addr = addr + WordAddr::from(WORD_SIZE as u32);
             }
@@ -753,15 +833,25 @@ impl Tracer for PreflightTracer {
         self.reset_register_tracking();
     }
 
-    fn is_busy_loop(_: &Self::Record) -> bool {
-        false
+    fn is_busy_loop(&self, _: &Self::Record) -> bool {
+        self.pc.before == self.pc.after
     }
 
     #[inline(always)]
-    fn store_pc(&mut self, _pc: ByteAddr) {}
+    fn store_pc(&mut self, pc: ByteAddr) {
+        self.pc.after = pc;
+    }
 
     #[inline(always)]
-    fn fetch(&mut self, _pc: WordAddr, _value: Instruction) {}
+    fn fetch(&mut self, pc: WordAddr, _value: Instruction) {
+        self.pc.before = pc.baddr();
+    }
+
+    #[inline(always)]
+    fn track_mmu_maxtouch_before(&mut self) {}
+
+    #[inline(always)]
+    fn track_mmu_maxtouch_after(&mut self) {}
 
     #[inline(always)]
     fn load_register(&mut self, idx: RegIdx, _value: Word) {
@@ -863,7 +953,7 @@ impl Tracer for FullTracer {
     }
 
     #[inline(always)]
-    fn is_busy_loop(record: &Self::Record) -> bool {
+    fn is_busy_loop(&self, record: &Self::Record) -> bool {
         record.is_busy_loop()
     }
 
@@ -875,6 +965,14 @@ impl Tracer for FullTracer {
     #[inline(always)]
     fn fetch(&mut self, pc: WordAddr, value: Instruction) {
         FullTracer::fetch(self, pc, value)
+    }
+
+    fn track_mmu_maxtouch_before(&mut self) {
+        FullTracer::track_mmu_maxtouch_before(self)
+    }
+
+    fn track_mmu_maxtouch_after(&mut self) {
+        FullTracer::track_mmu_maxtouch_after(self)
     }
 
     #[inline(always)]
