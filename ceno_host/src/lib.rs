@@ -67,6 +67,7 @@ impl Items {
         let header_words = lens.len() + 2;
         let data_offset = (size_of::<u32>() * header_words).next_multiple_of(WORD_ALIGNMENT);
 
+        // NOTE: serde format alignment with [`ceno_rt/src/mmio.rs`]
         let mut header = Vec::with_capacity(header_words);
         header.push(data_offset as u32);
         header.push(WORD_ALIGNMENT as u32);

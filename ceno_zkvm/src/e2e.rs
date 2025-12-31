@@ -1292,7 +1292,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             //   init shard  = where the "initialization record" happens
             //   rw shard    = shards that read/write the address
             //   later rw?   = whether there is any rw in shards > current shard
-            // Output:
+            // Chip(s):
             // - LocalFinalize = local finalize circuit
             // - ShardRAM      = shard ram circuit
             // - ShardRAM+LF   = both
@@ -1316,7 +1316,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // │  └─ later rw? YES -> ShardRAM
             // │
             // └─ NO: init in a previous shard
-            // ├─ later rw? NO  -> LocalFinalize
+            // ├─ later rw? NO  -> ShardRAM + LocalFinalize
             // └─ later rw? YES -> ShardRAM
 
             let time = std::time::Instant::now();
