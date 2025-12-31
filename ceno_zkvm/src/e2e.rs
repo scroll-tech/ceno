@@ -823,7 +823,10 @@ pub fn emulate_program<'a>(
     }
 
     let exit_code = info_span!("[ceno] emulator.preflight-execute").in_scope(|| {
-        let _ = vm.iter_until_halt().take(max_steps).count();
+        vm.iter_until_halt()
+            .take(max_steps)
+            .try_for_each(|step| step.map(|_| ()))
+            .unwrap_or_else(|err| panic!("emulator trapped before halt: {err}"));
         vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
 
