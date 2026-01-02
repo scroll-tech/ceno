@@ -8,7 +8,7 @@ use crate::{
 };
 use ceno_rt::WORD_SIZE;
 use smallvec::SmallVec;
-use std::{collections::BTreeMap, fmt, mem};
+use std::{collections::BTreeMap, fmt, mem, sync::Arc};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -88,6 +88,14 @@ pub trait Tracer {
 
     fn new(platform: &Platform) -> Self;
 
+    fn with_next_accesses(platform: &Platform, next_accesses: Option<Arc<NextCycleAccess>>) -> Self
+    where
+        Self: Sized,
+    {
+        let _ = next_accesses;
+        Self::new(platform)
+    }
+
     fn advance(&mut self) -> Self::Record;
 
     fn is_busy_loop(&self, record: &Self::Record) -> bool;
@@ -114,7 +122,7 @@ pub trait Tracer {
 
     fn final_accesses(&self) -> &LatestAccesses;
 
-    fn into_next_accesses(self) -> NextCycleAccess
+    fn into_next_accesses(self) -> Arc<NextCycleAccess>
     where
         Self: Sized;
 
@@ -541,10 +549,6 @@ pub struct FullTracer {
 
     // keep track of each address that the cycle when they were last accessed.
     latest_accesses: LatestAccesses,
-
-    // keep track of each cycle that accessed addresses in the future with respective future cycles.
-    // format: [current cycle -> Vec<(WordAddr, Cycle)>]
-    next_accesses: NextCycleAccess,
 }
 
 impl FullTracer {
@@ -565,7 +569,6 @@ impl FullTracer {
             },
             platform: platform.clone(),
             latest_accesses: LatestAccesses::new(platform),
-            next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
             max_heap_addr_access: ByteAddr::from(platform.heap.start),
             max_hint_addr_access: ByteAddr::from(platform.hints.start),
         }
@@ -711,19 +714,11 @@ impl FullTracer {
     #[inline(always)]
     pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         let cur_cycle = self.record.cycle + subcycle;
-        let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
-        self.next_accesses
-            .get_or_create(prev_cycle as usize)
-            .push((addr, cur_cycle));
-        prev_cycle
+        self.latest_accesses.track(addr, cur_cycle)
     }
 
     pub fn final_accesses(&self) -> &LatestAccesses {
         &self.latest_accesses
-    }
-
-    pub fn next_accesses(self) -> NextCycleAccess {
-        self.next_accesses
     }
 
     /// Return the cycle of the pending instruction (after the last completed step).
@@ -901,8 +896,8 @@ impl Tracer for PreflightTracer {
         &self.latest_accesses
     }
 
-    fn into_next_accesses(self) -> NextCycleAccess {
-        self.next_accesses
+    fn into_next_accesses(self) -> Arc<NextCycleAccess> {
+        Arc::new(self.next_accesses)
     }
 
     fn cycle(&self) -> Cycle {
@@ -1009,8 +1004,8 @@ impl Tracer for FullTracer {
         FullTracer::final_accesses(self)
     }
 
-    fn into_next_accesses(self) -> NextCycleAccess {
-        self.next_accesses()
+    fn into_next_accesses(self) -> Arc<NextCycleAccess> {
+        unimplemented!("FullTracer does not record next access metadata")
     }
 
     fn cycle(&self) -> Cycle {

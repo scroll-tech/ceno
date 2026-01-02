@@ -614,7 +614,7 @@ impl ShardContextBuilder {
     pub fn new(
         multi_prover: &MultiProver,
         platform: Platform,
-        addr_future_accesses: NextCycleAccess,
+        addr_future_accesses: Arc<NextCycleAccess>,
     ) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
@@ -631,13 +631,17 @@ impl ShardContextBuilder {
                     multi_prover.max_cell_per_shard
                 }
             },
-            addr_future_accesses: Arc::new(addr_future_accesses),
+            addr_future_accesses,
             prev_shard_cycle_range: vec![0],
             prev_shard_heap_range: vec![0],
             prev_shard_hint_range: vec![0],
             pending_step: None,
             platform,
         }
+    }
+
+    pub fn addr_future_accesses(&self) -> Arc<NextCycleAccess> {
+        self.addr_future_accesses.clone()
     }
 
     pub fn position_next_shard<'a>(
@@ -2051,6 +2055,7 @@ mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
     use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepRecord};
     use itertools::Itertools;
+    use std::sync::Arc;
 
     struct UniformStepExtractor;
 
@@ -2089,7 +2094,7 @@ mod tests {
         let mut shard_ctx_builder = ShardContextBuilder::new(
             &MultiProver::new(0, 1, u64::MAX, max_cycle_per_shard),
             CENO_PLATFORM.clone(),
-            NextCycleAccess::default(),
+            Arc::new(NextCycleAccess::default()),
         );
 
         let mut steps_iter = (0..executed_instruction).map(|i| {
