@@ -386,7 +386,7 @@ mod tests {
 
             let modulus = P::modulus();
             let expected = match inst.op {
-                FieldOperation::Add => Bn254Fp::from(&inst.x + &inst.y) % &modulus,
+                FieldOperation::Add => (&inst.x + &inst.y) % &modulus,
                 FieldOperation::Mul => (&inst.x * &inst.y) % &modulus,
                 FieldOperation::Sub | FieldOperation::Div => unreachable!(),
             };

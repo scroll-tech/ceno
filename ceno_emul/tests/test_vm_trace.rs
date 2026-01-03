@@ -17,7 +17,7 @@ fn test_vm_trace() -> Result<()> {
         program_fibonacci_20(),
         Default::default(),
     );
-    let mut ctx = VMState::new(CENO_PLATFORM, Arc::new(program));
+    let mut ctx = VMState::new(CENO_PLATFORM.clone(), Arc::new(program));
 
     let steps = run(&mut ctx)?;
 
@@ -53,7 +53,7 @@ fn test_empty_program() -> Result<()> {
         vec![],
         BTreeMap::new(),
     );
-    let mut ctx = VMState::new(CENO_PLATFORM, Arc::new(empty_program));
+    let mut ctx = VMState::new(CENO_PLATFORM.clone(), Arc::new(empty_program));
     let res = run(&mut ctx);
     assert!(matches!(res, Err(e) if e.to_string().contains("InstructionAccessFault")),);
     Ok(())

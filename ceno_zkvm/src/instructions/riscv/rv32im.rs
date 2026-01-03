@@ -172,7 +172,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub ecall_cells_map: HashMap<String, u64>,
 }
 
-const KECCAK_CELL_BLOWUP_FACTOR: u64 = 6;
+const KECCAK_CELL_BLOWUP_FACTOR: u64 = 2;
 
 impl<E: ExtensionField> Rv32imConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {

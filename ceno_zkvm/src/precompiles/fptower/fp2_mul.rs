@@ -356,23 +356,23 @@ mod tests {
     use super::*;
 
     use ff_ext::{BabyBearExt4, SmallField};
-    use gkr_iop::circuit_builder::{CircuitBuilder, ConstraintSystem};
-    use itertools::Itertools;
-    use std::sync::Arc;
-    use num::BigUint;
-    use rand::RngCore;
-    use sp1_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
-    use witness::{InstancePaddingStrategy, RowMajorMatrix};
     use gkr_iop::{
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
         cpu::{CpuBackend, CpuProver},
         gkr::{GKRProverOutput, layer::Layer},
         selector::SelectorContext,
     };
+    use itertools::Itertools;
     use mpcs::BasefoldDefault;
     use multilinear_extensions::{mle::PointAndEval, util::ceil_log2};
+    use num::BigUint;
+    use rand::RngCore;
     use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+    use sp1_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
+    use std::sync::Arc;
     use sumcheck::util::optimal_sumcheck_threads;
     use transcript::{BasicTranscript, Transcript};
+    use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
     use crate::witness::LkMultiplicity;
 
@@ -391,12 +391,8 @@ mod tests {
         let mut layout = Fp2MulAssignLayout::<E, P>::build_layer_logic(&mut cb, ())
             .expect("build_layer_logic failed");
         let (out_evals, mut chip) = layout.finalize(&mut cb);
-        let layer = Layer::from_circuit_builder(
-            &cb,
-            "fp2_mul".to_string(),
-            layout.n_challenges,
-            out_evals,
-        );
+        let layer =
+            Layer::from_circuit_builder(&cb, "fp2_mul".to_string(), layout.n_challenges, out_evals);
         chip.add_layer(layer);
         let gkr_circuit = chip.gkr_circuit();
 
@@ -467,16 +463,8 @@ mod tests {
             prover_transcript.read_challenge().elements,
         ];
 
-        let phase1_witness_group = phase1
-            .to_mles()
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
-        let structural_witness = structural
-            .to_mles()
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
+        let phase1_witness_group = phase1.to_mles().into_iter().map(Arc::new).collect_vec();
+        let structural_witness = structural.to_mles().into_iter().map(Arc::new).collect_vec();
         let fixed = layout
             .fixed_witness_group()
             .to_mles()
