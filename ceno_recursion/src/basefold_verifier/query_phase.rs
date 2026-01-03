@@ -15,7 +15,7 @@ use serde::Deserialize;
 
 use super::{basefold::*, extension_mmcs::*, mmcs::*, rs::*, utils::*};
 use crate::{
-    arithmetics::eq_eval_with_index,
+    arithmetics::{_print_ext_arr, _print_felt_arr, eq_eval_with_index},
     tower_verifier::{binding::*, program::interpolate_uni_poly},
 };
 
@@ -691,9 +691,24 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     proof,
                 };
 
-                /* _debug
-                ext_mmcs_verify_batch::<C>(builder, ext_mmcs_verifier_input);
-                */
+
+                // _debug
+                // builder.print_debug(9970);
+                // _print_felt_arr(builder, &commit.value);
+                // builder.print_debug(101);
+                // builder.print_debug(val);
+                // builder.range(0, idx_pair.len()).for_each(|idx_vec, builder| {
+                //     let i = builder.get(&idx_pair, idx_vec[0]);
+                //     builder.print_v(i);
+                // });
+                // builder.print_debug(100);
+                // let ovals = builder.get(&ext_mmcs_verifier_input.opened_values, 0).clone();
+                // _print_ext_arr(builder, &ovals);
+
+
+                // /* _debug
+                // ext_mmcs_verify_batch::<C>(builder, ext_mmcs_verifier_input);
+                // */
 
                 let r = builder.get(&input.fold_challenges, i_plus_one);
                 let left = builder.get(&leafs, 0);
