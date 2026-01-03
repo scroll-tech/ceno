@@ -1,11 +1,13 @@
 mod halt;
 mod keccak;
+mod sha_extend;
 mod uint256;
 mod weierstrass_add;
 mod weierstrass_decompress;
 mod weierstrass_double;
 
 pub use keccak::KeccakInstruction;
+pub use sha_extend::ShaExtendInstruction;
 pub use uint256::{Secp256k1InvInstruction, Uint256MulInstruction};
 pub use weierstrass_add::WeierstrassAddAssignInstruction;
 pub use weierstrass_decompress::WeierstrassDecompressInstruction;

@@ -16,6 +16,7 @@ use rayon::{
 
 use crate::gkr::booleanhypercube::BooleanHypercube;
 
+/// Given an mle defined over a boolean hypercube, left-rotate its base mle by one step according to the given boolean hypercube.
 pub fn rotation_next_base_mle<'a, E: ExtensionField>(
     bh: &BooleanHypercube,
     mle: &ArcMultilinearExtension<'a, E>,

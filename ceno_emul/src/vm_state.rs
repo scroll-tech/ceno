@@ -3,9 +3,10 @@ use crate::{
     PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     dense_addr_space::DenseAddrSpace,
+    encode_rv32,
     platform::Platform,
-    rv32im::{Instruction, TrapCause},
-    syscalls::{SyscallEffects, handle_syscall},
+    rv32im::{InsnKind, Instruction, TrapCause},
+    syscalls::{SHA_EXTEND, ShaExtendState, SyscallEffects, handle_syscall},
     tracer::{Change, FullTracer, Tracer},
 };
 use anyhow::{Result, anyhow};
@@ -13,6 +14,23 @@ use std::{iter::from_fn, ops::Deref, sync::Arc};
 
 pub struct HaltState {
     pub exit_code: u32,
+}
+
+pub enum MultiCycleState {
+    ShaExtend(ShaExtendState),
+}
+
+impl MultiCycleState {
+    pub fn next_round_effects(&mut self) -> Option<SyscallEffects> {
+        match self {
+            MultiCycleState::ShaExtend(state) => state.next_round_effects(),
+        }
+    }
+    pub fn is_done(&self) -> bool {
+        match self {
+            MultiCycleState::ShaExtend(state) => state.is_done(),
+        }
+    }
 }
 
 /// An implementation of the machine state and of the side-effects of operations.
@@ -29,6 +47,7 @@ pub struct VMState<T: Tracer = FullTracer> {
     // Termination.
     halt_state: Option<HaltState>,
     tracer: T,
+    pending_multi_cycle_insn: Option<(Instruction, MultiCycleState)>,
 }
 
 impl VMState<FullTracer> {
@@ -60,6 +79,7 @@ impl<T: Tracer> VMState<T> {
             registers: [0; VM_REG_COUNT],
             halt_state: None,
             tracer: T::new(&platform),
+            pending_multi_cycle_insn: None,
         };
 
         for (&addr, &value) in &program.image {
@@ -127,9 +147,40 @@ impl<T: Tracer> VMState<T> {
     }
 
     fn step(&mut self) -> Result<T::Record> {
+        if self.pending_multi_cycle_insn.is_some() {
+            let pc = self.pc;
+            let insn = self.pending_multi_cycle_insn.as_ref().unwrap().0;
+            self.tracer.fetch(ByteAddr(pc).waddr(), insn);
+            let ecall_code = self.peek_register(Platform::reg_ecall());
+            self.tracer.load_register(Platform::reg_ecall(), ecall_code);
+
+            let (_, state) = self.pending_multi_cycle_insn.as_mut().unwrap();
+            let mut effects = state.next_round_effects().ok_or_else(|| {
+                anyhow!("pending multi cycle instruction without remaining rounds")
+            })?;
+
+            let is_last_round = state.is_done();
+            effects.next_pc = if is_last_round {
+                Some(self.pc + PC_STEP_SIZE as u32)
+            } else {
+                Some(self.pc)
+            };
+            self.apply_syscall(effects)?;
+            self.tracer.store_pc(ByteAddr(self.pc));
+
+            let step = self.tracer.advance();
+            if is_last_round {
+                self.pending_multi_cycle_insn = None;
+            }
+            return Ok(step);
+        }
+
         crate::rv32im::step(self)?;
         let step = self.tracer.advance();
-        if self.tracer.is_busy_loop(&step) && !self.halted() {
+        if self.tracer.is_busy_loop(&step)
+            && self.pending_multi_cycle_insn.is_none()
+            && !self.halted()
+        {
             Err(anyhow!("Stuck in loop {}", "{}"))
         } else {
             Ok(step)
@@ -172,6 +223,22 @@ impl<T: Tracer> EmuContext for VMState<T> {
             let exit_code = self.load_register(Platform::reg_arg0())?;
             tracing::debug!("halt with exit_code={}", exit_code);
             self.halt(exit_code);
+            Ok(true)
+        } else if function == SHA_EXTEND {
+            if self.pending_multi_cycle_insn.is_some() {
+                return Err(anyhow!("nested sha_extend syscall"));
+            }
+
+            let mut state = ShaExtendState::new(self);
+            let mut effects = state
+                .next_round_effects()
+                .ok_or_else(|| anyhow!("sha_extend without rounds"))?;
+            effects.next_pc = Some(self.pc);
+            self.pending_multi_cycle_insn = Some((
+                encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+                MultiCycleState::ShaExtend(state),
+            ));
+            self.apply_syscall(effects)?;
             Ok(true)
         } else {
             match handle_syscall(self, function) {

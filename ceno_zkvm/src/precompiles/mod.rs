@@ -1,5 +1,6 @@
 mod bitwise_keccakf;
 mod lookup_keccakf;
+mod sha256;
 mod uint256;
 mod utils;
 mod weierstrass;
@@ -17,6 +18,10 @@ pub use bitwise_keccakf::{
 };
 use ff_ext::ExtensionField;
 use gkr_iop::selector::SelectorType;
+pub use sha256::{
+    SHA_EXTEND_ROTATION_LOG2, SHA_EXTEND_ROTATION_ROUNDS, SHA_EXTEND_ROUNDS, ShaExtendInstance,
+    ShaExtendLayout, ShaExtendTrace, ShaExtendWitInstance,
+};
 pub use uint256::{
     Uint256InvLayout, Uint256InvSpec, Uint256InvTrace, Uint256MulInstance, Uint256MulLayout,
     Uint256MulTrace, run_uint256_mul, setup_uint256mul_gkr_circuit as setup_uint256_mul_circuit,
@@ -40,8 +45,7 @@ pub use weierstrass::{
 
 #[derive(Clone, Debug)]
 pub struct SelectorTypeLayout<E: ExtensionField> {
-    pub sel_mem_read: SelectorType<E>,
-    pub sel_mem_write: SelectorType<E>,
-    pub sel_lookup: SelectorType<E>,
-    pub sel_zero: SelectorType<E>,
+    pub sel_first: Option<SelectorType<E>>,
+    pub sel_last: Option<SelectorType<E>>,
+    pub sel_all: SelectorType<E>,
 }
