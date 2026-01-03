@@ -628,7 +628,7 @@ impl ShardContextBuilder {
                 if multi_prover.max_cell_per_shard == u64::MAX {
                     u64::MAX
                 } else {
-                    DEFAULT_MAX_CELL_FIRST_SHARD
+                    multi_prover.max_cell_per_shard
                 }
             },
             addr_future_accesses: Arc::new(addr_future_accesses),
@@ -823,7 +823,10 @@ pub fn emulate_program<'a>(
     }
 
     let exit_code = info_span!("[ceno] emulator.preflight-execute").in_scope(|| {
-        let _ = vm.iter_until_halt().take(max_steps).count();
+        vm.iter_until_halt()
+            .take(max_steps)
+            .try_for_each(|step| step.map(|_| ()))
+            .unwrap_or_else(|err| panic!("emulator trapped before halt: {err}"));
         vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
 
@@ -1292,7 +1295,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             //   init shard  = where the "initialization record" happens
             //   rw shard    = shards that read/write the address
             //   later rw?   = whether there is any rw in shards > current shard
-            // Output:
+            // Chip(s):
             // - LocalFinalize = local finalize circuit
             // - ShardRAM      = shard ram circuit
             // - ShardRAM+LF   = both
@@ -1316,7 +1319,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // │  └─ later rw? YES -> ShardRAM
             // │
             // └─ NO: init in a previous shard
-            // ├─ later rw? NO  -> LocalFinalize
+            // ├─ later rw? NO  -> ShardRAM + LocalFinalize
             // └─ later rw? YES -> ShardRAM
 
             let time = std::time::Instant::now();

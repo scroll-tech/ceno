@@ -1,9 +1,8 @@
-use rkyv::vec::ArchivedVec;
 use tiny_keccak::{Hasher, Keccak};
 
 pub fn main() {
     let times = 100;
-    let raw_preimage: &ArchivedVec<u32> = ceno_rt::read();
+    let raw_preimage: Vec<u32> = ceno_rt::read();
     let preimage: Vec<u8> = raw_preimage.iter().flat_map(|x| x.to_le_bytes()).collect();
     for i in 0..times {
         let digest = keccak256(&preimage)
