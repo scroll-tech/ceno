@@ -467,6 +467,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             });
     }
 
+    // _debug
+    builder.print_debug(666666);
     batch_verify(
         builder,
         zkvm_proof_input.max_num_var,
