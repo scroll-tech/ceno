@@ -659,17 +659,20 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
         let round = builder.iter_ptr_get(&input.rounds, ptr_vec[0]);
         iter_zip!(builder, round.openings).for_each(|ptr_vec, builder| {
             let opening = builder.iter_ptr_get(&round.openings, ptr_vec[0]);
+
             // TODO: filter out openings with num_var >= get_basecode_msg_size_log::<C>()
-            let var_diff: Var<C::N> = builder.eval(input.max_num_var.get_var() - opening.num_var);
-            let scalar_var = pow_2(builder, var_diff);
-            let scalar = builder.unsafe_cast_var_to_felt(scalar_var);
-            iter_zip!(builder, opening.point_and_evals.evals).for_each(|ptr_vec, builder| {
-                let eval = builder.iter_ptr_get(&opening.point_and_evals.evals, ptr_vec[0]);
-                let coeff = builder.get(&input.batch_coeffs, batch_coeffs_offset);
-                let val: Ext<C::F, C::EF> = builder.eval(eval * coeff * scalar);
-                builder.assign(&expected_sum, expected_sum + val);
-                builder.assign(&batch_coeffs_offset, batch_coeffs_offset + Usize::from(1));
-            });
+            builder.if_ne(opening.num_var, zero_flag).then(|builder| {
+                let var_diff: Var<C::N> = builder.eval(input.max_num_var.get_var() - opening.num_var);
+                let scalar_var = pow_2(builder, var_diff);
+                let scalar = builder.unsafe_cast_var_to_felt(scalar_var);
+                iter_zip!(builder, opening.point_and_evals.evals).for_each(|ptr_vec, builder| {
+                    let eval = builder.iter_ptr_get(&opening.point_and_evals.evals, ptr_vec[0]);
+                    let coeff = builder.get(&input.batch_coeffs, batch_coeffs_offset);
+                    let val: Ext<C::F, C::EF> = builder.eval(eval * coeff * scalar);
+                    builder.assign(&expected_sum, expected_sum + val);
+                    builder.assign(&batch_coeffs_offset, batch_coeffs_offset + Usize::from(1));
+                });
+            }); 
         });
     });
     let sum: Ext<C::F, C::EF> = {
@@ -709,7 +712,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
     let one: Var<C::N> = builder.constant(C::N::ONE);
     let j: Var<C::N> = builder.constant(C::N::ZERO);
 
-    /* _debug
     // \sum_i eq(p, [r,i]) * f(r,i)
     iter_zip!(builder, input.rounds).for_each(|ptr_vec, builder| {
         let round = builder.iter_ptr_get(&input.rounds, ptr_vec[0]);
@@ -717,42 +719,43 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
         iter_zip!(builder, round.openings).for_each(|ptr_vec, builder| {
             let opening = builder.iter_ptr_get(&round.openings, ptr_vec[0]);
-            let point_and_evals = &opening.point_and_evals;
-            let point = &point_and_evals.point;
 
-            let num_vars_evaluated: Var<C::N> =
-                builder.eval(point.fs.len() - Usize::from(get_basecode_msg_size_log()));
-            let final_message = builder.get(&input.proof.final_message, j);
+            builder.if_ne(opening.num_var, zero_flag).then(|builder| {
+                let point_and_evals = &opening.point_and_evals;
+                let point = &point_and_evals.point;
 
-            // coeff is the eq polynomial evaluated at the first challenge.len() variables
-            let ylo = builder.eval(input.fold_challenges.len() - num_vars_evaluated);
-            let coeff = eq_eval_with_index(
-                builder,
-                &point.fs,
-                &input.fold_challenges,
-                Usize::from(0),
-                Usize::Var(ylo),
-                Usize::Var(num_vars_evaluated),
-            );
+                let num_vars_evaluated: Var<C::N> =
+                    builder.eval(point.fs.len() - Usize::from(get_basecode_msg_size_log()));
+                let final_message = builder.get(&input.proof.final_message, j);
 
-            // compute \sum_i eq(p[..num_vars_evaluated], r) * eq(p[num_vars_evaluated..], i) * f(r,i)
-            //
-            // We always assume that num_vars_evaluated is equal to p.len()
-            // so that the above sum only has one item and the final evaluation vector has only one element.
-            builder.assert_eq::<Var<C::N>>(final_message.len(), one);
-            
-            let final_message = builder.get(&final_message, 0);
-            let dot_prod: Ext<C::F, C::EF> = builder.eval(final_message * coeff);
-            
-            builder.assign(&right, right + dot_prod);
-            builder.assign(&j, j + Usize::from(1));
+                // coeff is the eq polynomial evaluated at the first challenge.len() variables
+                let ylo = builder.eval(input.fold_challenges.len() - num_vars_evaluated);
+                let coeff = eq_eval_with_index(
+                    builder,
+                    &point.fs,
+                    &input.fold_challenges,
+                    Usize::from(0),
+                    Usize::Var(ylo),
+                    Usize::Var(num_vars_evaluated),
+                );
+
+                // compute \sum_i eq(p[..num_vars_evaluated], r) * eq(p[num_vars_evaluated..], i) * f(r,i)
+                //
+                // We always assume that num_vars_evaluated is equal to p.len()
+                // so that the above sum only has one item and the final evaluation vector has only one element.
+                builder.assert_eq::<Var<C::N>>(final_message.len(), one);
+                
+                let final_message = builder.get(&final_message, 0);
+                let dot_prod: Ext<C::F, C::EF> = builder.eval(final_message * coeff);
+                
+                builder.assign(&right, right + dot_prod);
+                builder.assign(&j, j + Usize::from(1));
+            });
         });
     });
 
-    // _debug
-    // builder.assert_eq::<Var<C::N>>(j, input.proof.final_message.len());
-    // builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
-    */
+    builder.assert_eq::<Var<C::N>>(j, input.proof.final_message.len());
+    builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
 }
 
 #[cfg(test)]
