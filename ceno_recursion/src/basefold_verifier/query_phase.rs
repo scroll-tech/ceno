@@ -618,9 +618,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     proof,
                 };
 
-                /* _debug
                 ext_mmcs_verify_batch::<C>(builder, ext_mmcs_verifier_input);
-                */
 
                 let r = builder.get(&input.fold_challenges, i_plus_one);
                 let left = builder.get(&leafs, 0);
@@ -645,7 +643,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     );
                 });
             let final_value = builder.get(&final_codeword.values, final_idx);
-            
+
             builder.assert_eq::<Ext<C::F, C::EF>>(final_value, folded);
         },
     );
