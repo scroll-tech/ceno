@@ -394,82 +394,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
         input.fold_challenges.len(),
     );
 
-    // _debug
-    // let rounds_context: Array<C, RoundContextVariable<C>> = builder.dyn_array(input.rounds.len());
-    // let batch_coeffs_offset: Var<C::N> = builder.constant(C::N::ZERO);
-
-    // _debug
-    // builder.cycle_tracker_start("Construct round context");
-    // iter_zip!(builder, input.rounds, rounds_context).for_each(|ptr_vec, builder| {
-    //     let round = builder.iter_ptr_get(&input.rounds, ptr_vec[0]);
-    //     // This buffer is not initialized here in providing the context.
-    //     // It will be initialized later (once for each query) in the loop over queries,
-    //     // by the `fri_single_reduced_opening_eval` chip.
-    //     let opened_values_buffer: Array<C, Array<C, Felt<C::F>>> =
-    //         builder.dyn_array(round.openings.len());
-
-    //     let log2_heights = builder.dyn_array(round.openings.len());
-    //     let minus_alpha_offsets = builder.dyn_array(round.openings.len());
-    //     let dimensions = builder.dyn_array(round.openings.len());
-
-    //     iter_zip!(
-    //         builder,
-    //         opened_values_buffer,
-    //         log2_heights,
-    //         round.openings,
-    //         minus_alpha_offsets,
-    //     )
-    //     .for_each(|ptr_vec, builder| {
-    //         let opening = builder.iter_ptr_get(&round.openings, ptr_vec[2]);
-    //         let log2_height: Var<C::N> =
-    //             builder.eval(opening.num_var + Usize::from(get_rate_log() - 1));
-    //         builder.iter_ptr_set(&log2_heights, ptr_vec[1], log2_height);
-    //         let width = opening.point_and_evals.evals.len();
-
-    //         let opened_value_len: Var<C::N> = builder.eval(width.clone() * two);
-    //         let opened_value_buffer = builder.dyn_array(opened_value_len);
-    //         builder.iter_ptr_set(
-    //             &opened_values_buffer,
-    //             ptr_vec[0],
-    //             opened_value_buffer.clone(),
-    //         );
-
-    //         let alpha_offset = builder.get(&input.batch_coeffs, batch_coeffs_offset);
-    //         // Will need to negate the values of low and high
-    //         // because `fri_single_reduced_opening_eval` is
-    //         // computing \sum_i alpha^i (0 - opened_value[i]).
-    //         // We want \sum_i alpha^(i + offset) opened_value[i]
-    //         // Let's negate it here.
-    //         builder.assign(&alpha_offset, -alpha_offset);
-    //         builder.iter_ptr_set(&minus_alpha_offsets, ptr_vec[3], alpha_offset);
-    //         builder.assign(&batch_coeffs_offset, batch_coeffs_offset + width.clone());
-    //     });
-
-    //     // TODO: ensure that perm is indeed a permutation of 0, ..., opened_values.len()-1
-    //     // Note that this should be done outside the loop over queries
-
-    //     // reorder (opened values, dimension) according to the permutation
-    //     builder
-    //         .range(0, round.openings.len())
-    //         .for_each(|j_vec, builder| {
-    //             let height_j = builder.get(&log2_heights, j_vec[0]);
-    //             let permuted_j = builder.get(&round.perm, j_vec[0]);
-    //             // let permuted_j = j;
-    //             builder.set_value(&dimensions, permuted_j, height_j);
-    //         });
-    //     // TODO: ensure that dimensions is indeed sorted decreasingly
-    //     // Note that this should be done outside the loop over queries
-
-    //     let round_context = RoundContextVariable {
-    //         opened_values_buffer,
-    //         log2_heights,
-    //         minus_alpha_offsets,
-    //         dimensions,
-    //     };
-    //     builder.iter_ptr_set(&rounds_context, ptr_vec[1], round_context);
-    // });
-    // builder.cycle_tracker_end("Construct round context");
-
     iter_zip!(builder, input.indices, input.proof.query_opening_proof).for_each(
         |ptr_vec, builder| {
             // TODO: change type of input.indices to be `Array<C, Array<C, Var<C::N>>>`
@@ -571,19 +495,8 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
                     // reorder opened values according to the permutation
                     let permuted_j = builder.iter_ptr_get(&round.perm, i);
-                    // let permuted_j = j;
                     builder.set_value(&perm_opened_values, permuted_j, opened_values_buffer);
                     builder.set_value(&dimensions, permuted_j, log2_height);
-
-                    // _debug
-                    // let lo0 = builder.get(&low_values, 0);
-                    // let hi0 = builder.get(&high_values, 0);
-                    // let coeff0 = builder.get(&batch_coeffs, 0);
-                    // builder.print_debug(999999);
-                    // builder.print_e(coeff0);
-                    // builder.print_f(lo0);
-                    // builder.print_f(hi0);
-                    // builder.print_v(log2_height);
                 });
 
                 // i >>= (log2_max_codeword_size - commit.log2_max_codeword_size);
@@ -591,7 +504,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     builder.eval(log2_max_codeword_size - round.commit.log2_max_codeword_size);
                 let reduced_idx_bits = idx_bits.slice(builder, bits_shift, idx_bits.len());
 
-                /* _debug
                 // verify input mmcs
                 let mmcs_verifier_input = MmcsVerifierInputVariable {
                     commit: round.commit.commit.clone(),
@@ -601,105 +513,10 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     proof: opening_proof,
                 };
 
+                /* _debug
                 mmcs_verify_batch(builder, mmcs_verifier_input);
                 */
             });
-
-            // iter_zip!(builder, query.input_proofs, input.rounds, rounds_context).for_each(
-            //     |ptr_vec, builder| {
-            //         let batch_opening = builder.iter_ptr_get(&query.input_proofs, ptr_vec[0]);
-            //         let round = builder.iter_ptr_get(&input.rounds, ptr_vec[1]);
-            //         let opened_values = batch_opening.opened_values;
-            //         let perm_opened_values = builder.dyn_array(opened_values.length.clone());
-            //         let opening_proof = batch_opening.opening_proof;
-            //         let round_context = builder.iter_ptr_get(&rounds_context, ptr_vec[2]);
-
-            //         /* _debug
-            //         // _TODO: Iteration looping count is incorrect
-            //         // _TODO: 5 zipped arrays have different length
-            //         iter_zip!(
-            //             builder,
-            //             round_context.log2_heights,
-            //             round_context.minus_alpha_offsets,
-            //             round_context.opened_values_buffer,
-            //             round.perm,
-            //             round.openings,
-            //         )
-            //         .for_each(|ptr_vec, builder| {
-            //             let opened_values_buffer =
-            //                 builder.iter_ptr_get(&round_context.opened_values_buffer, ptr_vec[2]);
-            //             let log2_height: Var<C::N> =
-            //                 builder.iter_ptr_get(&round_context.log2_heights, ptr_vec[0]);
-            //             // The linear combination is by (alpha^offset, ..., alpha^(offset+width-1)), which is equal to
-            //             // alpha^offset * (1, ..., alpha^(width-1))
-            //             let minus_alpha_offset =
-            //                 builder.iter_ptr_get(&round_context.minus_alpha_offsets, ptr_vec[1]);
-            //             let opening = builder.iter_ptr_get(&round.openings, ptr_vec[4]);
-            //             let width = opening.point_and_evals.evals.len();
-            //             let low_values = opened_values_buffer.slice(builder, 0, width.clone());
-            //             let high_values = opened_values_buffer.slice(
-            //                 builder,
-            //                 width.clone(),
-            //                 opened_values_buffer.len(),
-            //             );
-
-            //             /* _debug
-            //             let all_zeros_slice = all_zeros.slice(builder, 0, width.clone());
-            //             let low = builder.fri_single_reduced_opening_eval(
-            //                 alpha,
-            //                 opened_values.id.get_var(),
-            //                 zero_flag,
-            //                 &low_values,
-            //                 &all_zeros_slice,
-            //             );
-            //             let high = builder.fri_single_reduced_opening_eval(
-            //                 alpha,
-            //                 opened_values.id.get_var(),
-            //                 zero_flag,
-            //                 &high_values,
-            //                 &all_zeros_slice,
-            //             );
-            //             builder.assign(&low, low * minus_alpha_offset);
-            //             builder.assign(&high, high * minus_alpha_offset);
-
-            //             let codeword: PackedCodeword<C> = PackedCodeword { low, high };
-            //             let codeword_acc = builder.get(&reduced_codeword_by_height, log2_height);
-
-            //             // reduced_openings[log2_height] += codeword
-            //             builder.assign(&codeword_acc.low, codeword_acc.low + codeword.low);
-            //             builder.assign(&codeword_acc.high, codeword_acc.high + codeword.high);
-
-            //             builder.set_value(&reduced_codeword_by_height, log2_height, codeword_acc);
-            //             */
-
-            //             // reorder opened values according to the permutation
-            //             let mat_j =
-            //                 builder.iter_ptr_get(&round_context.opened_values_buffer, ptr_vec[2]);
-            //             let permuted_j = builder.iter_ptr_get(&round.perm, ptr_vec[3]);
-            //             // let permuted_j = j;
-            //             builder.set_value(&perm_opened_values, permuted_j, mat_j);
-            //         });
-            //         */
-
-            //         // i >>= (log2_max_codeword_size - commit.log2_max_codeword_size);
-            //         let bits_shift: Var<C::N> =
-            //             builder.eval(log2_max_codeword_size - round.commit.log2_max_codeword_size);
-            //         let reduced_idx_bits = idx_bits.slice(builder, bits_shift, idx_bits.len());
-
-            //         // verify input mmcs
-            //         let mmcs_verifier_input = MmcsVerifierInputVariable {
-            //             commit: round.commit.commit.clone(),
-            //             dimensions: round_context.dimensions,
-            //             index_bits: reduced_idx_bits,
-            //             opened_values: perm_opened_values,
-            //             proof: opening_proof,
-            //         };
-
-            //         /* _debug
-            //         mmcs_verify_batch(builder, mmcs_verifier_input);
-            //         */
-            //     },
-            // );
             builder.cycle_tracker_end("Batching and first FRI round");
 
             let opening_ext = query.commit_phase_openings;
