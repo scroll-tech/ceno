@@ -618,24 +618,9 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     proof,
                 };
 
-
-                // _debug
-                // builder.print_debug(9970);
-                // _print_felt_arr(builder, &commit.value);
-                // builder.print_debug(101);
-                // builder.print_debug(val);
-                // builder.range(0, idx_pair.len()).for_each(|idx_vec, builder| {
-                //     let i = builder.get(&idx_pair, idx_vec[0]);
-                //     builder.print_v(i);
-                // });
-                // builder.print_debug(100);
-                // let ovals = builder.get(&ext_mmcs_verifier_input.opened_values, 0).clone();
-                // _print_ext_arr(builder, &ovals);
-
-
-                // /* _debug
-                // ext_mmcs_verify_batch::<C>(builder, ext_mmcs_verifier_input);
-                // */
+                /* _debug
+                ext_mmcs_verify_batch::<C>(builder, ext_mmcs_verifier_input);
+                */
 
                 let r = builder.get(&input.fold_challenges, i_plus_one);
                 let left = builder.get(&leafs, 0);
@@ -726,7 +711,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
     /* _debug
     // \sum_i eq(p, [r,i]) * f(r,i)
-    iter_zip!(builder, input.rounds,).for_each(|ptr_vec, builder| {
+    iter_zip!(builder, input.rounds).for_each(|ptr_vec, builder| {
         let round = builder.iter_ptr_get(&input.rounds, ptr_vec[0]);
         // TODO: filter out openings with num_var >= get_basecode_msg_size_log::<C>()
 
@@ -764,8 +749,9 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
         });
     });
 
-    builder.assert_eq::<Var<C::N>>(j, input.proof.final_message.len());
-    builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
+    // _debug
+    // builder.assert_eq::<Var<C::N>>(j, input.proof.final_message.len());
+    // builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
     */
 }
 
