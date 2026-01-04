@@ -645,10 +645,8 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     );
                 });
             let final_value = builder.get(&final_codeword.values, final_idx);
-
-            /* _debug
+            
             builder.assert_eq::<Ext<C::F, C::EF>>(final_value, folded);
-            */
         },
     );
 
