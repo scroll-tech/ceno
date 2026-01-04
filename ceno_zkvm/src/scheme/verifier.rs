@@ -43,9 +43,6 @@ use sumcheck::{
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
-// _debug
-use std::fs;
-
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vk: ZKVMVerifyingKey<E, PCS>,
 }
@@ -95,9 +92,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         transcripts: Vec<impl ForkableTranscript<E>>,
         expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
-        // _debug
-        println!("=> verify_proofs_halt");
-
         assert!(!vm_proofs.is_empty());
         let num_proofs = vm_proofs.len();
         let (_end_pc, _end_heap_addr, shard_ec_sum) = vm_proofs
@@ -142,14 +136,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 let next_heap_addr_end: u32 = heap_addr_start_u32 + heap_len * WORD_SIZE as u32;
 
                 // add to shard ec sum
-                // _debug
-                // println!("=> shard pi: {:?}", vm_proof.pi_evals.clone());
                 let shard_ec = self.verify_proof_validity(shard_id, vm_proof, transcript)?;
-                // println!("=> start_ec_sum: {:?}", shard_ec_sum);
-                // println!("=> shard_ec: {:?}", shard_ec);
-                // shard_ec_sum = shard_ec_sum + self.verify_proof_validity(shard_id, vm_proof, transcript)?;
                 shard_ec_sum = shard_ec_sum + shard_ec;
-                // println!("=> new_ec_sum: {:?}", shard_ec_sum);
 
                 Ok((Some(end_pc), Some(next_heap_addr_end), shard_ec_sum))
             })?;
@@ -169,9 +157,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: impl ForkableTranscript<E>,
     ) -> Result<SepticPoint<E::BaseField>, ZKVMError> {
-        // _debug
-        println!("=> verify_proof_validity");
-
         // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
@@ -421,30 +406,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             rounds.push((fixed_commit.clone(), fixed_openings));
         }
 
-        // _debug
-        let s = serde_json::to_string_pretty(&vm_proof.opening_proof).unwrap();
-        fs::write("opening_proof.json", s).expect("write opening proof");
-
-        // _debug
-        println!("batch_verify");
-        let max_num_var = rounds
-            .iter()
-            .map(|(commit, openings)| {
-                let max_num_var = openings
-                    .iter()
-                    .map(|(num_vars, _)| *num_vars)
-                    .max()
-                    .unwrap();
-                // assert_eq!(
-                //     commit.log2_max_codeword_size,
-                //     max_num_var + Spec::get_rate_log()
-                // );
-                max_num_var
-            })
-            .max()
-            .unwrap();
-        println!("=> max_num_var: {:?}", max_num_var);
-
         PCS::batch_verify(
             &self.vk.vp,
             rounds,
@@ -452,9 +413,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;
-
-
-
 
         let initial_global_state = eval_by_expr_with_instance(
             &[],
