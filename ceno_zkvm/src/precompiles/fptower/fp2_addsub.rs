@@ -327,23 +327,23 @@ mod tests {
     use super::*;
 
     use ff_ext::{BabyBearExt4, SmallField};
-    use gkr_iop::circuit_builder::{CircuitBuilder, ConstraintSystem};
-    use itertools::Itertools;
-    use std::sync::Arc;
-    use num::BigUint;
-    use rand::RngCore;
-    use sp1_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
-    use witness::{InstancePaddingStrategy, RowMajorMatrix};
     use gkr_iop::{
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
         cpu::{CpuBackend, CpuProver},
         gkr::{GKRProverOutput, layer::Layer},
         selector::SelectorContext,
     };
+    use itertools::Itertools;
     use mpcs::BasefoldDefault;
     use multilinear_extensions::{mle::PointAndEval, util::ceil_log2};
+    use num::BigUint;
+    use rand::RngCore;
     use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+    use sp1_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
+    use std::sync::Arc;
     use sumcheck::util::optimal_sumcheck_threads;
     use transcript::{BasicTranscript, Transcript};
+    use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
     use crate::{gadgets::FieldOperation, witness::LkMultiplicity};
 
@@ -450,16 +450,8 @@ mod tests {
             prover_transcript.read_challenge().elements,
         ];
 
-        let phase1_witness_group = phase1
-            .to_mles()
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
-        let structural_witness = structural
-            .to_mles()
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
+        let phase1_witness_group = phase1.to_mles().into_iter().map(Arc::new).collect_vec();
+        let structural_witness = structural.to_mles().into_iter().map(Arc::new).collect_vec();
         let fixed = layout
             .fixed_witness_group()
             .to_mles()
