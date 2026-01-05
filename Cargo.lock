@@ -1209,6 +1209,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "smallvec",
  "sp1-curves",
  "strum",
  "strum_macros",
