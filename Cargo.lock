@@ -190,7 +190,7 @@ checksum = "64b728d511962dda67c1bc7ea7c03736ec275ed2cf4c35d9585298ac9ccf3b73"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -229,7 +229,7 @@ dependencies = [
  "darling 0.21.3",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -444,7 +444,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62945a2f7e6de02a31fe400aa489f0e0f5b2502e69f95f853adb82a96c7a6b60"
 dependencies = [
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -482,7 +482,7 @@ dependencies = [
  "num-traits",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -542,7 +542,7 @@ checksum = "213888f660fddcca0d257e88e54ac05bca01885f258ccdf695bafd77031bb69d"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -605,7 +605,7 @@ checksum = "ffdcb70bdbc4d478427380519163274ac86e52916e10f0a8889adf0f96d3fee7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -650,9 +650,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64ct"
-version = "1.8.1"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e050f626429857a27ddccb31e0aca21356bfa709c04041aefddac081a8f068a"
+checksum = "7d809780667f4410e7c41b07f52439b94d2bdf8528eeedc287fa38d3b7f95d82"
 
 [[package]]
 name = "bincode"
@@ -719,7 +719,7 @@ checksum = "238b90427dfad9da4a9abd60f3ec1cdee6b80454bde49ed37f1781dd8e9dc7f9"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -845,7 +845,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -868,7 +868,7 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -900,7 +900,7 @@ checksum = "f9abbd1bc6865053c427f7198e6af43bfdedc55ab791faed4fbd361d789575ff"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1337,7 +1337,7 @@ dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1659,7 +1659,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1673,7 +1673,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1684,7 +1684,7 @@ checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
  "darling_core 0.20.11",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1695,7 +1695,7 @@ checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
 dependencies = [
  "darling_core 0.21.3",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1847,7 +1847,7 @@ checksum = "d150dea618e920167e5973d70ae6ece4385b7164e0d799fe7c122dd0a5d912ad"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1858,7 +1858,7 @@ checksum = "2cdc8d50f426189eef89dac62fabfa0abb27d5cc008f25bf4156a0203325becc"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1879,7 +1879,7 @@ dependencies = [
  "darling 0.20.11",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1889,7 +1889,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab63b0e2bf4d5928aff72e83a7dace85d7bba5fe12dcc3c5a572d78caffd3f3c"
 dependencies = [
  "derive_builder_core",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -1918,7 +1918,7 @@ checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
  "unicode-xid",
 ]
 
@@ -1932,7 +1932,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustc_version 0.4.1",
- "syn 2.0.112",
+ "syn 2.0.113",
  "unicode-xid",
 ]
 
@@ -1986,7 +1986,7 @@ checksum = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -2052,7 +2052,7 @@ dependencies = [
  "enum-ordinalize",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -2120,7 +2120,7 @@ checksum = "8ca9601fb2d62598ee17836250842873a413586e5d7ed88b356e38ddbb0ec631"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -2132,7 +2132,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -2252,6 +2252,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "once_cell",
  "p3",
@@ -2397,7 +2398,7 @@ dependencies = [
  "proc-macro-error2",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -2841,7 +2842,7 @@ checksum = "a0eb5a3343abf848c0984fe4604b2b105da9539376e24fc0a3b0007411ae4fd9"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -3033,9 +3034,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.178"
+version = "0.2.179"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
+checksum = "c5a2d376baa530d1238d133232d15e239abad80d05838b4b59354e5268af431f"
 
 [[package]]
 name = "libgit2-sys"
@@ -3237,6 +3238,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "bincode 1.3.3",
  "clap",
@@ -3249,7 +3251,6 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rayon",
  "serde",
- "serde_json",
  "sumcheck",
  "tracing",
  "tracing-subscriber",
@@ -3261,6 +3262,7 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "either",
  "ff_ext",
@@ -3376,7 +3378,7 @@ checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -3521,7 +3523,7 @@ checksum = "ff32365de1b6743cb203b710788263c44a03de03802daf96092f2da4fe6ba4d7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -3589,6 +3591,7 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 [[package]]
 name = "openvm"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "bytemuck",
  "num-bigint 0.4.6",
@@ -3601,6 +3604,7 @@ dependencies = [
 [[package]]
 name = "openvm-algebra-circuit"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cfg-if",
  "derive-new 0.6.0",
@@ -3629,15 +3633,17 @@ dependencies = [
 [[package]]
 name = "openvm-algebra-complex-macros"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-macros-common",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
 name = "openvm-algebra-guest"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "halo2curves-axiom",
  "num-bigint 0.4.6",
@@ -3653,17 +3659,19 @@ dependencies = [
 [[package]]
 name = "openvm-algebra-moduli-macros"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "num-bigint 0.4.6",
  "num-prime",
  "openvm-macros-common",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
 name = "openvm-algebra-transpiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-algebra-guest",
  "openvm-instructions",
@@ -3677,6 +3685,7 @@ dependencies = [
 [[package]]
 name = "openvm-bigint-circuit"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cfg-if",
  "derive-new 0.6.0",
@@ -3699,6 +3708,7 @@ dependencies = [
 [[package]]
 name = "openvm-bigint-guest"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-platform",
  "strum_macros",
@@ -3707,6 +3717,7 @@ dependencies = [
 [[package]]
 name = "openvm-bigint-transpiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-bigint-guest",
  "openvm-instructions",
@@ -3721,6 +3732,7 @@ dependencies = [
 [[package]]
 name = "openvm-build"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cargo_metadata 0.18.1",
  "eyre",
@@ -3732,6 +3744,7 @@ dependencies = [
 [[package]]
 name = "openvm-circuit"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "backtrace",
  "cfg-if",
@@ -3770,16 +3783,18 @@ dependencies = [
 [[package]]
 name = "openvm-circuit-derive"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "itertools 0.14.0",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
 name = "openvm-circuit-primitives"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "derive-new 0.6.0",
  "itertools 0.14.0",
@@ -3797,15 +3812,17 @@ dependencies = [
 [[package]]
 name = "openvm-circuit-primitives-derive"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "itertools 0.14.0",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
 name = "openvm-continuations"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "derivative",
  "openvm-circuit",
@@ -3875,15 +3892,17 @@ dependencies = [
 [[package]]
 name = "openvm-custom-insn"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
 name = "openvm-ecc-circuit"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cfg-if",
  "derive-new 0.6.0",
@@ -3912,6 +3931,7 @@ dependencies = [
 [[package]]
 name = "openvm-ecc-guest"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "ecdsa 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "elliptic-curve",
@@ -3930,15 +3950,17 @@ dependencies = [
 [[package]]
 name = "openvm-ecc-sw-macros"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-macros-common",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
 name = "openvm-ecc-transpiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-ecc-guest",
  "openvm-instructions",
@@ -3952,6 +3974,7 @@ dependencies = [
 [[package]]
 name = "openvm-instructions"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "backtrace",
  "derive-new 0.6.0",
@@ -3968,14 +3991,16 @@ dependencies = [
 [[package]]
 name = "openvm-instructions-derive"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
 name = "openvm-keccak256-circuit"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cfg-if",
  "derive-new 0.6.0",
@@ -4000,6 +4025,7 @@ dependencies = [
 [[package]]
 name = "openvm-keccak256-guest"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-platform",
 ]
@@ -4007,6 +4033,7 @@ dependencies = [
 [[package]]
 name = "openvm-keccak256-transpiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-instructions",
  "openvm-instructions-derive",
@@ -4020,13 +4047,15 @@ dependencies = [
 [[package]]
 name = "openvm-macros-common"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
 name = "openvm-mod-circuit-builder"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint 0.4.6",
@@ -4044,6 +4073,7 @@ dependencies = [
 [[package]]
 name = "openvm-native-circuit"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cfg-if",
  "derive-new 0.6.0",
@@ -4074,6 +4104,7 @@ dependencies = [
 [[package]]
 name = "openvm-native-compiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "backtrace",
  "itertools 0.14.0",
@@ -4095,14 +4126,16 @@ dependencies = [
 [[package]]
 name = "openvm-native-compiler-derive"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
 name = "openvm-native-recursion"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cfg-if",
  "itertools 0.14.0",
@@ -4126,6 +4159,7 @@ dependencies = [
 [[package]]
 name = "openvm-native-transpiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-instructions",
  "openvm-transpiler",
@@ -4135,6 +4169,7 @@ dependencies = [
 [[package]]
 name = "openvm-pairing-circuit"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cfg-if",
  "derive-new 0.6.0",
@@ -4163,6 +4198,7 @@ dependencies = [
 [[package]]
 name = "openvm-pairing-guest"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "halo2curves-axiom",
  "hex-literal",
@@ -4183,6 +4219,7 @@ dependencies = [
 [[package]]
 name = "openvm-pairing-transpiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-instructions",
  "openvm-pairing-guest",
@@ -4195,6 +4232,7 @@ dependencies = [
 [[package]]
 name = "openvm-platform"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "libm",
  "openvm-custom-insn",
@@ -4204,6 +4242,7 @@ dependencies = [
 [[package]]
 name = "openvm-poseidon2-air"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "derivative",
  "lazy_static",
@@ -4221,6 +4260,7 @@ dependencies = [
 [[package]]
 name = "openvm-rv32-adapters"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "derive-new 0.6.0",
  "itertools 0.14.0",
@@ -4237,6 +4277,7 @@ dependencies = [
 [[package]]
 name = "openvm-rv32im-circuit"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cfg-if",
  "derive-new 0.6.0",
@@ -4259,6 +4300,7 @@ dependencies = [
 [[package]]
 name = "openvm-rv32im-guest"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-custom-insn",
  "p3-field",
@@ -4268,6 +4310,7 @@ dependencies = [
 [[package]]
 name = "openvm-rv32im-transpiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-instructions",
  "openvm-instructions-derive",
@@ -4283,6 +4326,7 @@ dependencies = [
 [[package]]
 name = "openvm-sdk"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "bitcode",
  "bon",
@@ -4336,6 +4380,7 @@ dependencies = [
 [[package]]
 name = "openvm-sha256-air"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-circuit-primitives",
  "openvm-stark-backend",
@@ -4346,6 +4391,7 @@ dependencies = [
 [[package]]
 name = "openvm-sha256-circuit"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "cfg-if",
  "derive-new 0.6.0",
@@ -4368,6 +4414,7 @@ dependencies = [
 [[package]]
 name = "openvm-sha256-guest"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-platform",
 ]
@@ -4375,6 +4422,7 @@ dependencies = [
 [[package]]
 name = "openvm-sha256-transpiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "openvm-instructions",
  "openvm-instructions-derive",
@@ -4453,6 +4501,7 @@ dependencies = [
 [[package]]
 name = "openvm-transpiler"
 version = "1.4.1"
+source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scroll-ext#ac5d1b48b46fc37981f56ed943fa4ae6fb580827"
 dependencies = [
  "elf",
  "eyre",
@@ -4487,6 +4536,7 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "p3-air",
  "p3-baby-bear",
@@ -4892,7 +4942,7 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -4977,9 +5027,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pest"
-version = "2.8.4"
+version = "2.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbcfd20a6d4eeba40179f05735784ad32bdaef05ce8e8af05f180d45bb3e7e22"
+checksum = "2c9eb05c21a464ea704b53158d358a31e6425db2f63a1a7312268b05fe2b75f7"
 dependencies = [
  "memchr",
  "ucd-trie",
@@ -5053,6 +5103,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "ff_ext",
  "p3",
@@ -5112,7 +5163,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -5187,7 +5238,7 @@ dependencies = [
  "proc-macro-error-attr2",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -5431,7 +5482,7 @@ checksum = "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -5712,7 +5763,7 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -5864,7 +5915,7 @@ checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -5917,7 +5968,7 @@ dependencies = [
  "darling 0.21.3",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -6004,6 +6055,7 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -6087,7 +6139,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -6128,6 +6180,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "either",
  "ff_ext",
@@ -6145,13 +6198,14 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "itertools 0.13.0",
  "p3",
  "proc-macro2",
  "quote",
  "rand 0.8.5",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -6190,9 +6244,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.112"
+version = "2.0.113"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21f182278bf2d2bcb3c88b1b08a37df029d71ce3d3ae26168e3c653b213b99d4"
+checksum = "678faa00651c9eb72dd2020cbdf275d92eccb2400d568e419efdd64838145cb4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6207,7 +6261,7 @@ checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -6266,7 +6320,7 @@ checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -6277,7 +6331,7 @@ checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -6492,7 +6546,7 @@ checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -6550,6 +6604,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -6809,7 +6864,7 @@ dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
  "wasm-bindgen-shared",
 ]
 
@@ -6835,6 +6890,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "bincode 1.3.3",
  "clap",
@@ -6906,7 +6962,7 @@ checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -6917,7 +6973,7 @@ checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -7127,6 +7183,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 [[package]]
 name = "witness"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.19#eb292fef68831ba85e6553a56cacbf770ea9d122"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",
@@ -7170,7 +7227,7 @@ checksum = "b659052874eb698efe5b9e8cf382204678a0086ebf46982b79d6ca3182927e5d"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
  "synstructure",
 ]
 
@@ -7191,7 +7248,7 @@ checksum = "d8a8d209fdf45cf5138cbb5a506f6b52522a25afccc534d1475dad8e31105c6a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -7211,7 +7268,7 @@ checksum = "d71e5d6e06ab090c67b5e44993ec16b72dcbaabc526db883a360057678b48502"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
  "synstructure",
 ]
 
@@ -7232,7 +7289,7 @@ checksum = "85a5b4158499876c763cb03bc4e49185d3cccbabb15b33c627f7884f43db852e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -7265,7 +7322,7 @@ checksum = "eadce39539ca5cb3985590102671f2567e659fca9666581ad3411d59207951f3"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -7296,6 +7353,6 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.8"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "317f17ff091ac4515f17cc7a190d2769a8c9a96d227de5d64b500b01cda8f2cd"
+checksum = "30e0d8dffbae3d840f64bda38e28391faef673a7b5a6017840f2a106c8145868"

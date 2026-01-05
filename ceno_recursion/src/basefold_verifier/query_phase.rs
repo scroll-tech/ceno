@@ -475,8 +475,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                                 opened_values_buffer.len(),
                             );
 
-                            let end: Var<C::N> =
-                                builder.eval(batch_coeffs_offset.clone() + width.clone());
+                            let end: Var<C::N> = builder.eval(batch_coeffs_offset + width.clone());
                             let batch_coeffs =
                                 &input.batch_coeffs.slice(builder, batch_coeffs_offset, end);
                             builder.assign(&batch_coeffs_offset, end);

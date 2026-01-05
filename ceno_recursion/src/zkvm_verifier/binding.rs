@@ -193,7 +193,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .chain(fixed_num_vars.iter())
             .copied()
-            .map(|n| ceil_log2(n))
+            .map(ceil_log2)
             .max()
             .unwrap_or(0);
         let max_width = witin_max_widths
