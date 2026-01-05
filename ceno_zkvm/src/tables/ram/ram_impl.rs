@@ -1,4 +1,4 @@
-use ceno_emul::{Addr, WORD_SIZE};
+use ceno_emul::Addr;
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
@@ -6,28 +6,24 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelExtend, ParallelIterator,
 };
-use std::marker::PhantomData;
-use witness::{
-    InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding, set_fixed_val, set_val,
-};
+use std::{marker::PhantomData, ops::Range};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 use super::{
     MemInitRecord,
     ram_circuit::{DynVolatileRamTable, MemFinalRecord, NonVolatileTable},
 };
 use crate::{
-    chip_handler::general::PublicIOQuery,
+    chip_handler::general::PublicValuesQuery,
     circuit_builder::{CircuitBuilder, SetTableSpec},
     e2e::ShardContext,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
+    scheme::PublicValues,
     structs::ProgramParams,
     tables::ram::ram_circuit::DynVolatileRamTableConfigTrait,
 };
 use ff_ext::FieldInto;
-use gkr_iop::RAMType;
-use multilinear_extensions::{
-    Expression, Fixed, StructuralWitIn, StructuralWitInType, ToExpr, WitIn,
-};
+use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
 
 pub trait NonVolatileTableConfigTrait<NVRAM>: Sized + Send + Sync {
     type Config: Sized + Send + Sync;
@@ -267,86 +263,35 @@ pub struct DynVolatileRamTableInitConfig<DVRAM: DynVolatileRamTable + Send + Syn
     params: ProgramParams,
 }
 
-impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfigTrait<DVRAM>
-    for DynVolatileRamTableInitConfig<DVRAM>
-{
-    type Config = DynVolatileRamTableInitConfig<DVRAM>;
-
-    fn construct_circuit<E: ExtensionField>(
-        cb: &mut CircuitBuilder<E>,
-        params: &ProgramParams,
-    ) -> Result<Self, CircuitBuilderError> {
-        cb.set_omc_init_only();
-        let max_len = DVRAM::max_len(params);
-        let addr = cb.create_structural_witin(
-            || "addr",
-            StructuralWitInType::EqualDistanceSequence {
-                max_len,
-                offset: DVRAM::offset_addr(params),
-                multi_factor: WORD_SIZE,
-                descending: DVRAM::DESCENDING,
-            },
-        );
-
-        let (init_expr, init_v) = if DVRAM::ZERO_INIT {
-            (vec![Expression::ZERO; DVRAM::V_LIMBS], None)
-        } else {
-            let init_v = (0..DVRAM::V_LIMBS)
-                .map(|i| cb.create_witin(|| format!("init_v_limb_{i}")))
-                .collect::<Vec<WitIn>>();
-            (init_v.iter().map(|v| v.expr()).collect_vec(), Some(init_v))
-        };
-
-        let init_table = [
-            vec![(DVRAM::RAM_TYPE as usize).into()],
-            vec![addr.expr()],
-            init_expr,
-            vec![Expression::ZERO], // Initial cycle.
-        ]
-        .concat();
-        cb.w_table_record(
-            || "init_table",
-            DVRAM::RAM_TYPE,
-            SetTableSpec {
-                len: None,
-                structural_witins: vec![addr],
-            },
-            init_table,
-        )?;
-
-        Ok(Self {
-            addr,
-            init_v,
-            phantom: PhantomData,
-            params: params.clone(),
-        })
+impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitConfig<DVRAM> {
+    fn find_record_index(final_mem: &[MemFinalRecord], addr: Addr) -> Option<usize> {
+        final_mem.binary_search_by_key(&addr, |rec| rec.addr).ok()
     }
 
-    /// TODO consider taking RowMajorMatrix as argument to save allocations.
     fn assign_instances<F: SmallField>(
-        config: &Self::Config,
+        config: &Self,
         num_witin: usize,
         num_structural_witin: usize,
-        final_mem: &[MemFinalRecord],
+        (final_mem, _pv, _num_instances): &(&[MemFinalRecord], &PublicValues, usize),
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         if final_mem.is_empty() {
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
         assert_eq!(num_structural_witin, 2);
 
-        let num_instances_padded = next_pow2_instance_padding(final_mem.len());
-        assert!(num_instances_padded <= DVRAM::max_len(&config.params));
+        let num_instances = final_mem.len();
+        assert!(num_instances <= DVRAM::max_len(&config.params));
         assert!(DVRAM::max_len(&config.params).is_power_of_two());
 
         // got some duplicated code segment to simplify parallel assignment flow
         if let Some(init_v) = config.init_v.as_ref() {
             let mut witness = RowMajorMatrix::<F>::new(
-                num_instances_padded,
+                num_instances,
                 num_witin,
                 InstancePaddingStrategy::Default,
             );
             let mut structural_witness = RowMajorMatrix::<F>::new(
-                num_instances_padded,
+                num_instances,
                 num_structural_witin,
                 InstancePaddingStrategy::Default,
             );
@@ -384,13 +329,15 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                         config.addr,
                         DVRAM::addr(&config.params, i) as u64
                     );
-                    *structural_row.last_mut().unwrap() = F::ONE;
+                    if i < num_instances {
+                        *structural_row.last_mut().unwrap() = F::ONE;
+                    }
                 });
 
             Ok([witness, structural_witness])
         } else {
             let mut structural_witness = RowMajorMatrix::<F>::new(
-                num_instances_padded,
+                num_instances,
                 num_structural_witin,
                 InstancePaddingStrategy::Default,
             );
@@ -415,9 +362,175 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
                         config.addr,
                         DVRAM::addr(&config.params, i) as u64
                     );
-                    *structural_row.last_mut().unwrap() = F::ONE;
+                    if i < num_instances {
+                        *structural_row.last_mut().unwrap() = F::ONE;
+                    }
                 });
             Ok([RowMajorMatrix::empty(), structural_witness])
+        }
+    }
+
+    /// support offset address and length from public values
+    fn assign_instances_dynamic<F: SmallField>(
+        config: &Self,
+        num_witin: usize,
+        num_structural_witin: usize,
+        (final_mem, pv, num_instances): &(&[MemFinalRecord], &PublicValues, usize),
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        // got some duplicated code segment to simplify parallel assignment flow
+        let start_addr = DVRAM::dynamic_addr(&config.params, 0, pv);
+        let start_index = Self::find_record_index(final_mem, start_addr);
+        let fetch_rec = |entry_index: usize| -> (Addr, Option<&MemFinalRecord>) {
+            let expected_addr = DVRAM::dynamic_addr(&config.params, entry_index, pv);
+            let rec = start_index
+                .and_then(|start| start.checked_add(entry_index))
+                .and_then(|idx| final_mem.get(idx));
+            (expected_addr, rec)
+        };
+
+        if let Some(init_v) = config.init_v.as_ref() {
+            let mut witness = RowMajorMatrix::<F>::new(
+                *num_instances,
+                num_witin,
+                InstancePaddingStrategy::Default,
+            );
+            let mut structural_witness = RowMajorMatrix::<F>::new(
+                *num_instances,
+                num_structural_witin,
+                InstancePaddingStrategy::Default,
+            );
+
+            witness
+                .par_rows_mut()
+                .zip_eq(structural_witness.par_rows_mut())
+                .enumerate()
+                .for_each(|(i, (row, structural_row))| {
+                    let (expected_addr, rec_opt) = fetch_rec(i);
+                    if cfg!(debug_assertions)
+                        && let Some(rec) = rec_opt
+                    {
+                        debug_assert_eq!(
+                            rec.addr, expected_addr,
+                            "rec.addr {:x} != expected {:x}",
+                            rec.addr, expected_addr,
+                        );
+                    }
+                    if let Some(rec) = rec_opt {
+                        if init_v.len() == 1 {
+                            // Assign value directly.
+                            set_val!(row, init_v[0], rec.init_value as u64);
+                        } else {
+                            // Assign value limbs.
+                            init_v.iter().enumerate().for_each(|(l, limb)| {
+                                let val = (rec.init_value >> (l * LIMB_BITS)) & LIMB_MASK;
+                                set_val!(row, limb, val as u64);
+                            });
+                        }
+                    }
+                    set_val!(structural_row, config.addr, expected_addr as u64);
+                    if i < *num_instances {
+                        *structural_row.last_mut().unwrap() = F::ONE;
+                    }
+                });
+
+            Ok([witness, structural_witness])
+        } else {
+            let mut structural_witness = RowMajorMatrix::<F>::new(
+                *num_instances,
+                num_structural_witin,
+                InstancePaddingStrategy::Default,
+            );
+
+            structural_witness
+                .par_rows_mut()
+                .enumerate()
+                .for_each(|(i, structural_row)| {
+                    let (expected_addr, rec_opt) = fetch_rec(i);
+                    if cfg!(debug_assertions)
+                        && let Some(rec) = rec_opt
+                    {
+                        debug_assert_eq!(
+                            rec.addr, expected_addr,
+                            "rec.addr {:x} != expected {:x}",
+                            rec.addr, expected_addr,
+                        );
+                    }
+                    set_val!(structural_row, config.addr, expected_addr as u64);
+                    if i < *num_instances {
+                        *structural_row.last_mut().unwrap() = F::ONE;
+                    }
+                });
+            Ok([RowMajorMatrix::empty(), structural_witness])
+        }
+    }
+}
+
+impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfigTrait<DVRAM>
+    for DynVolatileRamTableInitConfig<DVRAM>
+{
+    type Config = DynVolatileRamTableInitConfig<DVRAM>;
+    type WitnessInput<'a> = (&'a [MemFinalRecord], &'a PublicValues, usize);
+
+    fn construct_circuit<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<Self, CircuitBuilderError> {
+        if !DVRAM::DYNAMIC_OFFSET {
+            cb.set_omc_init_only();
+        }
+
+        let (addr_expr, addr) = DVRAM::addr_expr(cb, params)?;
+
+        let (init_expr, init_v) = if DVRAM::ZERO_INIT {
+            (vec![Expression::ZERO; DVRAM::V_LIMBS], None)
+        } else {
+            let init_v = (0..DVRAM::V_LIMBS)
+                .map(|i| cb.create_witin(|| format!("init_v_limb_{i}")))
+                .collect::<Vec<WitIn>>();
+            (init_v.iter().map(|v| v.expr()).collect_vec(), Some(init_v))
+        };
+
+        let init_table = [
+            vec![(DVRAM::RAM_TYPE as usize).into()],
+            vec![addr_expr.expr()],
+            init_expr,
+            vec![Expression::ZERO], // Initial cycle.
+        ]
+        .concat();
+        cb.w_table_record(
+            || "init_table",
+            DVRAM::RAM_TYPE,
+            SetTableSpec {
+                len: None,
+                structural_witins: vec![addr],
+            },
+            init_table,
+        )?;
+
+        Ok(Self {
+            addr,
+            init_v,
+            phantom: PhantomData,
+            params: params.clone(),
+        })
+    }
+
+    /// TODO consider taking RowMajorMatrix as argument to save allocations.
+    fn assign_instances<'a, F: SmallField>(
+        config: &Self::Config,
+        num_witin: usize,
+        num_structural_witin: usize,
+        data: &(&[MemFinalRecord], &PublicValues, usize),
+    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
+        let (final_mem, _, _) = &data;
+        if final_mem.is_empty() {
+            return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
+        }
+        assert_eq!(num_structural_witin, 2);
+        if DVRAM::DYNAMIC_OFFSET {
+            Self::assign_instances_dynamic(config, num_witin, num_structural_witin, data)
+        } else {
+            Self::assign_instances(config, num_witin, num_structural_witin, data)
         }
     }
 }
@@ -476,51 +589,38 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
     }
 
     /// TODO consider taking RowMajorMatrix as argument to save allocations.
+    #[allow(clippy::type_complexity)]
     pub fn assign_instances<F: SmallField>(
         &self,
         shard_ctx: &ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        final_mem: &[(&'static str, InstancePaddingStrategy, &[MemFinalRecord])],
+        final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         assert!(num_structural_witin == 0 || num_structural_witin == 1);
         let num_structural_witin = num_structural_witin.max(1);
 
-        let is_current_shard_mem_record = |record: &&MemFinalRecord| -> bool {
-            (shard_ctx.is_first_shard() && record.cycle == 0)
-                || shard_ctx.is_in_current_shard(record.cycle)
-        };
+        let is_current_shard_mem_record =
+            |range: Option<&Range<Addr>>, record: &&MemFinalRecord| -> bool {
+                shard_ctx.is_in_current_shard(record.cycle)
+                    || if let Some(range) = range {
+                        range.contains(&record.addr) && record.cycle == 0
+                    } else {
+                        shard_ctx.is_first_shard() && record.cycle == 0
+                    }
+            };
 
         // collect each raw mem belong to this shard, BEFORE padding length
-        let current_shard_mems_len: Vec<usize> = final_mem
+        let mem_lens: Vec<usize> = final_mem
             .par_iter()
-            .map(|(_, _, mem)| mem.par_iter().filter(is_current_shard_mem_record).count())
+            .map(|(_, range, mem)| {
+                mem.par_iter()
+                    .filter(|mem| is_current_shard_mem_record(range.as_ref(), mem))
+                    .count()
+            })
             .collect();
 
-        // deal with non-pow2 padding for first shard
-        // format Vec<(pad_len, pad_start_index)>
-        let padding_info = if shard_ctx.is_first_shard() {
-            final_mem
-                .iter()
-                .map(|(_, _, mem)| {
-                    assert!(!mem.is_empty());
-                    (
-                        next_pow2_instance_padding(mem.len()) - mem.len(),
-                        mem.len(),
-                        mem[0].ram_type,
-                    )
-                })
-                .collect_vec()
-        } else {
-            vec![(0, 0, RAMType::Undefined); final_mem.len()]
-        };
-
         // calculate mem length
-        let mem_lens = current_shard_mems_len
-            .iter()
-            .zip_eq(&padding_info)
-            .map(|(raw_len, (pad_len, _, _))| raw_len + pad_len)
-            .collect_vec();
         let total_records = mem_lens.iter().sum();
 
         let mut witness =
@@ -556,73 +656,39 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
             structural_witness_value_rest = structural_witness_r;
         }
 
-        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
-
         witness_mut_slices
             .par_iter_mut()
             .zip_eq(structural_witness_mut_slices.par_iter_mut())
             .zip_eq(final_mem.par_iter())
-            .zip_eq(padding_info.par_iter())
-            .for_each(
-                |(
-                    ((witness, structural_witness), (_, padding_strategy, final_mem)),
-                    (pad_size, pad_start_index, ram_type),
-                )| {
-                    let mem_record_count = witness
-                        .chunks_mut(num_witin)
-                        .zip_eq(structural_witness.chunks_mut(num_structural_witin))
-                        .zip(final_mem.iter().filter(is_current_shard_mem_record))
-                        .map(|((row, structural_row), rec)| {
-                            if self.final_v.len() == 1 {
-                                // Assign value directly.
-                                set_val!(row, self.final_v[0], rec.value as u64);
-                            } else {
-                                // Assign value limbs.
-                                self.final_v.iter().enumerate().for_each(|(l, limb)| {
-                                    let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
-                                    set_val!(row, limb, val as u64);
-                                });
-                            }
-                            let shard_cycle = rec.cycle - current_shard_offset_cycle;
-                            set_val!(row, self.final_cycle, shard_cycle);
-
-                            set_val!(row, self.ram_type, rec.ram_type as u64);
-                            set_val!(row, self.addr_subset, rec.addr as u64);
-                            *structural_row.last_mut().unwrap() = F::ONE;
-                        })
-                        .count();
-
-                    if *pad_size > 0 && shard_ctx.is_first_shard() {
-                        match padding_strategy {
-                            InstancePaddingStrategy::Custom(pad_func) => {
-                                witness[mem_record_count * num_witin..]
-                                    .chunks_mut(num_witin)
-                                    .zip_eq(
-                                        structural_witness
-                                            [mem_record_count * num_structural_witin..]
-                                            .chunks_mut(num_structural_witin),
-                                    )
-                                    .zip_eq(
-                                        std::iter::successors(Some(*pad_start_index), |n| {
-                                            Some(*n + 1)
-                                        })
-                                        .take(*pad_size),
-                                    )
-                                    .for_each(|((row, structural_row), pad_index)| {
-                                        set_val!(
-                                            row,
-                                            self.addr_subset,
-                                            pad_func(pad_index as u64, self.addr_subset.id as u64)
-                                        );
-                                        set_val!(row, self.ram_type, *ram_type as u64);
-                                        *structural_row.last_mut().unwrap() = F::ONE;
-                                    });
-                            }
-                            _ => unimplemented!(),
+            .for_each(|((witness, structural_witness), (_, range, final_mem))| {
+                witness
+                    .chunks_mut(num_witin)
+                    .zip_eq(structural_witness.chunks_mut(num_structural_witin))
+                    .zip(
+                        final_mem
+                            .iter()
+                            .filter(|record| is_current_shard_mem_record(range.as_ref(), record)),
+                    )
+                    .for_each(|((row, structural_row), rec)| {
+                        if self.final_v.len() == 1 {
+                            // Assign value directly.
+                            set_val!(row, self.final_v[0], rec.value as u64);
+                        } else {
+                            // Assign value limbs.
+                            self.final_v.iter().enumerate().for_each(|(l, limb)| {
+                                let val = (rec.value >> (l * LIMB_BITS)) & LIMB_MASK;
+                                set_val!(row, limb, val as u64);
+                            });
                         }
-                    }
-                },
-            );
+
+                        let shard_cycle = shard_ctx.aligned_current_ts(rec.cycle);
+                        set_val!(row, self.final_cycle, shard_cycle);
+
+                        set_val!(row, self.ram_type, rec.ram_type as u64);
+                        set_val!(row, self.addr_subset, rec.addr as u64);
+                        *structural_row.last_mut().unwrap() = F::ONE;
+                    });
+            });
 
         Ok([witness, structural_witness])
     }
@@ -639,7 +705,8 @@ mod tests {
         witness::LkMultiplicity,
     };
 
-    use ceno_emul::WORD_SIZE;
+    use crate::scheme::PublicValues;
+    use ceno_emul::{CENO_PLATFORM, WORD_SIZE};
     use ff_ext::GoldilocksExt2 as E;
     use gkr_iop::RAMType;
     use itertools::Itertools;
@@ -657,12 +724,16 @@ mod tests {
         let def_params = ProgramParams::default();
         let lkm = LkMultiplicity::default().into_finalize_result();
 
+        let pv = PublicValues {
+            hint_start_addr: CENO_PLATFORM.hints.start,
+            ..Default::default()
+        };
         // ensure non-empty padding is required
         let some_non_2_pow = 26;
         let input = (0..some_non_2_pow)
             .map(|i| MemFinalRecord {
                 ram_type: RAMType::Memory,
-                addr: HintsTable::addr(&def_params, i),
+                addr: HintsTable::dynamic_addr(&def_params, i, &pv),
                 cycle: 0,
                 value: 0,
                 init_value: 0,
@@ -673,7 +744,7 @@ mod tests {
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
             &lkm.0,
-            &input,
+            &(&input, &pv, 0),
         )
         .unwrap();
 
