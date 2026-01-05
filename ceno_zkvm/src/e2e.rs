@@ -433,14 +433,15 @@ impl<'a> ShardContext<'a> {
                     "addr {addr_raw:x} prev_cycle {prev_cycle}, is_heap {is_heap}, is_hint {is_hint}",
                 );
                 // 2. handle heap/hint initial reads outside the shard range.
-                if !self.shard_heap_addr_range.contains(&addr_raw) {
-                    let prev_shard_id = if is_heap {
-                        self.extract_shard_id_by_heap_addr(addr_raw)
-                    } else if is_hint {
-                        self.extract_shard_id_by_hint_addr(addr_raw)
-                    } else {
-                        unreachable!()
-                    };
+                let prev_shard_id = if is_heap && !self.shard_heap_addr_range.contains(&addr_raw) {
+                    Some(self.extract_shard_id_by_heap_addr(addr_raw))
+                } else if is_hint && !self.shard_hint_addr_range.contains(&addr_raw) {
+                    Some(self.extract_shard_id_by_hint_addr(addr_raw))
+                } else {
+                    // dynamic init in current shard, skip and do nothing
+                    None
+                };
+                if let Some(prev_shard_id) = prev_shard_id {
                     let ram_record = self
                         .read_records_tbs
                         .as_mut()
