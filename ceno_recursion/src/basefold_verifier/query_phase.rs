@@ -434,6 +434,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     let opening_idxes: Array<C, Var<C::N>> =
                         builder.dyn_array(round.openings.len());
                     let opened_values_offset: Var<C::N> = builder.constant(C::N::ZERO);
+
                     builder
                         .range(0, round.openings.len())
                         .for_each(|i_vec, builder| {
@@ -447,13 +448,14 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                                 );
                             });
                         });
+
                     let dimensions: Array<C, Var<C::N>> =
                         builder.dyn_array(opened_values.length.clone());
 
                     builder
                         .range(0, opened_values.length.clone())
                         .for_each(|i_vec, builder| {
-                            let i = i_vec[0];
+                            let i = i_vec[0];                   
                             let opening_idx = builder.get(&opening_idxes, i_vec[0]);
                             let opening = builder.get(&round.openings, opening_idx);
                             let log2_height: Var<C::N> =
@@ -540,7 +542,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     // mmcs_verify_batch(builder, mmcs_verifier_input);
                 });
             builder.cycle_tracker_end("Batching and first FRI round");
-
+            
             let opening_ext = query.commit_phase_openings;
 
             // fold 1st codeword
@@ -666,6 +668,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
             builder.assert_eq::<Ext<C::F, C::EF>>(final_value, folded);
         },
     );
+
     // 1. check initial claim match with first round sumcheck value
     let batch_coeffs_offset: Var<C::N> = builder.constant(C::N::ZERO);
     let expected_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);

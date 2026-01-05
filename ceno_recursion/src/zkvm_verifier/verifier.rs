@@ -413,10 +413,10 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
-    if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-        builder
-            .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
+    builder
+        .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+        .then_or_else(|builder| {
+            if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
                 let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
                 let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
 
@@ -438,11 +438,9 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         perm: zkvm_proof_input.fixed_perm.clone(),
                     },
                 );
-            });
-    } else if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
-        builder
-            .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
+            }
+        }, |builder| {
+            if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref(){
                 let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
                 let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
 
@@ -464,8 +462,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         perm: zkvm_proof_input.fixed_perm.clone(),
                     },
                 );
-            });
-    }
+            }
+        });
 
     batch_verify(
         builder,
