@@ -15,7 +15,7 @@ use serde::Deserialize;
 
 use super::{basefold::*, extension_mmcs::*, mmcs::*, rs::*, utils::*};
 use crate::{
-    arithmetics::{_print_ext_arr, _print_felt_arr, eq_eval_with_index},
+    arithmetics::eq_eval_with_index,
     tower_verifier::{binding::*, program::interpolate_uni_poly},
 };
 
@@ -639,7 +639,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     opened_values,
                     proof,
                 };
-
                 ext_mmcs_verify_batch::<C>(builder, ext_mmcs_verifier_input);
 
                 let r = builder.get(&input.fold_challenges, i_plus_one);
@@ -650,7 +649,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 builder.assign(&folded, new_folded);
                 builder.assign(&i, i_plus_one);
             });
-
             builder.cycle_tracker_end("FRI rounds");
             // assert that final_value[i] = folded
             let final_idx: Var<C::N> = builder.constant(C::N::ZERO);
@@ -665,11 +663,9 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     );
                 });
             let final_value = builder.get(&final_codeword.values, final_idx);
-
             builder.assert_eq::<Ext<C::F, C::EF>>(final_value, folded);
         },
     );
-
     // 1. check initial claim match with first round sumcheck value
     let batch_coeffs_offset: Var<C::N> = builder.constant(C::N::ZERO);
     let expected_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
@@ -677,7 +673,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
         let round = builder.iter_ptr_get(&input.rounds, ptr_vec[0]);
         iter_zip!(builder, round.openings).for_each(|ptr_vec, builder| {
             let opening = builder.iter_ptr_get(&round.openings, ptr_vec[0]);
-
             // TODO: filter out openings with num_var >= get_basecode_msg_size_log::<C>()
             builder.if_ne(opening.num_var, zero_flag).then(|builder| {
                 let var_diff: Var<C::N> =
@@ -730,12 +725,10 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
     let right: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let one: Var<C::N> = builder.constant(C::N::ONE);
     let j: Var<C::N> = builder.constant(C::N::ZERO);
-
     // \sum_i eq(p, [r,i]) * f(r,i)
     iter_zip!(builder, input.rounds).for_each(|ptr_vec, builder| {
         let round = builder.iter_ptr_get(&input.rounds, ptr_vec[0]);
         // TODO: filter out openings with num_var >= get_basecode_msg_size_log::<C>()
-
         iter_zip!(builder, round.openings).for_each(|ptr_vec, builder| {
             let opening = builder.iter_ptr_get(&round.openings, ptr_vec[0]);
 
@@ -772,7 +765,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
             });
         });
     });
-
     builder.assert_eq::<Var<C::N>>(j, input.proof.final_message.len());
     builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
 }

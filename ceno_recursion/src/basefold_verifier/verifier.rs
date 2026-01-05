@@ -93,11 +93,11 @@ pub fn batch_verify<C: Config>(
             builder.assign(&diff_product_width, diff_product_width * diff);
         });
     });
+    // Check that at least one num_var is equal to max_num_var
     let zero: Var<C::N> = builder.eval(C::N::ZERO);
     builder.assert_eq::<Var<C::N>>(diff_product_num_var, zero);
     builder.assert_eq::<Var<C::N>>(diff_product_width, zero);
 
-    // Check that at least one num_var is equal to max_num_var
     let num_rounds: Var<C::N> =
         builder.eval(max_num_var - Usize::from(get_basecode_msg_size_log()));
 
