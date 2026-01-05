@@ -455,7 +455,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     builder
                         .range(0, opened_values.length.clone())
                         .for_each(|i_vec, builder| {
-                            let i = i_vec[0];                   
+                            let i = i_vec[0];
                             let opening_idx = builder.get(&opening_idxes, i_vec[0]);
                             let opening = builder.get(&round.openings, opening_idx);
                             let log2_height: Var<C::N> =
@@ -542,7 +542,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     // mmcs_verify_batch(builder, mmcs_verifier_input);
                 });
             builder.cycle_tracker_end("Batching and first FRI round");
-            
+
             let opening_ext = query.commit_phase_openings;
 
             // fold 1st codeword

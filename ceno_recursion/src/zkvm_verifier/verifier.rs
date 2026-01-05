@@ -415,55 +415,58 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     builder
         .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-        .then_or_else(|builder| {
-            if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+        .then_or_else(
+            |builder| {
+                if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
+                    let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+                    let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
 
-                let log2_max_codeword_size: Var<C::N> = builder.constant(
-                    C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
-                );
+                    let log2_max_codeword_size: Var<C::N> = builder.constant(
+                        C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
+                    );
 
-                builder.set(
-                    &rounds,
-                    1,
-                    RoundVariable {
-                        commit: BasefoldCommitmentVariable {
-                            commit: MmcsCommitmentVariable {
-                                value: commit_array,
+                    builder.set(
+                        &rounds,
+                        1,
+                        RoundVariable {
+                            commit: BasefoldCommitmentVariable {
+                                commit: MmcsCommitmentVariable {
+                                    value: commit_array,
+                                },
+                                log2_max_codeword_size: log2_max_codeword_size.into(),
                             },
-                            log2_max_codeword_size: log2_max_codeword_size.into(),
+                            openings: fixed_openings.clone(),
+                            perm: zkvm_proof_input.fixed_perm.clone(),
                         },
-                        openings: fixed_openings.clone(),
-                        perm: zkvm_proof_input.fixed_perm.clone(),
-                    },
-                );
-            }
-        }, |builder| {
-            if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref(){
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+                    );
+                }
+            },
+            |builder| {
+                if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
+                    let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
+                    let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
 
-                let log2_max_codeword_size: Var<C::N> = builder.constant(
-                    C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
-                );
+                    let log2_max_codeword_size: Var<C::N> = builder.constant(
+                        C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
+                    );
 
-                builder.set(
-                    &rounds,
-                    1,
-                    RoundVariable {
-                        commit: BasefoldCommitmentVariable {
-                            commit: MmcsCommitmentVariable {
-                                value: commit_array,
+                    builder.set(
+                        &rounds,
+                        1,
+                        RoundVariable {
+                            commit: BasefoldCommitmentVariable {
+                                commit: MmcsCommitmentVariable {
+                                    value: commit_array,
+                                },
+                                log2_max_codeword_size: log2_max_codeword_size.into(),
                             },
-                            log2_max_codeword_size: log2_max_codeword_size.into(),
+                            openings: fixed_openings.clone(),
+                            perm: zkvm_proof_input.fixed_perm.clone(),
                         },
-                        openings: fixed_openings.clone(),
-                        perm: zkvm_proof_input.fixed_perm.clone(),
-                    },
-                );
-            }
-        });
+                    );
+                }
+            },
+        );
 
     batch_verify(
         builder,
