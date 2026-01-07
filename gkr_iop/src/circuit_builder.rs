@@ -160,6 +160,10 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
 
+    // rw_selectors control read/write was activated or not within circuit
+    // rw_sel1 * rw_sel2 * rw_sel3 * ... * constraint
+    pub rw_selectors: Vec<Expression<E>>,
+
     pub(crate) phantom: PhantomData<E>,
 }
 
@@ -210,6 +214,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
             debug_map: HashMap::new(),
 
+            rw_selectors: vec![],
             phantom: std::marker::PhantomData,
         }
     }
@@ -441,7 +446,18 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
-        self.read_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+        if self.rw_selectors.is_empty() {
+            self.read_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+        } else {
+            let selector = self.rw_selectors.iter().cloned().product::<Expression<E>>();
+            self.read_rlc_record(
+                name_fn,
+                (ram_type as u64).into(),
+                record,
+                // selector * rlc_record + (1 - selector) * ONE
+                selector.clone() * rlc_record + (Expression::ONE - selector),
+            )
+        }
     }
 
     pub fn read_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
@@ -467,7 +483,18 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
-        self.write_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+        if self.rw_selectors.is_empty() {
+            self.write_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+        } else {
+            let selector = self.rw_selectors.iter().cloned().product::<Expression<E>>();
+            self.write_rlc_record(
+                name_fn,
+                (ram_type as u64).into(),
+                record,
+                // selector * rlc_record + (1 - selector) * ONE
+                selector.clone() * rlc_record + (Expression::ONE - selector),
+            )
+        }
     }
 
     pub fn write_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
@@ -547,6 +574,17 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         t
     }
 
+    pub fn conditional_rw_selector<T>(
+        &mut self,
+        selector: Expression<E>,
+        cb: impl FnOnce(&mut ConstraintSystem<E>) -> T,
+    ) -> T {
+        self.rw_selectors.push(selector);
+        let t = cb(self);
+        self.rw_selectors.pop();
+        t
+    }
+
     pub fn set_omc_init_only(&mut self) {
         self.with_omc_init_only = true;
     }
@@ -592,6 +630,17 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         cb: impl for<'b> FnOnce(&mut CircuitBuilder<'b, E>) -> Result<T, CircuitBuilderError>,
     ) -> Result<T, CircuitBuilderError> {
         self.cs.namespace(name_fn, |cs| {
+            let mut inner_circuit_builder = CircuitBuilder::<'_, E>::new(cs);
+            cb(&mut inner_circuit_builder)
+        })
+    }
+
+    pub fn conditional_rw_selector<T>(
+        &mut self,
+        selector: Expression<E>,
+        cb: impl for<'b> FnOnce(&mut CircuitBuilder<'b, E>) -> Result<T, CircuitBuilderError>,
+    ) -> Result<T, CircuitBuilderError> {
+        self.cs.conditional_rw_selector(selector, |cs| {
             let mut inner_circuit_builder = CircuitBuilder::<'_, E>::new(cs);
             cb(&mut inner_circuit_builder)
         })
@@ -1287,7 +1336,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                 assert_eq!(rhs_limbs.iter().map(|e| e.0).sum::<usize>(), 16);
 
                 self.require_reps_equal::<16, _, _>(
-                    ||format!(
+                    || format!(
                         "rotation internal {}, round {limb_i}, rot: {chunks_rotation}, delta: {delta}, {:?}",
                         name().into(),
                         sizes

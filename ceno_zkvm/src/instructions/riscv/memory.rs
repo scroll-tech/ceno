@@ -8,6 +8,8 @@ pub mod store;
 #[cfg(feature = "u16limb_circuit")]
 mod load_v2;
 #[cfg(feature = "u16limb_circuit")]
+mod loadstorew_v2;
+#[cfg(feature = "u16limb_circuit")]
 mod store_v2;
 #[cfg(test)]
 mod test;
