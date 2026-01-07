@@ -457,7 +457,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                         .for_each(|i_vec, builder| {
                             let i = i_vec[0];
                             let opening_idx = builder.get(&opening_idxes, i_vec[0]);
-                            let opening = builder.get(&round.openings, opening_idx);
+                            let opening = builder.get(&round.openings, opening_idx.clone());
                             let log2_height: Var<C::N> =
                                 builder.eval(opening.num_var + Usize::from(get_rate_log() - 1));
 
@@ -515,7 +515,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                             );
 
                             // reorder opened values according to the permutation
-                            let permuted_j = builder.iter_ptr_get(&round.perm, i);
+                            let permuted_j = builder.get(&round.perm, opening_idx);
                             builder.set_value(
                                 &perm_opened_values,
                                 permuted_j,
