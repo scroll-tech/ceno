@@ -457,7 +457,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                         .for_each(|i_vec, builder| {
                             let i = i_vec[0];
                             let opening_idx = builder.get(&opening_idxes, i_vec[0]);
-                            let opening = builder.get(&round.openings, opening_idx.clone());
+                            let opening = builder.get(&round.openings, opening_idx);
                             let log2_height: Var<C::N> =
                                 builder.eval(opening.num_var + Usize::from(get_rate_log() - 1));
 
