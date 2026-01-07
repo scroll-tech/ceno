@@ -40,6 +40,11 @@ pub struct ShiftImmConfig<E: ExtensionField> {
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
