@@ -162,6 +162,16 @@ impl<T> MemOp<T> {
     }
 }
 
+impl<T: Default> Default for MemOp<T> {
+    fn default() -> Self {
+        Self {
+            addr: Default::default(),
+            value: T::default(),
+            previous_cycle: 0,
+        }
+    }
+}
+
 pub type ReadOp = MemOp<Word>;
 pub type WriteOp = MemOp<Change<Word>>;
 

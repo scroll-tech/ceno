@@ -312,9 +312,21 @@ impl<E: ExtensionField> ConstraintSystem<E> {
                 .iter()
                 .cloned()
                 .product::<Expression<E>>();
+            // non_selected_rlc remove all non-constant expressions and treat as constant zero
+            let non_selected_rlc = self.rlc_chip_record(
+                std::iter::once(E::BaseField::from_canonical_u64(rom_type as u64).expr())
+                    .chain(record.clone())
+                    .map(|v| match v {
+                        c @ Expression::Constant(..) => c,
+                        _ => Expression::ZERO,
+                    })
+                    .collect(),
+            );
+            // sel * (alpha + \sum_i record_i * beta_i) + (1 - sel) * non_select_rlc
+            // for sel = 0 we do zero value lookup in table
             self.lk_expressions.push(
                 selector.expr() * rlc_record
-                    + (Expression::ONE - selector.expr()) * self.chip_record_alpha.expr(),
+                    + (Expression::ONE - selector.expr()) * non_selected_rlc,
             );
         }
         let path = self.ns.compute_path(name_fn().into());

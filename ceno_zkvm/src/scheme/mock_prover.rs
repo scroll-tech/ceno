@@ -1225,9 +1225,10 @@ Hints:
                         );
                         let w_selector_vec = w_selector.get_base_field_vec();
                         let write_rlc_records =
-                            filter_mle_by_predicate(write_rlc_records, |i, _v| {
-                                ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
-                                    && w_selector_vec[i] == E::BaseField::ONE
+                            filter_mle_by_predicate(write_rlc_records, |i, v| {
+                                (*v != E::ONE) &&
+                                (ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
+                                    && w_selector_vec[i] == E::BaseField::ONE)
                             });
                         if write_rlc_records.is_empty() {
                             continue;
@@ -1328,9 +1329,10 @@ Hints:
                             &challenges,
                         );
                         let r_selector_vec = r_selector.get_base_field_vec();
-                        let read_records = filter_mle_by_predicate(read_records, |i, _v| {
+                        let read_records = filter_mle_by_predicate(read_records, |i, v| {
+                            (*v != E::ONE) && (
                             ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
-                                && r_selector_vec[i] == E::BaseField::ONE
+                                && r_selector_vec[i] == E::BaseField::ONE)
                         });
                         if read_records.is_empty() {
                             continue;

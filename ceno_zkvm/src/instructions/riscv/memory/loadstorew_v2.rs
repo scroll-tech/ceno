@@ -118,13 +118,16 @@ impl<E: ExtensionField> Instruction<E> for LoadStoreWordInstruction<E> {
             + is_store.expr()
                 * Expression::Constant(Either::Left(E::BaseField::from_canonical_u32(SW as u32)));
 
+        let rd_expr: Expression<E> = is_load.expr() * rd_written.id.expr()
+            + is_store.expr() * Expression::from(ceno_emul::Instruction::RD_NULL);
+        let rs2_expr: Expression<E> = is_store.expr() * rs2.id.expr();
         // Fetch instruction
         circuit_builder.lk_fetch(&InsnRecord::new(
             vm_state.pc.expr(),
             insn_kind,
-            None,
+            Some(rd_expr),
             rs1.id.expr(),
-            rs2.id.expr(),
+            rs2_expr,
             imm.expr(),
             #[cfg(feature = "u16limb_circuit")]
             imm_sign.expr(),
@@ -187,6 +190,9 @@ impl<E: ExtensionField> Instruction<E> for LoadStoreWordInstruction<E> {
                     .rs1
                     .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
                 config
+                    .rs2
+                    .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
+                config
                     .rd_written
                     .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
                 config
@@ -221,7 +227,7 @@ impl<E: ExtensionField> Instruction<E> for LoadStoreWordInstruction<E> {
                 );
                 let prev_mem_value = Value::new_unchecked(memory_op.value.before);
 
-                let addr =
+                let unaligned_addr =
                     ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
                 config.vm_state.assign_instance(instance, shard_ctx, step)?;
                 config
@@ -229,6 +235,9 @@ impl<E: ExtensionField> Instruction<E> for LoadStoreWordInstruction<E> {
                     .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
                 config
                     .rs2
+                    .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
+                config
+                    .rd_written
                     .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
                 config
                     .mem_rw
@@ -242,9 +251,11 @@ impl<E: ExtensionField> Instruction<E> for LoadStoreWordInstruction<E> {
                 config
                     .prev_memory_value
                     .assign_value(instance, prev_mem_value);
-                config
-                    .memory_addr
-                    .assign_instance(instance, lk_multiplicity, addr.into())?;
+                config.memory_addr.assign_instance(
+                    instance,
+                    lk_multiplicity,
+                    unaligned_addr.into(),
+                )?;
             }
             _ => unreachable!(),
         }

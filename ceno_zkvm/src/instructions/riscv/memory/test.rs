@@ -291,22 +291,11 @@ fn impl_opcode_sh(imm: i32) {
     impl_opcode_store::<GoldilocksExt2, SHOp, ShInstruction<GoldilocksExt2>>(imm)
 }
 
-#[cfg(not(feature = "u16limb_circuit"))]
-fn impl_opcode_sw(imm: i32) {
-    assert_eq!(imm & 0x03, 0);
-    impl_opcode_store::<GoldilocksExt2, SWOp, SwInstruction<GoldilocksExt2>>(imm)
-}
-
-#[cfg(feature = "u16limb_circuit")]
 fn impl_opcode_sw(imm: i32) {
     assert_eq!(imm & 0x03, 0);
     impl_opcode_store_word_dynamic::<GoldilocksExt2, LoadStoreWordInstruction<GoldilocksExt2>>(
         imm, false,
     );
-}
-
-#[cfg(feature = "u16limb_circuit")]
-fn impl_opcode_sw_u16(imm: i32) {
     impl_opcode_store_word_dynamic::<BabyBearExt4, LoadStoreWordInstruction<BabyBearExt4>>(
         imm, false,
     );
@@ -317,9 +306,6 @@ fn impl_opcode_lw(imm: i32) {
     impl_opcode_store_word_dynamic::<GoldilocksExt2, LoadStoreWordInstruction<GoldilocksExt2>>(
         imm, true,
     );
-}
-
-fn impl_opcode_lw_u16(imm: i32) {
     impl_opcode_store_word_dynamic::<BabyBearExt4, LoadStoreWordInstruction<BabyBearExt4>>(
         imm, true,
     );
@@ -353,8 +339,6 @@ fn test_sw() {
 
     for &(imm,) in &cases {
         impl_opcode_sw(imm);
-        #[cfg(feature = "u16limb_circuit")]
-        impl_opcode_sw_u16(imm);
     }
 }
 
@@ -443,9 +427,6 @@ fn test_lw() {
     let cases = vec![(0,), (4,), (-4,)];
 
     for &(imm,) in &cases {
-        {
-            impl_opcode_lw(imm);
-            impl_opcode_lw_u16(imm);
-        }
+        impl_opcode_lw(imm);
     }
 }
