@@ -7,7 +7,6 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{
-            RIVInstruction,
             constants::{MEM_BITS, UInt},
             insn_base::{MemAddr, RWMEM, ReadRS1, ReadRS2, StateInOut, WriteRD},
         },
@@ -17,7 +16,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{
-    ByteAddr,
+    ByteAddr, InsnKind,
     InsnKind::{LW, SW},
     StepRecord,
 };
@@ -48,12 +47,17 @@ pub struct LoadStoreWordConfig<E: ExtensionField> {
     mem_rw: RWMEM,
 }
 
-pub struct LoadStoreWordInstruction<E, I>(PhantomData<(E, I)>);
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadStoreWordInstruction<E, I> {
+pub struct LoadStoreWordInstruction<E>(PhantomData<E>);
+impl<E: ExtensionField> Instruction<E> for LoadStoreWordInstruction<E> {
     type InstructionConfig = LoadStoreWordConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::LW, InsnKind::SW]
+    }
 
     fn name() -> String {
-        format!("{:?}", I::INST_KIND)
+        format!("{:?}_{:?}", InsnKind::LW, InsnKind::SW)
     }
 
     fn construct_circuit(

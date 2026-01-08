@@ -19,20 +19,13 @@ use crate::instructions::riscv::RIVInstruction;
 pub use crate::instructions::riscv::memory::load::LoadInstruction;
 #[cfg(feature = "u16limb_circuit")]
 pub use crate::instructions::riscv::memory::load_v2::LoadInstruction;
+pub use crate::instructions::riscv::memory::loadstorew_v2::LoadStoreWordInstruction;
 #[cfg(not(feature = "u16limb_circuit"))]
 pub use crate::instructions::riscv::memory::store::StoreInstruction;
 #[cfg(feature = "u16limb_circuit")]
 pub use crate::instructions::riscv::memory::store_v2::StoreInstruction;
 
 use ceno_emul::InsnKind;
-
-pub struct LwOp;
-
-impl RIVInstruction for LwOp {
-    const INST_KIND: InsnKind = InsnKind::LW;
-}
-
-pub type LwInstruction<E> = LoadInstruction<E, LwOp>;
 
 pub struct LhOp;
 impl RIVInstruction for LhOp {
@@ -57,12 +50,6 @@ impl RIVInstruction for LbuOp {
     const INST_KIND: InsnKind = InsnKind::LBU;
 }
 pub type LbuInstruction<E> = LoadInstruction<E, LbuOp>;
-
-pub struct SWOp;
-impl RIVInstruction for SWOp {
-    const INST_KIND: InsnKind = InsnKind::SW;
-}
-pub type SwInstruction<E> = StoreInstruction<E, SWOp, 2>;
 
 pub struct SHOp;
 impl RIVInstruction for SHOp {

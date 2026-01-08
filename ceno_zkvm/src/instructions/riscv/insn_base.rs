@@ -117,7 +117,7 @@ impl<E: ExtensionField> ReadRS1<E> {
         let id = circuit_builder.create_witin(|| "rs1_id");
         let prev_ts = circuit_builder.create_witin(|| "prev_rs1_ts");
         circuit_builder
-            .conditional_rw_selector(is_enable, |circuit_builder| {
+            .region_selector(is_enable, |circuit_builder| {
                 let (_, lt_cfg) = circuit_builder.register_read(
                     || "read_rs1",
                     id,
@@ -212,7 +212,7 @@ impl<E: ExtensionField> ReadRS2<E> {
         let id = circuit_builder.create_witin(|| "rs2_id");
         let prev_ts = circuit_builder.create_witin(|| "prev_rs2_ts");
         circuit_builder
-            .conditional_rw_selector(is_enable, |circuit_builder| {
+            .region_selector(is_enable, |circuit_builder| {
                 let (_, lt_cfg) = circuit_builder.register_read(
                     || "read_rs2",
                     id,
@@ -311,7 +311,7 @@ impl<E: ExtensionField> WriteRD<E> {
         let prev_ts = circuit_builder.create_witin(|| "prev_rd_ts");
         let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
         circuit_builder
-            .conditional_rw_selector(is_enable, |circuit_builder| {
+            .region_selector(is_enable, |circuit_builder| {
                 let (_, lt_cfg) = circuit_builder.register_write(
                     || "write_rd",
                     id,

@@ -160,9 +160,9 @@ pub struct ConstraintSystem<E: ExtensionField> {
 
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
 
-    // rw_selectors control read/write was activated or not within circuit
-    // rw_sel1 * rw_sel2 * rw_sel3 * ... * constraint
-    pub rw_selectors: Vec<Expression<E>>,
+    // region_selector control constrain was activated or not within circuit
+    #[serde(skip)]
+    pub region_selectors: Vec<Expression<E>>,
 
     pub(crate) phantom: PhantomData<E>,
 }
@@ -214,7 +214,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
             debug_map: HashMap::new(),
 
-            rw_selectors: vec![],
+            region_selectors: vec![],
             phantom: std::marker::PhantomData,
         }
     }
@@ -304,7 +304,19 @@ impl<E: ExtensionField> ConstraintSystem<E> {
                 .chain(record.clone())
                 .collect(),
         );
-        self.lk_expressions.push(rlc_record);
+        if self.region_selectors.is_empty() {
+            self.lk_expressions.push(rlc_record);
+        } else {
+            let selector = self
+                .region_selectors
+                .iter()
+                .cloned()
+                .product::<Expression<E>>();
+            self.lk_expressions.push(
+                selector.expr() * rlc_record
+                    + (Expression::ONE - selector.expr()) * self.chip_record_alpha.expr(),
+            );
+        }
         let path = self.ns.compute_path(name_fn().into());
         self.lk_expressions_namespace_map.push(path);
         // Since lk_expression is RLC(record) and when we're debugging
@@ -325,6 +337,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        assert!(self.region_selectors.is_empty());
         let rlc_record = self.rlc_chip_record(
             vec![(rom_type as usize).into()]
                 .into_iter()
@@ -362,6 +375,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        assert!(self.region_selectors.is_empty());
         let rlc_record = self.rlc_chip_record(record.clone());
         self.r_table_rlc_record(
             name_fn,
@@ -384,6 +398,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        assert!(self.region_selectors.is_empty());
         self.r_table_expressions.push(SetTableExpression {
             expr: rlc_record,
             table_spec,
@@ -406,6 +421,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        assert!(self.region_selectors.is_empty());
         let rlc_record = self.rlc_chip_record(record.clone());
         self.w_table_rlc_record(
             name_fn,
@@ -428,6 +444,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        assert!(self.region_selectors.is_empty());
         self.w_table_expressions.push(SetTableExpression {
             expr: rlc_record,
             table_spec,
@@ -446,18 +463,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
-        if self.rw_selectors.is_empty() {
-            self.read_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
-        } else {
-            let selector = self.rw_selectors.iter().cloned().product::<Expression<E>>();
-            self.read_rlc_record(
-                name_fn,
-                (ram_type as u64).into(),
-                record,
-                // selector * rlc_record + (1 - selector) * ONE
-                selector.clone() * rlc_record + (Expression::ONE - selector),
-            )
-        }
+        self.read_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
     }
 
     pub fn read_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
@@ -467,7 +473,18 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
         rlc_record: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
-        self.r_expressions.push(rlc_record);
+        if self.region_selectors.is_empty() {
+            self.r_expressions.push(rlc_record);
+        } else {
+            let selector = self
+                .region_selectors
+                .iter()
+                .cloned()
+                .product::<Expression<E>>();
+            // selector * rlc_record + (1 - selector) * ONE
+            self.r_expressions
+                .push(selector.clone() * rlc_record + (Expression::ONE - selector));
+        }
         let path = self.ns.compute_path(name_fn().into());
         self.r_expressions_namespace_map.push(path);
         // Since r_expression is RLC(record) and when we're debugging
@@ -483,18 +500,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
-        if self.rw_selectors.is_empty() {
-            self.write_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
-        } else {
-            let selector = self.rw_selectors.iter().cloned().product::<Expression<E>>();
-            self.write_rlc_record(
-                name_fn,
-                (ram_type as u64).into(),
-                record,
-                // selector * rlc_record + (1 - selector) * ONE
-                selector.clone() * rlc_record + (Expression::ONE - selector),
-            )
-        }
+        self.write_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
     }
 
     pub fn write_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
@@ -504,7 +510,18 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
         rlc_record: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
-        self.w_expressions.push(rlc_record);
+        if self.region_selectors.is_empty() {
+            self.w_expressions.push(rlc_record);
+        } else {
+            let selector = self
+                .region_selectors
+                .iter()
+                .cloned()
+                .product::<Expression<E>>();
+            // selector * rlc_record + (1 - selector) * ONE
+            self.w_expressions
+                .push(selector.clone() * rlc_record + (Expression::ONE - selector));
+        }
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);
         // Since w_expression is RLC(record) and when we're debugging
@@ -520,6 +537,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         slopes: Vec<Expression<E>>,
         final_sum: Vec<Expression<E>>,
     ) {
+        assert!(self.region_selectors.is_empty());
         assert_eq!(xs.len(), 7);
         assert_eq!(ys.len(), 7);
         assert_eq!(slopes.len(), 7);
@@ -542,11 +560,17 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             assert_zero_expr.degree() > 0,
             "constant expression assert to zero ?"
         );
-        if assert_zero_expr.degree() == 1 {
+        if self.region_selectors.is_empty() && assert_zero_expr.degree() == 1 {
             self.assert_zero_expressions.push(assert_zero_expr);
             let path = self.ns.compute_path(name_fn().into());
             self.assert_zero_expressions_namespace_map.push(path);
         } else {
+            let selector = self
+                .region_selectors
+                .iter()
+                .cloned()
+                .product::<Expression<E>>();
+            let assert_zero_expr = selector * assert_zero_expr;
             let assert_zero_expr = if assert_zero_expr.is_monomial_form() {
                 assert_zero_expr
             } else {
@@ -574,14 +598,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         t
     }
 
-    pub fn conditional_rw_selector<T>(
+    pub fn region_selector<T>(
         &mut self,
         selector: Expression<E>,
         cb: impl FnOnce(&mut ConstraintSystem<E>) -> T,
     ) -> T {
-        self.rw_selectors.push(selector);
+        self.region_selectors.push(selector);
         let t = cb(self);
-        self.rw_selectors.pop();
+        self.region_selectors.pop();
         t
     }
 
@@ -635,12 +659,12 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         })
     }
 
-    pub fn conditional_rw_selector<T>(
+    pub fn region_selector<T>(
         &mut self,
         selector: Expression<E>,
         cb: impl for<'b> FnOnce(&mut CircuitBuilder<'b, E>) -> Result<T, CircuitBuilderError>,
     ) -> Result<T, CircuitBuilderError> {
-        self.cs.conditional_rw_selector(selector, |cs| {
+        self.cs.region_selector(selector, |cs| {
             let mut inner_circuit_builder = CircuitBuilder::<'_, E>::new(cs);
             cb(&mut inner_circuit_builder)
         })
