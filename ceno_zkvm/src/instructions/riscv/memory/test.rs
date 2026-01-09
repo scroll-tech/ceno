@@ -1,5 +1,3 @@
-#[cfg(feature = "u16limb_circuit")]
-use crate::instructions::riscv::memory::LoadStoreWordInstruction;
 use crate::{
     Value,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
@@ -9,7 +7,10 @@ use crate::{
         riscv::{
             LbInstruction, LbuInstruction, LhInstruction, LhuInstruction, RIVInstruction,
             constants::UInt,
-            memory::{LbOp, LbuOp, LhOp, LhuOp, SBOp, SHOp, SbInstruction, ShInstruction},
+            memory::{
+                LbOp, LbuOp, LhOp, LhuOp, LoadStoreWordInstruction, SBOp, SHOp, SbInstruction,
+                ShInstruction,
+            },
         },
     },
     scheme::mock_prover::{MOCK_PC_START, MockProver},
@@ -140,7 +141,6 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
     MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
 }
 
-#[cfg(feature = "u16limb_circuit")]
 fn impl_opcode_store_word_dynamic<E: ExtensionField + Hash, Inst: Instruction<E>>(
     imm: i32,
     is_load: bool,
