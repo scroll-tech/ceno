@@ -1020,8 +1020,8 @@ impl EccVerifier {
         }
 
         // derive `sel_export`
-        let lsi_on_hypercube = repeat_n(E::ONE, out_rt.len() - 1)
-            .chain(once(E::ZERO))
+        let lsi_on_hypercube = once(E::ZERO)
+            .chain(repeat_n(E::ONE, out_rt.len() - 1))
             .collect_vec();
         let expected_sel_export =
             eq_eval(&out_rt, &lsi_on_hypercube) * eq_eval(&rt, &lsi_on_hypercube);

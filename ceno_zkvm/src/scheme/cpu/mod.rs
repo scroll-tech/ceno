@@ -96,9 +96,9 @@ impl CpuEccProver {
         let mut sel_add_mle: MultilinearExtension<'_, E> =
             sel_add.compute(&out_rt, &sel_add_ctx).unwrap();
 
-        // [1,1,...,1,0]
+        // the final sum is located at [1,...,1,0] (in big-endian)
         let last_evaluation_index = (1 << n) - 2;
-        let lsi_on_hypercube = repeat_n(E::ONE, n - 1).chain(once(E::ZERO)).collect_vec();
+        let lsi_on_hypercube = once(E::ZERO).chain(repeat_n(E::ONE, n - 1)).collect_vec();
         let mut sel_export = (0..(1 << n))
             .into_par_iter()
             .map(|_| E::ZERO)
@@ -235,7 +235,7 @@ impl CpuEccProver {
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
         );
 
-        // export x[1,...,1,0], y[1,...,1,0] for final result
+        // export x[1,...,1,0], y[1,...,1,0] for final result (using big-endian notation)
         let xp = xs.iter().map(|x| x.as_view_slice(2, 1)).collect_vec();
         let yp = ys.iter().map(|y| y.as_view_slice(2, 1)).collect_vec();
         let final_sum_x: SepticExtension<E::BaseField> = (xp.iter())
