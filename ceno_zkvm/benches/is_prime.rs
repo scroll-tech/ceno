@@ -68,6 +68,7 @@ fn is_prime_1(c: &mut Criterion) {
                             &[],
                             max_steps,
                             Checkpoint::PrepE2EProving,
+                            None,
                         );
                         let instant = std::time::Instant::now();
                         result.next_step();

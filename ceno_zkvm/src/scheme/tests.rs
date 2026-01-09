@@ -22,11 +22,10 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use gkr_iop::cpu::default_backend_config;
-use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
-use std::marker::PhantomData;
-
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::{MultilinearExtensionGpu, gpu_prover::*};
+use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
+use std::marker::PhantomData;
 #[cfg(feature = "gpu")]
 use std::sync::Arc;
 
@@ -147,12 +146,12 @@ fn test_rw_lk_expression_combination() {
                 &zkvm_cs,
                 &mut shard_ctx,
                 &config,
-                vec![StepRecord::default(); num_instances],
+                vec![&StepRecord::default(); num_instances],
             )
             .unwrap();
 
         // get proof
-        let prover = ZKVMProver::new(pk, device);
+        let prover = ZKVMProver::new_with_single_shard(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
         let mut rmm: Vec<_> = zkvm_witness
             .into_iter_sorted()
@@ -321,7 +320,7 @@ fn test_single_add_instance_e2e() {
     let vk = pk.get_vk_slow();
 
     // single instance
-    let mut vm = VMState::new(CENO_PLATFORM, program.clone().into());
+    let mut vm = VMState::new(CENO_PLATFORM.clone(), program.clone().into());
     let all_records = vm
         .iter_until_halt()
         .collect::<Result<Vec<StepRecord>, _>>()
@@ -330,7 +329,7 @@ fn test_single_add_instance_e2e() {
         .collect::<Vec<_>>();
     let mut add_records = vec![];
     let mut halt_records = vec![];
-    all_records.into_iter().for_each(|record| {
+    all_records.iter().for_each(|record| {
         let kind = record.insn().kind;
         match kind {
             ADD => add_records.push(record),
@@ -349,7 +348,7 @@ fn test_single_add_instance_e2e() {
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
     let device = create_prover(backend);
-    let prover = ZKVMProver::new(pk, device);
+    let prover = ZKVMProver::new_with_single_shard(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
@@ -381,7 +380,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(&shard_ctx, zkvm_witness, pi, transcript)

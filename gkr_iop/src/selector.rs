@@ -2,6 +2,7 @@ use std::iter::repeat_n;
 
 use rayon::iter::IndexedParallelIterator;
 
+use crate::{gkr::booleanhypercube::CYCLIC_POW2_5, utils::eq_eval_less_or_equal_than};
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
     Expression, WitnessId,
@@ -15,8 +16,7 @@ use rayon::{
     slice::ParallelSliceMut,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-
-use crate::{gkr::booleanhypercube::CYCLIC_POW2_5, utils::eq_eval_less_or_equal_than};
+use witness::next_pow2_instance_padding;
 
 /// Provide context for selector's instantiation at runtime
 #[derive(Clone, Debug)]
@@ -154,7 +154,10 @@ impl<E: ExtensionField> SelectorType<E> {
             }
             // compute true and false mle eq(1; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (eq() - sel(y; b[5..]))
             SelectorType::OrderedSparse32 { indices, .. } => {
-                assert_eq!(out_point.len(), ceil_log2(ctx.num_instances) + 5);
+                assert_eq!(
+                    out_point.len(),
+                    next_pow2_instance_padding(ctx.num_instances).ilog2() as usize + 5
+                );
 
                 let mut sel = build_eq_x_r_vec(out_point);
                 sel.par_chunks_exact_mut(CYCLIC_POW2_5.len())

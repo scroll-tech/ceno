@@ -27,51 +27,43 @@ pub mod gpu_prover {
         common::{
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
+            get_ceno_gpu_device_id,
             mle::{
                 build_mle_as_ceno, ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu,
                 rotation_selector_gpu,
             },
+            utils::HasUtils,
         },
     };
-    use cudarc::driver::{CudaDevice, DriverError};
+
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex, MutexGuard};
 
     pub type BB31Base = p3::babybear::BabyBear;
     pub type BB31Ext = ff_ext::BabyBearExt4;
 
-    pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> =
-        Lazy::new(|| CudaDevice::new(0));
-
     #[allow(clippy::type_complexity)]
     pub static CUDA_HAL: Lazy<
         Result<Arc<Mutex<CudaHalBB31>>, Box<dyn std::error::Error + Send + Sync>>,
     > = Lazy::new(|| {
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device init failed: {:?}", e))?;
-        device.bind_to_thread()?;
-
-        CudaHalBB31::new()
+        // can be overridden by env variable `CENO_GPU_DEVICE_ID`
+        let device_id: usize = get_ceno_gpu_device_id(0);
+        CudaHalBB31::new(device_id)
             .map(|hal| Arc::new(Mutex::new(hal)))
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     });
 
     pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalBB31>, String> {
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))?;
-        device
-            .bind_to_thread()
-            .map_err(|e| format!("Failed to bind device to thread: {:?}", e))?;
-
         let hal_arc = CUDA_HAL
             .as_ref()
             .map_err(|e| format!("HAL not available: {:?}", e))?;
-
-        hal_arc
+        let hal = hal_arc
             .lock()
-            .map_err(|e| format!("Failed to lock HAL: {:?}", e))
+            .map_err(|e| format!("Failed to lock HAL: {:?}", e))?;
+        hal.inner()
+            .synchronize()
+            .map_err(|e| format!("Failed to sync: {:?}", e))?;
+        Ok(hal)
     }
 }
 
@@ -158,6 +150,14 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     /// Get reference to internal GPU polynomial
     pub fn inner(&self) -> &GpuFieldType<'_> {
         &self.mle
+    }
+
+    pub fn as_view_chunks(&self, num_fanin: usize) -> Vec<GpuPolynomialExt<'a>> {
+        match &self.mle {
+            GpuFieldType::Base(_) => panic!("not supported yet"),
+            GpuFieldType::Ext(poly) => poly.as_view_chunk(num_fanin),
+            GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
+        }
     }
 
     /// Convert to CPU version of MultilinearExtension
@@ -408,7 +408,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let mut next_witness_buf = (0..num_non_zero_expr)
             .map(|_| {
                 cuda_hal
-                    .alloc_ext_elems_on_device(1 << num_vars)
+                    .alloc_ext_elems_on_device(1 << num_vars, false)
                     .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
             })
             .collect::<Result<Vec<_>, _>>()

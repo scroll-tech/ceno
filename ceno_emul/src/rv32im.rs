@@ -19,7 +19,7 @@ use ff_ext::ExtensionField;
 use itertools::Either;
 use multilinear_extensions::{Expression, impl_expr_from_unsigned};
 use num_derive::ToPrimitive;
-use strum_macros::{Display, EnumIter};
+use strum_macros::{Display, EnumCount, EnumIter};
 
 use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
 
@@ -149,7 +149,18 @@ pub enum InsnFormat {
 use InsnFormat::*;
 
 #[derive(
-    Clone, Copy, Display, Debug, PartialEq, Eq, PartialOrd, Ord, EnumIter, ToPrimitive, Default,
+    Clone,
+    Copy,
+    Display,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    EnumIter,
+    EnumCount,
+    ToPrimitive,
+    Default,
 )]
 #[allow(clippy::upper_case_acronyms)]
 pub enum InsnKind {

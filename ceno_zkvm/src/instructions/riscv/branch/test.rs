@@ -13,16 +13,14 @@ use crate::{
     structs::ProgramParams,
 };
 
-const A: Word = 0xbead1010;
-const B: Word = 0xef552020;
-
 #[test]
 fn test_opcode_beq() {
-    impl_opcode_beq(false);
-    impl_opcode_beq(true);
+    impl_opcode_beq(false, 0xbead1010, 0xef552020);
+    impl_opcode_beq(true, 0xef552020, 0xef552020);
+    impl_opcode_beq(true, 0xffffffff, 0xffffffff);
 }
 
-fn impl_opcode_beq(equal: bool) {
+fn impl_opcode_beq(take_branch: bool, a: u32, b: u32) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
@@ -37,18 +35,18 @@ fn impl_opcode_beq(equal: bool) {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, 8);
-    let pc_offset = if equal { 8 } else { PC_STEP_SIZE };
+    let pc_offset = if take_branch { 8 } else { PC_STEP_SIZE };
     let (raw_witin, lkm) = BeqInstruction::assign_instances(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
             insn_code,
-            A,
-            if equal { A } else { B },
+            a as Word,
+            b as Word,
             0,
         )],
     )
@@ -59,11 +57,12 @@ fn impl_opcode_beq(equal: bool) {
 
 #[test]
 fn test_opcode_bne() {
-    impl_opcode_bne(false);
-    impl_opcode_bne(true);
+    impl_opcode_bne(true, 0xbead1010, 0xef552020);
+    impl_opcode_bne(false, 0xef552020, 0xef552020);
+    impl_opcode_bne(false, 0xffffffff, 0xffffffff);
 }
 
-fn impl_opcode_bne(equal: bool) {
+fn impl_opcode_bne(take_branch: bool, a: u32, b: u32) {
     let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = cb
@@ -78,18 +77,18 @@ fn impl_opcode_bne(equal: bool) {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::BNE, 2, 3, 0, 8);
-    let pc_offset = if equal { PC_STEP_SIZE } else { 8 };
+    let pc_offset = if take_branch { 8 } else { PC_STEP_SIZE };
     let (raw_witin, lkm) = BneInstruction::assign_instances(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
             insn_code,
-            A,
-            if equal { A } else { B },
+            a as Word,
+            b as Word,
             0,
         )],
     )
@@ -128,7 +127,7 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -173,7 +172,7 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -225,7 +224,7 @@ fn impl_blt_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -277,7 +276,7 @@ fn impl_bge_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![StepRecord::new_b_instruction(
+        vec![&StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,

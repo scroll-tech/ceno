@@ -1,4 +1,7 @@
-use ceno_emul::{Addr, VMState, WORD_SIZE};
+use ceno_emul::{Addr, VM_REG_COUNT, WORD_SIZE};
+use ff_ext::ExtensionField;
+use gkr_iop::error::CircuitBuilderError;
+use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamInitCircuit};
 
 use crate::{
@@ -8,9 +11,15 @@ use crate::{
 
 mod ram_circuit;
 mod ram_impl;
-use crate::tables::ram::{
-    ram_circuit::LocalFinalRamCircuit,
-    ram_impl::{DynVolatileRamTableInitConfig, NonVolatileInitTableConfig},
+use crate::{
+    chip_handler::general::PublicValuesQuery,
+    circuit_builder::CircuitBuilder,
+    scheme::PublicValues,
+    structs::WitnessId,
+    tables::ram::{
+        ram_circuit::LocalFinalRamCircuit,
+        ram_impl::{DynVolatileRamTableInitConfig, NonVolatileInitTableConfig},
+    },
 };
 pub use ram_circuit::{DynVolatileRamTable, MemFinalRecord, MemInitRecord, NonVolatileTable};
 
@@ -22,17 +31,63 @@ impl DynVolatileRamTable for HeapTable {
     const V_LIMBS: usize = UINT_LIMBS;
     const ZERO_INIT: bool = true;
     const DESCENDING: bool = false;
+    const DYNAMIC_OFFSET: bool = true;
 
-    fn offset_addr(params: &ProgramParams) -> Addr {
-        params.platform.heap.start
+    fn addr_expr<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
+        let max_len = Self::max_len(params);
+        let addr = cb.create_structural_witin(
+            || "addr",
+            StructuralWitInType::EqualDistanceDynamicSequence {
+                max_len,
+                offset_instance_id: cb.query_heap_start_addr()?.0 as WitnessId,
+                multi_factor: WORD_SIZE,
+                descending: Self::DESCENDING,
+            },
+        );
+        Ok((addr.expr(), addr))
     }
 
-    fn end_addr(params: &ProgramParams) -> Addr {
-        params.platform.heap.end
+    fn max_len(params: &ProgramParams) -> usize {
+        let max_size = (params.platform.heap.end - params.platform.heap.start)
+            .div_ceil(WORD_SIZE as u32) as Addr;
+        1 << (u32::BITS - 1 - max_size.leading_zeros())
+    }
+
+    fn offset_addr(_params: &ProgramParams) -> Addr {
+        unimplemented!("heap offset is dynamic")
+    }
+
+    fn dynamic_offset_addr(params: &ProgramParams, pv: &PublicValues) -> Addr {
+        let heap_start = pv.heap_start_addr;
+        assert!(
+            heap_start >= params.platform.heap.start,
+            "heap_start {:x} < platform min heap start {:x}",
+            heap_start,
+            params.platform.heap.start
+        );
+        heap_start
+    }
+
+    fn end_addr(_params: &ProgramParams) -> Addr {
+        unimplemented!("heap end address is dynamic")
     }
 
     fn name() -> &'static str {
         "HeapTable"
+    }
+
+    fn dynamic_addr(params: &ProgramParams, entry_index: usize, pv: &PublicValues) -> Addr {
+        let addr = Self::dynamic_offset_addr(params, pv) + (entry_index * WORD_SIZE) as Addr;
+        assert!(
+            addr < params.platform.heap.end,
+            "heap addr {:x} >= platform max heap end {:x}",
+            addr,
+            params.platform.heap.end
+        );
+        addr
     }
 }
 
@@ -81,13 +136,59 @@ impl DynVolatileRamTable for HintsTable {
     const V_LIMBS: usize = UINT_LIMBS;
     const ZERO_INIT: bool = false;
     const DESCENDING: bool = false;
+    const DYNAMIC_OFFSET: bool = true;
 
-    fn offset_addr(params: &ProgramParams) -> Addr {
-        params.platform.hints.start
+    fn addr_expr<E: ExtensionField>(
+        cb: &mut CircuitBuilder<E>,
+        params: &ProgramParams,
+    ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
+        let max_len = Self::max_len(params);
+        let addr = cb.create_structural_witin(
+            || "addr",
+            StructuralWitInType::EqualDistanceDynamicSequence {
+                max_len,
+                offset_instance_id: cb.query_hint_start_addr()?.0 as WitnessId,
+                multi_factor: WORD_SIZE,
+                descending: Self::DESCENDING,
+            },
+        );
+        Ok((addr.expr(), addr))
     }
 
-    fn end_addr(params: &ProgramParams) -> Addr {
-        params.platform.hints.end
+    fn max_len(params: &ProgramParams) -> usize {
+        let max_size = (params.platform.hints.end - params.platform.hints.start)
+            .div_ceil(WORD_SIZE as u32) as Addr;
+        1 << (u32::BITS - 1 - max_size.leading_zeros())
+    }
+
+    fn offset_addr(_params: &ProgramParams) -> Addr {
+        unimplemented!("hints offset is dynamic")
+    }
+
+    fn dynamic_offset_addr(params: &ProgramParams, pv: &PublicValues) -> Addr {
+        let hint_start = pv.hint_start_addr;
+        assert!(
+            hint_start >= params.platform.hints.start,
+            "hint_start {:x} < platform min hint start {:x}",
+            hint_start,
+            params.platform.hints.start
+        );
+        hint_start
+    }
+
+    fn end_addr(_params: &ProgramParams) -> Addr {
+        unimplemented!("hints end address is dynamic")
+    }
+
+    fn dynamic_addr(params: &ProgramParams, entry_index: usize, pv: &PublicValues) -> Addr {
+        let addr = Self::dynamic_offset_addr(params, pv) + (entry_index * WORD_SIZE) as Addr;
+        assert!(
+            addr < params.platform.hints.end,
+            "hint addr {:x} >= platform max hint end {:x}",
+            addr,
+            params.platform.hints.end
+        );
+        addr
     }
 
     fn name() -> &'static str {
@@ -111,7 +212,7 @@ impl NonVolatileTable for RegTable {
     }
 
     fn len(_params: &ProgramParams) -> usize {
-        VMState::REG_COUNT.next_power_of_two()
+        VM_REG_COUNT.next_power_of_two()
     }
 }
 
@@ -156,4 +257,4 @@ impl NonVolatileTable for PubIOTable {
 }
 
 pub type PubIOInitCircuit<E> = PubIORamInitCircuit<E, PubIOTable>;
-pub type LocalFinalCircuit<'a, E> = LocalFinalRamCircuit<'a, UINT_LIMBS, E>;
+pub type LocalFinalCircuit<E> = LocalFinalRamCircuit<UINT_LIMBS, E>;

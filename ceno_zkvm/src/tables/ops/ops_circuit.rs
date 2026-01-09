@@ -19,7 +19,7 @@ pub struct OpsTableCircuit<E, R>(PhantomData<(E, R)>);
 impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP> {
     type TableConfig = OpTableConfig;
     type FixedInput = ();
-    type WitnessInput = ();
+    type WitnessInput<'a> = ();
 
     fn name() -> String {
         format!("{:?}_OPS_ROM_TABLE", OP::ROM_TYPE)

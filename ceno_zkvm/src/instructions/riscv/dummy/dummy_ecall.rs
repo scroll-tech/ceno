@@ -48,7 +48,11 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             false,
         )?;
 
-        let start_addr = cb.create_witin(|| "mem_addr");
+        let start_addr = if S::MEM_OPS_COUNT > 0 {
+            Some(cb.create_witin(|| "mem_addr"))
+        } else {
+            None
+        };
 
         let reg_writes = (0..S::REG_OPS_COUNT)
             .map(|i| {
@@ -97,7 +101,13 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             .dummy_insn
             .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
-        set_val!(instance, config.start_addr, u64::from(ops.mem_ops[0].addr));
+        if S::MEM_OPS_COUNT > 0 {
+            set_val!(
+                instance,
+                config.start_addr.as_ref().unwrap(),
+                u64::from(ops.mem_ops[0].addr)
+            );
+        }
 
         // Assign registers.
         for ((value, writer), op) in config.reg_writes.iter().zip_eq(&ops.reg_ops) {
@@ -127,6 +137,6 @@ pub struct LargeEcallConfig<E: ExtensionField> {
 
     reg_writes: Vec<(UInt<E>, WriteRD<E>)>,
 
-    start_addr: WitIn,
+    start_addr: Option<WitIn>,
     mem_writes: Vec<(WitIn, Change<UInt<E>>, WriteMEM)>,
 }

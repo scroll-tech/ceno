@@ -15,17 +15,18 @@ ceno-examples = { path = "../examples-builder" }
 ceno_emul = { path = "../ceno_emul" }
 ceno_gpu = { workspace = true, optional = true }
 ceno_host = { path = "../ceno_host" }
-cudarc = { version = "0.13.0", features = ["driver", "cuda-version-from-build-system"], optional = true }
+cudarc = { workspace = true, optional = true }
 either.workspace = true
 ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
 mpcs.workspace = true
 multilinear_extensions.workspace = true
-once_cell = "1.21.3"
+once_cell.workspace = true
 p3.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+smallvec.workspace = true
 sumcheck.workspace = true
 transcript.workspace = true
 whir.workspace = true
@@ -44,9 +45,11 @@ tracing-subscriber.workspace = true
 bincode.workspace = true
 cfg-if.workspace = true
 clap.workspace = true
+crossbeam = { version = "*", optional = true }
 derive = { path = "../derive" }
 generic-array.workspace = true
 generic_static = "0.2"
+metrics.workspace = true
 num.workspace = true
 num-bigint = "0.4.6"
 parse-size = "1.1"
@@ -54,6 +57,7 @@ rand.workspace = true
 sp1-curves.workspace = true
 tempfile = "3.14"
 tiny-keccak.workspace = true
+typenum.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
@@ -74,7 +78,7 @@ default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel",
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 goldilocks = ["forbid_overflow", "nightly-features", "parallel", "bigint-rug"]
-gpu = ["gkr_iop/gpu", "dep:ceno_gpu"]
+gpu = ["gkr_iop/gpu", "dep:ceno_gpu", "dep:crossbeam"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 nightly-features = [

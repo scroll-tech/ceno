@@ -10,7 +10,7 @@ use crate::{
     tables::InsnRecord,
     witness::{LkMultiplicity, set_val},
 };
-use ceno_emul::{InsnKind::ECALL, PC_STEP_SIZE, Platform, StepRecord, Tracer};
+use ceno_emul::{FullTracer as Tracer, InsnKind::ECALL, PC_STEP_SIZE, Platform, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::FieldAlgebra;

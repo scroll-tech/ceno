@@ -17,7 +17,7 @@ use crate::{
     uint::Value,
     witness::{LkMultiplicity, set_val},
 };
-use ceno_emul::Tracer;
+use ceno_emul::FullTracer as Tracer;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use std::{iter, marker::PhantomData};
 
