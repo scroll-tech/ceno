@@ -3,6 +3,7 @@ use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     e2e::ShardContext,
+    instructions::riscv::constants::NUM_INSTANCE_IDX,
     state::{GlobalState, StateCircuit},
     structs::{
         ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
@@ -966,7 +967,7 @@ Hints:
     ) where
         E: LkMultiplicityKey,
     {
-        let pub_io_evals = pi
+        let mut pub_io_evals = pi
             .to_vec::<E>()
             .into_iter()
             .map(|v| Either::Right(E::from(*v.index(0))))
@@ -1030,6 +1031,9 @@ Hints:
 
             let chip_input = chip_input.unwrap();
             let num_rows = chip_input.num_instances();
+            // set pub_io_evals per chip
+            pub_io_evals[NUM_INSTANCE_IDX] =
+                Either::Right(E::from_canonical_usize(chip_input.num_instances()));
 
             let [witness, structural_witness] = &chip_input.witness_rmms;
             let mut witness = witness

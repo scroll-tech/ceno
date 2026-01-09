@@ -9,7 +9,8 @@ use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
     instructions::riscv::constants::{
-        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX,
+        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
+        NUM_INSTANCE_IDX, SHARD_ID_IDX,
     },
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
@@ -168,7 +169,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
 
-        let pi_evals = &vm_proof.pi_evals;
+        let mut pi_evals = vm_proof.pi_evals.clone();
 
         // make sure circuit index of chip proofs are
         // subset of that of self.vk.circuit_vks
@@ -200,7 +201,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify constant poly(s) evaluation result match
         // we can evaluate at this moment because constant always evaluate to same value
         // non-constant poly(s) will be verified in respective (table) proof accordingly
-        izip!(&vm_proof.raw_pi, pi_evals)
+        izip!(&vm_proof.raw_pi, &pi_evals)
             .enumerate()
             .try_for_each(|(i, (raw, eval))| {
                 if raw.len() == 1 && E::from(raw[0]) != *eval {
@@ -286,6 +287,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         {
             let num_instance: usize = proof.num_instances.iter().sum();
             assert!(num_instance > 0);
+
+            // set per chip num_instance
+            pi_evals[NUM_INSTANCE_IDX] = E::from_canonical_usize(num_instance);
+
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
@@ -360,7 +365,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 circuit_name,
                 circuit_vk,
                 proof,
-                pi_evals,
+                &pi_evals,
                 &vm_proof.raw_pi,
                 &mut transcript,
                 NUM_FANIN,
@@ -423,7 +428,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &[],
             &[],
             &[],
-            pi_evals,
+            &pi_evals,
             &challenges,
             &self.vk.initial_global_state_expr,
         )
@@ -434,7 +439,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &[],
             &[],
             &[],
-            pi_evals,
+            &pi_evals,
             &challenges,
             &self.vk.finalize_global_state_expr,
         )

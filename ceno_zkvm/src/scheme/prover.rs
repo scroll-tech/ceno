@@ -31,6 +31,7 @@ use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
+    instructions::riscv::constants::NUM_INSTANCE_IDX,
     scheme::{
         hal::{DeviceProvingKey, ProofInput},
         utils::build_main_witness,
@@ -307,8 +308,15 @@ impl<
                     witness: witness_mle,
                     fixed,
                     structural_witness,
-                    public_input: public_input.clone(),
-                    pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
+                    public_values: public_input.clone(),
+                    pub_io_evals: {
+                        let mut pi_evals: Vec<_> =
+                            pi_evals.iter().map(|p| Either::Right(*p)).collect();
+                        // set num_instances
+                        pi_evals[NUM_INSTANCE_IDX] =
+                            Either::Right(E::from_canonical_usize(num_instances.iter().sum()));
+                        pi_evals
+                    },
                     num_instances: num_instances.clone(),
                     has_ecc_ops: cs.has_ecc_ops(),
                 };
@@ -477,7 +485,7 @@ impl<
         if !cs.instance_openings().is_empty() {
             let span = entered_span!("pi::evals", profiling_2 = true);
             for &Instance(idx) in cs.instance_openings() {
-                let poly = &input.public_input[idx];
+                let poly = &input.public_values[idx];
                 pi_in_evals.insert(
                     idx,
                     poly.eval(input_opening_point[..poly.num_vars()].to_vec()),

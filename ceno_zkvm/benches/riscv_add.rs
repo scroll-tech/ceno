@@ -110,7 +110,7 @@ fn bench_add(c: &mut Criterion) {
                             fixed: vec![],
                             witness: polys,
                             structural_witness: vec![],
-                            public_input: vec![],
+                            public_values: vec![],
                             pub_io_evals: vec![],
                             num_instances: vec![num_instances],
                             has_ecc_ops: false,

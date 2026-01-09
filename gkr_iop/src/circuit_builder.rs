@@ -511,11 +511,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         name_fn: N,
         assert_zero_expr: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
-        assert!(
-            assert_zero_expr.degree() > 0,
-            "constant expression assert to zero ?"
-        );
-        if assert_zero_expr.degree() == 1 {
+        if assert_zero_expr.degree() <= 1 {
             self.assert_zero_expressions.push(assert_zero_expr);
             let path = self.ns.compute_path(name_fn().into());
             self.assert_zero_expressions_namespace_map.push(path);

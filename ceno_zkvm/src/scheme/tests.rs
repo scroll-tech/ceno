@@ -203,7 +203,7 @@ fn test_rw_lk_expression_combination() {
             fixed: vec![],
             witness: wits_in,
             structural_witness: structural_in,
-            public_input: vec![],
+            public_values: vec![],
             pub_io_evals: vec![],
             num_instances: vec![num_instances],
             has_ecc_ops: false,

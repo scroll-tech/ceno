@@ -82,6 +82,7 @@ pub struct PublicValues {
     pub heap_shard_len: u32,
     pub hint_start_addr: u32,
     pub hint_shard_len: u32,
+    pub num_instances: u32,
     pub public_io: Vec<u32>,
     pub shard_rw_sum: Vec<u32>,
 }
@@ -113,6 +114,8 @@ impl PublicValues {
             heap_shard_len,
             hint_start_addr,
             hint_shard_len,
+            // it will be set per chip proving
+            num_instances: 0,
             public_io,
             shard_rw_sum,
         }
@@ -132,6 +135,7 @@ impl PublicValues {
             vec![E::BaseField::from_canonical_u32(self.heap_shard_len)],
             vec![E::BaseField::from_canonical_u32(self.hint_start_addr)],
             vec![E::BaseField::from_canonical_u32(self.hint_shard_len)],
+            vec![E::BaseField::ZERO],
         ]
         .into_iter()
         .chain(

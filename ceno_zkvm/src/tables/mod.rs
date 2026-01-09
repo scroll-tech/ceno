@@ -48,6 +48,9 @@ pub trait TableCircuit<E: ExtensionField> {
         let r_table_len = cb.cs.r_table_expressions.len();
         let w_table_len = cb.cs.w_table_expressions.len();
         let lk_table_len = cb.cs.lk_table_expressions.len() * 2;
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
 
         let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(selector.expr());
@@ -62,7 +65,7 @@ pub trait TableCircuit<E: ExtensionField> {
                 // lk_record
                 (r_table_len + w_table_len..r_table_len + w_table_len + lk_table_len).collect_vec(),
                 // zero_record
-                vec![],
+                (0..zero_len).collect_vec(),
             ],
             Chip::new_from_cb(cb, 0),
         );
@@ -76,6 +79,9 @@ pub trait TableCircuit<E: ExtensionField> {
         }
         if lk_table_len > 0 {
             cb.cs.lk_selector = Some(selector_type.clone());
+        }
+        if zero_len > 0 {
+            cb.cs.zero_selector = Some(selector_type.clone());
         }
 
         let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);

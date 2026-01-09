@@ -1,4 +1,5 @@
 use ceno_emul::Addr;
+use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
@@ -6,7 +7,10 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelExtend, ParallelIterator,
 };
-use std::{marker::PhantomData, ops::Range};
+use std::{
+    marker::PhantomData,
+    ops::{Neg, Range},
+};
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 use super::{
@@ -24,6 +28,7 @@ use crate::{
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
+use p3::field::FieldAlgebra;
 
 pub trait NonVolatileTableConfigTrait<NVRAM>: Sized + Send + Sync {
     type Config: Sized + Send + Sync;
@@ -475,7 +480,16 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
-        if !DVRAM::DYNAMIC_OFFSET {
+        if let Some(instance) = DVRAM::dynamic_length_instance() {
+            cb.require_zero(
+                || "dynamic_length + (num_instance * -1)",
+                instance.expr()
+                    + Expression::Product(
+                        Box::new(cb.query_num_instance()?.expr()),
+                        Box::new(Expression::Constant(Either::Left(E::BaseField::ONE.neg()))),
+                    ),
+            )?;
+        } else {
             cb.set_omc_init_only();
         }
 
@@ -527,7 +541,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
         assert_eq!(num_structural_witin, 2);
-        if DVRAM::DYNAMIC_OFFSET {
+        if DVRAM::dynamic_length_instance().is_some() {
             Self::assign_instances_dynamic(config, num_witin, num_structural_witin, data)
         } else {
             Self::assign_instances(config, num_witin, num_structural_witin, data)
