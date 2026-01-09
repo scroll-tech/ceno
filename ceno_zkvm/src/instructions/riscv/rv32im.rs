@@ -1,6 +1,5 @@
 use super::{
     arith::AddInstruction, branch::BltuInstruction, ecall::HaltInstruction, jump::JalInstruction,
-    memory::LwInstruction,
 };
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::auipc::AuipcInstruction;
@@ -27,6 +26,7 @@ use crate::{
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
+            memory::LoadStoreWordInstruction,
             mulh::MulhuInstruction,
             shift::{SllInstruction, SrlInstruction},
             shift_imm::{SlliInstruction, SraiInstruction, SrliInstruction},
@@ -44,7 +44,7 @@ use crate::{
 use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
     Bn254FpMulSpec,
-    InsnKind::{self, *},
+    InsnKind::{self},
     KeccakSpec, LogPcCycleSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec,
     Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Sha256ExtendSpec, StepRecord, SyscallSpec,
     Uint256MulSpec,
@@ -66,7 +66,7 @@ use std::{
     cmp::Reverse,
     collections::{BTreeMap, HashMap},
 };
-use strum::{EnumCount, IntoEnumIterator};
+use strum::EnumCount;
 
 pub mod mmu;
 
@@ -121,12 +121,11 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub jalr_config: <JalrInstruction<E> as Instruction<E>>::InstructionConfig,
 
     // Memory Opcodes
-    pub lw_config: <LwInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub loadstore_word_config: <LoadStoreWordInstruction<E> as Instruction<E>>::InstructionConfig,
     pub lhu_config: <LhuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub lh_config: <LhInstruction<E> as Instruction<E>>::InstructionConfig,
     pub lbu_config: <LbuInstruction<E> as Instruction<E>>::InstructionConfig,
     pub lb_config: <LbInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub sw_config: <SwInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sh_config: <ShInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sb_config: <SbInstruction<E> as Instruction<E>>::InstructionConfig,
 
@@ -177,6 +176,7 @@ pub struct InstructionDispatchBuilder {
     record_buffer_count: usize,
     insn_to_record_buffer: Vec<Option<usize>>,
     type_to_record_buffer: HashMap<TypeId, usize>,
+    type_names: HashMap<TypeId, String>,
 }
 
 impl InstructionDispatchBuilder {
@@ -185,6 +185,7 @@ impl InstructionDispatchBuilder {
             record_buffer_count: 0,
             insn_to_record_buffer: vec![None; InsnKind::COUNT],
             type_to_record_buffer: HashMap::new(),
+            type_names: HashMap::new(),
         }
     }
 
@@ -217,6 +218,9 @@ impl InstructionDispatchBuilder {
             "Instruction circuit {} registered more than once",
             type_name::<I>()
         );
+        self.type_names
+            .entry(TypeId::of::<I>())
+            .or_insert_with(|| I::name());
     }
 
     pub fn to_dispatch_ctx(&self) -> InstructionDispatchCtx {
@@ -224,6 +228,7 @@ impl InstructionDispatchBuilder {
             self.record_buffer_count,
             self.insn_to_record_buffer.clone(),
             self.type_to_record_buffer.clone(),
+            self.type_names.clone(),
         )
     }
 }
@@ -240,84 +245,85 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let mut inst_dispatch_builder = InstructionDispatchBuilder::new();
 
         macro_rules! register_opcode_circuit {
-            ($insn_kind:ident, $instruction:ty, $inst_cells_map:ident) => {{
+            ($instruction:ty, $inst_cells_map:ident) => {{
                 inst_dispatch_builder.register_instruction_kinds::<E, $instruction>(
                     <$instruction as Instruction<E>>::inst_kinds(),
                 );
                 let config = cs.register_opcode_circuit::<$instruction>();
 
                 // update estimated cell
-                $inst_cells_map[$insn_kind as usize] = cs
-                    .get_cs(&<$instruction>::name())
-                    .as_ref()
-                    .map(|cs| {
-                        (cs.zkvm_v1_css.num_witin as u64
-                            + cs.zkvm_v1_css.num_structural_witin as u64
-                            + cs.zkvm_v1_css.num_fixed as u64)
-                            * (1 << cs.rotation_vars().unwrap_or(0))
-                    })
-                    .unwrap_or_default();
-
+                for inst_kind in <$instruction as Instruction<E>>::inst_kinds() {
+                    $inst_cells_map[*inst_kind as usize] = cs
+                        .get_cs(&<$instruction>::name())
+                        .as_ref()
+                        .map(|cs| {
+                            (cs.zkvm_v1_css.num_witin as u64
+                                + cs.zkvm_v1_css.num_structural_witin as u64
+                                + cs.zkvm_v1_css.num_fixed as u64)
+                                * (1 << cs.rotation_vars().unwrap_or(0))
+                        })
+                        .unwrap_or_default();
+                }
                 config
             }};
         }
         // opcode circuits
         // alu opcodes
-        let add_config = register_opcode_circuit!(ADD, AddInstruction<E>, inst_cells_map);
-        let sub_config = register_opcode_circuit!(SUB, SubInstruction<E>, inst_cells_map);
-        let and_config = register_opcode_circuit!(AND, AndInstruction<E>, inst_cells_map);
-        let or_config = register_opcode_circuit!(OR, OrInstruction<E>, inst_cells_map);
-        let xor_config = register_opcode_circuit!(XOR, XorInstruction<E>, inst_cells_map);
-        let sll_config = register_opcode_circuit!(SLL, SllInstruction<E>, inst_cells_map);
-        let srl_config = register_opcode_circuit!(SRL, SrlInstruction<E>, inst_cells_map);
-        let sra_config = register_opcode_circuit!(SRA, SraInstruction<E>, inst_cells_map);
-        let slt_config = register_opcode_circuit!(SLT, SltInstruction<E>, inst_cells_map);
-        let sltu_config = register_opcode_circuit!(SLTU, SltuInstruction<E>, inst_cells_map);
-        let mul_config = register_opcode_circuit!(MUL, MulInstruction<E>, inst_cells_map);
-        let mulh_config = register_opcode_circuit!(MULH, MulhInstruction<E>, inst_cells_map);
-        let mulhsu_config = register_opcode_circuit!(MULHSU, MulhsuInstruction<E>, inst_cells_map);
-        let mulhu_config = register_opcode_circuit!(MULHU, MulhuInstruction<E>, inst_cells_map);
-        let divu_config = register_opcode_circuit!(DIVU, DivuInstruction<E>, inst_cells_map);
-        let remu_config = register_opcode_circuit!(REMU, RemuInstruction<E>, inst_cells_map);
-        let div_config = register_opcode_circuit!(DIV, DivInstruction<E>, inst_cells_map);
-        let rem_config = register_opcode_circuit!(REM, RemInstruction<E>, inst_cells_map);
+        let add_config = register_opcode_circuit!(AddInstruction<E>, inst_cells_map);
+        let sub_config = register_opcode_circuit!(SubInstruction<E>, inst_cells_map);
+        let and_config = register_opcode_circuit!(AndInstruction<E>, inst_cells_map);
+        let or_config = register_opcode_circuit!(OrInstruction<E>, inst_cells_map);
+        let xor_config = register_opcode_circuit!(XorInstruction<E>, inst_cells_map);
+        let sll_config = register_opcode_circuit!(SllInstruction<E>, inst_cells_map);
+        let srl_config = register_opcode_circuit!(SrlInstruction<E>, inst_cells_map);
+        let sra_config = register_opcode_circuit!(SraInstruction<E>, inst_cells_map);
+        let slt_config = register_opcode_circuit!(SltInstruction<E>, inst_cells_map);
+        let sltu_config = register_opcode_circuit!(SltuInstruction<E>, inst_cells_map);
+        let mul_config = register_opcode_circuit!(MulInstruction<E>, inst_cells_map);
+        let mulh_config = register_opcode_circuit!(MulhInstruction<E>, inst_cells_map);
+        let mulhsu_config = register_opcode_circuit!(MulhsuInstruction<E>, inst_cells_map);
+        let mulhu_config = register_opcode_circuit!(MulhuInstruction<E>, inst_cells_map);
+        let divu_config = register_opcode_circuit!(DivuInstruction<E>, inst_cells_map);
+        let remu_config = register_opcode_circuit!(RemuInstruction<E>, inst_cells_map);
+        let div_config = register_opcode_circuit!(DivInstruction<E>, inst_cells_map);
+        let rem_config = register_opcode_circuit!(RemInstruction<E>, inst_cells_map);
 
         // alu with imm opcodes
-        let addi_config = register_opcode_circuit!(ADDI, AddiInstruction<E>, inst_cells_map);
-        let andi_config = register_opcode_circuit!(ANDI, AndiInstruction<E>, inst_cells_map);
-        let ori_config = register_opcode_circuit!(ORI, OriInstruction<E>, inst_cells_map);
-        let xori_config = register_opcode_circuit!(XORI, XoriInstruction<E>, inst_cells_map);
-        let slli_config = register_opcode_circuit!(SLLI, SlliInstruction<E>, inst_cells_map);
-        let srli_config = register_opcode_circuit!(SRLI, SrliInstruction<E>, inst_cells_map);
-        let srai_config = register_opcode_circuit!(SRAI, SraiInstruction<E>, inst_cells_map);
-        let slti_config = register_opcode_circuit!(SLTI, SltiInstruction<E>, inst_cells_map);
-        let sltiu_config = register_opcode_circuit!(SLTIU, SltiuInstruction<E>, inst_cells_map);
+        let addi_config = register_opcode_circuit!(AddiInstruction<E>, inst_cells_map);
+        let andi_config = register_opcode_circuit!(AndiInstruction<E>, inst_cells_map);
+        let ori_config = register_opcode_circuit!(OriInstruction<E>, inst_cells_map);
+        let xori_config = register_opcode_circuit!(XoriInstruction<E>, inst_cells_map);
+        let slli_config = register_opcode_circuit!(SlliInstruction<E>, inst_cells_map);
+        let srli_config = register_opcode_circuit!(SrliInstruction<E>, inst_cells_map);
+        let srai_config = register_opcode_circuit!(SraiInstruction<E>, inst_cells_map);
+        let slti_config = register_opcode_circuit!(SltiInstruction<E>, inst_cells_map);
+        let sltiu_config = register_opcode_circuit!(SltiuInstruction<E>, inst_cells_map);
         #[cfg(feature = "u16limb_circuit")]
-        let lui_config = register_opcode_circuit!(LUI, LuiInstruction<E>, inst_cells_map);
+        let lui_config = register_opcode_circuit!(LuiInstruction<E>, inst_cells_map);
         #[cfg(feature = "u16limb_circuit")]
-        let auipc_config = register_opcode_circuit!(AUIPC, AuipcInstruction<E>, inst_cells_map);
+        let auipc_config = register_opcode_circuit!(AuipcInstruction<E>, inst_cells_map);
 
         // branching opcodes
-        let beq_config = register_opcode_circuit!(BEQ, BeqInstruction<E>, inst_cells_map);
-        let bne_config = register_opcode_circuit!(BNE, BneInstruction<E>, inst_cells_map);
-        let blt_config = register_opcode_circuit!(BLT, BltInstruction<E>, inst_cells_map);
-        let bltu_config = register_opcode_circuit!(BLTU, BltuInstruction<E>, inst_cells_map);
-        let bge_config = register_opcode_circuit!(BGE, BgeInstruction<E>, inst_cells_map);
-        let bgeu_config = register_opcode_circuit!(BGEU, BgeuInstruction<E>, inst_cells_map);
+        let beq_config = register_opcode_circuit!(BeqInstruction<E>, inst_cells_map);
+        let bne_config = register_opcode_circuit!(BneInstruction<E>, inst_cells_map);
+        let blt_config = register_opcode_circuit!(BltInstruction<E>, inst_cells_map);
+        let bltu_config = register_opcode_circuit!(BltuInstruction<E>, inst_cells_map);
+        let bge_config = register_opcode_circuit!(BgeInstruction<E>, inst_cells_map);
+        let bgeu_config = register_opcode_circuit!(BgeuInstruction<E>, inst_cells_map);
 
         // jump opcodes
-        let jal_config = register_opcode_circuit!(JAL, JalInstruction<E>, inst_cells_map);
-        let jalr_config = register_opcode_circuit!(JALR, JalrInstruction<E>, inst_cells_map);
+        let jal_config = register_opcode_circuit!(JalInstruction<E>, inst_cells_map);
+        let jalr_config = register_opcode_circuit!(JalrInstruction<E>, inst_cells_map);
 
         // memory opcodes
-        let lw_config = register_opcode_circuit!(LW, LwInstruction<E>, inst_cells_map);
-        let lhu_config = register_opcode_circuit!(LHU, LhuInstruction<E>, inst_cells_map);
-        let lh_config = register_opcode_circuit!(LH, LhInstruction<E>, inst_cells_map);
-        let lbu_config = register_opcode_circuit!(LBU, LbuInstruction<E>, inst_cells_map);
-        let lb_config = register_opcode_circuit!(LB, LbInstruction<E>, inst_cells_map);
-        let sw_config = register_opcode_circuit!(SW, SwInstruction<E>, inst_cells_map);
-        let sh_config = register_opcode_circuit!(SH, ShInstruction<E>, inst_cells_map);
-        let sb_config = register_opcode_circuit!(SB, SbInstruction<E>, inst_cells_map);
+        let loadstore_word_config =
+            register_opcode_circuit!(LoadStoreWordInstruction<E>, inst_cells_map);
+        let lhu_config = register_opcode_circuit!(LhuInstruction<E>, inst_cells_map);
+        let lh_config = register_opcode_circuit!(LhInstruction<E>, inst_cells_map);
+        let lbu_config = register_opcode_circuit!(LbuInstruction<E>, inst_cells_map);
+        let lb_config = register_opcode_circuit!(LbInstruction<E>, inst_cells_map);
+        let sh_config = register_opcode_circuit!(ShInstruction<E>, inst_cells_map);
+        let sb_config = register_opcode_circuit!(SbInstruction<E>, inst_cells_map);
 
         // ecall opcodes
         macro_rules! register_ecall_circuit {
@@ -444,10 +450,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             jal_config,
             jalr_config,
             // memory opcodes
-            sw_config,
+            loadstore_word_config,
             sh_config,
             sb_config,
-            lw_config,
             lhu_config,
             lh_config,
             lbu_config,
@@ -533,10 +538,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<JalrInstruction<E>>(cs, &self.jalr_config);
 
         // memory
-        fixed.register_opcode_circuit::<SwInstruction<E>>(cs, &self.sw_config);
+        fixed.register_opcode_circuit::<LoadStoreWordInstruction<E>>(
+            cs,
+            &self.loadstore_word_config,
+        );
         fixed.register_opcode_circuit::<ShInstruction<E>>(cs, &self.sh_config);
         fixed.register_opcode_circuit::<SbInstruction<E>>(cs, &self.sb_config);
-        fixed.register_opcode_circuit::<LwInstruction<E>>(cs, &self.lw_config);
         fixed.register_opcode_circuit::<LhuInstruction<E>>(cs, &self.lhu_config);
         fixed.register_opcode_circuit::<LhInstruction<E>>(cs, &self.lh_config);
         fixed.register_opcode_circuit::<LbuInstruction<E>>(cs, &self.lbu_config);
@@ -713,12 +720,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_opcode!(JalInstruction<E>, jal_config);
         assign_opcode!(JalrInstruction<E>, jalr_config);
         // memory
-        assign_opcode!(LwInstruction<E>, lw_config);
+        assign_opcode!(LoadStoreWordInstruction<E>, loadstore_word_config);
         assign_opcode!(LbInstruction<E>, lb_config);
         assign_opcode!(LbuInstruction<E>, lbu_config);
         assign_opcode!(LhInstruction<E>, lh_config);
         assign_opcode!(LhuInstruction<E>, lhu_config);
-        assign_opcode!(SwInstruction<E>, sw_config);
         assign_opcode!(ShInstruction<E>, sh_config);
         assign_opcode!(SbInstruction<E>, sb_config);
 
@@ -813,7 +819,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 pub struct InstructionDispatchCtx {
     insn_to_record_buffer: Vec<Option<usize>>,
     type_to_record_buffer: HashMap<TypeId, usize>,
-    insn_kinds: Vec<InsnKind>,
+    type_names: HashMap<TypeId, String>,
     circuit_record_buffers: Vec<Vec<StepRecord>>,
     fallback_record_buffers: Vec<Vec<StepRecord>>,
     ecall_record_buffers: BTreeMap<u32, Vec<StepRecord>>,
@@ -824,11 +830,12 @@ impl InstructionDispatchCtx {
         record_buffer_count: usize,
         insn_to_record_buffer: Vec<Option<usize>>,
         type_to_record_buffer: HashMap<TypeId, usize>,
+        type_names: HashMap<TypeId, String>,
     ) -> Self {
         Self {
             insn_to_record_buffer,
             type_to_record_buffer,
-            insn_kinds: InsnKind::iter().collect(),
+            type_names,
             circuit_record_buffers: (0..record_buffer_count).map(|_| Vec::new()).collect(),
             fallback_record_buffers: (0..InsnKind::COUNT).map(|_| Vec::new()).collect(),
             ecall_record_buffers: BTreeMap::new(),
@@ -872,28 +879,21 @@ impl InstructionDispatchCtx {
 
     fn trace_opcode_stats(&self) {
         let mut counts = self
-            .insn_kinds
+            .type_to_record_buffer
             .iter()
-            .map(|kind| (*kind, self.count_kind(*kind)))
+            .map(|(type_id, idx)| {
+                let count = self.circuit_record_buffers[*idx].len();
+                let name = self
+                    .type_names
+                    .get(type_id)
+                    .map(|s| s.as_str())
+                    .unwrap_or("unknown");
+                (name, count)
+            })
             .collect_vec();
         counts.sort_by_key(|(_, count)| Reverse(*count));
-        for (kind, count) in counts {
-            tracing::debug!("tracer generated {:?} {} records", kind, count);
-        }
-    }
-
-    fn count_kind(&self, kind: InsnKind) -> usize {
-        if kind == InsnKind::ECALL {
-            return self
-                .ecall_record_buffers
-                .values()
-                .map(|record_buffer| record_buffer.len())
-                .sum();
-        }
-        if let Some(idx) = self.insn_to_record_buffer[kind as usize] {
-            self.circuit_record_buffers[idx].len()
-        } else {
-            self.fallback_record_buffers[kind as usize].len()
+        for (name, count) in counts {
+            tracing::debug!("tracer generated {} {} records", name, count);
         }
     }
 

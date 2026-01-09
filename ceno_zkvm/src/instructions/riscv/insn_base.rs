@@ -19,7 +19,7 @@ use crate::{
 };
 use ceno_emul::FullTracer as Tracer;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use std::{iter, marker::PhantomData};
+use std::{array, iter, marker::PhantomData};
 
 #[derive(Debug)]
 pub struct StateInOut<E: ExtensionField> {
@@ -108,6 +108,34 @@ impl<E: ExtensionField> ReadRS1<E> {
         })
     }
 
+    pub fn construct_conditional_circuit(
+        circuit_builder: &mut CircuitBuilder<E>,
+        is_enable: Expression<E>,
+        rs1_read: RegisterExpr<E>,
+        cur_ts: WitIn,
+    ) -> Result<Self, ZKVMError> {
+        let id = circuit_builder.create_witin(|| "rs1_id");
+        let prev_ts = circuit_builder.create_witin(|| "prev_rs1_ts");
+        circuit_builder
+            .region_selector(is_enable, |circuit_builder| {
+                let (_, lt_cfg) = circuit_builder.register_read(
+                    || "read_rs1",
+                    id,
+                    prev_ts.expr(),
+                    cur_ts.expr() + Tracer::SUBCYCLE_RS1,
+                    rs1_read,
+                )?;
+
+                Ok(ReadRS1 {
+                    id,
+                    prev_ts,
+                    lt_cfg,
+                    _field_type: PhantomData,
+                })
+            })
+            .map_err(ZKVMError::CircuitBuilderError)
+    }
+
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
@@ -115,30 +143,42 @@ impl<E: ExtensionField> ReadRS1<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let op = step.rs1().expect("rs1 op");
-        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
-        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
-        let shard_cycle = step.cycle() - current_shard_offset_cycle;
-        set_val!(instance, self.id, op.register_index() as u64);
-        set_val!(instance, self.prev_ts, shard_prev_cycle);
+        if let Some(op) = step.rs1().as_ref() {
+            let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+            let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+            let shard_cycle = step.cycle() - current_shard_offset_cycle;
+            set_val!(instance, self.id, op.register_index() as u64);
+            set_val!(instance, self.prev_ts, shard_prev_cycle);
 
-        // Register read
-        self.lt_cfg.assign_instance(
-            instance,
-            lk_multiplicity,
-            shard_prev_cycle,
-            shard_cycle + Tracer::SUBCYCLE_RS1,
-        )?;
-        shard_ctx.send(
-            RAMType::Register,
-            op.addr,
-            op.register_index() as u64,
-            step.cycle() + Tracer::SUBCYCLE_RS1,
-            op.previous_cycle,
-            op.value,
-            None,
-        );
+            // Register read
+            self.lt_cfg.assign_instance(
+                instance,
+                lk_multiplicity,
+                shard_prev_cycle,
+                shard_cycle + Tracer::SUBCYCLE_RS1,
+            )?;
+            shard_ctx.send(
+                RAMType::Register,
+                op.addr,
+                op.register_index() as u64,
+                step.cycle() + Tracer::SUBCYCLE_RS1,
+                op.previous_cycle,
+                op.value,
+                None,
+            );
+            Ok(())
+        } else {
+            self.assign_instance_zero(instance, lk_multiplicity)
+        }
+    }
 
+    pub fn assign_instance_zero(
+        &self,
+        instance: &mut [<E as ExtensionField>::BaseField],
+        lk_multiplicity: &mut LkMultiplicity,
+    ) -> Result<(), ZKVMError> {
+        self.lt_cfg
+            .assign_instance(instance, lk_multiplicity, 0, 0)?;
         Ok(())
     }
 }
@@ -175,6 +215,34 @@ impl<E: ExtensionField> ReadRS2<E> {
         })
     }
 
+    pub fn construct_conditional_circuit(
+        circuit_builder: &mut CircuitBuilder<E>,
+        is_enable: Expression<E>,
+        rs2_read: RegisterExpr<E>,
+        cur_ts: WitIn,
+    ) -> Result<Self, ZKVMError> {
+        let id = circuit_builder.create_witin(|| "rs2_id");
+        let prev_ts = circuit_builder.create_witin(|| "prev_rs2_ts");
+        circuit_builder
+            .region_selector(is_enable, |circuit_builder| {
+                let (_, lt_cfg) = circuit_builder.register_read(
+                    || "read_rs2",
+                    id,
+                    prev_ts.expr(),
+                    cur_ts.expr() + Tracer::SUBCYCLE_RS2,
+                    rs2_read,
+                )?;
+
+                Ok(ReadRS2 {
+                    id,
+                    prev_ts,
+                    lt_cfg,
+                    _field_type: PhantomData,
+                })
+            })
+            .map_err(ZKVMError::CircuitBuilderError)
+    }
+
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
@@ -182,31 +250,44 @@ impl<E: ExtensionField> ReadRS2<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let op = step.rs2().expect("rs2 op");
-        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
-        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
-        let shard_cycle = step.cycle() - current_shard_offset_cycle;
-        set_val!(instance, self.id, op.register_index() as u64);
-        set_val!(instance, self.prev_ts, shard_prev_cycle);
+        if let Some(op) = step.rs2().as_ref() {
+            let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+            let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+            let shard_cycle = step.cycle() - current_shard_offset_cycle;
+            set_val!(instance, self.id, op.register_index() as u64);
+            set_val!(instance, self.prev_ts, shard_prev_cycle);
 
-        // Register read
-        self.lt_cfg.assign_instance(
-            instance,
-            lk_multiplicity,
-            shard_prev_cycle,
-            shard_cycle + Tracer::SUBCYCLE_RS2,
-        )?;
+            // Register read
+            self.lt_cfg.assign_instance(
+                instance,
+                lk_multiplicity,
+                shard_prev_cycle,
+                shard_cycle + Tracer::SUBCYCLE_RS2,
+            )?;
 
-        shard_ctx.send(
-            RAMType::Register,
-            op.addr,
-            op.register_index() as u64,
-            step.cycle() + Tracer::SUBCYCLE_RS2,
-            op.previous_cycle,
-            op.value,
-            None,
-        );
+            shard_ctx.send(
+                RAMType::Register,
+                op.addr,
+                op.register_index() as u64,
+                step.cycle() + Tracer::SUBCYCLE_RS2,
+                op.previous_cycle,
+                op.value,
+                None,
+            );
 
+            Ok(())
+        } else {
+            self.assign_instance_zero(instance, lk_multiplicity)
+        }
+    }
+
+    pub fn assign_instance_zero(
+        &self,
+        instance: &mut [<E as ExtensionField>::BaseField],
+        lk_multiplicity: &mut LkMultiplicity,
+    ) -> Result<(), ZKVMError> {
+        self.lt_cfg
+            .assign_instance(instance, lk_multiplicity, 0, 0)?;
         Ok(())
     }
 }
@@ -245,6 +326,36 @@ impl<E: ExtensionField> WriteRD<E> {
         })
     }
 
+    pub fn construct_conditional_circuit(
+        circuit_builder: &mut CircuitBuilder<E>,
+        is_enable: Expression<E>,
+        rd_written: RegisterExpr<E>,
+        cur_ts: WitIn,
+    ) -> Result<Self, ZKVMError> {
+        let id = circuit_builder.create_witin(|| "rd_id");
+        let prev_ts = circuit_builder.create_witin(|| "prev_rd_ts");
+        let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
+        circuit_builder
+            .region_selector(is_enable, |circuit_builder| {
+                let (_, lt_cfg) = circuit_builder.register_write(
+                    || "write_rd",
+                    id,
+                    prev_ts.expr(),
+                    cur_ts.expr() + Tracer::SUBCYCLE_RD,
+                    prev_value.register_expr(),
+                    rd_written,
+                )?;
+
+                Ok(WriteRD {
+                    id,
+                    prev_ts,
+                    prev_value,
+                    lt_cfg,
+                })
+            })
+            .map_err(ZKVMError::CircuitBuilderError)
+    }
+
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
@@ -252,8 +363,11 @@ impl<E: ExtensionField> WriteRD<E> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let op = step.rd().expect("rd op");
-        self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), &op)
+        if let Some(op) = step.rd().as_ref() {
+            self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)
+        } else {
+            self.assign_zero_op(instance, lk_multiplicity)
+        }
     }
 
     pub fn assign_op(
@@ -293,6 +407,17 @@ impl<E: ExtensionField> WriteRD<E> {
             Some(op.value.before),
         );
 
+        Ok(())
+    }
+
+    pub fn assign_zero_op(
+        &self,
+        instance: &mut [E::BaseField],
+        lk_multiplicity: &mut LkMultiplicity,
+    ) -> Result<(), ZKVMError> {
+        // Register write
+        self.lt_cfg
+            .assign_instance(instance, lk_multiplicity, 0, 0)?;
         Ok(())
     }
 }
@@ -398,8 +523,11 @@ impl WriteMEM {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let op = step.memory_op().unwrap();
-        self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), &op)
+        if let Some(op) = step.memory_op().as_ref() {
+            self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)
+        } else {
+            self.assign_zero_op(instance, lk_multiplicity)
+        }
     }
 
     pub fn assign_op<F: SmallField>(
@@ -432,6 +560,106 @@ impl WriteMEM {
             Some(op.value.before),
         );
 
+        Ok(())
+    }
+
+    pub fn assign_zero_op<F: SmallField>(
+        &self,
+        instance: &mut [F],
+        lk_multiplicity: &mut LkMultiplicity,
+    ) -> Result<(), ZKVMError> {
+        self.lt_cfg
+            .assign_instance(instance, lk_multiplicity, 0, 0)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct RWMEM {
+    pub prev_ts: WitIn,
+    pub lt_cfg: AssertLtConfig,
+}
+
+impl RWMEM {
+    pub fn construct_circuit<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        is_read: Expression<E>,
+        mem_addr: AddressExpr<E>,
+        prev_value: MemoryExpr<E>,
+        new_value: MemoryExpr<E>,
+        cur_ts: WitIn,
+    ) -> Result<Self, ZKVMError> {
+        let prev_ts = circuit_builder.create_witin(|| "prev_ts");
+
+        let (_, lt_cfg) = circuit_builder.memory_write(
+            || "write_memory",
+            &mem_addr,
+            prev_ts.expr(),
+            cur_ts.expr() + Tracer::SUBCYCLE_MEM,
+            prev_value.clone(),
+            array::from_fn(|i| {
+                is_read.expr() * prev_value[i].expr()
+                    + (Expression::ONE - is_read.expr()) * new_value[i].expr()
+            }),
+        )?;
+
+        Ok(RWMEM { prev_ts, lt_cfg })
+    }
+
+    pub fn assign_instance<E: ExtensionField>(
+        &self,
+        instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        if let Some(op) = step.memory_op().as_ref() {
+            self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)
+        } else {
+            self.assign_zero_op(instance, lk_multiplicity)
+        }
+    }
+
+    pub fn assign_op<F: SmallField>(
+        &self,
+        instance: &mut [F],
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        cycle: Cycle,
+        op: &WriteOp,
+    ) -> Result<(), ZKVMError> {
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let shard_cycle = cycle - current_shard_offset_cycle;
+        set_val!(instance, self.prev_ts, shard_prev_cycle);
+
+        self.lt_cfg.assign_instance(
+            instance,
+            lk_multiplicity,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_MEM,
+        )?;
+
+        shard_ctx.send(
+            RAMType::Memory,
+            op.addr,
+            op.addr.baddr().0 as u64,
+            cycle + Tracer::SUBCYCLE_MEM,
+            op.previous_cycle,
+            op.value.after,
+            Some(op.value.before),
+        );
+
+        Ok(())
+    }
+
+    pub fn assign_zero_op<F: SmallField>(
+        &self,
+        instance: &mut [F],
+        lk_multiplicity: &mut LkMultiplicity,
+    ) -> Result<(), ZKVMError> {
+        self.lt_cfg
+            .assign_instance(instance, lk_multiplicity, 0, 0)?;
         Ok(())
     }
 }

@@ -51,6 +51,6 @@ pub trait RIVInstruction {
 pub use arith::{AddInstruction, SubInstruction};
 pub use jump::{JalInstruction, JalrInstruction};
 pub use memory::{
-    LbInstruction, LbuInstruction, LhInstruction, LhuInstruction, LwInstruction, SbInstruction,
-    ShInstruction, SwInstruction,
+    LbInstruction, LbuInstruction, LhInstruction, LhuInstruction, LoadStoreWordInstruction,
+    SbInstruction, ShInstruction,
 };
