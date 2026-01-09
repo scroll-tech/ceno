@@ -302,16 +302,16 @@ impl<
                         self.device.transport_mles(&structural_mles)
                     });
 
-            let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
-            let input = ProofInput {
-                witness: witness_mle,
-                fixed,
-                structural_witness,
-                public_input: public_input.clone(),
-                pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
-                num_instances: num_instances.clone(),
-                has_ecc_ops: cs.has_ecc_ops(),
-            };
+                let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
+                let input = ProofInput {
+                    witness: witness_mle,
+                    fixed,
+                    structural_witness,
+                    public_input: public_input.clone(),
+                    pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
+                    num_instances: num_instances.clone(),
+                    has_ecc_ops: cs.has_ecc_ops(),
+                };
 
                 let (opcode_proof, pi_in_evals, input_opening_point) =
                     info_span!("[ceno] create_chip_proof", name = circuit_name.as_str()).in_scope(
