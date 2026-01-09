@@ -1,12 +1,12 @@
 use crate::{
     CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
-    chunked_vec::ChunkedVec,
     dense_addr_space::DenseAddrSpace,
     encode_rv32,
     syscalls::{SyscallEffects, SyscallWitness},
 };
 use ceno_rt::WORD_SIZE;
+use rayon::prelude::*;
 use smallvec::SmallVec;
 use std::{collections::BTreeMap, fmt, mem, sync::Arc};
 
@@ -40,8 +40,8 @@ pub struct StepRecord {
 }
 
 pub type NextAccessPair = SmallVec<[(WordAddr, Cycle); 1]>;
-pub type NextCycleAccess = ChunkedVec<NextAccessPair>;
-const ACCESSED_CHUNK_SIZE: usize = 1 << 20;
+pub type NextCycleAccess = Vec<NextAccessPair>;
+const NEXT_ACCESS_PREALLOC: usize = 101_194_444;
 
 fn init_mmio_min_max_access(
     platform: &Platform,
@@ -79,6 +79,7 @@ fn init_mmio_min_max_access(
 
 pub trait Tracer {
     type Record;
+    type Config;
 
     const SUBCYCLE_RS1: Cycle = 0;
     const SUBCYCLE_RS2: Cycle = 1;
@@ -86,14 +87,18 @@ pub trait Tracer {
     const SUBCYCLE_MEM: Cycle = 3;
     const SUBCYCLES_PER_INSN: Cycle = 4;
 
-    fn new(platform: &Platform) -> Self;
+    fn new(platform: &Platform, config: &Self::Config) -> Self;
 
-    fn with_next_accesses(platform: &Platform, next_accesses: Option<Arc<NextCycleAccess>>) -> Self
+    fn with_next_accesses(
+        platform: &Platform,
+        config: &Self::Config,
+        next_accesses: Option<Arc<NextCycleAccess>>,
+    ) -> Self
     where
         Self: Sized,
     {
         let _ = next_accesses;
-        Self::new(platform)
+        Self::new(platform, config)
     }
 
     fn advance(&mut self) -> Self::Record;
@@ -164,6 +169,133 @@ impl<T> MemOp<T> {
 
 pub type ReadOp = MemOp<Word>;
 pub type WriteOp = MemOp<Change<Word>>;
+
+/// `EmptyTracer` tracks minimal metadata only.
+#[derive(Debug)]
+pub struct EmptyTracer {
+    cycle: Cycle,
+    pc: Change<ByteAddr>,
+    last_kind: InsnKind,
+    last_rs1: Option<Word>,
+}
+
+impl Default for EmptyTracer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EmptyTracer {
+    pub const SUBCYCLE_RS1: Cycle = <Self as Tracer>::SUBCYCLE_RS1;
+    pub const SUBCYCLE_RS2: Cycle = <Self as Tracer>::SUBCYCLE_RS2;
+    pub const SUBCYCLE_RD: Cycle = <Self as Tracer>::SUBCYCLE_RD;
+    pub const SUBCYCLE_MEM: Cycle = <Self as Tracer>::SUBCYCLE_MEM;
+    pub const SUBCYCLES_PER_INSN: Cycle = <Self as Tracer>::SUBCYCLES_PER_INSN;
+
+    pub fn new() -> Self {
+        Self {
+            cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
+            pc: Change::default(),
+            last_kind: InsnKind::INVALID,
+            last_rs1: None,
+        }
+    }
+
+    pub fn last_insn_kind(&self) -> InsnKind {
+        self.last_kind
+    }
+
+    pub fn last_rs1_value(&self) -> Option<Word> {
+        self.last_rs1
+    }
+}
+
+impl Tracer for EmptyTracer {
+    type Record = ();
+    type Config = ();
+
+    fn new(_platform: &Platform, _config: &Self::Config) -> Self {
+        EmptyTracer::new()
+    }
+
+    #[inline(always)]
+    fn advance(&mut self) -> Self::Record {
+        self.cycle += Self::SUBCYCLES_PER_INSN;
+    }
+
+    fn is_busy_loop(&self, _: &Self::Record) -> bool {
+        self.pc.before == self.pc.after
+    }
+
+    #[inline(always)]
+    fn store_pc(&mut self, pc: ByteAddr) {
+        self.pc.after = pc;
+    }
+
+    #[inline(always)]
+    fn fetch(&mut self, pc: WordAddr, value: Instruction) {
+        self.pc.before = pc.baddr();
+        self.last_kind = value.kind;
+        self.last_rs1 = None;
+    }
+
+    #[inline(always)]
+    fn track_mmu_maxtouch_before(&mut self) {}
+
+    #[inline(always)]
+    fn track_mmu_maxtouch_after(&mut self) {}
+
+    #[inline(always)]
+    fn load_register(&mut self, idx: RegIdx, value: Word) {
+        if matches!(self.last_kind, InsnKind::ECALL) && idx == Platform::reg_ecall() {
+            self.last_rs1 = Some(value);
+        }
+    }
+
+    #[inline(always)]
+    fn store_register(&mut self, _idx: RegIdx, _value: Change<Word>) {}
+
+    #[inline(always)]
+    fn load_memory(&mut self, _addr: WordAddr, _value: Word) {}
+
+    #[inline(always)]
+    fn store_memory(&mut self, _addr: WordAddr, _value: Change<Word>) {}
+
+    #[inline(always)]
+    fn track_syscall(&mut self, _effects: SyscallEffects) {}
+
+    #[inline(always)]
+    fn track_access(&mut self, _addr: WordAddr, _subcycle: Cycle) -> Cycle {
+        0
+    }
+
+    fn final_accesses(&self) -> &LatestAccesses {
+        unimplemented!()
+    }
+
+    fn into_next_accesses(self) -> NextCycleAccess {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn cycle(&self) -> Cycle {
+        self.cycle
+    }
+
+    fn executed_insts(&self) -> usize {
+        (self.cycle() / Self::SUBCYCLES_PER_INSN)
+            .saturating_sub(1)
+            .try_into()
+            .unwrap()
+    }
+
+    fn probe_min_max_address_by_start_addr(
+        &self,
+        _start_addr: WordAddr,
+    ) -> Option<(WordAddr, WordAddr)> {
+        None
+    }
+}
 
 #[derive(Debug)]
 pub struct LatestAccesses {
@@ -768,6 +900,70 @@ pub struct PreflightTracer {
     latest_accesses: LatestAccesses,
     next_accesses: NextCycleAccess,
     register_reads_tracked: u8,
+    shard_cycle_boundaries: Arc<Vec<Cycle>>,
+    current_shard_idx: usize,
+    current_shard_start_cycle: Cycle,
+    current_shard_end_cycle: Cycle,
+    final_cycle: Cycle,
+}
+
+#[derive(Clone, Debug)]
+pub struct PreflightTracerConfig {
+    next_access_capacity: usize,
+    shard_cycle_boundaries: Arc<Vec<Cycle>>,
+    end_cycle: Cycle,
+}
+
+impl PreflightTracerConfig {
+    pub fn new(
+        next_access_capacity: usize,
+        shard_cycle_boundaries: Arc<Vec<Cycle>>,
+        end_cycle: Cycle,
+    ) -> Self {
+        assert!(next_access_capacity > 0);
+        assert!(
+            !shard_cycle_boundaries.is_empty(),
+            "shard_cycle_boundaries must contain at least one entry"
+        );
+        Self {
+            next_access_capacity,
+            shard_cycle_boundaries,
+            end_cycle,
+        }
+    }
+
+    pub fn with_default_boundaries(next_access_capacity: usize) -> Self {
+        Self::new(
+            next_access_capacity,
+            Arc::new(vec![FullTracer::SUBCYCLES_PER_INSN, Cycle::MAX]),
+            Cycle::MAX,
+        )
+    }
+
+    pub fn from_end_cycle(end_cycle: Cycle, shard_cycle_boundaries: Arc<Vec<Cycle>>) -> Self {
+        let extra = PreflightTracer::SUBCYCLES_PER_INSN as Cycle;
+        let needed = end_cycle.saturating_add(extra).saturating_add(1);
+        let next_access_capacity = needed.try_into().unwrap_or(usize::MAX);
+        Self::new(next_access_capacity, shard_cycle_boundaries, end_cycle)
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.next_access_capacity
+    }
+
+    pub fn shard_cycle_boundaries(&self) -> Arc<Vec<Cycle>> {
+        self.shard_cycle_boundaries.clone()
+    }
+
+    pub fn end_cycle(&self) -> Cycle {
+        self.end_cycle
+    }
+}
+
+impl Default for PreflightTracerConfig {
+    fn default() -> Self {
+        Self::with_default_boundaries(NEXT_ACCESS_PREALLOC)
+    }
 }
 
 impl PreflightTracer {
@@ -777,16 +973,37 @@ impl PreflightTracer {
     pub const SUBCYCLE_MEM: Cycle = <Self as Tracer>::SUBCYCLE_MEM;
     pub const SUBCYCLES_PER_INSN: Cycle = <Self as Tracer>::SUBCYCLES_PER_INSN;
 
-    pub fn new(platform: &Platform) -> Self {
+    pub fn new(platform: &Platform, config: &PreflightTracerConfig) -> Self {
+        let capacity = config.capacity();
+        let next_accesses = (0..capacity)
+            .into_par_iter()
+            .map(|_| NextAccessPair::default())
+            .collect();
+        let shard_cycle_boundaries = config.shard_cycle_boundaries();
+        assert!(
+            shard_cycle_boundaries.len() >= 2,
+            "shard_cycle_boundaries must contain at least two entries"
+        );
+        let (current_shard_start_cycle, current_shard_end_cycle) =
+            (shard_cycle_boundaries[0], shard_cycle_boundaries[1]);
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
-            next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
+            next_accesses,
             register_reads_tracked: 0,
+            shard_cycle_boundaries,
+            current_shard_idx: 0,
+            current_shard_start_cycle,
+            current_shard_end_cycle,
+            final_cycle: config.end_cycle(),
         };
         tracer.reset_register_tracking();
+        assert!(
+            tracer.current_shard_start_cycle < tracer.current_shard_end_cycle,
+            "non-incremental shard boundary at index 0"
+        );
         tracer
     }
 
@@ -813,18 +1030,42 @@ impl PreflightTracer {
     fn reset_register_tracking(&mut self) {
         self.register_reads_tracked = 0;
     }
+
+    #[inline(always)]
+    fn maybe_advance_shard(&mut self) {
+        if self.cycle < self.current_shard_end_cycle || self.cycle >= self.final_cycle {
+            return;
+        }
+        let len = self.shard_cycle_boundaries.len();
+        let next_idx = self.current_shard_idx + 1;
+        assert!(
+            next_idx + 1 < len,
+            "cycle {} exceeded configured shard boundaries",
+            self.cycle
+        );
+        self.current_shard_idx = next_idx;
+        self.current_shard_start_cycle = self.shard_cycle_boundaries[next_idx];
+        self.current_shard_end_cycle = self.shard_cycle_boundaries[next_idx + 1];
+        assert!(
+            self.current_shard_start_cycle < self.current_shard_end_cycle,
+            "non-incremental shard boundary at index {}",
+            next_idx
+        );
+    }
 }
 
 impl Tracer for PreflightTracer {
     type Record = ();
+    type Config = PreflightTracerConfig;
 
-    fn new(platform: &Platform) -> Self {
-        PreflightTracer::new(platform)
+    fn new(platform: &Platform, config: &Self::Config) -> Self {
+        PreflightTracer::new(platform, config)
     }
 
     #[inline(always)]
     fn advance(&mut self) -> Self::Record {
         self.cycle += Self::SUBCYCLES_PER_INSN;
+        self.maybe_advance_shard();
         self.reset_register_tracking();
     }
 
@@ -886,9 +1127,10 @@ impl Tracer for PreflightTracer {
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         let cur_cycle = self.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
-        self.next_accesses
-            .get_or_create(prev_cycle as usize)
-            .push((addr, cur_cycle));
+        if prev_cycle < self.current_shard_start_cycle {
+            let idx = prev_cycle as usize;
+            self.next_accesses[idx].push((addr, cur_cycle));
+        }
         prev_cycle
     }
 
@@ -937,8 +1179,9 @@ impl Tracer for PreflightTracer {
 
 impl Tracer for FullTracer {
     type Record = StepRecord;
+    type Config = ();
 
-    fn new(platform: &Platform) -> Self {
+    fn new(platform: &Platform, _config: &Self::Config) -> Self {
         FullTracer::new(platform)
     }
 

@@ -23,9 +23,10 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, NextCycleAccess,
-    Platform, PreflightTracer, Program, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word,
-    WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmptyTracer, EmuContext, FullTracer, InsnKind,
+    IterAddresses, NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program,
+    StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
+    host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -119,6 +120,7 @@ pub struct EmulationResult<'a> {
     pub final_mem_state: FinalMemState,
     pub pi: PublicValues,
     pub shard_ctx_builder: ShardContextBuilder,
+    pub shard_cycle_boundaries: Arc<Vec<Cycle>>,
     pub executed_steps: usize,
     pub phantom: PhantomData<&'a ()>,
     // pub shard_ctxs: Vec<ShardContext<'a>>,
@@ -574,7 +576,12 @@ impl<'a> ShardContext<'a> {
 }
 
 pub trait StepCellExtractor {
-    fn extract_cells(&self, step: &StepRecord) -> u64;
+    fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64;
+
+    #[inline(always)]
+    fn extract_cells(&self, step: &StepRecord) -> u64 {
+        self.cells_for_kind(step.insn().kind, step.rs1().map(|op| op.value))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -811,12 +818,13 @@ impl Iterator for StepReplay {
     }
 }
 
-pub fn emulate_program<'a>(
+pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
     program: Arc<Program>,
     max_steps: usize,
     init_mem_state: &InitMemState,
     platform: &Platform,
     multi_prover: &MultiProver,
+    step_cell_extractor: &S,
 ) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
@@ -827,7 +835,79 @@ pub fn emulate_program<'a>(
         heap: _,
     } = init_mem_state;
 
-    let mut vm: VMState<PreflightTracer> = VMState::new_with_tracer(platform.clone(), program);
+    let mut vm: VMState<EmptyTracer> = info_span!("[ceno] emulator.new_empty_tracer")
+        .in_scope(|| VMState::new_with_tracer(platform.clone(), program.clone()));
+
+    info_span!("[ceno] emulator.init_mem").in_scope(|| {
+        for record in chain!(hints_init, io_init) {
+            vm.init_memory(record.addr.into(), record.value);
+        }
+    });
+
+    let cycle_budget = multi_prover.max_cycle_per_shard;
+    let mut shard_cycle_boundaries = vec![FullTracer::SUBCYCLES_PER_INSN];
+    let cell_budget = multi_prover.max_cell_per_shard;
+    let mut current_cells: u64 = 0;
+    let mut current_cycle_in_shard: Cycle = 0;
+    let mut current_shard_id: usize = 0;
+    let _ = info_span!("[ceno] emulator.max_cycle_estimated").in_scope(|| {
+        let mut steps = 0usize;
+        loop {
+            if steps >= max_steps {
+                break;
+            }
+            match vm.next_step_record() {
+                Ok(Some(_)) => {
+                    steps += 1;
+                    let tracer = vm.tracer();
+                    let step_cycle = tracer
+                        .cycle()
+                        .saturating_sub(EmptyTracer::SUBCYCLES_PER_INSN);
+                    let step_cells = step_cell_extractor
+                        .cells_for_kind(tracer.last_insn_kind(), tracer.last_rs1_value());
+                    let next_cells = current_cells.saturating_add(step_cells);
+                    let next_cycle =
+                        current_cycle_in_shard.saturating_add(FullTracer::SUBCYCLES_PER_INSN);
+                    let cycle_limit_hit = cycle_budget < Cycle::MAX && next_cycle >= cycle_budget;
+                    if next_cells >= cell_budget || cycle_limit_hit {
+                        assert!(
+                            current_cells > 0 || current_cycle_in_shard > 0,
+                            "shard split before accumulating any steps"
+                        );
+                        if shard_cycle_boundaries.last().copied().unwrap_or_default() != step_cycle
+                        {
+                            shard_cycle_boundaries.push(step_cycle);
+                        }
+                        current_shard_id += 1;
+                        current_cells = step_cells;
+                        current_cycle_in_shard = FullTracer::SUBCYCLES_PER_INSN;
+                    } else {
+                        current_cells = next_cells;
+                        current_cycle_in_shard = next_cycle;
+                    }
+                }
+                Ok(None) => break,
+                Err(err) => panic!("emulator trapped before halt: {err}"),
+            }
+        }
+        vm.halted_state().map(|halt_state| halt_state.exit_code)
+    });
+    let max_cycle = vm.tracer().cycle();
+    if shard_cycle_boundaries.last().copied().unwrap_or_default() != max_cycle {
+        shard_cycle_boundaries.push(max_cycle);
+    }
+    let shard_cycle_boundaries = Arc::new(shard_cycle_boundaries);
+    tracing::info!(
+        "num_shards: {}, max_cycle {}, shard_cycle_boundaries {:?}",
+        current_shard_id + 1,
+        max_cycle,
+        shard_cycle_boundaries
+    );
+    let preflight_config =
+        PreflightTracerConfig::from_end_cycle(max_cycle, shard_cycle_boundaries.clone());
+
+    let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
+        .in_scope(|| VMState::new_with_tracer_config(platform.clone(), program, preflight_config));
 
     for record in chain!(hints_init, io_init) {
         vm.init_memory(record.addr.into(), record.value);
@@ -1014,6 +1094,7 @@ pub fn emulate_program<'a>(
         pi,
         exit_code,
         shard_ctx_builder,
+        shard_cycle_boundaries: shard_cycle_boundaries.clone(),
         executed_steps: insts,
         final_mem_state: FinalMemState {
             reg: reg_final,
@@ -1234,9 +1315,10 @@ pub fn generate_witness<'a, E: ExtensionField>(
             let mut zkvm_witness = ZKVMWitnesses::default();
             let mut pi = pi_template.clone();
             tracing::debug!(
-                "{}th shard collect {} steps, heap_addr_range {:x} - {:x}, hint_addr_range {:x} - {:x}",
+                "{}th shard collect {} steps, cycles range {:?}, heap_addr_range {:x} - {:x}, hint_addr_range {:x} - {:x}",
                 shard_ctx.shard_id,
                 shard_summary.step_count,
+                shard_ctx.cur_shard_cycle_range,
                 shard_ctx.shard_heap_addr_range.start,
                 shard_ctx.shard_heap_addr_range.end,
                 shard_ctx.shard_hint_addr_range.start,
@@ -1671,6 +1753,7 @@ pub fn run_e2e_with_checkpoint<
         &init_full_mem,
         &prover.pk.program_ctx.as_ref().unwrap().platform,
         &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
+        &prover.pk.program_ctx.as_ref().unwrap().system_config.config,
     );
     tracing::debug!("emulate done in {:?}", start.elapsed());
 
@@ -1761,6 +1844,7 @@ pub fn run_e2e_proof<
         init_full_mem,
         &ctx.platform,
         &ctx.multi_prover,
+        &ctx.system_config.config,
     );
     create_proofs_streaming(
         emul_result,
@@ -2060,13 +2144,15 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 #[cfg(test)]
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
-    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepRecord};
+    use ceno_emul::{
+        CENO_PLATFORM, Cycle, FullTracer, InsnKind, NextCycleAccess, StepRecord, Word,
+    };
     use itertools::Itertools;
 
     struct UniformStepExtractor;
 
     impl StepCellExtractor for &UniformStepExtractor {
-        fn extract_cells(&self, _step: &StepRecord) -> u64 {
+        fn cells_for_kind(&self, _kind: InsnKind, _rs1_value: Option<Word>) -> u64 {
             1
         }
     }

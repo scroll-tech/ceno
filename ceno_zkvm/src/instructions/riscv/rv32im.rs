@@ -46,8 +46,8 @@ use ceno_emul::{
     Bn254FpMulSpec,
     InsnKind::{self, *},
     KeccakSpec, LogPcCycleSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec,
-    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec, Secp256r1DoubleSpec,
-    Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepRecord, SyscallSpec, Uint256MulSpec,
+    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec, Secp256r1DoubleSpec. Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepRecord, SyscallSpec,
+    Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
@@ -1030,16 +1030,16 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
     }
 }
 
-impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
+impl<E: ExtensionField> Rv32imConfig<E> {
     #[inline(always)]
-    fn extract_cells(&self, record: &StepRecord) -> u64 {
-        let insn_kind = record.insn.kind;
-        if !matches!(insn_kind, InsnKind::ECALL) {
-            // quick match for opcode and return
-            return self.inst_cells_map[insn_kind as usize];
+    pub fn cells_for(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64 {
+        if !matches!(kind, InsnKind::ECALL) {
+            return self.inst_cells_map[kind as usize];
         }
+
         // deal with ecall logic
-        match record.rs1().unwrap().value {
+        let code = rs1_value.unwrap_or_default();
+        match code {
             // ecall / halt
             ECALL_HALT => *self
                 .ecall_cells_map
@@ -1108,8 +1108,21 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
             // phantom
             LogPcCycleSpec::CODE => 0,
             ceno_emul::SHA_EXTEND => 0,
-            // other type of ecalls are handled by dummy ecall instruction
-            _ => unreachable!("unknow match record {:?}", record),
+            _ => panic!("unknown ecall code {code:#x}"),
         }
+    }
+}
+
+impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
+    #[inline(always)]
+    fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64 {
+        self.cells_for(kind, rs1_value)
+    }
+}
+
+impl<E: ExtensionField> StepCellExtractor for Rv32imConfig<E> {
+    #[inline(always)]
+    fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64 {
+        self.cells_for(kind, rs1_value)
     }
 }
