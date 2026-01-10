@@ -33,6 +33,7 @@ use crate::{
 use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
 
+use ceno_zkvm::instructions::riscv::constants::NUM_INSTANCE_IDX;
 use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{
@@ -330,6 +331,16 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 }
 
                 builder.cycle_tracker_start("Verify chip proof");
+
+                let num_instance_idx: Var<C::N> =
+                    builder.constant(C::N::from_canonical_usize(NUM_INSTANCE_IDX));
+                let sum_num_instances_ext =
+                    builder.ext_from_base_slice(&[chip_proof.sum_num_instances_felt]);
+                builder.set_value(
+                    &zkvm_proof_input.pi_evals,
+                    num_instance_idx,
+                    sum_num_instances_ext,
+                );
                 let (input_opening_point, chip_shard_ec_sum) = verify_chip_proof(
                     circuit_name,
                     builder,
