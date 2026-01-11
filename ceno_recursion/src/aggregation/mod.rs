@@ -683,7 +683,7 @@ pub fn verify_proofs(
         let mut witness_stream: Vec<Vec<F>> = Vec::new();
         witness_stream.extend(zkvm_proof_input.write());
 
-        /* _debug
+        
         let poseidon2_max_constraint_degree: usize = 3;
         let mut config = NativeConfig::aggregation(0, poseidon2_max_constraint_degree);
         config.system.memory_config.max_access_adapter_n = 16;
@@ -702,7 +702,6 @@ pub fn verify_proofs(
             true,
         )
         .unwrap();
-        */
     }
 }
 

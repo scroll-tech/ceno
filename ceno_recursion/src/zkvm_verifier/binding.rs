@@ -182,7 +182,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .map(|proof| ceil_log2(proof.sum_num_instances.next_power_of_two()))
+            .map(|proof| ceil_log2(proof.sum_num_instances) + proof.num_rotation_var)
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
@@ -195,7 +195,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
             .filter(|proof| !proof.fixed_in_evals.is_empty())
-            .map(|proof| ceil_log2(proof.sum_num_instances.next_power_of_two()))
+            .map(|proof| ceil_log2(proof.sum_num_instances))
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
@@ -208,6 +208,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .chain(fixed_num_vars.iter())
             .copied()
+            // _debug
             // .map(ceil_log2)
             .max()
             .unwrap_or(0);
@@ -233,14 +234,27 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         };
 
         // _debug
-        println!("=> witin_num_vars: {:?}", witin_num_vars.clone());
-        println!("=> fixed_num_vars: {:?}", fixed_num_vars.clone());
+        // println!("=> witin_num_vars: {:?}", witin_num_vars.clone());
+        // println!("=> fixed_num_vars: {:?}", fixed_num_vars.clone());
 
         let witin_perm = get_perm(witin_num_vars);
         let fixed_perm = get_perm(fixed_num_vars);
 
         // _debug
-        println!("=> witin_perm: {:?}", witin_perm);
+        // let witin_perm = get_perm(witin_num_vars.clone());
+        // let fixed_perm = get_perm(fixed_num_vars.clone());
+
+        // _debug
+        // println!("=> witin_perm: {:?}", witin_perm);
+        // let mut sorted_witin_num_vars: Vec<usize> = vec![];
+        // for i in 0..witin_num_vars.len() {
+        //     sorted_witin_num_vars.push(0usize);
+        // }
+        // for (idx, n) in witin_num_vars.iter().enumerate() {
+        //     sorted_witin_num_vars[witin_perm[idx]] = *n;
+        // }
+        // println!("=> sorted: {:?}", sorted_witin_num_vars);
+
 
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.shard_id));
         stream.extend(self.raw_pi.write());
