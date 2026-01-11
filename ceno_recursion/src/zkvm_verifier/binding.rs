@@ -182,7 +182,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .map(|proof| proof.sum_num_instances)
+            .map(|proof| ceil_log2(proof.sum_num_instances.next_power_of_two()))
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
@@ -195,7 +195,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
             .filter(|proof| !proof.fixed_in_evals.is_empty())
-            .map(|proof| proof.sum_num_instances)
+            .map(|proof| ceil_log2(proof.sum_num_instances.next_power_of_two()))
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
@@ -208,7 +208,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .chain(fixed_num_vars.iter())
             .copied()
-            .map(ceil_log2)
+            // .map(ceil_log2)
             .max()
             .unwrap_or(0);
         let max_width = witin_max_widths
