@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::{BTreeMap, HashMap}, ops::DerefMut};
 
 use crate::{
     arithmetics::{ceil_log2, next_pow2_instance_padding},
@@ -12,7 +12,7 @@ use crate::{
 };
 use ceno_zkvm::{
     scheme::{ZKVMChipProof, ZKVMProof},
-    structs::{EccQuarkProof, TowerProofs},
+    structs::{EccQuarkProof, TowerProofs, ZKVMVerifyingKey},
 };
 use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::LayerProof};
 use itertools::Itertools;
@@ -97,29 +97,44 @@ pub(crate) struct ZKVMProofInput {
     pub opening_proof: BasefoldProof,
 }
 
-impl From<(usize, ZKVMProof<E, RecPcs>)> for ZKVMProofInput {
-    fn from(d: (usize, ZKVMProof<E, RecPcs>)) -> Self {
+impl ZKVMProofInput {
+    pub fn from_proof(shard_id: usize, zkvm_proof: ZKVMProof<E, RecPcs>, vk: &ZKVMVerifyingKey<E, RecPcs>) -> Self {
+        let mut num_rotation_vars: HashMap<usize, usize> = HashMap::new();
+        let mut chip_indices = zkvm_proof.chip_proofs.iter().map(|(chip_idx, proofs)| *chip_idx).collect::<Vec<usize>>();
+        chip_indices.push(0);
+
+        let mut chip_idx: usize = 0;
+        let mut chip_id: usize = chip_indices[chip_idx];
+        for (i, (_, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+            if chip_id == i {
+                let composed_cs = chip_vk.get_cs();
+                num_rotation_vars.insert(chip_id, composed_cs.rotation_vars().unwrap_or(0));
+                chip_idx += 1;
+                chip_id = chip_indices[chip_idx];
+            }
+        }
+
         ZKVMProofInput {
-            shard_id: d.0,
-            raw_pi: d.1.raw_pi,
-            pi_evals: d.1.pi_evals,
-            chip_proofs: d
-                .1
+            shard_id,
+            raw_pi: zkvm_proof.raw_pi,
+            pi_evals: zkvm_proof.pi_evals,
+            chip_proofs: zkvm_proof
                 .chip_proofs
                 .into_iter()
                 .map(|(chip_idx, proofs)| {
+                    let num_rotation_var = *num_rotation_vars.get(&chip_idx).expect("num_rotation is not empty");
                     (
                         chip_idx,
                         proofs
                             .into_iter()
-                            .map(|proof| ZKVMChipProofInput::from((chip_idx, proof)))
+                            .map(|proof| ZKVMChipProofInput::from((chip_idx, proof, num_rotation_var)))
                             .collect::<Vec<ZKVMChipProofInput>>()
                             .into(),
                     )
                 })
                 .collect::<BTreeMap<usize, ZKVMChipProofs>>(),
-            witin_commit: d.1.witin_commit.into(),
-            opening_proof: d.1.opening_proof.into(),
+            witin_commit: zkvm_proof.witin_commit.into(),
+            opening_proof: zkvm_proof.opening_proof.into(),
         }
     }
 }
@@ -216,8 +231,16 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
                 });
             perm
         };
+
+        // _debug
+        println!("=> witin_num_vars: {:?}", witin_num_vars.clone());
+        println!("=> fixed_num_vars: {:?}", fixed_num_vars.clone());
+
         let witin_perm = get_perm(witin_num_vars);
         let fixed_perm = get_perm(fixed_num_vars);
+
+        // _debug
+        println!("=> witin_perm: {:?}", witin_perm);
 
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.shard_id));
         stream.extend(self.raw_pi.write());
@@ -326,6 +349,7 @@ impl Hintable<InnerConfig> for TowerProofInput {
 pub struct ZKVMChipProofInput {
     pub idx: usize,
     pub sum_num_instances: usize,
+    pub num_rotation_var: usize,
 
     // product constraints
     pub r_out_evals_len: usize,
@@ -386,8 +410,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofs {
     }
 }
 
-impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
-    fn from(d: (usize, ZKVMChipProof<E>)) -> Self {
+impl From<(usize, ZKVMChipProof<E>, usize)> for ZKVMChipProofInput {
+    fn from(d: (usize, ZKVMChipProof<E>, usize)) -> Self {
         let idx = d.0;
         let p = d.1;
         let sum_num_instances = p.num_instances.iter().sum();
@@ -395,6 +419,7 @@ impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
         Self {
             idx,
             sum_num_instances,
+            num_rotation_var: d.2,
             r_out_evals_len: p.r_out_evals.len(),
             w_out_evals_len: p.w_out_evals.len(),
             lk_out_evals_len: p.lk_out_evals.len(),
