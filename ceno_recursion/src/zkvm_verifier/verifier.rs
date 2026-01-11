@@ -30,6 +30,7 @@ use crate::{
         SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable,
     },
 };
+use ceno_emul::Platform;
 use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
 
@@ -99,7 +100,7 @@ pub fn transcript_group_sample_ext<C: Config>(
 pub fn verify_zkvm_proof<C: Config<F = F>>(
     builder: &mut Builder<C>,
     zkvm_proof_input: ZKVMProofInputVariable<C>,
-    vk: &ZKVMVerifyingKey<E, Pcs>,
+    vk: &ZKVMVerifyingKey<E, Pcs, Platform>,
 ) -> SepticPointVariable<C> {
     let mut challenger = DuplexChallengerVariable::new(builder);
     transcript_observe_label(builder, &mut challenger, b"riscv");

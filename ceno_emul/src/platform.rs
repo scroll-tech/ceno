@@ -1,15 +1,15 @@
+use crate::addr::{Addr, RegIdx};
 use core::fmt::{self, Formatter};
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, fmt::Display, ops::Range, sync::Arc};
-
-use crate::addr::{Addr, RegIdx};
 
 /// The Platform struct holds the parameters of the VM.
 /// It defines:
 /// - the layout of virtual memory,
 /// - special addresses, such as the initial PC,
 /// - codes of environment calls.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Platform {
     pub rom: Range<Addr>,
     pub prog_data: Arc<BTreeSet<Addr>>,

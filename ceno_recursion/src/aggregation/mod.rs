@@ -2,6 +2,7 @@ use crate::zkvm_verifier::{
     binding::{E, F, ZKVMProofInput, ZKVMProofInputVariable},
     verifier::verify_zkvm_proof,
 };
+use ceno_emul::Platform;
 use ceno_zkvm::{
     instructions::riscv::constants::{END_PC_IDX, EXIT_CODE_IDX, INIT_PC_IDX},
     scheme::ZKVMProof,
@@ -60,6 +61,7 @@ use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
+type BaseZkvmVk = ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>, Platform>;
 use openvm_circuit::{
     arch::{
         CONNECTOR_AIR_ID, PROGRAM_AIR_ID, PROGRAM_CACHED_TRACE_INDEX, PUBLIC_VALUES_AIR_ID,
@@ -110,7 +112,7 @@ impl CenoAggregationProver {
         }
     }
 
-    pub fn from_base_vk(vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>) -> Self {
+    pub fn from_base_vk(vk: BaseZkvmVk) -> Self {
         let vb = NativeBuilder::default();
         let [leaf_fri_params, internal_fri_params, _root_fri_params] =
             [LEAF_LOG_BLOWUP, INTERNAL_LOG_BLOWUP, ROOT_LOG_BLOWUP]
@@ -368,7 +370,7 @@ impl CenoAggregationProver {
 
 /// Config to generate leaf VM verifier program.
 pub struct CenoLeafVmVerifierConfig {
-    pub vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
+    pub vk: BaseZkvmVk,
     pub compiler_options: CompilerOptions,
 }
 
@@ -645,9 +647,7 @@ pub fn verify_e2e_stark_proof(
 }
 
 /// Build Ceno's zkVM verifier program from vk in OpenVM's eDSL
-pub fn build_zkvm_verifier_program(
-    vk: &ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
-) -> Program<F> {
+pub fn build_zkvm_verifier_program(vk: &BaseZkvmVk) -> Program<F> {
     let mut builder = AsmBuilder::<F, E>::default();
 
     let zkvm_proof_input_variables = ZKVMProofInput::read(&mut builder);
@@ -667,10 +667,7 @@ pub fn build_zkvm_verifier_program(
     program
 }
 
-pub fn verify_proofs(
-    zkvm_proofs: Vec<ZKVMProof<E, RecPcs>>,
-    vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
-) {
+pub fn verify_proofs(zkvm_proofs: Vec<ZKVMProof<E, RecPcs>>, vk: BaseZkvmVk) {
     let program = build_zkvm_verifier_program(&vk);
     if !zkvm_proofs.is_empty() {
         let zkvm_proof_input = ZKVMProofInput::from((0usize, zkvm_proofs[0].clone()));
@@ -707,10 +704,10 @@ mod tests {
         aggregation::{CenoAggregationProver, verify_proofs},
         zkvm_verifier::binding::E,
     };
+    use super::BaseZkvmVk;
     use ceno_zkvm::{
         e2e::verify,
         scheme::{ZKVMProof, verifier::ZKVMVerifier},
-        structs::ZKVMVerifyingKey,
     };
     use mpcs::{Basefold, BasefoldRSParams};
     use openvm_stark_sdk::{config::setup_tracing_with_log_level, p3_bn254_fr::Bn254Fr};
@@ -727,7 +724,7 @@ mod tests {
             bincode::deserialize_from(File::open(proof_path).expect("Failed to open proof file"))
                 .expect("Failed to deserialize proof file");
 
-        let vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>> =
+        let vk: BaseZkvmVk =
             bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
                 .expect("Failed to deserialize vk file");
 
@@ -754,7 +751,7 @@ mod tests {
             bincode::deserialize_from(File::open(proof_path).expect("Failed to open proof file"))
                 .expect("Failed to deserialize proof file");
 
-        let vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>> =
+        let vk: BaseZkvmVk =
             bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
                 .expect("Failed to deserialize vk file");
 
@@ -771,7 +768,7 @@ mod tests {
             bincode::deserialize_from(File::open(proof_path).expect("Failed to open proof file"))
                 .expect("Failed to deserialize proof file");
 
-        let vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>> =
+        let vk: BaseZkvmVk =
             bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
                 .expect("Failed to deserialize vk file");
 

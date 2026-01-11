@@ -798,7 +798,7 @@ mod tests {
         let pd = create_prover(backend);
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
-        let zkvm_vk = zkvm_pk.get_vk_slow();
+        let zkvm_vk = zkvm_pk.get_vk_slow::<ceno_emul::Platform>();
         let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 

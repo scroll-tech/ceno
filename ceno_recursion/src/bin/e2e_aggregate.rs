@@ -1,4 +1,4 @@
-use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_recursion::aggregation::CenoAggregationProver;
 use ceno_zkvm::{
@@ -251,18 +251,23 @@ fn main() {
 
     let backend = create_backend(args.max_num_variables, args.security_level);
     let prover = create_prover(backend);
-    let result =
-        run_e2e_with_checkpoint::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, _, _>(
-            prover,
-            program,
-            platform,
-            multi_prover,
-            &hints,
-            &public_io,
-            max_steps,
-            Checkpoint::Complete,
-            None,
-        );
+    let result = run_e2e_with_checkpoint::<
+        BabyBearExt4,
+        Basefold<BabyBearExt4, BasefoldRSParams>,
+        _,
+        _,
+        Platform,
+    >(
+        prover,
+        program,
+        platform,
+        multi_prover,
+        &hints,
+        &public_io,
+        max_steps,
+        Checkpoint::Complete,
+        None,
+    );
 
     let zkvm_proofs = result
         .proofs

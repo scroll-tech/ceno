@@ -368,7 +368,7 @@ fn run_inner<
     checkpoint: Checkpoint,
     target_shard_id: Option<usize>,
 ) {
-    let result = run_e2e_with_checkpoint::<E, PCS, _, _>(
+    let result = run_e2e_with_checkpoint::<E, PCS, _, _, Platform>(
         pd,
         program,
         platform,
@@ -399,7 +399,7 @@ fn run_inner<
 
 fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     mut zkvm_proof: ZKVMProof<E, Pcs>,
-    verifier: &ZKVMVerifier<E, Pcs>,
+    verifier: &ZKVMVerifier<E, Pcs, Platform>,
 ) {
     // do sanity check
     let transcript = Transcript::new(b"riscv");

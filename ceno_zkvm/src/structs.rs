@@ -3,7 +3,7 @@ use crate::{
     e2e::{E2EProgramCtx, ShardContext},
     error::ZKVMError,
     instructions::Instruction,
-    scheme::septic_curve::SepticPoint,
+    scheme::{septic_curve::SepticPoint, verifier::MemStatePubValuesVerifier},
     state::StateCircuit,
     tables::{
         ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
@@ -785,7 +785,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
-    pub fn get_vk_slow(&self) -> ZKVMVerifyingKey<E, PCS> {
+    pub fn get_vk_slow<M: MemStatePubValuesVerifier<E, PCS, Config = Platform>>(&self) -> ZKVMVerifyingKey<E, PCS, M> {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
             entry_pc: self.entry_pc,
@@ -805,6 +805,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .enumerate()
                 .map(|(index, name)| (index, name.clone()))
                 .collect(),
+            mem_state_config: self.program_ctx.as_ref().unwrap().platform.clone(),
         }
     }
 
@@ -818,8 +819,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned",
 ))]
-pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
-where
+pub struct ZKVMVerifyingKey<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M: MemStatePubValuesVerifier<E, PCS>,
+> where
     PCS::VerifierParam: Sized,
 {
     pub vp: PCS::VerifierParam,
@@ -835,4 +839,5 @@ where
     // circuit index -> circuit name
     // mainly used for debugging
     pub circuit_index_to_name: BTreeMap<usize, String>,
+    pub mem_state_config: M::Config,
 }

@@ -47,7 +47,7 @@ fn keccak_prove(c: &mut Criterion) {
     let _ = hints.write(&vec![1, 2, 3]);
     let max_steps = usize::MAX;
     // estimate proof size data first
-    let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
+    let result = run_e2e_with_checkpoint::<E, Pcs, _, _, Platform>(
         create_prover(backend.clone()),
         program.clone(),
         platform.clone(),
@@ -86,7 +86,7 @@ fn keccak_prove(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
-                    let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
+                    let result = run_e2e_with_checkpoint::<E, Pcs, _, _, Platform>(
                         create_prover(backend.clone()),
                         program.clone(),
                         platform.clone(),

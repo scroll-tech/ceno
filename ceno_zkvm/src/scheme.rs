@@ -22,6 +22,7 @@ use crate::{
             ecall::HaltInstruction,
         },
     },
+    scheme::verifier::MemStatePubValuesVerifier,
     structs::{TowerProofs, ZKVMVerifyingKey},
 };
 
@@ -224,7 +225,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         self.chip_proofs.len()
     }
 
-    pub fn has_halt(&self, vk: &ZKVMVerifyingKey<E, PCS>) -> bool {
+    pub fn has_halt<M: MemStatePubValuesVerifier<E, PCS>>(
+        &self,
+        vk: &ZKVMVerifyingKey<E, PCS, M>,
+    ) -> bool {
         let halt_circuit_index = vk
             .circuit_vks
             .keys()

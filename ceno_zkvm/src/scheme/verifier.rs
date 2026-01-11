@@ -9,8 +9,8 @@ use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
     instructions::riscv::constants::{
-        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
-        NUM_INSTANCE_IDX, SHARD_ID_IDX,
+        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, HINT_LENGTH_IDX, HINT_START_ADDR_IDX,
+        INIT_CYCLE_IDX, INIT_PC_IDX, NUM_INSTANCE_IDX, SHARD_ID_IDX,
     },
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
@@ -21,7 +21,7 @@ use crate::{
         ZKVMVerifyingKey,
     },
 };
-use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
+use ceno_emul::{FullTracer as Tracer, Platform, WORD_SIZE};
 use gkr_iop::{
     self,
     selector::{SelectorContext, SelectorType},
@@ -37,6 +37,7 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use p3::field::FieldAlgebra;
+use serde::{Serialize, de::DeserializeOwned};
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState},
     util::get_challenge_pows,
@@ -44,16 +45,79 @@ use sumcheck::{
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
-pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub vk: ZKVMVerifyingKey<E, PCS>,
+pub trait MemStatePubValuesVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>:
+    Clone
+{
+    type Config: Serialize + DeserializeOwned + Clone;
+    fn verify_proofs(&self, vm_proofs: Vec<ZKVMProof<E, PCS>>);
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
-    pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
+fn verify_mem_state_pub_values<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    platform: &Platform,
+    vm_proofs: Vec<ZKVMProof<E, PCS>>,
+) {
+    assert!(!vm_proofs.is_empty());
+    let (_end_heap_addr, _end_hint_addr) = vm_proofs
+        .into_iter()
+        // optionally halt on last chunk
+        .enumerate()
+        .fold(
+            (None, None),
+            |(prev_heap_addr_end, prev_hint_addr_end), (_, vm_proof)| {
+                // check memory continuation consistency
+                // heap
+                let heap_addr_start_u32 =
+                    vm_proof.pi_evals[HEAP_START_ADDR_IDX].to_canonical_u64() as u32;
+                let heap_len = vm_proof.pi_evals[HEAP_LENGTH_IDX].to_canonical_u64() as u32;
+                assert!(platform.heap.contains(&heap_addr_start_u32));
+                if let Some(prev_heap_addr_end) = prev_heap_addr_end {
+                    assert_eq!(heap_addr_start_u32, prev_heap_addr_end);
+                };
+                let next_heap_addr_end: u32 = heap_addr_start_u32 + heap_len * WORD_SIZE as u32;
+                assert!(platform.heap.contains(&next_heap_addr_end));
+
+                let hint_addr_start_u32 =
+                    vm_proof.pi_evals[HINT_START_ADDR_IDX].to_canonical_u64() as u32;
+                let hint_len = vm_proof.pi_evals[HINT_LENGTH_IDX].to_canonical_u64() as u32;
+                assert!(platform.hints.contains(&hint_addr_start_u32));
+                if let Some(prev_hint_addr_end) = prev_hint_addr_end {
+                    assert_eq!(hint_addr_start_u32, prev_hint_addr_end);
+                };
+                let next_hint_addr_end: u32 = hint_addr_start_u32 + hint_len * WORD_SIZE as u32;
+                assert!(platform.hints.contains(&next_hint_addr_end));
+
+                (Some(next_heap_addr_end), Some(next_hint_addr_end))
+            },
+        );
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MemStatePubValuesVerifier<E, PCS>
+    for Platform
+{
+    type Config = Platform;
+
+    fn verify_proofs(&self, vm_proofs: Vec<ZKVMProof<E, PCS>>) {
+        verify_mem_state_pub_values(self, vm_proofs);
+    }
+}
+
+#[derive(Clone)]
+pub struct ZKVMVerifier<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M: MemStatePubValuesVerifier<E, PCS>,
+> {
+    pub vk: ZKVMVerifyingKey<E, PCS, M>,
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValuesVerifier<E, PCS>>
+    ZKVMVerifier<E, PCS, M>
+{
+    pub fn new(vk: ZKVMVerifyingKey<E, PCS, M>) -> Self {
         ZKVMVerifier { vk }
     }
 
-    pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS> {
+    pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS, M> {
         self.vk
     }
 
@@ -126,7 +190,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
                 // check memory continuation consistency
                 let heap_addr_start_u32 = vm_proof.pi_evals[HEAP_START_ADDR_IDX].to_canonical_u64() as u32;
-                let heap_len= vm_proof.pi_evals[HEAP_LENGTH_IDX].to_canonical_u64() as u32;
+                let heap_len = vm_proof.pi_evals[HEAP_LENGTH_IDX].to_canonical_u64() as u32;
                 if let Some(prev_heap_addr_end) = prev_heap_addr_end {
                     assert_eq!(heap_addr_start_u32, prev_heap_addr_end);
                     // TODO check heap addr in prime field within range
@@ -679,6 +743,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &selector_ctxs,
         )?;
         Ok((rt, shard_ec_sum))
+    }
+}
+
+/// riscv impl
+impl<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M: MemStatePubValuesVerifier<E, PCS, Config = Platform>,
+> MemStatePubValuesVerifier<E, PCS> for ZKVMVerifier<E, PCS, M>
+{
+    type Config = M::Config;
+    fn verify_proofs(&self, vm_proofs: Vec<ZKVMProof<E, PCS>>) {
+        verify_mem_state_pub_values(&self.vk.mem_state_config, vm_proofs);
     }
 }
 

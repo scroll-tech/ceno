@@ -1,7 +1,7 @@
 use super::CompilationOptions;
 use crate::utils::*;
 use anyhow::{Context, bail};
-use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::*,
@@ -354,7 +354,7 @@ fn run_elf_inner<
     compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<E2ECheckpointResult<E, PCS>> {
+) -> anyhow::Result<E2ECheckpointResult<E, PCS, Platform>> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
@@ -410,7 +410,7 @@ fn run_elf_inner<
     );
 
     let backend = create_backend(options.max_num_variables, options.security_level);
-    Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
+    Ok(run_e2e_with_checkpoint::<E, PCS, _, _, Platform>(
         create_prover(backend.clone()),
         program,
         platform,
