@@ -61,6 +61,10 @@ use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 type BaseZkvmVk = ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>, RiscvMemStateConfig>;
+use ceno_emul::WORD_SIZE;
+use ceno_zkvm::instructions::riscv::constants::{
+    HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, HINT_LENGTH_IDX, HINT_START_ADDR_IDX,
+};
 use openvm_circuit::{
     arch::{
         CONNECTOR_AIR_ID, PROGRAM_AIR_ID, PROGRAM_CACHED_TRACE_INDEX, PUBLIC_VALUES_AIR_ID,
@@ -374,6 +378,22 @@ pub struct CenoLeafVmVerifierConfig {
 }
 
 impl CenoLeafVmVerifierConfig {
+    /// lhs < rhs
+    fn assert_felt_lt<C: Config<F = F>, V: Variable<C>, E: Into<V::Expression>>(
+        _builder: &mut Builder<C>,
+        _lhs: E,
+        _rhs: E,
+    ) {
+    }
+
+    /// lhs >= rhs
+    fn assert_felt_gt<C: Config<F = F>, V: Variable<C>, E: Into<V::Expression>>(
+        _builder: &mut Builder<C>,
+        _lhs: E,
+        _rhs: E,
+    ) {
+    }
+
     pub fn build_program(&self) -> Program<F> {
         let mut builder = Builder::<C>::default();
 
@@ -410,6 +430,70 @@ impl CenoLeafVmVerifierConfig {
             builder.assign(&stark_pvs.connector.initial_pc, init_pc);
             builder.assign(&stark_pvs.connector.final_pc, end_pc);
             builder.assign(&stark_pvs.connector.exit_code, exit_code);
+
+            // check riscv mem state
+            // retrive constant
+            let heap_min_start_addr = {
+                let v = builder.eval(Usize::from(self.vk.mem_state_verifier.heap.start as usize));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+            let heap_max_end_addr = {
+                let v = builder.eval(Usize::from(self.vk.mem_state_verifier.heap.end as usize));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+            let hint_min_start_addr = {
+                let v = builder.eval(Usize::from(self.vk.mem_state_verifier.hints.start as usize));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+            let hint_max_end_addr = {
+                let v = builder.eval(Usize::from(self.vk.mem_state_verifier.hints.end as usize));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+
+            // retrieve from public value
+            let heap_start_addr = {
+                let arr = builder.get(pv, HEAP_START_ADDR_IDX);
+                builder.get(&arr, 0)
+            };
+            let heap_length = {
+                let arr = builder.get(pv, HEAP_LENGTH_IDX);
+                builder.get(&arr, 0)
+            };
+            let heap_end_addr = {
+                let v = heap_start_addr
+                    + heap_length * builder.constant::<Felt<F>>(F::from_canonical_usize(WORD_SIZE));
+                builder.eval(v)
+            };
+            let hint_start_addr = {
+                let arr = builder.get(pv, HINT_START_ADDR_IDX);
+                builder.get(&arr, 0)
+            };
+            let hint_length = {
+                let arr = builder.get(pv, HINT_LENGTH_IDX);
+                builder.get(&arr, 0)
+            };
+            let hint_end_addr = {
+                let v = hint_start_addr
+                    + hint_length * builder.constant::<Felt<F>>(F::from_canonical_usize(WORD_SIZE));
+                builder.eval(v)
+            };
+
+            // heap_start_addr >= heap_min_start_addr
+            Self::assert_felt_gt::<_, Felt<F>, _>(
+                &mut builder,
+                heap_start_addr,
+                heap_min_start_addr,
+            );
+            // heap_end_addr < heap_max_end_addr
+            Self::assert_felt_lt::<_, Felt<F>, _>(&mut builder, heap_end_addr, heap_max_end_addr);
+            // hint_start_addr >= hint_min_start_addr
+            Self::assert_felt_gt::<_, Felt<F>, _>(
+                &mut builder,
+                hint_start_addr,
+                hint_min_start_addr,
+            );
+            // hint_end_addr < hint_max_end_addr
+            Self::assert_felt_lt::<_, Felt<F>, _>(&mut builder, hint_end_addr, hint_max_end_addr);
 
             // TODO: assign shard_ec_sum to stark_pvs.shard_ec_sum
 

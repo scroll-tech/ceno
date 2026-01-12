@@ -54,8 +54,8 @@ pub trait MemStatePubValuesVerifier<E: ExtensionField, PCS: PolynomialCommitment
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct RiscvMemStateConfig {
-    heap: Range<u32>,
-    hints: Range<u32>,
+    pub heap: Range<u32>,
+    pub hints: Range<u32>,
 }
 
 impl RiscvMemStateConfig {
