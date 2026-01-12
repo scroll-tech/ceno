@@ -251,13 +251,12 @@ impl CpuEccProver {
         let export_expr =
             x3.0.iter()
                 .zip_eq(final_sum_x.0.iter())
-                // .chain(y3.0.iter().zip_eq(final_sum_y.0.iter()))
+                .chain(y3.0.iter().zip_eq(final_sum_y.0.iter()))
                 .map(|(x, final_x)| x - final_x.expr())
-                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE * 2))
                 .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha)))
                 .sum::<Expression<E>>()
                 * sel_export_expr;
-        // assert!(alpha_pows_iter.next().is_none());
 
         let exprs_bypass = exprs_bypass.into_iter().sum::<Expression<E>>() * sel_bypass_expr;
 
@@ -269,6 +268,7 @@ impl CpuEccProver {
         let rt = state.collect_raw_challenges();
         let evals = state.get_mle_flatten_final_evaluations();
 
+        // 3 for sel_add, sel_bypass, sel_export
         // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
         assert_eq!(evals.len(), 3 + SEPTIC_EXTENSION_DEGREE * 7);
 

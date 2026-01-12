@@ -956,10 +956,10 @@ impl EccVerifier {
         // zerocheck: 0 = s[1,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1])
         // zerocheck: 0 = s[1,b]^2 - x[b,0] - x[b,1] - x[1,b]
         // zerocheck: 0 = s[1,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b])
-        // zerocheck: 0 = (x[1,b] - x[b,0])
-        // zerocheck: 0 = (y[1,b] - y[b,0])
-        // zerocheck: 0 = (x[1,b] - final_x)
-        // zerocheck: 0 = (y[1,b] - final_y)
+        // zerocheck: 0 = (x[1,b] - x[b,0]) * sel_bypass
+        // zerocheck: 0 = (y[1,b] - y[b,0]) * sel_bypass
+        // zerocheck: 0 = (x[1,b] - final_x) * sel_export
+        // zerocheck: 0 = (y[1,b] - final_y) * sel_export
         //
         // note that they are not septic extension field elements,
         // we just want to reuse the multiply/add/sub formulas
@@ -1037,9 +1037,9 @@ impl EccVerifier {
         let export_evaluations: E =
             x3.0.iter()
                 .zip_eq(proof.sum.x.0.iter())
-                // .chain(y3.0.iter().zip_eq(proof.sum.y.0.iter()))
+                .chain(y3.0.iter().zip_eq(proof.sum.y.0.iter()))
                 .map(|(a, b)| *a - *b)
-                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE * 2))
                 .map(|(c, alpha)| c * *alpha)
                 .sum();
 
