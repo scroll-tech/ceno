@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, ops::DerefMut};
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{
     arithmetics::{ceil_log2, next_pow2_instance_padding},
@@ -98,9 +98,17 @@ pub(crate) struct ZKVMProofInput {
 }
 
 impl ZKVMProofInput {
-    pub fn from_proof(shard_id: usize, zkvm_proof: ZKVMProof<E, RecPcs>, vk: &ZKVMVerifyingKey<E, RecPcs>) -> Self {
-        let mut num_rotation_vars: HashMap<usize, usize> = HashMap::new();
-        let mut chip_indices = zkvm_proof.chip_proofs.iter().map(|(chip_idx, proofs)| *chip_idx).collect::<Vec<usize>>();
+    pub fn from_proof(
+        shard_id: usize,
+        zkvm_proof: ZKVMProof<E, RecPcs>,
+        vk: &ZKVMVerifyingKey<E, RecPcs>,
+    ) -> Self {
+        let mut chip_witin_num_vars: HashMap<usize, (usize, usize)> = HashMap::new(); // (chip_id, (num_witin, num_fixed))
+        let mut chip_indices = zkvm_proof
+            .chip_proofs
+            .keys()
+            .copied()
+            .collect::<Vec<usize>>();
         chip_indices.push(0);
 
         let mut chip_idx: usize = 0;
@@ -108,7 +116,13 @@ impl ZKVMProofInput {
         for (i, (_, chip_vk)) in vk.circuit_vks.iter().enumerate() {
             if chip_id == i {
                 let composed_cs = chip_vk.get_cs();
-                num_rotation_vars.insert(chip_id, composed_cs.rotation_vars().unwrap_or(0));
+                chip_witin_num_vars.insert(
+                    chip_id,
+                    (
+                        composed_cs.zkvm_v1_css.num_witin as usize,
+                        composed_cs.zkvm_v1_css.num_fixed,
+                    ),
+                );
                 chip_idx += 1;
                 chip_id = chip_indices[chip_idx];
             }
@@ -122,12 +136,16 @@ impl ZKVMProofInput {
                 .chip_proofs
                 .into_iter()
                 .map(|(chip_idx, proofs)| {
-                    let num_rotation_var = *num_rotation_vars.get(&chip_idx).expect("num_rotation is not empty");
+                    let (num_witin, num_fixed) = *chip_witin_num_vars
+                        .get(&chip_idx)
+                        .expect("num_witin data should exist");
                     (
                         chip_idx,
                         proofs
                             .into_iter()
-                            .map(|proof| ZKVMChipProofInput::from((chip_idx, proof, num_rotation_var)))
+                            .map(|proof| {
+                                ZKVMChipProofInput::from((chip_idx, proof, num_witin, num_fixed))
+                            })
                             .collect::<Vec<ZKVMChipProofInput>>()
                             .into(),
                     )
@@ -182,7 +200,10 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .map(|proof| ceil_log2(proof.sum_num_instances) + proof.num_rotation_var)
+            .map(|proof| {
+                let num_var = ceil_log2(proof.sum_num_instances);
+                if proof.num_witin > 0 { num_var } else { 0 }
+            })
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
@@ -208,8 +229,6 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .chain(fixed_num_vars.iter())
             .copied()
-            // _debug
-            // .map(ceil_log2)
             .max()
             .unwrap_or(0);
         let max_width = witin_max_widths
@@ -232,29 +251,8 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
                 });
             perm
         };
-
-        // _debug
-        // println!("=> witin_num_vars: {:?}", witin_num_vars.clone());
-        // println!("=> fixed_num_vars: {:?}", fixed_num_vars.clone());
-
         let witin_perm = get_perm(witin_num_vars);
         let fixed_perm = get_perm(fixed_num_vars);
-
-        // _debug
-        // let witin_perm = get_perm(witin_num_vars.clone());
-        // let fixed_perm = get_perm(fixed_num_vars.clone());
-
-        // _debug
-        // println!("=> witin_perm: {:?}", witin_perm);
-        // let mut sorted_witin_num_vars: Vec<usize> = vec![];
-        // for i in 0..witin_num_vars.len() {
-        //     sorted_witin_num_vars.push(0usize);
-        // }
-        // for (idx, n) in witin_num_vars.iter().enumerate() {
-        //     sorted_witin_num_vars[witin_perm[idx]] = *n;
-        // }
-        // println!("=> sorted: {:?}", sorted_witin_num_vars);
-
 
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.shard_id));
         stream.extend(self.raw_pi.write());
@@ -363,7 +361,9 @@ impl Hintable<InnerConfig> for TowerProofInput {
 pub struct ZKVMChipProofInput {
     pub idx: usize,
     pub sum_num_instances: usize,
-    pub num_rotation_var: usize,
+
+    pub num_witin: usize,
+    pub num_fixed: usize,
 
     // product constraints
     pub r_out_evals_len: usize,
@@ -424,16 +424,30 @@ impl Hintable<InnerConfig> for ZKVMChipProofs {
     }
 }
 
-impl From<(usize, ZKVMChipProof<E>, usize)> for ZKVMChipProofInput {
-    fn from(d: (usize, ZKVMChipProof<E>, usize)) -> Self {
+impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
+    fn from(d: (usize, ZKVMChipProof<E>, usize, usize)) -> Self {
         let idx = d.0;
         let p = d.1;
-        let sum_num_instances = p.num_instances.iter().sum();
+
+        let num_var = if p.gkr_iop_proof.is_some() {
+            let vars = p
+                .gkr_iop_proof
+                .as_ref()
+                .unwrap()
+                .0
+                .iter()
+                .map(|l| l.main.proof.proofs.len())
+                .collect::<Vec<usize>>();
+            vars[0]
+        } else {
+            0
+        };
 
         Self {
             idx,
-            sum_num_instances,
-            num_rotation_var: d.2,
+            sum_num_instances: 1 << num_var,
+            num_witin: d.2,
+            num_fixed: d.3,
             r_out_evals_len: p.r_out_evals.len(),
             w_out_evals_len: p.w_out_evals.len(),
             lk_out_evals_len: p.lk_out_evals.len(),

@@ -683,7 +683,6 @@ pub fn verify_proofs(
         let mut witness_stream: Vec<Vec<F>> = Vec::new();
         witness_stream.extend(zkvm_proof_input.write());
 
-        
         let poseidon2_max_constraint_degree: usize = 3;
         let mut config = NativeConfig::aggregation(0, poseidon2_max_constraint_degree);
         config.system.memory_config.max_access_adapter_n = 16;
@@ -811,7 +810,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_single_rust_verifier() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 

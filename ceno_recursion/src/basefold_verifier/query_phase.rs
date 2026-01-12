@@ -429,16 +429,19 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     let batch_opening = builder.get(&query.input_proofs, idx_vec[0]);
                     let round = builder.get(&input.rounds, idx_vec[0]);
                     let opened_values = batch_opening.opened_values;
-                    let perm_opened_values = builder.dyn_array(opened_values.length.clone());
+                    let perm_opened_values = builder.dyn_array(round.openings.len());
                     let opening_proof = batch_opening.opening_proof;
                     let opening_idxes: Array<C, Var<C::N>> =
                         builder.dyn_array(round.openings.len());
                     let opened_values_offset: Var<C::N> = builder.constant(C::N::ZERO);
 
+                    let dimensions: Array<C, Var<C::N>> = builder.dyn_array(round.openings.len());
+
                     builder
                         .range(0, round.openings.len())
                         .for_each(|i_vec, builder| {
                             let opening = builder.get(&round.openings, i_vec[0]);
+                            // builder.set(&dimensions, i_vec[0], opening.num_var);
 
                             builder.if_ne(opening.num_var, zero_flag).then(|builder| {
                                 builder.set(&opening_idxes, opened_values_offset, i_vec[0]);
@@ -448,9 +451,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                                 );
                             });
                         });
-
-                    let dimensions: Array<C, Var<C::N>> =
-                        builder.dyn_array(opened_values.length.clone());
 
                     builder
                         .range(0, opened_values.length.clone())
@@ -529,12 +529,30 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                         builder.eval(log2_max_codeword_size - round.commit.log2_max_codeword_size);
                     let reduced_idx_bits = idx_bits.slice(builder, bits_shift, idx_bits.len());
 
+                    let non_zero_idx: Var<C::N> = builder.eval(C::N::ZERO);
+                    let non_zero_dimensions: Array<C, Var<C::N>> =
+                        builder.dyn_array(opened_values.length.get_var());
+                    let non_zero_perm_opened_values: Array<C, Array<C, Felt<C::F>>> =
+                        builder.dyn_array(opened_values.length.get_var());
+                    builder
+                        .range(0, round.openings.len())
+                        .for_each(|idx_vec, builder| {
+                            let d = builder.get(&dimensions, idx_vec[0]);
+
+                            builder.if_ne(d, zero_flag).then(|builder| {
+                                builder.set(&non_zero_dimensions, non_zero_idx, d);
+                                let values = builder.get(&perm_opened_values, idx_vec[0]);
+                                builder.set(&non_zero_perm_opened_values, non_zero_idx, values);
+                                builder.assign(&non_zero_idx, non_zero_idx + Usize::from(1));
+                            });
+                        });
+
                     // verify input mmcs
                     let mmcs_verifier_input = MmcsVerifierInputVariable {
                         commit: round.commit.commit.clone(),
-                        dimensions,
+                        dimensions: non_zero_dimensions,
                         index_bits: reduced_idx_bits,
-                        opened_values: perm_opened_values,
+                        opened_values: non_zero_perm_opened_values,
                         proof: opening_proof,
                     };
 
