@@ -3,7 +3,7 @@ use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::{create_backend, create_prover},
+    scheme::{create_backend, create_prover, verifier::RiscvMemStateConfig},
 };
 use std::{fs, path::PathBuf, time::Duration};
 mod alloc;
@@ -62,7 +62,7 @@ fn fibonacci_witness(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
-                    let result = run_e2e_with_checkpoint::<E, Pcs, _, _, Platform>(
+                    let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RiscvMemStateConfig>(
                         create_prover(backend.clone()),
                         program.clone(),
                         platform.clone(),

@@ -1,4 +1,4 @@
-use ceno_emul::{IterAddresses, Platform, Program, WORD_SIZE, Word};
+use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_recursion::aggregation::CenoAggregationProver;
 use ceno_zkvm::{
@@ -6,7 +6,9 @@ use ceno_zkvm::{
         Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
         setup_platform, setup_platform_debug,
     },
-    scheme::{constants::MAX_NUM_VARIABLES, create_backend, create_prover},
+    scheme::{
+        constants::MAX_NUM_VARIABLES, create_backend, create_prover, verifier::RiscvMemStateConfig,
+    },
 };
 use clap::Parser;
 use ff_ext::BabyBearExt4;
@@ -256,7 +258,7 @@ fn main() {
         Basefold<BabyBearExt4, BasefoldRSParams>,
         _,
         _,
-        Platform,
+        RiscvMemStateConfig,
     >(
         prover,
         program,

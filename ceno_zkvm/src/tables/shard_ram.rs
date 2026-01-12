@@ -659,8 +659,11 @@ mod tests {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         scheme::{
-            PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
-            septic_curve::SepticPoint, verifier::ZKVMVerifier,
+            PublicValues, create_backend, create_prover,
+            hal::ProofInput,
+            prover::ZKVMProver,
+            septic_curve::SepticPoint,
+            verifier::{RiscvMemStateConfig, ZKVMVerifier},
         },
         structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
         tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
@@ -798,7 +801,7 @@ mod tests {
         let pd = create_prover(backend);
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
-        let zkvm_vk = zkvm_pk.get_vk_slow::<ceno_emul::Platform>();
+        let zkvm_vk = zkvm_pk.get_vk_slow::<RiscvMemStateConfig>();
         let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 

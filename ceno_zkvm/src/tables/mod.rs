@@ -51,7 +51,6 @@ pub trait TableCircuit<E: ExtensionField> {
         let zero_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
-
         let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(selector.expr());
 

@@ -13,7 +13,10 @@ use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 
-use ceno_zkvm::{e2e::MultiProver, scheme::verifier::ZKVMVerifier};
+use ceno_zkvm::{
+    e2e::MultiProver,
+    scheme::verifier::{RiscvMemStateConfig, ZKVMVerifier},
+};
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 
@@ -50,7 +53,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         let mut hints = CenoStdin::default();
         let _ = hints.write(&20);
         // estimate proof size data first
-        let result = run_e2e_with_checkpoint::<E, Pcs, _, _, Platform>(
+        let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RiscvMemStateConfig>(
             create_prover(backend.clone()),
             program.clone(),
             platform.clone(),
@@ -69,7 +72,7 @@ fn fibonacci_prove(c: &mut Criterion) {
 
         println!("e2e proof {}", proof);
         let transcript = BasicTranscript::new(b"riscv");
-        let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
+        let verifier = ZKVMVerifier::<E, Pcs, RiscvMemStateConfig>::new(vk);
         assert!(
             verifier
                 .verify_proof_halt(proof, transcript, false)
@@ -92,7 +95,7 @@ fn fibonacci_prove(c: &mut Criterion) {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
-                        let result = run_e2e_with_checkpoint::<E, Pcs, _, _, Platform>(
+                        let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RiscvMemStateConfig>(
                             create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),

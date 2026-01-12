@@ -2,10 +2,9 @@ use crate::zkvm_verifier::{
     binding::{E, F, ZKVMProofInput, ZKVMProofInputVariable},
     verifier::verify_zkvm_proof,
 };
-use ceno_emul::Platform;
 use ceno_zkvm::{
     instructions::riscv::constants::{END_PC_IDX, EXIT_CODE_IDX, INIT_PC_IDX},
-    scheme::ZKVMProof,
+    scheme::{ZKVMProof, verifier::RiscvMemStateConfig},
     structs::ZKVMVerifyingKey,
 };
 use ff_ext::BabyBearExt4;
@@ -61,7 +60,7 @@ use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
-type BaseZkvmVk = ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>, Platform>;
+type BaseZkvmVk = ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>, RiscvMemStateConfig>;
 use openvm_circuit::{
     arch::{
         CONNECTOR_AIR_ID, PROGRAM_AIR_ID, PROGRAM_CACHED_TRACE_INDEX, PUBLIC_VALUES_AIR_ID,
@@ -699,12 +698,11 @@ pub fn verify_proofs(zkvm_proofs: Vec<ZKVMProof<E, RecPcs>>, vk: BaseZkvmVk) {
 
 #[cfg(test)]
 mod tests {
-    use super::verify_e2e_stark_proof;
+    use super::{BaseZkvmVk, verify_e2e_stark_proof};
     use crate::{
         aggregation::{CenoAggregationProver, verify_proofs},
         zkvm_verifier::binding::E,
     };
-    use super::BaseZkvmVk;
     use ceno_zkvm::{
         e2e::verify,
         scheme::{ZKVMProof, verifier::ZKVMVerifier},

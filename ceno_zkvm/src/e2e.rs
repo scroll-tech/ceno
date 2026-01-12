@@ -1532,7 +1532,7 @@ pub fn setup_program<E: ExtensionField>(
 impl<E: ExtensionField> E2EProgramCtx<E> {
     pub fn keygen<
         PCS: PolynomialCommitmentScheme<E> + 'static,
-        M: MemStatePubValuesVerifier<E, PCS, Config = Platform>,
+        M: MemStatePubValuesVerifier<E, PCS> + From<Platform>,
     >(
         self,
         max_num_variables: usize,
@@ -1560,7 +1560,7 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
     pub fn keygen_with_pb<
         PCS: PolynomialCommitmentScheme<E> + 'static,
         PB: ProverBackend<E = E, Pcs = PCS> + 'static,
-        M: MemStatePubValuesVerifier<E, PCS, Config = Platform>,
+        M: MemStatePubValuesVerifier<E, PCS> + From<Platform>,
     >(
         self,
         pb: &PB,
@@ -1620,7 +1620,7 @@ pub fn run_e2e_with_checkpoint<
     PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     PD: ProverDevice<PB> + 'static,
-    M: MemStatePubValuesVerifier<E, PCS, Config = Platform> + 'static,
+    M: MemStatePubValuesVerifier<E, PCS> + From<Platform> + 'static,
 >(
     device: PD,
     program: Program,
@@ -1966,7 +1966,7 @@ fn create_proofs_streaming<
 pub fn run_e2e_verify<
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
-    M: MemStatePubValuesVerifier<E, PCS, Config = Platform>,
+    M: MemStatePubValuesVerifier<E, PCS>,
 >(
     verifier: &ZKVMVerifier<E, PCS, M>,
     zkvm_proofs: Vec<ZKVMProof<E, PCS>>,

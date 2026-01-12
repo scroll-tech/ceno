@@ -785,7 +785,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
-    pub fn get_vk_slow<M: MemStatePubValuesVerifier<E, PCS, Config = Platform>>(&self) -> ZKVMVerifyingKey<E, PCS, M> {
+    pub fn get_vk_slow<M>(&self) -> ZKVMVerifyingKey<E, PCS, M>
+    where
+        M: MemStatePubValuesVerifier<E, PCS> + From<Platform>,
+    {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
             entry_pc: self.entry_pc,
@@ -805,7 +808,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .enumerate()
                 .map(|(index, name)| (index, name.clone()))
                 .collect(),
-            mem_state_config: self.program_ctx.as_ref().unwrap().platform.clone(),
+            mem_state_verifier: M::from(self.program_ctx.as_ref().unwrap().platform.clone()),
         }
     }
 
@@ -816,8 +819,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned",
+    serialize = "E::BaseField: Serialize, M: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned, M: DeserializeOwned",
 ))]
 pub struct ZKVMVerifyingKey<
     E: ExtensionField,
@@ -839,5 +842,5 @@ pub struct ZKVMVerifyingKey<
     // circuit index -> circuit name
     // mainly used for debugging
     pub circuit_index_to_name: BTreeMap<usize, String>,
-    pub mem_state_config: M::Config,
+    pub mem_state_verifier: M,
 }

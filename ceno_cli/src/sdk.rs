@@ -7,8 +7,11 @@ use ceno_recursion::{
 use ceno_zkvm::{
     e2e::{MultiProver, run_e2e_proof, setup_program},
     scheme::{
-        ZKVMProof, create_backend, create_prover, hal::ProverDevice,
-        mock_prover::LkMultiplicityKey, prover::ZKVMProver, verifier::ZKVMVerifier,
+        ZKVMProof, create_backend, create_prover,
+        hal::ProverDevice,
+        mock_prover::LkMultiplicityKey,
+        prover::ZKVMProver,
+        verifier::{RiscvMemStateConfig, ZKVMVerifier},
     },
     structs::{ZKVMProvingKey, ZKVMVerifyingKey},
 };
@@ -51,7 +54,7 @@ pub struct Sdk<
 
     // base(app) layer
     pub zkvm_pk: Option<Arc<ZKVMProvingKey<E, PCS>>>,
-    pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS, Platform>>,
+    pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS, RiscvMemStateConfig>>,
     pub zkvm_prover: Option<ZKVMProver<E, PCS, PB, PD>>,
 
     // aggregation
@@ -104,7 +107,7 @@ where
     }
 
     // allow us to read the app vk from file and then set it
-    pub fn set_app_vk(&mut self, vk: ZKVMVerifyingKey<E, PCS, Platform>) {
+    pub fn set_app_vk(&mut self, vk: ZKVMVerifyingKey<E, PCS, RiscvMemStateConfig>) {
         self.zkvm_vk = Some(vk);
     }
 
@@ -164,7 +167,7 @@ where
         self.zkvm_pk.clone().expect("zkvm pk is not set")
     }
 
-    pub fn get_app_vk(&self) -> ZKVMVerifyingKey<E, PCS, Platform> {
+    pub fn get_app_vk(&self) -> ZKVMVerifyingKey<E, PCS, RiscvMemStateConfig> {
         self.zkvm_vk.clone().expect("zkvm vk is not set")
     }
 
@@ -176,7 +179,7 @@ where
         self.agg_pk.as_ref().expect("agg pk is not set").get_vk()
     }
 
-    pub fn create_zkvm_verifier(&self) -> ZKVMVerifier<E, PCS, Platform> {
+    pub fn create_zkvm_verifier(&self) -> ZKVMVerifier<E, PCS, RiscvMemStateConfig> {
         let Some(app_vk) = self.zkvm_vk.clone() else {
             panic!("empty zkvm vk");
         };

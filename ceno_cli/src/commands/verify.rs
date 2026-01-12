@@ -1,9 +1,11 @@
 use crate::utils::print_cargo_message;
 use anyhow::{Context, bail};
-use ceno_emul::Platform;
 use ceno_zkvm::{
     e2e::{FieldType, PcsKind, verify},
-    scheme::{ZKVMProof, verifier::ZKVMVerifier},
+    scheme::{
+        ZKVMProof,
+        verifier::{RiscvMemStateConfig, ZKVMVerifier},
+    },
     structs::ZKVMVerifyingKey,
 };
 use clap::Parser;
@@ -67,7 +69,7 @@ fn run_inner<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize>(
     );
 
     let start = std::time::Instant::now();
-    let vk: ZKVMVerifyingKey<E, PCS, Platform> =
+    let vk: ZKVMVerifyingKey<E, PCS, RiscvMemStateConfig> =
         bincode::deserialize_from(File::open(&args.vk).context("Failed to open vk file")?)
             .context("Failed to deserialize vk file")?;
     print_cargo_message(
