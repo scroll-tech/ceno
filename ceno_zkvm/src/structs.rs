@@ -808,7 +808,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .enumerate()
                 .map(|(index, name)| (index, name.clone()))
                 .collect(),
-            mem_state_verifier: M::from(self.program_ctx.as_ref().unwrap().platform.clone()),
+            mem_state_verifier: self
+                .program_ctx
+                .as_ref()
+                .map(|ctx| M::from(ctx.platform.clone()))
+                .unwrap_or_default(),
         }
     }
 

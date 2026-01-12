@@ -1982,7 +1982,10 @@ pub fn run_e2e_verify<
             .verify_proofs_halt(zkvm_proofs, transcripts, exit_code.is_some())
             .expect("verify proof return with error"),
     );
-    MemStatePubValuesVerifier::verify_proofs(verifier, mem_state_proofs);
+    verifier
+        .vk
+        .mem_state_verifier
+        .verify_proofs(mem_state_proofs);
     match exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),

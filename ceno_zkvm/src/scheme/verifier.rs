@@ -47,12 +47,12 @@ use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
 pub trait MemStatePubValuesVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>:
-    Clone
+    Clone + Default
 {
     fn verify_proofs(&self, vm_proofs: Vec<ZKVMProof<E, PCS>>);
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct RiscvMemStateConfig {
     heap: Range<u32>,
     hints: Range<u32>,
@@ -79,6 +79,7 @@ impl From<&Platform> for RiscvMemStateConfig {
     }
 }
 
+// riscv impl
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MemStatePubValuesVerifier<E, PCS>
     for RiscvMemStateConfig
 {
@@ -761,15 +762,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValues
             &selector_ctxs,
         )?;
         Ok((rt, shard_ec_sum))
-    }
-}
-
-/// riscv impl
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValuesVerifier<E, PCS>>
-    MemStatePubValuesVerifier<E, PCS> for ZKVMVerifier<E, PCS, M>
-{
-    fn verify_proofs(&self, vm_proofs: Vec<ZKVMProof<E, PCS>>) {
-        self.vk.mem_state_verifier.verify_proofs(vm_proofs);
     }
 }
 
