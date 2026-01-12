@@ -31,9 +31,10 @@ use sumcheck::structs::{IOPProof, IOPProverMessage};
 use tracing::Level;
 use witness::RowMajorMatrix;
 
-/// proof that the sum of N=2^n EC points is equal to `sum`
-/// in one layer instead of GKR layered circuit approach
-/// note that this one layer IOP borrowed ideas from
+/// Proof that the sum of N (not necessarily a power of two) EC points
+/// is equal to `sum` in one layer instead of multiple layers in a
+/// GKR layered circuit approach that we used for offline memory checking.
+/// Note that this one layer IOP borrowed ideas from
 /// [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -42,6 +43,7 @@ use witness::RowMajorMatrix;
 ))]
 pub struct EccQuarkProof<E: ExtensionField> {
     pub zerocheck_proof: IOPProof<E>,
+    /// Number of EC points being summed
     pub num_instances: usize,
     pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[0,rt], y[0,rt], s[0,rt]
     pub rt: Point<E>,

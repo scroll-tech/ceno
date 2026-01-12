@@ -1,6 +1,9 @@
 use either::Either;
 use ff_ext::ExtensionField;
-use std::{iter, marker::PhantomData};
+use std::{
+    iter::{self, once, repeat_n},
+    marker::PhantomData,
+};
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
@@ -630,25 +633,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValues
             tracing::debug!("verifying ecc proof...");
             assert!(proof.ecc_proof.is_some());
             let ecc_proof = proof.ecc_proof.as_ref().unwrap();
-
-            // let expected_septic_xy = cs
-            //     .ec_final_sum
-            //     .iter()
-            //     .map(|expr| {
-            //         eval_by_expr_with_instance(&[], &[], &[], pi, challenges, expr)
-            //             .right()
-            //             .and_then(|v| v.as_base())
-            //             .unwrap()
-            //     })
-            //     .collect_vec();
-            // let expected_septic_x: SepticExtension<E::BaseField> =
-            //     expected_septic_xy[0..SEPTIC_EXTENSION_DEGREE].into();
-            // let expected_septic_y: SepticExtension<E::BaseField> =
-            //     expected_septic_xy[SEPTIC_EXTENSION_DEGREE..].into();
-
-            // assert_eq!(&ecc_proof.sum.x, &expected_septic_x);
-            // assert_eq!(&ecc_proof.sum.y, &expected_septic_y);
             assert!(!ecc_proof.sum.is_infinity);
+
             EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
             tracing::debug!("ecc proof verified.");
             Some(ecc_proof.sum.clone())
@@ -1018,7 +1004,7 @@ impl EccVerifier {
         let num_vars = next_pow2_instance_padding(proof.num_instances).ilog2() as usize;
         let out_rt = transcript.sample_and_append_vec(b"ecc", num_vars);
         let alpha_pows = transcript.sample_and_append_challenge_pows(
-            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2,
+            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 4,
             b"ecc_alpha",
         );
         let mut alpha_pows_iter = alpha_pows.iter();
@@ -1034,19 +1020,20 @@ impl EccVerifier {
             transcript,
         );
 
-        let s0: SepticExtension<E> = proof.evals[2..][0..][..SEPTIC_EXTENSION_DEGREE].into();
+        let evals = &proof.evals[3..]; // skip sel_add, sel_bypass, sel_export
+        let s0: SepticExtension<E> = evals[0..][..SEPTIC_EXTENSION_DEGREE].into();
         let x0: SepticExtension<E> =
-            proof.evals[2..][SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+            evals[SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
         let y0: SepticExtension<E> =
-            proof.evals[2..][2 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+            evals[2 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
         let x1: SepticExtension<E> =
-            proof.evals[2..][3 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+            evals[3 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
         let y1: SepticExtension<E> =
-            proof.evals[2..][4 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+            evals[4 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
         let x3: SepticExtension<E> =
-            proof.evals[2..][5 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+            evals[5 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
         let y3: SepticExtension<E> =
-            proof.evals[2..][6 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
+            evals[6 * SEPTIC_EXTENSION_DEGREE..][..SEPTIC_EXTENSION_DEGREE].into();
 
         let rt = sumcheck_claim
             .point
@@ -1054,11 +1041,13 @@ impl EccVerifier {
             .map(|c| c.elements)
             .collect_vec();
 
-        // zerocheck: 0 = s[0,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1])
-        // zerocheck: 0 = s[0,b]^2 - x[b,0] - x[b,1] - x[1,b]
-        // zerocheck: 0 = s[0,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b])
-        // zerocheck: 0 = (x[1,b] - x[b,0])
-        // zerocheck: 0 = (y[1,b] - y[b,0])
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1])
+        // zerocheck: 0 = s[1,b]^2 - x[b,0] - x[b,1] - x[1,b]
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b])
+        // zerocheck: 0 = (x[1,b] - x[b,0]) * sel_bypass
+        // zerocheck: 0 = (y[1,b] - y[b,0]) * sel_bypass
+        // zerocheck: 0 = (x[1,b] - final_x) * sel_export
+        // zerocheck: 0 = (y[1,b] - final_y) * sel_export
         //
         // note that they are not septic extension field elements,
         // we just want to reuse the multiply/add/sub formulas
@@ -1118,10 +1107,36 @@ impl EccVerifier {
             ));
         }
 
+        // derive `sel_export`
+        let lsi_on_hypercube = once(E::ZERO)
+            .chain(repeat_n(E::ONE, out_rt.len() - 1))
+            .collect_vec();
+        let expected_sel_export =
+            eq_eval(&out_rt, &lsi_on_hypercube) * eq_eval(&rt, &lsi_on_hypercube);
+        if proof.evals[2] != expected_sel_export {
+            return Err(ZKVMError::VerifyError(
+                (format!(
+                    "sel_export evaluation mismatch, expected {}, got {}",
+                    expected_sel_export, proof.evals[2]
+                ))
+                .into(),
+            ));
+        }
+        let export_evaluations: E =
+            x3.0.iter()
+                .zip_eq(proof.sum.x.0.iter())
+                .chain(y3.0.iter().zip_eq(proof.sum.y.0.iter()))
+                .map(|(a, b)| *a - *b)
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE * 2))
+                .map(|(c, alpha)| c * *alpha)
+                .sum();
+
         let add_evaluations = vec![v1, v2, v3].into_iter().flatten().sum::<E>();
         let bypass_evaluations = vec![v4, v5].into_iter().flatten().sum::<E>();
         if sumcheck_claim.expected_evaluation
-            != add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass
+            != add_evaluations * expected_sel_add
+                + bypass_evaluations * expected_sel_bypass
+                + export_evaluations * expected_sel_export
         {
             return Err(ZKVMError::VerifyError(
                 (format!(
