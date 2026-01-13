@@ -261,6 +261,31 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             let chip_proofs =
                 builder.get(&zkvm_proof_input.chip_proofs, num_chips_verified.get_var());
 
+            let chip_proofs_len = chip_proofs.len();
+            if circuit_vk.get_cs().with_omc_init_only() {
+                // shard_id > 0
+                builder
+                    .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+                    .then(|builder| {
+                        builder.assert_usize_eq(chip_proofs_len.clone(), Usize::from(0));
+                    });
+
+                // shard_id == 0
+                builder
+                    .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+                    .then(|builder| {
+                        builder.assert_usize_eq(chip_proofs_len.clone(), Usize::from(1));
+                    });
+            } else if circuit_vk.get_cs().with_omc_init_dyn() {
+                // either empty or only 1 chip proofs
+                builder.assert_usize_eq(
+                    chip_proofs_len.clone() * (Usize::from(1) - chip_proofs_len),
+                    Usize::from(0),
+                );
+            } else {
+                // do nothing
+            }
+
             iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
                 let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
                 builder.assert_usize_eq(

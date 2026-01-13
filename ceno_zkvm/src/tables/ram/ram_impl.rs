@@ -481,6 +481,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
         if let Some(instance) = DVRAM::dynamic_length_instance() {
+            cb.set_omc_init_dyn();
             cb.require_zero(
                 || "dynamic_length + (num_instance * -1)",
                 instance.expr()

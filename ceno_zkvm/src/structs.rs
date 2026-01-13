@@ -12,7 +12,10 @@ use crate::{
 };
 use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
-use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
+use gkr_iop::{
+    circuit_builder::ShardOMCInitType, gkr::GKRCircuit, tables::LookupTable,
+    utils::lk_multiplicity::Multiplicity,
+};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
@@ -188,7 +191,11 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     }
 
     pub fn with_omc_init_only(&self) -> bool {
-        self.zkvm_v1_css.with_omc_init_only
+        matches!(self.zkvm_v1_css.omc_init_type, ShardOMCInitType::InitOnce)
+    }
+
+    pub fn with_omc_init_dyn(&self) -> bool {
+        matches!(self.zkvm_v1_css.omc_init_type, ShardOMCInitType::InitDyn)
     }
 }
 

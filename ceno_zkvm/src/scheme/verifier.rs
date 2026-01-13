@@ -181,13 +181,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValues
     ) -> Result<bool, ZKVMError> {
         assert!(!vm_proofs.is_empty());
         let num_proofs = vm_proofs.len();
-        let (_end_pc, _end_heap_addr, shard_ec_sum) = vm_proofs
+        let (_end_pc, shard_ec_sum) = vm_proofs
             .into_iter()
             .zip_eq(transcripts)
             // optionally halt on last chunk
             .zip_eq(iter::repeat_n(false, num_proofs - 1).chain(iter::once(expect_halt)))
             .enumerate()
-            .try_fold((None, None, SepticPoint::<E::BaseField>::default()), |(prev_pc, prev_heap_addr_end, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
+            .try_fold((None, SepticPoint::<E::BaseField>::default()), |(prev_pc, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
                 // require ecall/halt proof to exist, depend on whether we expect a halt.
                 let has_halt = vm_proof.has_halt(&self.vk);
                 if has_halt != expect_halt {
@@ -210,18 +210,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValues
                 }
                 let end_pc = vm_proof.pi_evals[END_PC_IDX];
 
-                // check memory continuation consistency
-                let heap_addr_start_u32 = vm_proof.pi_evals[HEAP_START_ADDR_IDX].to_canonical_u64() as u32;
-                let heap_len = vm_proof.pi_evals[HEAP_LENGTH_IDX].to_canonical_u64() as u32;
-                if let Some(prev_heap_addr_end) = prev_heap_addr_end {
-                    assert_eq!(heap_addr_start_u32, prev_heap_addr_end);
-                    // TODO check heap addr in prime field within range
-                } else {
-                    // TODO first chunk, check initial heap addr
-                };
-                // TODO check heap_len == heap chip num_instances
-                let next_heap_addr_end: u32 = heap_addr_start_u32 + heap_len * WORD_SIZE as u32;
-
                 // add to shard ec sum
                 // _debug
                 // println!("=> shard pi: {:?}", vm_proof.pi_evals.clone());
@@ -232,7 +220,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValues
                 shard_ec_sum = shard_ec_sum + shard_ec;
                 // println!("=> new_ec_sum: {:?}", shard_ec_sum);
 
-                Ok((Some(end_pc), Some(next_heap_addr_end), shard_ec_sum))
+                Ok((Some(end_pc), shard_ec_sum))
             })?;
         // TODO check _end_heap_addr within heap range from vk
         // check shard ec_sum is_infinity
@@ -352,16 +340,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValues
         for (index, proofs) in &vm_proof.chip_proofs {
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
-            if shard_id > 0 && circuit_vk.get_cs().with_omc_init_only() {
+            if circuit_vk.get_cs().with_omc_init_only() {
+                if shard_id > 0 {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("{shard_id}th shard non-first shard got omc dynamic table init",)
+                            .into(),
+                    ));
+                }
+                if shard_id == 0 && proofs.len() != 1 {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("{shard_id}th shard first shard got > 1 omc dynamic table init",)
+                            .into(),
+                    ));
+                }
+            } else if circuit_vk.get_cs().with_omc_init_dyn() && proofs.len() > 1 {
+                // either empty or only 1 chip proofs
                 return Err(ZKVMError::InvalidProof(
-                    format!("{shard_id}th shard non-first shard got omc dynamic table init",)
-                        .into(),
-                ));
-            }
-            if shard_id == 0 && circuit_vk.get_cs().with_omc_init_only() && proofs.len() != 1 {
-                return Err(ZKVMError::InvalidProof(
-                    format!("{shard_id}th shard first shard got > 1 omc dynamic table init",)
-                        .into(),
+                    format!("{shard_id}th shard got > 1 dynamic table init",).into(),
                 ));
             }
         }
