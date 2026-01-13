@@ -476,17 +476,55 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             let num_instance = builder.iter_ptr_get(&num_instances, ptr_vec[0]);
             builder.assign(&sum_num_instances, sum_num_instances.clone() + num_instance);
         });
+        builder.assert_nonzero(&sum_num_instances);
         let sum_num_instances_felt = builder.unsafe_cast_var_to_felt(sum_num_instances.get_var());
 
         let sum_num_instances_minus_one_bit_decomposition = {
-            let one_felt_const: Felt<_> = builder.eval(F::ONE);
-            let sum_num_instances_minus_one_bit_decomposition =
-                builder.num2bits_f_circuit(sum_num_instances_felt.into() - one_felt_const);
-            builder.vec(sum_num_instances_minus_one_bit_decomposition)
+            let bit_decompose_hints = Vec::<F>::read(builder);
+            let const_zero: Felt<_> = builder.constant(F::ZERO);
+            let const_one: Felt<_> = builder.constant(F::ONE);
+            let const_two: Var<_> = builder.constant(F::TWO);
+            let sum = Var::uninit(builder);
+            builder.assign(&sum, F::ZERO);
+            let pow2_factor = Var::uninit(builder);
+            builder.assign(&pow2_factor, F::ONE);
+            // traverse from lsb
+            iter_zip!(builder, bit_decompose_hints).for_each(|ptr_vec, builder| {
+                let bit = builder.iter_ptr_get(&bit_decompose_hints, ptr_vec[0]);
+                // assert bit
+                builder.assert_eq::<Felt<_>>(bit * (const_one - bit), const_zero);
+                let bit_var = builder.cast_felt_to_var(bit);
+                builder.assign(&sum, sum + bit_var * pow2_factor);
+                builder.assign(&pow2_factor, pow2_factor * const_two);
+            });
+            let sum_felt = builder.unsafe_cast_var_to_felt(sum);
+            // assert bit decompose result match sum_num_instances_felt
+            let sum_instance_minus_one: Felt<_> = builder.eval(sum_num_instances_felt - const_one);
+            builder.assert_eq::<Felt<_>>(sum_felt, sum_instance_minus_one);
+            bit_decompose_hints
         };
 
-        // TODO soundness: derive `log2_num_instances` from `num_instances`
-        let log2_num_instances = Usize::Var(usize::read(builder));
+        let log2_num_instances = {
+            let derived_log2 = Usize::from(Var::uninit(builder));
+            // min log2_num_instances 1
+            builder.assign(&derived_log2, F::ONE);
+            let const_one_bit: Var<_> = builder.constant(F::ONE);
+            let bit_index = Usize::from(Var::uninit(builder));
+            builder.assign(&bit_index, F::ZERO);
+            iter_zip!(builder, sum_num_instances_minus_one_bit_decomposition).for_each(
+                |ptr_vec, builder| {
+                    let bit = builder
+                        .iter_ptr_get(&sum_num_instances_minus_one_bit_decomposition, ptr_vec[0]);
+                    let bit_var = builder.cast_felt_to_var(bit);
+                    // Bits encode (sum_num_instances - 1). Highest set bit index + 1 == ceil(log2(sum)).
+                    builder.if_eq(bit_var, const_one_bit).then(|builder| {
+                        builder.assign(&derived_log2, bit_index.clone() + const_one_bit);
+                    });
+                    builder.assign(&bit_index, bit_index.clone() + const_one_bit);
+                },
+            );
+            derived_log2
+        };
 
         let r_out_evals_len = Usize::Var(usize::read(builder));
         let w_out_evals_len = Usize::Var(usize::read(builder));
@@ -545,17 +583,13 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let idx_u32: F = F::from_canonical_u32(self.idx as u32);
         stream.extend(idx_u32.write());
 
-        let sum_num_instances = self.num_instances.iter().sum();
+        let num_instances = self.num_instances.iter().sum();
         stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
             &self.num_instances,
         ));
 
-        let sum_num_instance_bit_decomp = decompose_minus_one_bits(sum_num_instances);
+        let sum_num_instance_bit_decomp = decompose_minus_one_bits(num_instances);
         stream.extend(sum_num_instance_bit_decomp.write());
-
-        let next_pow2_instance = next_pow2_instance_padding(sum_num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instance);
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
 
         let r_out_evals_len = self.r_out_evals.len();
         let w_out_evals_len = self.w_out_evals.len();
