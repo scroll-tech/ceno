@@ -63,7 +63,7 @@ impl<T: Tracer> VMState<T> {
             program: program.clone(),
             memory: DenseAddrSpace::new(
                 ByteAddr::from(platform.rom.start).waddr(),
-                ByteAddr::from(platform.heap.end).waddr(),
+                ByteAddr::from(platform.stack.end).waddr(),
             ),
             registers: [0; VM_REG_COUNT],
             halt_state: None,

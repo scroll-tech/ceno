@@ -178,7 +178,7 @@ impl LatestAccesses {
         Self {
             store: DenseAddrSpace::new(
                 WordAddr::from(0u32),
-                ByteAddr::from(platform.heap.end).waddr(),
+                ByteAddr::from(platform.stack.end).waddr(),
             ),
             len: 0,
             #[cfg(any(test, debug_assertions))]
