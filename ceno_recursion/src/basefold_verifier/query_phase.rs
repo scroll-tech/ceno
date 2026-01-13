@@ -556,8 +556,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                         proof: opening_proof,
                     };
 
-                    // _debug
-                    // mmcs_verify_batch(builder, mmcs_verifier_input);
+                    mmcs_verify_batch(builder, mmcs_verifier_input);
                 });
             builder.cycle_tracker_end("Batching and first FRI round");
 
