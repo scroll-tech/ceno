@@ -1733,7 +1733,7 @@ pub fn verify_ecc_proof<C: Config>(
     let alpha_pows = gen_alpha_pows(
         builder,
         challenger,
-        Usize::from(SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2),
+        Usize::from(SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 4),
     );
 
     let one_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
@@ -1750,7 +1750,7 @@ pub fn verify_ecc_proof<C: Config>(
         unipoly_extrapolator,
     );
 
-    let cord_slice = proof.evals.slice(builder, 2, proof.evals.len());
+    let cord_slice = proof.evals.slice(builder, 3, proof.evals.len());
     let s0: SepticExtensionVariable<C> =
         cord_slice.slice(builder, 0, SEPTIC_EXTENSION_DEGREE).into();
     let x0: SepticExtensionVariable<C> = cord_slice
@@ -1802,6 +1802,8 @@ pub fn verify_ecc_proof<C: Config>(
     let v3: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let v4: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let v5: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
+    let export_x: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
+    let export_y: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let x0_x1: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let x0_x3: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
 
@@ -1811,6 +1813,8 @@ pub fn verify_ecc_proof<C: Config>(
         let x3_i = builder.get(&x3.vs, i);
         let y0_i = builder.get(&y0.vs, i);
         let y3_i = builder.get(&y3.vs, i);
+        let sum_x_i = builder.get(&proof.sum.x.vs, i);
+        let sum_y_i = builder.get(&proof.sum.y.vs, i);
         let s0_squared_i = builder.get(&s0_squared.vs, i);
 
         builder.set(&x0_x1.vs, i, x0_i - x1_i);
@@ -1818,6 +1822,8 @@ pub fn verify_ecc_proof<C: Config>(
         builder.set(&v2.vs, i, s0_squared_i - x0_i - x1_i - x3_i);
         builder.set(&v4.vs, i, x3_i - x0_i);
         builder.set(&v5.vs, i, y3_i - y0_i);
+        builder.set(&export_x.vs, i, x3_i - sum_x_i);
+        builder.set(&export_y.vs, i, y3_i - sum_y_i);
     }
 
     let s0_x0_x1 = septic_ext_mul(builder, &s0, &x0_x1);
@@ -1830,7 +1836,9 @@ pub fn verify_ecc_proof<C: Config>(
         let y1_i = builder.get(&y1.vs, i);
         let y3_i = builder.get(&y3.vs, i);
 
+        // v1 = s0 * (x0 - x1) - (y0 - y1)
         builder.set(&v1.vs, i, s0_x0_x1_i - (y0_i - y1_i));
+        // v3 = s0 * (x0 - x3) - (y0 + y3)
         builder.set(&v3.vs, i, s0_x0_x3_i - (y0_i + y3_i));
     }
 
@@ -1855,12 +1863,24 @@ pub fn verify_ecc_proof<C: Config>(
         4 * SEPTIC_EXTENSION_DEGREE,
         5 * SEPTIC_EXTENSION_DEGREE,
     );
+    let mask_export_x = alpha_pows.slice(
+        builder,
+        5 * SEPTIC_EXTENSION_DEGREE,
+        6 * SEPTIC_EXTENSION_DEGREE,
+    );
+    let mask_export_y = alpha_pows.slice(
+        builder,
+        6 * SEPTIC_EXTENSION_DEGREE,
+        7 * SEPTIC_EXTENSION_DEGREE,
+    );
 
     mask_arr(builder, &v1.vs, &mask1);
     mask_arr(builder, &v2.vs, &mask2);
     mask_arr(builder, &v3.vs, &mask3);
     mask_arr(builder, &v4.vs, &mask4);
     mask_arr(builder, &v5.vs, &mask5);
+    mask_arr(builder, &export_x.vs, &mask_export_x);
+    mask_arr(builder, &export_y.vs, &mask_export_y);
 
     let sel_add_expr = SelectorType::<E>::QuarkBinaryTreeLessThan(Expression::StructuralWitIn(
         0,
@@ -1884,18 +1904,37 @@ pub fn verify_ecc_proof<C: Config>(
     let proof_eval_0 = builder.get(&proof.evals, 0);
     builder.assert_ext_eq(proof_eval_0, expected_sel_add);
 
-    let eq_eval: Ext<<C as Config>::F, <C as Config>::EF> =
+    let eq_eval_ext: Ext<<C as Config>::F, <C as Config>::EF> =
         eq_eval(builder, &out_rt, &rt, one_ext, zero_ext);
     let out_rt_prod = arr_product(builder, &out_rt);
     let rt_prod = arr_product(builder, &rt);
     let expected_sel_bypass: Ext<C::F, C::EF> =
-        builder.eval(eq_eval - expected_sel_add - (out_rt_prod * rt_prod));
+        builder.eval(eq_eval_ext - expected_sel_add - (out_rt_prod * rt_prod));
 
     let proof_eval_1 = builder.get(&proof.evals, 1);
     builder.assert_ext_eq(proof_eval_1, expected_sel_bypass);
 
+    let lsi_on_hypercube: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(num_vars.clone());
+    builder.set(&lsi_on_hypercube, 0, zero_ext);
+    builder
+        .range(1, lsi_on_hypercube.len())
+        .for_each(|idx_vec, builder| {
+            builder.set(&lsi_on_hypercube, idx_vec[0], one_ext);
+        });
+
+    let expected_sel_export: Ext<C::F, C::EF> = {
+        let a = eq_eval(builder, &out_rt, &lsi_on_hypercube, one_ext, zero_ext);
+        let b = eq_eval(builder, &rt, &lsi_on_hypercube, one_ext, zero_ext);
+
+        builder.eval(a * b)
+    };
+
+    let proof_eval_2 = builder.get(&proof.evals, 2);
+    builder.assert_ext_eq(proof_eval_2, expected_sel_export);
+
     let add_evaluations: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let bypass_evaluations: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    let export_evaluations: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     for i in 0..SEPTIC_EXTENSION_DEGREE {
         let v1_i = builder.get(&v1.vs, i);
         let v2_i = builder.get(&v2.vs, i);
@@ -1903,11 +1942,21 @@ pub fn verify_ecc_proof<C: Config>(
         let v4_i = builder.get(&v4.vs, i);
         let v5_i = builder.get(&v5.vs, i);
 
+        let export_x_i = builder.get(&export_x.vs, i);
+        let export_y_i = builder.get(&export_y.vs, i);
+
         builder.assign(&add_evaluations, add_evaluations + v1_i + v2_i + v3_i);
         builder.assign(&bypass_evaluations, bypass_evaluations + v4_i + v5_i);
+        builder.assign(
+            &export_evaluations,
+            export_evaluations + export_x_i + export_y_i,
+        );
     }
-    let op_evaluation: Ext<C::F, C::EF> =
-        builder.eval(add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass);
+    let op_evaluation: Ext<C::F, C::EF> = builder.eval(
+        add_evaluations * expected_sel_add
+            + bypass_evaluations * expected_sel_bypass
+            + export_evaluations * expected_sel_export,
+    );
     builder.assert_ext_eq(sumcheck_expected_evaluation, op_evaluation);
 }
 
