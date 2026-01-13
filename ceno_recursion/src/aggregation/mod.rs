@@ -484,8 +484,8 @@ impl CenoLeafVmVerifierConfig {
             // In particular for (3), the inequality is interpreted in the integer range
             // [0, F::Order), and the condition 2*end < F::Order guarantees
             // `start + offset` does not wrap modulo F::Order.
-            assert!(2 * self.vk.mem_state_verifier.heap.end < F::ORDER_U32);
-            assert!(2 * self.vk.mem_state_verifier.hints.end < F::ORDER_U32);
+            assert!(2 * self.vk.mem_state_verifier.heap.end < F::ORDER_U32, "2 * {:x} >= {}", self.vk.mem_state_verifier.heap.end, F::ORDER_U32);
+            assert!(2 * self.vk.mem_state_verifier.hints.end < F::ORDER_U32, "2 * {:x} > {}", self.vk.mem_state_verifier.heap.end, F::ORDER_U32);
             fn bits_needed(x: u32) -> u32 {
                 if x == 0 { 1 } else { 32 - x.leading_zeros() }
             }
