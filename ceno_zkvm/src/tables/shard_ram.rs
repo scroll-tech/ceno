@@ -663,7 +663,7 @@ mod tests {
             hal::ProofInput,
             prover::ZKVMProver,
             septic_curve::SepticPoint,
-            verifier::{RiscvMemStateConfig, ZKVMVerifier},
+            verifier::{RV32imMemStateConfig, ZKVMVerifier},
         },
         structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
         tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
@@ -801,7 +801,7 @@ mod tests {
         let pd = create_prover(backend);
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
-        let zkvm_vk = zkvm_pk.get_vk_slow::<RiscvMemStateConfig>();
+        let zkvm_vk = zkvm_pk.get_vk_slow::<RV32imMemStateConfig>();
         let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 

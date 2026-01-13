@@ -31,7 +31,7 @@ use crate::{
     },
 };
 use ceno_zkvm::{
-    scheme::verifier::RiscvMemStateConfig,
+    scheme::verifier::RV32imMemStateConfig,
     structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey},
 };
 use ff_ext::BabyBearExt4;
@@ -102,7 +102,7 @@ pub fn transcript_group_sample_ext<C: Config>(
 pub fn verify_zkvm_proof<C: Config<F = F>>(
     builder: &mut Builder<C>,
     zkvm_proof_input: ZKVMProofInputVariable<C>,
-    vk: &ZKVMVerifyingKey<E, Pcs, RiscvMemStateConfig>,
+    vk: &ZKVMVerifyingKey<E, Pcs, RV32imMemStateConfig>,
 ) -> SepticPointVariable<C> {
     let mut challenger = DuplexChallengerVariable::new(builder);
     transcript_observe_label(builder, &mut challenger, b"riscv");

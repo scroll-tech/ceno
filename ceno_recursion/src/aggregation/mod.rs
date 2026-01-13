@@ -4,7 +4,7 @@ use crate::zkvm_verifier::{
 };
 use ceno_zkvm::{
     instructions::riscv::constants::{END_PC_IDX, EXIT_CODE_IDX, INIT_PC_IDX},
-    scheme::{ZKVMProof, verifier::RiscvMemStateConfig},
+    scheme::{ZKVMProof, verifier::RV32imMemStateConfig},
     structs::ZKVMVerifyingKey,
 };
 use ff_ext::BabyBearExt4;
@@ -60,7 +60,7 @@ use p3::field::{FieldAlgebra, PrimeField32};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
-type BaseZkvmVk = ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>, RiscvMemStateConfig>;
+type BaseZkvmVk = ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>, RV32imMemStateConfig>;
 use ceno_emul::WORD_SIZE;
 use ceno_zkvm::instructions::riscv::constants::{
     HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, HINT_LENGTH_IDX, HINT_START_ADDR_IDX,

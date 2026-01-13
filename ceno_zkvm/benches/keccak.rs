@@ -10,7 +10,7 @@ use ceno_zkvm::{
 mod alloc;
 use ceno_zkvm::{
     e2e::MultiProver,
-    scheme::verifier::{RiscvMemStateConfig, ZKVMVerifier},
+    scheme::verifier::{RV32imMemStateConfig, ZKVMVerifier},
 };
 use criterion::*;
 use ff_ext::BabyBearExt4;
@@ -50,7 +50,7 @@ fn keccak_prove(c: &mut Criterion) {
     let _ = hints.write(&vec![1, 2, 3]);
     let max_steps = usize::MAX;
     // estimate proof size data first
-    let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RiscvMemStateConfig>(
+    let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RV32imMemStateConfig>(
         create_prover(backend.clone()),
         program.clone(),
         platform.clone(),
@@ -69,7 +69,7 @@ fn keccak_prove(c: &mut Criterion) {
 
     println!("e2e proof {}", proof);
     let transcript = BasicTranscript::new(b"riscv");
-    let verifier = ZKVMVerifier::<E, Pcs, RiscvMemStateConfig>::new(vk);
+    let verifier = ZKVMVerifier::<E, Pcs, RV32imMemStateConfig>::new(vk);
     assert!(
         verifier
             .verify_proof_halt(proof, transcript, true)
@@ -89,7 +89,7 @@ fn keccak_prove(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
-                    let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RiscvMemStateConfig>(
+                    let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RV32imMemStateConfig>(
                         create_prover(backend.clone()),
                         program.clone(),
                         platform.clone(),

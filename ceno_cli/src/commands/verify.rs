@@ -4,7 +4,7 @@ use ceno_zkvm::{
     e2e::{FieldType, PcsKind, verify},
     scheme::{
         ZKVMProof,
-        verifier::{RiscvMemStateConfig, ZKVMVerifier},
+        verifier::{RV32imMemStateConfig, ZKVMVerifier},
     },
     structs::ZKVMVerifyingKey,
 };
@@ -69,7 +69,7 @@ fn run_inner<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize>(
     );
 
     let start = std::time::Instant::now();
-    let vk: ZKVMVerifyingKey<E, PCS, RiscvMemStateConfig> =
+    let vk: ZKVMVerifyingKey<E, PCS, RV32imMemStateConfig> =
         bincode::deserialize_from(File::open(&args.vk).context("Failed to open vk file")?)
             .context("Failed to deserialize vk file")?;
     print_cargo_message(

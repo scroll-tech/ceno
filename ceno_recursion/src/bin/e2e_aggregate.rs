@@ -7,7 +7,7 @@ use ceno_zkvm::{
         setup_platform, setup_platform_debug,
     },
     scheme::{
-        constants::MAX_NUM_VARIABLES, create_backend, create_prover, verifier::RiscvMemStateConfig,
+        constants::MAX_NUM_VARIABLES, create_backend, create_prover, verifier::RV32imMemStateConfig,
     },
 };
 use clap::Parser;
@@ -258,7 +258,7 @@ fn main() {
         Basefold<BabyBearExt4, BasefoldRSParams>,
         _,
         _,
-        RiscvMemStateConfig,
+        RV32imMemStateConfig,
     >(
         prover,
         program,

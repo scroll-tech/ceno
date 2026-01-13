@@ -53,35 +53,35 @@ pub trait MemStatePubValuesVerifier<E: ExtensionField, PCS: PolynomialCommitment
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
-pub struct RiscvMemStateConfig {
+pub struct RV32imMemStateConfig {
     pub heap: Range<u32>,
     pub hints: Range<u32>,
 }
 
-impl RiscvMemStateConfig {
+impl RV32imMemStateConfig {
     pub fn from_platform(platform: &Platform) -> Self {
-        RiscvMemStateConfig {
+        RV32imMemStateConfig {
             heap: platform.heap.start..platform.heap.end,
             hints: platform.hints.start..platform.hints.end,
         }
     }
 }
 
-impl From<Platform> for RiscvMemStateConfig {
+impl From<Platform> for RV32imMemStateConfig {
     fn from(platform: Platform) -> Self {
-        RiscvMemStateConfig::from_platform(&platform)
+        RV32imMemStateConfig::from_platform(&platform)
     }
 }
 
-impl From<&Platform> for RiscvMemStateConfig {
+impl From<&Platform> for RV32imMemStateConfig {
     fn from(platform: &Platform) -> Self {
-        RiscvMemStateConfig::from_platform(platform)
+        RV32imMemStateConfig::from_platform(platform)
     }
 }
 
 // riscv impl
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MemStatePubValuesVerifier<E, PCS>
-    for RiscvMemStateConfig
+    for RV32imMemStateConfig
 {
     fn verify_proofs(&self, vm_proofs: Vec<ZKVMProof<E, PCS>>) {
         assert!(!vm_proofs.is_empty());

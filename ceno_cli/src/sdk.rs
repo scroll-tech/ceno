@@ -11,7 +11,7 @@ use ceno_zkvm::{
         hal::ProverDevice,
         mock_prover::LkMultiplicityKey,
         prover::ZKVMProver,
-        verifier::{RiscvMemStateConfig, ZKVMVerifier},
+        verifier::{RV32imMemStateConfig, ZKVMVerifier},
     },
     structs::{ZKVMProvingKey, ZKVMVerifyingKey},
 };
@@ -54,7 +54,7 @@ pub struct Sdk<
 
     // base(app) layer
     pub zkvm_pk: Option<Arc<ZKVMProvingKey<E, PCS>>>,
-    pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS, RiscvMemStateConfig>>,
+    pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS, RV32imMemStateConfig>>,
     pub zkvm_prover: Option<ZKVMProver<E, PCS, PB, PD>>,
 
     // aggregation
@@ -107,7 +107,7 @@ where
     }
 
     // allow us to read the app vk from file and then set it
-    pub fn set_app_vk(&mut self, vk: ZKVMVerifyingKey<E, PCS, RiscvMemStateConfig>) {
+    pub fn set_app_vk(&mut self, vk: ZKVMVerifyingKey<E, PCS, RV32imMemStateConfig>) {
         self.zkvm_vk = Some(vk);
     }
 
@@ -167,7 +167,7 @@ where
         self.zkvm_pk.clone().expect("zkvm pk is not set")
     }
 
-    pub fn get_app_vk(&self) -> ZKVMVerifyingKey<E, PCS, RiscvMemStateConfig> {
+    pub fn get_app_vk(&self) -> ZKVMVerifyingKey<E, PCS, RV32imMemStateConfig> {
         self.zkvm_vk.clone().expect("zkvm vk is not set")
     }
 
@@ -179,7 +179,7 @@ where
         self.agg_pk.as_ref().expect("agg pk is not set").get_vk()
     }
 
-    pub fn create_zkvm_verifier(&self) -> ZKVMVerifier<E, PCS, RiscvMemStateConfig> {
+    pub fn create_zkvm_verifier(&self) -> ZKVMVerifier<E, PCS, RV32imMemStateConfig> {
         let Some(app_vk) = self.zkvm_vk.clone() else {
             panic!("empty zkvm vk");
         };

@@ -37,7 +37,7 @@ use super::{
     constants::MAX_NUM_VARIABLES,
     prover::ZKVMProver,
     utils::infer_tower_product_witness,
-    verifier::{RiscvMemStateConfig, TowerVerify, ZKVMVerifier},
+    verifier::{RV32imMemStateConfig, TowerVerify, ZKVMVerifier},
 };
 use crate::{
     e2e::ShardContext, scheme::constants::NUM_FANIN, structs::PointAndEval,
@@ -136,7 +136,7 @@ fn test_rw_lk_expression_combination() {
                 zkvm_fixed_traces,
             )
             .unwrap();
-        let vk = pk.get_vk_slow::<RiscvMemStateConfig>();
+        let vk = pk.get_vk_slow::<RV32imMemStateConfig>();
 
         // generate mock witness
         let num_instances = 1 << 8;
@@ -317,7 +317,7 @@ fn test_single_add_instance_e2e() {
         .clone()
         .key_gen::<Pcs>(pp, vp, program.entry, zkvm_fixed_traces)
         .expect("keygen failed");
-    let vk = pk.get_vk_slow::<RiscvMemStateConfig>();
+    let vk = pk.get_vk_slow::<RV32imMemStateConfig>();
 
     // single instance
     let mut vm = VMState::new(CENO_PLATFORM.clone(), program.clone().into());

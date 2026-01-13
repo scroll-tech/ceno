@@ -477,8 +477,15 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             builder.assign(&sum_num_instances, sum_num_instances.clone() + num_instance);
         });
         let sum_num_instances_felt = builder.unsafe_cast_var_to_felt(sum_num_instances.get_var());
-        // TODO soundness: derive 1. bit decomposition 2. `log2_num_instances` from `num_instances`
-        let sum_num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
+
+        let sum_num_instances_minus_one_bit_decomposition = {
+            let one_felt_const: Felt<_> = builder.eval(F::ONE);
+            let sum_num_instances_minus_one_bit_decomposition =
+                builder.num2bits_f_circuit(sum_num_instances_felt.into() - one_felt_const);
+            builder.vec(sum_num_instances_minus_one_bit_decomposition)
+        };
+
+        // TODO soundness: derive `log2_num_instances` from `num_instances`
         let log2_num_instances = Usize::Var(usize::read(builder));
 
         let r_out_evals_len = Usize::Var(usize::read(builder));

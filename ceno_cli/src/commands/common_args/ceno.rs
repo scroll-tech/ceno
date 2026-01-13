@@ -9,7 +9,7 @@ use ceno_zkvm::{
         constants::MAX_NUM_VARIABLES,
         create_backend, create_prover,
         mock_prover::LkMultiplicityKey,
-        verifier::{RiscvMemStateConfig, ZKVMVerifier},
+        verifier::{RV32imMemStateConfig, ZKVMVerifier},
     },
 };
 use clap::Args;
@@ -356,7 +356,7 @@ fn run_elf_inner<
     compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<E2ECheckpointResult<E, PCS, RiscvMemStateConfig>> {
+) -> anyhow::Result<E2ECheckpointResult<E, PCS, RV32imMemStateConfig>> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
@@ -413,7 +413,7 @@ fn run_elf_inner<
 
     let backend = create_backend(options.max_num_variables, options.security_level);
     Ok(
-        run_e2e_with_checkpoint::<E, PCS, _, _, RiscvMemStateConfig>(
+        run_e2e_with_checkpoint::<E, PCS, _, _, RV32imMemStateConfig>(
             create_prover(backend.clone()),
             program,
             platform,
