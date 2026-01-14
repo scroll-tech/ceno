@@ -1,6 +1,6 @@
 // Test addition of two curve points. Assert result inside the guest
 extern crate ceno_rt;
-use ceno_rt::syscalls::syscall_secp256k1_add;
+use ceno_syscall::syscall_secp256k1_add;
 
 // Byte repr. of points from https://docs.rs/secp/latest/secp/#arithmetic-1
 const P: [u8; 65] = [
@@ -41,9 +41,9 @@ fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
 }
 fn main() {
     let mut p: DecompressedPoint = bytes_to_words(P);
-    let mut q: DecompressedPoint = bytes_to_words(Q);
+    let q: DecompressedPoint = bytes_to_words(Q);
     let p_plus_q: DecompressedPoint = bytes_to_words(P_PLUS_Q);
 
-    syscall_secp256k1_add(&mut p, &mut q);
+    syscall_secp256k1_add(&mut p, &q);
     assert_eq!(p, p_plus_q);
 }

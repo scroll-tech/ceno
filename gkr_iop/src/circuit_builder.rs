@@ -96,32 +96,40 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub witin_namespace_map: Vec<String>,
 
     pub num_structural_witin: WitnessId,
+    pub structural_witins: Vec<StructuralWitIn>,
     pub structural_witin_namespace_map: Vec<String>,
 
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
-    pub instance_name_map: HashMap<Instance, String>,
+    pub instance_openings: Vec<Instance>,
+
+    pub ec_point_exprs: Vec<Expression<E>>,
+    pub ec_slope_exprs: Vec<Expression<E>>,
+    pub ec_final_sum: Vec<Expression<E>>,
 
     pub r_selector: Option<SelectorType<E>>,
     pub r_expressions: Vec<Expression<E>>,
     pub r_expressions_namespace_map: Vec<String>,
     // for each read expression we store its ram type and original value before doing RLC
     // the original value will be used for debugging
-    pub r_ram_types: Vec<(RAMType, Vec<Expression<E>>)>,
+    pub r_ram_types: Vec<(Expression<E>, Vec<Expression<E>>)>,
 
     pub w_selector: Option<SelectorType<E>>,
     pub w_expressions: Vec<Expression<E>>,
     pub w_expressions_namespace_map: Vec<String>,
     // for each write expression we store its ram type and original value before doing RLC
     // the original value will be used for debugging
-    pub w_ram_types: Vec<(RAMType, Vec<Expression<E>>)>,
+    pub w_ram_types: Vec<(Expression<E>, Vec<Expression<E>>)>,
 
     /// init/final ram expression
     pub r_table_expressions: Vec<SetTableExpression<E>>,
     pub r_table_expressions_namespace_map: Vec<String>,
     pub w_table_expressions: Vec<SetTableExpression<E>>,
     pub w_table_expressions_namespace_map: Vec<String>,
+    // specify whether constrains system cover only init_w
+    // as it imply w/r set and final_w might happen ACROSS shards
+    pub with_omc_init_only: bool,
 
     pub lk_selector: Option<SelectorType<E>>,
     /// lookup expression
@@ -162,11 +170,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             // platform,
             witin_namespace_map: vec![],
             num_structural_witin: 0,
+            structural_witins: vec![],
             structural_witin_namespace_map: vec![],
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
-            instance_name_map: HashMap::new(),
+            instance_openings: vec![],
+            ec_final_sum: vec![],
+            ec_slope_exprs: vec![],
+            ec_point_exprs: vec![],
             r_selector: None,
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
@@ -179,6 +191,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             r_table_expressions_namespace_map: vec![],
             w_table_expressions: vec![],
             w_table_expressions_namespace_map: vec![],
+            with_omc_init_only: false,
             lk_selector: None,
             lk_expressions: vec![],
             lk_table_expressions: vec![],
@@ -220,12 +233,20 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             id: self.num_structural_witin,
             witin_type,
         };
+        self.structural_witins.push(wit_in);
         self.num_structural_witin = self.num_structural_witin.strict_add(1);
 
         let path = self.ns.compute_path(n().into());
         self.structural_witin_namespace_map.push(path);
 
         wit_in
+    }
+
+    pub fn create_placeholder_structural_witin<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        n: N,
+    ) -> StructuralWitIn {
+        self.create_structural_witin(n, StructuralWitInType::Empty)
     }
 
     pub fn create_fixed<NR: Into<String>, N: FnOnce() -> NR>(&mut self, n: N) -> Fixed {
@@ -238,17 +259,25 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         f
     }
 
-    pub fn query_instance<NR: Into<String>, N: FnOnce() -> NR>(
+    pub fn query_instance(&self, idx: usize) -> Result<Instance, CircuitBuilderError> {
+        let i = Instance(idx);
+        Ok(i)
+    }
+
+    pub fn query_instance_for_openings(
         &mut self,
-        n: N,
         idx: usize,
     ) -> Result<Instance, CircuitBuilderError> {
         let i = Instance(idx);
 
-        let name = n().into();
-        self.instance_name_map.insert(i, name);
+        assert!(
+            !self.instance_openings.contains(&i),
+            "query same pubio idx {idx} mle more than once",
+        );
+        self.instance_openings.push(i);
 
-        Ok(i)
+        // return instance only count
+        Ok(Instance(self.instance_openings.len() - 1))
     }
 
     pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {
@@ -329,12 +358,27 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         N: FnOnce() -> NR,
     {
         let rlc_record = self.rlc_chip_record(record.clone());
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
-        );
+        self.r_table_rlc_record(
+            name_fn,
+            (ram_type as u64).into(),
+            table_spec,
+            record,
+            rlc_record,
+        )
+    }
+
+    pub fn r_table_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
         self.r_table_expressions.push(SetTableExpression {
             expr: rlc_record,
             table_spec,
@@ -358,12 +402,27 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         N: FnOnce() -> NR,
     {
         let rlc_record = self.rlc_chip_record(record.clone());
-        assert_eq!(
-            rlc_record.degree(),
-            1,
-            "rlc record degree {} != 1",
-            rlc_record.degree()
-        );
+        self.w_table_rlc_record(
+            name_fn,
+            (ram_type as u64).into(),
+            table_spec,
+            record,
+            rlc_record,
+        )
+    }
+
+    pub fn w_table_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
         self.w_table_expressions.push(SetTableExpression {
             expr: rlc_record,
             table_spec,
@@ -382,6 +441,16 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
+        self.read_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+    }
+
+    pub fn read_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError> {
         self.r_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.r_expressions_namespace_map.push(path);
@@ -398,11 +467,43 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(record.clone());
+        self.write_rlc_record(name_fn, (ram_type as u64).into(), record, rlc_record)
+    }
+
+    pub fn write_rlc_record<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError> {
         self.w_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
         self.w_expressions_namespace_map.push(path);
+        // Since w_expression is RLC(record) and when we're debugging
+        // it's helpful to recover the value of record itself.
         self.w_ram_types.push((ram_type, record));
         Ok(())
+    }
+
+    pub fn ec_sum(
+        &mut self,
+        xs: Vec<Expression<E>>,
+        ys: Vec<Expression<E>>,
+        slopes: Vec<Expression<E>>,
+        final_sum: Vec<Expression<E>>,
+    ) {
+        assert_eq!(xs.len(), 7);
+        assert_eq!(ys.len(), 7);
+        assert_eq!(slopes.len(), 7);
+        assert_eq!(final_sum.len(), 7 * 2);
+
+        assert_eq!(self.ec_point_exprs.len(), 0);
+        self.ec_point_exprs.extend(xs);
+        self.ec_point_exprs.extend(ys);
+
+        self.ec_slope_exprs = slopes;
+        self.ec_final_sum = final_sum;
     }
 
     pub fn require_zero<NR: Into<String>, N: FnOnce() -> NR>(
@@ -444,6 +545,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         let t = cb(self);
         self.ns.pop_namespace();
         t
+    }
+
+    pub fn set_omc_init_only(&mut self) {
+        self.with_omc_init_only = true;
     }
 }
 
@@ -527,6 +632,14 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.create_structural_witin(name_fn, witin_type)
     }
 
+    pub fn create_placeholder_structural_witin<NR, N>(&mut self, name_fn: N) -> StructuralWitIn
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs.create_placeholder_structural_witin(name_fn)
+    }
+
     pub fn create_fixed<NR, N>(&mut self, name_fn: N) -> Fixed
     where
         NR: Into<String>,
@@ -579,6 +692,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             .r_table_record(name_fn, ram_type, table_spec, record)
     }
 
+    pub fn r_table_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .r_table_rlc_record(name_fn, ram_type, table_spec, record, rlc_record)
+    }
+
     pub fn w_table_record<NR, N>(
         &mut self,
         name_fn: N,
@@ -594,6 +723,22 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
             .w_table_record(name_fn, ram_type, table_spec, record)
     }
 
+    pub fn w_table_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        table_spec: SetTableSpec,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .w_table_rlc_record(name_fn, ram_type, table_spec, record, rlc_record)
+    }
+
     pub fn read_record<NR, N>(
         &mut self,
         name_fn: N,
@@ -605,6 +750,21 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.read_record(name_fn, ram_type, record)
+    }
+
+    pub fn read_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .read_rlc_record(name_fn, ram_type, record, rlc_record)
     }
 
     pub fn write_record<NR, N>(
@@ -620,8 +780,33 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         self.cs.write_record(name_fn, ram_type, record)
     }
 
+    pub fn write_rlc_record<NR, N>(
+        &mut self,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        self.cs
+            .write_rlc_record(name_fn, ram_type, record, rlc_record)
+    }
+
     pub fn rlc_chip_record(&self, records: Vec<Expression<E>>) -> Expression<E> {
         self.cs.rlc_chip_record(records)
+    }
+
+    pub fn ec_sum(
+        &mut self,
+        xs: Vec<Expression<E>>,
+        ys: Vec<Expression<E>>,
+        slope: Vec<Expression<E>>,
+        final_sum: Vec<Expression<E>>,
+    ) {
+        self.cs.ec_sum(xs, ys, slope, final_sum);
     }
 
     pub fn create_bit<NR, N>(&mut self, name_fn: N) -> Result<WitIn, CircuitBuilderError>
@@ -874,6 +1059,30 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         )
     }
 
+    pub fn assert_bytes<NR, N>(
+        &mut self,
+        name_fn: N,
+        exprs: &[impl ToExpr<E, Output = Expression<E>> + Clone],
+    ) -> Result<(), CircuitBuilderError>
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        let name = name_fn().into();
+        for (i, pair) in exprs.chunks(2).enumerate() {
+            match pair {
+                [a, b] => {
+                    self.assert_double_u8(|| format!("{}_{i:?}", name), a.expr(), b.expr())?
+                }
+                [a] => {
+                    self.assert_double_u8(|| format!("{}_{i:?}", name), a.expr(), Expression::ZERO)?
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub fn assert_bit<NR, N>(
         &mut self,
         name_fn: N,
@@ -1103,6 +1312,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn rotate_and_assert_eq(&mut self, a: Expression<E>, b: Expression<E>) {
         self.cs.rotations.push((a, b));
+    }
+
+    pub fn set_omc_init_only(&mut self) {
+        self.cs.set_omc_init_only();
     }
 }
 

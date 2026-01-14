@@ -1,54 +1,63 @@
-use std::{collections::HashSet, iter::zip, ops::Range};
-
-use ceno_emul::{Addr, Cycle, IterAddresses, WORD_SIZE, Word};
-use ff_ext::ExtensionField;
-use itertools::{Itertools, chain};
-
 use crate::{
+    e2e::ShardContext,
     error::ZKVMError,
+    scheme::PublicValues,
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
-        HeapCircuit, HintsCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOCircuit,
-        PubIOTable, RegTable, RegTableCircuit, StackCircuit, StaticMemCircuit, StaticMemTable,
-        TableCircuit,
+        DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, HintsTable,
+        LocalFinalCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOInitCircuit,
+        PubIOTable, RegTable, RegTableInitCircuit, ShardRamCircuit, StackInitCircuit, StackTable,
+        StaticMemInitCircuit, StaticMemTable, TableCircuit,
     },
 };
+use ceno_emul::{Addr, IterAddresses, WORD_SIZE, Word};
+use ff_ext::ExtensionField;
+use itertools::{Itertools, chain};
+use std::{collections::HashSet, iter::zip, ops::Range};
 
 pub struct MmuConfig<E: ExtensionField> {
     /// Initialization of registers.
-    pub reg_config: <RegTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub reg_init_config: <RegTableInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of memory with static addresses.
-    pub static_mem_config: <StaticMemCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub static_mem_init_config: <StaticMemInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of public IO.
-    pub public_io_config: <PubIOCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub public_io_init_config: <PubIOInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of hints.
-    pub hints_config: <HintsCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub hints_init_config: <HintsInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of heap.
-    pub heap_config: <HeapCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub heap_init_config: <HeapInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of stack.
-    pub stack_config: <StackCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub stack_init_config: <StackInitCircuit<E> as TableCircuit<E>>::TableConfig,
+    /// finalized circuit for all MMIO
+    pub local_final_circuit: <LocalFinalCircuit<E> as TableCircuit<E>>::TableConfig,
+    /// ram bus to deal with cross shard read/write
+    pub ram_bus_circuit: <ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
 impl<E: ExtensionField> MmuConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
-        let reg_config = cs.register_table_circuit::<RegTableCircuit<E>>();
+        let reg_init_config = cs.register_table_circuit::<RegTableInitCircuit<E>>();
 
-        let static_mem_config = cs.register_table_circuit::<StaticMemCircuit<E>>();
+        let static_mem_init_config = cs.register_table_circuit::<StaticMemInitCircuit<E>>();
 
-        let public_io_config = cs.register_table_circuit::<PubIOCircuit<E>>();
+        let public_io_init_config = cs.register_table_circuit::<PubIOInitCircuit<E>>();
 
-        let hints_config = cs.register_table_circuit::<HintsCircuit<E>>();
-        let stack_config = cs.register_table_circuit::<StackCircuit<E>>();
-        let heap_config = cs.register_table_circuit::<HeapCircuit<E>>();
+        let hints_init_config = cs.register_table_circuit::<HintsInitCircuit<E>>();
+        let stack_init_config = cs.register_table_circuit::<StackInitCircuit<E>>();
+        let heap_init_config = cs.register_table_circuit::<HeapInitCircuit<E>>();
+        let local_final_circuit = cs.register_table_circuit::<LocalFinalCircuit<E>>();
+        let ram_bus_circuit = cs.register_table_circuit::<ShardRamCircuit<E>>();
 
         Self {
-            reg_config,
-            static_mem_config,
-            public_io_config,
-            hints_config,
-            stack_config,
-            heap_config,
+            reg_init_config,
+            static_mem_init_config,
+            public_io_init_config,
+            hints_init_config,
+            stack_init_config,
+            heap_init_config,
+            local_final_circuit,
+            ram_bus_circuit,
             params: cs.params.clone(),
         }
     }
@@ -72,45 +81,134 @@ impl<E: ExtensionField> MmuConfig<E> {
             "memory addresses must be unique"
         );
 
-        fixed.register_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_init);
+        fixed.register_table_circuit::<RegTableInitCircuit<E>>(cs, &self.reg_init_config, reg_init);
 
-        fixed.register_table_circuit::<StaticMemCircuit<E>>(
+        fixed.register_table_circuit::<StaticMemInitCircuit<E>>(
             cs,
-            &self.static_mem_config,
+            &self.static_mem_init_config,
             static_mem_init,
         );
 
-        fixed.register_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_addrs);
-        fixed.register_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, &());
-        fixed.register_table_circuit::<StackCircuit<E>>(cs, &self.stack_config, &());
-        fixed.register_table_circuit::<HeapCircuit<E>>(cs, &self.heap_config, &());
+        fixed.register_table_circuit::<PubIOInitCircuit<E>>(
+            cs,
+            &self.public_io_init_config,
+            io_addrs,
+        );
+        fixed.register_table_circuit::<HintsInitCircuit<E>>(cs, &self.hints_init_config, &());
+        fixed.register_table_circuit::<StackInitCircuit<E>>(cs, &self.stack_init_config, &());
+        fixed.register_table_circuit::<HeapInitCircuit<E>>(cs, &self.heap_init_config, &());
+        fixed.register_table_circuit::<LocalFinalCircuit<E>>(cs, &self.local_final_circuit, &());
+        // fixed.register_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, &());
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn assign_table_circuit(
+    pub fn assign_dynamic_init_table_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
+        pv: &PublicValues,
+        hints_final: &[MemFinalRecord],
+        heap_final: &[MemFinalRecord],
+    ) -> Result<(), ZKVMError> {
+        witness.assign_table_circuit::<HeapInitCircuit<E>>(
+            cs,
+            &self.heap_init_config,
+            &(heap_final, pv, pv.heap_shard_len as usize),
+        )?;
+        witness.assign_table_circuit::<HintsInitCircuit<E>>(
+            cs,
+            &self.hints_init_config,
+            &(hints_final, pv, pv.hint_shard_len as usize),
+        )?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn assign_init_table_circuit(
+        &self,
+        cs: &ZKVMConstraintSystem<E>,
+        witness: &mut ZKVMWitnesses<E>,
+        pv: &PublicValues,
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
-        io_cycles: &[Cycle],
+        io_final: &[MemFinalRecord],
+        stack_final: &[MemFinalRecord],
+    ) -> Result<(), ZKVMError> {
+        witness.assign_table_circuit::<RegTableInitCircuit<E>>(
+            cs,
+            &self.reg_init_config,
+            reg_final,
+        )?;
+
+        witness.assign_table_circuit::<StaticMemInitCircuit<E>>(
+            cs,
+            &self.static_mem_init_config,
+            static_mem_final,
+        )?;
+
+        witness.assign_table_circuit::<PubIOInitCircuit<E>>(
+            cs,
+            &self.public_io_init_config,
+            io_final,
+        )?;
+
+        witness.assign_table_circuit::<StackInitCircuit<E>>(
+            cs,
+            &self.stack_init_config,
+            &(stack_final, pv, stack_final.len()),
+        )?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn assign_continuation_circuit(
+        &self,
+        cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &ShardContext,
+        witness: &mut ZKVMWitnesses<E>,
+        pv: &PublicValues,
+        reg_final: &[MemFinalRecord],
+        static_mem_final: &[MemFinalRecord],
+        io_final: &[MemFinalRecord],
         hints_final: &[MemFinalRecord],
         stack_final: &[MemFinalRecord],
         heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
-        witness.assign_table_circuit::<RegTableCircuit<E>>(cs, &self.reg_config, reg_final)?;
+        let all_records = vec![
+            (PubIOTable::name(), None, io_final),
+            (RegTable::name(), None, reg_final),
+            (StaticMemTable::name(), None, static_mem_final),
+            (StackTable::name(), None, stack_final),
+            (
+                HintsTable::name(),
+                Some(
+                    pv.hint_start_addr
+                        ..(pv.hint_start_addr + pv.hint_shard_len * (WORD_SIZE as u32)),
+                ),
+                hints_final,
+            ),
+            (
+                HeapTable::name(),
+                Some(
+                    pv.heap_start_addr
+                        ..(pv.heap_start_addr + pv.heap_shard_len * (WORD_SIZE as u32)),
+                ),
+                heap_final,
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, _, record)| !record.is_empty())
+        .collect_vec();
 
-        witness.assign_table_circuit::<StaticMemCircuit<E>>(
+        witness.assign_table_circuit::<LocalFinalCircuit<E>>(
             cs,
-            &self.static_mem_config,
-            static_mem_final,
+            &self.local_final_circuit,
+            &(shard_ctx, all_records.as_slice()),
         )?;
-
-        witness.assign_table_circuit::<PubIOCircuit<E>>(cs, &self.public_io_config, io_cycles)?;
-        witness.assign_table_circuit::<HintsCircuit<E>>(cs, &self.hints_config, hints_final)?;
-        witness.assign_table_circuit::<StackCircuit<E>>(cs, &self.stack_config, stack_final)?;
-        witness.assign_table_circuit::<HeapCircuit<E>>(cs, &self.heap_config, heap_final)?;
-
+        witness.assign_shared_circuit(
+            cs,
+            &(shard_ctx, all_records.as_slice()),
+            &self.ram_bus_circuit,
+        )?;
         Ok(())
     }
 
@@ -156,6 +254,19 @@ impl MemPadder {
         padded_len: usize,
         values: &[Word],
     ) -> Vec<MemInitRecord> {
+        assert!(
+            values.len() <= padded_len,
+            "values.len() {} exceeds padded_len {}",
+            values.len(),
+            padded_len
+        );
+        let address_capacity = address_range.iter_addresses().len();
+        assert!(
+            padded_len <= address_capacity,
+            "padded_len {} exceeds address_range capacity {}",
+            padded_len,
+            address_capacity
+        );
         let mut records = Self::new_mem_records_uninit(address_range, padded_len);
         for (record, &value) in zip(&mut records, values) {
             record.value = value;
@@ -169,6 +280,12 @@ impl MemPadder {
     ///
     /// See `new_mem_records` for more details.
     pub fn init_mem_records(records: &mut Vec<MemInitRecord>, values: &[Word]) {
+        assert!(
+            values.len() <= records.len(),
+            "values.len() {} exceeds records.len() {}",
+            values.len(),
+            records.len()
+        );
         for (record, &value) in zip(records, values) {
             record.value = value;
         }

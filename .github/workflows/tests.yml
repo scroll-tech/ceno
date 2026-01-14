@@ -15,7 +15,7 @@ concurrency:
 jobs:
   tests:
     name: Run Tests
-    timeout-minutes: 30
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
 
     steps:
@@ -24,7 +24,7 @@ jobs:
         with:
           targets: riscv32im-unknown-none-elf
           # TODO: figure out way to keep this in sync with rust-toolchain.toml automatically
-          toolchain: nightly-2025-03-25
+          toolchain: nightly-2025-08-18
       - name: Cargo cache
         uses: actions/cache@v4
         with:
@@ -39,10 +39,32 @@ jobs:
           key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: tests-${{ runner.os }}-cargo-
 
+      - name: Install m4
+        run: sudo apt-get install -y m4
+
       - name: Install cargo make
         run: |
           cargo make --version || cargo install cargo-make
+
+      #      - name: Run aggregation tests
+      #        env:
+      #          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
+      #        run: |
+      #          cargo run --release --package ceno_zkvm --bin e2e -- \
+      #            --platform=ceno --max-cycle-per-shard=1600 \
+      #            examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+      #          mkdir -p ceno_recursion/src/imported
+      #          mv proof.bin ceno_recursion/src/imported/
+      #          mv vk.bin ceno_recursion/src/imported/
+      #          cargo test --release --package ceno_recursion --tests -- --ignored
+
       - name: run test
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
         run: cargo make tests
-      - name: run test + feature u16limb_circuit
-        run: cargo make tests_v2
+
+      - name: run test + goldilocks
+        env:
+          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
+        run: cargo make tests_goldilock
+

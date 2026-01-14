@@ -56,6 +56,10 @@ pub struct CenoOptions {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
+    /// pub io size in byte
+    #[arg(long, default_value = "1k", value_parser = parse_size)]
+    public_io_size: u32,
+
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
@@ -74,10 +78,33 @@ pub struct CenoOptions {
     #[arg(long)]
     pub out_vk: Option<PathBuf>,
 
+    /// prover id
+    #[arg(long, default_value = "0")]
+    prover_id: u32,
+
+    /// number of available prover.
+    #[arg(long, default_value = "1")]
+    num_provers: u32,
+
+    // max cycle per shard
+    #[arg(long, default_value = "536870912")] // 536870912 = 2^29
+    max_cycle_per_shard: u64,
+
+    // max cycle per shard
+    // default value: 16GB VRAM, each cell 4 byte, log explosion 2
+    // => 2^30 * 16 / 4 / 2
+    #[arg(long, default_value = "2147483648")]
+    max_cell_per_shard: u64,
+
     /// Profiling granularity.
     /// Setting any value restricts logs to profiling information
     #[arg(long)]
     profiling: Option<usize>,
+
+    // for debug purpose
+    // only generate respective shard id and skip others
+    #[arg(long)]
+    shard_id: Option<u64>,
 }
 
 impl CenoOptions {
@@ -303,7 +330,7 @@ impl CenoOptions {
                     self,
                     compilation_options,
                     elf_path,
-                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+                    Checkpoint::PrepVerify, // TODO: when whir and babybear is ready
                 )
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
@@ -311,7 +338,7 @@ impl CenoOptions {
                     self,
                     compilation_options,
                     elf_path,
-                    Checkpoint::PrepVerify, // FIXME: when whir and babybear is ready
+                    Checkpoint::PrepVerify, // TODO: when whir and babybear is ready
                 )
             }
         }
@@ -333,14 +360,23 @@ fn run_elf_inner<
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
     let program = Program::load_elf(&elf_bytes, u32::MAX).context("failed to load elf")?;
     print_cargo_message("Loaded", format_args!("{}", elf_path.display()));
+    let multi_prover = MultiProver::new(
+        options.prover_id as usize,
+        options.num_provers as usize,
+        options.max_cell_per_shard,
+        options.max_cycle_per_shard,
+    );
 
     let public_io = options
         .read_public_io()
         .context("failed to read public io")?;
-    // estimate required pub io size, which is required in platform/key setup phase
-    let pub_io_size: u32 = ((public_io.len() * WORD_SIZE) as u32)
-        .next_power_of_two()
-        .max(16);
+    let public_io_size = options.public_io_size;
+    assert!(
+        public_io.len() <= public_io_size as usize / WORD_SIZE,
+        "require pub io length {} < max public_io_size {}",
+        public_io.len(),
+        public_io_size as usize / WORD_SIZE
+    );
 
     let platform = if compilation_options.release {
         setup_platform(
@@ -348,7 +384,7 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            pub_io_size,
+            public_io_size,
         )
     } else {
         setup_platform_debug(
@@ -356,7 +392,7 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            pub_io_size,
+            public_io_size,
         )
     };
     tracing::info!("Running on platform {:?} {}", options.platform, platform);
@@ -378,10 +414,12 @@ fn run_elf_inner<
         create_prover(backend.clone()),
         program,
         platform,
+        multi_prover,
         &hints,
         &public_io,
         options.max_steps,
         checkpoint,
+        options.shard_id.map(|v| v as usize),
     ))
 }
 
@@ -422,12 +460,12 @@ fn prove_inner<
     checkpoint: Checkpoint,
 ) -> anyhow::Result<()> {
     let result = run_elf_inner::<E, PCS, P>(args, compilation_options, elf_path, checkpoint)?;
-    let zkvm_proof = result.proof.expect("PrepSanityCheck should yield proof.");
+    let zkvm_proofs = result.proofs.expect("PrepSanityCheck should yield proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk);
-    if let Err(e) = verify(&zkvm_proof, &verifier) {
+    if let Err(e) = verify(zkvm_proofs.clone(), &verifier) {
         bail!("Verification failed: {e:?}");
     }
     print_cargo_message(
@@ -440,7 +478,7 @@ fn prove_inner<
         print_cargo_message("Writing", format_args!("proof to {}", path.display()));
         let proof_file =
             File::create(&path).context(format!("failed to create {}", path.display()))?;
-        bincode::serialize_into(proof_file, &zkvm_proof)
+        bincode::serialize_into(proof_file, &zkvm_proofs)
             .context("failed to serialize zkvm proof")?;
     }
     if let Some(out_vk) = args.out_vk.as_ref() {

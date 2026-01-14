@@ -4,13 +4,13 @@ use ff_ext::ExtensionField;
 use crate::{
     chip_handler::{RegisterExpr, general::InstFetch},
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::riscv::insn_base::{StateInOut, WriteRD},
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
 use multilinear_extensions::ToExpr;
-
 // Opcode: 1101111
 
 /// This config handles the common part of the J-type instruction (JAL):
@@ -55,11 +55,13 @@ impl<E: ExtensionField> JInstructionConfig<E> {
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        self.vm_state.assign_instance(instance, step)?;
-        self.rd.assign_instance(instance, lk_multiplicity, step)?;
+        self.vm_state.assign_instance(instance, shard_ctx, step)?;
+        self.rd
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         // Fetch the instruction.
         lk_multiplicity.fetch(step.pc().before.0);

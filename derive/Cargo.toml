@@ -1,0 +1,17 @@
+[package]
+categories.workspace = true
+description = "derive"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "derive"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0"
+syn = { version = "1.0", features = ["full"] }

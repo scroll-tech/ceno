@@ -21,6 +21,7 @@ mod test {
     use crate::{
         Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
+        e2e::ShardContext,
         instructions::{Instruction, riscv::constants::UInt},
         scheme::mock_prover::{MOCK_PC_START, MockProver},
         structs::ProgramParams,
@@ -63,9 +64,10 @@ mod test {
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm);
         let (raw_witin, lkm) = AddiInstruction::<E>::assign_instances(
             &config,
+            &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![StepRecord::new_i_instruction(
+            vec![&StepRecord::new_i_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                 insn_code,

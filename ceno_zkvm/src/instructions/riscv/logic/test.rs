@@ -1,15 +1,15 @@
 use ceno_emul::{Change, StepRecord, Word, encode_rv32};
 use ff_ext::GoldilocksExt2;
 
+use super::*;
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     instructions::{Instruction, riscv::constants::UInt8},
     scheme::mock_prover::{MOCK_PC_START, MockProver},
     structs::ProgramParams,
     utils::split_to_u8,
 };
-
-use super::*;
 
 const A: Word = 0xbead1010;
 const B: Word = 0xef552020;
@@ -32,9 +32,10 @@ fn test_opcode_and() {
     let insn_code = encode_rv32(InsnKind::AND, 2, 3, 4, 0);
     let (raw_witin, lkm) = AndInstruction::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_r_instruction(
+        vec![&StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
             insn_code,
@@ -74,9 +75,10 @@ fn test_opcode_or() {
     let insn_code = encode_rv32(InsnKind::OR, 2, 3, 4, 0);
     let (raw_witin, lkm) = OrInstruction::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_r_instruction(
+        vec![&StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
             insn_code,
@@ -116,9 +118,10 @@ fn test_opcode_xor() {
     let insn_code = encode_rv32(InsnKind::XOR, 2, 3, 4, 0);
     let (raw_witin, lkm) = XorInstruction::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_r_instruction(
+        vec![&StepRecord::new_r_instruction(
             3,
             MOCK_PC_START,
             insn_code,

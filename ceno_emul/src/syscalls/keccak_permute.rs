@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use tiny_keccak::keccakf;
 
-use crate::{Change, EmuContext, Platform, VMState, Word, WriteOp, utils::MemoryView};
+use crate::{Change, EmuContext, Platform, Tracer, VMState, Word, WriteOp, utils::MemoryView};
 
 use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
@@ -15,7 +15,7 @@ impl SyscallSpec for KeccakSpec {
 
     const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = KECCAK_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::KECCAK_PERMUTE;
+    const CODE: u32 = ceno_syscall::KECCAK_PERMUTE;
     const HAS_LOOKUPS: bool = true;
 }
 
@@ -28,7 +28,7 @@ impl From<[Word; KECCAK_WORDS]> for KeccakState {
         KeccakState(
             words
                 .chunks_exact(2)
-                .map(|chunk| (chunk[0] as u64 | ((chunk[1] as u64) << 32)))
+                .map(|chunk| chunk[0] as u64 | ((chunk[1] as u64) << 32))
                 .collect_vec()
                 .try_into()
                 .expect("failed to parse words into [u64; 25]"),
@@ -52,7 +52,7 @@ impl From<KeccakState> for [Word; KECCAK_WORDS] {
 ///
 /// Compatible with:
 /// https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/precompiles/keccak256/permute.rs
-pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
+pub fn keccak_permute<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
     // Read the argument `state_ptr`.
@@ -62,7 +62,7 @@ pub fn keccak_permute(vm: &VMState) -> SyscallEffects {
         0, // Cycle set later in finalize().
     )];
 
-    let mut state_view = MemoryView::<KECCAK_WORDS>::new(vm, state_ptr);
+    let mut state_view = MemoryView::<_, KECCAK_WORDS>::new(vm, state_ptr);
     let mut state = KeccakState::from(state_view.words());
     keccakf(&mut state.0);
     let output_words: [Word; KECCAK_WORDS] = state.into();

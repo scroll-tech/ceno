@@ -1,0 +1,17 @@
+[package]
+categories.workspace = true
+description = "Ceno zkVM SHA-2 guest"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "ceno_sha2"
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+ceno_syscall.workspace = true
+digest = "0.10.7"
+
+[features]
+oid = ["digest/oid"]

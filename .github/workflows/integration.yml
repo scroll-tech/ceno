@@ -48,6 +48,9 @@ jobs:
           key: integration-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: dtolnay/rust-toolchain@nightly
 
+      - name: Install m4
+        run: sudo apt-get install -y m4
+
       - name: Run fibonacci (debug)
         env:
           RUST_LOG: debug
@@ -60,15 +63,122 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
-      - name: Run fibonacci (release + goldilocks)
+      - name: Run multi-shards fibonacci (debug)
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+          MOCK_PROVING: 1
+        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/fibonacci
+
+      - name: Run multi-shards fibonacci (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+        run: cargo run --release --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+
+      # note: the shard ram circuit does not support goldilocks field yet
+      # - name: Run fibonacci (release + goldilocks)
+      # env:
+      #   RUSTFLAGS: "-C opt-level=3"
+      #   run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+
+      - name: Run Guest Heap Alloc (debug)
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+          MOCK_PROVING: 1
+        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/debug/examples/ceno_rt_alloc
+
+      - name: Run Guest Heap Alloc (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
+
+      - name: Run multi-shards Guest Heap Alloc (debug)
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+          MOCK_PROVING: 1
+        # set --max-cycle-per-shard=420 to test heap read from previous shard, probing from guest program
+        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=420 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/ceno_rt_alloc
+
+      - name: Run multi-shards Guest Heap Alloc (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+
+      # note: the shard ram circuit does not support goldilocks field yet
+      # - name: Run Guest Heap Alloc (release + goldilocks)
+      # env:
+      #   RUSTFLAGS: "-C opt-level=3"
+      #   run: cargo run --release --package ceno_zkvm --no-default-features --features goldilocks --bin e2e -- --field=goldilocks --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/ceno_rt_alloc
 
       - name: Run keccak_syscall (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+
+      - name: Run multi-shards keccak_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+
+      - name: Run secp256k1_add_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_add_syscall
+
+      - name: Run secp256k1_double_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_double_syscall
+
+      - name: Run secp256k1_decompress_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_decompress_syscall
+
+      - name: Run bn254_curve_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_curve_syscalls
+
+      - name: Run bn254_fptower_syscalls (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_fptower_syscalls
+
+      - name: Run k256 ecrecover (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_ecrecover
+
+      - name: Run k256 scalar algebra (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_scalar_algebra
+
+      - name: Run uint256_mul_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/uint256_mul_syscall
+
+      - name: Run sha_extend_syscall (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/sha_extend_syscall
+
+      - name: Run fibonacci (release) in multi-shards with CENO_CROSS_SHARD_LIMIT
+        env:
+          RUST_LOG: debug
+          RUSTFLAGS: "-C opt-level=3"
+          CENO_CROSS_SHARD_LIMIT: 32
+        run: cargo run --release --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
+
+      - name: Run aggregation e2e
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: |
+          cargo run --release --package ceno_recursion --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Install cargo make
         run: |
@@ -77,3 +187,10 @@ jobs:
       - name: Test install Ceno cli
         run: |
           cargo make cli
+
+      - name: Run Ceno cli example proof
+        working-directory: ceno_cli/example
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo ceno prove --platform=ceno --hints 10 --public-io 4

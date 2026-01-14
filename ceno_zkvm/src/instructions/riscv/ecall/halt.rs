@@ -1,6 +1,7 @@
 use crate::{
-    chip_handler::{RegisterChipOperations, general::PublicIOQuery},
+    chip_handler::{RegisterChipOperations, general::PublicValuesQuery},
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
     instructions::{
@@ -10,10 +11,10 @@ use crate::{
             ecall_insn::EcallInstructionConfig,
         },
     },
-    structs::ProgramParams,
+    structs::{ProgramParams, RAMType},
     witness::LkMultiplicity,
 };
-use ceno_emul::{StepRecord, Tracer};
+use ceno_emul::{FullTracer as Tracer, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
 use p3::field::FieldAlgebra;
@@ -70,6 +71,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -85,23 +87,32 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             step.pc().after.0
         );
 
+        let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
+        let shard_cycle = step.cycle() - current_shard_offset_cycle;
+        let rs2_prev_cycle = shard_ctx.aligned_prev_ts(step.rs2().unwrap().previous_cycle);
         // the access of X10 register is stored in rs2()
-        set_val!(
-            instance,
-            config.prev_x10_ts,
-            step.rs2().unwrap().previous_cycle
+        set_val!(instance, config.prev_x10_ts, rs2_prev_cycle);
+
+        shard_ctx.send(
+            RAMType::Register,
+            step.rs2().unwrap().addr,
+            ceno_emul::Platform::reg_arg0() as u64,
+            step.cycle() + Tracer::SUBCYCLE_RS2,
+            step.rs2().unwrap().previous_cycle,
+            step.rs2().unwrap().value,
+            None,
         );
 
         config.lt_x10_cfg.assign_instance(
             instance,
             lk_multiplicity,
-            step.rs2().unwrap().previous_cycle,
-            step.cycle() + Tracer::SUBCYCLE_RS2,
+            rs2_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_RS2,
         )?;
 
         config
             .ecall_cfg
-            .assign_instance::<E>(instance, lk_multiplicity, step)?;
+            .assign_instance::<E>(instance, shard_ctx, lk_multiplicity, step)?;
 
         Ok(())
     }

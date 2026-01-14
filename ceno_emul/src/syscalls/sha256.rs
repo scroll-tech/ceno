@@ -1,4 +1,4 @@
-use crate::{Change, EmuContext, Platform, VMState, Word, WriteOp, utils::MemoryView};
+use crate::{Change, EmuContext, Platform, Tracer, VMState, Word, WriteOp, utils::MemoryView};
 
 use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
@@ -9,9 +9,9 @@ pub struct Sha256ExtendSpec;
 impl SyscallSpec for Sha256ExtendSpec {
     const NAME: &'static str = "SHA256_EXTEND";
 
-    const REG_OPS_COUNT: usize = 2;
+    const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = SHA_EXTEND_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::SHA_EXTEND;
+    const CODE: u32 = ceno_syscall::SHA_EXTEND;
 }
 
 /// Wrapper type for the sha_extend argument that implements conversions
@@ -38,11 +38,10 @@ pub fn sha_extend(w: &mut [u32]) {
             .wrapping_add(s0)
             .wrapping_add(w[i - 7])
             .wrapping_add(s1);
-        // TODO: why doesn't sp1 use wrapping_add?
     }
 }
 
-pub fn extend(vm: &VMState) -> SyscallEffects {
+pub fn extend<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let state_ptr = vm.peek_register(Platform::reg_arg0());
 
     // Read the argument `state_ptr`.
@@ -52,7 +51,7 @@ pub fn extend(vm: &VMState) -> SyscallEffects {
         0, // Cycle set later in finalize().
     )];
 
-    let mut state_view = MemoryView::<SHA_EXTEND_WORDS>::new(vm, state_ptr);
+    let mut state_view = MemoryView::<_, SHA_EXTEND_WORDS>::new(vm, state_ptr);
     let mut sha_extend_words = ShaExtendWords::from(state_view.words());
     sha_extend(&mut sha_extend_words.0);
     let output_words: [Word; SHA_EXTEND_WORDS] = sha_extend_words.into();

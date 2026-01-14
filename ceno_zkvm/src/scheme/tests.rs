@@ -11,9 +11,7 @@ use crate::{
         create_backend, create_prover,
         hal::{ProofInput, TowerProverSpec},
     },
-    structs::{
-        PointAndEval, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
-    },
+    structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::ProgramTableCircuit,
     witness::{LkMultiplicity, set_val},
 };
@@ -24,11 +22,10 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use gkr_iop::cpu::default_backend_config;
-use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
-use std::marker::PhantomData;
-
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::{MultilinearExtensionGpu, gpu_prover::*};
+use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
+use std::marker::PhantomData;
 #[cfg(feature = "gpu")]
 use std::sync::Arc;
 
@@ -37,12 +34,15 @@ use ff_ext::{Instrumented, PoseidonField};
 
 use super::{
     PublicValues,
-    constants::{MAX_NUM_VARIABLES, NUM_FANIN},
+    constants::MAX_NUM_VARIABLES,
     prover::ZKVMProver,
     utils::infer_tower_product_witness,
     verifier::{TowerVerify, ZKVMVerifier},
 };
-use crate::tables::DynamicRangeTableCircuit;
+use crate::{
+    e2e::ShardContext, scheme::constants::NUM_FANIN, structs::PointAndEval,
+    tables::DynamicRangeTableCircuit,
+};
 use itertools::Itertools;
 use mpcs::{
     PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits, WhirDefault,
@@ -55,6 +55,7 @@ use transcript::{BasicTranscript, Transcript};
 struct TestConfig {
     pub(crate) reg_id: WitIn,
 }
+
 struct TestCircuit<E: ExtensionField, const RW: usize, const L: usize> {
     phantom: PhantomData<E>,
 }
@@ -90,6 +91,7 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        _shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         _lk_multiplicity: &mut LkMultiplicity,
         _step: &StepRecord,
@@ -118,6 +120,7 @@ fn test_rw_lk_expression_combination() {
         let name = TestCircuit::<E, RW, L>::name();
         let mut zkvm_cs = ZKVMConstraintSystem::default();
         let config = zkvm_cs.register_opcode_circuit::<TestCircuit<E, RW, L>>();
+        let mut shard_ctx = ShardContext::default();
 
         // generate fixed traces
         let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
@@ -129,6 +132,7 @@ fn test_rw_lk_expression_combination() {
             .key_gen::<Pcs>(
                 device.backend.pp.clone(),
                 device.backend.vp.clone(),
+                0,
                 zkvm_fixed_traces,
             )
             .unwrap();
@@ -140,15 +144,21 @@ fn test_rw_lk_expression_combination() {
         zkvm_witness
             .assign_opcode_circuit::<TestCircuit<E, RW, L>>(
                 &zkvm_cs,
+                &mut shard_ctx,
                 &config,
-                vec![StepRecord::default(); num_instances],
+                vec![&StepRecord::default(); num_instances],
             )
             .unwrap();
 
         // get proof
-        let prover = ZKVMProver::new(pk, device);
+        let prover = ZKVMProver::new_with_single_shard(pk, device);
         let mut transcript = BasicTranscript::new(b"test");
-        let mut rmm = zkvm_witness.into_iter_sorted().next().unwrap().1;
+        let mut rmm: Vec<_> = zkvm_witness
+            .into_iter_sorted()
+            .next()
+            .unwrap()
+            .witness_rmms
+            .into();
         let (rmm, structural_rmm) = (rmm.remove(0), rmm.remove(0));
         let wits_in = rmm.to_mles();
         let structural_wits_in = structural_rmm.to_mles();
@@ -194,7 +204,9 @@ fn test_rw_lk_expression_combination() {
             witness: wits_in,
             structural_witness: structural_in,
             public_input: vec![],
-            num_instances,
+            pub_io_evals: vec![],
+            num_instances: vec![num_instances],
+            has_ecc_ops: false,
         };
         let (proof, _, _) = prover
             .create_chip_proof(
@@ -222,10 +234,11 @@ fn test_rw_lk_expression_combination() {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
         }
         verifier
-            .verify_opcode_proof(
+            .verify_chip_proof(
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
+                &[],
                 &[],
                 &mut v_transcript,
                 NUM_FANIN,
@@ -274,6 +287,7 @@ fn test_single_add_instance_e2e() {
     Pcs::setup(1 << MAX_NUM_VARIABLES, SecurityLevel::default()).expect("Basefold PCS setup");
     let (pp, vp) = Pcs::trim((), 1 << MAX_NUM_VARIABLES).expect("Basefold trim");
     let mut zkvm_cs = ZKVMConstraintSystem::default();
+    let mut shard_ctx = ShardContext::default();
     // opcode circuits
     let add_config = zkvm_cs.register_opcode_circuit::<AddInstruction<E>>();
     let halt_config = zkvm_cs.register_opcode_circuit::<HaltInstruction<E>>();
@@ -301,12 +315,12 @@ fn test_single_add_instance_e2e() {
 
     let pk = zkvm_cs
         .clone()
-        .key_gen::<Pcs>(pp, vp, zkvm_fixed_traces)
+        .key_gen::<Pcs>(pp, vp, program.entry, zkvm_fixed_traces)
         .expect("keygen failed");
     let vk = pk.get_vk_slow();
 
     // single instance
-    let mut vm = VMState::new(CENO_PLATFORM, program.clone().into());
+    let mut vm = VMState::new(CENO_PLATFORM.clone(), program.clone().into());
     let all_records = vm
         .iter_until_halt()
         .collect::<Result<Vec<StepRecord>, _>>()
@@ -315,7 +329,7 @@ fn test_single_add_instance_e2e() {
         .collect::<Vec<_>>();
     let mut add_records = vec![];
     let mut halt_records = vec![];
-    all_records.into_iter().for_each(|record| {
+    all_records.iter().for_each(|record| {
         let kind = record.insn().kind;
         match kind {
             ADD => add_records.push(record),
@@ -334,15 +348,25 @@ fn test_single_add_instance_e2e() {
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
     let device = create_prover(backend);
-    let mut prover = ZKVMProver::new(pk, device);
+    let prover = ZKVMProver::new_with_single_shard(pk, device);
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
     zkvm_witness
-        .assign_opcode_circuit::<AddInstruction<E>>(&zkvm_cs, &add_config, add_records)
+        .assign_opcode_circuit::<AddInstruction<E>>(
+            &zkvm_cs,
+            &mut shard_ctx,
+            &add_config,
+            add_records,
+        )
         .unwrap();
     zkvm_witness
-        .assign_opcode_circuit::<HaltInstruction<E>>(&zkvm_cs, &halt_config, halt_records)
+        .assign_opcode_circuit::<HaltInstruction<E>>(
+            &zkvm_cs,
+            &mut shard_ctx,
+            &halt_config,
+            halt_records,
+        )
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
     zkvm_witness
@@ -356,10 +380,10 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, vec![0]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
-        .create_proof(zkvm_witness, pi, transcript)
+        .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
         .expect("create_proof failed");
 
     println!("encoded zkvm proof {}", &zkvm_proof,);

@@ -7,6 +7,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 
+use crate::e2e::ShardContext;
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use multilinear_extensions::{Expression, ToExpr};
@@ -67,14 +68,17 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
     pub fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        self.vm_state.assign_instance(instance, step)?;
-        self.rs1.assign_instance(instance, lk_multiplicity, step)?;
-        self.rd.assign_instance(instance, lk_multiplicity, step)?;
+        self.vm_state.assign_instance(instance, shard_ctx, step)?;
+        self.rs1
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
+        self.rd
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
         self.mem_read
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         // Fetch instruction
         lk_multiplicity.fetch(step.pc().before.0);

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ceno_zkvm::precompiles::{run_faster_keccakf, setup_lookup_keccak_gkr_circuit};
+use ceno_zkvm::precompiles::{run_lookup_keccakf, setup_lookup_keccak_gkr_circuit};
 use criterion::*;
 use ff_ext::BabyBearExt4;
 
@@ -41,7 +41,7 @@ fn keccak_f_fn(c: &mut Criterion) {
                         let circuit =
                             setup_lookup_keccak_gkr_circuit().expect("setup circuit error");
                         #[allow(clippy::unit_arg)]
-                        let _ = run_faster_keccakf::<BabyBearExt4, BasefoldDefault<BabyBearExt4>>(
+                        let _ = run_lookup_keccakf::<BabyBearExt4, BasefoldDefault<BabyBearExt4>>(
                             circuit,
                             black_box(states),
                             false,

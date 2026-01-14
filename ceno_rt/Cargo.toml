@@ -1,7 +1,7 @@
 [package]
 categories = ["cryptography", "zk", "blockchain", "ceno"]
 description = "Ceno runtime library"
-edition = "2021"
+edition = "2024"
 keywords = ["cryptography", "zk", "blockchain", "ceno"]
 license = "MIT OR Apache-2.0"
 name = "ceno_rt"
@@ -10,5 +10,7 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [dependencies]
+ceno_serde = { path = "../ceno_serde" }
 getrandom = { version = "0.2.15", features = ["custom"], default-features = false }
-rkyv.workspace = true
+getrandom_v3 = { package = "getrandom", version = "0.3", default-features = false }
+serde.workspace = true

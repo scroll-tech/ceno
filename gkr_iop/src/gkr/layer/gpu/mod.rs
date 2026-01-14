@@ -43,6 +43,7 @@ use crate::{
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
 pub mod utils;
+use crate::selector::SelectorContext;
 use utils::*;
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<GpuBackend<E, PCS>>
@@ -54,15 +55,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Gp
         out_point: &multilinear_extensions::mle::Point<E>,
         transcript: &mut impl transcript::Transcript<E>,
     ) -> crate::gkr::layer::sumcheck_layer::LayerProof<E> {
+        let span = entered_span!("LinearLayerProver", profiling_2 = true);
         let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit
             .0
             .into_iter()
             .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
             .collect();
         let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
-        <CpuProver<CpuBackend<E, PCS>> as LinearLayerProver<CpuBackend<E, PCS>>>::prove(
+        let res = <CpuProver<CpuBackend<E, PCS>> as LinearLayerProver<CpuBackend<E, PCS>>>::prove(
             layer, cpu_wit, out_point, transcript,
-        )
+        );
+        exit_span!(span);
+        res
     }
 }
 
@@ -77,20 +81,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
         challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E> {
+        let span = entered_span!("SumcheckLayerProver", profiling_2 = true);
         let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit
             .0
             .into_iter()
             .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
             .collect();
         let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
-        <CpuProver<CpuBackend<E, PCS>> as SumcheckLayerProver<CpuBackend<E, PCS>>>::prove(
+        let res = <CpuProver<CpuBackend<E, PCS>> as SumcheckLayerProver<CpuBackend<E, PCS>>>::prove(
             layer,
             num_threads,
             max_num_variables,
             cpu_wit,
             challenges,
             transcript,
-        )
+        );
+        exit_span!(span);
+        res
     }
 }
 
@@ -106,11 +113,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         pub_io_evals: &[<GpuBackend<E, PCS> as ProverBackend>::E],
         challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> (
         LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<GpuBackend<E, PCS> as ProverBackend>::E>,
     ) {
+        let span = entered_span!("ZerocheckLayerProver", profiling_2 = true);
         let num_threads = 1; // VP builder for GPU: do not use _num_threads
 
         assert_eq!(challenges.len(), 2);
@@ -163,14 +171,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         )
         .collect_vec();
 
-        let span = entered_span!("IOPProverState::prove", profiling_4 = true);
+        let span_eq = entered_span!("build eqs", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
         let eqs_gpu = layer
             .out_sel_and_eval_exprs
             .iter()
             .zip(out_points.iter())
-            .map(|((sel_type, _), point)| {
-                build_eq_x_r_with_sel_gpu(&cuda_hal, point, num_instances, sel_type)
+            .zip(selector_ctxs.iter())
+            .map(|(((sel_type, _), point), selector_ctx)| {
+                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type)
             })
             // for rotation left point
             .chain(
@@ -191,18 +200,41 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     .map(|rotation_point| build_eq_x_r_gpu(&cuda_hal, rotation_point)),
             )
             .collect::<Vec<_>>();
+        // `wit` := witin ++ fixed ++ pubio
         let all_witins_gpu = wit
             .iter()
-            .take(layer.n_witin)
+            .take(layer.n_witin + layer.n_fixed + layer.n_instance)
             .map(|mle| mle.as_ref())
-            .chain(eqs_gpu.iter())
             .chain(
-                // fixed, start after `n_witin`
+                // some non-selector structural witin
                 wit.iter()
-                    .skip(layer.n_witin + layer.n_structural_witin)
+                    .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
+                    .take(
+                        layer.n_structural_witin
+                            - layer.out_sel_and_eval_exprs.len()
+                            - layer
+                                .rotation_exprs
+                                .0
+                                .as_ref()
+                                .map(|_| ROTATION_OPENING_COUNT)
+                                .unwrap_or(0),
+                    )
                     .map(|mle| mle.as_ref()),
             )
+            .chain(eqs_gpu.iter())
             .collect_vec();
+        assert_eq!(
+            all_witins_gpu.len(),
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {} + layer.n_instance {}",
+            all_witins_gpu.len(),
+            layer.n_witin,
+            layer.n_structural_witin,
+            layer.n_fixed,
+            layer.n_instance,
+        );
+        exit_span!(span_eq);
+
         // Calculate max_num_var and max_degree from the extracted relationships
         let (term_coefficients, mle_indices_per_term, mle_size_info) =
             extract_mle_relationships_from_monomial_terms(
@@ -222,17 +254,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .unwrap_or(0);
 
         // Convert types for GPU function Call
-        let basic_tr: &mut BasicTranscript<GL64Ext> =
-            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GL64Ext>) };
-        let term_coefficients_gl64: Vec<GL64Ext> =
+        let basic_tr: &mut BasicTranscript<BB31Ext> =
+            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
+        let term_coefficients_gl64: Vec<BB31Ext> =
             unsafe { std::mem::transmute(term_coefficients) };
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
-            .sumcheck
             .prove_generic_sumcheck_gpu(
-                &cuda_hal,
                 all_witins_gpu_type_gl64,
                 &mle_size_info,
                 &term_coefficients_gl64,
@@ -247,13 +277,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 
         // convert back to E: ExtensionField
         let proof_gpu_e =
-            unsafe { std::mem::transmute::<IOPProof<GL64Ext>, IOPProof<E>>(proof_gpu) };
-        let evals_gpu_e = unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(evals_gpu) };
+            unsafe { std::mem::transmute::<IOPProof<BB31Ext>, IOPProof<E>>(proof_gpu) };
+        let evals_gpu_e = unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(evals_gpu) };
         let row_challenges_e =
-            unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(row_challenges) };
+            unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(row_challenges) };
 
         exit_span!(span);
-
         (
             LayerProof {
                 main: SumcheckLayerProof {
@@ -275,6 +304,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 ///     rotated_rotation_expr[i].0(rx) == (1 - rx_4) * rotation_expr[i].1(0, rx_0, rx_1, ..., rx_3, rx_5, ...)
 ///                                     + rx_4 * rotation_expr[i].1(1, rx_0, 1 - rx_1, ..., rx_3, rx_5, ...)
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip_all, name = "prove_rotation_gpu", level = "info")]
 pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     _num_threads: usize,
     max_num_variables: usize,
@@ -292,7 +322,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
 
     // rotated_mles is non-deterministic input, rotated from existing witness polynomial
     // we will reduce it to zero check, and finally reduce to committed polynomial opening
-    let span = entered_span!("rotate_witin_selector", profiling_4 = true);
+    let span = entered_span!("rotate_witin_selector", profiling_3 = true);
     let rotated_mles_gpu = build_rotation_mles_gpu(
         &cuda_hal,
         raw_rotation_exprs,
@@ -315,7 +345,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     .collect_vec();
     exit_span!(span);
 
-    let span = entered_span!("rotation IOPProverState::prove", profiling_4 = true);
+    let span = entered_span!("rotation IOPProverState::prove", profiling_3 = true);
     // gpu mles
     let mle_gpu_ref: Vec<&MultilinearExtensionGpu<E>> = rotated_mles_gpu
         .iter()
@@ -344,17 +374,15 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
         .unwrap_or(0);
 
     // Convert types for GPU function call
-    let basic_tr: &mut BasicTranscript<GL64Ext> =
-        unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<GL64Ext>) };
-    let term_coefficients_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(term_coefficients) };
-    let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
+    let basic_tr: &mut BasicTranscript<BB31Ext> =
+        unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
+    let term_coefficients_gl64: Vec<BB31Ext> = unsafe { std::mem::transmute(term_coefficients) };
+    let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
         unsafe { std::mem::transmute(mle_gpu_ref) };
     let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
     // gpu prover
     let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
-        .sumcheck
         .prove_generic_sumcheck_gpu(
-            &cuda_hal,
             all_witins_gpu_type_gl64,
             &mle_size_info,
             &term_coefficients_gl64,
@@ -367,14 +395,14 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
     let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
 
-    let proof_gpu_e = unsafe { std::mem::transmute::<IOPProof<GL64Ext>, IOPProof<E>>(proof_gpu) };
-    let mut evals_gpu_e = unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(evals_gpu) };
-    let row_challenges_e = unsafe { std::mem::transmute::<Vec<GL64Ext>, Vec<E>>(row_challenges) };
+    let proof_gpu_e = unsafe { std::mem::transmute::<IOPProof<BB31Ext>, IOPProof<E>>(proof_gpu) };
+    let mut evals_gpu_e = unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(evals_gpu) };
+    let row_challenges_e = unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(row_challenges) };
     // skip selector/eq as verifier can derive itself
     evals_gpu_e.truncate(raw_rotation_exprs.len() * 2);
     exit_span!(span);
 
-    let span = entered_span!("rotation derived left/right eval", profiling_4 = true);
+    let span = entered_span!("rotation derived left/right eval", profiling_3 = true);
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
     let (left_point, right_point) = bh.get_rotation_points(&row_challenges_e);
     let evals = evals_gpu_e

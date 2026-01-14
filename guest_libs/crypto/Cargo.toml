@@ -1,0 +1,26 @@
+[package]
+categories = ["cryptography", "zk", "blockchain", "ceno"]
+description = "Ceno zkVM Crypto Guest Library"
+edition = "2021"
+keywords = ["cryptography", "zk", "blockchain", "ceno"]
+license = "MIT OR Apache-2.0"
+name = "ceno_crypto"
+readme = "README.md"
+repository = "https://github.com/scroll-tech/ceno"
+version = "0.1.0"
+
+[dependencies]
+bn = { package = "substrate-bn", git = "https://github.com/scroll-tech/bn", branch = "ceno" }
+ceno_keccak = { path = "../keccak" }
+ceno_sha2 = { path = "../sha2" }
+ceno_syscall.workspace = true
+k256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+alloy-consensus = { version = "1.0", features = ["crypto-backend"] }
+alloy-primitives = "1.4"
+revm-precompile.workspace = true
+
+[features]
+profiling = ["k256/profiling"]

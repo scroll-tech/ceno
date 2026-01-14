@@ -4,64 +4,66 @@ use crate::{
 };
 use ff_ext::ExtensionField;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
-use multilinear_extensions::mle::{FieldType, MultilinearExtension, Point};
+use multilinear_extensions::{
+    macros::{entered_span, exit_span},
+    mle::{FieldType, MultilinearExtension, Point},
+};
 use p3::field::TwoAdicField;
 use std::{rc::Rc, sync::Arc};
 use witness::RowMajorMatrix;
 
 use crate::cpu::default_backend_config;
 
+use either::Either;
 use itertools::{Itertools, izip};
 use std::marker::PhantomData;
 
 pub mod gpu_prover {
     pub use ceno_gpu::{
         BasefoldCommitmentWithWitness as BasefoldCommitmentWithWitnessGpu, Buffer, CudaHal,
-        gl64::{
-            CudaHalGL64, GpuFieldType, GpuPolynomial, GpuPolynomialExt, buffer::BufferImpl,
-            build_mle_as_ceno, convert_ceno_to_gpu_basefold_commitment,
-            ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu, rotation_selector_gpu,
+        bb31::{
+            CudaHalBB31, GpuDigestLayer, GpuFieldType, GpuMatrix, GpuPolynomial, GpuPolynomialExt,
+        },
+        common::{
+            basefold::utils::convert_ceno_to_gpu_basefold_commitment,
+            buffer::BufferImpl,
+            get_ceno_gpu_device_id,
+            mle::{
+                build_mle_as_ceno, ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu,
+                rotation_selector_gpu,
+            },
+            utils::HasUtils,
         },
     };
-    use cudarc::driver::{CudaDevice, DriverError};
+
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex, MutexGuard};
 
-    pub type GL64Base = p3::goldilocks::Goldilocks;
-    pub type GL64Ext = ff_ext::GoldilocksExt2;
-
-    pub static CUDA_DEVICE: Lazy<Result<Arc<CudaDevice>, DriverError>> =
-        Lazy::new(|| CudaDevice::new(0));
+    pub type BB31Base = p3::babybear::BabyBear;
+    pub type BB31Ext = ff_ext::BabyBearExt4;
 
     #[allow(clippy::type_complexity)]
     pub static CUDA_HAL: Lazy<
-        Result<Arc<Mutex<CudaHalGL64>>, Box<dyn std::error::Error + Send + Sync>>,
+        Result<Arc<Mutex<CudaHalBB31>>, Box<dyn std::error::Error + Send + Sync>>,
     > = Lazy::new(|| {
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device init failed: {:?}", e))?;
-        device.bind_to_thread()?;
-
-        CudaHalGL64::new()
+        // can be overridden by env variable `CENO_GPU_DEVICE_ID`
+        let device_id: usize = get_ceno_gpu_device_id(0);
+        CudaHalBB31::new(device_id)
             .map(|hal| Arc::new(Mutex::new(hal)))
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     });
 
-    pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalGL64>, String> {
-        let device = CUDA_DEVICE
-            .as_ref()
-            .map_err(|e| format!("Device not available: {:?}", e))?;
-        device
-            .bind_to_thread()
-            .map_err(|e| format!("Failed to bind device to thread: {:?}", e))?;
-
+    pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalBB31>, String> {
         let hal_arc = CUDA_HAL
             .as_ref()
             .map_err(|e| format!("HAL not available: {:?}", e))?;
-
-        hal_arc
+        let hal = hal_arc
             .lock()
-            .map_err(|e| format!("Failed to lock HAL: {:?}", e))
+            .map_err(|e| format!("Failed to lock HAL: {:?}", e))?;
+        hal.inner()
+            .synchronize()
+            .map_err(|e| format!("Failed to sync: {:?}", e))?;
+        Ok(hal)
     }
 }
 
@@ -71,8 +73,8 @@ pub use gpu_prover::*;
 /// Stores a multilinear polynomial in dense evaluation form.
 pub struct MultilinearExtensionGpu<'a, E: ExtensionField> {
     /// GPU polynomial data, supporting both base field and extension field
-    pub mle: GpuFieldType,
-    _phantom: PhantomData<&'a E>,
+    pub mle: GpuFieldType<'a>,
+    _phantom: PhantomData<E>,
 }
 
 impl<'a, E: ExtensionField> Default for MultilinearExtensionGpu<'a, E> {
@@ -122,12 +124,40 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu
     fn evaluations_len(&self) -> usize {
         self.mle.evaluations_len()
     }
+
+    fn bh_signature(&self) -> E {
+        if std::any::TypeId::of::<E::BaseField>()
+            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
+        {
+            panic!("GPU backend only supports Goldilocks");
+        }
+
+        match &self.mle {
+            GpuFieldType::Base(poly) => {
+                let res: Vec<E> = unsafe { std::mem::transmute(vec![poly.bh_signature()]) };
+                res[0]
+            }
+            GpuFieldType::Ext(poly) => {
+                let res: Vec<E> = unsafe { std::mem::transmute(vec![poly.bh_signature()]) };
+                res[0]
+            }
+            GpuFieldType::Unreachable => unreachable!(),
+        }
+    }
 }
 
 impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     /// Get reference to internal GPU polynomial
-    pub fn inner(&self) -> &GpuFieldType {
+    pub fn inner(&self) -> &GpuFieldType<'_> {
         &self.mle
+    }
+
+    pub fn as_view_chunks(&self, num_fanin: usize) -> Vec<GpuPolynomialExt<'a>> {
+        match &self.mle {
+            GpuFieldType::Base(_) => panic!("not supported yet"),
+            GpuFieldType::Ext(poly) => poly.as_view_chunk(num_fanin),
+            GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
+        }
     }
 
     /// Convert to CPU version of MultilinearExtension
@@ -160,12 +190,12 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Create GPU version from CPU version of MultilinearExtension
-    pub fn from_ceno(cuda_hal: &CudaHalGL64, mle: &MultilinearExtension<'a, E>) -> Self {
+    pub fn from_ceno(cuda_hal: &CudaHalBB31, mle: &MultilinearExtension<'a, E>) -> Self {
         // check type of mle
         match mle.evaluations {
             FieldType::Base(_) => {
                 let mle_vec_ref = mle.get_base_field_vec();
-                let mle_vec_ref_gl64: &[GL64Base] = unsafe { std::mem::transmute(mle_vec_ref) };
+                let mle_vec_ref_gl64: &[BB31Base] = unsafe { std::mem::transmute(mle_vec_ref) };
                 let mle_gpu =
                     GpuPolynomial::from_ceno_vec(cuda_hal, mle_vec_ref_gl64, mle.num_vars())
                         .unwrap();
@@ -176,7 +206,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
             }
             FieldType::Ext(_) => {
                 let mle_vec_ref = mle.get_ext_field_vec();
-                let mle_vec_ref_gl64_ext: &[GL64Ext] = unsafe { std::mem::transmute(mle_vec_ref) };
+                let mle_vec_ref_gl64_ext: &[BB31Ext] = unsafe { std::mem::transmute(mle_vec_ref) };
                 let mle_gpu =
                     GpuPolynomialExt::from_ceno_vec(cuda_hal, mle_vec_ref_gl64_ext, mle.num_vars())
                         .unwrap();
@@ -190,7 +220,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Create from base field GpuPolynomial
-    pub fn from_ceno_gpu_base(mle_gpu: GpuPolynomial) -> Self {
+    pub fn from_ceno_gpu_base(mle_gpu: GpuPolynomial<'a>) -> Self {
         Self {
             mle: GpuFieldType::Base(mle_gpu),
             _phantom: PhantomData,
@@ -198,7 +228,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Create from extension field GpuPolynomialExt
-    pub fn from_ceno_gpu_ext(mle_gpu: GpuPolynomialExt) -> Self {
+    pub fn from_ceno_gpu_ext(mle_gpu: GpuPolynomialExt<'a>) -> Self {
         Self {
             mle: GpuFieldType::Ext(mle_gpu),
             _phantom: PhantomData,
@@ -206,12 +236,12 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Method for backward compatibility
-    pub fn from_ceno_gpu(mle_gpu: GpuPolynomial) -> Self {
+    pub fn from_ceno_gpu(mle_gpu: GpuPolynomial<'a>) -> Self {
         Self::from_ceno_gpu_base(mle_gpu)
     }
 
     /// get inner poly reference with base field claim
-    pub fn as_ceno_gpu_base(&self) -> &GpuPolynomial {
+    pub fn as_ceno_gpu_base(&self) -> &GpuPolynomial<'_> {
         match &self.mle {
             GpuFieldType::Base(poly) => poly,
             GpuFieldType::Ext(_) => panic!("poly in ext field"),
@@ -220,7 +250,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// get inner poly reference with ext field claim
-    pub fn as_ceno_gpu_ext(&self) -> &GpuPolynomialExt {
+    pub fn as_ceno_gpu_ext(&self) -> &GpuPolynomialExt<'_> {
         match &self.mle {
             GpuFieldType::Base(_) => panic!("poly in base field"),
             GpuFieldType::Ext(poly) => poly,
@@ -266,7 +296,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
     type MultilinearPoly<'a> = MultilinearExtensionGpu<'a, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
-    type PcsData = BasefoldCommitmentWithWitnessGpu<E::BaseField, BufferImpl<E::BaseField>>;
+    type PcsData = BasefoldCommitmentWithWitnessGpu<
+        E::BaseField,
+        BufferImpl<'static, E::BaseField>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    >;
     #[cfg(not(feature = "gpu"))]
     type PcsData = <PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
@@ -299,15 +335,15 @@ where
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     ProtocolWitnessGeneratorProver<GpuBackend<E, PCS>> for GpuProver<GpuBackend<E, PCS>>
 {
+    #[tracing::instrument(skip_all, name = "layer_witness", fields(profiling_2), level = "trace")]
     fn layer_witness<'a>(
         layer: &Layer<E>,
         layer_wits: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
-        pub_io_evals: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
+        pub_io_evals: &[Either<E::BaseField, E>],
         challenges: &[E],
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
-        if std::any::TypeId::of::<E::BaseField>()
-            != std::any::TypeId::of::<p3::goldilocks::Goldilocks>()
-        {
+        let span = entered_span!("preprocess", profiling_2 = true);
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports Goldilocks base field");
         }
 
@@ -316,17 +352,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
             .collect();
-
-        // take public input from gpu to cpu for scalar evaluation
-        // assume public io is quite small, thus the cost is negligible
-        // evaluate all scalar terms first
-        // when instance was access in scalar, we only take its first item
-        // this operation is sound
-        let pub_io_evals = pub_io_evals
-            .iter()
-            .map(|mle| mle.inner_to_mle())
-            .map(|instance| instance.evaluations.index(0))
-            .collect_vec();
 
         // pre-process and flatten indices into friendly GPU format
         let (num_non_zero_expr, term_coefficients, mle_indices_per_term, mle_size_info) = layer
@@ -348,7 +373,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     &pub_io_evals,
                     challenges,
                 );
-                let coeffs_gl64: Vec<GL64Ext> = unsafe { std::mem::transmute(coeffs) };
+                let coeffs_gl64: Vec<BB31Ext> = unsafe { std::mem::transmute(coeffs) };
                 (coeffs_gl64, indices, size_info)
             })
             .fold(
@@ -369,10 +394,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .as_ref()
             .unwrap()
             .0;
+        exit_span!(span);
 
+        let span = entered_span!("witness_infer", profiling_2 = true);
         // process & transmute poly
         let all_witins_gpu = layer_wits.iter().map(|mle| mle.as_ref()).collect_vec();
-        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<GL64Ext>> =
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
 
@@ -381,7 +408,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let mut next_witness_buf = (0..num_non_zero_expr)
             .map(|_| {
                 cuda_hal
-                    .alloc_ext_elems_on_device(1 << num_vars)
+                    .alloc_ext_elems_on_device(1 << num_vars, false)
                     .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
             })
             .collect::<Result<Vec<_>, _>>()
@@ -390,13 +417,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         cuda_hal
             .witness_infer
             .wit_infer_by_monomial_expr(
-                &cuda_hal,
+                &*cuda_hal,
                 all_witins_gpu_type_gl64,
                 &term_coefficients,
                 &mle_indices_per_term,
                 &mut next_witness_buf,
             )
             .unwrap();
+        exit_span!(span);
 
         // recover it back and interleaving with default gpu
         let mut next_iter = next_witness_buf.into_iter();

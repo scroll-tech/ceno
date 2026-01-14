@@ -11,6 +11,7 @@ use transcript::Transcript;
 use crate::{
     error::BackendError,
     hal::{ProverBackend, ProverDevice},
+    selector::SelectorContext,
 };
 
 pub mod booleanhypercube;
@@ -44,6 +45,7 @@ pub struct GKRCircuitOutput<'a, PB: ProverBackend>(pub LayerWitness<'a, PB>);
 pub struct GKRProverOutput<E: ExtensionField, Evaluation> {
     pub gkr_proof: GKRProof<E>,
     pub opening_evaluations: Vec<Evaluation>,
+    pub rt: Vec<Point<E>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -77,14 +79,14 @@ impl<E: ExtensionField> GKRCircuit<E> {
         pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        num_instances: usize,
+        selector_ctxs: &[SelectorContext],
     ) -> Result<GKRProverOutput<E, Evaluation<E>>, BackendError> {
         let mut running_evals = out_evals.to_vec();
         // running evals is a global referable within chip
         running_evals.resize(self.n_evaluations, PointAndEval::default());
         let mut challenges = challenges.to_vec();
         let span = entered_span!("layer_proof", profiling_2 = true);
-        let sumcheck_proofs = izip!(&self.layers, circuit_wit.layers)
+        let (sumcheck_proofs, rt): (Vec<_>, Vec<_>) = izip!(&self.layers, circuit_wit.layers)
             .enumerate()
             .map(|(i, (layer, layer_wit))| {
                 tracing::debug!("prove layer {i} layer with layer name {}", layer.name);
@@ -97,12 +99,12 @@ impl<E: ExtensionField> GKRCircuit<E> {
                     pub_io_evals,
                     &mut challenges,
                     transcript,
-                    num_instances,
+                    selector_ctxs,
                 );
                 exit_span!(span);
                 res
             })
-            .collect_vec();
+            .unzip();
         exit_span!(span);
 
         let opening_evaluations = self.opening_evaluations(&running_evals);
@@ -110,6 +112,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         Ok(GKRProverOutput {
             gkr_proof: GKRProof(sumcheck_proofs),
             opening_evaluations,
+            rt,
         })
     }
 
@@ -120,10 +123,11 @@ impl<E: ExtensionField> GKRCircuit<E> {
         gkr_proof: GKRProof<E>,
         out_evals: &[PointAndEval<E>],
         pub_io_evals: &[E],
+        raw_pi: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
-        num_instances: usize,
-    ) -> Result<GKRClaims<Evaluation<E>>, BackendError>
+        selector_ctxs: &[SelectorContext],
+    ) -> Result<(GKRClaims<Evaluation<E>>, Point<E>), BackendError>
     where
         E: ExtensionField,
     {
@@ -132,20 +136,24 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let mut challenges = challenges.to_vec();
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
-        for (i, (layer, layer_proof)) in izip!(&self.layers, sumcheck_proofs).enumerate() {
-            tracing::debug!("verifier layer {i} layer with layer name {}", layer.name);
-            layer.verify(
-                max_num_variables,
-                layer_proof,
-                &mut evaluations,
-                pub_io_evals,
-                &mut challenges,
-                transcript,
-                num_instances,
-            )?;
-        }
-
-        Ok(GKRClaims(self.opening_evaluations(&evaluations)))
+        let rt = izip!(&self.layers, sumcheck_proofs).enumerate().try_fold(
+            vec![],
+            |_, (i, (layer, layer_proof))| {
+                tracing::debug!("verifier layer {i} layer with layer name {}", layer.name);
+                let rt = layer.verify(
+                    max_num_variables,
+                    layer_proof,
+                    &mut evaluations,
+                    pub_io_evals,
+                    raw_pi,
+                    &mut challenges,
+                    transcript,
+                    selector_ctxs,
+                )?;
+                Ok(rt)
+            },
+        )?;
+        Ok((GKRClaims(self.opening_evaluations(&evaluations)), rt))
     }
 
     /// Output opening evaluations. First witin and then fixed.

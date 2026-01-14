@@ -2,9 +2,9 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 
 use anyhow::Result;
 use ceno_emul::{
-    BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, COORDINATE_WORDS,
-    EmuContext, InsnKind, Platform, Program, SECP256K1_ARG_WORDS, SHA_EXTEND_WORDS, StepRecord,
-    VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, EmuContext, InsnKind,
+    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, SHA_EXTEND_WORDS,
+    StepRecord, UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
     host_utils::{read_all_messages, read_all_messages_as_words},
 };
 use ceno_host::CenoStdin;
@@ -17,8 +17,8 @@ fn test_ceno_rt_mini() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_mini;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: program.image.keys().copied().collect(),
-        ..CENO_PLATFORM
+        prog_data: Arc::new(program.image.keys().copied().collect()),
+        ..CENO_PLATFORM.clone()
     };
     let mut state = VMState::new(platform, Arc::new(program));
     let _steps = run(&mut state)?;
@@ -35,8 +35,8 @@ fn test_ceno_rt_panic() {
     let program_elf = ceno_examples::ceno_rt_panic;
     let program = Program::load_elf(program_elf, u32::MAX).unwrap();
     let platform = Platform {
-        prog_data: program.image.keys().copied().collect(),
-        ..CENO_PLATFORM
+        prog_data: Arc::new(program.image.keys().copied().collect()),
+        ..CENO_PLATFORM.clone()
     };
     let mut state = VMState::new(platform, Arc::new(program));
     let steps = run(&mut state).unwrap();
@@ -51,8 +51,8 @@ fn test_ceno_rt_mem() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_mem;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: program.image.keys().copied().collect(),
-        ..CENO_PLATFORM
+        prog_data: Arc::new(program.image.keys().copied().collect()),
+        ..CENO_PLATFORM.clone()
     };
     let sheap = program.sheap.into();
     let mut state = VMState::new(platform, Arc::new(program.clone()));
@@ -68,19 +68,19 @@ fn test_ceno_rt_alloc() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_alloc;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: program.image.keys().copied().collect(),
-        ..CENO_PLATFORM
+        prog_data: Arc::new(program.image.keys().copied().collect()),
+        ..CENO_PLATFORM.clone()
     };
     let mut state = VMState::new(platform, Arc::new(program));
     let _steps = run(&mut state)?;
 
     // Search for the RAM action of the test program.
     let mut found = (false, false);
-    for &addr in state.tracer().final_accesses().keys() {
-        if !CENO_PLATFORM.is_ram(addr.into()) {
+    for addr in state.tracer().final_accesses().addresses() {
+        if !CENO_PLATFORM.is_ram((*addr).into()) {
             continue;
         }
-        let value = state.peek_memory(addr);
+        let value = state.peek_memory(*addr);
         if value == 0xf00d {
             found.0 = true;
         }
@@ -98,8 +98,8 @@ fn test_ceno_rt_io() -> Result<()> {
     let program_elf = ceno_examples::ceno_rt_io;
     let program = Program::load_elf(program_elf, u32::MAX)?;
     let platform = Platform {
-        prog_data: program.image.keys().copied().collect(),
-        ..CENO_PLATFORM
+        prog_data: Arc::new(program.image.keys().copied().collect()),
+        ..CENO_PLATFORM.clone()
     };
     let mut state = VMState::new(platform, Arc::new(program));
     let _steps = run(&mut state)?;
@@ -116,7 +116,7 @@ fn test_ceno_rt_io() -> Result<()> {
 #[test]
 fn test_hints() -> Result<()> {
     let all_messages = messages_to_strings(&ceno_host::run(
-        CENO_PLATFORM,
+        CENO_PLATFORM.clone(),
         ceno_examples::hints,
         CenoStdin::default()
             .write(&true)?
@@ -136,7 +136,7 @@ fn test_hints() -> Result<()> {
 fn test_bubble_sorting() -> Result<()> {
     let mut rng = thread_rng();
     let all_messages = messages_to_strings(&ceno_host::run(
-        CENO_PLATFORM,
+        CENO_PLATFORM.clone(),
         ceno_examples::quadratic_sorting,
         // Provide some random numbers to sort.
         CenoStdin::default().write(&(0..1_000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
@@ -151,7 +151,7 @@ fn test_bubble_sorting() -> Result<()> {
 fn test_sorting() -> Result<()> {
     let mut rng = thread_rng();
     let all_messages = messages_to_strings(&ceno_host::run(
-        CENO_PLATFORM,
+        CENO_PLATFORM.clone(),
         ceno_examples::sorting,
         // Provide some random numbers to sort.
         CenoStdin::default().write(&(0..1000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
@@ -175,7 +175,7 @@ fn test_median() -> Result<()> {
     hints.write(&nums[nums.len() / 2])?;
 
     let all_messages = messages_to_strings(&ceno_host::run(
-        CENO_PLATFORM,
+        CENO_PLATFORM.clone(),
         ceno_examples::median,
         &hints,
         None,
@@ -197,7 +197,7 @@ fn test_hashing_fail() {
     nums[211] = nums[907];
 
     let _ = ceno_host::run(
-        CENO_PLATFORM,
+        CENO_PLATFORM.clone(),
         ceno_examples::hashing,
         CenoStdin::default().write(&nums).unwrap(),
         None,
@@ -218,7 +218,7 @@ fn test_hashing() -> Result<()> {
     };
 
     let all_messages = messages_to_strings(&ceno_host::run(
-        CENO_PLATFORM,
+        CENO_PLATFORM.clone(),
         ceno_examples::hashing,
         CenoStdin::default().write(&uniques)?,
         None,
@@ -287,6 +287,18 @@ fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
     bytes[0..32].reverse();
     bytes[32..].reverse();
     std::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * (i + 1)].try_into().unwrap()))
+}
+
+#[test]
+fn test_secp256k1() -> Result<()> {
+    let program_elf = ceno_examples::secp256k1;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert!(!syscalls.is_empty());
+
+    Ok(())
 }
 
 #[test]
@@ -359,11 +371,12 @@ fn test_secp256k1_double() -> Result<()> {
     assert_eq!(p_address, witness.reg_ops[0].value.before);
     let p_address: WordAddr = p_address.into();
 
+    // first byte is tag
     const DOUBLE_P: [u8; 65] = [
-        4, 111, 137, 182, 244, 228, 50, 13, 91, 93, 34, 231, 93, 191, 248, 105, 28, 226, 251, 23,
-        66, 192, 188, 66, 140, 44, 218, 130, 239, 101, 255, 164, 76, 202, 170, 134, 48, 127, 46,
-        14, 9, 192, 64, 102, 67, 163, 33, 48, 157, 140, 217, 10, 97, 231, 183, 28, 129, 177, 185,
-        253, 179, 135, 182, 253, 203,
+        1, 198, 4, 127, 148, 65, 237, 125, 109, 48, 69, 64, 110, 149, 192, 124, 216, 92, 119, 142,
+        75, 140, 239, 60, 167, 171, 172, 9, 185, 92, 112, 158, 229, 26, 225, 104, 254, 166, 61,
+        195, 57, 163, 197, 132, 25, 70, 108, 234, 238, 247, 246, 50, 101, 50, 102, 208, 225, 35,
+        100, 49, 169, 80, 207, 229, 42,
     ];
     let expect = bytes_to_words(DOUBLE_P);
 
@@ -411,9 +424,14 @@ fn test_secp256k1_decompress() -> Result<()> {
     // Writes should cover the Y coordinate, i.e latter half of the repr
     let expect = bytes_to_words(decompressed)[8..].to_vec();
 
-    assert_eq!(witness.mem_ops.len(), 2 * COORDINATE_WORDS);
+    assert_eq!(witness.mem_ops.len(), 2 * SECP256K1_COORDINATE_WORDS);
     // Reads on X
-    for (i, write_op) in witness.mem_ops.iter().take(COORDINATE_WORDS).enumerate() {
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .take(SECP256K1_COORDINATE_WORDS)
+        .enumerate()
+    {
         assert_eq!(write_op.addr, x_address + i);
         assert_eq!(write_op.value.after, write_op.value.before);
     }
@@ -422,13 +440,25 @@ fn test_secp256k1_decompress() -> Result<()> {
     for (i, write_op) in witness
         .mem_ops
         .iter()
-        .skip(COORDINATE_WORDS)
-        .take(COORDINATE_WORDS)
+        .skip(SECP256K1_COORDINATE_WORDS)
+        .take(SECP256K1_COORDINATE_WORDS)
         .enumerate()
     {
         assert_eq!(write_op.addr, y_address + i);
         assert_eq!(write_op.value.after, expect[i]);
     }
+
+    Ok(())
+}
+
+#[test]
+fn test_secp256k1_ecrecover() -> Result<()> {
+    let program_elf = ceno_examples::secp256k1_ecrecover;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+
+    let steps = run(&mut state)?;
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert!(!syscalls.is_empty());
 
     Ok(())
 }
@@ -477,12 +507,12 @@ fn test_sha256_extend() -> Result<()> {
 
 #[test]
 fn test_sha256_full() -> Result<()> {
-    let public_io: &Vec<u32> = &vec![
+    let public_io: &[u32; 8] = &[
         30689455, 3643278932, 1489987339, 1626711444, 3610619649, 1925764735, 581441152, 321290698,
     ];
     let hints: &Vec<u32> = &vec![0u32; 10];
     let all_messages = messages_to_strings(&ceno_host::run(
-        CENO_PLATFORM,
+        CENO_PLATFORM.clone(),
         ceno_examples::sha256,
         CenoStdin::default().write(hints)?,
         Some(CenoStdin::default().write(public_io)?),
@@ -535,6 +565,10 @@ fn test_bn254_fptower_syscalls() -> Result<()> {
         check_reads(&witness.mem_ops[BN254_FP2_WORDS..], b);
     }
 
+    let program_elf = ceno_examples::bn254_patched_fp;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let _ = run(&mut state)?;
+
     Ok(())
 }
 
@@ -547,11 +581,34 @@ fn test_bn254_curve() -> Result<()> {
     let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
     assert_eq!(syscalls.len(), 3);
 
-    for witness in syscalls.iter() {
-        assert_eq!(witness.reg_ops.len(), 2);
-        assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
-        assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
-    }
+    // add
+    assert_eq!(syscalls[0].reg_ops.len(), 2);
+    assert_eq!(
+        syscalls[0].reg_ops[0].register_index(),
+        Platform::reg_arg0()
+    );
+    assert_eq!(
+        syscalls[0].reg_ops[1].register_index(),
+        Platform::reg_arg1()
+    );
+
+    // double
+    assert_eq!(syscalls[1].reg_ops.len(), 1);
+    assert_eq!(
+        syscalls[1].reg_ops[0].register_index(),
+        Platform::reg_arg0()
+    );
+
+    // add
+    assert_eq!(syscalls[2].reg_ops.len(), 2);
+    assert_eq!(
+        syscalls[2].reg_ops[0].register_index(),
+        Platform::reg_arg0()
+    );
+    assert_eq!(
+        syscalls[2].reg_ops[1].register_index(),
+        Platform::reg_arg1()
+    );
 
     let messages = read_all_messages_as_words(&state);
     let [a1, b, a2, c1, c2, one, c3]: [Vec<u32>; 7] = messages.try_into().unwrap();
@@ -575,6 +632,69 @@ fn test_bn254_curve() -> Result<()> {
 }
 
 #[test]
+fn test_bn254_precompile() -> Result<()> {
+    let program_elf = ceno_examples::bn254_precompile;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let _ = run(&mut state)?;
+    Ok(())
+}
+
+#[test]
+fn test_uint256_mul() -> Result<()> {
+    let program_elf = ceno_examples::uint256_mul_syscall;
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+
+    let steps = run(&mut state)?;
+
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 1);
+
+    let witness = syscalls[0];
+    assert_eq!(witness.reg_ops.len(), 2);
+    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+    assert_eq!(witness.reg_ops[1].register_index(), Platform::reg_arg1());
+
+    let a_address = witness.reg_ops[0].value.after;
+    assert_eq!(a_address, witness.reg_ops[0].value.before);
+    let a_address: WordAddr = a_address.into();
+
+    let b_address = witness.reg_ops[1].value.after;
+    assert_eq!(b_address, witness.reg_ops[1].value.before);
+    let b_address: WordAddr = b_address.into();
+
+    let expect: [u32; 8] = [
+        0xF0D2F44F, 0xF0DC2116, 0x253AB7CD, 0x3089E8F6, 0x803BED8F, 0x969E7A64, 0x610CBFFF,
+        0x80012A20,
+    ];
+
+    assert_eq!(witness.mem_ops.len(), 3 * UINT256_WORDS_FIELD_ELEMENT);
+    // Expect first half to consist of read/writes on x
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .take(UINT256_WORDS_FIELD_ELEMENT)
+        .enumerate()
+    {
+        assert_eq!(write_op.addr, a_address + i);
+        assert_eq!(write_op.value.after, expect[i]);
+    }
+
+    // Expect second half to consist of reads on y and modulus
+    for (i, write_op) in witness
+        .mem_ops
+        .iter()
+        .skip(UINT256_WORDS_FIELD_ELEMENT)
+        .take(UINT256_WORDS_FIELD_ELEMENT * 2)
+        .enumerate()
+    {
+        assert_eq!(write_op.addr, b_address + i);
+        assert_eq!(write_op.value.after, write_op.value.before);
+    }
+
+    Ok(())
+}
+
+#[test]
 fn test_syscalls_compatibility() -> Result<()> {
     let program_elf = ceno_examples::syscalls;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
@@ -586,7 +706,7 @@ fn test_syscalls_compatibility() -> Result<()> {
 #[test]
 fn test_fibonacci() -> Result<()> {
     let _ = ceno_host::run(
-        CENO_PLATFORM,
+        CENO_PLATFORM.clone(),
         ceno_examples::fibonacci,
         CenoStdin::default().write(&10_u32)?,
         Some(CenoStdin::default().write(&4191_u32)?),
@@ -598,7 +718,7 @@ fn test_fibonacci() -> Result<()> {
 fn test_keccak_no_syscall() -> Result<()> {
     let pre_image = vec![0xdeadbeefu32, 0xdeadbeef, 0xdeadbeef];
     let all_messages = messages_to_strings(&ceno_host::run(
-        CENO_PLATFORM,
+        CENO_PLATFORM.clone(),
         ceno_examples::keccak_no_syscall,
         CenoStdin::default().write(&pre_image)?,
         None,
@@ -622,8 +742,26 @@ fn test_keccak_no_syscall() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_keccak_guest() -> Result<()> {
+    let _ = ceno_host::run(
+        CENO_PLATFORM.clone(),
+        ceno_examples::keccak_lib,
+        &CenoStdin::default(),
+        None,
+    );
+
+    let _ = ceno_host::run(
+        CENO_PLATFORM.clone(),
+        ceno_examples::keccak_native,
+        &CenoStdin::default(),
+        None,
+    );
+    Ok(())
+}
+
 fn unsafe_platform() -> Platform {
-    let mut platform = CENO_PLATFORM;
+    let mut platform = CENO_PLATFORM.clone();
     platform.unsafe_ecall_nop = true;
     platform
 }

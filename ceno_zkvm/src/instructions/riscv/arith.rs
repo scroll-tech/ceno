@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    circuit_builder::CircuitBuilder, error::ZKVMError, instructions::Instruction,
-    structs::ProgramParams, uint::Value, witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder, e2e::ShardContext, error::ZKVMError,
+    instructions::Instruction, structs::ProgramParams, uint::Value, witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
@@ -87,13 +87,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [<E as ExtensionField>::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         config
             .r_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         let rs2_read = Value::new_unchecked(step.rs2().unwrap().value);
         config
@@ -186,9 +187,10 @@ mod test {
         let insn_code = encode_rv32(I::INST_KIND, 2, 3, 4, 0);
         let (raw_witin, lkm) = ArithInstruction::<GoldilocksExt2, I>::assign_instances(
             &config,
+            &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![StepRecord::new_r_instruction(
+            vec![&StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
                 insn_code,

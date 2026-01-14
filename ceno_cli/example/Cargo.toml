@@ -1,13 +1,9 @@
 [workspace]
 [package]
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 name = "ceno_example"
 version = "0.1.0"
 
 [dependencies]
 ceno_rt = { path = "../../ceno_rt" }
-rkyv = { version = "0.8", default-features = false, features = [
-  "alloc",
-  "bytecheck",
-] }

@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     iter::Step,
@@ -31,11 +32,11 @@ pub type Addr = u32;
 pub type Cycle = u64;
 pub type RegIdx = usize;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ByteAddr(pub u32);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WordAddr(u32);
+pub struct WordAddr(pub u32);
 
 impl From<ByteAddr> for WordAddr {
     fn from(addr: ByteAddr) -> Self {
@@ -89,7 +90,7 @@ impl ByteAddr {
     }
 
     pub const fn is_aligned(&self) -> bool {
-        self.0 % WORD_SIZE as u32 == 0
+        self.0.is_multiple_of(WORD_SIZE as u32)
     }
 
     pub const fn is_null(&self) -> bool {
