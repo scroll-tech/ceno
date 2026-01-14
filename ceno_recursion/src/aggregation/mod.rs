@@ -42,6 +42,7 @@ use openvm_sdk::{
     SC,
     config::DEFAULT_NUM_CHILDREN_INTERNAL,
     prover::vm::{new_local_prover, types::VmProvingKey},
+    config::Halo2Config,
 };
 use openvm_stark_backend::{
     config::{Com, StarkGenericConfig},
@@ -80,6 +81,7 @@ pub type InnerConfig = AsmConfig<F, E>;
 pub const LEAF_LOG_BLOWUP: usize = 1;
 pub const INTERNAL_LOG_BLOWUP: usize = 2;
 pub const ROOT_LOG_BLOWUP: usize = 3;
+pub const HALO2_VERIFIER_K: usize = 23;
 pub const ROOT_MAX_CONSTRAINT_DEG: usize = (1 << ROOT_LOG_BLOWUP) + 1;
 pub const ROOT_NUM_PUBLIC_VALUES: usize = 15;
 pub const SBOX_SIZE: usize = 7;
@@ -272,6 +274,14 @@ impl CenoAggregationProver {
             root_committed_exe.exe.clone(),
         )
         .expect("root prover");
+
+        // Halo2
+        let halo2_config = Halo2Config {
+            verifier_k: HALO2_VERIFIER_K,
+            wrapper_k: None,    // Auto-tuned
+            profiling: true,    // _debug: change to false in production
+        };
+
 
         // Recursion keys
         let vk = CenoRecursionVerifierKeys {
