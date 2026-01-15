@@ -23,10 +23,9 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, InsnKind, IterAddresses,
-    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, StepCellExtractor,
-    StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
-    host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, NextCycleAccess,
+    Platform, PreflightTracer, PreflightTracerConfig, Program, StepCellExtractor, StepRecord,
+    Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -670,11 +669,7 @@ impl ShardContextBuilder {
             .copied()
             .expect("missing shard boundary for shard");
         let mut summary = ShardStepSummary::default();
-        loop {
-            let step = match steps_iter.next() {
-                Some(step) => step,
-                None => break,
-            };
+        for step in steps_iter.by_ref() {
             summary.update(&step);
             on_step(step);
             if summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN == expected_end_cycle {
@@ -825,7 +820,7 @@ pub fn emulate_program<'a>(
         }
     });
 
-    let exit_code = info_span!("[ceno] emulator.execute").in_scope(|| {
+    let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
         let mut steps = 0usize;
         loop {
             if steps >= max_steps {
@@ -1678,8 +1673,9 @@ pub fn run_e2e_with_checkpoint<
 
     // Emulate program
     let start = std::time::Instant::now();
-    let step_cell_extractor: Arc<dyn StepCellExtractor> =
+    let raw_step_cell_extractor =
         Arc::clone(&prover.pk.program_ctx.as_ref().unwrap().system_config.config);
+    let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
     let emul_result = emulate_program(
         prover.pk.program_ctx.as_ref().unwrap().program.clone(),
         max_steps,
@@ -1771,7 +1767,8 @@ pub fn run_e2e_proof<
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     // Emulate program
-    let step_cell_extractor: Arc<dyn StepCellExtractor> = Arc::clone(&ctx.system_config.config);
+    let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+    let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
     let emul_result = emulate_program(
         ctx.program.clone(),
         max_steps,

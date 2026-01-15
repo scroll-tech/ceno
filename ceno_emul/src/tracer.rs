@@ -312,15 +312,16 @@ impl ShardPlanBuilder {
         } else {
             self.max_cell_per_shard
         };
-        let next_cells = self.cur_cells.saturating_add(step_cells);
-        let next_cycle = self
+
+        // always include step in current shard to simplify overall logic
+        self.cur_cells = self.cur_cells.saturating_add(step_cells);
+        self.cur_cycle_in_shard = self
             .cur_cycle_in_shard
             .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
-        let cycle_limit_hit =
-            self.max_cycle_per_shard < Cycle::MAX && next_cycle >= self.max_cycle_per_shard;
-        let should_split = next_cells >= target || cycle_limit_hit;
-        self.cur_cells = next_cells;
-        self.cur_cycle_in_shard = next_cycle;
+
+        let cycle_limit_hit = self.max_cycle_per_shard < Cycle::MAX
+            && self.cur_cycle_in_shard >= self.max_cycle_per_shard;
+        let should_split = self.cur_cells >= target || cycle_limit_hit;
         if should_split {
             assert!(
                 self.cur_cells > 0 || self.cur_cycle_in_shard > 0,
@@ -882,7 +883,6 @@ impl FullTracer {
     }
 }
 
-#[derive(Debug)]
 pub struct PreflightTracer {
     cycle: Cycle,
     pc: Change<ByteAddr>,
@@ -898,12 +898,42 @@ pub struct PreflightTracer {
     step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PreflightTracerConfig {
     record_next_accesses: bool,
     max_cell_per_shard: u64,
     max_cycle_per_shard: Cycle,
     step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
+}
+
+impl fmt::Debug for PreflightTracer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreflightTracer")
+            .field("cycle", &self.cycle)
+            .field("pc", &self.pc)
+            .field("last_kind", &self.last_kind)
+            .field("last_rs1", &self.last_rs1)
+            .field("mmio_min_max_access", &self.mmio_min_max_access)
+            .field("latest_accesses", &self.latest_accesses)
+            .field("next_accesses", &self.next_accesses)
+            .field("register_reads_tracked", &self.register_reads_tracked)
+            .field("record_next_accesses", &self.record_next_accesses)
+            .field("planner", &self.planner)
+            .field("current_shard_start_cycle", &self.current_shard_start_cycle)
+            .field("step_cell_extractor", &self.step_cell_extractor.is_some())
+            .finish()
+    }
+}
+
+impl fmt::Debug for PreflightTracerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreflightTracerConfig")
+            .field("record_next_accesses", &self.record_next_accesses)
+            .field("max_cell_per_shard", &self.max_cell_per_shard)
+            .field("max_cycle_per_shard", &self.max_cycle_per_shard)
+            .field("step_cell_extractor", &self.step_cell_extractor.is_some())
+            .finish()
+    }
 }
 
 impl PreflightTracerConfig {
@@ -996,7 +1026,7 @@ impl PreflightTracer {
         tracer
     }
 
-    pub fn into_shard_plan(mut self) -> (ShardPlanBuilder, NextCycleAccess) {
+    pub fn into_shard_plan(self) -> (ShardPlanBuilder, NextCycleAccess) {
         let Some(mut planner) = self.planner else {
             panic!("shard planner missing")
         };

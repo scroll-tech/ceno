@@ -46,8 +46,9 @@ use ceno_emul::{
     Bn254FpMulSpec,
     InsnKind::{self, *},
     KeccakSpec, LogPcCycleSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec,
-    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec, Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec,, Sha256ExtendSpec, StepCellExtractor,
-    StepRecord, SyscallSpec, Uint256MulSpec, Word,
+    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec, Secp256r1DoubleSpec,
+    Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepCellExtractor, StepRecord, SyscallSpec,
+    Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
