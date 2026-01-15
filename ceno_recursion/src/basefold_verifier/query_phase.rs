@@ -547,8 +547,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                             });
                         });
 
-                    non_zero_perm_opened_values.truncate(builder, Usize::from(non_zero_idx));
-                    non_zero_dimensions.truncate(builder, Usize::from(non_zero_idx));
                     // verify input mmcs
                     let mmcs_verifier_input = MmcsVerifierInputVariable {
                         commit: round.commit.commit.clone(),
