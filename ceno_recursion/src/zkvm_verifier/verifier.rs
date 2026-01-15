@@ -223,10 +223,15 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let dummy_table_item = alpha;
     let dummy_table_item_multiplicity: Var<C::N> = builder.constant(C::N::ZERO);
 
-    let witin_openings: Array<C, RoundOpeningVariable<C>> =
-        builder.dyn_array(zkvm_proof_input.chip_proofs.len());
-    let fixed_openings: Array<C, RoundOpeningVariable<C>> =
-        builder.dyn_array(zkvm_proof_input.chip_proofs.len());
+    let proofs_len: Usize<C::N> = builder.eval(C::N::ZERO);
+    builder
+        .range(0, zkvm_proof_input.chip_proofs.len())
+        .for_each(|idx_vec, builder| {
+            let chip_proofs_len = builder.get(&zkvm_proof_input.chip_proofs, idx_vec[0]).len();
+            builder.assign(&proofs_len, proofs_len.clone() + chip_proofs_len);
+        });
+    let witin_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len.clone());
+    let fixed_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len);
     let shard_ec_sum = SepticPointVariable {
         x: SepticExtensionVariable {
             vs: builder.dyn_array(7),
@@ -239,6 +244,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     let num_chips_verified: Usize<C::N> = builder.eval(C::N::ZERO);
     let num_chips_have_fixed: Usize<C::N> = builder.eval(C::N::ZERO);
+    let num_proofs_verified: Usize<C::N> = builder.eval(C::N::ZERO);
 
     let chip_indices: Array<C, Var<C::N>> = builder.dyn_array(zkvm_proof_input.chip_proofs.len());
     builder
@@ -357,7 +363,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                             evals: chip_proof.wits_in_evals,
                         },
                     });
-                    builder.set_value(&witin_openings, num_chips_verified.get_var(), witin_round);
+                    builder.set_value(&witin_openings, num_proofs_verified.get_var(), witin_round);
                 }
                 if circuit_vk.get_cs().num_fixed() > 0 {
                     let fixed_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
@@ -385,6 +391,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     .then(|builder| {
                         add_septic_points_in_place(builder, &shard_ec_sum, &chip_shard_ec_sum);
                     });
+                builder.inc(&num_proofs_verified);
             });
             builder.inc(&num_chips_verified);
         });
