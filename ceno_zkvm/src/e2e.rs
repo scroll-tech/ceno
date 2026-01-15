@@ -57,7 +57,7 @@ use witness::next_pow2_instance_padding;
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
-pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 23;
+pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
 // define a relative small number to make first shard handle much less instruction
 pub const DEFAULT_MAX_CELL_FIRST_SHARD: u64 = 1 << 20;
 
@@ -381,7 +381,7 @@ impl<'a> ShardContext<'a> {
             Err(_) => return None,
         };
         self.addr_future_accesses.get(idx).and_then(|res| {
-            if res.len() == 1 {
+            if res.len() == 1 && res[0].0 == addr {
                 Some(res[0].1)
             } else if res.len() > 1 {
                 res.iter()
@@ -1937,7 +1937,6 @@ fn create_proofs_streaming<
     target_shard_id: Option<usize>,
     init_mem_state: &InitMemState,
 ) -> Vec<ZKVMProof<E, PCS>> {
-    let is_mock_proving = true;
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
         #[cfg(feature = "gpu")]
