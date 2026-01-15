@@ -45,7 +45,6 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    convert::TryFrom,
     marker::PhantomData,
     ops::Range,
     sync::Arc,
@@ -376,11 +375,7 @@ impl<'a> ShardContext<'a> {
     /// then `find_future_next_access(0xabc, 4)` returns `8`.
     #[inline(always)]
     pub fn find_future_next_access(&self, cycle: Cycle, addr: WordAddr) -> Option<Cycle> {
-        let idx = match usize::try_from(cycle) {
-            Ok(idx) => idx,
-            Err(_) => return None,
-        };
-        self.addr_future_accesses.get(idx).and_then(|res| {
+        self.addr_future_accesses.get(&cycle).and_then(|res| {
             if res.len() == 1 && res[0].0 == addr {
                 Some(res[0].1)
             } else if res.len() > 1 {

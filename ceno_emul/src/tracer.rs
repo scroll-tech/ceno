@@ -6,9 +6,9 @@ use crate::{
     syscalls::{SyscallEffects, SyscallWitness},
 };
 use ceno_rt::WORD_SIZE;
-use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-use std::{collections::BTreeMap, convert::TryFrom, fmt, mem, sync::Arc};
+use std::{collections::BTreeMap, fmt, mem, sync::Arc};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -40,7 +40,7 @@ pub struct StepRecord {
 }
 
 pub type NextAccessPair = SmallVec<[(WordAddr, Cycle); 1]>;
-pub type NextCycleAccess = Vec<NextAccessPair>;
+pub type NextCycleAccess = FxHashMap<Cycle, NextAccessPair>;
 
 fn init_mmio_min_max_access(
     platform: &Platform,
@@ -965,19 +965,12 @@ impl PreflightTracer {
         );
         let (current_shard_start_cycle, current_shard_end_cycle) =
             (shard_cycle_boundaries[0], shard_cycle_boundaries[1]);
-        let total_slots = usize::try_from(config.end_cycle())
-            .expect("preflight max_cycle must fit into usize")
-            .saturating_add(1);
-        let next_accesses: NextCycleAccess = (0..total_slots)
-            .into_par_iter()
-            .map(|_| NextAccessPair::default())
-            .collect();
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
-            next_accesses,
+            next_accesses: FxHashMap::default(),
             register_reads_tracked: 0,
             shard_cycle_boundaries,
             current_shard_idx: 0,
@@ -1114,13 +1107,10 @@ impl Tracer for PreflightTracer {
         let cur_cycle = self.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
         if prev_cycle < self.current_shard_start_cycle {
-            let idx = usize::try_from(prev_cycle)
-                .expect("prev_cycle exceeded usize when recording next access");
-            let bucket = self
-                .next_accesses
-                .get_mut(idx)
-                .expect("prev_cycle exceeded allocated next access table");
-            bucket.push((addr, cur_cycle));
+            self.next_accesses
+                .entry(prev_cycle)
+                .or_default()
+                .push((addr, cur_cycle));
         }
         prev_cycle
     }
