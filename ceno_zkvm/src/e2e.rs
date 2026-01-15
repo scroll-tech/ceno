@@ -375,19 +375,17 @@ impl<'a> ShardContext<'a> {
     /// then `find_future_next_access(0xabc, 4)` returns `8`.
     #[inline(always)]
     pub fn find_future_next_access(&self, cycle: Cycle, addr: WordAddr) -> Option<Cycle> {
-        self.addr_future_accesses
-            .get(&cycle)
-            .and_then(|res| {
-                if res.len() == 1 {
-                    Some(res[0].1)
-                } else if res.len() > 1 {
-                    res.iter()
-                        .find(|(m_addr, _)| *m_addr == addr)
-                        .map(|(_, cycle)| *cycle)
-                } else {
-                    None
-                }
-            })
+        self.addr_future_accesses.get(&cycle).and_then(|res| {
+            if res.len() == 1 {
+                Some(res[0].1)
+            } else if res.len() > 1 {
+                res.iter()
+                    .find(|(m_addr, _)| *m_addr == addr)
+                    .map(|(_, cycle)| *cycle)
+            } else {
+                None
+            }
+        })
     }
 
     #[inline(always)]
@@ -616,17 +614,23 @@ impl ShardStepSummary {
 pub struct ShardContextBuilder {
     pub cur_shard_id: usize,
     addr_future_accesses: Arc<NextCycleAccess>,
-    cur_cells: u64,
-    cur_acc_cycle: Cycle,
     max_cell_per_shard: u64,
     max_cycle_per_shard: Cycle,
     target_cell_first_shard: u64,
     prev_shard_cycle_range: Vec<Cycle>,
     prev_shard_heap_range: Vec<Addr>,
     prev_shard_hint_range: Vec<Addr>,
-    // holds the first step for the next shard once the current shard hits its limit
-    pending_step: Option<StepRecord>,
     platform: Platform,
+    shard_cycle_boundaries: Arc<Vec<Cycle>>,
+    max_cycle: Cycle,
+    planner: Option<ShardPlanner>,
+}
+
+#[derive(Default)]
+struct ShardPlanner {
+    cur_cells: u64,
+    cur_cycle_in_shard: Cycle,
+    shard_id: usize,
 }
 
 impl Default for ShardContextBuilder {
@@ -634,33 +638,27 @@ impl Default for ShardContextBuilder {
         ShardContextBuilder {
             cur_shard_id: 0,
             addr_future_accesses: Arc::new(Default::default()),
-            cur_cells: 0,
-            cur_acc_cycle: 0,
             max_cell_per_shard: 0,
             max_cycle_per_shard: 0,
             target_cell_first_shard: 0,
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
             prev_shard_hint_range: vec![],
-            pending_step: None,
             platform: CENO_PLATFORM.clone(),
+            shard_cycle_boundaries: Arc::new(vec![FullTracer::SUBCYCLES_PER_INSN]),
+            max_cycle: 0,
+            planner: Some(ShardPlanner::default()),
         }
     }
 }
 
 impl ShardContextBuilder {
     /// set max_cell_per_shard == u64::MAX if target for single shard
-    pub fn new(
-        multi_prover: &MultiProver,
-        platform: Platform,
-        addr_future_accesses: NextCycleAccess,
-    ) -> Self {
+    pub fn new(multi_prover: &MultiProver, platform: Platform) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
         ShardContextBuilder {
             cur_shard_id: 0,
-            cur_cells: 0,
-            cur_acc_cycle: 0,
             max_cell_per_shard: multi_prover.max_cell_per_shard,
             max_cycle_per_shard: multi_prover.max_cycle_per_shard,
             target_cell_first_shard: {
@@ -670,55 +668,127 @@ impl ShardContextBuilder {
                     multi_prover.max_cell_per_shard
                 }
             },
-            addr_future_accesses: Arc::new(addr_future_accesses),
+            addr_future_accesses: Arc::new(Default::default()),
             prev_shard_cycle_range: vec![0],
             prev_shard_heap_range: vec![0],
             prev_shard_hint_range: vec![0],
-            pending_step: None,
             platform,
+            shard_cycle_boundaries: Arc::new(vec![FullTracer::SUBCYCLES_PER_INSN]),
+            max_cycle: 0,
+            planner: Some(ShardPlanner::default()),
+        }
+    }
+
+    pub fn set_addr_future_accesses(&mut self, addr_future_accesses: NextCycleAccess) {
+        self.addr_future_accesses = Arc::new(addr_future_accesses);
+    }
+
+    #[inline(always)]
+    pub fn observe_step_budget(&mut self, step_cycle: Cycle, step_cells: u64) {
+        let should_split = {
+            let planner = self
+                .planner
+                .as_mut()
+                .expect("shard context planner already finalized");
+            let target_cost_current_shard = if planner.shard_id == 0 {
+                self.target_cell_first_shard
+            } else {
+                self.max_cell_per_shard
+            };
+            let next_cells = planner.cur_cells.saturating_add(step_cells);
+            let next_cycle = planner
+                .cur_cycle_in_shard
+                .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
+            let cycle_limit_hit =
+                self.max_cycle_per_shard < Cycle::MAX && next_cycle >= self.max_cycle_per_shard;
+            let should_split = next_cells >= target_cost_current_shard || cycle_limit_hit;
+            if should_split {
+                assert!(
+                    planner.cur_cells > 0 || planner.cur_cycle_in_shard > 0,
+                    "shard split before accumulating any steps"
+                );
+                planner.shard_id += 1;
+                planner.cur_cells = step_cells;
+                planner.cur_cycle_in_shard = FullTracer::SUBCYCLES_PER_INSN;
+            } else {
+                planner.cur_cells = next_cells;
+                planner.cur_cycle_in_shard = next_cycle;
+            }
+            should_split
+        };
+        if should_split {
+            self.push_boundary(step_cycle);
+        }
+    }
+
+    pub fn finalize_plan(&mut self, max_cycle: Cycle) {
+        self.max_cycle = max_cycle;
+        self.push_boundary(max_cycle);
+        self.prev_shard_cycle_range = vec![0];
+        self.prev_shard_heap_range = vec![0];
+        self.prev_shard_hint_range = vec![0];
+        self.cur_shard_id = 0;
+        self.planner = None;
+    }
+
+    pub fn shard_cycle_boundaries(&self) -> Arc<Vec<Cycle>> {
+        self.shard_cycle_boundaries.clone()
+    }
+
+    pub fn total_shards(&self) -> usize {
+        self.shard_cycle_boundaries.len().saturating_sub(1)
+    }
+
+    fn push_boundary(&mut self, cycle: Cycle) {
+        if self
+            .shard_cycle_boundaries
+            .last()
+            .copied()
+            .unwrap_or_default()
+            != cycle
+        {
+            Arc::get_mut(&mut self.shard_cycle_boundaries)
+                .expect("shard cycle boundaries already shared")
+                .push(cycle);
         }
     }
 
     pub fn position_next_shard<'a>(
         &mut self,
         steps_iter: &mut impl Iterator<Item = StepRecord>,
-        step_cell_extractor: impl StepCellExtractor,
         mut on_step: impl FnMut(StepRecord),
     ) -> Option<(ShardContext<'a>, ShardStepSummary)> {
+        if self.cur_shard_id >= self.total_shards() {
+            return None;
+        }
+        let expected_end_cycle = self
+            .shard_cycle_boundaries
+            .get(self.cur_shard_id + 1)
+            .copied()
+            .expect("missing shard boundary for shard");
         let mut summary = ShardStepSummary::default();
-        let target_cost_current_shard = if self.cur_shard_id == 0 {
-            self.target_cell_first_shard
-        } else {
-            self.max_cell_per_shard
-        };
         loop {
-            let step = if let Some(step) = self.pending_step.take() {
-                step
-            } else {
-                match steps_iter.next() {
-                    Some(step) => step,
-                    None => break,
-                }
+            let step = match steps_iter.next() {
+                Some(step) => step,
+                None => break,
             };
-            let next_cells = self.cur_cells + step_cell_extractor.extract_cells(&step);
-            let next_cycle = self.cur_acc_cycle + FullTracer::SUBCYCLES_PER_INSN;
-            if next_cells >= target_cost_current_shard || next_cycle >= self.max_cycle_per_shard {
-                assert!(
-                    summary.step_count > 0,
-                    "empty record match when splitting shards"
-                );
-                self.pending_step = Some(step);
-                break;
-            }
-            self.cur_cells = next_cells;
-            self.cur_acc_cycle = next_cycle;
             summary.update(&step);
             on_step(step);
+            if summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN == expected_end_cycle {
+                break;
+            }
         }
 
         if summary.step_count == 0 {
             return None;
         }
+
+        assert_eq!(
+            summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN,
+            expected_end_cycle,
+            "shard {} did not end on expected boundary",
+            self.cur_shard_id
+        );
 
         if self.cur_shard_id > 0 {
             assert_eq!(
@@ -746,6 +816,8 @@ impl ShardContextBuilder {
 
         let shard_ctx = ShardContext {
             shard_id: self.cur_shard_id,
+            num_shards: self.total_shards(),
+            max_cycle: self.max_cycle,
             cur_shard_cycle_range: summary.first_cycle as usize
                 ..(summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN) as usize,
             addr_future_accesses: self.addr_future_accesses.clone(),
@@ -763,8 +835,6 @@ impl ShardContextBuilder {
             .push(shard_ctx.shard_heap_addr_range.end);
         self.prev_shard_hint_range
             .push(shard_ctx.shard_hint_addr_range.end);
-        self.cur_cells = 0;
-        self.cur_acc_cycle = 0;
         self.cur_shard_id += 1;
 
         Some((shard_ctx, summary))
@@ -844,12 +914,7 @@ pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
         }
     });
 
-    let cycle_budget = multi_prover.max_cycle_per_shard;
-    let mut shard_cycle_boundaries = vec![FullTracer::SUBCYCLES_PER_INSN];
-    let cell_budget = multi_prover.max_cell_per_shard;
-    let mut current_cells: u64 = 0;
-    let mut current_cycle_in_shard: Cycle = 0;
-    let mut current_shard_id: usize = 0;
+    let mut shard_ctx_builder = ShardContextBuilder::new(multi_prover, platform.clone());
     let _ = info_span!("[ceno] emulator.max_cycle_estimated").in_scope(|| {
         let mut steps = 0usize;
         loop {
@@ -865,26 +930,7 @@ pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
                         .saturating_sub(EmptyTracer::SUBCYCLES_PER_INSN);
                     let step_cells = step_cell_extractor
                         .cells_for_kind(tracer.last_insn_kind(), tracer.last_rs1_value());
-                    let next_cells = current_cells.saturating_add(step_cells);
-                    let next_cycle =
-                        current_cycle_in_shard.saturating_add(FullTracer::SUBCYCLES_PER_INSN);
-                    let cycle_limit_hit = cycle_budget < Cycle::MAX && next_cycle >= cycle_budget;
-                    if next_cells >= cell_budget || cycle_limit_hit {
-                        assert!(
-                            current_cells > 0 || current_cycle_in_shard > 0,
-                            "shard split before accumulating any steps"
-                        );
-                        if shard_cycle_boundaries.last().copied().unwrap_or_default() != step_cycle
-                        {
-                            shard_cycle_boundaries.push(step_cycle);
-                        }
-                        current_shard_id += 1;
-                        current_cells = step_cells;
-                        current_cycle_in_shard = FullTracer::SUBCYCLES_PER_INSN;
-                    } else {
-                        current_cells = next_cells;
-                        current_cycle_in_shard = next_cycle;
-                    }
+                    shard_ctx_builder.observe_step_budget(step_cycle, step_cells);
                 }
                 Ok(None) => break,
                 Err(err) => panic!("emulator trapped before halt: {err}"),
@@ -893,15 +939,13 @@ pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
         vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
     let max_cycle = vm.tracer().cycle();
-    if shard_cycle_boundaries.last().copied().unwrap_or_default() != max_cycle {
-        shard_cycle_boundaries.push(max_cycle);
-    }
-    let shard_cycle_boundaries = Arc::new(shard_cycle_boundaries);
+    shard_ctx_builder.finalize_plan(max_cycle);
+    let shard_cycle_boundaries = shard_ctx_builder.shard_cycle_boundaries();
     tracing::info!(
         "num_shards: {}, max_cycle {}, shard_cycle_boundaries {:?}",
-        current_shard_id + 1,
+        shard_ctx_builder.total_shards(),
         max_cycle,
-        shard_cycle_boundaries
+        shard_cycle_boundaries.as_ref()
     );
     let preflight_config =
         PreflightTracerConfig::from_end_cycle(max_cycle, shard_cycle_boundaries.clone());
@@ -1084,11 +1128,7 @@ pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
         );
     }
 
-    let shard_ctx_builder = ShardContextBuilder::new(
-        multi_prover,
-        platform.clone(),
-        vm.take_tracer().into_next_accesses(),
-    );
+    shard_ctx_builder.set_addr_future_accesses(vm.take_tracer().into_next_accesses());
 
     EmulationResult {
         pi,
@@ -1305,7 +1345,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
             instrunction_dispatch_ctx.begin_shard();
             let (mut shard_ctx, shard_summary) = match shard_ctx_builder.position_next_shard(
                 &mut step_iter,
-                &system_config.config,
                 |step| instrunction_dispatch_ctx.ingest_step(step),
             ) {
                 Some(result) => result,
@@ -2144,9 +2183,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 #[cfg(test)]
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
-    use ceno_emul::{
-        CENO_PLATFORM, Cycle, FullTracer, InsnKind, NextCycleAccess, StepRecord, Word,
-    };
+    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, InsnKind, StepRecord, Word};
     use itertools::Itertools;
 
     struct UniformStepExtractor;
@@ -2186,15 +2223,27 @@ mod tests {
         let mut shard_ctx_builder = ShardContextBuilder::new(
             &MultiProver::new(0, 1, u64::MAX, max_cycle_per_shard),
             CENO_PLATFORM.clone(),
-            NextCycleAccess::default(),
         );
-
-        let mut steps_iter = (0..executed_instruction).map(|i| {
-            StepRecord::new_ecall_any(FullTracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
-        });
+        let steps = (0..executed_instruction)
+            .map(|i| {
+                StepRecord::new_ecall_any(FullTracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
+            })
+            .collect_vec();
+        for step in &steps {
+            shard_ctx_builder.observe_step_budget(
+                step.cycle().saturating_sub(FullTracer::SUBCYCLES_PER_INSN),
+                (&UniformStepExtractor {}).extract_cells(step),
+            );
+        }
+        let max_cycle = steps
+            .last()
+            .map(|step| step.cycle() + FullTracer::SUBCYCLES_PER_INSN)
+            .unwrap_or(FullTracer::SUBCYCLES_PER_INSN);
+        shard_ctx_builder.finalize_plan(max_cycle);
+        let mut steps_iter = steps.into_iter();
         let shard_ctx = std::iter::from_fn(|| {
             shard_ctx_builder
-                .position_next_shard(&mut steps_iter, &UniformStepExtractor {}, |_| {})
+                .position_next_shard(&mut steps_iter, |_| {})
                 .map(|(ctx, _)| ctx)
         })
         .collect_vec();
