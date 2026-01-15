@@ -45,6 +45,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    convert::TryFrom,
     marker::PhantomData,
     ops::Range,
     sync::Arc,
@@ -56,7 +57,7 @@ use witness::next_pow2_instance_padding;
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
-pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
+pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 23;
 // define a relative small number to make first shard handle much less instruction
 pub const DEFAULT_MAX_CELL_FIRST_SHARD: u64 = 1 << 20;
 
@@ -375,7 +376,11 @@ impl<'a> ShardContext<'a> {
     /// then `find_future_next_access(0xabc, 4)` returns `8`.
     #[inline(always)]
     pub fn find_future_next_access(&self, cycle: Cycle, addr: WordAddr) -> Option<Cycle> {
-        self.addr_future_accesses.get(&cycle).and_then(|res| {
+        let idx = match usize::try_from(cycle) {
+            Ok(idx) => idx,
+            Err(_) => return None,
+        };
+        self.addr_future_accesses.get(idx).and_then(|res| {
             if res.len() == 1 {
                 Some(res[0].1)
             } else if res.len() > 1 {
@@ -1932,6 +1937,7 @@ fn create_proofs_streaming<
     target_shard_id: Option<usize>,
     init_mem_state: &InitMemState,
 ) -> Vec<ZKVMProof<E, PCS>> {
+    let is_mock_proving = true;
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
         #[cfg(feature = "gpu")]
