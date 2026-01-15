@@ -201,7 +201,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
             .filter(|proof| proof.num_witin > 0)
-            .map(|proof| ceil_log2(proof.sum_num_instances))
+            .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
@@ -214,7 +214,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
             .filter(|proof| !proof.fixed_in_evals.is_empty())
-            .map(|proof| ceil_log2(proof.sum_num_instances))
+            .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
@@ -358,7 +358,8 @@ impl Hintable<InnerConfig> for TowerProofInput {
 
 pub struct ZKVMChipProofInput {
     pub idx: usize,
-    pub sum_num_instances: usize,
+    /// number of variables in the chip's multilinear polynomials
+    pub num_vars: usize,
 
     pub num_witin: usize,
     pub num_fixed: usize,
@@ -427,7 +428,7 @@ impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
         let idx = d.0;
         let p = d.1;
 
-        let num_var = if p.gkr_iop_proof.is_some() {
+        let num_vars = if p.gkr_iop_proof.is_some() {
             let vars = p
                 .gkr_iop_proof
                 .as_ref()
@@ -443,7 +444,7 @@ impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
 
         Self {
             idx,
-            sum_num_instances: 1 << num_var,
+            num_vars,
             num_witin: d.2,
             num_fixed: d.3,
             r_out_evals_len: p.r_out_evals.len(),
