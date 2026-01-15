@@ -200,10 +200,8 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .map(|proof| {
-                let num_var = ceil_log2(proof.sum_num_instances);
-                if proof.num_witin > 0 { num_var } else { 0 }
-            })
+            .filter(|proof| proof.num_witin > 0)
+            .map(|proof| ceil_log2(proof.sum_num_instances))
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs

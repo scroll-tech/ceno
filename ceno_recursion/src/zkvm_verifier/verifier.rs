@@ -230,8 +230,12 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             let chip_proofs_len = builder.get(&zkvm_proof_input.chip_proofs, idx_vec[0]).len();
             builder.assign(&proofs_len, proofs_len.clone() + chip_proofs_len);
         });
+
+    // not each chip has witness or fixed opening
+    // therefore we need to truncate these two opening arrays
     let witin_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len.clone());
     let fixed_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len);
+
     let shard_ec_sum = SepticPointVariable {
         x: SepticExtensionVariable {
             vs: builder.dyn_array(7),
@@ -243,8 +247,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     };
 
     let num_chips_verified: Usize<C::N> = builder.eval(C::N::ZERO);
-    let num_chips_have_fixed: Usize<C::N> = builder.eval(C::N::ZERO);
-    let num_proofs_verified: Usize<C::N> = builder.eval(C::N::ZERO);
+    let num_fixed_openings: Usize<C::N> = builder.eval(C::N::ZERO);
+    let num_witin_openings: Usize<C::N> = builder.eval(C::N::ZERO);
 
     let chip_indices: Array<C, Var<C::N>> = builder.dyn_array(zkvm_proof_input.chip_proofs.len());
     builder
@@ -363,7 +367,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                             evals: chip_proof.wits_in_evals,
                         },
                     });
-                    builder.set_value(&witin_openings, num_proofs_verified.get_var(), witin_round);
+                    builder.set_value(&witin_openings, num_witin_openings.get_var(), witin_round);
+                    builder.inc(&num_witin_openings);
                 }
                 if circuit_vk.get_cs().num_fixed() > 0 {
                     let fixed_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
@@ -376,8 +381,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         },
                     });
 
-                    builder.set_value(&fixed_openings, num_chips_have_fixed.get_var(), fixed_round);
-                    builder.inc(&num_chips_have_fixed);
+                    builder.set_value(&fixed_openings, num_fixed_openings.get_var(), fixed_round);
+                    builder.inc(&num_fixed_openings);
                 }
 
                 let r_out_evals_prod = nested_product(builder, &chip_proof.r_out_evals);
@@ -391,11 +396,15 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     .then(|builder| {
                         add_septic_points_in_place(builder, &shard_ec_sum, &chip_shard_ec_sum);
                     });
-                builder.inc(&num_proofs_verified);
             });
             builder.inc(&num_chips_verified);
         });
     }
+    // truncate the witin and fixed opening arrays
+    witin_openings.truncate(builder, num_witin_openings);
+    fixed_openings.truncate(builder, num_fixed_openings);
+
+    // all proofs must be verified without missing
     builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
 
     let dummy_table_item_multiplicity =
