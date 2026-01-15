@@ -9,7 +9,7 @@ use crate::{
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
-        mmcs::MmcsCommitmentVariable,
+        hash::HashVariable,
         query_phase::PointAndEvalsVariable,
         utils::pow_2,
     },
@@ -425,9 +425,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         .then_or_else(
             |builder| {
                 if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-                    let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                    let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
-
+                    let commit = HashVariable::new(builder, &fixed_commit.commit().into());
                     let log2_max_codeword_size: Var<C::N> = builder.constant(
                         C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
                     );
@@ -437,9 +435,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         1,
                         RoundVariable {
                             commit: BasefoldCommitmentVariable {
-                                commit: MmcsCommitmentVariable {
-                                    value: commit_array,
-                                },
+                                commit,
                                 log2_max_codeword_size: log2_max_codeword_size.into(),
                             },
                             openings: fixed_openings.clone(),
@@ -450,8 +446,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             },
             |builder| {
                 if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
-                    let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                    let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+                    let commit = HashVariable::new(builder, &fixed_commit.commit().into());
 
                     let log2_max_codeword_size: Var<C::N> = builder.constant(
                         C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
@@ -462,9 +457,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         1,
                         RoundVariable {
                             commit: BasefoldCommitmentVariable {
-                                commit: MmcsCommitmentVariable {
-                                    value: commit_array,
-                                },
+                                commit,
                                 log2_max_codeword_size: log2_max_codeword_size.into(),
                             },
                             openings: fixed_openings.clone(),
