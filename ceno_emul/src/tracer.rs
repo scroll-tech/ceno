@@ -1127,10 +1127,10 @@ impl Tracer for PreflightTracer {
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         let cur_cycle = self.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
-        if prev_cycle < self.current_shard_start_cycle {
-            let idx = prev_cycle as usize;
-            self.next_accesses[idx].push((addr, cur_cycle));
-        }
+        // if prev_cycle < self.current_shard_start_cycle {
+        let idx = prev_cycle as usize;
+        self.next_accesses[idx].push((addr, cur_cycle));
+        // }
         prev_cycle
     }
 
