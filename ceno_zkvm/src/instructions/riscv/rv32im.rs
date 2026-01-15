@@ -21,9 +21,9 @@ use crate::{
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
                 Fp2AddInstruction, Fp2MulInstruction, FpAddInstruction, FpMulInstruction,
-                KeccakInstruction, Secp256k1InvInstruction, Uint256MulInstruction,
-                WeierstrassAddAssignInstruction, WeierstrassDecompressInstruction,
-                WeierstrassDoubleAssignInstruction,
+                KeccakInstruction, Secp256k1InvInstruction, Secp256r1InvInstruction,
+                Uint256MulInstruction, WeierstrassAddAssignInstruction,
+                WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
@@ -46,8 +46,8 @@ use ceno_emul::{
     Bn254FpMulSpec,
     InsnKind::{self, *},
     KeccakSpec, LogPcCycleSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec,
-    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Sha256ExtendSpec, StepRecord, SyscallSpec,
-    Uint256MulSpec,
+    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec, Secp256r1DoubleSpec,
+    Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepRecord, SyscallSpec, Uint256MulSpec,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
@@ -60,6 +60,7 @@ use sp1_curves::weierstrass::{
     SwCurve,
     bn254::{Bn254, Bn254BaseField},
     secp256k1::Secp256k1,
+    secp256r1::Secp256r1,
 };
 use std::{
     any::{TypeId, type_name},
@@ -153,6 +154,12 @@ pub struct Rv32imConfig<E: ExtensionField> {
         <Secp256k1InvInstruction<E> as Instruction<E>>::InstructionConfig,
     pub secp256k1_decompress_config:
         <WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>> as Instruction<E>>::InstructionConfig,
+    pub secp256r1_add_config:
+        <WeierstrassAddAssignInstruction<E, SwCurve<Secp256r1>> as Instruction<E>>::InstructionConfig,
+    pub secp256r1_double_config:
+        <WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256r1>> as Instruction<E>>::InstructionConfig,
+    pub secp256r1_scalar_invert:
+        <Secp256r1InvInstruction<E> as Instruction<E>>::InstructionConfig,
     pub uint256_mul_config:
         <Uint256MulInstruction<E> as Instruction<E>>::InstructionConfig,
 
@@ -386,6 +393,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let secp256k1_decompress_config = register_ecall_circuit!(WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>, ecall_cells_map);
         let secp256k1_scalar_invert =
             register_ecall_circuit!(Secp256k1InvInstruction<E>, ecall_cells_map);
+        let secp256r1_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Secp256r1>>, ecall_cells_map);
+        let secp256r1_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256r1>>, ecall_cells_map);
+        let secp256r1_scalar_invert =
+            register_ecall_circuit!(Secp256r1InvInstruction<E>, ecall_cells_map);
         let uint256_mul_config = register_ecall_circuit!(Uint256MulInstruction<E>, ecall_cells_map);
 
         // tables
@@ -465,6 +476,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             secp256k1_double_config,
             secp256k1_scalar_invert,
             secp256k1_decompress_config,
+            secp256r1_add_config,
+            secp256r1_double_config,
+            secp256r1_scalar_invert,
             uint256_mul_config,
             // tables
             dynamic_range_config,
@@ -581,6 +595,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             cs,
             &self.secp256k1_decompress_config,
         );
+        fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Secp256r1>>>(
+            cs,
+            &self.secp256r1_add_config,
+        );
+        fixed.register_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256r1>>>(
+            cs,
+            &self.secp256r1_double_config,
+        );
         fixed.register_opcode_circuit::<Uint256MulInstruction<E>>(cs, &self.uint256_mul_config);
 
         // table
@@ -638,6 +660,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         log_ecall!(
             "secp256k1_decompress_records",
             Secp256k1DecompressSpec::CODE
+        );
+        log_ecall!("secp256r1_add_records", Secp256r1AddSpec::CODE);
+        log_ecall!("secp256r1_double_records", Secp256r1DoubleSpec::CODE);
+        log_ecall!(
+            "secp256r1_scalar_invert_records",
+            Secp256r1ScalarInvertSpec::CODE
         );
         log_ecall!("uint256_mul_records", Uint256MulSpec::CODE);
 
@@ -774,6 +802,21 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>,
             secp256k1_decompress_config,
             Secp256k1DecompressSpec::CODE
+        );
+        assign_ecall!(
+            WeierstrassAddAssignInstruction<E, SwCurve<Secp256r1>>,
+            secp256r1_add_config,
+            Secp256r1AddSpec::CODE
+        );
+        assign_ecall!(
+            WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256r1>>,
+            secp256r1_double_config,
+            Secp256r1DoubleSpec::CODE
+        );
+        assign_ecall!(
+            Secp256r1InvInstruction<E>,
+            secp256r1_scalar_invert,
+            Secp256r1ScalarInvertSpec::CODE
         );
         assign_ecall!(
             Uint256MulInstruction<E>,
@@ -1045,6 +1088,18 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
             Secp256k1DecompressSpec::CODE => *self
                 .ecall_cells_map
                 .get(&WeierstrassDecompressInstruction::<E, SwCurve<Secp256k1>>::name())
+                .expect("unable to find name"),
+            Secp256r1AddSpec::CODE => *self
+                .ecall_cells_map
+                .get(&WeierstrassAddAssignInstruction::<E, SwCurve<Secp256r1>>::name())
+                .expect("unable to find name"),
+            Secp256r1DoubleSpec::CODE => *self
+                .ecall_cells_map
+                .get(&WeierstrassDoubleAssignInstruction::<E, SwCurve<Secp256r1>>::name())
+                .expect("unable to find name"),
+            Secp256r1ScalarInvertSpec::CODE => *self
+                .ecall_cells_map
+                .get(&Secp256r1InvInstruction::<E>::name())
                 .expect("unable to find name"),
             Uint256MulSpec::CODE => *self
                 .ecall_cells_map
