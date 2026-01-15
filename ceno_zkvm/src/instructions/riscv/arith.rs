@@ -34,6 +34,11 @@ pub type SubInstruction<E> = ArithInstruction<E, SubOp>;
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -190,7 +195,7 @@ mod test {
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![&StepRecord::new_r_instruction(
+            &[StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
                 insn_code,

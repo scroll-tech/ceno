@@ -2,7 +2,7 @@ use ceno_emul::InsnKind;
 
 mod rv32im;
 pub use rv32im::{
-    DummyExtraConfig, Rv32imConfig,
+    DummyExtraConfig, InstructionDispatchBuilder, InstructionDispatchCtx, Rv32imConfig,
     mmu::{MemPadder, MmuConfig},
 };
 

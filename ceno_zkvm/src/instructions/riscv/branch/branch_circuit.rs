@@ -35,11 +35,16 @@ pub struct BranchConfig<E: ExtensionField> {
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I> {
+    type InstructionConfig = BranchConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
+
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
     }
-
-    type InstructionConfig = BranchConfig<E>;
 
     fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,

@@ -29,6 +29,11 @@ pub struct LargeEcallDummy<E, S>(PhantomData<(E, S)>);
 
 impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S> {
     type InstructionConfig = LargeEcallConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         S::NAME.to_owned()

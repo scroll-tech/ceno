@@ -77,6 +77,11 @@ impl<E: ExtensionField, P: FpOpField + FpAddSpec + NumWords> Instruction<E>
     for FpAddInstruction<E, P>
 {
     type InstructionConfig = EcallFpOpConfig<E, P>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "Ecall_FpAdd".to_string()
@@ -120,7 +125,7 @@ impl<E: ExtensionField, P: FpOpField + FpAddSpec + NumWords> Instruction<E>
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         assign_fp_op_instances::<E, P>(
             config,
@@ -140,6 +145,11 @@ impl<E: ExtensionField, P: FpOpField + FpMulSpec + NumWords> Instruction<E>
     for FpMulInstruction<E, P>
 {
     type InstructionConfig = EcallFpOpConfig<E, P>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "Ecall_FpMul".to_string()
@@ -183,7 +193,7 @@ impl<E: ExtensionField, P: FpOpField + FpMulSpec + NumWords> Instruction<E>
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         assign_fp_op_instances::<E, P>(
             config,
@@ -300,7 +310,7 @@ fn assign_fp_op_instances<E: ExtensionField, P: FpOpField + NumWords>(
     shard_ctx: &mut ShardContext,
     num_witin: usize,
     num_structural_witin: usize,
-    steps: Vec<&StepRecord>,
+    steps: &[StepRecord],
     syscall_code: u32,
     op: FieldOperation,
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {

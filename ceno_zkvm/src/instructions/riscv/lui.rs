@@ -34,6 +34,11 @@ pub struct LuiInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     type InstructionConfig = LuiConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::LUI]
+    }
 
     fn name() -> String {
         format!("{:?}", InsnKind::LUI)
@@ -159,7 +164,7 @@ mod tests {
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![&StepRecord::new_i_instruction(
+            &[StepRecord::new_i_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                 insn_code,

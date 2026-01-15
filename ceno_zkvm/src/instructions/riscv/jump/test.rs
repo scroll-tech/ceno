@@ -46,7 +46,7 @@ fn verify_test_opcode_jal<E: ExtensionField>(pc_offset: i32) {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_j_instruction(
+        &[StepRecord::new_j_instruction(
             4,
             Change::new(MOCK_PC_START, new_pc),
             insn_code,
@@ -122,7 +122,7 @@ fn verify_test_opcode_jalr<E: ExtensionField>(rs1_read: Word, imm: i32) {
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_i_instruction(
+        &[StepRecord::new_i_instruction(
             4,
             Change::new(MOCK_PC_START, new_pc),
             insn_code,

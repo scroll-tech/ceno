@@ -61,6 +61,11 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
     for WeierstrassDoubleAssignInstruction<E, EC>
 {
     type InstructionConfig = EcallWeierstrassDoubleAssignConfig<E, EC>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "Ecall_WeierstrassDoubleAssign_".to_string() + format!("{:?}", EC::CURVE_TYPE).as_str()
@@ -193,7 +198,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let syscall_code = match EC::CURVE_TYPE {
             CurveType::Secp256k1 => SECP256K1_DOUBLE,
