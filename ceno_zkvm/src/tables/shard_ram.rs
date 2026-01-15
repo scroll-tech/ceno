@@ -659,8 +659,11 @@ mod tests {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         scheme::{
-            PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
-            septic_curve::SepticPoint, verifier::ZKVMVerifier,
+            PublicValues, create_backend, create_prover,
+            hal::ProofInput,
+            prover::ZKVMProver,
+            septic_curve::SepticPoint,
+            verifier::{RV32imMemStateConfig, ZKVMVerifier},
         },
         structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
         tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
@@ -798,7 +801,7 @@ mod tests {
         let pd = create_prover(backend);
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
-        let zkvm_vk = zkvm_pk.get_vk_slow();
+        let zkvm_vk = zkvm_pk.get_vk_slow::<RV32imMemStateConfig>();
         let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 
@@ -816,7 +819,7 @@ mod tests {
             witness: witness[0].to_mles().into_iter().map(Arc::new).collect(),
             structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
             fixed: vec![],
-            public_input: public_input_mles.clone(),
+            public_values: public_input_mles.clone(),
             pub_io_evals,
             num_instances: vec![n_global_writes as usize, n_global_reads as usize],
             has_ecc_ops: true,

@@ -6,7 +6,9 @@ use ceno_zkvm::{
         Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
         setup_platform, setup_platform_debug,
     },
-    scheme::{constants::MAX_NUM_VARIABLES, create_backend, create_prover},
+    scheme::{
+        constants::MAX_NUM_VARIABLES, create_backend, create_prover, verifier::RV32imMemStateConfig,
+    },
 };
 use clap::Parser;
 use ff_ext::BabyBearExt4;
@@ -251,18 +253,23 @@ fn main() {
 
     let backend = create_backend(args.max_num_variables, args.security_level);
     let prover = create_prover(backend);
-    let result =
-        run_e2e_with_checkpoint::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, _, _>(
-            prover,
-            program,
-            platform,
-            multi_prover,
-            &hints,
-            &public_io,
-            max_steps,
-            Checkpoint::Complete,
-            None,
-        );
+    let result = run_e2e_with_checkpoint::<
+        BabyBearExt4,
+        Basefold<BabyBearExt4, BasefoldRSParams>,
+        _,
+        _,
+        RV32imMemStateConfig,
+    >(
+        prover,
+        program,
+        platform,
+        multi_prover,
+        &hints,
+        &public_io,
+        max_steps,
+        Checkpoint::Complete,
+        None,
+    );
 
     let zkvm_proofs = result
         .proofs

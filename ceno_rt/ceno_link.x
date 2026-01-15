@@ -5,7 +5,7 @@ _hints_length = 128M;
 _lengths_of_hints_start = ORIGIN(REGION_HINTS) + 128M;
 
 _lengths_of_pubio_start = ORIGIN(REGION_PUBIO);
-_pubio_start  = ORIGIN(REGION_PUBIO);             /* 0x20000000 */
+_pubio_start  = ORIGIN(REGION_PUBIO);             /* 0x30000000 */
 _pubio_end    = ORIGIN(REGION_PUBIO) + 128M;      /* PUBIO grows upward */
 _pubio_length = 128M;
 _stack_start  = ORIGIN(REGION_PUBIO) + 256M;      /* stack grows downward */
@@ -24,16 +24,6 @@ SECTIONS
     *(.srodata .srodata.*);
     *(.rodata .rodata.*);
   } > ROM
-
-  .pubio (NOLOAD): ALIGN(4)
-  {
-    *(.pubio .pubio.*);
-  } > STACK_PUBIO
-
-  .stack (NOLOAD) : ALIGN(4)
-  {
-    *(.stack .stack.*)
-  } > STACK_PUBIO
 
   /* Define a section for runtime-populated EEPROM-like HINTS data */
   .hints (NOLOAD) : ALIGN(4)
@@ -63,4 +53,14 @@ SECTIONS
     . = ALIGN(0x8000000);
     _sheap = .;
   } > RAM
+
+  .pubio (NOLOAD): ALIGN(4)
+  {
+    *(.pubio .pubio.*);
+  } > STACK_PUBIO
+
+  .stack (NOLOAD) : ALIGN(4)
+  {
+    *(.stack .stack.*)
+  } > STACK_PUBIO
 }

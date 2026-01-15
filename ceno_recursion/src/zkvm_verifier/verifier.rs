@@ -30,9 +30,13 @@ use crate::{
         SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable,
     },
 };
-use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
+use ceno_zkvm::{
+    scheme::verifier::RV32imMemStateConfig,
+    structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey},
+};
 use ff_ext::BabyBearExt4;
 
+use ceno_zkvm::instructions::riscv::constants::NUM_INSTANCE_IDX;
 use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{
@@ -98,7 +102,7 @@ pub fn transcript_group_sample_ext<C: Config>(
 pub fn verify_zkvm_proof<C: Config<F = F>>(
     builder: &mut Builder<C>,
     zkvm_proof_input: ZKVMProofInputVariable<C>,
-    vk: &ZKVMVerifyingKey<E, Pcs>,
+    vk: &ZKVMVerifyingKey<E, Pcs, RV32imMemStateConfig>,
 ) -> SepticPointVariable<C> {
     let mut challenger = DuplexChallengerVariable::new(builder);
     transcript_observe_label(builder, &mut challenger, b"riscv");
@@ -257,6 +261,31 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             let chip_proofs =
                 builder.get(&zkvm_proof_input.chip_proofs, num_chips_verified.get_var());
 
+            let chip_proofs_len = chip_proofs.len();
+            if circuit_vk.get_cs().with_omc_init_only() {
+                // shard_id > 0
+                builder
+                    .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+                    .then(|builder| {
+                        builder.assert_usize_eq(chip_proofs_len.clone(), Usize::from(0));
+                    });
+
+                // shard_id == 0
+                builder
+                    .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+                    .then(|builder| {
+                        builder.assert_usize_eq(chip_proofs_len.clone(), Usize::from(1));
+                    });
+            } else if circuit_vk.get_cs().with_omc_init_dyn() {
+                // either empty or only 1 chip proofs
+                builder.assert_usize_eq(
+                    chip_proofs_len.clone() * (Usize::from(1) - chip_proofs_len),
+                    Usize::from(0),
+                );
+            } else {
+                // do nothing
+            }
+
             iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
                 let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
                 builder.assert_usize_eq(
@@ -330,6 +359,16 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 }
 
                 builder.cycle_tracker_start("Verify chip proof");
+
+                let num_instance_idx: Var<C::N> =
+                    builder.constant(C::N::from_canonical_usize(NUM_INSTANCE_IDX));
+                let sum_num_instances_ext =
+                    builder.ext_from_base_slice(&[chip_proof.sum_num_instances_felt]);
+                builder.set_value(
+                    &zkvm_proof_input.pi_evals,
+                    num_instance_idx,
+                    sum_num_instances_ext,
+                );
                 let (input_opening_point, chip_shard_ec_sum) = verify_chip_proof(
                     circuit_name,
                     builder,

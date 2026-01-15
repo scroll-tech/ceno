@@ -8,8 +8,12 @@ use ceno_zkvm::{
         setup_platform, setup_platform_debug, verify,
     },
     scheme::{
-        ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
-        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
+        ZKVMProof,
+        constants::MAX_NUM_VARIABLES,
+        create_backend, create_prover,
+        hal::ProverDevice,
+        mock_prover::LkMultiplicityKey,
+        verifier::{RV32imMemStateConfig, ZKVMVerifier},
     },
     with_panic_hook,
 };
@@ -368,7 +372,7 @@ fn run_inner<
     checkpoint: Checkpoint,
     target_shard_id: Option<usize>,
 ) {
-    let result = run_e2e_with_checkpoint::<E, PCS, _, _>(
+    let result = run_e2e_with_checkpoint::<E, PCS, _, _, RV32imMemStateConfig>(
         pd,
         program,
         platform,
@@ -399,7 +403,7 @@ fn run_inner<
 
 fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     mut zkvm_proof: ZKVMProof<E, Pcs>,
-    verifier: &ZKVMVerifier<E, Pcs>,
+    verifier: &ZKVMVerifier<E, Pcs, RV32imMemStateConfig>,
 ) {
     // do sanity check
     let transcript = Transcript::new(b"riscv");

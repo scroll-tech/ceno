@@ -6,8 +6,10 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::*,
     scheme::{
-        constants::MAX_NUM_VARIABLES, create_backend, create_prover,
-        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
+        constants::MAX_NUM_VARIABLES,
+        create_backend, create_prover,
+        mock_prover::LkMultiplicityKey,
+        verifier::{RV32imMemStateConfig, ZKVMVerifier},
     },
 };
 use clap::Args;
@@ -354,7 +356,7 @@ fn run_elf_inner<
     compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<E2ECheckpointResult<E, PCS>> {
+) -> anyhow::Result<E2ECheckpointResult<E, PCS, RV32imMemStateConfig>> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
@@ -410,17 +412,19 @@ fn run_elf_inner<
     );
 
     let backend = create_backend(options.max_num_variables, options.security_level);
-    Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
-        create_prover(backend.clone()),
-        program,
-        platform,
-        multi_prover,
-        &hints,
-        &public_io,
-        options.max_steps,
-        checkpoint,
-        options.shard_id.map(|v| v as usize),
-    ))
+    Ok(
+        run_e2e_with_checkpoint::<E, PCS, _, _, RV32imMemStateConfig>(
+            create_prover(backend.clone()),
+            program,
+            platform,
+            multi_prover,
+            &hints,
+            &public_io,
+            options.max_steps,
+            checkpoint,
+            options.shard_id.map(|v| v as usize),
+        ),
+    )
 }
 
 fn keygen_inner<

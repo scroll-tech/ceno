@@ -841,7 +841,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let pub_io_mles = cs
             .instance_openings
             .iter()
-            .map(|instance| input.public_input[instance.0].clone())
+            .map(|instance| input.public_values[instance.0].clone())
             .collect_vec();
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
             // it's not global chip

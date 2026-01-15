@@ -3,7 +3,7 @@ use crate::{
     e2e::{E2EProgramCtx, ShardContext},
     error::ZKVMError,
     instructions::Instruction,
-    scheme::septic_curve::SepticPoint,
+    scheme::{septic_curve::SepticPoint, verifier::MemStatePubValuesVerifier},
     state::StateCircuit,
     tables::{
         ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
@@ -12,7 +12,10 @@ use crate::{
 };
 use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
-use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
+use gkr_iop::{
+    circuit_builder::ShardOMCInitType, gkr::GKRCircuit, tables::LookupTable,
+    utils::lk_multiplicity::Multiplicity,
+};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
@@ -188,7 +191,11 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     }
 
     pub fn with_omc_init_only(&self) -> bool {
-        self.zkvm_v1_css.with_omc_init_only
+        matches!(self.zkvm_v1_css.omc_init_type, ShardOMCInitType::InitOnce)
+    }
+
+    pub fn with_omc_init_dyn(&self) -> bool {
+        matches!(self.zkvm_v1_css.omc_init_type, ShardOMCInitType::InitDyn)
     }
 }
 
@@ -787,7 +794,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
-    pub fn get_vk_slow(&self) -> ZKVMVerifyingKey<E, PCS> {
+    pub fn get_vk_slow<M>(&self) -> ZKVMVerifyingKey<E, PCS, M>
+    where
+        M: MemStatePubValuesVerifier<E, PCS> + From<Platform>,
+    {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
             entry_pc: self.entry_pc,
@@ -807,6 +817,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .enumerate()
                 .map(|(index, name)| (index, name.clone()))
                 .collect(),
+            mem_state_verifier: self
+                .program_ctx
+                .as_ref()
+                .map(|ctx| M::from(ctx.platform.clone()))
+                .unwrap_or_default(),
         }
     }
 
@@ -817,11 +832,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned",
+    serialize = "E::BaseField: Serialize, M: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned, M: DeserializeOwned",
 ))]
-pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
-where
+pub struct ZKVMVerifyingKey<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M: MemStatePubValuesVerifier<E, PCS>,
+> where
     PCS::VerifierParam: Sized,
 {
     pub vp: PCS::VerifierParam,
@@ -837,4 +855,5 @@ where
     // circuit index -> circuit name
     // mainly used for debugging
     pub circuit_index_to_name: BTreeMap<usize, String>,
+    pub mem_state_verifier: M,
 }

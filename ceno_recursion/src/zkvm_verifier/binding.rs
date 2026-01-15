@@ -167,7 +167,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .map(|proof| proof.sum_num_instances)
+            .map(|proof| proof.num_instances.iter().sum())
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
@@ -180,7 +180,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
             .filter(|proof| !proof.fixed_in_evals.is_empty())
-            .map(|proof| proof.sum_num_instances)
+            .map(|proof| proof.num_instances.iter().sum())
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
@@ -319,7 +319,6 @@ impl Hintable<InnerConfig> for TowerProofInput {
 
 pub struct ZKVMChipProofInput {
     pub idx: usize,
-    pub sum_num_instances: usize,
 
     // product constraints
     pub r_out_evals_len: usize,
@@ -384,11 +383,9 @@ impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
     fn from(d: (usize, ZKVMChipProof<E>)) -> Self {
         let idx = d.0;
         let p = d.1;
-        let sum_num_instances = p.num_instances.iter().sum();
 
         Self {
             idx,
-            sum_num_instances,
             r_out_evals_len: p.r_out_evals.len(),
             w_out_evals_len: p.w_out_evals.len(),
             lk_out_evals_len: p.lk_out_evals.len(),
@@ -437,6 +434,7 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub idx_felt: Felt<C::F>,
 
     pub sum_num_instances: Usize<C::N>,
+    pub sum_num_instances_felt: Felt<C::F>,
     pub sum_num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
     pub log2_num_instances: Usize<C::N>,
 
@@ -469,9 +467,64 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let idx = Usize::Var(usize::read(builder));
         let idx_felt = F::read(builder);
 
-        let sum_num_instances = Usize::Var(usize::read(builder));
-        let sum_num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
-        let log2_num_instances = Usize::Var(usize::read(builder));
+        let num_instances = Vec::<usize>::read(builder);
+
+        // derive sum_num_instances from instances vector
+        let sum_num_instances = Usize::from(Var::uninit(builder));
+        builder.assign(&sum_num_instances, F::ZERO);
+        iter_zip!(builder, num_instances).for_each(|ptr_vec, builder| {
+            let num_instance = builder.iter_ptr_get(&num_instances, ptr_vec[0]);
+            builder.assign(&sum_num_instances, sum_num_instances.clone() + num_instance);
+        });
+        builder.assert_nonzero(&sum_num_instances);
+        let sum_num_instances_felt = builder.unsafe_cast_var_to_felt(sum_num_instances.get_var());
+
+        let sum_num_instances_minus_one_bit_decomposition = {
+            let bit_decompose_hints = Vec::<F>::read(builder);
+            let const_zero: Felt<_> = builder.constant(F::ZERO);
+            let const_one: Felt<_> = builder.constant(F::ONE);
+            let const_two: Var<_> = builder.constant(F::TWO);
+            let sum = Var::uninit(builder);
+            builder.assign(&sum, F::ZERO);
+            let pow2_factor = Var::uninit(builder);
+            builder.assign(&pow2_factor, F::ONE);
+            // traverse from lsb
+            iter_zip!(builder, bit_decompose_hints).for_each(|ptr_vec, builder| {
+                let bit = builder.iter_ptr_get(&bit_decompose_hints, ptr_vec[0]);
+                // assert bit
+                builder.assert_eq::<Felt<_>>(bit * (const_one - bit), const_zero);
+                let bit_var = builder.cast_felt_to_var(bit);
+                builder.assign(&sum, sum + bit_var * pow2_factor);
+                builder.assign(&pow2_factor, pow2_factor * const_two);
+            });
+            let sum_felt = builder.unsafe_cast_var_to_felt(sum);
+            // assert bit decompose result match sum_num_instances_felt
+            let sum_instance_minus_one: Felt<_> = builder.eval(sum_num_instances_felt - const_one);
+            builder.assert_eq::<Felt<_>>(sum_felt, sum_instance_minus_one);
+            bit_decompose_hints
+        };
+
+        let log2_num_instances = {
+            let derived_log2 = Usize::from(Var::uninit(builder));
+            // min log2_num_instances 1
+            builder.assign(&derived_log2, F::ONE);
+            let const_one_bit: Var<_> = builder.constant(F::ONE);
+            let bit_index = Usize::from(Var::uninit(builder));
+            builder.assign(&bit_index, F::ZERO);
+            iter_zip!(builder, sum_num_instances_minus_one_bit_decomposition).for_each(
+                |ptr_vec, builder| {
+                    let bit = builder
+                        .iter_ptr_get(&sum_num_instances_minus_one_bit_decomposition, ptr_vec[0]);
+                    let bit_var = builder.cast_felt_to_var(bit);
+                    // Bits encode (sum_num_instances - 1). Highest set bit index + 1 == ceil(log2(sum)).
+                    builder.if_eq(bit_var, const_one_bit).then(|builder| {
+                        builder.assign(&derived_log2, bit_index.clone() + const_one_bit);
+                    });
+                    builder.assign(&bit_index, bit_index.clone() + const_one_bit);
+                },
+            );
+            derived_log2
+        };
 
         let r_out_evals_len = Usize::Var(usize::read(builder));
         let w_out_evals_len = Usize::Var(usize::read(builder));
@@ -489,7 +542,6 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let has_ecc_proof = Usize::Var(usize::read(builder));
         let ecc_proof = EccQuarkProofInput::read(builder);
 
-        let num_instances = Vec::<usize>::read(builder);
         let n_inst_0_bit_decomps = Vec::<F>::read(builder);
         let n_inst_1_bit_decomps = Vec::<F>::read(builder);
 
@@ -500,6 +552,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             idx,
             idx_felt,
             sum_num_instances,
+            sum_num_instances_felt,
             sum_num_instances_minus_one_bit_decomposition,
             log2_num_instances,
             r_out_evals_len,
@@ -530,15 +583,13 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let idx_u32: F = F::from_canonical_u32(self.idx as u32);
         stream.extend(idx_u32.write());
 
-        let sum_num_instances = self.num_instances.iter().sum();
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&sum_num_instances));
+        let num_instances = self.num_instances.iter().sum();
+        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
+            &self.num_instances,
+        ));
 
-        let sum_num_instance_bit_decomp = decompose_minus_one_bits(sum_num_instances);
+        let sum_num_instance_bit_decomp = decompose_minus_one_bits(num_instances);
         stream.extend(sum_num_instance_bit_decomp.write());
-
-        let next_pow2_instance = next_pow2_instance_padding(sum_num_instances);
-        let log2_num_instances = ceil_log2(next_pow2_instance);
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
 
         let r_out_evals_len = self.r_out_evals.len();
         let w_out_evals_len = self.w_out_evals.len();
@@ -561,10 +612,6 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(self.gkr_iop_proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());
-
-        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
-            &self.num_instances,
-        ));
 
         let n_inst_0 = self.num_instances[0];
         let n_inst_0_bit_decomps = decompose_minus_one_bits(n_inst_0);

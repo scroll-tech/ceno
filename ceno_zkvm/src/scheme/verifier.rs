@@ -12,7 +12,8 @@ use super::{ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
     instructions::riscv::constants::{
-        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX,
+        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, HINT_LENGTH_IDX, HINT_START_ADDR_IDX,
+        INIT_CYCLE_IDX, INIT_PC_IDX, NUM_INSTANCE_IDX, SHARD_ID_IDX,
     },
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
@@ -23,7 +24,7 @@ use crate::{
         ZKVMVerifyingKey,
     },
 };
-use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
+use ceno_emul::{FullTracer as Tracer, Platform, WORD_SIZE};
 use gkr_iop::{
     self,
     selector::{SelectorContext, SelectorType},
@@ -39,6 +40,8 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use p3::field::FieldAlgebra;
+use serde::{Deserialize, Serialize};
+use std::ops::Range;
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState},
     util::get_challenge_pows,
@@ -46,16 +49,97 @@ use sumcheck::{
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
-pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub vk: ZKVMVerifyingKey<E, PCS>,
+pub trait MemStatePubValuesVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>:
+    Clone + Default
+{
+    fn verify_proofs(&self, vm_proofs: Vec<ZKVMProof<E, PCS>>);
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
-    pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct RV32imMemStateConfig {
+    pub heap: Range<u32>,
+    pub hints: Range<u32>,
+}
+
+impl RV32imMemStateConfig {
+    pub fn from_platform(platform: &Platform) -> Self {
+        RV32imMemStateConfig {
+            heap: platform.heap.start..platform.heap.end,
+            hints: platform.hints.start..platform.hints.end,
+        }
+    }
+}
+
+impl From<Platform> for RV32imMemStateConfig {
+    fn from(platform: Platform) -> Self {
+        RV32imMemStateConfig::from_platform(&platform)
+    }
+}
+
+impl From<&Platform> for RV32imMemStateConfig {
+    fn from(platform: &Platform) -> Self {
+        RV32imMemStateConfig::from_platform(platform)
+    }
+}
+
+// riscv impl
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MemStatePubValuesVerifier<E, PCS>
+    for RV32imMemStateConfig
+{
+    fn verify_proofs(&self, vm_proofs: Vec<ZKVMProof<E, PCS>>) {
+        assert!(!vm_proofs.is_empty());
+        let (_end_heap_addr, _end_hint_addr) = vm_proofs
+            .into_iter()
+            // optionally halt on last chunk
+            .enumerate()
+            .fold(
+                (None, None),
+                |(prev_heap_addr_end, prev_hint_addr_end), (_, vm_proof)| {
+                    // check memory continuation consistency
+                    // heap
+                    let heap_addr_start_u32 =
+                        vm_proof.pi_evals[HEAP_START_ADDR_IDX].to_canonical_u64() as u32;
+                    let heap_len = vm_proof.pi_evals[HEAP_LENGTH_IDX].to_canonical_u64() as u32;
+                    assert!(self.heap.contains(&heap_addr_start_u32));
+                    if let Some(prev_heap_addr_end) = prev_heap_addr_end {
+                        assert_eq!(heap_addr_start_u32, prev_heap_addr_end);
+                    };
+                    let next_heap_addr_end: u32 = heap_addr_start_u32 + heap_len * WORD_SIZE as u32;
+                    assert!(self.heap.contains(&next_heap_addr_end));
+
+                    let hint_addr_start_u32 =
+                        vm_proof.pi_evals[HINT_START_ADDR_IDX].to_canonical_u64() as u32;
+                    let hint_len = vm_proof.pi_evals[HINT_LENGTH_IDX].to_canonical_u64() as u32;
+                    assert!(self.hints.contains(&hint_addr_start_u32));
+                    if let Some(prev_hint_addr_end) = prev_hint_addr_end {
+                        assert_eq!(hint_addr_start_u32, prev_hint_addr_end);
+                    };
+                    let next_hint_addr_end: u32 = hint_addr_start_u32 + hint_len * WORD_SIZE as u32;
+                    assert!(self.hints.contains(&next_hint_addr_end));
+
+                    (Some(next_heap_addr_end), Some(next_hint_addr_end))
+                },
+            );
+    }
+}
+
+#[derive(Clone)]
+pub struct ZKVMVerifier<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M: MemStatePubValuesVerifier<E, PCS>,
+> {
+    pub vk: ZKVMVerifyingKey<E, PCS, M>,
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValuesVerifier<E, PCS>>
+    ZKVMVerifier<E, PCS, M>
+{
+    pub fn new(vk: ZKVMVerifyingKey<E, PCS, M>) -> Self {
         ZKVMVerifier { vk }
     }
 
-    pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS> {
+    pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS, M> {
         self.vk
     }
 
@@ -97,13 +181,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     ) -> Result<bool, ZKVMError> {
         assert!(!vm_proofs.is_empty());
         let num_proofs = vm_proofs.len();
-        let (_end_pc, _end_heap_addr, shard_ec_sum) = vm_proofs
+        let (_end_pc, shard_ec_sum) = vm_proofs
             .into_iter()
             .zip_eq(transcripts)
             // optionally halt on last chunk
             .zip_eq(iter::repeat_n(false, num_proofs - 1).chain(iter::once(expect_halt)))
             .enumerate()
-            .try_fold((None, None, SepticPoint::<E::BaseField>::default()), |(prev_pc, prev_heap_addr_end, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
+            .try_fold((None, SepticPoint::<E::BaseField>::default()), |(prev_pc, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
                 // require ecall/halt proof to exist, depend on whether we expect a halt.
                 let has_halt = vm_proof.has_halt(&self.vk);
                 if has_halt != expect_halt {
@@ -126,18 +210,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 }
                 let end_pc = vm_proof.pi_evals[END_PC_IDX];
 
-                // check memory continuation consistency
-                let heap_addr_start_u32 = vm_proof.pi_evals[HEAP_START_ADDR_IDX].to_canonical_u64() as u32;
-                let heap_len= vm_proof.pi_evals[HEAP_LENGTH_IDX].to_canonical_u64() as u32;
-                if let Some(prev_heap_addr_end) = prev_heap_addr_end {
-                    assert_eq!(heap_addr_start_u32, prev_heap_addr_end);
-                    // TODO check heap addr in prime field within range
-                } else {
-                    // TODO first chunk, check initial heap addr
-                };
-                // TODO check heap_len == heap chip num_instances
-                let next_heap_addr_end: u32 = heap_addr_start_u32 + heap_len * WORD_SIZE as u32;
-
                 // add to shard ec sum
                 // _debug
                 // println!("=> shard pi: {:?}", vm_proof.pi_evals.clone());
@@ -148,7 +220,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 shard_ec_sum = shard_ec_sum + shard_ec;
                 // println!("=> new_ec_sum: {:?}", shard_ec_sum);
 
-                Ok((Some(end_pc), Some(next_heap_addr_end), shard_ec_sum))
+                Ok((Some(end_pc), shard_ec_sum))
             })?;
         // TODO check _end_heap_addr within heap range from vk
         // check shard ec_sum is_infinity
@@ -171,7 +243,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
 
-        let pi_evals = &vm_proof.pi_evals;
+        let mut pi_evals = vm_proof.pi_evals.clone();
 
         // make sure circuit index of chip proofs are
         // subset of that of self.vk.circuit_vks
@@ -203,7 +275,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify constant poly(s) evaluation result match
         // we can evaluate at this moment because constant always evaluate to same value
         // non-constant poly(s) will be verified in respective (table) proof accordingly
-        izip!(&vm_proof.raw_pi, pi_evals)
+        izip!(&vm_proof.raw_pi, &pi_evals)
             .enumerate()
             .try_for_each(|(i, (raw, eval))| {
                 if raw.len() == 1 && E::from(raw[0]) != *eval {
@@ -268,16 +340,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         for (index, proofs) in &vm_proof.chip_proofs {
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
-            if shard_id > 0 && circuit_vk.get_cs().with_omc_init_only() {
+            if circuit_vk.get_cs().with_omc_init_only() {
+                if shard_id > 0 {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("{shard_id}th shard non-first shard got omc dynamic table init",)
+                            .into(),
+                    ));
+                }
+                if shard_id == 0 && proofs.len() != 1 {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("{shard_id}th shard first shard got > 1 omc dynamic table init",)
+                            .into(),
+                    ));
+                }
+            } else if circuit_vk.get_cs().with_omc_init_dyn() && proofs.len() > 1 {
+                // either empty or only 1 chip proofs
                 return Err(ZKVMError::InvalidProof(
-                    format!("{shard_id}th shard non-first shard got omc dynamic table init",)
-                        .into(),
-                ));
-            }
-            if shard_id == 0 && circuit_vk.get_cs().with_omc_init_only() && proofs.len() != 1 {
-                return Err(ZKVMError::InvalidProof(
-                    format!("{shard_id}th shard first shard got > 1 omc dynamic table init",)
-                        .into(),
+                    format!("{shard_id}th shard got > 1 dynamic table init",).into(),
                 ));
             }
         }
@@ -289,6 +368,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         {
             let num_instance: usize = proof.num_instances.iter().sum();
             assert!(num_instance > 0);
+
+            // set per chip num_instance
+            pi_evals[NUM_INSTANCE_IDX] = E::from_canonical_usize(num_instance);
+
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
@@ -363,7 +446,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 circuit_name,
                 circuit_vk,
                 proof,
-                pi_evals,
+                &pi_evals,
                 &vm_proof.raw_pi,
                 &mut transcript,
                 NUM_FANIN,
@@ -426,7 +509,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &[],
             &[],
             &[],
-            pi_evals,
+            &pi_evals,
             &challenges,
             &self.vk.initial_global_state_expr,
         )
@@ -437,7 +520,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &[],
             &[],
             &[],
-            pi_evals,
+            &pi_evals,
             &challenges,
             &self.vk.finalize_global_state_expr,
         )

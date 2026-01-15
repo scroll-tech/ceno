@@ -5,7 +5,7 @@ use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
     e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::{create_backend, create_prover},
+    scheme::{create_backend, create_prover, verifier::RV32imMemStateConfig},
 };
 mod alloc;
 use ceno_zkvm::e2e::MultiProver;
@@ -60,7 +60,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
-                        let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
+                        let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RV32imMemStateConfig>(
                             create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),

@@ -1,15 +1,15 @@
+use crate::addr::{Addr, RegIdx};
 use core::fmt::{self, Formatter};
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, fmt::Display, ops::Range, sync::Arc};
-
-use crate::addr::{Addr, RegIdx};
 
 /// The Platform struct holds the parameters of the VM.
 /// It defines:
 /// - the layout of virtual memory,
 /// - special addresses, such as the initial PC,
 /// - codes of environment calls.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Platform {
     pub rom: Range<Addr>,
     pub prog_data: Arc<BTreeSet<Addr>>,
@@ -58,51 +58,52 @@ impl Display for Platform {
     }
 }
 
-/// alined with [`memory.x`]
-// ┌───────────────────────────── 0x4000_0000 (end of _sheap, or heap)
+/// aligned with [`memory.x`]
+// ┌───────────────────────────── 0x4000_0000 (stack top)
 // │
-// │   HEAP (128 MB, grows upward)
+// │   STACK (≈128 MB, grows downward)
 // │   0x3800_0000 .. 0x4000_0000
 // │
-// ├───────────────────────────── 0x3800_0000 (_sheap, align 0x800_0000)
-// │   RAM (128 MB)
+// ├───────────────────────────── 0x3800_0000 (stack base / pubio end)
+// │
+// │   PUBLIC I/O (128 MB)
 // │   0x3000_0000 .. 0x3800_0000
-// ├───────────────────────────── 0x3000_0000 (RAM base / hints end)
+// │
+// ├───────────────────────────── 0x3000_0000 (pubio base / hints end)
 // │
 // │   HINTS (128 MB)
 // │   0x2800_0000 .. 0x3000_0000
 // │
-// │───────────────────────────── 0x2800_0000 (hint base / gap end)
+// │───────────────────────────── 0x2800_0000 (hint start / gap end)
 // │
 // │   [Reserved gap: 128 MB for debug I/O]
 // │   0x2000_0000 .. 0x2800_0000
-// │───────────────────────────── 0x2000_0000 (gap / stack end)
+// │───────────────────────────── 0x2000_0000 (gap / heap end)
 // │
-// │   STACK (≈128 MB, grows downward)
+// │   HEAP (128 MB, grows upward)
 // │   0x1800_0000 .. 0x2000_0000
 // │
-// ├───────────────────────────── 0x1800_0000 (stack base / pubio end)
-// │
-// │   PUBLIC I/O (128 MB)
+// ├───────────────────────────── 0x1800_0000 (_sheap, align 0x800_0000)
+// │   RAM (128 MB)
 // │   0x1000_0000 .. 0x1800_0000
 // │
-// ├───────────────────────────── 0x1000_0000 (pubio base / rom end)
+// ├───────────────────────────── 0x1000_0000 (ram base / rom end)
 // │
 // │   ROM / TEXT / RODATA (128 MB)
 // │   0x0800_0000 .. 0x1000_0000
 // │
-// └───────────────────────────── 0x8000_0000 (rom base)
+// └───────────────────────────── 0x0800_0000 (rom base)
 pub static CENO_PLATFORM: Lazy<Platform> = Lazy::new(|| Platform {
     rom: 0x0800_0000..0x1000_0000,       // 128 MB
-    public_io: 0x1000_0000..0x1800_0000, // 128 MB
-    stack: 0x1800_0000..0x2000_4000, // stack grows downward 128MB, 0x4000 reserved for debug io.
-    // we make hints start from 0x2800_0000 thus reserve a 128MB gap for debug io
-    // at the end of stack
+    public_io: 0x3000_0000..0x3800_0000, // 128 MB
+    stack: 0x3800_0000..0x4000_4000, // stack grows downward 128MB, 0x4000 reserved for debug io.
+    // we make hints start from 0x2800_0000 thus reserve a 128MB gap (0x2000_0000..0x2800_0000)
+    // between the RAM payload and the hint data for debug io
     hints: 0x2800_0000..0x3000_0000, // 128 MB
     // heap grows upward, reserved 128 MB for it
     // the beginning of heap address got bss/sbss data
-    // and the real heap start from 0x3800_0000
-    heap: 0x3000_0000..0x4000_0000,
+    // and the real heap start from 0x1800_0000
+    heap: 0x1000_0000..0x2000_0000,
     unsafe_ecall_nop: false,
     prog_data: Arc::new(BTreeSet::new()),
     is_debug: false,
