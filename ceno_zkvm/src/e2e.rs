@@ -23,8 +23,8 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmptyTracer, EmuContext, FullTracer, InsnKind,
-    IterAddresses, NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, InsnKind, IterAddresses,
+    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, StepCellExtractor,
     StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
     host_utils::read_all_messages,
 };
@@ -58,8 +58,6 @@ pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
 pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
 // define a relative small number to make first shard handle much less instruction
-pub const DEFAULT_MAX_CELL_FIRST_SHARD: u64 = 1 << 20;
-
 /// The polynomial commitment scheme kind
 #[derive(
     Default,
@@ -573,15 +571,6 @@ impl<'a> ShardContext<'a> {
     }
 }
 
-pub trait StepCellExtractor {
-    fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64;
-
-    #[inline(always)]
-    fn extract_cells(&self, step: &StepRecord) -> u64 {
-        self.cells_for_kind(step.insn().kind, step.rs1().map(|op| op.value))
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ShardStepSummary {
     pub step_count: usize,
@@ -614,23 +603,12 @@ impl ShardStepSummary {
 pub struct ShardContextBuilder {
     pub cur_shard_id: usize,
     addr_future_accesses: Arc<NextCycleAccess>,
-    max_cell_per_shard: u64,
-    max_cycle_per_shard: Cycle,
-    target_cell_first_shard: u64,
     prev_shard_cycle_range: Vec<Cycle>,
     prev_shard_heap_range: Vec<Addr>,
     prev_shard_hint_range: Vec<Addr>,
     platform: Platform,
     shard_cycle_boundaries: Arc<Vec<Cycle>>,
     max_cycle: Cycle,
-    planner: Option<ShardPlanner>,
-}
-
-#[derive(Default)]
-struct ShardPlanner {
-    cur_cells: u64,
-    cur_cycle_in_shard: Cycle,
-    shard_id: usize,
 }
 
 impl Default for ShardContextBuilder {
@@ -638,97 +616,36 @@ impl Default for ShardContextBuilder {
         ShardContextBuilder {
             cur_shard_id: 0,
             addr_future_accesses: Arc::new(Default::default()),
-            max_cell_per_shard: 0,
-            max_cycle_per_shard: 0,
-            target_cell_first_shard: 0,
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
             prev_shard_hint_range: vec![],
             platform: CENO_PLATFORM.clone(),
             shard_cycle_boundaries: Arc::new(vec![FullTracer::SUBCYCLES_PER_INSN]),
             max_cycle: 0,
-            planner: Some(ShardPlanner::default()),
         }
     }
 }
 
 impl ShardContextBuilder {
-    /// set max_cell_per_shard == u64::MAX if target for single shard
-    pub fn new(multi_prover: &MultiProver, platform: Platform) -> Self {
+    pub fn from_plan(
+        multi_prover: &MultiProver,
+        platform: Platform,
+        shard_cycle_boundaries: Arc<Vec<Cycle>>,
+        max_cycle: Cycle,
+        addr_future_accesses: NextCycleAccess,
+    ) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
         ShardContextBuilder {
             cur_shard_id: 0,
-            max_cell_per_shard: multi_prover.max_cell_per_shard,
-            max_cycle_per_shard: multi_prover.max_cycle_per_shard,
-            target_cell_first_shard: {
-                if multi_prover.max_cell_per_shard == u64::MAX {
-                    u64::MAX
-                } else {
-                    multi_prover.max_cell_per_shard
-                }
-            },
-            addr_future_accesses: Arc::new(Default::default()),
+            addr_future_accesses: Arc::new(addr_future_accesses),
             prev_shard_cycle_range: vec![0],
             prev_shard_heap_range: vec![0],
             prev_shard_hint_range: vec![0],
             platform,
-            shard_cycle_boundaries: Arc::new(vec![FullTracer::SUBCYCLES_PER_INSN]),
-            max_cycle: 0,
-            planner: Some(ShardPlanner::default()),
+            shard_cycle_boundaries,
+            max_cycle,
         }
-    }
-
-    pub fn set_addr_future_accesses(&mut self, addr_future_accesses: NextCycleAccess) {
-        self.addr_future_accesses = Arc::new(addr_future_accesses);
-    }
-
-    #[inline(always)]
-    pub fn observe_step_budget(&mut self, step_cycle: Cycle, step_cells: u64) {
-        let should_split = {
-            let planner = self
-                .planner
-                .as_mut()
-                .expect("shard context planner already finalized");
-            let target_cost_current_shard = if planner.shard_id == 0 {
-                self.target_cell_first_shard
-            } else {
-                self.max_cell_per_shard
-            };
-            let next_cells = planner.cur_cells.saturating_add(step_cells);
-            let next_cycle = planner
-                .cur_cycle_in_shard
-                .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
-            let cycle_limit_hit =
-                self.max_cycle_per_shard < Cycle::MAX && next_cycle >= self.max_cycle_per_shard;
-            let should_split = next_cells >= target_cost_current_shard || cycle_limit_hit;
-            if should_split {
-                assert!(
-                    planner.cur_cells > 0 || planner.cur_cycle_in_shard > 0,
-                    "shard split before accumulating any steps"
-                );
-                planner.shard_id += 1;
-                planner.cur_cells = step_cells;
-                planner.cur_cycle_in_shard = FullTracer::SUBCYCLES_PER_INSN;
-            } else {
-                planner.cur_cells = next_cells;
-                planner.cur_cycle_in_shard = next_cycle;
-            }
-            should_split
-        };
-        if should_split {
-            self.push_boundary(step_cycle);
-        }
-    }
-
-    pub fn finalize_plan(&mut self, max_cycle: Cycle) {
-        self.max_cycle = max_cycle;
-        self.push_boundary(max_cycle);
-        self.prev_shard_cycle_range = vec![0];
-        self.prev_shard_heap_range = vec![0];
-        self.prev_shard_hint_range = vec![0];
-        self.cur_shard_id = 0;
-        self.planner = None;
     }
 
     pub fn shard_cycle_boundaries(&self) -> Arc<Vec<Cycle>> {
@@ -737,20 +654,6 @@ impl ShardContextBuilder {
 
     pub fn total_shards(&self) -> usize {
         self.shard_cycle_boundaries.len().saturating_sub(1)
-    }
-
-    fn push_boundary(&mut self, cycle: Cycle) {
-        if self
-            .shard_cycle_boundaries
-            .last()
-            .copied()
-            .unwrap_or_default()
-            != cycle
-        {
-            Arc::get_mut(&mut self.shard_cycle_boundaries)
-                .expect("shard cycle boundaries already shared")
-                .push(cycle);
-        }
     }
 
     pub fn position_next_shard<'a>(
@@ -888,13 +791,13 @@ impl Iterator for StepReplay {
     }
 }
 
-pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
+pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
     init_mem_state: &InitMemState,
     platform: &Platform,
     multi_prover: &MultiProver,
-    step_cell_extractor: &S,
+    step_cell_extractor: Arc<dyn StepCellExtractor>,
 ) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
@@ -905,8 +808,16 @@ pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
         heap: _,
     } = init_mem_state;
 
-    let mut vm: VMState<EmptyTracer> = info_span!("[ceno] emulator.new_empty_tracer")
-        .in_scope(|| VMState::new_with_tracer(platform.clone(), program.clone()));
+    let tracer_config = PreflightTracerConfig::new(
+        true,
+        multi_prover.max_cell_per_shard,
+        multi_prover.max_cycle_per_shard,
+    )
+    .with_step_cell_extractor(step_cell_extractor);
+    let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
+        .in_scope(|| {
+            VMState::new_with_tracer_config(platform.clone(), program.clone(), tracer_config)
+        });
 
     info_span!("[ceno] emulator.init_mem").in_scope(|| {
         for record in chain!(hints_init, io_init) {
@@ -914,8 +825,7 @@ pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
         }
     });
 
-    let mut shard_ctx_builder = ShardContextBuilder::new(multi_prover, platform.clone());
-    let _ = info_span!("[ceno] emulator.max_cycle_estimated").in_scope(|| {
+    let exit_code = info_span!("[ceno] emulator.execute").in_scope(|| {
         let mut steps = 0usize;
         loop {
             if steps >= max_steps {
@@ -924,13 +834,6 @@ pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
             match vm.next_step_record() {
                 Ok(Some(_)) => {
                     steps += 1;
-                    let tracer = vm.tracer();
-                    let step_cycle = tracer
-                        .cycle()
-                        .saturating_sub(EmptyTracer::SUBCYCLES_PER_INSN);
-                    let step_cells = step_cell_extractor
-                        .cells_for_kind(tracer.last_insn_kind(), tracer.last_rs1_value());
-                    shard_ctx_builder.observe_step_budget(step_cycle, step_cells);
                 }
                 Ok(None) => break,
                 Err(err) => panic!("emulator trapped before halt: {err}"),
@@ -939,32 +842,6 @@ pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
         vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
     let max_cycle = vm.tracer().cycle();
-    shard_ctx_builder.finalize_plan(max_cycle);
-    let shard_cycle_boundaries = shard_ctx_builder.shard_cycle_boundaries();
-    tracing::info!(
-        "num_shards: {}, max_cycle {}, shard_cycle_boundaries {:?}",
-        shard_ctx_builder.total_shards(),
-        max_cycle,
-        shard_cycle_boundaries.as_ref()
-    );
-    let preflight_config =
-        PreflightTracerConfig::from_end_cycle(max_cycle, shard_cycle_boundaries.clone());
-
-    let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
-        .in_scope(|| VMState::new_with_tracer_config(platform.clone(), program, preflight_config));
-
-    for record in chain!(hints_init, io_init) {
-        vm.init_memory(record.addr.into(), record.value);
-    }
-
-    let exit_code = info_span!("[ceno] emulator.preflight-execute").in_scope(|| {
-        vm.iter_until_halt()
-            .take(max_steps)
-            .try_for_each(|step| step.map(|_| ()))
-            .unwrap_or_else(|err| panic!("emulator trapped before halt: {err}"));
-        vm.halted_state().map(|halt_state| halt_state.exit_code)
-    });
-
     if platform.is_debug {
         let all_messages = read_all_messages(&vm)
             .iter()
@@ -1128,7 +1005,22 @@ pub fn emulate_program<'a, S: StepCellExtractor + ?Sized>(
         );
     }
 
-    shard_ctx_builder.set_addr_future_accesses(vm.take_tracer().into_next_accesses());
+    let tracer = vm.take_tracer();
+    let (plan_builder, next_accesses) = tracer.into_shard_plan();
+    let shard_cycle_boundaries = Arc::new(plan_builder.into_cycle_boundaries());
+    let shard_ctx_builder = ShardContextBuilder::from_plan(
+        multi_prover,
+        platform.clone(),
+        shard_cycle_boundaries.clone(),
+        max_cycle,
+        next_accesses,
+    );
+    tracing::info!(
+        "num_shards: {}, max_cycle {}, shard_cycle_boundaries {:?}",
+        shard_ctx_builder.total_shards(),
+        max_cycle,
+        shard_cycle_boundaries.as_ref()
+    );
 
     EmulationResult {
         pi,
@@ -1254,7 +1146,7 @@ pub fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
 
 pub struct ConstraintSystemConfig<E: ExtensionField> {
     pub zkvm_cs: ZKVMConstraintSystem<E>,
-    pub config: Rv32imConfig<E>,
+    pub config: Arc<Rv32imConfig<E>>,
     pub inst_dispatch_builder: InstructionDispatchBuilder,
     pub mmu_config: MmuConfig<E>,
     pub dummy_config: DummyExtraConfig<E>,
@@ -1273,7 +1165,7 @@ pub fn construct_configs<E: ExtensionField>(
     zkvm_cs.register_global_state::<GlobalState>();
     ConstraintSystemConfig {
         zkvm_cs,
-        config,
+        config: Arc::new(config),
         inst_dispatch_builder,
         mmu_config,
         dummy_config,
@@ -1786,13 +1678,15 @@ pub fn run_e2e_with_checkpoint<
 
     // Emulate program
     let start = std::time::Instant::now();
+    let step_cell_extractor: Arc<dyn StepCellExtractor> =
+        Arc::clone(&prover.pk.program_ctx.as_ref().unwrap().system_config.config);
     let emul_result = emulate_program(
         prover.pk.program_ctx.as_ref().unwrap().program.clone(),
         max_steps,
         &init_full_mem,
         &prover.pk.program_ctx.as_ref().unwrap().platform,
         &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
-        &prover.pk.program_ctx.as_ref().unwrap().system_config.config,
+        step_cell_extractor,
     );
     tracing::debug!("emulate done in {:?}", start.elapsed());
 
@@ -1877,13 +1771,14 @@ pub fn run_e2e_proof<
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     // Emulate program
+    let step_cell_extractor: Arc<dyn StepCellExtractor> = Arc::clone(&ctx.system_config.config);
     let emul_result = emulate_program(
         ctx.program.clone(),
         max_steps,
         init_full_mem,
         &ctx.platform,
         &ctx.multi_prover,
-        &ctx.system_config.config,
+        step_cell_extractor,
     );
     create_proofs_streaming(
         emul_result,
@@ -2182,17 +2077,10 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 
 #[cfg(test)]
 mod tests {
-    use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
-    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, InsnKind, StepRecord, Word};
+    use crate::e2e::{MultiProver, ShardContextBuilder};
+    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepRecord};
     use itertools::Itertools;
-
-    struct UniformStepExtractor;
-
-    impl StepCellExtractor for &UniformStepExtractor {
-        fn cells_for_kind(&self, _kind: InsnKind, _rs1_value: Option<Word>) -> u64 {
-            1
-        }
-    }
+    use std::sync::Arc;
 
     #[test]
     fn test_single_prover_shard_ctx() {
@@ -2220,26 +2108,37 @@ mod tests {
         executed_instruction: usize,
         expected_shard: usize,
     ) {
-        let mut shard_ctx_builder = ShardContextBuilder::new(
-            &MultiProver::new(0, 1, u64::MAX, max_cycle_per_shard),
-            CENO_PLATFORM.clone(),
-        );
         let steps = (0..executed_instruction)
             .map(|i| {
                 StepRecord::new_ecall_any(FullTracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
             })
             .collect_vec();
-        for step in &steps {
-            shard_ctx_builder.observe_step_budget(
-                step.cycle().saturating_sub(FullTracer::SUBCYCLES_PER_INSN),
-                (&UniformStepExtractor {}).extract_cells(step),
-            );
-        }
         let max_cycle = steps
             .last()
             .map(|step| step.cycle() + FullTracer::SUBCYCLES_PER_INSN)
             .unwrap_or(FullTracer::SUBCYCLES_PER_INSN);
-        shard_ctx_builder.finalize_plan(max_cycle);
+        let shard_cycle_boundaries = {
+            let mut boundaries = vec![FullTracer::SUBCYCLES_PER_INSN];
+            let mut cur_cycle_in_shard = 0;
+            for step in &steps {
+                let next_cycle = cur_cycle_in_shard + FullTracer::SUBCYCLES_PER_INSN;
+                if max_cycle_per_shard < Cycle::MAX && next_cycle >= max_cycle_per_shard {
+                    boundaries.push(step.cycle());
+                    cur_cycle_in_shard = FullTracer::SUBCYCLES_PER_INSN;
+                } else {
+                    cur_cycle_in_shard = next_cycle;
+                }
+            }
+            boundaries.push(max_cycle);
+            Arc::new(boundaries)
+        };
+        let mut shard_ctx_builder = ShardContextBuilder::from_plan(
+            &MultiProver::new(0, 1, u64::MAX, max_cycle_per_shard),
+            CENO_PLATFORM.clone(),
+            shard_cycle_boundaries,
+            max_cycle,
+            NextCycleAccess::default(),
+        );
         let mut steps_iter = steps.into_iter();
         let shard_ctx = std::iter::from_fn(|| {
             shard_ctx_builder

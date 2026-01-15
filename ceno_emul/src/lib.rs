@@ -10,8 +10,8 @@ pub use platform::{CENO_PLATFORM, Platform};
 
 mod tracer;
 pub use tracer::{
-    Change, EmptyTracer, FullTracer, LatestAccesses, MemOp, NextAccessPair, NextCycleAccess,
-    PreflightTracer, PreflightTracerConfig, ReadOp, StepRecord, Tracer, WriteOp,
+    Change, FullTracer, LatestAccesses, MemOp, NextAccessPair, NextCycleAccess, PreflightTracer,
+    PreflightTracerConfig, ReadOp, ShardPlanBuilder, StepCellExtractor, StepRecord, Tracer, WriteOp,
 };
 
 mod vm_state;
