@@ -137,7 +137,7 @@ macro_rules! ceno_crypto {
                 sig: &[u8; 64],
                 pk: &[u8; 64],
             ) -> bool {
-                $crate::secp256r1::secp256r1_verify_signature(msg, sig, pk)
+                $crate::secp256r1::secp256r1_verify_signature(msg, sig, pk).is_some()
             }
         }
 
