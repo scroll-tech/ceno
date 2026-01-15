@@ -89,6 +89,7 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
 ];
 
 pub struct CenoAggregationProver {
+    pub base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
@@ -98,12 +99,14 @@ pub struct CenoAggregationProver {
 
 impl CenoAggregationProver {
     pub fn new(
+        base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
         leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
         internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
         root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
         pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) -> Self {
         Self {
+            base_vk,
             leaf_prover,
             internal_prover,
             root_prover,
@@ -152,11 +155,11 @@ impl CenoAggregationProver {
 
         // Leaf layer program
         let leaf_engine = BabyBearPoseidon2Engine::new(leaf_fri_params);
-        let leaf_program = CenoLeafVmVerifierConfig {
+        let leaf_vm_verifier_config = CenoLeafVmVerifierConfig {
             vk,
             compiler_options: CompilerOptions::default().with_cycle_tracker(),
-        }
-        .build_program();
+        };
+        let leaf_program = leaf_vm_verifier_config.build_program();
         let leaf_committed_exe = Arc::new(VmCommittedExe::<SC>::commit(
             leaf_program.into(),
             leaf_engine.config().pcs(),
@@ -292,6 +295,7 @@ impl CenoAggregationProver {
         };
 
         Self {
+            base_vk: leaf_vm_verifier_config.vk,
             leaf_prover,
             internal_prover,
             root_prover,
@@ -310,7 +314,7 @@ impl CenoAggregationProver {
         let zkvm_proof_inputs: Vec<ZKVMProofInput> = base_proofs
             .into_iter()
             .enumerate()
-            .map(|(shard_id, p)| ZKVMProofInput::from((shard_id, p)))
+            .map(|(shard_id, p)| ZKVMProofInput::from_proof(shard_id, p, &self.base_vk))
             .collect();
         let user_public_values: Vec<F> = zkvm_proof_inputs
             .iter()
@@ -686,7 +690,7 @@ pub fn verify_proofs(
 ) {
     let program = build_zkvm_verifier_program(&vk);
     if !zkvm_proofs.is_empty() {
-        let zkvm_proof_input = ZKVMProofInput::from((0usize, zkvm_proofs[0].clone()));
+        let zkvm_proof_input = ZKVMProofInput::from_proof(0usize, zkvm_proofs[0].clone(), &vk);
 
         // Pass in witness stream
         let mut witness_stream: Vec<Vec<F>> = Vec::new();

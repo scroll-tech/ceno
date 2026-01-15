@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{
     arithmetics::{ceil_log2, next_pow2_instance_padding},
@@ -12,7 +12,7 @@ use crate::{
 };
 use ceno_zkvm::{
     scheme::{ZKVMChipProof, ZKVMProof, constants::SEPTIC_EXTENSION_DEGREE},
-    structs::{EccQuarkProof, TowerProofs},
+    structs::{EccQuarkProof, TowerProofs, ZKVMVerifyingKey},
 };
 use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::LayerProof};
 use itertools::Itertools;
@@ -97,29 +97,62 @@ pub(crate) struct ZKVMProofInput {
     pub opening_proof: BasefoldProof,
 }
 
-impl From<(usize, ZKVMProof<E, RecPcs>)> for ZKVMProofInput {
-    fn from(d: (usize, ZKVMProof<E, RecPcs>)) -> Self {
+impl ZKVMProofInput {
+    pub fn from_proof(
+        shard_id: usize,
+        zkvm_proof: ZKVMProof<E, RecPcs>,
+        vk: &ZKVMVerifyingKey<E, RecPcs>,
+    ) -> Self {
+        let mut chip_witin_num_vars: HashMap<usize, (usize, usize)> = HashMap::new(); // (chip_id, (num_witin, num_fixed))
+        let mut chip_indices = zkvm_proof
+            .chip_proofs
+            .keys()
+            .copied()
+            .collect::<Vec<usize>>();
+        chip_indices.push(0);
+
+        let mut chip_idx: usize = 0;
+        let mut chip_id: usize = chip_indices[chip_idx];
+        for (i, (_, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+            if chip_id == i {
+                let composed_cs = chip_vk.get_cs();
+                chip_witin_num_vars.insert(
+                    chip_id,
+                    (
+                        composed_cs.zkvm_v1_css.num_witin as usize,
+                        composed_cs.zkvm_v1_css.num_fixed,
+                    ),
+                );
+                chip_idx += 1;
+                chip_id = chip_indices[chip_idx];
+            }
+        }
+
         ZKVMProofInput {
-            shard_id: d.0,
-            raw_pi: d.1.raw_pi,
-            pi_evals: d.1.pi_evals,
-            chip_proofs: d
-                .1
+            shard_id,
+            raw_pi: zkvm_proof.raw_pi,
+            pi_evals: zkvm_proof.pi_evals,
+            chip_proofs: zkvm_proof
                 .chip_proofs
                 .into_iter()
                 .map(|(chip_idx, proofs)| {
+                    let (num_witin, num_fixed) = *chip_witin_num_vars
+                        .get(&chip_idx)
+                        .expect("num_witin data should exist");
                     (
                         chip_idx,
                         proofs
                             .into_iter()
-                            .map(|proof| ZKVMChipProofInput::from((chip_idx, proof)))
+                            .map(|proof| {
+                                ZKVMChipProofInput::from((chip_idx, proof, num_witin, num_fixed))
+                            })
                             .collect::<Vec<ZKVMChipProofInput>>()
                             .into(),
                     )
                 })
                 .collect::<BTreeMap<usize, ZKVMChipProofs>>(),
-            witin_commit: d.1.witin_commit.into(),
-            opening_proof: d.1.opening_proof.into(),
+            witin_commit: zkvm_proof.witin_commit.into(),
+            opening_proof: zkvm_proof.opening_proof.into(),
         }
     }
 }
@@ -167,7 +200,8 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .map(|proof| proof.sum_num_instances)
+            .filter(|proof| proof.num_witin > 0)
+            .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
@@ -180,7 +214,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
             .filter(|proof| !proof.fixed_in_evals.is_empty())
-            .map(|proof| proof.sum_num_instances)
+            .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
@@ -189,7 +223,12 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .filter(|proof| !proof.fixed_in_evals.is_empty())
             .map(|proof| proof.fixed_in_evals.len())
             .collect::<Vec<_>>();
-        let max_num_var = witin_num_vars.iter().copied().max().unwrap_or(0);
+        let max_num_var = witin_num_vars
+            .iter()
+            .chain(fixed_num_vars.iter())
+            .copied()
+            .max()
+            .unwrap_or(0);
         let max_width = witin_max_widths
             .iter()
             .chain(fixed_max_widths.iter())
@@ -319,7 +358,11 @@ impl Hintable<InnerConfig> for TowerProofInput {
 
 pub struct ZKVMChipProofInput {
     pub idx: usize,
-    pub sum_num_instances: usize,
+    /// number of variables in the chip's multilinear polynomials
+    pub num_vars: usize,
+
+    pub num_witin: usize,
+    pub num_fixed: usize,
 
     // product constraints
     pub r_out_evals_len: usize,
@@ -380,15 +423,30 @@ impl Hintable<InnerConfig> for ZKVMChipProofs {
     }
 }
 
-impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
-    fn from(d: (usize, ZKVMChipProof<E>)) -> Self {
+impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
+    fn from(d: (usize, ZKVMChipProof<E>, usize, usize)) -> Self {
         let idx = d.0;
         let p = d.1;
-        let sum_num_instances = p.num_instances.iter().sum();
+
+        let num_vars = if p.gkr_iop_proof.is_some() {
+            let vars = p
+                .gkr_iop_proof
+                .as_ref()
+                .unwrap()
+                .0
+                .iter()
+                .map(|l| l.main.proof.proofs.len())
+                .collect::<Vec<usize>>();
+            vars[0]
+        } else {
+            0
+        };
 
         Self {
             idx,
-            sum_num_instances,
+            num_vars,
+            num_witin: d.2,
+            num_fixed: d.3,
             r_out_evals_len: p.r_out_evals.len(),
             w_out_evals_len: p.w_out_evals.len(),
             lk_out_evals_len: p.lk_out_evals.len(),

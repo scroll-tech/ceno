@@ -408,6 +408,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         {
             rounds.push((fixed_commit.clone(), fixed_openings));
         }
+
         PCS::batch_verify(
             &self.vk.vp,
             rounds,
