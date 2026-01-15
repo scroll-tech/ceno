@@ -37,12 +37,9 @@ use openvm_native_compiler::{
     conversion::{CompilerOptions, convert_program},
     prelude::*,
 };
-use openvm_native_recursion::hints::Hintable;
+use openvm_native_recursion::{hints::Hintable, config::outer::OuterConfig, vars::StarkProofVariable};
 use openvm_sdk::{
-    SC,
-    config::DEFAULT_NUM_CHILDREN_INTERNAL,
-    prover::vm::{new_local_prover, types::VmProvingKey},
-    config::Halo2Config,
+    SC, config::{DEFAULT_NUM_CHILDREN_INTERNAL}, prover::{vm::{new_local_prover, types::VmProvingKey}}
 };
 use openvm_stark_backend::{
     config::{Com, StarkGenericConfig},
@@ -63,7 +60,10 @@ use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::{fs::File, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
-use crate::aggregation::types::{InternalVmVerifierPvs, VmVerifierPvs};
+use crate::aggregation::{
+    types::{InternalVmVerifierPvs, VmVerifierPvs},
+    statics::StaticProverVerifier
+};
 use openvm_circuit::arch::{PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver, instructions::exe::VmExe};
 use openvm_continuations::RootSC;
 use openvm_native_compiler::{
@@ -76,12 +76,12 @@ use openvm_stark_backend::proof::Proof;
 mod internal;
 mod root;
 mod types;
+mod statics;
 
 pub type InnerConfig = AsmConfig<F, E>;
 pub const LEAF_LOG_BLOWUP: usize = 1;
 pub const INTERNAL_LOG_BLOWUP: usize = 2;
 pub const ROOT_LOG_BLOWUP: usize = 3;
-pub const HALO2_VERIFIER_K: usize = 23;
 pub const ROOT_MAX_CONSTRAINT_DEG: usize = (1 << ROOT_LOG_BLOWUP) + 1;
 pub const ROOT_NUM_PUBLIC_VALUES: usize = 15;
 pub const SBOX_SIZE: usize = 7;
@@ -97,6 +97,7 @@ pub struct CenoAggregationProver {
     pub root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
     pub vk: CenoRecursionVerifierKeys<BabyBearPoseidon2Config>,
     pub pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
+    pub static_prover_verifier: StaticProverVerifier,
 }
 
 impl CenoAggregationProver {
@@ -114,6 +115,7 @@ impl CenoAggregationProver {
             root_prover,
             vk: pk.get_vk(),
             pk,
+            static_prover_verifier: StaticProverVerifier::new(),
         }
     }
 
@@ -278,14 +280,6 @@ impl CenoAggregationProver {
         )
         .expect("root prover");
 
-        // Halo2
-        let halo2_config = Halo2Config {
-            verifier_k: HALO2_VERIFIER_K,
-            wrapper_k: None,    // Auto-tuned
-            profiling: true,    // _debug: change to false in production
-        };
-
-
         // Recursion keys
         let vk = CenoRecursionVerifierKeys {
             leaf_vm_vk,
@@ -311,6 +305,7 @@ impl CenoAggregationProver {
             root_prover,
             vk,
             pk,
+            static_prover_verifier: StaticProverVerifier::new(),
         }
     }
 
@@ -598,6 +593,7 @@ pub struct CenoRecursionProvingKeys<SC: StarkGenericConfig, VC> {
     pub internal_committed_exe: Arc<VmCommittedExe<SC>>,
     pub root_vm_pk: Arc<VmProvingKey<RootSC, VC>>,
     pub root_committed_exe: Arc<VmCommittedExe<RootSC>>,
+    pub root_air_heights: Vec<u32>,
 }
 
 impl<SC: StarkGenericConfig, VC> Clone for CenoRecursionProvingKeys<SC, VC> {
@@ -609,6 +605,7 @@ impl<SC: StarkGenericConfig, VC> Clone for CenoRecursionProvingKeys<SC, VC> {
             internal_committed_exe: self.internal_committed_exe.clone(),
             root_vm_pk: self.root_vm_pk.clone(),
             root_committed_exe: self.root_committed_exe.clone(),
+            root_air_heights: self.root_air_heights.clone(),
         }
     }
 }

@@ -77,6 +77,15 @@ impl<F: Copy> CenoRootVmVerifierPvs<F> {
         ret.extend(self.public_values);
         ret
     }
+    pub fn from_flatten(flatten: Vec<F>) -> Self {
+        let init_pc = flatten[1];
+        let public_values = flatten[1..].to_vec();
+
+        Self {
+            init_pc,
+            public_values,
+        }
+    }
 }
 
 impl CenoRootVmVerifierConfig {
