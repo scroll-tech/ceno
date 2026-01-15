@@ -6,7 +6,7 @@ use crate::{
     syscalls::{SyscallEffects, SyscallWitness},
 };
 use ceno_rt::WORD_SIZE;
-use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{collections::BTreeMap, fmt, mem, sync::Arc};
 
@@ -40,8 +40,7 @@ pub struct StepRecord {
 }
 
 pub type NextAccessPair = SmallVec<[(WordAddr, Cycle); 1]>;
-pub type NextCycleAccess = Vec<NextAccessPair>;
-const NEXT_ACCESS_PREALLOC: usize = 101_194_444;
+pub type NextCycleAccess = FxHashMap<Cycle, NextAccessPair>;
 
 fn init_mmio_min_max_access(
     platform: &Platform,
@@ -909,46 +908,31 @@ pub struct PreflightTracer {
 
 #[derive(Clone, Debug)]
 pub struct PreflightTracerConfig {
-    next_access_capacity: usize,
     shard_cycle_boundaries: Arc<Vec<Cycle>>,
     end_cycle: Cycle,
 }
 
 impl PreflightTracerConfig {
-    pub fn new(
-        next_access_capacity: usize,
-        shard_cycle_boundaries: Arc<Vec<Cycle>>,
-        end_cycle: Cycle,
-    ) -> Self {
-        assert!(next_access_capacity > 0);
+    pub fn new(shard_cycle_boundaries: Arc<Vec<Cycle>>, end_cycle: Cycle) -> Self {
         assert!(
             !shard_cycle_boundaries.is_empty(),
             "shard_cycle_boundaries must contain at least one entry"
         );
         Self {
-            next_access_capacity,
             shard_cycle_boundaries,
             end_cycle,
         }
     }
 
-    pub fn with_default_boundaries(next_access_capacity: usize) -> Self {
+    pub fn with_default_boundaries() -> Self {
         Self::new(
-            next_access_capacity,
             Arc::new(vec![FullTracer::SUBCYCLES_PER_INSN, Cycle::MAX]),
             Cycle::MAX,
         )
     }
 
     pub fn from_end_cycle(end_cycle: Cycle, shard_cycle_boundaries: Arc<Vec<Cycle>>) -> Self {
-        let extra = PreflightTracer::SUBCYCLES_PER_INSN as Cycle;
-        let needed = end_cycle.saturating_add(extra).saturating_add(1);
-        let next_access_capacity = needed.try_into().unwrap_or(usize::MAX);
-        Self::new(next_access_capacity, shard_cycle_boundaries, end_cycle)
-    }
-
-    pub fn capacity(&self) -> usize {
-        self.next_access_capacity
+        Self::new(shard_cycle_boundaries, end_cycle)
     }
 
     pub fn shard_cycle_boundaries(&self) -> Arc<Vec<Cycle>> {
@@ -962,7 +946,7 @@ impl PreflightTracerConfig {
 
 impl Default for PreflightTracerConfig {
     fn default() -> Self {
-        Self::with_default_boundaries(NEXT_ACCESS_PREALLOC)
+        Self::with_default_boundaries()
     }
 }
 
@@ -974,11 +958,6 @@ impl PreflightTracer {
     pub const SUBCYCLES_PER_INSN: Cycle = <Self as Tracer>::SUBCYCLES_PER_INSN;
 
     pub fn new(platform: &Platform, config: &PreflightTracerConfig) -> Self {
-        let capacity = config.capacity();
-        let next_accesses = (0..capacity)
-            .into_par_iter()
-            .map(|_| NextAccessPair::default())
-            .collect();
         let shard_cycle_boundaries = config.shard_cycle_boundaries();
         assert!(
             shard_cycle_boundaries.len() >= 2,
@@ -991,7 +970,7 @@ impl PreflightTracer {
             pc: Default::default(),
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
-            next_accesses,
+            next_accesses: FxHashMap::default(),
             register_reads_tracked: 0,
             shard_cycle_boundaries,
             current_shard_idx: 0,
@@ -1127,10 +1106,12 @@ impl Tracer for PreflightTracer {
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         let cur_cycle = self.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
-        // if prev_cycle < self.current_shard_start_cycle {
-        let idx = prev_cycle as usize;
-        self.next_accesses[idx].push((addr, cur_cycle));
-        // }
+        if prev_cycle < self.current_shard_start_cycle {
+            self.next_accesses
+                .entry(prev_cycle)
+                .or_default()
+                .push((addr, cur_cycle));
+        }
         prev_cycle
     }
 

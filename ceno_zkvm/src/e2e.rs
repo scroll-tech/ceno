@@ -376,7 +376,7 @@ impl<'a> ShardContext<'a> {
     #[inline(always)]
     pub fn find_future_next_access(&self, cycle: Cycle, addr: WordAddr) -> Option<Cycle> {
         self.addr_future_accesses
-            .get(cycle as usize)
+            .get(&cycle)
             .and_then(|res| {
                 if res.len() == 1 {
                     Some(res[0].1)
