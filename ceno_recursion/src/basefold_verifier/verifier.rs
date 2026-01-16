@@ -87,6 +87,7 @@ pub fn batch_verify<C: Config>(
             // num_var is always smaller than 32.
             builder.range_check_var(diff, 5);
             builder.assign(&diff_product_num_var, diff_product_num_var * diff);
+
             let diff: Var<C::N> = builder.eval(max_width - opening.point_and_evals.evals.len());
             // width is always smaller than 2^14.
             builder.range_check_var(diff, 14);
