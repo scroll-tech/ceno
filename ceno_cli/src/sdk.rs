@@ -217,14 +217,21 @@ where
                 self.zkvm_vk.is_some(),
                 "Aggregation must provide existing base layer vk."
             );
-            let base_vk = self.zkvm_vk.as_ref().unwrap().clone();            let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeCpuBuilder>(
+            let base_vk = self.zkvm_vk.as_ref().unwrap().clone();
+            let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeCpuBuilder>(
                 Default::default(),
                 &agg_pk.root_vm_pk,
                 agg_pk.root_committed_exe.exe.clone(),
             )
             .expect("root prover");
 
-            CenoAggregationProver::new(base_vk, leaf_prover, internal_prover, root_prover, agg_pk.clone())
+            CenoAggregationProver::new(
+                base_vk,
+                leaf_prover,
+                internal_prover,
+                root_prover,
+                agg_pk.clone(),
+            )
         } else {
             let agg_prover = CenoAggregationProver::from_base_vk(self.zkvm_vk.clone().unwrap());
             self.agg_pk = Some(agg_prover.pk.clone());
