@@ -11,7 +11,7 @@ use crate::{
     },
 };
 use ceno_zkvm::{
-    scheme::{ZKVMChipProof, ZKVMProof},
+    scheme::{ZKVMChipProof, ZKVMProof, constants::SEPTIC_EXTENSION_DEGREE},
     structs::{EccQuarkProof, TowerProofs, ZKVMVerifyingKey},
 };
 use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::LayerProof};
@@ -856,6 +856,27 @@ pub struct SepticPointVariable<C: Config> {
     pub x: SepticExtensionVariable<C>,
     pub y: SepticExtensionVariable<C>,
     pub is_infinity: Usize<C::N>,
+}
+
+impl<C: Config> SepticPointVariable<C> {
+    pub fn zero(builder: &mut Builder<C>) -> Self {
+        let r = SepticPointVariable {
+            x: SepticExtensionVariable {
+                vs: builder.dyn_array(7),
+            },
+            y: SepticExtensionVariable {
+                vs: builder.dyn_array(7),
+            },
+            is_infinity: Usize::uninit(builder),
+        };
+        let z: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+        for i in 0..SEPTIC_EXTENSION_DEGREE {
+            builder.set(&r.x.vs, i, z);
+            builder.set(&r.y.vs, i, z);
+        }
+        builder.assign(&r.is_infinity, Usize::from(1));
+        r
+    }
 }
 
 pub struct EccQuarkProofInput {
