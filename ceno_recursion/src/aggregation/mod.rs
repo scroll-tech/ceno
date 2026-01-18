@@ -38,12 +38,13 @@ use openvm_native_compiler::{
     prelude::*,
 };
 use openvm_native_recursion::{
-    config::outer::OuterConfig, hints::Hintable, vars::StarkProofVariable,
+    config::outer::OuterConfig, halo2::RawEvmProof, hints::Hintable, vars::StarkProofVariable,
 };
 use openvm_sdk::{
     SC,
     config::DEFAULT_NUM_CHILDREN_INTERNAL,
     prover::vm::{new_local_prover, types::VmProvingKey},
+    types::EvmProof,
 };
 use openvm_stark_backend::{
     config::{Com, StarkGenericConfig},
@@ -68,8 +69,15 @@ use crate::aggregation::{
     statics::StaticProverVerifier,
     types::{InternalVmVerifierPvs, VmVerifierPvs},
 };
-use openvm_circuit::arch::{PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver, instructions::exe::VmExe};
+use openvm_circuit::{
+    arch::{
+        PUBLIC_VALUES_AIR_ID, PreflightExecutionOutput, SingleSegmentVmProver,
+        instructions::exe::VmExe,
+    },
+    utils::next_power_of_two_or_zero,
+};
 use openvm_continuations::RootSC;
+use openvm_native_circuit::NATIVE_MAX_TRACE_HEIGHTS;
 use openvm_native_compiler::{
     asm::AsmConfig,
     ir::{Builder, Config, Felt},
@@ -317,7 +325,7 @@ impl CenoAggregationProver {
     pub fn generate_root_proof(
         &mut self,
         base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
-    ) -> (Proof<RootSC>, Vec<u32>) {
+    ) -> Proof<RootSC> {
         let aggregation_start_timestamp = Instant::now();
 
         // Construct zkvm proof input
@@ -426,25 +434,13 @@ impl CenoAggregationProver {
 
         let last_internal = proofs.pop().unwrap();
 
-        // Export internal proof
-        let file =
-            File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
-        bincode::serialize_into(file, &last_internal).expect("failed to serialize internal proof");
-
         // _todo: possible multi-layer wrapping for reducing AIR heights
-
-        let root_air_heights = compute_root_proof_heights(
-            &mut self.root_prover.vm,
-            &self.pk.root_committed_exe,
-            &last_internal,
-        )
-        .expect("compute root air heights");
 
         let root_input = RootVmVerifierInput {
             proofs: vec![last_internal],
             public_values: user_public_values,
         };
-
+        // Generate root proof
         let root_start_timestamp = Instant::now();
         let root_proof = SingleSegmentVmProver::prove(
             &mut self.root_prover,
@@ -457,11 +453,11 @@ impl CenoAggregationProver {
             root_start_timestamp.elapsed()
         );
 
-        // Export root proof
+        // Export root proof, heights and recursion key
         let file = File::create("./src/exports/root_proof.bin").expect("Create export proof file");
         bincode::serialize_into(file, &root_proof).expect("failed to serialize root proof");
 
-        (root_proof, root_air_heights)
+        root_proof
     }
 
     pub fn verify_root_proof(&self, root_proof: &Proof<RootSC>) -> Result<(), VerificationError> {
@@ -470,6 +466,20 @@ impl CenoAggregationProver {
             .engine
             .verify(&self.vk.root_vm_vk, root_proof)?;
         Ok(())
+    }
+
+    pub fn prove_static(&mut self, root_proof: &Proof<RootSC>) -> RawEvmProof {
+        let root_air_heights = root_proof
+            .per_air
+            .iter()
+            .map(|air| {
+                next_power_of_two_or_zero(2usize.pow(air.degree as u32))
+                    .try_into()
+                    .unwrap()
+            })
+            .collect::<Vec<u32>>();
+        self.static_prover_verifier
+            .prove_static(root_proof, &root_air_heights, &self.pk)
     }
 }
 
@@ -769,7 +779,7 @@ mod tests {
                 .expect("Failed to deserialize vk file");
 
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
-        let (root_proof, _) = agg_prover.generate_root_proof(zkvm_proofs);
+        let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
 
         // Verify generated aggregated root_proof
         // Method 1: Verify the root proof using the aggregation prover
@@ -818,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 

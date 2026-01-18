@@ -20,17 +20,28 @@ use openvm_continuations::{
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
 use openvm_native_circuit::{NativeBuilder, NativeConfig, NativeCpuBuilder};
 use openvm_native_recursion::{
-    config::outer::OuterConfig, halo2::utils::CacheHalo2ParamsReader, hints::Hintable,
+    config::outer::OuterConfig,
+    halo2::{
+        RawEvmProof,
+        utils::{CacheHalo2ParamsReader, Halo2ParamsReader},
+        wrapper::{FallbackEvmVerifier, Halo2WrapperProvingKey},
+    },
+    hints::Hintable,
     vars::StarkProofVariable,
+    witness::Witnessable,
 };
 use openvm_sdk::{
     SC,
     config::{DEFAULT_NUM_CHILDREN_INTERNAL, Halo2Config},
-    keygen::{Halo2ProvingKey, dummy::compute_root_proof_heights, perm::AirIdPermutation},
+    keygen::{
+        Halo2ProvingKey, RootVerifierProvingKey, dummy::compute_root_proof_heights,
+        perm::AirIdPermutation,
+    },
     prover::{
         EvmHalo2Prover, Halo2Prover,
         vm::{new_local_prover, types::VmProvingKey},
     },
+    types::EvmProof,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 use p3::field::FieldAlgebra;
@@ -39,12 +50,8 @@ pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use crate::aggregation::root::CenoRootVmVerifierPvs;
 use openvm_continuations::RootSC;
 use openvm_native_compiler::{ir::Builder, prelude::*};
-use openvm_native_recursion::{
-    halo2::{utils::Halo2ParamsReader, wrapper::Halo2WrapperProvingKey},
-    witness::Witnessable,
-};
-use openvm_sdk::keygen::RootVerifierProvingKey;
 use openvm_stark_backend::proof::Proof;
+
 pub const HALO2_VERIFIER_K: usize = 23;
 
 pub struct StaticProverVerifier {
@@ -52,6 +59,7 @@ pub struct StaticProverVerifier {
     params_reader: CacheHalo2ParamsReader,
     static_pv_handler: StaticPvHandler,
     prover: Option<Halo2Prover>, // expensive to construct
+    verifier: Option<FallbackEvmVerifier>,
 }
 
 pub struct StaticPvHandler {
@@ -98,6 +106,7 @@ impl StaticProverVerifier {
             params_reader,
             static_pv_handler,
             prover: None,
+            verifier: None,
         }
     }
     pub fn init(
@@ -106,8 +115,6 @@ impl StaticProverVerifier {
         root_air_heights: &Vec<u32>,
         ceno_recursion_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) {
-        let special_air_ids = AirIdPermutation::compute(root_air_heights).get_special_air_ids();
-
         let root_verifier_proving_key = RootVerifierProvingKey {
             vm_pk: ceno_recursion_key.root_vm_pk.clone(),
             root_committed_exe: ceno_recursion_key.root_committed_exe.clone(),
@@ -133,8 +140,14 @@ impl StaticProverVerifier {
             profiling: self.config.profiling,
         };
 
+        // Update prover/verifier
+        let wrapper_k = halo2_pk.wrapper.pinning.metadata.config_params.k;
+        let params = self.params_reader.read_params(wrapper_k);
+        let static_verifier = halo2_pk.wrapper.generate_fallback_evm_verifier(&params);
         let prover = Halo2Prover::new(&self.params_reader, halo2_pk);
+
         self.prover = Some(prover);
+        self.verifier = Some(static_verifier);
     }
 
     pub fn prove_static(
@@ -142,12 +155,20 @@ impl StaticProverVerifier {
         root_proof: &Proof<RootSC>,
         root_proof_air_heights: &Vec<u32>,
         ceno_recursion_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
-    ) {
+    ) -> RawEvmProof {
         if self.prover.is_none() {
             self.init(root_proof, root_proof_air_heights, ceno_recursion_key);
         }
+        self.prover
+            .as_ref()
+            .unwrap()
+            .prove_for_evm(&root_proof)
+            .try_into()
+            .expect("generate halo2 proof")
+    }
 
-        let halo2_proof = self.prover.as_ref().unwrap().prove_for_evm(&root_proof);
+    pub fn verify_static(&mut self, proof: RawEvmProof) {
+        Halo2WrapperProvingKey::evm_verify(&self.verifier, &proof).unwrap();
     }
 }
 
@@ -172,20 +193,19 @@ mod tests {
     pub fn test_static_verifier_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);
 
-        let root_proof_path = "./src/exports/root_proof.bin";
         let vk_path = "./src/imported/vk.bin";
-
         let vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>> =
             bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
                 .expect("Failed to deserialize vk file");
+        let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
+
+        let root_proof_path = "./src/exports/root_proof.bin";
         let root_proof: Proof<RootSC> = bincode::deserialize_from(
             File::open(root_proof_path).expect("Failed to open proof file"),
         )
         .expect("Deserialize root proof");
-        let agg_prover = CenoAggregationProver::from_base_vk(vk);
 
-        let mut static_prover_verifier = StaticProverVerifier::new();
-        // static_prover_verifier.prove_static(&root_proof, Some(&internal_proof), &agg_prover.pk);
+        let halo2_proof = agg_prover.prove_static(&root_proof);
     }
 
     #[test]
