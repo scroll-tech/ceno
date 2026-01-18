@@ -447,7 +447,7 @@ impl CenoAggregationProver {
             root_start_timestamp.elapsed()
         );
 
-        // Export root proof, heights and recursion key
+        // Export root proof
         let file = File::create("./src/exports/root_proof.bin").expect("Create export proof file");
         bincode::serialize_into(file, &root_proof).expect("failed to serialize root proof");
 
@@ -827,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
