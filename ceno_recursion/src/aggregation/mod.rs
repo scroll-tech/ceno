@@ -37,14 +37,11 @@ use openvm_native_compiler::{
     conversion::{CompilerOptions, convert_program},
     prelude::*,
 };
-use openvm_native_recursion::{
-    config::outer::OuterConfig, halo2::RawEvmProof, hints::Hintable, vars::StarkProofVariable,
-};
+use openvm_native_recursion::{halo2::RawEvmProof, hints::Hintable};
 use openvm_sdk::{
     SC,
     config::DEFAULT_NUM_CHILDREN_INTERNAL,
     prover::vm::{new_local_prover, types::VmProvingKey},
-    types::EvmProof,
 };
 use openvm_stark_backend::{
     config::{Com, StarkGenericConfig},
@@ -69,20 +66,17 @@ use crate::aggregation::{
     statics::StaticProverVerifier,
     types::{InternalVmVerifierPvs, VmVerifierPvs},
 };
+use anyhow::Result;
 use openvm_circuit::{
-    arch::{
-        PUBLIC_VALUES_AIR_ID, PreflightExecutionOutput, SingleSegmentVmProver,
-        instructions::exe::VmExe,
-    },
+    arch::{PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver, instructions::exe::VmExe},
     utils::next_power_of_two_or_zero,
 };
 use openvm_continuations::RootSC;
-use openvm_native_circuit::NATIVE_MAX_TRACE_HEIGHTS;
 use openvm_native_compiler::{
     asm::AsmConfig,
     ir::{Builder, Config, Felt},
 };
-use openvm_sdk::{keygen::dummy::compute_root_proof_heights, util::check_max_constraint_degrees};
+use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
 
 mod internal;
@@ -482,8 +476,9 @@ impl CenoAggregationProver {
             .prove_static(root_proof, &root_air_heights, &self.pk)
     }
 
-    pub fn verify_static(&mut self, halo2_proof: RawEvmProof) {
-        self.static_prover_verifier.verify_static(halo2_proof);
+    pub fn verify_static(&mut self, halo2_proof: RawEvmProof) -> Result<()> {
+        let _ = self.static_prover_verifier.verify_static(halo2_proof);
+        Ok(())
     }
 }
 

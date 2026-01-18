@@ -1,24 +1,15 @@
 use crate::{
-    aggregation::{CenoRecursionProvingKeys, root::CenoRootVmVerifierConfig},
-    zkvm_verifier::{
-        binding::{E, F, ZKVMProofInput, ZKVMProofInputVariable},
-        verifier::verify_zkvm_proof,
-    },
+    aggregation::{CenoRecursionProvingKeys, root::CenoRootVmVerifierPvs},
+    zkvm_verifier::binding::F,
 };
-use mpcs::{Basefold, BasefoldRSParams};
-
-use crate::aggregation::internal::InternalVmVerifierConfig;
+use anyhow::Result;
 use openvm_continuations::{
-    C,
-    static_verifier::StaticVerifierPvHandler,
-    verifier::{
-        common::types::SpecialAirIds, internal::types::InternalVmVerifierInput,
-        root::types::RootVmVerifierInput,
-    },
+    RootSC, static_verifier::StaticVerifierPvHandler, verifier::common::types::SpecialAirIds,
 };
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
-use openvm_native_circuit::{NativeBuilder, NativeConfig, NativeCpuBuilder};
+use openvm_native_circuit::NativeConfig;
+use openvm_native_compiler::ir::Builder;
 use openvm_native_recursion::{
     config::outer::OuterConfig,
     halo2::{
@@ -26,31 +17,17 @@ use openvm_native_recursion::{
         utils::{CacheHalo2ParamsReader, Halo2ParamsReader},
         wrapper::{FallbackEvmVerifier, Halo2WrapperProvingKey},
     },
-    hints::Hintable,
     vars::StarkProofVariable,
-    witness::Witnessable,
 };
 use openvm_sdk::{
-    SC,
-    config::{DEFAULT_NUM_CHILDREN_INTERNAL, Halo2Config},
-    keygen::{
-        Halo2ProvingKey, RootVerifierProvingKey, dummy::compute_root_proof_heights,
-        perm::AirIdPermutation,
-    },
-    prover::{
-        EvmHalo2Prover, Halo2Prover,
-        vm::{new_local_prover, types::VmProvingKey},
-    },
-    types::EvmProof,
+    config::Halo2Config,
+    keygen::{Halo2ProvingKey, RootVerifierProvingKey},
+    prover::Halo2Prover,
 };
+use openvm_stark_backend::proof::Proof;
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 use p3::field::FieldAlgebra;
-use std::{fs::File, sync::Arc, time::Instant};
-pub type RecPcs = Basefold<E, BasefoldRSParams>;
-use crate::aggregation::root::CenoRootVmVerifierPvs;
-use openvm_continuations::RootSC;
-use openvm_native_compiler::{ir::Builder, prelude::*};
-use openvm_stark_backend::proof::Proof;
+use std::sync::Arc;
 
 pub const HALO2_VERIFIER_K: usize = 23;
 
@@ -63,11 +40,11 @@ pub struct StaticProverVerifier {
 }
 
 pub struct StaticPvHandler {
-    pub init_pc: F,
+    pub _init_pc: F,
 }
 impl StaticPvHandler {
     pub fn init() -> Self {
-        Self { init_pc: F::ZERO }
+        Self { _init_pc: F::ZERO }
     }
 }
 
@@ -86,19 +63,22 @@ impl StaticVerifierPvHandler for StaticPvHandler {
             .map(|x| builder.cast_felt_to_var(x))
             .collect();
         let pvs = CenoRootVmVerifierPvs::from_flatten(public_values);
-        let num_public_values = pvs.public_values.len();
 
-        num_public_values
+        pvs.public_values.len()
     }
 }
-
+impl Default for StaticProverVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl StaticProverVerifier {
     pub fn new() -> Self {
         let params_reader = CacheHalo2ParamsReader::new("../params/");
         let halo2_config = Halo2Config {
             verifier_k: HALO2_VERIFIER_K,
             wrapper_k: None, // Auto-tuned
-            profiling: true, // _debug: change to false in production
+            profiling: false,
         };
         let static_pv_handler = StaticPvHandler::init();
         Self {
@@ -112,13 +92,13 @@ impl StaticProverVerifier {
     pub fn init(
         &mut self,
         root_proof: &Proof<RootSC>,
-        root_air_heights: &Vec<u32>,
+        root_air_heights: &[u32],
         ceno_recursion_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) {
         let root_verifier_proving_key = RootVerifierProvingKey {
             vm_pk: ceno_recursion_key.root_vm_pk.clone(),
             root_committed_exe: ceno_recursion_key.root_committed_exe.clone(),
-            air_heights: root_air_heights.clone(),
+            air_heights: root_air_heights.to_owned(),
         };
 
         let verifier = root_verifier_proving_key.keygen_static_verifier(
@@ -153,7 +133,7 @@ impl StaticProverVerifier {
     pub fn prove_static(
         &mut self,
         root_proof: &Proof<RootSC>,
-        root_proof_air_heights: &Vec<u32>,
+        root_proof_air_heights: &[u32],
         ceno_recursion_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) -> RawEvmProof {
         if self.prover.is_none() {
@@ -162,32 +142,29 @@ impl StaticProverVerifier {
         self.prover
             .as_ref()
             .unwrap()
-            .prove_for_evm(&root_proof)
+            .prove_for_evm(root_proof)
             .try_into()
             .expect("generate halo2 proof")
     }
 
-    pub fn verify_static(&mut self, proof: RawEvmProof) {
-        Halo2WrapperProvingKey::evm_verify(&self.verifier, &proof).unwrap();
+    pub fn verify_static(&mut self, proof: RawEvmProof) -> Result<()> {
+        let static_verifier = self
+            .verifier
+            .as_ref()
+            .expect("static verifier must be initiated");
+        Halo2WrapperProvingKey::evm_verify(static_verifier, &proof).unwrap();
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        aggregation::{
-            CenoAggregationProver, CenoRecursionProvingKeys, statics::StaticProverVerifier,
-        },
-        zkvm_verifier::binding::E,
-    };
+    use crate::{aggregation::CenoAggregationProver, zkvm_verifier::binding::E};
     use ceno_zkvm::structs::ZKVMVerifyingKey;
     use mpcs::{Basefold, BasefoldRSParams};
-    use openvm_continuations::{RootSC, SC};
-    use openvm_native_circuit::NativeConfig;
+    use openvm_continuations::RootSC;
     use openvm_stark_backend::proof::Proof;
-    use openvm_stark_sdk::config::{
-        baby_bear_poseidon2::BabyBearPoseidon2Config, setup_tracing_with_log_level,
-    };
+    use openvm_stark_sdk::config::setup_tracing_with_log_level;
     use std::fs::File;
 
     pub fn test_static_verifier_inner_thread() {
