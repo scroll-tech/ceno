@@ -10,41 +10,57 @@ use mpcs::{Basefold, BasefoldRSParams};
 use crate::aggregation::internal::InternalVmVerifierConfig;
 use openvm_continuations::{
     C,
-    verifier::{internal::types::InternalVmVerifierInput, root::types::RootVmVerifierInput, common::types::SpecialAirIds},
-    static_verifier::StaticVerifierPvHandler
+    static_verifier::StaticVerifierPvHandler,
+    verifier::{
+        common::types::SpecialAirIds, internal::types::InternalVmVerifierInput,
+        root::types::RootVmVerifierInput,
+    },
 };
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
 use openvm_native_circuit::{NativeBuilder, NativeConfig, NativeCpuBuilder};
-use openvm_native_recursion::{halo2::utils::CacheHalo2ParamsReader, hints::Hintable, config::outer::OuterConfig, vars::StarkProofVariable};
+use openvm_native_recursion::{
+    config::outer::OuterConfig, halo2::utils::CacheHalo2ParamsReader, hints::Hintable,
+    vars::StarkProofVariable,
+};
 use openvm_sdk::{
-    SC, config::{DEFAULT_NUM_CHILDREN_INTERNAL, Halo2Config}, keygen::Halo2ProvingKey, prover::{EvmHalo2Prover, Halo2Prover, vm::{new_local_prover, types::VmProvingKey}}
+    SC,
+    config::{DEFAULT_NUM_CHILDREN_INTERNAL, Halo2Config},
+    keygen::{
+        Halo2ProvingKey,
+        perm::AirIdPermutation,
+    },
+    prover::{
+        EvmHalo2Prover, Halo2Prover,
+        vm::{new_local_prover, types::VmProvingKey},
+    },
 };
-use openvm_stark_sdk::{
-    config::baby_bear_poseidon2::BabyBearPoseidon2Config,
-};
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 use p3::field::FieldAlgebra;
 use std::{fs::File, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
-use crate::aggregation::{
-    root::CenoRootVmVerifierPvs,
-};
+use crate::aggregation::root::CenoRootVmVerifierPvs;
 use openvm_continuations::RootSC;
-use openvm_native_compiler::{
-    ir::{Builder},
-};
+use openvm_native_compiler::ir::Builder;
+use openvm_native_recursion::witness::Witnessable;
 use openvm_stark_backend::proof::Proof;
+use openvm_native_compiler::prelude::*;
 pub const HALO2_VERIFIER_K: usize = 23;
 
 pub struct StaticProverVerifier {
     config: Halo2Config,
     params_reader: CacheHalo2ParamsReader,
     static_pv_handler: StaticPvHandler,
-    prover: Option<Halo2Prover>,    // expensive to construct
+    prover: Option<Halo2Prover>, // expensive to construct
 }
 
 pub struct StaticPvHandler {
-    pub _phantom: F,
+    pub init_pc: F,
+}
+impl StaticPvHandler {
+    pub fn init() -> Self {
+        Self { init_pc: F::ZERO }
+    }
 }
 
 impl StaticVerifierPvHandler for StaticPvHandler {
@@ -73,12 +89,10 @@ impl StaticProverVerifier {
         let params_reader = CacheHalo2ParamsReader::new("../params/");
         let halo2_config = Halo2Config {
             verifier_k: HALO2_VERIFIER_K,
-            wrapper_k: None,    // Auto-tuned
-            profiling: true,    // _debug: change to false in production
+            wrapper_k: None, // Auto-tuned
+            profiling: true, // _debug: change to false in production
         };
-        let static_pv_handler = StaticPvHandler {
-            _phantom: F::ONE,
-        };
+        let static_pv_handler = StaticPvHandler::init();
         Self {
             config: halo2_config,
             params_reader,
@@ -86,42 +100,41 @@ impl StaticProverVerifier {
             prover: None,
         }
     }
-    pub fn gen_static_proof(
-        &self,
-        root_proof: &Proof<RootSC>,
-        ceno_proving_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>
+    pub fn init(
+        &mut self,
+        ceno_proving_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) {
-        // let halo2_pk = Halo2ProvingKey::keygen(
-        //     self.config,
-        //     &self.params_reader,
-        //     &self.static_pv_handler,
-        //     agg_pk,
-        //     dummy_internal_proof.clone(),
-        // )?;
-        if !self.prover.is_some() {
-            let halo2_verifier_proving_key = {
-                let mut witness: Vec<Vec<F>> = Vec::new();
-                witness.extend(root_proof.write());
+        let internal_proof_path = "./src/imported/internal_proof.bin";
+        let root_proof_path = "./src/imported/root_proof.bin";
+        let internal: Proof<SC> = bincode::deserialize_from(
+            File::open(internal_proof_path).expect("Failed to open proof file"),
+        )
+        .expect("Deserialize internal proof");
+        let root: Proof<RootSC> = bincode::deserialize_from(
+            File::open(root_proof_path).expect("Failed to open proof file"),
+        )
+        .expect("Deserialize root proof");
 
-                let special_air_ids = AirIdPermutation::compute(&ceno_proving_key.root_air_heights).get_special_air_ids();
-                let config = StaticVerifierConfig {
-                    root_verifier_fri_params: self.vm_pk.fri_params,
-                    special_air_ids,
-                    root_verifier_program_commit: self.root_committed_exe.get_program_commit().into(),
-                };
+        let mut witness = Witness::default();
+        root.write(&mut witness);
 
-            };
-        }
-
-        // let special_air_ids = root_proof.get_air_ids().slice(0, 3);
-
-        let verifier = agg_pk.root_verifier_pk.keygen_static_verifier(
-            &self.params_reader.read_params(self.config.verifier_k),
-            dummy_root_proof,
-            self.pv_handler,
-        );
+        let special_air_ids = AirIdPermutation::compute(&ceno_proving_key.root_air_heights)
+            .get_special_air_ids();
+        let config = StaticVerifierConfig {
+            root_verifier_fri_params: self.vm_pk.fri_params,
+            special_air_ids,
+            root_verifier_program_commit: self
+                .root_committed_exe
+                .get_program_commit()
+                .into(),
+        };
 
 
+        // let verifier = agg_pk.root_verifier_pk.keygen_static_verifier(
+        //     &self.params_reader.read_params(self.config.verifier_k),
+        //     dummy_root_proof,
+        //     self.pv_handler,
+        // );
 
         // pub fn keygen_static_verifier(
         //     &self,
@@ -149,9 +162,6 @@ impl StaticProverVerifier {
         // }
 
 
-
-
-
         let dummy_snark = verifier.generate_dummy_snark(self.params_reader);
         let wrapper = if let Some(wrapper_k) = self.config.wrapper_k {
             Halo2WrapperProvingKey::keygen(&self.params_reader.read_params(wrapper_k), dummy_snark)
@@ -164,11 +174,17 @@ impl StaticProverVerifier {
             profiling: self.config.profiling,
         };
 
-
-
-
-
         let prover = Halo2Prover::new(&self.params_reader, halo2_pk);
         self.prover = Some(prover);
+    }
+
+    pub fn gen_static_proof(
+        &mut self,
+        root_proof: &Proof<RootSC>,
+        ceno_proving_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
+    ) {
+        if !self.prover.is_some() {
+            self.init(ceno_proving_key);
+        }
     }
 }

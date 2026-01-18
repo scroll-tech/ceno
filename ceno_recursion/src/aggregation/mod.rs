@@ -37,9 +37,13 @@ use openvm_native_compiler::{
     conversion::{CompilerOptions, convert_program},
     prelude::*,
 };
-use openvm_native_recursion::{hints::Hintable, config::outer::OuterConfig, vars::StarkProofVariable};
+use openvm_native_recursion::{
+    config::outer::OuterConfig, hints::Hintable, vars::StarkProofVariable,
+};
 use openvm_sdk::{
-    SC, config::{DEFAULT_NUM_CHILDREN_INTERNAL}, prover::{vm::{new_local_prover, types::VmProvingKey}}
+    SC,
+    config::DEFAULT_NUM_CHILDREN_INTERNAL,
+    prover::vm::{new_local_prover, types::VmProvingKey},
 };
 use openvm_stark_backend::{
     config::{Com, StarkGenericConfig},
@@ -61,8 +65,8 @@ use serde::{Deserialize, Serialize};
 use std::{fs::File, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use crate::aggregation::{
+    statics::StaticProverVerifier,
     types::{InternalVmVerifierPvs, VmVerifierPvs},
-    statics::StaticProverVerifier
 };
 use openvm_circuit::arch::{PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver, instructions::exe::VmExe};
 use openvm_continuations::RootSC;
@@ -75,8 +79,8 @@ use openvm_stark_backend::proof::Proof;
 
 mod internal;
 mod root;
-mod types;
 mod statics;
+mod types;
 
 pub type InnerConfig = AsmConfig<F, E>;
 pub const LEAF_LOG_BLOWUP: usize = 1;
@@ -84,6 +88,7 @@ pub const INTERNAL_LOG_BLOWUP: usize = 2;
 pub const ROOT_LOG_BLOWUP: usize = 3;
 pub const ROOT_MAX_CONSTRAINT_DEG: usize = (1 << ROOT_LOG_BLOWUP) + 1;
 pub const ROOT_NUM_PUBLIC_VALUES: usize = 15;
+pub const MAX_NUM_PUBLIC_VALUES: usize = 32;
 pub const SBOX_SIZE: usize = 7;
 const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216,
@@ -421,6 +426,10 @@ impl CenoAggregationProver {
 
         let last_internal = proofs.pop().unwrap();
 
+        // Export internal proof
+        let file = File::create("./imported/internal_proof.bin").expect("Create export proof file");
+        bincode::serialize_into(file, &last_internal).expect("failed to serialize internal proof");
+
         // _todo: possible multi-layer wrapping for reducing AIR heights
 
         let root_input = RootVmVerifierInput {
@@ -441,8 +450,8 @@ impl CenoAggregationProver {
         );
 
         // Export root proof
-        let file = File::create("root_proof.bin").expect("Create export proof file");
-        bincode::serialize_into(file, &root_proof).expect("failed to serialize internal proof");
+        let file = File::create("./imported/root_proof.bin").expect("Create export proof file");
+        bincode::serialize_into(file, &root_proof).expect("failed to serialize root proof");
 
         root_proof
     }
@@ -593,7 +602,6 @@ pub struct CenoRecursionProvingKeys<SC: StarkGenericConfig, VC> {
     pub internal_committed_exe: Arc<VmCommittedExe<SC>>,
     pub root_vm_pk: Arc<VmProvingKey<RootSC, VC>>,
     pub root_committed_exe: Arc<VmCommittedExe<RootSC>>,
-    pub root_air_heights: Vec<u32>,
 }
 
 impl<SC: StarkGenericConfig, VC> Clone for CenoRecursionProvingKeys<SC, VC> {
@@ -605,7 +613,6 @@ impl<SC: StarkGenericConfig, VC> Clone for CenoRecursionProvingKeys<SC, VC> {
             internal_committed_exe: self.internal_committed_exe.clone(),
             root_vm_pk: self.root_vm_pk.clone(),
             root_committed_exe: self.root_committed_exe.clone(),
-            root_air_heights: self.root_air_heights.clone(),
         }
     }
 }
