@@ -3,9 +3,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::{
     OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
-    circuit_builder::{
-        CircuitBuilder, ConstraintSystem, RotationParams, expansion_expr, rotation_split,
-    },
+    circuit_builder::{CircuitBuilder, ConstraintSystem, expansion_expr, rotation_split},
     cpu::{CpuBackend, CpuProver},
     error::{BackendError, CircuitBuilderError},
     gkr::{
@@ -192,8 +190,8 @@ impl<E: ExtensionField> KeccakLayout<E> {
             wits,
             // fixed,
             [
-                sel_mem_read,
-                sel_mem_write,
+                sel_first,
+                sel_last,
                 eq_zero,
                 eq_rotation_left,
                 eq_rotation_right,
@@ -231,20 +229,19 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation,
             },
             selector_type_layout: SelectorTypeLayout {
-                sel_mem_read: SelectorType::OrderedSparse32 {
+                sel_first: Some(SelectorType::OrderedSparse {
+                    num_vars: 5,
                     indices: vec![CYCLIC_POW2_5[0] as usize],
-                    expression: sel_mem_read.expr(),
-                },
-                sel_mem_write: SelectorType::OrderedSparse32 {
+                    expression: sel_first.expr(),
+                }),
+                sel_last: Some(SelectorType::OrderedSparse {
+                    num_vars: 5,
                     indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
-                    expression: sel_mem_write.expr(),
-                },
-                sel_lookup: SelectorType::OrderedSparse32 {
+                    expression: sel_last.expr(),
+                }),
+                sel_all: SelectorType::OrderedSparse {
+                    num_vars: 5,
                     indices: checked_indices.clone(),
-                    expression: eq_zero.expr(),
-                },
-                sel_zero: SelectorType::OrderedSparse32 {
-                    indices: checked_indices,
                     expression: eq_zero.expr(),
                 },
             },
@@ -506,15 +503,13 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // rotation constrain: rotation(keccak_input8).next() == keccak_output8
         izip!(keccak_input8, keccak_output8)
             .for_each(|(input, output)| system.rotate_and_assert_eq(input.expr(), output.expr()));
-        system.set_rotation_params(RotationParams {
-            rotation_eqs: Some([
-                layout.layer_exprs.eq_rotation_left.expr(),
-                layout.layer_exprs.eq_rotation_right.expr(),
-                layout.layer_exprs.eq_rotation.expr(),
-            ]),
-            rotation_cyclic_group_log2: ROUNDS_CEIL_LOG2,
-            rotation_cyclic_subgroup_size: ROUNDS - 1,
-        });
+        system.set_rotation_params(
+            layout.layer_exprs.eq_rotation_left.expr(),
+            layout.layer_exprs.eq_rotation_right.expr(),
+            layout.layer_exprs.eq_rotation.expr(),
+            ROUNDS_CEIL_LOG2,
+            ROUNDS - 1,
+        );
 
         Ok(layout)
     }
@@ -525,10 +520,10 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         self.n_challenges = 0;
 
         // register selector to legacy constrain system
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_first.clone().unwrap());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_last.clone().unwrap());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
 
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();
@@ -688,30 +683,25 @@ where
                 let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
                 let mut cyclic_group = bh.into_iter();
 
-                let (mut sel_mem_read_iter, sel_mem_read_structural_witin) = (
-                    self.selector_type_layout
-                        .sel_mem_read
-                        .sparse32_indices()
-                        .iter(),
-                    self.selector_type_layout.sel_mem_read.selector_expr().id(),
+                let Some(sel_first) = self.selector_type_layout.sel_first.as_ref() else {
+                    panic!("sel_first must be Some");
+                };
+                let (mut sel_first_iter, sel_first_structural_witin) = (
+                    sel_first.sparse_indices().iter(),
+                    sel_first.selector_expr().id(),
                 );
-                let (mut sel_mem_write_iter, sel_mem_write_structural_witin) = (
-                    self.selector_type_layout
-                        .sel_mem_write
-                        .sparse32_indices()
-                        .iter(),
-                    self.selector_type_layout.sel_mem_write.selector_expr().id(),
+
+                let Some(sel_last) = self.selector_type_layout.sel_last.as_ref() else {
+                    panic!("sel_last must be Some");
+                };
+                let (mut sel_last_iter, sel_last_structural_witin) = (
+                    sel_last.sparse_indices().iter(),
+                    sel_last.selector_expr().id(),
                 );
-                let (mut sel_lookup_iter, sel_lookup_structural_witin) = (
-                    self.selector_type_layout
-                        .sel_lookup
-                        .sparse32_indices()
-                        .iter(),
-                    self.selector_type_layout.sel_lookup.selector_expr().id(),
-                );
-                let (mut sel_zero_iter, sel_zero_structural_witin) = (
-                    self.selector_type_layout.sel_zero.sparse32_indices().iter(),
-                    self.selector_type_layout.sel_zero.selector_expr().id(),
+
+                let (mut sel_all_iter, sel_all_structural_witin) = (
+                    self.selector_type_layout.sel_all.sparse_indices().iter(),
+                    self.selector_type_layout.sel_all.selector_expr().id(),
                 );
 
                 #[allow(clippy::needless_range_loop)]
@@ -721,24 +711,19 @@ where
                         &mut wits[round_index as usize * self.n_committed..][..self.n_committed];
 
                     // set selector
-                    if let Some(index) = sel_mem_read_iter.next() {
+                    if let Some(index) = sel_first_iter.next() {
                         structural_wits
-                            [index * self.n_structural_witin + sel_mem_read_structural_witin] =
+                            [index * self.n_structural_witin + sel_first_structural_witin] =
                             E::BaseField::ONE;
                     }
-                    if let Some(index) = sel_mem_write_iter.next() {
+                    if let Some(index) = sel_last_iter.next() {
                         structural_wits
-                            [index * self.n_structural_witin + sel_mem_write_structural_witin] =
+                            [index * self.n_structural_witin + sel_last_structural_witin] =
                             E::BaseField::ONE;
                     }
-                    if let Some(index) = sel_lookup_iter.next() {
+                    if let Some(index) = sel_all_iter.next() {
                         structural_wits
-                            [index * self.n_structural_witin + sel_lookup_structural_witin] =
-                            E::BaseField::ONE;
-                    }
-                    if let Some(index) = sel_zero_iter.next() {
-                        structural_wits
-                            [index * self.n_structural_witin + sel_zero_structural_witin] =
+                            [index * self.n_structural_witin + sel_all_structural_witin] =
                             E::BaseField::ONE;
                     }
 

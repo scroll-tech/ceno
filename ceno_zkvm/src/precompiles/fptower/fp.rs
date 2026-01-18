@@ -126,10 +126,9 @@ impl<E: ExtensionField, P: FpOpField> FpOpLayout<E, P> {
         let eq = cb.create_placeholder_structural_witin(|| "fp_op_structural_witin");
         let sel = SelectorType::Prefix(eq.expr());
         let selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: sel.clone(),
-            sel_mem_write: sel.clone(),
-            sel_lookup: sel.clone(),
-            sel_zero: sel.clone(),
+            sel_first: None,
+            sel_last: None,
+            sel_all: sel.clone(),
         };
 
         let input32_exprs: [GenericArray<MemoryExpr<E>, <P as NumWords>::WordsFieldElement>; 2] =
@@ -233,10 +232,10 @@ impl<E: ExtensionField, P: FpOpField> ProtocolBuilder<E> for FpOpLayout<E, P> {
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
         self.n_challenges = 0;
 
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
 
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();

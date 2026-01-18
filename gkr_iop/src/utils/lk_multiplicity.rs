@@ -202,6 +202,17 @@ impl LkMultiplicity {
         self.increment(LookupTable::DoubleU8, (a << 8) + b);
     }
 
+    pub fn assert_bytes(&mut self, vs: &[u8]) {
+        // process in pairs
+        for pair in vs.chunks(2) {
+            match pair {
+                [a, b] => self.assert_double_u8(*a as u64, *b as u64),
+                [a] => self.assert_double_u8(*a as u64, 0),
+                _ => {}
+            }
+        }
+    }
+
     /// assert slices of field elements within range
     #[inline]
     pub fn assert_byte_fields<F: SmallField>(&mut self, vs: &[F]) {
@@ -238,6 +249,11 @@ impl LkMultiplicity {
     /// lookup a < b as unsigned byte
     pub fn lookup_ltu_byte(&mut self, a: u64, b: u64) {
         self.logic_u8::<LtuTable>(a, b)
+    }
+
+    pub fn lookup_shr_byte(&mut self, shift: u64, carry: u64, nb_bits_to_shift: u64) {
+        self.assert_double_u8(shift, shift << nb_bits_to_shift);
+        self.assert_double_u8(carry, carry << (8 - nb_bits_to_shift));
     }
 
     pub fn lookup_pow2(&mut self, v: u64) {
