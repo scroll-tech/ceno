@@ -481,6 +481,10 @@ impl CenoAggregationProver {
         self.static_prover_verifier
             .prove_static(root_proof, &root_air_heights, &self.pk)
     }
+
+    pub fn verify_static(&mut self, halo2_proof: RawEvmProof) {
+        self.static_prover_verifier.verify_static(halo2_proof);
+    }
 }
 
 pub fn verify_root_proof(
