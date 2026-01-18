@@ -26,11 +26,7 @@ use openvm_native_recursion::{
 use openvm_sdk::{
     SC,
     config::{DEFAULT_NUM_CHILDREN_INTERNAL, Halo2Config},
-    keygen::{
-        Halo2ProvingKey,
-        perm::AirIdPermutation,
-        dummy::compute_root_proof_heights,
-    },
+    keygen::{Halo2ProvingKey, dummy::compute_root_proof_heights, perm::AirIdPermutation},
     prover::{
         EvmHalo2Prover, Halo2Prover,
         vm::{new_local_prover, types::VmProvingKey},
@@ -42,13 +38,13 @@ use std::{fs::File, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use crate::aggregation::root::CenoRootVmVerifierPvs;
 use openvm_continuations::RootSC;
-use openvm_native_compiler::ir::Builder;
-use openvm_native_recursion::witness::Witnessable;
-use openvm_stark_backend::proof::Proof;
-use openvm_native_compiler::prelude::*;
+use openvm_native_compiler::{ir::Builder, prelude::*};
+use openvm_native_recursion::{
+    halo2::{utils::Halo2ParamsReader, wrapper::Halo2WrapperProvingKey},
+    witness::Witnessable,
+};
 use openvm_sdk::keygen::RootVerifierProvingKey;
-use openvm_native_recursion::halo2::utils::Halo2ParamsReader;
-use openvm_native_recursion::halo2::wrapper::Halo2WrapperProvingKey;
+use openvm_stark_backend::proof::Proof;
 pub const HALO2_VERIFIER_K: usize = 23;
 
 pub struct StaticProverVerifier {
@@ -145,37 +141,33 @@ impl StaticProverVerifier {
         &mut self,
         root_proof: &Proof<RootSC>,
         root_proof_air_heights: &Vec<u32>,
-        ceno_recursion_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>
+        ceno_recursion_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) {
         if self.prover.is_none() {
-            self.init(
-                root_proof,
-                root_proof_air_heights,
-                ceno_recursion_key,
-            );
+            self.init(root_proof, root_proof_air_heights, ceno_recursion_key);
         }
+
+        let halo2_proof = self.prover.as_ref().unwrap().prove_for_evm(&root_proof);
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
-    use openvm_stark_sdk::config::setup_tracing_with_log_level;
-    use std::fs::File;
-    use openvm_stark_backend::proof::Proof;
-    use openvm_continuations::{SC, RootSC};
-    use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
-    use openvm_native_circuit::NativeConfig;
     use crate::{
         aggregation::{
-            CenoRecursionProvingKeys, CenoAggregationProver,
-            statics::StaticProverVerifier,
+            CenoAggregationProver, CenoRecursionProvingKeys, statics::StaticProverVerifier,
         },
         zkvm_verifier::binding::E,
     };
     use ceno_zkvm::structs::ZKVMVerifyingKey;
     use mpcs::{Basefold, BasefoldRSParams};
+    use openvm_continuations::{RootSC, SC};
+    use openvm_native_circuit::NativeConfig;
+    use openvm_stark_backend::proof::Proof;
+    use openvm_stark_sdk::config::{
+        baby_bear_poseidon2::BabyBearPoseidon2Config, setup_tracing_with_log_level,
+    };
+    use std::fs::File;
 
     pub fn test_static_verifier_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);

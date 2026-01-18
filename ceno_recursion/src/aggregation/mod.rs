@@ -74,10 +74,7 @@ use openvm_native_compiler::{
     asm::AsmConfig,
     ir::{Builder, Config, Felt},
 };
-use openvm_sdk::{
-    util::check_max_constraint_degrees,
-    keygen::dummy::compute_root_proof_heights
-};
+use openvm_sdk::{keygen::dummy::compute_root_proof_heights, util::check_max_constraint_degrees};
 use openvm_stark_backend::proof::Proof;
 
 mod internal;
@@ -430,12 +427,18 @@ impl CenoAggregationProver {
         let last_internal = proofs.pop().unwrap();
 
         // Export internal proof
-        let file = File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
+        let file =
+            File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
         bincode::serialize_into(file, &last_internal).expect("failed to serialize internal proof");
 
         // _todo: possible multi-layer wrapping for reducing AIR heights
 
-        let root_air_heights = compute_root_proof_heights(&mut self.root_prover.vm, &self.pk.root_committed_exe, &last_internal).expect("compute root air heights");
+        let root_air_heights = compute_root_proof_heights(
+            &mut self.root_prover.vm,
+            &self.pk.root_committed_exe,
+            &last_internal,
+        )
+        .expect("compute root air heights");
 
         let root_input = RootVmVerifierInput {
             proofs: vec![last_internal],
