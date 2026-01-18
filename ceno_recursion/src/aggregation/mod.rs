@@ -74,7 +74,10 @@ use openvm_native_compiler::{
     asm::AsmConfig,
     ir::{Builder, Config, Felt},
 };
-use openvm_sdk::util::check_max_constraint_degrees;
+use openvm_sdk::{
+    util::check_max_constraint_degrees,
+    keygen::dummy::compute_root_proof_heights
+};
 use openvm_stark_backend::proof::Proof;
 
 mod internal;
@@ -317,7 +320,7 @@ impl CenoAggregationProver {
     pub fn generate_root_proof(
         &mut self,
         base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
-    ) -> Proof<RootSC> {
+    ) -> (Proof<RootSC>, Vec<u32>) {
         let aggregation_start_timestamp = Instant::now();
 
         // Construct zkvm proof input
@@ -427,10 +430,12 @@ impl CenoAggregationProver {
         let last_internal = proofs.pop().unwrap();
 
         // Export internal proof
-        let file = File::create("./imported/internal_proof.bin").expect("Create export proof file");
+        let file = File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
         bincode::serialize_into(file, &last_internal).expect("failed to serialize internal proof");
 
         // _todo: possible multi-layer wrapping for reducing AIR heights
+
+        let root_air_heights = compute_root_proof_heights(&mut self.root_prover.vm, &self.pk.root_committed_exe, &last_internal).expect("compute root air heights");
 
         let root_input = RootVmVerifierInput {
             proofs: vec![last_internal],
@@ -450,10 +455,10 @@ impl CenoAggregationProver {
         );
 
         // Export root proof
-        let file = File::create("./imported/root_proof.bin").expect("Create export proof file");
+        let file = File::create("./src/exports/root_proof.bin").expect("Create export proof file");
         bincode::serialize_into(file, &root_proof).expect("failed to serialize root proof");
 
-        root_proof
+        (root_proof, root_air_heights)
     }
 
     pub fn verify_root_proof(&self, root_proof: &Proof<RootSC>) -> Result<(), VerificationError> {
@@ -761,7 +766,7 @@ mod tests {
                 .expect("Failed to deserialize vk file");
 
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
-        let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
+        let (root_proof, _) = agg_prover.generate_root_proof(zkvm_proofs);
 
         // Verify generated aggregated root_proof
         // Method 1: Verify the root proof using the aggregation prover
