@@ -95,11 +95,11 @@ pub trait Tracer {
     const SUBCYCLE_MEM: Cycle = 3;
     const SUBCYCLES_PER_INSN: Cycle = 4;
 
-    fn new(platform: &Platform, config: &Self::Config) -> Self;
+    fn new(platform: &Platform, config: Self::Config) -> Self;
 
     fn with_next_accesses(
         platform: &Platform,
-        config: &Self::Config,
+        config: Self::Config,
         next_accesses: Option<Arc<NextCycleAccess>>,
     ) -> Self
     where
@@ -887,10 +887,9 @@ pub struct PreflightTracer {
     latest_accesses: LatestAccesses,
     next_accesses: NextCycleAccess,
     register_reads_tracked: u8,
-    record_next_accesses: bool,
     planner: Option<ShardPlanBuilder>,
     current_shard_start_cycle: Cycle,
-    step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
+    config: PreflightTracerConfig,
 }
 
 #[derive(Clone)]
@@ -912,10 +911,9 @@ impl fmt::Debug for PreflightTracer {
             .field("latest_accesses", &self.latest_accesses)
             .field("next_accesses", &self.next_accesses)
             .field("register_reads_tracked", &self.register_reads_tracked)
-            .field("record_next_accesses", &self.record_next_accesses)
             .field("planner", &self.planner)
             .field("current_shard_start_cycle", &self.current_shard_start_cycle)
-            .field("step_cell_extractor", &self.step_cell_extractor.is_some())
+            .field("config", &self.config)
             .finish()
     }
 }
@@ -993,13 +991,14 @@ impl PreflightTracer {
         self.last_rs1
     }
 
-    pub fn new(platform: &Platform, config: &PreflightTracerConfig) -> Self {
-        let mut max_cycle_per_shard = config.max_cycle_per_shard();
-        if max_cycle_per_shard != Cycle::MAX {
+    pub fn new(platform: &Platform, config: PreflightTracerConfig) -> Self {
+        let mut planner_cycle_limit = config.max_cycle_per_shard();
+        if planner_cycle_limit != Cycle::MAX {
             // Observe-step already accounts for the current instruction, so shrink the
             // limit by one instruction to keep shard boundaries aligned with callers.
-            max_cycle_per_shard = max_cycle_per_shard.saturating_sub(Self::SUBCYCLES_PER_INSN);
+            planner_cycle_limit = planner_cycle_limit.saturating_sub(Self::SUBCYCLES_PER_INSN);
         }
+        let max_cell_per_shard = config.max_cell_per_shard();
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
@@ -1009,13 +1008,12 @@ impl PreflightTracer {
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: FxHashMap::default(),
             register_reads_tracked: 0,
-            record_next_accesses: config.record_next_accesses(),
             planner: Some(ShardPlanBuilder::new(
-                config.max_cell_per_shard(),
-                max_cycle_per_shard,
+                max_cell_per_shard,
+                planner_cycle_limit,
             )),
             current_shard_start_cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
-            step_cell_extractor: config.step_cell_extractor(),
+            config,
         };
         tracer.reset_register_tracking();
         tracer
@@ -1060,7 +1058,7 @@ impl Tracer for PreflightTracer {
     type Record = ();
     type Config = PreflightTracerConfig;
 
-    fn new(platform: &Platform, config: &Self::Config) -> Self {
+    fn new(platform: &Platform, config: Self::Config) -> Self {
         PreflightTracer::new(platform, config)
     }
 
@@ -1069,6 +1067,7 @@ impl Tracer for PreflightTracer {
         if let Some(planner) = self.planner.as_mut() {
             // compute whether next step should bump the cycle
             let step_cells = self
+                .config
                 .step_cell_extractor
                 .as_ref()
                 .map(|extractor| extractor.cells_for_kind(self.last_kind, self.last_rs1))
@@ -1143,7 +1142,7 @@ impl Tracer for PreflightTracer {
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         let cur_cycle = self.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
-        if self.record_next_accesses && prev_cycle < self.current_shard_start_cycle {
+        if self.config.record_next_accesses && prev_cycle < self.current_shard_start_cycle {
             self.next_accesses
                 .entry(prev_cycle)
                 .or_default()
@@ -1199,7 +1198,7 @@ impl Tracer for FullTracer {
     type Record = StepRecord;
     type Config = ();
 
-    fn new(platform: &Platform, _config: &Self::Config) -> Self {
+    fn new(platform: &Platform, _config: Self::Config) -> Self {
         FullTracer::new(platform)
     }
 

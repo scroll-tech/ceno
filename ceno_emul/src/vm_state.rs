@@ -60,7 +60,6 @@ impl<T: Tracer> VMState<T> {
     ) -> Self {
         let pc = program.entry;
 
-        let tracer_config = config;
         let mut vm = Self {
             pc,
             platform: platform.clone(),
@@ -71,7 +70,7 @@ impl<T: Tracer> VMState<T> {
             ),
             registers: [0; VM_REG_COUNT],
             halt_state: None,
-            tracer: T::new(&platform, &tracer_config),
+            tracer: T::new(&platform, config),
         };
 
         for (&addr, &value) in &program.image {
