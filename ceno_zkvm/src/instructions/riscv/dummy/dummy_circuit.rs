@@ -1,83 +1,19 @@
-use std::marker::PhantomData;
-
-use ceno_emul::{InsnCategory, InsnFormat, InsnKind, StepRecord};
+use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 
 use super::super::{
-    RIVInstruction,
     constants::UInt,
     insn_base::{ReadMEM, ReadRS1, ReadRS2, StateInOut, WriteMEM, WriteRD},
 };
 use crate::{
     chip_handler::general::InstFetch, circuit_builder::CircuitBuilder, e2e::ShardContext,
-    error::ZKVMError, instructions::Instruction, structs::ProgramParams, tables::InsnRecord,
-    uint::Value, witness::LkMultiplicity,
+    error::ZKVMError, tables::InsnRecord, uint::Value, witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
 #[cfg(feature = "u16limb_circuit")]
 use p3::field::FieldAlgebra;
 use witness::set_val;
-
-/// DummyInstruction can handle any instruction and produce its side-effects.
-pub struct DummyInstruction<E, I>(PhantomData<(E, I)>);
-
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for DummyInstruction<E, I> {
-    type InstructionConfig = DummyConfig<E>;
-
-    fn name() -> String {
-        format!("{:?}_DUMMY", I::INST_KIND)
-    }
-
-    fn construct_circuit(
-        circuit_builder: &mut CircuitBuilder<E>,
-        _params: &ProgramParams,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let kind = I::INST_KIND;
-        let format = InsnFormat::from(kind);
-        let category = InsnCategory::from(kind);
-
-        // ECALL can do everything.
-        let is_ecall = matches!(kind, InsnKind::ECALL);
-
-        // Regular instructions do what is implied by their format.
-        let (with_rs1, with_rs2, with_rd) = match format {
-            _ if is_ecall => (true, true, true),
-            InsnFormat::R => (true, true, true),
-            InsnFormat::I => (true, false, true),
-            InsnFormat::S => (true, true, false),
-            InsnFormat::B => (true, true, false),
-            InsnFormat::U => (false, false, true),
-            InsnFormat::J => (false, false, true),
-        };
-        let with_mem_write = matches!(category, InsnCategory::Store) || is_ecall;
-        let with_mem_read = matches!(category, InsnCategory::Load);
-        let branching = matches!(category, InsnCategory::Branch)
-            || matches!(kind, InsnKind::JAL | InsnKind::JALR)
-            || is_ecall;
-
-        DummyConfig::construct_circuit(
-            circuit_builder,
-            I::INST_KIND,
-            with_rs1,
-            with_rs2,
-            with_rd,
-            with_mem_write,
-            with_mem_read,
-            branching,
-        )
-    }
-
-    fn assign_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        instance: &mut [<E as ExtensionField>::BaseField],
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config.assign_instance(instance, shard_ctx, lk_multiplicity, step)
-    }
-}
 
 #[derive(Debug)]
 pub struct MemAddrVal<E: ExtensionField> {

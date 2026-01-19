@@ -276,6 +276,11 @@ pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftRTypeConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -372,6 +377,11 @@ pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

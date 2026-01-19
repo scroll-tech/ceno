@@ -42,6 +42,11 @@ pub struct JalrInstruction<E>(PhantomData<E>);
 ///   the program table
 impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     type InstructionConfig = JalrConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::JALR]
+    }
 
     fn name() -> String {
         format!("{:?}", InsnKind::JALR)
