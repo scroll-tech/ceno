@@ -78,6 +78,7 @@ use openvm_native_compiler::{
 };
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
+use openvm_sdk::keygen::perm::AirIdPermutation;
 
 mod internal;
 mod root;
@@ -256,7 +257,7 @@ impl CenoAggregationProver {
 
         let mut root_engine = BabyBearPoseidon2RootEngine::new(root_fri_params);
         root_engine.max_constraint_degree = ROOT_MAX_CONSTRAINT_DEG;
-        let (root_vm, root_vm_pk) = VirtualMachine::<_, NativeCpuBuilder>::new_with_keygen(
+        let (mut root_vm, mut root_vm_pk) = VirtualMachine::<_, NativeCpuBuilder>::new_with_keygen(
             root_engine,
             Default::default(),
             root_vm_config.clone(),
@@ -274,6 +275,10 @@ impl CenoAggregationProver {
             root_program.into(),
             root_vm.engine.config().pcs(),
         ));
+
+        let air_heights = VM_MAX_TRACE_HEIGHTS;
+        let root_air_perm = AirIdPermutation::compute(&air_heights);
+        root_air_perm.permute(&mut root_vm_pk.per_air);
 
         let root_vm_pk = Arc::new(VmProvingKey {
             fri_params: root_fri_params,
@@ -463,17 +468,8 @@ impl CenoAggregationProver {
     }
 
     pub fn prove_static(&mut self, root_proof: &Proof<RootSC>) -> RawEvmProof {
-        let root_air_heights = root_proof
-            .per_air
-            .iter()
-            .map(|air| {
-                next_power_of_two_or_zero(2usize.pow(air.degree as u32))
-                    .try_into()
-                    .unwrap()
-            })
-            .collect::<Vec<u32>>();
         self.static_prover_verifier
-            .prove_static(root_proof, &root_air_heights, &self.pk)
+            .prove_static(root_proof, &self.pk)
     }
 
     pub fn verify_static(&mut self, halo2_proof: RawEvmProof) -> Result<()> {

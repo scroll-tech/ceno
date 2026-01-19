@@ -21,7 +21,7 @@ use openvm_native_recursion::{
 };
 use openvm_sdk::{
     config::Halo2Config,
-    keygen::{Halo2ProvingKey, RootVerifierProvingKey},
+    keygen::{Halo2ProvingKey, RootVerifierProvingKey, perm::AirIdPermutation},
     prover::Halo2Prover,
 };
 use openvm_stark_backend::proof::Proof;
@@ -74,7 +74,7 @@ impl Default for StaticProverVerifier {
 }
 impl StaticProverVerifier {
     pub fn new() -> Self {
-        let params_reader = CacheHalo2ParamsReader::new("../params/");
+        let params_reader = CacheHalo2ParamsReader::new("./src/params/");
         let halo2_config = Halo2Config {
             verifier_k: HALO2_VERIFIER_K,
             wrapper_k: None, // Auto-tuned
@@ -92,9 +92,16 @@ impl StaticProverVerifier {
     pub fn init(
         &mut self,
         root_proof: &Proof<RootSC>,
-        root_air_heights: &[u32],
         ceno_recursion_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) {
+        let root_air_heights = root_proof
+            .per_air
+            .iter()
+            .map(|air| {
+                air.degree as u32
+            })
+            .collect::<Vec<u32>>();
+
         let root_verifier_proving_key = RootVerifierProvingKey {
             vm_pk: ceno_recursion_key.root_vm_pk.clone(),
             root_committed_exe: ceno_recursion_key.root_committed_exe.clone(),
@@ -133,11 +140,10 @@ impl StaticProverVerifier {
     pub fn prove_static(
         &mut self,
         root_proof: &Proof<RootSC>,
-        root_proof_air_heights: &[u32],
         ceno_recursion_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) -> RawEvmProof {
         if self.prover.is_none() {
-            self.init(root_proof, root_proof_air_heights, ceno_recursion_key);
+            self.init(root_proof, ceno_recursion_key);
         }
         self.prover
             .as_ref()
