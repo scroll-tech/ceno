@@ -44,6 +44,17 @@ impl Hintable<InnerConfig> for Hash {
     }
 }
 
+impl<C: Config<F = F>> HashVariable<C> {
+    pub fn new(builder: &mut Builder<C>, hash: &Hash) -> Self {
+        let value = builder.dyn_array(DIGEST_ELEMS);
+        for i in 0..DIGEST_ELEMS {
+            builder.set(&value, i, hash.value[i]);
+        }
+
+        HashVariable { value }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use openvm_circuit::arch::{SystemConfig, VmExecutor};

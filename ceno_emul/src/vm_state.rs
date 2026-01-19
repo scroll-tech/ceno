@@ -6,7 +6,7 @@ use crate::{
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
-    tracer::{Change, FullTracer, Tracer},
+    tracer::{Change, FullTracer, NextCycleAccess, Tracer},
 };
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
@@ -47,6 +47,14 @@ impl<T: Tracer> VMState<T> {
     pub const REG_COUNT: usize = VM_REG_COUNT;
 
     pub fn new_with_tracer(platform: Platform, program: Arc<Program>) -> Self {
+        Self::new_with_tracer_and_next_accesses(platform, program, None)
+    }
+
+    pub fn new_with_tracer_and_next_accesses(
+        platform: Platform,
+        program: Arc<Program>,
+        next_accesses: Option<Arc<NextCycleAccess>>,
+    ) -> Self {
         let pc = program.entry;
 
         let mut vm = Self {
@@ -59,7 +67,7 @@ impl<T: Tracer> VMState<T> {
             ),
             registers: [0; VM_REG_COUNT],
             halt_state: None,
-            tracer: T::new(&platform),
+            tracer: T::with_next_accesses(&platform, next_accesses),
         };
 
         for (&addr, &value) in &program.image {
