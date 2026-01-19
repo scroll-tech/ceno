@@ -1,12 +1,12 @@
 use crate::{
     CENO_PLATFORM, InsnKind, Instruction, PC_STEP_SIZE, Platform,
     addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
-    chunked_vec::ChunkedVec,
     dense_addr_space::DenseAddrSpace,
     encode_rv32,
     syscalls::{SyscallEffects, SyscallWitness},
 };
 use ceno_rt::WORD_SIZE;
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{collections::BTreeMap, fmt, mem, sync::Arc};
 
@@ -39,9 +39,17 @@ pub struct StepRecord {
     syscall: Option<SyscallWitness>,
 }
 
+pub trait StepCellExtractor {
+    fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64;
+
+    #[inline(always)]
+    fn extract_cells(&self, step: &StepRecord) -> u64 {
+        self.cells_for_kind(step.insn().kind, step.rs1().map(|op| op.value))
+    }
+}
+
 pub type NextAccessPair = SmallVec<[(WordAddr, Cycle); 1]>;
-pub type NextCycleAccess = ChunkedVec<NextAccessPair>;
-const ACCESSED_CHUNK_SIZE: usize = 1 << 20;
+pub type NextCycleAccess = FxHashMap<Cycle, NextAccessPair>;
 
 fn init_mmio_min_max_access(
     platform: &Platform,
@@ -79,6 +87,7 @@ fn init_mmio_min_max_access(
 
 pub trait Tracer {
     type Record;
+    type Config;
 
     const SUBCYCLE_RS1: Cycle = 0;
     const SUBCYCLE_RS2: Cycle = 1;
@@ -86,14 +95,18 @@ pub trait Tracer {
     const SUBCYCLE_MEM: Cycle = 3;
     const SUBCYCLES_PER_INSN: Cycle = 4;
 
-    fn new(platform: &Platform) -> Self;
+    fn new(platform: &Platform, config: Self::Config) -> Self;
 
-    fn with_next_accesses(platform: &Platform, next_accesses: Option<Arc<NextCycleAccess>>) -> Self
+    fn with_next_accesses(
+        platform: &Platform,
+        config: Self::Config,
+        next_accesses: Option<Arc<NextCycleAccess>>,
+    ) -> Self
     where
         Self: Sized,
     {
         let _ = next_accesses;
-        Self::new(platform)
+        Self::new(platform, config)
     }
 
     fn advance(&mut self) -> Self::Record;
@@ -232,6 +245,111 @@ impl LatestAccesses {
     #[cfg(not(any(test, debug_assertions)))]
     pub fn addresses(&self) -> std::iter::Empty<&WordAddr> {
         unimplemented!("no track touched address in release build")
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardPlanBuilder {
+    shard_cycle_boundaries: Vec<Cycle>,
+    max_cell_per_shard: u64,
+    target_cell_first_shard: u64,
+    max_cycle_per_shard: Cycle,
+    current_shard_start_cycle: Cycle,
+    cur_cells: u64,
+    cur_cycle_in_shard: Cycle,
+    shard_id: usize,
+    finalized: bool,
+}
+
+impl ShardPlanBuilder {
+    pub fn new(max_cell_per_shard: u64, max_cycle_per_shard: Cycle) -> Self {
+        let initial_cycle = FullTracer::SUBCYCLES_PER_INSN;
+        ShardPlanBuilder {
+            shard_cycle_boundaries: vec![initial_cycle],
+            max_cell_per_shard,
+            target_cell_first_shard: max_cell_per_shard,
+            max_cycle_per_shard,
+            current_shard_start_cycle: initial_cycle,
+            cur_cells: 0,
+            cur_cycle_in_shard: 0,
+            shard_id: 0,
+            finalized: false,
+        }
+    }
+
+    pub fn current_shard_start_cycle(&self) -> Cycle {
+        self.current_shard_start_cycle
+    }
+
+    pub fn shard_cycle_boundaries(&self) -> &[Cycle] {
+        &self.shard_cycle_boundaries
+    }
+
+    pub fn max_cycle(&self) -> Cycle {
+        assert!(self.finalized, "shard plan not finalized yet");
+        *self
+            .shard_cycle_boundaries
+            .last()
+            .expect("shard boundaries must contain at least one entry")
+    }
+
+    pub fn into_cycle_boundaries(self) -> Vec<Cycle> {
+        assert!(self.finalized, "shard plan not finalized yet");
+        self.shard_cycle_boundaries
+    }
+
+    pub fn observe_step(&mut self, step_cycle: Cycle, step_cells: u64) {
+        assert!(
+            !self.finalized,
+            "shard plan cannot be extended after finalization"
+        );
+        let target = if self.shard_id == 0 {
+            self.target_cell_first_shard
+        } else {
+            self.max_cell_per_shard
+        };
+
+        // always include step in current shard to simplify overall logic
+        self.cur_cells = self.cur_cells.saturating_add(step_cells);
+        self.cur_cycle_in_shard = self
+            .cur_cycle_in_shard
+            .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
+
+        let cycle_limit_hit = self.cur_cycle_in_shard >= self.max_cycle_per_shard;
+        let should_split = self.cur_cells >= target || cycle_limit_hit;
+        if should_split {
+            assert!(
+                self.cur_cells > 0 || self.cur_cycle_in_shard > 0,
+                "shard split before accumulating any steps"
+            );
+            let next_shard_cycle = step_cycle + FullTracer::SUBCYCLES_PER_INSN;
+            self.push_boundary(next_shard_cycle);
+            self.shard_id += 1;
+            self.current_shard_start_cycle = next_shard_cycle;
+            self.cur_cells = 0;
+            self.cur_cycle_in_shard = 0;
+        }
+    }
+
+    pub fn finalize(&mut self, max_cycle: Cycle) {
+        assert!(
+            !self.finalized,
+            "shard plan cannot be finalized multiple times"
+        );
+        self.push_boundary(max_cycle);
+        self.finalized = true;
+    }
+
+    fn push_boundary(&mut self, cycle: Cycle) {
+        if self
+            .shard_cycle_boundaries
+            .last()
+            .copied()
+            .unwrap_or_default()
+            != cycle
+        {
+            self.shard_cycle_boundaries.push(cycle);
+        }
     }
 }
 
@@ -760,14 +878,102 @@ impl FullTracer {
     }
 }
 
-#[derive(Debug)]
 pub struct PreflightTracer {
     cycle: Cycle,
     pc: Change<ByteAddr>,
+    last_kind: InsnKind,
+    last_rs1: Option<Word>,
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: LatestAccesses,
     next_accesses: NextCycleAccess,
     register_reads_tracked: u8,
+    planner: Option<ShardPlanBuilder>,
+    current_shard_start_cycle: Cycle,
+    config: PreflightTracerConfig,
+}
+
+#[derive(Clone)]
+pub struct PreflightTracerConfig {
+    record_next_accesses: bool,
+    max_cell_per_shard: u64,
+    max_cycle_per_shard: Cycle,
+    step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
+}
+
+impl fmt::Debug for PreflightTracer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreflightTracer")
+            .field("cycle", &self.cycle)
+            .field("pc", &self.pc)
+            .field("last_kind", &self.last_kind)
+            .field("last_rs1", &self.last_rs1)
+            .field("mmio_min_max_access", &self.mmio_min_max_access)
+            .field("latest_accesses", &self.latest_accesses)
+            .field("next_accesses", &self.next_accesses)
+            .field("register_reads_tracked", &self.register_reads_tracked)
+            .field("planner", &self.planner)
+            .field("current_shard_start_cycle", &self.current_shard_start_cycle)
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
+impl fmt::Debug for PreflightTracerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreflightTracerConfig")
+            .field("record_next_accesses", &self.record_next_accesses)
+            .field("max_cell_per_shard", &self.max_cell_per_shard)
+            .field("max_cycle_per_shard", &self.max_cycle_per_shard)
+            .field("step_cell_extractor", &self.step_cell_extractor.is_some())
+            .finish()
+    }
+}
+
+impl PreflightTracerConfig {
+    pub fn new(
+        record_next_accesses: bool,
+        max_cell_per_shard: u64,
+        max_cycle_per_shard: Cycle,
+    ) -> Self {
+        Self {
+            record_next_accesses,
+            max_cell_per_shard,
+            max_cycle_per_shard,
+            step_cell_extractor: None,
+        }
+    }
+
+    pub fn record_next_accesses(&self) -> bool {
+        self.record_next_accesses
+    }
+
+    pub fn max_cell_per_shard(&self) -> u64 {
+        self.max_cell_per_shard
+    }
+
+    pub fn max_cycle_per_shard(&self) -> Cycle {
+        self.max_cycle_per_shard
+    }
+
+    pub fn with_step_cell_extractor(mut self, extractor: Arc<dyn StepCellExtractor>) -> Self {
+        self.step_cell_extractor = Some(extractor);
+        self
+    }
+
+    pub fn step_cell_extractor(&self) -> Option<Arc<dyn StepCellExtractor>> {
+        self.step_cell_extractor.clone()
+    }
+}
+
+impl Default for PreflightTracerConfig {
+    fn default() -> Self {
+        Self {
+            record_next_accesses: true,
+            max_cell_per_shard: u64::MAX,
+            max_cycle_per_shard: Cycle::MAX,
+            step_cell_extractor: None,
+        }
+    }
 }
 
 impl PreflightTracer {
@@ -777,17 +983,50 @@ impl PreflightTracer {
     pub const SUBCYCLE_MEM: Cycle = <Self as Tracer>::SUBCYCLE_MEM;
     pub const SUBCYCLES_PER_INSN: Cycle = <Self as Tracer>::SUBCYCLES_PER_INSN;
 
-    pub fn new(platform: &Platform) -> Self {
+    pub fn last_insn_kind(&self) -> InsnKind {
+        self.last_kind
+    }
+
+    pub fn last_rs1_value(&self) -> Option<Word> {
+        self.last_rs1
+    }
+
+    pub fn new(platform: &Platform, config: PreflightTracerConfig) -> Self {
+        let mut planner_cycle_limit = config.max_cycle_per_shard();
+        if planner_cycle_limit != Cycle::MAX {
+            // Observe-step already accounts for the current instruction, so shrink the
+            // limit by one instruction to keep shard boundaries aligned with callers.
+            planner_cycle_limit = planner_cycle_limit.saturating_sub(Self::SUBCYCLES_PER_INSN);
+        }
+        let max_cell_per_shard = config.max_cell_per_shard();
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
+            last_kind: InsnKind::INVALID,
+            last_rs1: None,
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
-            next_accesses: NextCycleAccess::new(ACCESSED_CHUNK_SIZE),
+            next_accesses: FxHashMap::default(),
             register_reads_tracked: 0,
+            planner: Some(ShardPlanBuilder::new(
+                max_cell_per_shard,
+                planner_cycle_limit,
+            )),
+            current_shard_start_cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
+            config,
         };
         tracer.reset_register_tracking();
         tracer
+    }
+
+    pub fn into_shard_plan(self) -> (ShardPlanBuilder, NextCycleAccess) {
+        let Some(mut planner) = self.planner else {
+            panic!("shard planner missing")
+        };
+        if !planner.finalized {
+            planner.finalize(self.cycle);
+        }
+        (planner, self.next_accesses)
     }
 
     #[inline(always)]
@@ -817,13 +1056,25 @@ impl PreflightTracer {
 
 impl Tracer for PreflightTracer {
     type Record = ();
+    type Config = PreflightTracerConfig;
 
-    fn new(platform: &Platform) -> Self {
-        PreflightTracer::new(platform)
+    fn new(platform: &Platform, config: Self::Config) -> Self {
+        PreflightTracer::new(platform, config)
     }
 
     #[inline(always)]
     fn advance(&mut self) -> Self::Record {
+        if let Some(planner) = self.planner.as_mut() {
+            // compute whether next step should bump the cycle
+            let step_cells = self
+                .config
+                .step_cell_extractor
+                .as_ref()
+                .map(|extractor| extractor.cells_for_kind(self.last_kind, self.last_rs1))
+                .unwrap_or(0);
+            planner.observe_step(self.cycle, step_cells);
+            self.current_shard_start_cycle = planner.current_shard_start_cycle();
+        }
         self.cycle += Self::SUBCYCLES_PER_INSN;
         self.reset_register_tracking();
     }
@@ -838,8 +1089,10 @@ impl Tracer for PreflightTracer {
     }
 
     #[inline(always)]
-    fn fetch(&mut self, pc: WordAddr, _value: Instruction) {
+    fn fetch(&mut self, pc: WordAddr, value: Instruction) {
         self.pc.before = pc.baddr();
+        self.last_kind = value.kind;
+        self.last_rs1 = None;
     }
 
     #[inline(always)]
@@ -849,7 +1102,7 @@ impl Tracer for PreflightTracer {
     fn track_mmu_maxtouch_after(&mut self) {}
 
     #[inline(always)]
-    fn load_register(&mut self, idx: RegIdx, _value: Word) {
+    fn load_register(&mut self, idx: RegIdx, value: Word) {
         let addr = Platform::register_vma(idx).into();
         let subcycle = match self.register_reads_tracked {
             0 => Self::SUBCYCLE_RS1,
@@ -857,6 +1110,9 @@ impl Tracer for PreflightTracer {
             _ => unimplemented!("Only two register reads are supported"),
         };
         self.register_reads_tracked += 1;
+        if matches!(self.last_kind, InsnKind::ECALL) && idx == Platform::reg_ecall() {
+            self.last_rs1 = Some(value);
+        }
         self.track_access(addr, subcycle);
     }
 
@@ -886,9 +1142,12 @@ impl Tracer for PreflightTracer {
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
         let cur_cycle = self.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
-        self.next_accesses
-            .get_or_create(prev_cycle as usize)
-            .push((addr, cur_cycle));
+        if self.config.record_next_accesses && prev_cycle < self.current_shard_start_cycle {
+            self.next_accesses
+                .entry(prev_cycle)
+                .or_default()
+                .push((addr, cur_cycle));
+        }
         prev_cycle
     }
 
@@ -937,8 +1196,9 @@ impl Tracer for PreflightTracer {
 
 impl Tracer for FullTracer {
     type Record = StepRecord;
+    type Config = ();
 
-    fn new(platform: &Platform) -> Self {
+    fn new(platform: &Platform, _config: Self::Config) -> Self {
         FullTracer::new(platform)
     }
 
