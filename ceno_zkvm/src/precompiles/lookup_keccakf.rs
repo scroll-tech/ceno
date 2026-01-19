@@ -389,7 +389,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // iterator over split witnesses
         let mut rotation_witness = rotation_witness.iter();
 
-        for (i, rc) in ROTATION_CONSTANTS.iter().enumerate() {
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..5 {
             #[allow(clippy::needless_range_loop)]
             for j in 0..5 {
                 let arg = theta_output
@@ -397,7 +398,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                     .iter()
                     .map(|e| e.expr())
                     .collect_vec();
-                let (sizes, _) = rotation_split(rc[j]);
+                let (sizes, _) = rotation_split(ROTATION_CONSTANTS[j][i]);
                 let many = sizes.len();
                 let rep_split = zip_eq(sizes, rotation_witness.by_ref().take(many))
                     .map(|(sz, wit)| (sz, wit.expr()))
