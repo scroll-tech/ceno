@@ -267,11 +267,7 @@ impl ShardPlanBuilder {
         ShardPlanBuilder {
             shard_cycle_boundaries: vec![initial_cycle],
             max_cell_per_shard,
-            target_cell_first_shard: if max_cell_per_shard == u64::MAX {
-                u64::MAX
-            } else {
-                max_cell_per_shard
-            },
+            target_cell_first_shard: max_cell_per_shard,
             max_cycle_per_shard,
             current_shard_start_cycle: initial_cycle,
             cur_cells: 0,
@@ -319,8 +315,7 @@ impl ShardPlanBuilder {
             .cur_cycle_in_shard
             .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
 
-        let cycle_limit_hit = self.max_cycle_per_shard < Cycle::MAX
-            && self.cur_cycle_in_shard >= self.max_cycle_per_shard;
+        let cycle_limit_hit = self.cur_cycle_in_shard >= self.max_cycle_per_shard;
         let should_split = self.cur_cells >= target || cycle_limit_hit;
         if should_split {
             assert!(
