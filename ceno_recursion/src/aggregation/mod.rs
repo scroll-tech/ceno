@@ -98,6 +98,7 @@ pub struct CenoAggregationProver {
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
+    pub permuted_root_prover: Option<RootVerifierLocalProver>,
     pub vk: CenoRecursionVerifierKeys<BabyBearPoseidon2Config>,
     pub pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
 }
@@ -115,6 +116,7 @@ impl CenoAggregationProver {
             leaf_prover,
             internal_prover,
             root_prover,
+            permuted_root_prover: None,
             vk: pk.get_vk(),
             pk,
         }
@@ -296,6 +298,7 @@ impl CenoAggregationProver {
             internal_committed_exe,
             root_vm_pk,
             root_committed_exe,
+            permuted_root_pk: None,
         };
 
         Self {
@@ -303,6 +306,7 @@ impl CenoAggregationProver {
             leaf_prover,
             internal_prover,
             root_prover,
+            permuted_root_prover: None,
             vk,
             pk,
         }
@@ -431,23 +435,27 @@ impl CenoAggregationProver {
             public_values: user_public_values,
         };
 
+        // Initiate the root prover with AIR height permutation
+        // This step is skipped if the permuted root prover is already initiated
+        // (either from a run of `generate_root_proof`` or with a dummy)
+        let root_permutation_start_timestamp = Instant::now();
+        if self.permuted_root_prover.is_none() {
+            self.init_root_prover_with_permutation(&root_input);
+        }
+        println!(
+            "Root - AIR-permuted root prover is not initiated. Completed initiation at: {:?}",
+            root_permutation_start_timestamp.elapsed()
+        );
+
+        // Generate root proof (AIR-permuted)
         let root_start_timestamp = Instant::now();
-        let root_proof = SingleSegmentVmProver::prove(
-            &mut self.root_prover,
-            root_input.write(),
-            VM_MAX_TRACE_HEIGHTS,
-        )
-        .expect("root proof generation should pass");
+        let air_permuted_root_proof = SingleSegmentVmProver::prove(self.permuted_root_prover.as_mut().unwrap(), root_input.write(), VM_MAX_TRACE_HEIGHTS).expect("root proof");
         println!(
             "Root - Completed root proof at: {:?}",
             root_start_timestamp.elapsed()
         );
 
-        // Export root proof
-        let file = File::create("./src/exports/root_proof.bin").expect("Create export proof file");
-        bincode::serialize_into(file, &root_proof).expect("failed to serialize internal proof");
-
-        root_proof
+        air_permuted_root_proof
     }
 
     pub fn verify_root_proof(&self, root_proof: &Proof<RootSC>) -> Result<(), VerificationError> {
@@ -458,7 +466,7 @@ impl CenoAggregationProver {
         Ok(())
     }
 
-    pub fn calculate_root_proof_permutation(&mut self, root_input: RootVmVerifierInput<SC>) {
+    pub fn init_root_prover_with_permutation(&mut self, root_input: &RootVmVerifierInput<SC>) {
         self.root_prover.reset_state(root_input.write());
         let mut trace_heights = VM_MAX_TRACE_HEIGHTS.to_vec();
 
@@ -481,21 +489,12 @@ impl CenoAggregationProver {
         } = vm.execute_preflight(&mut self.root_prover.interpreter, state, None, &trace_heights).expect("execute preflight");
         
         let ctx = vm.generate_proving_ctx(system_records, record_arenas).expect("proving context");
-        let mut air_heights: Vec<u32> = ctx
+        let air_heights: Vec<u32> = ctx
             .into_iter()
             .map(|(_, air_ctx)| {
-                next_power_of_two_or_zero(air_ctx.main_trace_height())
-                    .try_into()
-                    .unwrap()
+                air_ctx.main_trace_height().next_power_of_two() as u32
             })
             .collect();
-        
-        // _debug
-        for i in 0..air_heights.len() {
-            if air_heights[i] == 0 {
-                air_heights[i] = 1;
-            }
-        }
         println!("=> air_heights: {:?}", air_heights);
 
         let root_air_perm = AirIdPermutation::compute(&air_heights);
@@ -504,8 +503,7 @@ impl CenoAggregationProver {
         println!("=> root vm pk air len: {:?}", vm_air_len);
         root_air_perm.permute(&mut root_vm_pk.per_air);
 
-        // _debug
-        let root_verifier_pk = RootVerifierProvingKey {
+        let root_permuted_pk = RootVerifierProvingKey {
             vm_pk: Arc::new(VmProvingKey {
                 fri_params: self.pk.root_vm_pk.fri_params,
                 vm_config: self.pk.root_vm_pk.vm_config.clone(),
@@ -514,70 +512,8 @@ impl CenoAggregationProver {
             root_committed_exe: self.pk.root_committed_exe.clone(),
             air_heights,
         };
-        // Generate a root proof using the permuted pk
-        let mut root_prover = RootVerifierLocalProver::new(&root_verifier_pk).expect("create a root prover");
-        let air_permuted_root_proof = SingleSegmentVmProver::prove(&mut root_prover, root_input.write(), VM_MAX_TRACE_HEIGHTS).expect("root proof");
-
-        // fn prove(
-        //     &mut self,
-        //     input: impl Into<Streams<Val<E::SC>>>,
-        //     trace_heights: &[u32],
-        // ) -> Result<Proof<E::SC>, VirtualMachineError> {
-        //     self.reset_state(input);
-        //     let vm = &mut self.vm;
-        //     let exe = &self.exe;
-        //     assert!(!vm.config().as_ref().continuation_enabled);
-        //     let mut trace_heights = trace_heights.to_vec();
-        //     trace_heights[PUBLIC_VALUES_AIR_ID] = vm.config().as_ref().num_public_values as u32;
-        //     let state = self.state.take().expect("State should always be present");
-        //     let num_custom_pvs = state.custom_pvs.len();
-        //     let (proof, final_memory) = vm.prove(&mut self.interpreter, state, None, &trace_heights)?;
-
-
-        // pub fn prove(
-        //     &mut self,
-        //     interpreter: &mut PreflightInterpretedInstance2<Val<E::SC>, VB::VmConfig>,
-        //     state: VmState<Val<E::SC>, GuestMemory>,
-        //     num_insns: Option<u64>,
-        //     trace_heights: &[u32],
-        // ) -> Result<(Proof<E::SC>, Option<GuestMemory>), VirtualMachineError>
-        // where
-        //     Val<E::SC>: PrimeField32,
-        //     <VB::VmConfig as VmExecutionConfig<Val<E::SC>>>::Executor:
-        //         PreflightExecutor<Val<E::SC>, VB::RecordArena>,
-        // {
-        //     self.transport_init_memory_to_device(&state.memory);
-
-        //     let PreflightExecutionOutput {
-        //         system_records,
-        //         record_arenas,
-        //         to_state,
-        //     } = self.execute_preflight(interpreter, state, num_insns, trace_heights)?;
-        //     // drop final memory unless this is a terminal segment and the exit code is success
-        //     let final_memory =
-        //         (system_records.exit_code == Some(ExitCode::Success as u32)).then_some(to_state.memory);
-        //     let ctx = self.generate_proving_ctx(system_records, record_arenas)?;
-        //     let proof = self.engine.prove(&self.pk, ctx);
-
-        //     Ok((proof, final_memory))
-        // }
-
-
-        //     let final_memory = final_memory.ok_or(ExecutionError::DidNotTerminate)?;
-        //     // Put back state to avoid re-allocation
-        //     self.state = Some(VmState::new_with_defaults(
-        //         0,
-        //         exe.pc_start,
-        //         final_memory,
-        //         vec![],
-        //         DEFAULT_RNG_SEED,
-        //         num_custom_pvs,
-        //     ));
-        //     #[cfg(feature = "metrics")]
-        //     {
-        //         self.state.as_mut().unwrap().metrics.debug_infos = debug_infos;
-        //     }
-        //     Ok(proof)
+        self.permuted_root_prover = Some(RootVerifierLocalProver::new(&root_permuted_pk).expect("create a root prover"));
+        self.pk.permuted_root_pk = Some(Arc::new(root_permuted_pk));
     }
 }
 
@@ -718,6 +654,7 @@ pub struct CenoRecursionProvingKeys<SC: StarkGenericConfig, VC> {
     pub internal_committed_exe: Arc<VmCommittedExe<SC>>,
     pub root_vm_pk: Arc<VmProvingKey<RootSC, VC>>,
     pub root_committed_exe: Arc<VmCommittedExe<RootSC>>,
+    pub permuted_root_pk: Option<Arc<RootVerifierProvingKey>>,
 }
 
 impl<SC: StarkGenericConfig, VC> Clone for CenoRecursionProvingKeys<SC, VC> {
@@ -729,6 +666,7 @@ impl<SC: StarkGenericConfig, VC> Clone for CenoRecursionProvingKeys<SC, VC> {
             internal_committed_exe: self.internal_committed_exe.clone(),
             root_vm_pk: self.root_vm_pk.clone(),
             root_committed_exe: self.root_committed_exe.clone(),
+            permuted_root_pk: self.permuted_root_pk.clone(),
         }
     }
 }
@@ -898,7 +836,7 @@ mod tests {
             public_values: user_public_values,
         };
 
-        agg_prover.calculate_root_proof_permutation(root_input);
+        agg_prover.init_root_prover_with_permutation(&root_input);
     }
 
     pub fn aggregation_inner_thread() {
