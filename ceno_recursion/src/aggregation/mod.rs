@@ -1,5 +1,5 @@
 use crate::{
-    aggregation::root::CenoRootVmVerifierConfig,
+    aggregation::{root::CenoRootVmVerifierConfig, statics::StaticProverVerifier},
     zkvm_verifier::{
         binding::{E, F, ZKVMProofInput, ZKVMProofInputVariable},
         verifier::verify_zkvm_proof,
@@ -37,14 +37,16 @@ use openvm_native_compiler::{
     conversion::{CompilerOptions, convert_program},
     prelude::*,
 };
-use openvm_native_recursion::hints::Hintable;
+use openvm_native_recursion::{halo2::RawEvmProof, hints::Hintable};
 use openvm_sdk::{
     SC,
     config::DEFAULT_NUM_CHILDREN_INTERNAL,
-    prover::vm::{new_local_prover, types::VmProvingKey},
-    keygen::RootVerifierProvingKey,
-    util::check_max_constraint_degrees, keygen::perm::AirIdPermutation,
-    prover::RootVerifierLocalProver,
+    keygen::{RootVerifierProvingKey, perm::AirIdPermutation},
+    prover::{
+        RootVerifierLocalProver,
+        vm::{new_local_prover, types::VmProvingKey},
+    },
+    util::check_max_constraint_degrees,
 };
 use openvm_stark_backend::{
     config::{Com, StarkGenericConfig},
@@ -67,9 +69,9 @@ use serde::{Deserialize, Serialize};
 use std::{fs::File, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use crate::aggregation::types::{InternalVmVerifierPvs, VmVerifierPvs};
-use openvm_circuit::{
-    arch::{PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver, instructions::exe::VmExe, PreflightExecutionOutput},
-    utils::next_power_of_two_or_zero,
+use anyhow::Result;
+use openvm_circuit::arch::{
+    PUBLIC_VALUES_AIR_ID, PreflightExecutionOutput, SingleSegmentVmProver, instructions::exe::VmExe,
 };
 use openvm_continuations::RootSC;
 use openvm_native_compiler::{
@@ -79,6 +81,7 @@ use openvm_native_compiler::{
 
 mod internal;
 mod root;
+mod statics;
 mod types;
 
 pub type InnerConfig = AsmConfig<F, E>;
@@ -99,6 +102,7 @@ pub struct CenoAggregationProver {
     pub internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
     pub permuted_root_prover: Option<RootVerifierLocalProver>,
+    pub static_prover_verifier: StaticProverVerifier,
     pub vk: CenoRecursionVerifierKeys<BabyBearPoseidon2Config>,
     pub pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
 }
@@ -117,6 +121,7 @@ impl CenoAggregationProver {
             internal_prover,
             root_prover,
             permuted_root_prover: None,
+            static_prover_verifier: StaticProverVerifier::new(),
             vk: pk.get_vk(),
             pk,
         }
@@ -307,6 +312,7 @@ impl CenoAggregationProver {
             internal_prover,
             root_prover,
             permuted_root_prover: None,
+            static_prover_verifier: StaticProverVerifier::new(),
             vk,
             pk,
         }
@@ -425,7 +431,8 @@ impl CenoAggregationProver {
         let last_internal = proofs.pop().unwrap();
 
         // Export root proof
-        let file = File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
+        let file =
+            File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
         bincode::serialize_into(file, &last_internal).expect("failed to serialize internal proof");
 
         // _todo: possible multi-layer wrapping for reducing AIR heights
@@ -449,13 +456,28 @@ impl CenoAggregationProver {
 
         // Generate root proof (AIR-permuted)
         let root_start_timestamp = Instant::now();
-        let air_permuted_root_proof = SingleSegmentVmProver::prove(self.permuted_root_prover.as_mut().unwrap(), root_input.write(), VM_MAX_TRACE_HEIGHTS).expect("root proof");
+        let air_permuted_root_proof = SingleSegmentVmProver::prove(
+            self.permuted_root_prover.as_mut().unwrap(),
+            root_input.write(),
+            VM_MAX_TRACE_HEIGHTS,
+        )
+        .expect("root proof");
         println!(
             "Root - Completed root proof at: {:?}",
             root_start_timestamp.elapsed()
         );
 
         air_permuted_root_proof
+    }
+
+    pub fn prove_static(&mut self, root_proof: &Proof<RootSC>) -> RawEvmProof {
+        self.static_prover_verifier
+            .prove_static(root_proof, &self.pk)
+    }
+
+    pub fn verify_static(&mut self, halo2_proof: RawEvmProof) -> Result<()> {
+        let _ = self.static_prover_verifier.verify_static(halo2_proof);
+        Ok(())
     }
 
     pub fn verify_root_proof(&self, root_proof: &Proof<RootSC>) -> Result<(), VerificationError> {
@@ -470,15 +492,14 @@ impl CenoAggregationProver {
         self.root_prover.reset_state(root_input.write());
         let mut trace_heights = VM_MAX_TRACE_HEIGHTS.to_vec();
 
-        let num_public_values = self
-            .root_prover
-            .vm
-            .config()
-            .as_ref()
-            .num_public_values as u32;
+        let num_public_values = self.root_prover.vm.config().as_ref().num_public_values as u32;
         trace_heights[PUBLIC_VALUES_AIR_ID] = num_public_values;
 
-        let state = self.root_prover.state.take().expect("vm state should exist");
+        let state = self
+            .root_prover
+            .state
+            .take()
+            .expect("vm state should exist");
         let vm = &mut self.root_prover.vm;
         vm.transport_init_memory_to_device(&state.memory);
 
@@ -486,14 +507,21 @@ impl CenoAggregationProver {
             system_records,
             record_arenas,
             to_state: _,
-        } = vm.execute_preflight(&mut self.root_prover.interpreter, state, None, &trace_heights).expect("execute preflight");
-        
-        let ctx = vm.generate_proving_ctx(system_records, record_arenas).expect("proving context");
+        } = vm
+            .execute_preflight(
+                &mut self.root_prover.interpreter,
+                state,
+                None,
+                &trace_heights,
+            )
+            .expect("execute preflight");
+
+        let ctx = vm
+            .generate_proving_ctx(system_records, record_arenas)
+            .expect("proving context");
         let air_heights: Vec<u32> = ctx
             .into_iter()
-            .map(|(_, air_ctx)| {
-                air_ctx.main_trace_height().next_power_of_two() as u32
-            })
+            .map(|(_, air_ctx)| air_ctx.main_trace_height().next_power_of_two() as u32)
             .collect();
         println!("=> air_heights: {:?}", air_heights);
 
@@ -507,12 +535,13 @@ impl CenoAggregationProver {
             vm_pk: Arc::new(VmProvingKey {
                 fri_params: self.pk.root_vm_pk.fri_params,
                 vm_config: self.pk.root_vm_pk.vm_config.clone(),
-                vm_pk: root_vm_pk
+                vm_pk: root_vm_pk,
             }),
             root_committed_exe: self.pk.root_committed_exe.clone(),
             air_heights,
         };
-        self.permuted_root_prover = Some(RootVerifierLocalProver::new(&root_permuted_pk).expect("create a root prover"));
+        self.permuted_root_prover =
+            Some(RootVerifierLocalProver::new(&root_permuted_pk).expect("create a root prover"));
         self.pk.permuted_root_pk = Some(Arc::new(root_permuted_pk));
     }
 }
@@ -788,7 +817,10 @@ pub fn verify_proofs(
 #[cfg(test)]
 mod tests {
     use crate::{
-        aggregation::{CenoAggregationProver, verify_proofs, verify_root_proof, ZKVMProofInput, RootVmVerifierInput, F},
+        aggregation::{
+            CenoAggregationProver, F, RootVmVerifierInput, ZKVMProofInput, verify_proofs,
+            verify_root_proof,
+        },
         zkvm_verifier::binding::E,
     };
     use ceno_zkvm::{
@@ -797,10 +829,10 @@ mod tests {
         structs::ZKVMVerifyingKey,
     };
     use mpcs::{Basefold, BasefoldRSParams};
-    use openvm_stark_sdk::config::setup_tracing_with_log_level;
-    use openvm_stark_backend::proof::Proof;
-    use std::fs::File;
     use openvm_sdk::SC;
+    use openvm_stark_backend::proof::Proof;
+    use openvm_stark_sdk::config::setup_tracing_with_log_level;
+    use std::fs::File;
 
     pub fn root_proof_permutation_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);
@@ -818,9 +850,10 @@ mod tests {
                 .expect("Failed to deserialize vk file");
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
 
-        let internal_proof: Proof<SC> = 
-            bincode::deserialize_from(File::open(internal_proof_path).expect("Failed to open proof file"))
-                .expect("Failed to deserialize proof file");
+        let internal_proof: Proof<SC> = bincode::deserialize_from(
+            File::open(internal_proof_path).expect("Failed to open proof file"),
+        )
+        .expect("Failed to deserialize proof file");
 
         let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs
             .into_iter()

@@ -46,6 +46,7 @@ tracing-subscriber.workspace = true
 transcript.workspace = true
 whir.workspace = true
 witness.workspace = true
+anyhow.workspace = true
 
 [[bin]]
 name = "e2e_aggregate"
