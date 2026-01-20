@@ -127,8 +127,8 @@ lto = "thin"
 #ceno_crypto_primitives = { path = "../ceno-patch/crypto-primitives", package = "ceno_crypto_primitives" }
 #ceno_syscall = { path = "../ceno-patch/syscall", package = "ceno_syscall" }
 
-# [patch."https://github.com/scroll-tech/ceno-gpu-mock.git"]
-# ceno_gpu = { path = "../ceno-gpu/cuda_hal", package = "cuda_hal", default-features = false, features=["bb31"] }
+#[patch."https://github.com/scroll-tech/ceno-gpu-mock.git"]
+#ceno_gpu = { path = "../ceno-gpu/cuda_hal", package = "cuda_hal", default-features = false, features = ["bb31"] }
 
 #[patch."https://github.com/scroll-tech/gkr-backend"]
 #ff_ext = { path = "../gkr-backend/crates/ff_ext", package = "ff_ext" }
