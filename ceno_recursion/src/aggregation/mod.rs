@@ -759,6 +759,11 @@ mod tests {
     use openvm_sdk::SC;
     use openvm_continuations::RootSC;
     use openvm_stark_backend::proof::Proof;
+    use openvm_stark_sdk::p3_baby_bear::BabyBear;
+    use crate::aggregation::{ZKVMProofInput, RootVmVerifierInput, VM_MAX_TRACE_HEIGHTS};
+    use openvm_circuit::arch::SingleSegmentVmProver;
+    use openvm_native_recursion::hints::Hintable;
+    type F = BabyBear;
 
     pub fn aggregation_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);
@@ -820,10 +825,10 @@ mod tests {
 
     pub fn test_root_proof_permutation_inner_thread() {
         let proof_path = "./src/imported/proof.bin";
+        let vk_path = "./src/imported/vk.bin";
         let internal_proof_path = "./src/exports/internal_proof.bin";
         let root_proof_path = "./src/exports/root_proof.bin";
-        let vk_path = "./src/imported/vk.bin";
-
+        
         let zkvm_proofs: Vec<ZKVMProof<E, Basefold<E, BasefoldRSParams>>> =
             bincode::deserialize_from(File::open(proof_path).expect("Failed to open proof file"))
                 .expect("Failed to deserialize proof file");
@@ -836,12 +841,35 @@ mod tests {
             bincode::deserialize_from(File::open(internal_proof_path).expect("Failed to open proof file"))
                 .expect("Failed to deserialize proof file");
 
-        let root_proof: Proof<RootSC> = 
-            bincode::deserialize_from(File::open(root_proof_path).expect("Failed to open proof file"))
-                .expect("Failed to deserialize proof file");
+        let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
+        let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs
+            .into_iter()
+            .enumerate()
+            .map(|(shard_id, p)| ZKVMProofInput::from_proof(shard_id, p, &agg_prover.base_vk))
+            .collect();
+        let user_public_values: Vec<F> = zkvm_proof_inputs
+            .iter()
+            .flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>())
+            .collect();
 
-        let root_proof_air_heights = root_proof.per_air.iter().map(|air| air.degree).collect::<Vec<usize>>();
-        println!("=> root_proof_air_heights: {:?}", root_proof_air_heights);
+        let root_input = RootVmVerifierInput {
+            proofs: vec![internal_proof],
+            public_values: user_public_values,
+        };
+        // Generate root proof
+        let root_proof = SingleSegmentVmProver::prove(
+            &mut agg_prover.root_prover,
+            root_input.write(),
+            VM_MAX_TRACE_HEIGHTS,
+        )
+        .expect("root proof generation should pass");
+
+
+        // let imported_root_proof: Proof<RootSC> = 
+        //     bincode::deserialize_from(File::open(root_proof_path).expect("Failed to open proof file"))
+        //         .expect("Failed to deserialize proof file");
+        // let root_proof_air_heights = root_proof.per_air.iter().map(|air| air.degree).collect::<Vec<usize>>();
+        // println!("=> root_proof_air_heights: {:?}", root_proof_air_heights);
     }
 
     #[test]
