@@ -37,6 +37,11 @@ pub struct JalInstruction<E>(PhantomData<E>);
 ///   of native WitIn values for address space arithmetic.
 impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     type InstructionConfig = JalConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::JAL]
+    }
 
     fn name() -> String {
         format!("{:?}", InsnKind::JAL)

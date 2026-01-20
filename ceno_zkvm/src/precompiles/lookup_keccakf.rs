@@ -389,6 +389,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // iterator over split witnesses
         let mut rotation_witness = rotation_witness.iter();
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..5 {
             #[allow(clippy::needless_range_loop)]
             for j in 0..5 {
