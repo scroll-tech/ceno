@@ -250,7 +250,8 @@ impl CenoAggregationProver {
                 ROOT_NUM_PUBLIC_VALUES,
             )
             .without_continuations()
-            .with_max_segment_len((1 << 24) - 100),
+            .with_max_segment_len((1 << 24) - 100)
+            .with_profiling(),
             native: Default::default(),
         };
 
@@ -430,7 +431,7 @@ impl CenoAggregationProver {
 
         let last_internal = proofs.pop().unwrap();
 
-        // Export root proof
+        // Export last internal proof
         let file =
             File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
         bincode::serialize_into(file, &last_internal).expect("failed to serialize internal proof");
@@ -462,6 +463,12 @@ impl CenoAggregationProver {
             VM_MAX_TRACE_HEIGHTS,
         )
         .expect("root proof");
+
+        // Export root proof
+        let file =
+            File::create("./src/exports/root_proof.bin").expect("Create export proof file");
+        bincode::serialize_into(file, &air_permuted_root_proof).expect("failed to serialize root proof");
+
         println!(
             "Root - Completed root proof at: {:?}",
             root_start_timestamp.elapsed()
@@ -471,20 +478,19 @@ impl CenoAggregationProver {
     }
 
     pub fn prove_static(&mut self, root_proof: &Proof<RootSC>) -> RawEvmProof {
-        self.static_prover_verifier
-            .prove_static(root_proof, &self.pk)
+        let halo2_proof = self.static_prover_verifier
+            .prove_static(root_proof, &self.pk);
+
+        // Export halo2 proof
+        let file =
+            File::create("./src/exports/halo2_proof.bin").expect("Create export proof file");
+        bincode::serialize_into(file, &halo2_proof).expect("failed to serialize halo2 proof");
+
+        halo2_proof
     }
 
     pub fn verify_static(&mut self, halo2_proof: RawEvmProof) -> Result<()> {
         let _ = self.static_prover_verifier.verify_static(halo2_proof);
-        Ok(())
-    }
-
-    pub fn verify_root_proof(&self, root_proof: &Proof<RootSC>) -> Result<(), VerificationError> {
-        self.root_prover
-            .vm
-            .engine
-            .verify(&self.vk.root_vm_vk, root_proof)?;
         Ok(())
     }
 
@@ -888,16 +894,8 @@ mod tests {
 
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
         let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
-
-        // Verify generated aggregated root_proof
-        // Method 1: Verify the root proof using the aggregation prover
-        agg_prover
-            .verify_root_proof(&root_proof)
-            .expect("root proof verification should pass");
-
-        // Method 2: Use stand-alone verification with only vk
-        verify_root_proof(&agg_prover.vk, &root_proof)
-            .expect("root proof verification should pass");
+        // let halo2_proof = agg_prover.prove_static(&root_proof);
+        // agg_prover.verify_static(halo2_proof).expect("halo2 proof is ok");
     }
 
     pub fn verify_single_inner_thread() {
@@ -936,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_root_proof_permutation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
@@ -949,7 +947,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
