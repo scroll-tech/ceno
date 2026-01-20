@@ -465,9 +465,9 @@ impl CenoAggregationProver {
         .expect("root proof");
 
         // Export root proof
-        let file =
-            File::create("./src/exports/root_proof.bin").expect("Create export proof file");
-        bincode::serialize_into(file, &air_permuted_root_proof).expect("failed to serialize root proof");
+        let file = File::create("./src/exports/root_proof.bin").expect("Create export proof file");
+        bincode::serialize_into(file, &air_permuted_root_proof)
+            .expect("failed to serialize root proof");
 
         println!(
             "Root - Completed root proof at: {:?}",
@@ -478,12 +478,12 @@ impl CenoAggregationProver {
     }
 
     pub fn prove_static(&mut self, root_proof: &Proof<RootSC>) -> RawEvmProof {
-        let halo2_proof = self.static_prover_verifier
+        let halo2_proof = self
+            .static_prover_verifier
             .prove_static(root_proof, &self.pk);
 
         // Export halo2 proof
-        let file =
-            File::create("./src/exports/halo2_proof.bin").expect("Create export proof file");
+        let file = File::create("./src/exports/halo2_proof.bin").expect("Create export proof file");
         bincode::serialize_into(file, &halo2_proof).expect("failed to serialize halo2 proof");
 
         halo2_proof
@@ -525,16 +525,24 @@ impl CenoAggregationProver {
         let ctx = vm
             .generate_proving_ctx(system_records, record_arenas)
             .expect("proving context");
-        let air_heights: Vec<u32> = ctx
+        let filtered_air_heights: Vec<u32> = ctx
             .into_iter()
             .map(|(_, air_ctx)| air_ctx.main_trace_height().next_power_of_two() as u32)
             .collect();
-        println!("=> air_heights: {:?}", air_heights);
+
+        // _debug, TODO: Access adaptor <u16> and NativeSumcheck AIRs are returning 0s, making the len of air_heights incorrect.
+        // In the root prover, these unused AIRs need to be removed.
+        // Temporary fix: Add back the missing 0 height entries for these 2 AIRs.
+        let access_adaptor_u16_air_id = 7usize;
+        let native_sumcheck_air_id = 8usize;
+        let mut air_heights = [1u32; 19].to_vec();
+        air_heights[0..access_adaptor_u16_air_id]
+            .copy_from_slice(&filtered_air_heights[0..access_adaptor_u16_air_id]);
+        air_heights[(native_sumcheck_air_id + 1)..]
+            .copy_from_slice(&filtered_air_heights[access_adaptor_u16_air_id..]);
 
         let root_air_perm = AirIdPermutation::compute(&air_heights);
         let mut root_vm_pk = self.pk.root_vm_pk.vm_pk.clone();
-        let vm_air_len = root_vm_pk.per_air.len();
-        println!("=> root vm pk air len: {:?}", vm_air_len);
         root_air_perm.permute(&mut root_vm_pk.per_air);
 
         let root_permuted_pk = RootVerifierProvingKey {
@@ -894,8 +902,10 @@ mod tests {
 
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
         let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
-        // let halo2_proof = agg_prover.prove_static(&root_proof);
-        // agg_prover.verify_static(halo2_proof).expect("halo2 proof is ok");
+        let halo2_proof = agg_prover.prove_static(&root_proof);
+        agg_prover
+            .verify_static(halo2_proof)
+            .expect("halo2 proof is ok");
     }
 
     pub fn verify_single_inner_thread() {
@@ -947,9 +957,9 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
-        let stack_size = 256 * 1024 * 1024; // 64 MB
+        let stack_size = 1024 * 1024 * 1024; // 512 MB
 
         let handler = std::thread::Builder::new()
             .stack_size(stack_size)

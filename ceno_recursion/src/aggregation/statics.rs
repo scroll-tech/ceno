@@ -19,11 +19,7 @@ use openvm_native_recursion::{
     },
     vars::StarkProofVariable,
 };
-use openvm_sdk::{
-    config::Halo2Config,
-    keygen::Halo2ProvingKey,
-    prover::Halo2Prover,
-};
+use openvm_sdk::{config::Halo2Config, keygen::Halo2ProvingKey, prover::Halo2Prover};
 use openvm_stark_backend::proof::Proof;
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 use p3::field::FieldAlgebra;
@@ -96,11 +92,15 @@ impl StaticProverVerifier {
     ) {
         assert!(!ceno_recursion_key.permuted_root_pk.is_none());
 
-        let verifier = ceno_recursion_key.permuted_root_pk.as_ref().unwrap().keygen_static_verifier(
-            &self.params_reader.read_params(self.config.verifier_k),
-            root_proof.clone(),
-            &self.static_pv_handler,
-        );
+        let verifier = ceno_recursion_key
+            .permuted_root_pk
+            .as_ref()
+            .unwrap()
+            .keygen_static_verifier(
+                &self.params_reader.read_params(self.config.verifier_k),
+                root_proof.clone(),
+                &self.static_pv_handler,
+            );
         let dummy_snark = verifier.generate_dummy_snark(&self.params_reader);
         let wrapper = if let Some(wrapper_k) = self.config.wrapper_k {
             Halo2WrapperProvingKey::keygen(&self.params_reader.read_params(wrapper_k), dummy_snark)

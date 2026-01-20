@@ -270,5 +270,6 @@ fn main() {
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
-    let _ = agg_prover.generate_root_proof(zkvm_proofs);
+    let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
+    let halo2_proof = agg_prover.prove_static(&root_proof);
 }
