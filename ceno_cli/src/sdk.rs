@@ -1,7 +1,7 @@
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_recursion::{
-    aggregation::{CenoAggregationProver, CenoRecursionProvingKeys, CenoRecursionVerifierKeys},
+    aggregation::{CenoAggregationProver, CenoRecursionProvingKeys, CenoRecursionVerifierKeys, ROOT_PROOF_AIR_HEIGHTS},
     zkvm_verifier::binding::E,
 };
 use ceno_zkvm::{
@@ -22,7 +22,7 @@ use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
 use openvm_native_circuit::{NativeBuilder, NativeConfig, NativeCpuBuilder};
-use openvm_sdk::{RootSC, prover::vm::new_local_prover};
+use openvm_sdk::{RootSC, prover::vm::new_local_prover, prover::RootVerifierLocalProver, keygen::RootVerifierProvingKey};
 use openvm_stark_backend::{config::StarkGenericConfig, proof::Proof};
 #[cfg(not(feature = "gpu"))]
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
@@ -218,13 +218,12 @@ where
                 "Aggregation must provide existing base layer vk."
             );
             let base_vk = self.zkvm_vk.as_ref().unwrap().clone();
-            let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeCpuBuilder>(
-                Default::default(),
-                &agg_pk.root_vm_pk,
-                agg_pk.root_committed_exe.exe.clone(),
-            )
-            .expect("root prover");
-
+            let root_prover = RootVerifierLocalProver::new(&RootVerifierProvingKey{
+                vm_pk: agg_pk.root_vm_pk.clone(),
+                root_committed_exe: agg_pk.root_committed_exe.clone(),
+                air_heights: ROOT_PROOF_AIR_HEIGHTS.to_vec(),
+            }).expect("root prover");
+            
             CenoAggregationProver::new(
                 base_vk,
                 leaf_prover,

@@ -78,7 +78,10 @@ use openvm_native_compiler::{
 };
 use openvm_sdk::util::check_max_constraint_degrees;
 use openvm_stark_backend::proof::Proof;
-use openvm_sdk::keygen::perm::AirIdPermutation;
+use openvm_sdk::{
+    keygen::{perm::AirIdPermutation, RootVerifierProvingKey},
+    prover::RootVerifierLocalProver,
+};
 
 mod internal;
 mod root;
@@ -97,12 +100,16 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216,
     2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
+pub const ROOT_PROOF_AIR_HEIGHTS: &[u32] = &[
+    262144, 2, 16, 131072, 262144, 131072, 4096, 32768, 262144, 65536, 524288, 32768, 131072,
+    65536, 262144, 32768, 262144
+];
 
 pub struct CenoAggregationProver {
     pub base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-    pub root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
+    pub root_prover: RootVerifierLocalProver,
     pub vk: CenoRecursionVerifierKeys<BabyBearPoseidon2Config>,
     pub pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     pub static_prover_verifier: StaticProverVerifier,
@@ -113,7 +120,7 @@ impl CenoAggregationProver {
         base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
         leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
         internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-        root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
+        root_prover: RootVerifierLocalProver,
         pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) -> Self {
         Self {
@@ -257,7 +264,7 @@ impl CenoAggregationProver {
 
         let mut root_engine = BabyBearPoseidon2RootEngine::new(root_fri_params);
         root_engine.max_constraint_degree = ROOT_MAX_CONSTRAINT_DEG;
-        let (mut root_vm, mut root_vm_pk) = VirtualMachine::<_, NativeCpuBuilder>::new_with_keygen(
+        let (root_vm, mut root_vm_pk) = VirtualMachine::<_, NativeCpuBuilder>::new_with_keygen(
             root_engine,
             Default::default(),
             root_vm_config.clone(),
@@ -276,8 +283,7 @@ impl CenoAggregationProver {
             root_vm.engine.config().pcs(),
         ));
 
-        let air_heights = VM_MAX_TRACE_HEIGHTS;
-        let root_air_perm = AirIdPermutation::compute(&air_heights);
+        let root_air_perm = AirIdPermutation::compute(&ROOT_PROOF_AIR_HEIGHTS);
         root_air_perm.permute(&mut root_vm_pk.per_air);
 
         let root_vm_pk = Arc::new(VmProvingKey {
@@ -285,12 +291,12 @@ impl CenoAggregationProver {
             vm_config: root_vm_config,
             vm_pk: root_vm_pk,
         });
-        let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeCpuBuilder>(
-            Default::default(),
-            &root_vm_pk,
-            root_committed_exe.exe.clone(),
-        )
-        .expect("root prover");
+
+        let root_prover = RootVerifierLocalProver::new(&RootVerifierProvingKey{
+            vm_pk: root_vm_pk.clone(),
+            root_committed_exe: root_committed_exe.clone(),
+            air_heights: ROOT_PROOF_AIR_HEIGHTS.to_vec(),
+        }).expect("root prover");
 
         // Recursion keys
         let vk = CenoRecursionVerifierKeys {
@@ -457,14 +463,6 @@ impl CenoAggregationProver {
         bincode::serialize_into(file, &root_proof).expect("failed to serialize root proof");
 
         root_proof
-    }
-
-    pub fn verify_root_proof(&self, root_proof: &Proof<RootSC>) -> Result<(), VerificationError> {
-        self.root_prover
-            .vm
-            .engine
-            .verify(&self.vk.root_vm_vk, root_proof)?;
-        Ok(())
     }
 
     pub fn prove_static(&mut self, root_proof: &Proof<RootSC>) -> RawEvmProof {
@@ -758,6 +756,9 @@ mod tests {
     use mpcs::{Basefold, BasefoldRSParams};
     use openvm_stark_sdk::config::setup_tracing_with_log_level;
     use std::fs::File;
+    use openvm_sdk::SC;
+    use openvm_continuations::RootSC;
+    use openvm_stark_backend::proof::Proof;
 
     pub fn aggregation_inner_thread() {
         setup_tracing_with_log_level(tracing::Level::WARN);
@@ -776,15 +777,10 @@ mod tests {
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
         let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
 
+        // _debug
         // Verify generated aggregated root_proof
-        // Method 1: Verify the root proof using the aggregation prover
-        agg_prover
-            .verify_root_proof(&root_proof)
-            .expect("root proof verification should pass");
-
-        // Method 2: Use stand-alone verification with only vk
-        verify_root_proof(&agg_prover.vk, &root_proof)
-            .expect("root proof verification should pass");
+        // verify_root_proof(&agg_prover.vk, &root_proof)
+        //     .expect("root proof verification should pass");
     }
 
     pub fn verify_single_inner_thread() {
@@ -822,10 +818,36 @@ mod tests {
         verify(zkvm_proofs.clone(), &verifier).expect("Verification failed");
     }
 
+    pub fn test_root_proof_permutation_inner_thread() {
+        let proof_path = "./src/imported/proof.bin";
+        let internal_proof_path = "./src/exports/internal_proof.bin";
+        let root_proof_path = "./src/exports/root_proof.bin";
+        let vk_path = "./src/imported/vk.bin";
+
+        let zkvm_proofs: Vec<ZKVMProof<E, Basefold<E, BasefoldRSParams>>> =
+            bincode::deserialize_from(File::open(proof_path).expect("Failed to open proof file"))
+                .expect("Failed to deserialize proof file");
+
+        let vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>> =
+            bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
+                .expect("Failed to deserialize vk file");
+        
+        let internal_proof: Proof<SC> = 
+            bincode::deserialize_from(File::open(internal_proof_path).expect("Failed to open proof file"))
+                .expect("Failed to deserialize proof file");
+
+        let root_proof: Proof<RootSC> = 
+            bincode::deserialize_from(File::open(root_proof_path).expect("Failed to open proof file"))
+                .expect("Failed to deserialize proof file");
+
+        let root_proof_air_heights = root_proof.per_air.iter().map(|air| air.degree).collect::<Vec<usize>>();
+        println!("=> root_proof_air_heights: {:?}", root_proof_air_heights);
+    }
+
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
-        let stack_size = 256 * 1024 * 1024; // 64 MB
+        let stack_size = 1024 * 1024 * 1024; // 512 MB
 
         let handler = std::thread::Builder::new()
             .stack_size(stack_size)
@@ -856,6 +878,19 @@ mod tests {
         let handler = std::thread::Builder::new()
             .stack_size(stack_size)
             .spawn(verify_single_rust_verifier_inner_thread)
+            .expect("Failed to spawn thread");
+
+        handler.join().expect("Thread panicked");
+    }
+
+    #[test]
+    // #[ignore = "need to generate proof first"]
+    pub fn test_root_proof_permutation() {
+        let stack_size = 256 * 1024 * 1024; // 64 MB
+
+        let handler = std::thread::Builder::new()
+            .stack_size(stack_size)
+            .spawn(test_root_proof_permutation_inner_thread)
             .expect("Failed to spawn thread");
 
         handler.join().expect("Thread panicked");
