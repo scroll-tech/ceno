@@ -158,6 +158,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
 
+    #[serde(skip)]
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
 
     pub(crate) phantom: PhantomData<E>,
