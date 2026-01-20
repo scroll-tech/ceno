@@ -68,6 +68,11 @@ pub struct Uint256MulInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
     type InstructionConfig = EcallUint256MulConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "Ecall_Uint256Mul".to_string()
@@ -221,7 +226,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let syscall_code = UINT256_MUL;
 
@@ -417,6 +422,11 @@ pub struct EcallUint256InvConfig<E: ExtensionField, Spec: Uint256InvSpec> {
 
 impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstruction<E, Spec> {
     type InstructionConfig = EcallUint256InvConfig<E, Spec>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         Spec::name()
@@ -536,7 +546,7 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let syscall_code = Spec::syscall();
 

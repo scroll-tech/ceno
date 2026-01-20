@@ -67,6 +67,11 @@ impl<E: ExtensionField, P: FpOpField + Fp2MulSpec + NumWords> Instruction<E>
     for Fp2MulInstruction<E, P>
 {
     type InstructionConfig = EcallFp2MulConfig<E, P>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "Ecall_Fp2Mul".to_string()
@@ -110,7 +115,7 @@ impl<E: ExtensionField, P: FpOpField + Fp2MulSpec + NumWords> Instruction<E>
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         assign_fp2_mul_instances::<E, P>(config, shard_ctx, num_witin, num_structural_witin, steps)
     }
@@ -217,7 +222,7 @@ fn assign_fp2_mul_instances<E: ExtensionField, P: FpOpField + Fp2MulSpec + NumWo
     shard_ctx: &mut ShardContext,
     num_witin: usize,
     num_structural_witin: usize,
-    steps: Vec<&StepRecord>,
+    steps: &[StepRecord],
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     let mut lk_multiplicity = LkMultiplicity::default();
     if steps.is_empty() {
