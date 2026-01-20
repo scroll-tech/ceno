@@ -18,6 +18,8 @@ use openvm_circuit::{
     },
     system::program::trace::VmCommittedExe,
     utils::air_test_impl,
+    arch::{PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver, instructions::exe::VmExe},
+    utils::next_power_of_two_or_zero,
 };
 use openvm_stark_backend::{
     config::{PcsProverData, Val},
@@ -67,10 +69,6 @@ use crate::aggregation::{
     types::{InternalVmVerifierPvs, VmVerifierPvs},
 };
 use anyhow::Result;
-use openvm_circuit::{
-    arch::{PUBLIC_VALUES_AIR_ID, SingleSegmentVmProver, instructions::exe::VmExe},
-    utils::next_power_of_two_or_zero,
-};
 use openvm_continuations::RootSC;
 use openvm_native_compiler::{
     asm::AsmConfig,
@@ -100,6 +98,7 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216,
     2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
+// _debug: placeholder. in production the air heights must be calculated by running an internal proof through root prover preflight
 pub const ROOT_PROOF_AIR_HEIGHTS: &[u32] = &[
     262144, 2, 16, 131072, 262144, 131072, 4096, 32768, 262144, 65536, 524288, 32768, 131072,
     65536, 262144, 32768, 262144
@@ -109,7 +108,7 @@ pub struct CenoAggregationProver {
     pub base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
     pub internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-    pub root_prover: RootVerifierLocalProver,
+    pub root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
     pub vk: CenoRecursionVerifierKeys<BabyBearPoseidon2Config>,
     pub pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     pub static_prover_verifier: StaticProverVerifier,
@@ -120,7 +119,7 @@ impl CenoAggregationProver {
         base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
         leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
         internal_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
-        root_prover: RootVerifierLocalProver,
+        root_prover: VmInstance<BabyBearPoseidon2RootEngine, NativeCpuBuilder>,
         pk: CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) -> Self {
         Self {
@@ -283,20 +282,18 @@ impl CenoAggregationProver {
             root_vm.engine.config().pcs(),
         ));
 
-        let root_air_perm = AirIdPermutation::compute(&ROOT_PROOF_AIR_HEIGHTS);
-        root_air_perm.permute(&mut root_vm_pk.per_air);
-
         let root_vm_pk = Arc::new(VmProvingKey {
             fri_params: root_fri_params,
             vm_config: root_vm_config,
             vm_pk: root_vm_pk,
         });
 
-        let root_prover = RootVerifierLocalProver::new(&RootVerifierProvingKey{
-            vm_pk: root_vm_pk.clone(),
-            root_committed_exe: root_committed_exe.clone(),
-            air_heights: ROOT_PROOF_AIR_HEIGHTS.to_vec(),
-        }).expect("root prover");
+        let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeCpuBuilder>(
+            Default::default(),
+            &root_vm_pk,
+            root_committed_exe.exe.clone(),
+        )
+        .expect("root prover");
 
         // Recursion keys
         let vk = CenoRecursionVerifierKeys {
@@ -438,6 +435,10 @@ impl CenoAggregationProver {
         println!("Aggregation - Final height: {:?}", internal_node_height);
 
         let last_internal = proofs.pop().unwrap();
+
+        // Export last internal proof
+        let file = File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
+        bincode::serialize_into(file, &last_internal).expect("failed to serialize internal proof");
 
         // _todo: possible multi-layer wrapping for reducing AIR heights
 
@@ -761,8 +762,40 @@ mod tests {
     use openvm_stark_backend::proof::Proof;
     use openvm_stark_sdk::p3_baby_bear::BabyBear;
     use crate::aggregation::{ZKVMProofInput, RootVmVerifierInput, VM_MAX_TRACE_HEIGHTS};
-    use openvm_circuit::arch::SingleSegmentVmProver;
     use openvm_native_recursion::hints::Hintable;
+    use openvm_circuit::{
+        arch::{
+            MemoryConfig, SystemConfig, VirtualMachine, VmInstance, instructions::program::Program, SingleSegmentVmProver
+        },
+        system::program::trace::VmCommittedExe,
+        utils::air_test_impl,
+        arch::{PUBLIC_VALUES_AIR_ID, instructions::exe::VmExe},
+        utils::next_power_of_two_or_zero,
+    };
+    use openvm_native_circuit::{NativeBuilder, NativeConfig, NativeCpuBuilder};
+    use openvm_sdk::config::SBOX_SIZE;
+    use crate::aggregation::{
+        ROOT_NUM_PUBLIC_VALUES, ROOT_MAX_CONSTRAINT_DEG, CenoRootVmVerifierConfig
+    };
+    use openvm_native_compiler::{
+        conversion::CompilerOptions,
+        prelude::DIGEST_SIZE
+    };
+    use openvm_stark_sdk::{
+        config::baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
+        engine::{StarkFriEngine, StarkEngine}
+    };
+    use openvm_circuit::{
+        arch::{PreflightExecutionOutput, interpreter_preflight::PreflightInterpretedInstance},
+    };
+    use openvm_stark_backend::config::StarkGenericConfig;
+    use openvm_sdk::prover::vm::types::VmProvingKey;
+    use openvm_sdk::prover::vm::new_local_prover;
+    use openvm_sdk::keygen::perm::AirIdPermutation;
+    use openvm_sdk::keygen::RootVerifierProvingKey;
+    use openvm_sdk::prover::RootVerifierLocalProver;
+    use std::sync::Arc;
+
     type F = BabyBear;
 
     pub fn aggregation_inner_thread() {
@@ -827,8 +860,7 @@ mod tests {
         let proof_path = "./src/imported/proof.bin";
         let vk_path = "./src/imported/vk.bin";
         let internal_proof_path = "./src/exports/internal_proof.bin";
-        let root_proof_path = "./src/exports/root_proof.bin";
-        
+
         let zkvm_proofs: Vec<ZKVMProof<E, Basefold<E, BasefoldRSParams>>> =
             bincode::deserialize_from(File::open(proof_path).expect("Failed to open proof file"))
                 .expect("Failed to deserialize proof file");
@@ -841,7 +873,7 @@ mod tests {
             bincode::deserialize_from(File::open(internal_proof_path).expect("Failed to open proof file"))
                 .expect("Failed to deserialize proof file");
 
-        let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
+        let agg_prover = CenoAggregationProver::from_base_vk(vk);
         let zkvm_proof_inputs: Vec<ZKVMProofInput> = zkvm_proofs
             .into_iter()
             .enumerate()
@@ -851,25 +883,104 @@ mod tests {
             .iter()
             .flat_map(|p| p.raw_pi.iter().flat_map(|v| v.clone()).collect::<Vec<F>>())
             .collect();
-
         let root_input = RootVmVerifierInput {
             proofs: vec![internal_proof],
             public_values: user_public_values,
         };
-        // Generate root proof
-        let root_proof = SingleSegmentVmProver::prove(
-            &mut agg_prover.root_prover,
-            root_input.write(),
-            VM_MAX_TRACE_HEIGHTS,
-        )
-        .expect("root proof generation should pass");
 
+        let root_verifier_pk = {
+            let mut root_engine = BabyBearPoseidon2RootEngine::new(agg_prover.pk.root_vm_pk.fri_params);
+            root_engine.max_constraint_degree = ROOT_MAX_CONSTRAINT_DEG;
+            let root_vm_config = NativeConfig {
+                system: SystemConfig::new(
+                    SBOX_SIZE.min(ROOT_MAX_CONSTRAINT_DEG),
+                    MemoryConfig {
+                        max_access_adapter_n: 16,
+                        ..Default::default()
+                    },
+                    ROOT_NUM_PUBLIC_VALUES,
+                )
+                .without_continuations()
+                .with_max_segment_len((1 << 24) - 100)
+                .with_profiling(),
+                native: Default::default(),
+            };
+            let internal_vm_verifier_commit: [F; DIGEST_SIZE] =
+                agg_prover.pk.internal_committed_exe.get_program_commit().into();
+            let root_program = CenoRootVmVerifierConfig {
+                leaf_fri_params: agg_prover.pk.leaf_vm_pk.fri_params,
+                internal_fri_params: agg_prover.pk.internal_vm_pk.fri_params,
+                num_user_public_values: ROOT_NUM_PUBLIC_VALUES,
+                internal_vm_verifier_commit,
+                compiler_options: CompilerOptions::default().with_cycle_tracker(),
+            }
+            .build_program(&agg_prover.vk.leaf_vm_vk, &agg_prover.vk.internal_vm_vk);
+            let (mut root_vm, mut root_vm_pk) = VirtualMachine::<_, NativeCpuBuilder>::new_with_keygen(
+                root_engine,
+                Default::default(),
+                root_vm_config.clone(),
+            )
+            .expect("root keygen");
+            let root_committed_exe = Arc::new(VmCommittedExe::<RootSC>::commit(
+                root_program.into(),
+                root_vm.engine.config().pcs(),
+            ));
+            let root_vm_pk = Arc::new(VmProvingKey {
+                fri_params: agg_prover.pk.root_vm_pk.fri_params,
+                vm_config: root_vm_config.clone(),
+                vm_pk: root_vm_pk,
+            });
+            let mut root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeCpuBuilder>(
+                Default::default(),
+                &root_vm_pk,
+                root_committed_exe.exe.clone(),
+            )
+            .expect("root prover");
+            
+            // Calculate trace heights by pushing the root input through preflight
+            let mut trace_heights = VM_MAX_TRACE_HEIGHTS.to_vec();
+            trace_heights[PUBLIC_VALUES_AIR_ID] = root_input.public_values.len() as u32;
+            let state = root_vm.create_initial_state(&root_committed_exe.exe, root_input.write());
+            let cached_program_trace = root_vm.transport_committed_exe_to_device(&root_committed_exe);
+            root_vm.load_program(cached_program_trace);
+            root_vm.transport_init_memory_to_device(&state.memory);
+            let mut preflight_interpreter = root_vm.preflight_interpreter(&root_committed_exe.exe).expect("preflight interpreter");
+            let PreflightExecutionOutput {
+                system_records,
+                record_arenas,
+                ..
+            } = root_vm.execute_preflight(&mut preflight_interpreter, state, None, &trace_heights).expect("execute preflight");
+            let ctx = root_vm.generate_proving_ctx(system_records, record_arenas).expect("proving ctx generation");
+            let air_heights: Vec<u32> = ctx
+                .into_iter()
+                .map(|(_, air_ctx)| {
+                    next_power_of_two_or_zero(air_ctx.main_trace_height())
+                        .try_into()
+                        .unwrap()
+                })
+                .collect();
+            let root_air_perm = AirIdPermutation::compute(&air_heights);
 
-        // let imported_root_proof: Proof<RootSC> = 
-        //     bincode::deserialize_from(File::open(root_proof_path).expect("Failed to open proof file"))
-        //         .expect("Failed to deserialize proof file");
-        // let root_proof_air_heights = root_proof.per_air.iter().map(|air| air.degree).collect::<Vec<usize>>();
-        // println!("=> root_proof_air_heights: {:?}", root_proof_air_heights);
+            let mut root_vm_pk = root_vm_pk.vm_pk.clone();
+            root_air_perm.permute(&mut root_vm_pk.per_air);
+
+            RootVerifierProvingKey {
+                vm_pk: Arc::new(VmProvingKey {
+                    fri_params: agg_prover.pk.root_vm_pk.fri_params,
+                    vm_config: root_vm_config,
+                    vm_pk: root_vm_pk
+                }),
+                root_committed_exe,
+                air_heights,
+            }
+        };
+
+        // Generate a root proof using the permuted pk
+        let mut root_prover = RootVerifierLocalProver::new(&root_verifier_pk).expect("create a root prover");
+        let air_permuted_root_proof = SingleSegmentVmProver::prove(&mut root_prover, root_input.write(), VM_MAX_TRACE_HEIGHTS).expect("root proof");
+
+        let root_proof_trace_heights = air_permuted_root_proof.per_air.iter().map(|air| air.degree).collect::<Vec<usize>>();
+        println!("=> Root proof trace heights from permuted pk: {:?}", root_proof_trace_heights);
     }
 
     #[test]
