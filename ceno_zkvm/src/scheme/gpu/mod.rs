@@ -10,19 +10,37 @@ use crate::{
     },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
+use ceno_gpu::bb31::{CudaHalBB31, GpuPolynomial};
+use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
-    gpu::{GpuBackend, GpuProver},
+    gkr::{
+        self, Evaluation, GKRProof, GKRProverOutput,
+        layer::{LayerWitness, gpu::utils::extract_mle_relationships_from_monomial_terms},
+    },
+    gpu::{GpuBackend, GpuProver, gpu_prover::BB31Ext},
     hal::ProverBackend,
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
-use std::{collections::BTreeMap, sync::Arc};
+use multilinear_extensions::{
+    Expression, ToExpr,
+    mle::{FieldType, IntoMLE, MultilinearExtension},
+    util::ceil_log2,
+    virtual_poly::{build_eq_x_r_vec, eq_eval},
+};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
+use std::{
+    collections::BTreeMap,
+    iter::{once, repeat_n},
+    sync::Arc,
+};
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::IOPProverMessage,
+    structs::{IOPProof, IOPProverMessage},
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
@@ -33,15 +51,23 @@ use tracing::info_span;
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::gpu_prover::*;
 
+mod util;
+use util::{
+    WitnessRegistry, batch_mles_take_half, expect_basic_transcript, hal_to_backend_error,
+    mle_filter_even_odd_batch, mle_host_to_gpu, read_septic_value_from_gpu, symbolic_from_mle,
+};
 pub struct GpuTowerProver;
 
 use crate::{
-    scheme::{constants::NUM_FANIN, cpu::CpuEccProver},
+    scheme::{
+        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        septic_curve::SepticPoint,
+    },
     structs::EccQuarkProof,
 };
 use gkr_iop::{
-    gpu::{ArcMultilinearExtensionGpu, MultilinearExtensionGpu},
-    selector::SelectorContext,
+    gpu::{ArcMultilinearExtensionGpu, BB31Base, MultilinearExtensionGpu},
+    selector::{SelectorContext, SelectorType},
 };
 
 // Extract out_evals from GPU-built tower witnesses
@@ -106,7 +132,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         PCS::Commitment,
     ) {
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
-            panic!("GPU backend only supports Goldilocks base field");
+            panic!("GPU backend only supports BabyBear base field");
         }
 
         let span = entered_span!("[gpu] init pp", profiling_2 = true);
@@ -217,6 +243,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
@@ -320,46 +347,43 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
                 last_layer
             })
             .collect::<Vec<_>>()
+    } else if lk_denominator_last_layer.is_empty() {
+        vec![]
     } else {
-        if lk_denominator_last_layer.is_empty() {
-            vec![]
-        } else {
-            // Case when numerator is empty - create shared ones_buffer and use views
-            // This saves memory by having all p1, p2 polynomials reference the same buffer
-            let nv = lk_denominator_last_layer[0][0].num_vars();
+        // Case when numerator is empty - create shared ones_buffer and use views
+        // This saves memory by having all p1, p2 polynomials reference the same buffer
+        let nv = lk_denominator_last_layer[0][0].num_vars();
 
-            // Create one shared ones_buffer as Owned (can be 'static)
-            let ones_poly = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
-                .map_err(|e| format!("Failed to create shared ones_buffer: {:?}", e))
-                .unwrap();
-            // SAFETY: Owned buffer can be safely treated as 'static
-            let ones_poly_static: GpuPolynomialExt<'static> =
-                unsafe { std::mem::transmute(ones_poly) };
-            ones_buffer.push(ones_poly_static);
+        // Create one shared ones_buffer as Owned (can be 'static)
+        let ones_poly = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
+            .map_err(|e| format!("Failed to create shared ones_buffer: {:?}", e))
+            .unwrap();
+        // SAFETY: Owned buffer can be safely treated as 'static
+        let ones_poly_static: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(ones_poly) };
+        ones_buffer.push(ones_poly_static);
 
-            // Get reference from storage to ensure proper lifetime
-            let ones_poly_ref = ones_buffer.last().unwrap();
-            let mle_len_bytes = ones_poly_ref.evaluations().len() * std::mem::size_of::<BB31Ext>();
+        // Get reference from storage to ensure proper lifetime
+        let ones_poly_ref = ones_buffer.last().unwrap();
+        let mle_len_bytes = ones_poly_ref.evaluations().len() * std::mem::size_of::<BB31Ext>();
 
-            // Create views referencing the shared ones_buffer for each tower's p1, p2
-            lk_denominator_last_layer
-                .into_iter()
-                .map(|lk_d_chunks| {
-                    // Create views of ones_buffer for p1 and p2
-                    let p1_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
-                    let p2_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
-                    let p1_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p1_view), nv);
-                    let p2_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p2_view), nv);
-                    // SAFETY: views from 'static buffer can be 'static
-                    let p1_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p1_gpu) };
-                    let p2_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p2_gpu) };
-                    // Use [p1, p2, q1, q2] format for the last layer
-                    let mut last_layer = vec![p1_gpu, p2_gpu];
-                    last_layer.extend(lk_d_chunks);
-                    last_layer
-                })
-                .collect::<Vec<_>>()
-        }
+        // Create views referencing the shared ones_buffer for each tower's p1, p2
+        lk_denominator_last_layer
+            .into_iter()
+            .map(|lk_d_chunks| {
+                // Create views of ones_buffer for p1 and p2
+                let p1_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
+                let p2_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
+                let p1_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p1_view), nv);
+                let p2_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p2_view), nv);
+                // SAFETY: views from 'static buffer can be 'static
+                let p1_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p1_gpu) };
+                let p2_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p2_gpu) };
+                // Use [p1, p2, q1, q2] format for the last layer
+                let mut last_layer = vec![p1_gpu, p2_gpu];
+                last_layer.extend(lk_d_chunks);
+                last_layer
+            })
+            .collect::<Vec<_>>()
     };
     if !logup_last_layers.is_empty() {
         let first_layer = &logup_last_layers[0];
@@ -518,7 +542,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         'b: 'c,
     {
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
-            panic!("GPU backend only supports Goldilocks base field");
+            panic!("GPU backend only supports BabyBear base field");
         }
 
         // Calculate r_set_len directly from constraint system
@@ -731,20 +755,217 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBa
         invs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<EccQuarkProof<E>, ZKVMError> {
-        // TODO implement GPU version of `create_ecc_proof`
-        let xs = xs.iter().map(|mle| mle.inner_to_mle().into()).collect_vec();
-        let ys = ys.iter().map(|mle| mle.inner_to_mle().into()).collect_vec();
-        let invs = invs
-            .iter()
-            .map(|mle| mle.inner_to_mle().into())
-            .collect_vec();
-        Ok(CpuEccProver::create_ecc_proof(
+        assert_eq!(xs.len(), SEPTIC_EXTENSION_DEGREE);
+        assert_eq!(ys.len(), SEPTIC_EXTENSION_DEGREE);
+
+        let n = xs[0].mle.num_vars() - 1;
+        tracing::debug!(
+            "Creating EC Summation Quark proof with {} points in {n} variables",
+            num_instances
+        );
+
+        let out_rt = transcript.sample_and_append_vec(b"ecc", n);
+
+        // expression with add (3 zero constraints), bypass (2 zero constraints), export (2 zero constraints)
+        let alpha_pows = transcript.sample_and_append_challenge_pows(
+            SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2 + SEPTIC_EXTENSION_DEGREE * 2,
+            b"ecc_alpha",
+        );
+        let mut alpha_pows_iter = alpha_pows.iter();
+
+        let sel_add = SelectorType::QuarkBinaryTreeLessThan(0.into());
+        let sel_add_ctx = SelectorContext {
+            offset: 0,
             num_instances,
-            xs,
-            ys,
-            invs,
-            transcript,
-        ))
+            num_vars: n,
+        };
+        let sel_add_mle: MultilinearExtension<'_, E> =
+            sel_add.compute(&out_rt, &sel_add_ctx).unwrap();
+
+        // the final sum is located at [1,...,1,0] (in big-endian)
+        let last_evaluation_index = (1 << n) - 2;
+        let lsi_on_hypercube = once(E::ZERO).chain(repeat_n(E::ONE, n - 1)).collect_vec();
+        let mut sel_export = (0..(1 << n))
+            .into_par_iter()
+            .map(|_| E::ZERO)
+            .collect::<Vec<_>>();
+        sel_export[last_evaluation_index] = eq_eval(&out_rt, lsi_on_hypercube.as_slice());
+        let sel_export_mle = sel_export.into_mle();
+
+        // we construct sel_bypass witness here
+        // verifier can derive it via `sel_bypass = eq - sel_add - sel_last_onehot`
+        let mut sel_bypass_mle: Vec<E> = build_eq_x_r_vec(&out_rt);
+        match sel_add_mle.evaluations() {
+            FieldType::Ext(sel_add_mle) => sel_add_mle
+                .par_iter()
+                .zip(sel_bypass_mle.par_iter_mut())
+                .for_each(|(sel_add, sel_bypass)| {
+                    if *sel_add != E::ZERO {
+                        *sel_bypass = E::ZERO;
+                    }
+                }),
+            _ => unreachable!(),
+        }
+        *sel_bypass_mle.last_mut().unwrap() = E::ZERO;
+        let sel_bypass_mle = sel_bypass_mle.into_mle();
+
+        let cuda_hal = get_cuda_hal().map_err(hal_to_backend_error)?;
+        let sel_add_gpu = mle_host_to_gpu(&cuda_hal, &sel_add_mle);
+        let sel_bypass_gpu = mle_host_to_gpu(&cuda_hal, &sel_bypass_mle);
+        let sel_export_gpu = mle_host_to_gpu(&cuda_hal, &sel_export_mle);
+        let split_batches = mle_filter_even_odd_batch::<E>(
+            &cuda_hal,
+            &[(&xs, false), (&xs, true), (&ys, false), (&ys, true)],
+        )?;
+        let mut split_iter = split_batches.into_iter();
+        let x0_gpu = split_iter.next().unwrap_or_default();
+        let x1_gpu = split_iter.next().unwrap_or_default();
+        let y0_gpu = split_iter.next().unwrap_or_default();
+        let y1_gpu = split_iter.next().unwrap_or_default();
+
+        // build x[1,b], y[1,b], s[1,b]
+        let x3_gpu = batch_mles_take_half::<E>(&xs, 1)?;
+        let y3_gpu = batch_mles_take_half::<E>(&ys, 1)?;
+        let s_gpu = batch_mles_take_half::<E>(&invs, 1)?;
+
+        let mut registry: WitnessRegistry<'a, E> = WitnessRegistry::default();
+        let sel_add_expr = registry.register(sel_add_gpu);
+        let sel_bypass_expr = registry.register(sel_bypass_gpu);
+        let sel_export_expr = registry.register(sel_export_gpu);
+
+        let s = symbolic_from_mle(&mut registry, &s_gpu);
+        let x0 = symbolic_from_mle(&mut registry, &x0_gpu);
+        let y0 = symbolic_from_mle(&mut registry, &y0_gpu);
+        let x1 = symbolic_from_mle(&mut registry, &x1_gpu);
+        let y1 = symbolic_from_mle(&mut registry, &y1_gpu);
+        let x3 = symbolic_from_mle(&mut registry, &x3_gpu);
+        let y3 = symbolic_from_mle(&mut registry, &y3_gpu);
+
+        let mut exprs_add = vec![];
+        let mut exprs_bypass = vec![];
+        // affine addition
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[b,1]) - (y[b,0] - y[b,1]) with b != (1,...,1)
+        exprs_add.extend(
+            (s.clone() * (&x0 - &x1) - (&y0 - &y1))
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        // zerocheck: 0 = s[1,b]^2 - x[b,0] - x[b,1] - x[1,b] with b != (1,...,1)
+        exprs_add.extend(
+            ((&s * &s) - &x0 - &x1 - &x3)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+        // zerocheck: 0 = s[1,b] * (x[b,0] - x[1,b]) - (y[b,0] + y[1,b]) with b != (1,...,1)
+        exprs_add.extend(
+            (s.clone() * (&x0 - &x3) - (&y0 + &y3))
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        let exprs_add = exprs_add.into_iter().sum::<Expression<E>>() * sel_add_expr;
+
+        // deal with bypass
+        // 0 = (x[1,b] - x[b,0])
+        exprs_bypass.extend(
+            (&x3 - &x0)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+        // 0 = (y[1,b] - y[b,0])
+        exprs_bypass.extend(
+            (&y3 - &y0)
+                .to_exprs()
+                .into_iter()
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha))),
+        );
+
+        // export x[1,...,1,0], y[1,...,1,0] for final result (using big-endian notation)
+        let xp_gpu = batch_mles_take_half::<E>(&xs, 1)?;
+        let yp_gpu = batch_mles_take_half::<E>(&ys, 1)?;
+        let final_sum_x = read_septic_value_from_gpu(&xp_gpu, last_evaluation_index)?;
+        let final_sum_y = read_septic_value_from_gpu(&yp_gpu, last_evaluation_index)?;
+        // 0 = sel_export * (x[1,b] - final_sum.x)
+        // 0 = sel_export * (y[1,b] - final_sum.y)
+        let export_expr =
+            x3.0.iter()
+                .zip_eq(final_sum_x.0.iter())
+                .chain(y3.0.iter().zip_eq(final_sum_y.0.iter()))
+                .map(|(x, final_x)| x - final_x.expr())
+                .zip_eq(alpha_pows_iter.by_ref().take(SEPTIC_EXTENSION_DEGREE * 2))
+                .map(|(e, alpha)| e * Expression::Constant(Either::Right(*alpha)))
+                .sum::<Expression<E>>()
+                * sel_export_expr;
+
+        let exprs_bypass = exprs_bypass.into_iter().sum::<Expression<E>>() * sel_bypass_expr;
+
+        let zero_expr = exprs_add + exprs_bypass + export_expr;
+
+        let monomial_terms = zero_expr.get_monomial_terms();
+        let gpu_refs = registry.gpu_refs();
+        let (term_coefficients, mle_indices_per_term, mle_size_info) =
+            extract_mle_relationships_from_monomial_terms(&monomial_terms, &gpu_refs, &[], &[]);
+        let max_degree = mle_indices_per_term
+            .iter()
+            .map(|indices| indices.len())
+            .max()
+            .unwrap_or(0);
+        let term_coefficients_gl64: Vec<BB31Ext> =
+            unsafe { std::mem::transmute(term_coefficients.clone()) };
+        let gpu_refs_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
+            unsafe { std::mem::transmute(gpu_refs) };
+        let gpu_field_refs = gpu_refs_gl64.iter().map(|mle| &mle.mle).collect_vec();
+
+        let basic_transcript = expect_basic_transcript(transcript);
+        let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
+            .prove_generic_sumcheck_gpu(
+                gpu_field_refs,
+                &mle_size_info,
+                &term_coefficients_gl64,
+                &mle_indices_per_term,
+                n,
+                max_degree,
+                basic_transcript,
+            )
+            .map_err(|e| hal_to_backend_error(format!("GPU sumcheck failed: {e:?}")))?;
+
+        drop(cuda_hal);
+
+        let proof_gpu_e: IOPProof<E> = unsafe { std::mem::transmute(proof_gpu) };
+        let evals_gpu_e: Vec<Vec<E>> = unsafe { std::mem::transmute(evals_gpu) };
+        let mut evals = Vec::new();
+        for chunk in evals_gpu_e {
+            evals.extend(chunk);
+        }
+        let rt: Point<E> = unsafe {
+            std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(
+                challenges_gpu.iter().map(|c| c.elements).collect(),
+            )
+        };
+
+        // 3 for sel_add, sel_bypass, sel_export
+        // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
+        assert_eq!(evals.len(), 3 + SEPTIC_EXTENSION_DEGREE * 7);
+        let final_sum = SepticPoint::from_affine(final_sum_x.clone(), final_sum_y.clone());
+        assert_eq!(proof_gpu_e.extract_sum(), E::ZERO);
+
+        Ok(EccQuarkProof {
+            zerocheck_proof: proof_gpu_e,
+            num_instances,
+            evals,
+            rt,
+            sum: final_sum,
+        })
     }
 }
 
@@ -760,7 +981,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
         transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
-            panic!("GPU backend only supports Goldilocks base field");
+            panic!("GPU backend only supports BabyBear base field");
         }
 
         let mut rounds = vec![];
@@ -822,7 +1043,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
             })
             .collect();
 
-        let gpu_proof = if std::any::TypeId::of::<E>() == std::any::TypeId::of::<BB31Ext>() {
+        if std::any::TypeId::of::<E>() == std::any::TypeId::of::<BB31Ext>() {
             let transcript_any = transcript as &mut dyn std::any::Any;
             let basic_transcript = transcript_any
                 .downcast_mut::<BasicTranscript<BB31Ext>>()
@@ -838,9 +1059,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
             std::mem::forget(gpu_proof_basefold);
             gpu_proof
         } else {
-            panic!("GPU backend only supports Goldilocks base field");
-        };
-        gpu_proof
+            panic!("GPU backend only supports BabyBear base field");
+        }
     }
 }
 
