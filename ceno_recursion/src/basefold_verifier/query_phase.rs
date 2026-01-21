@@ -308,12 +308,6 @@ pub struct QueryPhaseVerifierInputVariable<C: Config> {
 }
 
 #[derive(DslVariable, Clone)]
-pub struct PackedCodeword<C: Config> {
-    pub low: Ext<C::F, C::EF>,
-    pub high: Ext<C::F, C::EF>,
-}
-
-#[derive(DslVariable, Clone)]
 pub struct RoundContextVariable<C: Config> {
     pub(crate) opened_values_buffer: Array<C, Array<C, Felt<C::F>>>,
     pub(crate) log2_heights: Array<C, Var<C::N>>,
@@ -388,9 +382,9 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
     let initial_cur_num_var: Var<C::N> = builder.eval(input.max_num_var.clone());
     let initial_log2_height: Var<C::N> =
-        builder.eval(initial_cur_num_var + Usize::from(get_rate_log() - 1));
+        builder.eval(initial_cur_num_var + Usize::from(get_rate_log()));
     builder.assert_eq::<Var<C::N>>(
-        input.proof.commits.len() + Usize::from(1),
+        input.proof.commits.len(),
         input.fold_challenges.len(),
     );
 
@@ -482,15 +476,11 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 });
             let idx_bits = idx_bits.slice(builder, 1, log2_max_codeword_size);
 
-            let reduced_codeword_by_height: Array<C, PackedCodeword<C>> =
+            let reduced_codeword_by_height: Array<C, Ext<C::F, C::EF>> =
                 builder.dyn_array(log2_max_codeword_size);
             // initialize reduced_codeword_by_height with zeroes
             iter_zip!(builder, reduced_codeword_by_height).for_each(|ptr_vec, builder| {
-                let zero_codeword = PackedCodeword {
-                    low: zero,
-                    high: zero,
-                };
-                builder.set_value(&reduced_codeword_by_height, ptr_vec[0], zero_codeword);
+                builder.set_value(&reduced_codeword_by_height, ptr_vec[0], zero);
             });
             let query = builder.iter_ptr_get(&input.proof.query_opening_proof, ptr_vec[1]);
 
@@ -523,39 +513,23 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                             builder.iter_ptr_get(&round_context.minus_alpha_offsets, ptr_vec[1]);
                         let opening = builder.iter_ptr_get(&round.openings, ptr_vec[4]);
                         let width = opening.point_and_evals.evals.len();
-                        let low_values = opened_values_buffer.slice(builder, 0, width.clone());
-                        let high_values = opened_values_buffer.slice(
-                            builder,
-                            width.clone(),
-                            opened_values_buffer.len(),
-                        );
 
                         let all_zeros_slice = all_zeros.slice(builder, 0, width.clone());
-                        let low = builder.fri_single_reduced_opening_eval(
+                        let eval = builder.fri_single_reduced_opening_eval(
                             alpha,
                             opened_values.id.get_var(),
                             zero_flag,
-                            &low_values,
+                            &opened_values_buffer,
                             &all_zeros_slice,
                         );
-                        let high = builder.fri_single_reduced_opening_eval(
-                            alpha,
-                            opened_values.id.get_var(),
-                            zero_flag,
-                            &high_values,
-                            &all_zeros_slice,
-                        );
-                        builder.assign(&low, low * minus_alpha_offset);
-                        builder.assign(&high, high * minus_alpha_offset);
+                        builder.assign(&eval, eval * minus_alpha_offset);
 
-                        let codeword: PackedCodeword<C> = PackedCodeword { low, high };
-                        let codeword_acc = builder.get(&reduced_codeword_by_height, log2_height);
+                        let eval_acc = builder.get(&reduced_codeword_by_height, log2_height);
 
-                        // reduced_openings[log2_height] += codeword
-                        builder.assign(&codeword_acc.low, codeword_acc.low + codeword.low);
-                        builder.assign(&codeword_acc.high, codeword_acc.high + codeword.high);
+                        // reduced_openings[log2_height] += eval
+                        builder.assign(&eval_acc, eval_acc + eval);
 
-                        builder.set_value(&reduced_codeword_by_height, log2_height, codeword_acc);
+                        builder.set_value(&reduced_codeword_by_height, log2_height, eval_acc);
 
                         // reorder opened values according to the permutation
                         let mat_j =
@@ -587,8 +561,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
             let cur_num_var: Var<C::N> = builder.eval(initial_cur_num_var);
             let log2_height: Var<C::N> = builder.eval(initial_log2_height);
 
-            let r = builder.get(&input.fold_challenges, 0);
-            let codeword = builder.get(&reduced_codeword_by_height, log2_height);
             let coeff = verifier_folding_coeffs_level(
                 builder,
                 &two_adic_generators_inverses,
@@ -596,18 +568,12 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 &idx_bits,
                 inv_2,
             );
-            let folded = codeword_fold_with_challenge::<C>(
-                builder,
-                codeword.low,
-                codeword.high,
-                r,
-                coeff,
-                inv_2,
-            );
+            let folded = builder.constant(C::EF::ZERO);
 
             // check commit phases
             let commits = &input.proof.commits;
             builder.assert_eq::<Var<C::N>>(commits.len(), opening_ext.len());
+
             builder.cycle_tracker_start("FRI rounds");
             let i: Var<C::N> = builder.constant(C::N::ZERO);
             iter_zip!(builder, commits, opening_ext).for_each(|ptr_vec, builder| {
@@ -618,8 +584,6 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 let sibling_value = commit_phase_step.sibling_value;
                 let proof = commit_phase_step.opening_proof;
 
-                builder.assign(&cur_num_var, cur_num_var - Usize::from(1));
-                builder.assign(&log2_height, log2_height - Usize::from(1));
 
                 let folded_idx = builder.get(&idx_bits, i);
                 let new_involved_packed_codeword =
@@ -637,7 +601,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 // So prev ^ 2 = 1/4 * omega^{-2^(MAX - (level + 2)) * 2 * (index+2^level*prev_bit)}
                 //             = 1/4 * omega^{-2^(MAX - (level + 1)) * (index+2^level*prev_bit)}
                 //             = 1/4 * omega^{-2^(MAX - (level + 1)) * index - 2^(MAX - (level + 1)) * 2^level*prev_bit}
-                //             = 1/2 * curr * omeag^{- 2^(MAX - 1) * prev_bit}
+                //             = 1/2 * curr * omega^{- 2^(MAX - 1) * prev_bit}
                 //             = 1/2 * curr * generator_of_order(2)^{-prev_bit}
                 // Note that generator_of_order(2) is exactly -1, so
                 // prev ^ 2 = 1/2 * curr * (-1)^{-prev_bit}
@@ -650,10 +614,10 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
                 builder.if_eq(folded_idx, Usize::from(0)).then_or_else(
                     |builder| {
-                        builder.assign(&folded, folded + new_involved_packed_codeword.low);
+                        builder.assign(&folded, folded + new_involved_packed_codeword);
                     },
                     |builder| {
-                        builder.assign(&folded, folded + new_involved_packed_codeword.high);
+                        builder.assign(&folded, folded + new_involved_packed_codeword);
                         builder.assign(&coeff, -coeff);
                     },
                 );
@@ -688,6 +652,8 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     codeword_fold_with_challenge(builder, left, right, r, coeff, inv_2);
                 builder.assign(&folded, new_folded);
                 builder.assign(&i, i_plus_one);
+                builder.assign(&cur_num_var, cur_num_var - Usize::from(1));
+                builder.assign(&log2_height, log2_height - Usize::from(1));
             });
             builder.cycle_tracker_end("FRI rounds");
             // assert that final_value[i] = folded
@@ -929,9 +895,7 @@ pub mod tests {
                     .sample_and_append_challenge(b"commit round")
                     .elements,
             );
-            if i < num_rounds - 1 {
-                write_digest_to_transcript(&commits[i], &mut transcript);
-            }
+            write_digest_to_transcript(&commits[i], &mut transcript);
         }
         transcript.append_field_element_exts_iter(opening_proof.final_message.iter().flatten());
 
