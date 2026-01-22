@@ -641,7 +641,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 // Because `folded_idx` is just the `prev_bit`, so we reuse the following `if_eq` and multiply -1
                 // in the branch where `folded_idx` is != 0.
                 builder.assign(&coeff, coeff * coeff * two_felt);
-                let next_folded_idx = builder.get(&idx_bits, i_plus_one.clone());
+                let next_folded_idx = builder.get(&idx_bits, i_plus_one);
                 builder
                     .if_ne(next_folded_idx, Usize::from(0))
                     .then(|builder| {
