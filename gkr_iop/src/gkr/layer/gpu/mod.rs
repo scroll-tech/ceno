@@ -236,34 +236,66 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         );
         exit_span!(span_eq);
 
+        let plan = layer.main_sumcheck_expression_common_factored.as_ref();
+        let residual_terms =
+            layer
+                .main_sumcheck_expression_monomial_terms_excluded_shared
+                .as_ref();
         // Calculate max_num_var and max_degree from the extracted relationships
-        let monomial_terms = layer
-            .main_sumcheck_expression_monomial_terms_excluded_shared
-            .as_ref()
-            .or(layer.main_sumcheck_expression_monomial_terms.as_ref())
-            .cloned()
-            .expect("main sumcheck monomial terms must exist");
+        let monomial_terms = match (plan, residual_terms) {
+            (Some(_), Some(residual)) => residual.clone(),
+            (Some(_), None) => panic!("common factoring plan present without residual monomials"),
+            (None, Some(terms)) => terms.clone(),
+            (None, None) => layer
+                .main_sumcheck_expression_monomial_terms
+                .clone()
+                .expect("main sumcheck monomial terms must exist"),
+        };
         let (term_coefficients, mle_indices_per_term, mle_size_info) =
             extract_mle_relationships_from_monomial_terms(
-                // &monomial_terms,
-                layer
-                    .main_sumcheck_expression_monomial_terms
-                    .as_ref()
-                    .unwrap(),
+                &monomial_terms,
                 &all_witins_gpu,
                 &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
                 &main_sumcheck_challenges,
             );
-        let common_term_plan_host: Option<CommonTermPlan> = layer
-            .main_sumcheck_expression_common_factored
-            .as_ref()
-            .map(|plan| encode_common_term_plan(plan));
+        if let Some(plan) = plan {
+            for group in &plan.groups {
+                for &term_idx in &group.term_indices {
+                    debug_assert!(
+                        term_idx < mle_indices_per_term.len(),
+                        "factored term {} missing residual monomial (len={})",
+                        term_idx,
+                        mle_indices_per_term.len()
+                    );
+                    debug_assert!(
+                        !mle_indices_per_term[term_idx].is_empty(),
+                        "factored term {} has no residual multiplicands",
+                        term_idx
+                    );
+                }
+            }
+        }
+        let common_term_plan_host: Option<CommonTermPlan> =
+            plan.map(|plan| encode_common_term_plan(plan, all_witins_gpu.len()));
         let max_num_var = max_num_variables;
-        let max_degree = mle_indices_per_term
-            .iter()
-            .map(|indices| indices.len())
-            .max()
-            .unwrap_or(0);
+        let max_degree = if let Some(plan) = plan {
+            plan.groups
+                .iter()
+                .flat_map(|group| group.term_indices.iter().map(|term_idx| {
+                    let shared_len = group.shared_len;
+                    let residual_len = mle_indices_per_term
+                        .get(*term_idx)
+                        .map(|v| v.len())
+                        .unwrap_or(0);
+                    shared_len + residual_len
+                }))
+                .max()
+                .unwrap_or_else(|| {
+                    mle_indices_per_term.iter().map(|indices| indices.len()).max().unwrap_or(0)
+                })
+        } else {
+            mle_indices_per_term.iter().map(|indices| indices.len()).max().unwrap_or(0)
+        };
 
         // Convert types for GPU function Call
         let basic_tr: &mut BasicTranscript<BB31Ext> =
@@ -281,8 +313,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 &mle_indices_per_term,
                 max_num_var,
                 max_degree,
-                // common_term_plan_host.as_ref(),
-                None,
+                common_term_plan_host.as_ref(),
+                // None,
                 basic_tr,
             )
             .unwrap();

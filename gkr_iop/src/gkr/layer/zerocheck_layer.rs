@@ -506,6 +506,7 @@ fn build_common_factored_plan_and_residual_terms<E: ExtensionField>(
             }
         }
         groups.push(CommonTermGroup {
+            shared_len: effective_len,
             witness_indices,
             term_indices,
         });

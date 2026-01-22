@@ -64,11 +64,18 @@ pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
     (term_coefficients, mle_indices_per_term, mle_size_info)
 }
 
-pub fn encode_common_term_plan(plan: &CommonFactoredTermPlan) -> CommonTermPlan {
+pub fn encode_common_term_plan(
+    plan: &CommonFactoredTermPlan,
+    total_mles: usize,
+) -> CommonTermPlan {
     let mut term_offsets = Vec::with_capacity(plan.groups.len() + 1);
     let mut term_terms = Vec::new();
     term_offsets.push(0);
     for group in &plan.groups {
+        assert!(
+            !group.term_indices.is_empty(),
+            "common term group must include at least one term"
+        );
         for &term_idx in &group.term_indices {
             term_terms.push(
                 u32::try_from(term_idx).expect("term index exceeds supported range for GPU plan"),
@@ -82,6 +89,12 @@ pub fn encode_common_term_plan(plan: &CommonFactoredTermPlan) -> CommonTermPlan 
     common_mle_offsets.push(0);
     for group in &plan.groups {
         for &wit_idx in &group.witness_indices {
+            assert!(
+                wit_idx < total_mles,
+                "common witness index {} out of range (total {})",
+                wit_idx,
+                total_mles
+            );
             common_mle_indices.push(
                 u32::try_from(wit_idx).expect("witness index exceeds supported range for GPU plan"),
             );
@@ -89,13 +102,20 @@ pub fn encode_common_term_plan(plan: &CommonFactoredTermPlan) -> CommonTermPlan 
         common_mle_offsets.push(common_mle_indices.len() as u32);
     }
 
+    let num_groups = plan.groups.len();
+    let mut common_scalar_offsets = Vec::with_capacity(num_groups + 1);
+    let common_scalar_indices = Vec::new();
+    for _ in 0..=num_groups {
+        common_scalar_offsets.push(0);
+    }
+
     CommonTermPlan {
         term_offsets,
         term_terms,
         common_mle_offsets,
         common_mle_indices,
-        common_scalar_offsets: vec![0, 0],
-        common_scalar_indices: Vec::new(),
+        common_scalar_offsets,
+        common_scalar_indices,
     }
 }
 

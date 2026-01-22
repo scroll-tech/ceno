@@ -57,6 +57,7 @@ pub struct CommonFactoredTermPlan {
 pub struct CommonTermGroup {
     pub witness_indices: Vec<usize>,
     pub term_indices: Vec<usize>,
+    pub shared_len: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
