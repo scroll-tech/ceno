@@ -410,12 +410,11 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
         .for_each(|ptr_vec, builder| {
             let opening = builder.iter_ptr_get(&round.openings, ptr_vec[2]);
             let log2_height: Var<C::N> =
-                builder.eval(opening.num_var + Usize::from(get_rate_log() - 1));
+                builder.eval(opening.num_var + Usize::from(get_rate_log()));
             builder.iter_ptr_set(&log2_heights, ptr_vec[1], log2_height);
             let width = opening.point_and_evals.evals.len();
 
-            let opened_value_len: Var<C::N> = builder.eval(width.clone() * two);
-            let opened_value_buffer = builder.dyn_array(opened_value_len);
+            let opened_value_buffer = builder.dyn_array(width.clone());
             builder.iter_ptr_set(
                 &opened_values_buffer,
                 ptr_vec[0],
@@ -473,8 +472,8 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 });
             let idx_bits = idx_bits.slice(builder, 0, log2_max_codeword_size);
 
-            let reduced_codeword_by_height: Array<C, Ext<C::F, C::EF>> =
-                builder.dyn_array(log2_max_codeword_size);
+            let ro_len: Var<C::N> = builder.eval(log2_max_codeword_size + Usize::from(1));
+            let reduced_codeword_by_height: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(ro_len);
             // initialize reduced_codeword_by_height with zeroes
             iter_zip!(builder, reduced_codeword_by_height).for_each(|ptr_vec, builder| {
                 builder.set_value(&reduced_codeword_by_height, ptr_vec[0], zero);
@@ -556,13 +555,16 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
             let log2_height: Var<C::N> = builder.eval(initial_log2_height);
 
-            let coeff = verifier_folding_coeffs_level(
-                builder,
-                &two_adic_generators_inverses,
-                log2_height,
-                &idx_bits,
-                inv_2,
-            );
+            let coeff = {
+                let leaf_idx_bits = idx_bits.slice(builder, 1, idx_bits.len());
+                verifier_folding_coeffs_level(
+                    builder,
+                    &two_adic_generators_inverses,
+                    log2_height,
+                    &leaf_idx_bits,
+                    inv_2,
+                )
+            };
             let folded = builder.constant(C::EF::ZERO);
 
             // check commit phases
@@ -639,10 +641,12 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 // Because `folded_idx` is just the `prev_bit`, so we reuse the following `if_eq` and multiply -1
                 // in the branch where `folded_idx` is != 0.
                 builder.assign(&coeff, coeff * coeff * two_felt);
-
-                builder.if_ne(folded_idx, Usize::from(0)).then(|builder| {
-                    builder.assign(&coeff, -coeff);
-                });
+                let next_folded_idx = builder.get(&idx_bits, i_plus_one.clone());
+                builder
+                    .if_ne(next_folded_idx, Usize::from(0))
+                    .then(|builder| {
+                        builder.assign(&coeff, -coeff);
+                    });
             });
             builder.cycle_tracker_end("FRI rounds");
             // assert that final_value[i] = folded
@@ -658,7 +662,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     );
                 });
             let final_value = builder.get(&final_codeword.values, final_idx);
-            // builder.assert_eq::<Ext<C::F, C::EF>>(final_value, folded);
+            builder.assert_eq::<Ext<C::F, C::EF>>(final_value, folded);
         },
     );
     // 1. check initial claim match with first round sumcheck value
@@ -765,13 +769,22 @@ pub mod tests {
         BasefoldDefault, BasefoldRSParams, BasefoldSpec, PCSFriParam, PolynomialCommitmentScheme,
         pcs_batch_commit, pcs_trim, util::hash::write_digest_to_transcript,
     };
-    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_circuit::{
+        arch::{SystemConfig, VmExecutor, instructions::program::Program},
+        utils::{TestStarkEngine, air_test_impl},
+    };
     use openvm_instructions::exe::VmExe;
-    use openvm_native_circuit::{Native, NativeConfig};
+    use openvm_native_circuit::{Native, NativeBuilder, NativeConfig};
     use openvm_native_compiler::asm::AsmBuilder;
     use openvm_native_recursion::hints::Hintable;
     use openvm_stark_backend::p3_challenger::GrindingChallenger;
-    use openvm_stark_sdk::p3_baby_bear::BabyBear;
+    use openvm_stark_sdk::{
+        config::{
+            baby_bear_poseidon2::BabyBearPoseidon2Engine,
+            fri_params::standard_fri_params_with_100_bits_conjectured_security,
+        },
+        p3_baby_bear::BabyBear,
+    };
     use rand::thread_rng;
     use transcript::{BasicTranscript, Transcript};
 
@@ -782,6 +795,7 @@ pub mod tests {
     use crate::{
         basefold_verifier::{
             basefold::{Round, RoundOpening},
+            mmcs::MmcsCommitment,
             query_phase::PointAndEvals,
         },
         tower_verifier::binding::Point,
@@ -932,12 +946,17 @@ pub mod tests {
             .with_max_segment_len((1 << 25) - 100);
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
         let exe = VmExe::new(program);
+        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config.clone()).unwrap();
         let interpreter = executor.instance(&exe).unwrap();
         interpreter
-            .execute(witness, None)
+            .execute(witness.clone(), None)
             .expect("constructed test should pass");
+
+        let fri_params = standard_fri_params_with_100_bits_conjectured_security(1);
+        let vb = NativeBuilder::default();
+        air_test_impl::<BabyBearPoseidon2Engine, _>(fri_params, vb, config, exe, witness, 1, true)
+            .unwrap();
     }
 
     #[test]
