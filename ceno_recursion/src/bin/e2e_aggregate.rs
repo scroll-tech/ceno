@@ -271,5 +271,5 @@ fn main() {
 
     let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
     let root_proof = agg_prover.generate_root_proof(zkvm_proofs);
-    let halo2_proof = agg_prover.prove_static(&root_proof);
+    let _halo2_proof = agg_prover.prove_static(&root_proof);
 }

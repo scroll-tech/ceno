@@ -377,7 +377,7 @@ pub mod tests {
             .with_public_values(4)
             .with_max_segment_len((1 << 25) - 100)
             .with_profiling();
-        let config = NativeConfig::new(system_config, Native);
+        let config = NativeConfig::new(system_config, Native(true));
 
         // _debug
         // let executor = VmExecutor::<BabyBear, NativeConfig>::new(config);

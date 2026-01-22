@@ -74,6 +74,7 @@ use openvm_circuit::arch::{
     PUBLIC_VALUES_AIR_ID, PreflightExecutionOutput, SingleSegmentVmProver, instructions::exe::VmExe,
 };
 use openvm_continuations::RootSC;
+use openvm_native_circuit::extension::Native;
 use openvm_native_compiler::{
     asm::AsmConfig,
     ir::{Builder, Config, Felt},
@@ -95,7 +96,10 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216,
     2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
-
+const ROOT_VM_MAX_TRACE_HEIGHTS: &[u32] = &[
+    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 2097152, 16777216, 2097152, 8388608,
+    262144, 2097152, 1048576, 4194304, 1048576, 262144,
+];
 pub struct CenoAggregationProver {
     pub base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
@@ -146,7 +150,7 @@ impl CenoAggregationProver {
             .with_max_segment_len((1 << 24) - 100)
             .with_profiling()
             .without_continuations(),
-            native: Default::default(),
+            native: Native(true),
         };
 
         // Leaf layer keygen
@@ -199,7 +203,7 @@ impl CenoAggregationProver {
             .with_max_segment_len((1 << 24) - 100)
             .with_profiling()
             .without_continuations(),
-            native: Default::default(),
+            native: Native(true),
         };
 
         // Internal keygen
@@ -244,7 +248,7 @@ impl CenoAggregationProver {
             system: SystemConfig::new(
                 SBOX_SIZE.min(ROOT_MAX_CONSTRAINT_DEG),
                 MemoryConfig {
-                    max_access_adapter_n: 16,
+                    max_access_adapter_n: 8,
                     ..Default::default()
                 },
                 ROOT_NUM_PUBLIC_VALUES,
@@ -252,18 +256,18 @@ impl CenoAggregationProver {
             .without_continuations()
             .with_max_segment_len((1 << 24) - 100)
             .with_profiling(),
-            native: Default::default(),
+            native: Native(false),
         };
 
         let mut root_engine = BabyBearPoseidon2RootEngine::new(root_fri_params);
         root_engine.max_constraint_degree = ROOT_MAX_CONSTRAINT_DEG;
+
         let (root_vm, root_vm_pk) = VirtualMachine::<_, NativeCpuBuilder>::new_with_keygen(
             root_engine,
             Default::default(),
             root_vm_config.clone(),
         )
         .expect("root keygen");
-
         let root_program = CenoRootVmVerifierConfig {
             leaf_fri_params,
             internal_fri_params,
@@ -460,7 +464,7 @@ impl CenoAggregationProver {
         let air_permuted_root_proof = SingleSegmentVmProver::prove(
             self.permuted_root_prover.as_mut().unwrap(),
             root_input.write(),
-            VM_MAX_TRACE_HEIGHTS,
+            ROOT_VM_MAX_TRACE_HEIGHTS,
         )
         .expect("root proof");
 
@@ -496,7 +500,7 @@ impl CenoAggregationProver {
 
     pub fn init_root_prover_with_permutation(&mut self, root_input: &RootVmVerifierInput<SC>) {
         self.root_prover.reset_state(root_input.write());
-        let mut trace_heights = VM_MAX_TRACE_HEIGHTS.to_vec();
+        let mut trace_heights = ROOT_VM_MAX_TRACE_HEIGHTS.to_vec();
 
         let num_public_values = self.root_prover.vm.config().as_ref().num_public_values as u32;
         trace_heights[PUBLIC_VALUES_AIR_ID] = num_public_values;
@@ -525,22 +529,10 @@ impl CenoAggregationProver {
         let ctx = vm
             .generate_proving_ctx(system_records, record_arenas)
             .expect("proving context");
-        let filtered_air_heights: Vec<u32> = ctx
+        let air_heights: Vec<u32> = ctx
             .into_iter()
             .map(|(_, air_ctx)| air_ctx.main_trace_height().next_power_of_two() as u32)
             .collect();
-
-        // _debug, TODO: Access adaptor <u16> and NativeSumcheck AIRs are returning 0s, making the len of air_heights incorrect.
-        // In the root prover, these unused AIRs need to be removed.
-        // Temporary fix: Add back the missing 0 height entries for these 2 AIRs.
-        let access_adaptor_u16_air_id = 7usize;
-        let native_sumcheck_air_id = 8usize;
-        let mut air_heights = [1u32; 19].to_vec();
-        air_heights[0..access_adaptor_u16_air_id]
-            .copy_from_slice(&filtered_air_heights[0..access_adaptor_u16_air_id]);
-        air_heights[(native_sumcheck_air_id + 1)..]
-            .copy_from_slice(&filtered_air_heights[access_adaptor_u16_air_id..]);
-
         let root_air_perm = AirIdPermutation::compute(&air_heights);
         let mut root_vm_pk = self.pk.root_vm_pk.vm_pk.clone();
         root_air_perm.permute(&mut root_vm_pk.per_air);
@@ -864,6 +856,7 @@ mod tests {
                 .expect("Failed to deserialize vk file");
         let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
 
+        // _debug
         let internal_proof: Proof<SC> = bincode::deserialize_from(
             File::open(internal_proof_path).expect("Failed to open proof file"),
         )

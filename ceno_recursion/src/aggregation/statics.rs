@@ -90,7 +90,7 @@ impl StaticProverVerifier {
         root_proof: &Proof<RootSC>,
         ceno_recursion_key: &CenoRecursionProvingKeys<BabyBearPoseidon2Config, NativeConfig>,
     ) {
-        assert!(!ceno_recursion_key.permuted_root_pk.is_none());
+        assert!(ceno_recursion_key.permuted_root_pk.is_some());
 
         let verifier = ceno_recursion_key
             .permuted_root_pk

@@ -74,7 +74,7 @@ mod tests {
 
         // configure the VM executor
         let system_config = SystemConfig::default().with_max_segment_len(1 << 20);
-        let config = NativeConfig::new(system_config, Native);
+        let config = NativeConfig::new(system_config, Native(true));
         let executor = VmExecutor::new(config).unwrap();
 
         // prepare input
