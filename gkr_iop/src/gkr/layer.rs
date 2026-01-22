@@ -48,6 +48,17 @@ pub enum LayerType {
     Linear,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct CommonFactoredTermPlan {
+    pub groups: Vec<CommonTermGroup>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct CommonTermGroup {
+    pub witness_indices: Vec<usize>,
+    pub term_indices: Vec<usize>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
@@ -101,7 +112,11 @@ pub struct Layer<E: ExtensionField> {
     // static expression, only valid for zerocheck & sumcheck layer
     // store in 2 forms: expression & monomial
     pub main_sumcheck_expression_monomial_terms: Option<Vec<Term<Expression<E>, Expression<E>>>>,
+    #[serde(default)]
+    pub main_sumcheck_expression_monomial_terms_excluded_shared:
+        Option<Vec<Term<Expression<E>, Expression<E>>>>,
     pub main_sumcheck_expression: Option<Expression<E>>,
+    pub main_sumcheck_expression_common_factored: Option<CommonFactoredTermPlan>,
 
     // rotation sumcheck expression, only optionally valid for zerocheck
     // store in 2 forms: expression & monomial
@@ -174,7 +189,9 @@ impl<E: ExtensionField> Layer<E> {
                     rotation_cyclic_subgroup_size,
                     expr_names,
                     main_sumcheck_expression_monomial_terms: None,
+                    main_sumcheck_expression_monomial_terms_excluded_shared: None,
                     main_sumcheck_expression: None,
+                    main_sumcheck_expression_common_factored: None,
                     rotation_sumcheck_expression_monomial_terms: None,
                     rotation_sumcheck_expression: None,
                 };

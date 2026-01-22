@@ -39,6 +39,7 @@ use crate::{
     },
     hal::ProverBackend,
 };
+use ceno_gpu::common::sumcheck::CommonTermPlan;
 
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
@@ -236,16 +237,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         exit_span!(span_eq);
 
         // Calculate max_num_var and max_degree from the extracted relationships
+        let monomial_terms = layer
+            .main_sumcheck_expression_monomial_terms_excluded_shared
+            .as_ref()
+            .or(layer.main_sumcheck_expression_monomial_terms.as_ref())
+            .cloned()
+            .expect("main sumcheck monomial terms must exist");
         let (term_coefficients, mle_indices_per_term, mle_size_info) =
             extract_mle_relationships_from_monomial_terms(
-                &layer
+                // &monomial_terms,
+                layer
                     .main_sumcheck_expression_monomial_terms
-                    .clone()
+                    .as_ref()
                     .unwrap(),
                 &all_witins_gpu,
                 &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
                 &main_sumcheck_challenges,
             );
+        let common_term_plan_host: Option<CommonTermPlan> = layer
+            .main_sumcheck_expression_common_factored
+            .as_ref()
+            .map(|plan| encode_common_term_plan(plan));
         let max_num_var = max_num_variables;
         let max_degree = mle_indices_per_term
             .iter()
@@ -269,11 +281,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 &mle_indices_per_term,
                 max_num_var,
                 max_degree,
+                // common_term_plan_host.as_ref(),
+                None,
                 basic_tr,
             )
             .unwrap();
-        let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
-        let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
+        println!("finish sumcheck");
+        let evals_gpu = evals_gpu.into_iter().flatten().collect();
+        let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect();
 
         // convert back to E: ExtensionField
         let proof_gpu_e =
@@ -389,11 +404,12 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
             &mle_indices_per_term,
             max_num_var,
             max_degree,
+            None,
             basic_tr,
         )
         .unwrap();
-    let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
-    let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
+    let evals_gpu = evals_gpu.into_iter().flatten().collect();
+    let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect();
 
     let proof_gpu_e = unsafe { std::mem::transmute::<IOPProof<BB31Ext>, IOPProof<E>>(proof_gpu) };
     let mut evals_gpu_e = unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(evals_gpu) };
