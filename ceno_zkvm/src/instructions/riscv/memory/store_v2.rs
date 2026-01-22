@@ -42,6 +42,11 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     for StoreInstruction<E, I, N_ZEROS>
 {
     type InstructionConfig = StoreConfig<E, N_ZEROS>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

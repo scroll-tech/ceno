@@ -9,12 +9,15 @@ build-std = [
 ]
 build-std-features = [
   "compiler-builtins-mem",
-  "panic_immediate_abort",
   "default",
 ]
+panic-immediate-abort = true
 
 [profile.dev]
-panic = "abort"
+panic = "immediate-abort"
+
+[profile.release]
+panic = "immediate-abort"
 
 [build]
 rustflags = [

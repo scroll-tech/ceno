@@ -14,7 +14,7 @@ use crate::{
     structs::{ProgramParams, RAMType},
     witness::LkMultiplicity,
 };
-use ceno_emul::{FullTracer as Tracer, StepRecord};
+use ceno_emul::{FullTracer as Tracer, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
 use p3::field::FieldAlgebra;
@@ -31,6 +31,11 @@ pub struct HaltInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
     type InstructionConfig = HaltConfig;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "ECALL_HALT".into()

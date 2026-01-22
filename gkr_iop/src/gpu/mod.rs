@@ -370,7 +370,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 let (coeffs, indices, size_info) = extract_mle_relationships_from_monomial_terms(
                     expr,
                     &layer_wits.iter().map(|mle| mle.as_ref()).collect_vec(),
-                    &pub_io_evals,
+                    pub_io_evals,
                     challenges,
                 );
                 let coeffs_gl64: Vec<BB31Ext> = unsafe { std::mem::transmute(coeffs) };
