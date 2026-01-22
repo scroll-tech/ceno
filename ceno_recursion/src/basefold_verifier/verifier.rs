@@ -113,12 +113,9 @@ pub fn batch_verify<C: Config>(
         transcript_observe_label(builder, challenger, b"commit round");
         let challenge = challenger.sample_ext(builder);
         builder.set(&fold_challenges, index_vec[0], challenge);
-        builder
-            .if_ne(index_vec[0], num_rounds - Usize::from(1))
-            .then(|builder| {
-                let commit = builder.get(&proof.commits, index_vec[0]);
-                challenger.observe_digest(builder, commit.value.into());
-            });
+
+        let commit = builder.get(&proof.commits, index_vec[0]);
+        challenger.observe_digest(builder, commit.value.into());
     });
 
     iter_zip!(builder, proof.final_message).for_each(|ptr_vec_sumcheck_message, builder| {
