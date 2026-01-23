@@ -1,0 +1,979 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Ceno Docs</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-2459343d.css">
+        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-99aac1db.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-8efd8917.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Ceno Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="ceno-project-overview"><a class="header" href="#ceno-project-overview">Ceno Project Overview</a></h1>
+<p>Ceno is a non-uniform, segmentable, and parallelizable RISC-V Zero-Knowledge Virtual Machine (zkVM). It allows for the execution of Rust code in a verifiable manner, leveraging the power of zero-knowledge proofs.</p>
+<h2 id="key-features"><a class="header" href="#key-features">Key Features</a></h2>
+<ul>
+<li><strong>RISC-V Architecture</strong>: Ceno is built around the RISC-V instruction set, providing a standardized and open-source foundation for the virtual machine.</li>
+<li><strong>Zero-Knowledge Proofs</strong>: The core of Ceno is its ability to generate zero-knowledge proofs of computation, ensuring that programs have been executed correctly without revealing any private inputs.</li>
+<li><strong>Rust Support</strong>: Ceno is written in Rust and is designed to run programs also written in Rust, allowing developers to leverage the safety and performance of the Rust language.</li>
+<li><strong>Modularity</strong>: The project is divided into several key components, each with a specific role in the Ceno ecosystem.</li>
+</ul>
+<h2 id="project-structure"><a class="header" href="#project-structure">Project Structure</a></h2>
+<p>The Ceno workspace is organized into the following main crates:</p>
+<ul>
+<li><code>ceno_cli</code>: A command-line interface for interacting with the Ceno zkVM.</li>
+<li><code>ceno_emul</code>: Provides emulation capabilities for the RISC-V instruction set.</li>
+<li><code>ceno_host</code>: The host component responsible for managing the zkVM and orchestrating the proof generation process.</li>
+<li><code>ceno_rt</code>: The runtime environment for guest programs running within the zkVM.</li>
+<li><code>ceno_zkvm</code>: The core zkVM implementation, including the prover and verifier.</li>
+<li><code>examples</code>: A collection of example programs that demonstrate how to use Ceno.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
+<p>This chapter will guide you through setting up your local development environment for Ceno and running your first
+zero-knowledge program.</p>
+<h2 id="local-build-requirements"><a class="header" href="#local-build-requirements">Local Build Requirements</a></h2>
+<p>Ceno is built in Rust, so you must <a href="https://www.rust-lang.org/tools/install">install the Rust toolchain</a> first.</p>
+<p>We also use <code>cargo-make</code> to orchestrate the build process. You can install it with the following command:</p>
+<pre><code class="language-sh">cargo install cargo-make
+</code></pre>
+<p>Ceno executes RISC-V instructions, so you will also need to install the Risc-V target for Rust. You can do this with the
+following command:</p>
+<pre><code class="language-sh">rustup target add riscv32im-ceno-zkvm-elf
+</code></pre>
+<h2 id="installing-cargo-ceno"><a class="header" href="#installing-cargo-ceno">Installing <code>cargo ceno</code></a></h2>
+<p>The <code>cargo ceno</code> command is the primary tool for interacting with the Ceno zkVM. You can install it by running the
+following command from the root of the repository:</p>
+<pre><code class="language-sh">JEMALLOC_SYS_WITH_MALLOC_CONF="retain:true,metadata_thp:always,thp:always,dirty_decay_ms:-1,muzzy_decay_ms:-1,abort_conf:true" \
+    cargo install --git https://github.com/scroll-tech/ceno.git --features jemalloc --features nightly-features cargo-ceno
+</code></pre>
+<h2 id="building-the-examples"><a class="header" href="#building-the-examples">Building the Examples</a></h2>
+<p>The Ceno project includes a variety of <a href="https://github.com/scroll-tech/ceno/tree/master/examples/examples">examples</a> to
+help you get started.</p>
+<p>You can build all the examples using the <code>cargo ceno</code> command-line tool. Execute the following command in the Ceno
+repository root directory:</p>
+<pre><code class="language-sh">cargo ceno build --example fibonacci
+</code></pre>
+<p>This command will compile the example <code>fibonacci</code> located in the <code>examples/examples</code> directory and place the resulting
+ELF files in the <code>examples/target/riscv32im-ceno-zkvm-elf/release</code> directory.</p>
+<h2 id="running-an-example"><a class="header" href="#running-an-example">Running an Example</a></h2>
+<p>Once the examples are built, you can run any of them using the <code>cargo ceno run</code> command. We will run the Fibonacci
+example.</p>
+<p>This example calculates the <code>n</code>-th Fibonacci number, where <code>n</code> is determined by a hint value provided at runtime. For
+this guide, we will calculate the 1024-th number (corresponding to hint value <code>10</code> as <code>2^10=1024</code>) in the sequence.</p>
+<p>Execute the following command in the Ceno repository root directory to run the Fibonacci example with prove/verify:</p>
+<pre><code class="language-sh">cargo ceno prove --example fibonacci --hints=10 --public-io=4191
+</code></pre>
+<p>Let’s break down the command:</p>
+<ul>
+<li><code>cargo ceno prove</code>: This is the command to prove a Ceno program.</li>
+<li><code>--example fibonacci</code>: This specifies that we want to run the <code>fibonacci</code> example.</li>
+<li><code>--hints=10</code>: This is a private input to our program. In this case, it tells the program to run 2^10 (1024) Fibonacci
+steps.</li>
+<li><code>--public-io=4191</code>: This is the expected public output. The program will verify that the result of the computation
+matches this value.</li>
+</ul>
+<p>If the command runs successfully, you have just run your first ZK program with Ceno! The next chapter will dive into the
+code for this example.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="your-first-zk-program"><a class="header" href="#your-first-zk-program">Your First ZK Program</a></h1>
+<p>In the previous chapter, you ran a pre-compiled Fibonacci example. Now, let’s look at the actual Rust code for that
+guest program and understand how it works.</p>
+<p>The goal of this program is to calculate the <code>n</code>-th Fibonacci number inside the Ceno zkVM and then commit the result to
+the public output.</p>
+<h2 id="the-code"><a class="header" href="#the-code">The Code</a></h2>
+<p>Here is the complete source code for the Fibonacci example (<code>examples/examples/fibonacci.rs</code>):</p>
+<pre class="playground"><code class="language-rust">extern crate ceno_rt;
+
+fn main() {
+    // Compute the (1 &lt;&lt; log_n) 'th fibonacci number, using normal Rust code.
+    let log_n: u32 = ceno_rt::read();
+    let mut a = 0_u32;
+    let mut b = 1_u32;
+    let n = 1 &lt;&lt; log_n;
+    for _ in 0..n {
+        let mut c = a + b;
+        c %= 7919; // Modulus to prevent overflow.
+        a = b;
+        b = c;
+    }
+    // Constrain with public io
+    ceno_rt::commit(&amp;b);
+}</code></pre>
+<h2 id="code-breakdown"><a class="header" href="#code-breakdown">Code Breakdown</a></h2>
+<p>Let’s break down the key parts of this program.</p>
+<h3 id="1-importing-the-ceno-runtime"><a class="header" href="#1-importing-the-ceno-runtime">1. Importing the Ceno Runtime</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>extern crate ceno_rt;
+<span class="boring">}</span></code></pre>
+<p>Every Ceno guest program needs to import the <code>ceno_rt</code> crate. This crate provides essential functions for interacting
+with the zkVM environment, such as reading private inputs and committing public outputs.</p>
+<h3 id="2-reading-private-inputs"><a class="header" href="#2-reading-private-inputs">2. Reading Private Inputs</a></h3>
+<pre class="playground"><code class="language-rust">fn main() {
+    let log_n: u32 = ceno_rt::read();
+}</code></pre>
+<p>The <code>ceno_rt::read()</code> function is used to read private data that the host provides. In the previous chapter, we passed
+<code>--hints=10</code>. This is the value that <code>ceno_rt::read()</code> retrieves. The program receives it as an <code>Archived&lt;u32&gt;</code>, which
+is then converted into a standard <code>u32</code>.</p>
+<h3 id="3-core-logic"><a class="header" href="#3-core-logic">3. Core Logic</a></h3>
+<pre class="playground"><code class="language-rust">fn main() {
+    let mut a = 0_u32;
+    let mut b = 1_u32;
+    let n = 1 &lt;&lt; log_n;
+    for _ in 0..n {
+        let mut c = a + b;
+        c %= 7919; // Modulus to prevent overflow.
+        a = b;
+        b = c;
+    }
+}</code></pre>
+<p>This is standard Rust code for calculating a Fibonacci sequence. It uses the <code>log_n</code> input to determine the number of
+iterations (<code>n = 1 &lt;&lt; log_n</code>, which is <code>2^10 = 1024</code>). The calculation is performed modulo <code>7919</code> to keep the numbers
+within a manageable size.</p>
+<p>This is a key takeaway: <strong>You can write normal Rust code for your core computational logic.</strong></p>
+<h3 id="4-committing-public-output"><a class="header" href="#4-committing-public-output">4. Committing Public Output</a></h3>
+<pre class="playground"><code class="language-rust">fn main() {
+    ceno_rt::commit(&amp;b);
+}</code></pre>
+<p>After the calculation is complete, <code>ceno_rt::commit()</code> is called. This function takes the final result (<code>b</code>) and commits
+it as a public output of the zkVM. The host can then verify that the program produced the correct public output. In our
+<code>run</code> command, this is checked against the <code>--public-io=4191</code> argument.</p>
+<h2 id="building-the-program"><a class="header" href="#building-the-program">Building the Program</a></h2>
+<p>To build this program so that it can be run inside the Ceno zkVM, you can use the <code>cargo ceno build</code> command:</p>
+<pre><code class="language-sh">cargo ceno build --example fibonacci
+</code></pre>
+<p>This will produce an ELF file at <code>examples/target/riscv32im-ceno-zkvm-elf/release/fibonacci</code>. This is the file that is
+executed by the <code>run</code> command.</p>
+<h2 id="running-the-program"><a class="header" href="#running-the-program">Running the Program</a></h2>
+<p>As you saw in the previous chapter, you can run the program with <code>cargo ceno run</code>:</p>
+<pre><code class="language-sh">cargo ceno run --example fibonacci --hints=10 --public-io=4191
+</code></pre>
+<p>or alternatively using the hints file to provide the hints:</p>
+<pre><code class="language-sh">cargo ceno run --example fibonacci --hints-file=hints.bin --public-io=4191
+</code></pre>
+<p>where <code>hints.bin</code> can be generated by the following rust program:</p>
+<pre class="playground"><code class="language-rust">use std::fs::File;
+use std::io::Write;
+
+fn main() {
+    let mut file = File::create("hints.bin").unwrap();
+    file.write_all(&amp;10u32.to_le_bytes()).unwrap();
+}</code></pre>
+<p><strong>TODO:</strong> support generating hints file by running the guest program (possibly in a different mode, say, hint generating
+mode)</p>
+<p><strong>TODO:</strong> support providing public io also in binary file</p>
+<p>Now that you understand the basic components of a Ceno program, the next section will explore the interaction between
+the host and the guest in more detail.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="host-guest-interaction"><a class="header" href="#host-guest-interaction">Host-Guest Interaction</a></h1>
+<p>A critical aspect of developing ZK applications is understanding how the “host” (the machine running the prover) and
+the “guest” (the ZK program running inside the vm) communicate with each other.</p>
+<p>In Ceno, this communication happens in two main ways:</p>
+<ol>
+<li><strong>Private Inputs (Hints)</strong>: The host can pass private data to the guest.</li>
+<li><strong>Public Inputs/Outputs (I/O)</strong>: The guest can receive public data and commit to public outputs that the host can
+verify.</li>
+</ol>
+<p>We saw both of these in the command used to run the Fibonacci example:</p>
+<pre><code class="language-sh">cargo ceno run --example fibonacci --hints=10 --public-io=4191
+</code></pre>
+<h2 id="private-inputs-hints"><a class="header" href="#private-inputs-hints">Private Inputs (Hints)</a></h2>
+<p>Private inputs, which Ceno refers to as “hints,” are data known only to the host and the guest. They are not revealed
+publicly and do not become part of the final proof. This is the primary way to provide secret inputs to your ZK program.</p>
+<p>In the guest code, you use the <code>ceno_rt::read()</code> function to access this data.</p>
+<p><strong>Guest Code:</strong></p>
+<pre class="playground"><code class="language-rust">// Reads the private hint value provided by the host.
+
+fn main() {
+    let log_n: u32 = ceno_rt::read();
+    // do something...
+}</code></pre>
+<p><strong>Host Command:</strong></p>
+<pre><code class="language-sh">... --hints=10 ...
+</code></pre>
+<p>In this interaction, the value <code>10</code> is passed from the host to the guest. The guest program reads this value and uses it
+to determine how many Fibonacci iterations to perform. This input remains private.</p>
+<h2 id="public-inputs-and-outputs"><a class="header" href="#public-inputs-and-outputs">Public Inputs and Outputs</a></h2>
+<p>Public I/O is data that is known to both the host and the verifier. It is part of the public record and is used to
+ensure the ZK program is performing the correct computation on the correct public data.</p>
+<p>In Ceno, the guest program can commit data to the public record using the <code>ceno_rt::commit()</code> function.</p>
+<p><strong>Guest Code:</strong></p>
+<pre class="playground"><code class="language-rust">fn main() {
+    // do something ...
+    // Commits the final result `b` to the public output.
+    ceno_rt::commit(&amp;b);
+}</code></pre>
+<p><strong>Host Command:</strong></p>
+<pre><code class="language-sh">... --public-io=4191 ...
+</code></pre>
+<p>Here, the guest calculates the final Fibonacci number and commits the result <code>b</code>. The Ceno host environment then checks
+that this committed value is equal to the value provided in the <code>--public-io</code> argument (<code>4191</code>). If they do not match,
+the proof will fail, indicating an incorrect computation or a different result than expected.</p>
+<p>This mechanism is crucial for creating verifiable computations. You can use public I/O to:</p>
+<ul>
+<li>Provide public inputs that the program must use.</li>
+<li>Assert that the program produces a specific, known public output.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="generating-and-verifying-proofs"><a class="header" href="#generating-and-verifying-proofs">Generating and Verifying Proofs</a></h1>
+<p>The <code>cargo ceno</code> command provides a streamlined workflow for generating and verifying proofs of your ZK programs. This
+is handled primarily by the <code>keygen</code>, <code>prove</code> and <code>verify</code> subcommands.</p>
+<p>Here’s a more detailed look at the steps involved in generating a proof:</p>
+<ol>
+<li>
+<p><strong>Key Generation (<code>cargo ceno keygen</code>):</strong> Before proving, you need a proving key and a verification key. The <code>keygen</code>
+command generates these keys for a given guest program.</p>
+<pre><code class="language-bash">cargo ceno keygen --example &lt;GUEST_EXAMPLE_NAME&gt; --out-vk &lt;PATH_TO_VERIFICATION_KEY_FILE&gt;
+</code></pre>
+</li>
+<li>
+<p><strong>Proof Generation (using the witness):</strong> The final step is to use the proving key and the witness to generate the
+proof. The <code>prove</code> command automates this, but you can also perform this step manually using the lower-level
+<code>raw-prove</code> command if you have the ELF file, proving key, and witness.</p>
+</li>
+</ol>
+<p>By using <code>cargo ceno prove</code>, you get a simplified experience that handles these steps for you. For most use cases,
+<code>cargo ceno prove</code> and <code>cargo ceno verify</code> are the primary commands you will use.</p>
+<pre><code class="language-bash">cargo ceno prove --example &lt;GUEST_EXAMPLE_NAME&gt; --hints=&lt;HINTS_SEPARATED_BY_COMMA&gt; --public-io=&lt;PUBLIC_IO&gt; --out-proof target/fibonacci.proof
+</code></pre>
+<h2 id="concrete-example"><a class="header" href="#concrete-example">Concrete Example</a></h2>
+<p>You can use <code>ceno</code> to generate proofs for your own custom Rust programs. Let’s walk through how to set up a new project
+and use <code>ceno</code> with it.</p>
+<h3 id="1-project-setup"><a class="header" href="#1-project-setup">1. Project Setup</a></h3>
+<p>First, create a new binary crate with <code>cargo</code>:</p>
+<pre><code class="language-bash">cargo new my-ceno-program
+cd my-ceno-program
+</code></pre>
+<p>Your project will have the following structure:</p>
+<pre><code>my-ceno-program/
+├── Cargo.toml
+└── src/
+    └── main.rs
+</code></pre>
+<h3 id="2-cargotoml"><a class="header" href="#2-cargotoml">2. Cargo.toml</a></h3>
+<p>Next, you need to add <code>ceno_rt</code> as a dependency in your <code>Cargo.toml</code>. <code>ceno_rt</code> provides the runtime environment and
+syscalls for guest programs.</p>
+<pre><code class="language-toml">[package]
+name = "my-ceno-program"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ceno_rt = { git = "https://github.com/scroll-tech/ceno.git" }
+rkyv = { version = "0.8", default-features = false, features = [
+    "alloc",
+    "bytecheck",
+] }
+</code></pre>
+<p><em>Note: For local development, you can use a path dependency: <code>ceno_rt = { path = "../ceno/ceno_rt" }</code></em></p>
+<p>Special notes, as ceno rely on nightly rust toolchain, please also add file <code>rust-toolchain.toml</code> with example content</p>
+<pre><code class="language-toml">[toolchain]
+# refer toolchain from https://github.com/scroll-tech/ceno/blob/master/rust-toolchain.toml#L2
+channel = "nightly-2025-11-20"
+targets = ["riscv32im-unknown-none-elf"]
+# We need the sources for build-std.
+components = ["rust-src"]
+</code></pre>
+<h3 id="3-writing-the-guest-program"><a class="header" href="#3-writing-the-guest-program">3. Writing the Guest Program</a></h3>
+<p>Now, let’s write a simple guest program in <code>src/main.rs</code>. This program will read one <code>u32</code> values from the input, add a
+constant to it, and write the result to the output.</p>
+<pre class="playground"><code class="language-rust">extern crate ceno_rt;
+
+fn main() {
+    let a: u32 = ceno_rt::read();
+    let b: u32 = 3;
+    let c = a.wrapping_add(b);
+
+    ceno_rt::commit(&amp;c);
+}</code></pre>
+<h3 id="4-building-proving-and-verifying"><a class="header" href="#4-building-proving-and-verifying">4. Building, Proving, and Verifying</a></h3>
+<p>With your custom program ready, you can use <code>ceno</code> to manage the workflow. These commands are typically run from the
+root of your project (<code>my-ceno-program</code>).</p>
+<h4 id="41-build-the-program"><a class="header" href="#41-build-the-program">4.1. Build the program</a></h4>
+<p>The <code>build</code> command compiles your guest program into a RISC-V ELF file.</p>
+<pre><code class="language-bash">cargo ceno build
+</code></pre>
+<p>This will create an ELF file at <code>target/riscv32im-ceno-zkvm-elf/debug/my-ceno-program</code>.</p>
+<h4 id="42-generate-keys"><a class="header" href="#42-generate-keys">4.2. Generate Keys</a></h4>
+<p>Next, generate the proving and verification keys.</p>
+<pre><code class="language-bash">cargo ceno keygen --out-vk vk.bin
+</code></pre>
+<p>This will save the keys in a <code>keys</code> directory.</p>
+<h4 id="43-generate-a-proof"><a class="header" href="#43-generate-a-proof">4.3. Generate a Proof</a></h4>
+<p>Now, run the program and generate a proof. You can provide input via the <code>--stdin</code> flag.</p>
+<pre><code class="language-bash">cargo ceno prove --hints=5 --public-io=8 --out-proof proof.bin
+</code></pre>
+<p>This command executes the ELF, generates a proof, and saves it as <code>proof.bin</code>.</p>
+<h4 id="44-providing-inputs-via-file"><a class="header" href="#44-providing-inputs-via-file">4.4. Providing Inputs via File</a></h4>
+<p>In addition to providing hints and public I/O directly on the command line, you can also use files to provide these
+inputs. This is particularly useful for larger inputs or when you want to reuse the same inputs across multiple runs.</p>
+<p><strong>Hints via File</strong></p>
+<p>You can provide hints to the prover using the <code>--hints-file</code> flag. The hints file should be a raw binary file containing
+the hint data. You can create this file using a simple Rust program. For example, to create a hints file with the value
+<code>5u32</code> and <code>8u32</code>:</p>
+<pre class="playground"><code class="language-rust">use std::fs::File;
+use std::io::Write;
+
+fn main() {
+    let mut file = File::create("hints.bin").unwrap();
+    file.write_all(&amp;5u32.to_le_bytes()).unwrap();
+}</code></pre>
+<p>Then, you can use this file when generating a proof:</p>
+<pre><code class="language-bash">cargo ceno prove --hints-file hints.bin --public-io=8 --out-proof proof.bin
+</code></pre>
+<p>This approach is useful when you have a large amount of hint data that is inconvenient to pass through the command line.</p>
+<h4 id="45-verify-the-proof"><a class="header" href="#45-verify-the-proof">4.5. Verify the Proof</a></h4>
+<p>Finally, verify the generated proof.</p>
+<pre><code class="language-bash">cargo ceno verify --vk vk.bin --proof proof.bin
+</code></pre>
+<p>If the proof is valid, you’ll see a success message. This workflow allows you to integrate <code>ceno</code>’s proving capabilities
+into your own Rust projects.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="the-ceno-cli"><a class="header" href="#the-ceno-cli">The <code>ceno</code> CLI</a></h1>
+<p>The <code>ceno</code> command-line interface is the primary way to interact with the Ceno ZKVM. It allows you to build, run, and verify your ZK programs.</p>
+<p>The available commands are:</p>
+<ul>
+<li><code>cargo ceno build</code>: Compiles a guest program written in Rust into a RISC-V ELF file.</li>
+<li><code>cargo ceno info</code>: Provides information about a compiled ELF file, such as its size and segments.</li>
+<li><code>cargo ceno keygen</code>: Generates a proving key and a verification key for a guest program.</li>
+<li><code>cargo ceno prove</code>: Compiles, runs, and proves a Ceno guest program in one go.</li>
+<li><code>cargo ceno run</code>: Executes a guest program.</li>
+<li><code>cargo ceno verify</code>: Verifies a proof generated by <code>cargo ceno prove</code>.</li>
+<li><code>cargo ceno raw-keygen</code>: A lower-level command to generate keys from a compiled ELF file.</li>
+<li><code>cargo ceno raw-prove</code>: A lower-level command to prove a program from a compiled ELF file and a witness.</li>
+<li><code>cargo ceno raw-run</code>: A lower-level command to run a program without the full proof generation, useful for debugging.</li>
+</ul>
+<p>For detailed usage of each command, you can use the <code>--help</code> flag, for example: <code>cargo ceno run --help</code>. The next sections will explain the three core commands.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="cargo-ceno-build"><a class="header" href="#cargo-ceno-build"><code>cargo ceno build</code></a></h1>
+<p>The <code>cargo ceno build</code> command compiles a Ceno program. It is a wrapper around the standard <code>cargo build</code> command, but it automatically sets the correct target and rustflags for building Ceno programs.</p>
+<h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
+<pre><code class="language-bash">cargo ceno build [OPTIONS]
+</code></pre>
+<h2 id="options"><a class="header" href="#options">Options</a></h2>
+<p>The <code>build</code> command accepts all the same options as <code>cargo build</code>. Some of the most common options are:</p>
+<ul>
+<li><code>--example &lt;NAME&gt;</code>: Build a specific example.</li>
+<li><code>--release</code>: Build in release mode.</li>
+<li><code>--package &lt;NAME&gt;</code> or <code>-p &lt;NAME&gt;</code>: Specify which package to build.</li>
+<li><code>--workspace</code>: Build all packages in the workspace.</li>
+</ul>
+<p>For a full list of options, run <code>cargo ceno build --help</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="run-prove-and-keygen"><a class="header" href="#run-prove-and-keygen">Run, prove, and keygen</a></h1>
+<p>The <code>run</code>, <code>prove</code>, and <code>keygen</code> commands are used to execute Ceno programs. They all share a similar set of options.</p>
+<ul>
+<li><code>cargo ceno run</code>: Executes a Ceno program in the ZKVM.</li>
+<li><code>cargo ceno prove</code>: Executes a Ceno program and generates a proof of its execution.</li>
+<li><code>cargo ceno keygen</code>: Generates a proving key and a verification key for a Ceno program.</li>
+</ul>
+<h2 id="usage-1"><a class="header" href="#usage-1">Usage</a></h2>
+<pre><code class="language-bash">cargo ceno run [OPTIONS]
+cargo ceno prove [OPTIONS]
+cargo ceno keygen [OPTIONS]
+</code></pre>
+<h2 id="options-1"><a class="header" href="#options-1">Options</a></h2>
+<p>These commands accept all the same options as <code>cargo build</code>. Some of the most common options are:</p>
+<ul>
+<li><code>--example &lt;NAME&gt;</code>: Run a specific example.</li>
+<li><code>--release</code>: Run in release mode.</li>
+<li><code>--package &lt;NAME&gt;</code> or <code>-p &lt;NAME&gt;</code>: Specify which package to run.</li>
+</ul>
+<p>In addition, the <code>prove</code> and <code>keygen</code> commands have some Ceno-specific options:</p>
+<ul>
+<li><code>--proof &lt;PATH&gt;</code>: Path to the output proof file (for <code>prove</code>). Defaults to <code>proof.bin</code>.</li>
+<li><code>--out-vk &lt;PATH&gt;</code>: Path to the output verification key file (for <code>keygen</code>). Defaults to <code>vk.bin</code>.</li>
+</ul>
+<p>For a full list of options, run <code>cargo ceno &lt;COMMAND&gt; --help</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="raw-commands"><a class="header" href="#raw-commands">Raw Commands</a></h1>
+<p>The <code>raw-run</code>, <code>raw-prove</code>, and <code>raw-keygen</code> commands are lower-level commands that operate on ELF files directly. These are useful for debugging and for integrating Ceno with other build systems.</p>
+<h2 id="cargo-ceno-raw-run"><a class="header" href="#cargo-ceno-raw-run"><code>cargo ceno raw-run</code></a></h2>
+<p>Executes a pre-compiled ELF file in the Ceno ZKVM.</p>
+<h3 id="usage-2"><a class="header" href="#usage-2">Usage</a></h3>
+<pre><code class="language-bash">cargo ceno raw-run &lt;ELF_PATH&gt;
+</code></pre>
+<h2 id="cargo-ceno-raw-prove"><a class="header" href="#cargo-ceno-raw-prove"><code>cargo ceno raw-prove</code></a></h2>
+<p>Generates a proof for a pre-compiled ELF file.</p>
+<h3 id="usage-1-1"><a class="header" href="#usage-1-1">Usage</a></h3>
+<pre><code class="language-bash">cargo ceno raw-prove &lt;ELF_PATH&gt;
+</code></pre>
+<h2 id="cargo-ceno-raw-keygen"><a class="header" href="#cargo-ceno-raw-keygen"><code>cargo ceno raw-keygen</code></a></h2>
+<p>Generates a proving key and a verification key for a pre-compiled ELF file.</p>
+<h3 id="usage-2-1"><a class="header" href="#usage-2-1">Usage</a></h3>
+<pre><code class="language-bash">cargo ceno raw-keygen &lt;ELF_PATH&gt;
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="walkthroughs-of-examples"><a class="header" href="#walkthroughs-of-examples">Walkthroughs of Examples</a></h1>
+<p>This chapter will contain detailed walkthroughs of selected examples from the <code>examples/</code> directory.</p>
+<h2 id="fibonacci"><a class="header" href="#fibonacci">Fibonacci</a></h2>
+<p>The <code>fibonacci</code> example computes the <code>n</code>-th Fibonacci number, where <code>n</code> is a power of 2. The purpose of this example is to show how to perform a simple computation within the zkVM.</p>
+<h3 id="guest-code"><a class="header" href="#guest-code">Guest Code</a></h3>
+<p>The guest program for the <code>fibonacci</code> example is located at <code>examples/examples/fibonacci.rs</code>.</p>
+<pre class="playground"><code class="language-rust">extern crate ceno_rt;
+
+fn main() {
+    // Compute the (1 &lt;&lt; log_n) 'th fibonacci number, using normal Rust code.
+    let log_n: u32 = ceno_rt::read();
+    let mut a = 0_u32;
+    let mut b = 1_u32;
+    let n = 1 &lt;&lt; log_n;
+    for _ in 0..n {
+        let mut c = a + b;
+        c %= 7919; // Modulus to prevent overflow.
+        a = b;
+        b = c;
+    }
+    // Constrain with public io
+    ceno_rt::commit(&amp;b);
+}</code></pre>
+<p>The guest program reads a private input <code>log_n</code> from the host. This input determines the number of iterations to perform. The program then calculates <code>n = 1 &lt;&lt; log_n</code> and computes the <code>n</code>-th Fibonacci number using a standard iterative approach. To prevent the numbers from growing too large, the computation is performed modulo 7919. Finally, the program commits the result back to the host as a public output.</p>
+<p>This example demonstrates the basic workflow of a Ceno zkVM program: reading private inputs, performing computations, and committing public outputs. It shows that you can write standard Rust code for the guest, and the zkVM will execute it.</p>
+<h2 id="is-prime"><a class="header" href="#is-prime">Is Prime</a></h2>
+<p>The <code>is_prime</code> example counts the number of prime numbers up to a given integer <code>n</code>. This example showcases a slightly more complex algorithm and control flow.</p>
+<h3 id="guest-code-1"><a class="header" href="#guest-code-1">Guest Code</a></h3>
+<p>The guest program for the <code>is_prime</code> example is located at <code>examples/examples/is_prime.rs</code>.</p>
+<pre class="playground"><code class="language-rust">extern crate ceno_rt;
+
+fn is_prime(n: u32) -&gt; bool {
+    if n &lt; 2 {
+        return false;
+    }
+    let mut i = 2;
+    while i * i &lt;= n {
+        if n.is_multiple_of(i) {
+            return false;
+        }
+        i += 1;
+    }
+
+    true
+}
+
+fn main() {
+    let n: u32 = ceno_rt::read();
+    let mut cnt_primes = 0;
+
+    for i in 0..=n {
+        cnt_primes += is_prime(i) as u32;
+    }
+
+    if cnt_primes &gt; 1000 * 1000 {
+        panic!();
+    }
+}</code></pre>
+<p>The guest program reads an integer <code>n</code> from the host. It then iterates from 0 to <code>n</code>, checking if each number is prime using a helper function <code>is_prime</code>. The <code>is_prime</code> function implements the trial division method. The total count of prime numbers is accumulated in <code>cnt_primes</code>. If the count of primes exceeds a certain threshold, the program will panic. This demonstrates how to handle exceptional cases in the guest. The program does not commit any public output, but the proof generated by the zkVM still guarantees that the computation was performed correctly.</p>
+<p>This example highlights the ability to define and use helper functions within the guest code, as well as the use of control flow constructs like loops and conditional statements.</p>
+<h2 id="bn254-curve-syscalls"><a class="header" href="#bn254-curve-syscalls">BN254 Curve Syscalls</a></h2>
+<p>The <code>bn254_curve_syscalls</code> example demonstrates the use of syscalls for elliptic curve operations on the BN254 curve. This is useful for cryptographic applications that require curve arithmetic.</p>
+<h3 id="guest-code-2"><a class="header" href="#guest-code-2">Guest Code</a></h3>
+<p>The guest program for the <code>bn254_curve_syscalls</code> example is located at <code>examples/examples/bn254_curve_syscalls.rs</code>.</p>
+<pre class="playground"><code class="language-rust">// Test addition of two curve points. Assert result inside the guest
+extern crate ceno_rt;
+use ceno_syscall::{syscall_bn254_add, syscall_bn254_double};
+
+use substrate_bn::{AffineG1, Fr, G1, Group};
+fn bytes_to_words(bytes: [u8; 64]) -&gt; [u32; 16] {
+    let mut bytes = bytes;
+    // Reverse the order of bytes for each coordinate
+    bytes[0..32].reverse();
+    bytes[32..].reverse();
+    std::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * (i + 1)].try_into().unwrap()))
+}
+
+fn g1_to_words(elem: G1) -&gt; [u32; 16] {
+    let elem = AffineG1::from_jacobian(elem).unwrap();
+    let mut x_bytes = [0u8; 32];
+    elem.x().to_big_endian(&amp;mut x_bytes).unwrap();
+    let mut y_bytes = [0u8; 32];
+    elem.y().to_big_endian(&amp;mut y_bytes).unwrap();
+
+    let mut bytes = [0u8; 64];
+    bytes[..32].copy_from_slice(&amp;x_bytes);
+    bytes[32..].copy_from_slice(&amp;y_bytes);
+
+    bytes_to_words(bytes)
+}
+
+fn main() {
+    let a = G1::one() * Fr::from_str("237").unwrap();
+    let b = G1::one() * Fr::from_str("450").unwrap();
+    let mut a = g1_to_words(a);
+    let b = g1_to_words(b);
+
+    log_state(&amp;a);
+    log_state(&amp;b);
+
+    syscall_bn254_add(&amp;mut a, &amp;b);
+
+    assert_eq!(
+        a,
+        [
+            3533671058, 384027398, 1667527989, 405931240, 1244739547, 3008185164, 3438692308,
+            533547881, 4111479971, 1966599592, 1118334819, 3045025257, 3188923637, 1210932908,
+            947531184, 656119894
+        ]
+    );
+    log_state(&amp;a);
+
+    let c = G1::one() * Fr::from_str("343").unwrap();
+    let mut c = g1_to_words(c);
+    log_state(&amp;c);
+
+    syscall_bn254_double(&amp;mut c);
+    log_state(&amp;c);
+
+    let one = g1_to_words(G1::one());
+    log_state(&amp;one);
+
+    syscall_bn254_add(&amp;mut c, &amp;one);
+    log_state(&amp;c);
+
+    // 2 * 343 + 1 == 237 + 450, one hopes
+    assert_eq!(a, c);
+}
+
+#[cfg(debug_assertions)]
+fn log_state(state: &amp;[u32]) {
+    use ceno_rt::info_out;
+    info_out().write_frame(unsafe {
+        core::slice::from_raw_parts(state.as_ptr() as *const u8, size_of_val(state))
+    });
+}
+
+#[cfg(not(debug_assertions))]
+fn log_state(_state: &amp;[u32]) {}</code></pre>
+<p>The guest program initializes two points on the BN254 curve. It then uses the <code>syscall_bn254_add</code> syscall to add the two points and asserts that the result is correct by comparing it with a pre-computed value. It also demonstrates the use of the <code>syscall_bn254_double</code> syscall to double a point. The program includes helper functions to convert between different representations of curve points.</p>
+<p>This example showcases how to leverage syscalls to perform complex and computationally expensive operations. By using syscalls, the guest can delegate these operations to the host, which can often execute them more efficiently. The guest can still verify the results of the syscalls to ensure the integrity of the computation.</p>
+<h2 id="ceno-rt-alloc"><a class="header" href="#ceno-rt-alloc">Ceno RT Alloc</a></h2>
+<p>The <code>ceno_rt_alloc</code> example shows how to use the allocator in the Ceno runtime to allocate memory on the heap.</p>
+<h3 id="guest-code-3"><a class="header" href="#guest-code-3">Guest Code</a></h3>
+<p>The guest program for the <code>ceno_rt_alloc</code> example is located at <code>examples/examples/ceno_rt_alloc.rs</code>.</p>
+<pre class="playground"><code class="language-rust">use core::ptr::{addr_of, read_volatile};
+
+extern crate ceno_rt;
+
+extern crate alloc;
+use alloc::{vec, vec::Vec};
+
+static mut OUTPUT: u32 = 0;
+
+fn main() {
+    // Test writing to a global variable.
+    unsafe {
+        OUTPUT = 0xf00d;
+        black_box(addr_of!(OUTPUT));
+    }
+
+    // Test writing to the heap.
+    let v: Vec&lt;u32&gt; = vec![0xbeef];
+    black_box(&amp;v[0]);
+
+    // Test writing to a larger vector on the heap
+    let mut v: Vec&lt;u32&gt; = vec![0; 128 * 1024];
+    ceno_syscall::syscall_phantom_log_pc_cycle("finish allocation");
+    v[999] = 0xdead_beef;
+    black_box(&amp;v[0]);
+
+    ceno_syscall::syscall_phantom_log_pc_cycle("start fibonacci");
+    let log_n: u32 = 12;
+    let mut a = 0_u32;
+    let mut b = 1_u32;
+    let n = 1 &lt;&lt; log_n;
+    for _ in 0..n {
+        let mut c = a + b;
+        c %= 7919; // Modulus to prevent overflow.
+        a = b;
+        b = c;
+    }
+    ceno_syscall::syscall_phantom_log_pc_cycle("end fibonacci");
+
+    // write to heap which allocated earlier shard
+    v[999] = 0xbeef_dead;
+    let mut v: Vec&lt;u32&gt; = vec![0; 128 * 1024];
+    // write to heap allocate in current non-first shard
+    v[0] = 0xdead_beef;
+}
+
+/// Prevent compiler optimizations.
+fn black_box&lt;T&gt;(x: *const T) -&gt; T {
+    unsafe { read_volatile(x) }
+}</code></pre>
+<p>The guest program demonstrates three different memory operations. First, it writes to a global static variable. Second, it allocates a small <code>Vec</code> on the heap. Third, it allocates a much larger <code>Vec</code> on the heap and writes a value to an element in it. The <code>black_box</code> function is used to ensure that the compiler does not optimize away these memory operations.</p>
+<p>This example is important for understanding how memory management works in the Ceno zkVM. It shows that the guest has access to both static memory and heap memory, and can perform dynamic memory allocation.</p>
+<h2 id="keccak-syscall"><a class="header" href="#keccak-syscall">Keccak Syscall</a></h2>
+<p>The <code>keccak_syscall</code> example demonstrates how to use a syscall to perform the Keccak permutation, which is the core of the Keccak hash function (used in SHA-3).</p>
+<h3 id="guest-code-4"><a class="header" href="#guest-code-4">Guest Code</a></h3>
+<p>The guest program for the <code>keccak_syscall</code> example is located at <code>examples/examples/keccak_syscall.rs</code>.</p>
+<pre class="playground"><code class="language-rust">//! Compute the Keccak permutation using a syscall.
+//!
+//! Iterate multiple times and log the state after each iteration.
+
+extern crate ceno_rt;
+use ceno_syscall::syscall_keccak_permute;
+
+const ITERATIONS: usize = 100;
+
+fn main() {
+    let mut state = [0_u64; 25];
+
+    for i in 0..ITERATIONS {
+        syscall_keccak_permute(&amp;mut state);
+        if i == 0 {
+            log_state(&amp;state);
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn log_state(state: &amp;[u64; 25]) {
+    use ceno_rt::info_out;
+    info_out().write_frame(unsafe {
+        core::slice::from_raw_parts(state.as_ptr() as *const u8, state.len() * size_of::&lt;u64&gt;())
+    });
+}
+
+#[cfg(not(debug_assertions))]
+fn log_state(_state: &amp;[u64; 25]) {}</code></pre>
+<p>The guest program initializes a 25-word state and then enters a loop where it repeatedly applies the Keccak permutation to the state using the <code>syscall_keccak_permute</code> syscall. The <code>log_state</code> function is used to log the state after the first permutation, which can be useful for debugging.</p>
+<p>This example further illustrates the power of syscalls. The Keccak permutation is a complex operation, and implementing it efficiently in the guest would be challenging. By providing it as a syscall, the Ceno platform makes it easy for guest programs to use this important cryptographic primitive.</p>
+<h2 id="median"><a class="header" href="#median">Median</a></h2>
+<p>The <code>median</code> example shows how to find the median of a list of numbers. It demonstrates a common pattern where the host provides a candidate answer, and the guest verifies it.</p>
+<h3 id="guest-code-5"><a class="header" href="#guest-code-5">Guest Code</a></h3>
+<p>The guest program for the <code>median</code> example is located at <code>examples/examples/median.rs</code>.</p>
+<pre class="playground"><code class="language-rust">//! Find the median of a collection of numbers.
+//!
+//! Of course, we are asking our good friend, the host, for help, but we still need to verify the answer.
+extern crate ceno_rt;
+use ceno_rt::debug_println;
+#[cfg(debug_assertions)]
+use core::fmt::Write;
+
+fn main() {
+    let numbers: Vec&lt;u32&gt; = ceno_rt::read();
+    let median_candidate: u32 = ceno_rt::read();
+    let smaller = numbers.iter().filter(|x| **x &lt; median_candidate).count();
+    assert_eq!(smaller, numbers.len() / 2);
+    debug_println!("{}", median_candidate);
+}</code></pre>
+<p>The guest program reads a list of numbers and a median candidate from the host. It then verifies that the candidate is indeed the median by counting the number of elements in the list that are smaller than the candidate. If the count is equal to half the length of the list, the assertion passes, and the program successfully completes.</p>
+<p>This example showcases a powerful pattern for zkVM programming: verifiable computation. The host, which is not constrained by the limitations of the zkVM, can perform a complex computation (like finding the median of a large list) and then provide the answer to the guest. The guest’s task is then to perform a much simpler computation to verify that the host’s answer is correct. This allows for the verification of complex computations that would be too expensive to perform directly in the zkVM.</p>
+<h2 id="sorting"><a class="header" href="#sorting">Sorting</a></h2>
+<p>The <code>sorting</code> example demonstrates how to sort a list of numbers inside the guest.</p>
+<h3 id="guest-code-6"><a class="header" href="#guest-code-6">Guest Code</a></h3>
+<p>The guest program for the <code>sorting</code> example is located at <code>examples/examples/sorting.rs</code>.</p>
+<pre class="playground"><code class="language-rust">extern crate ceno_rt;
+use ceno_rt::debug_println;
+#[cfg(debug_assertions)]
+use core::fmt::Write;
+
+fn main() {
+    let mut scratch: Vec&lt;u32&gt; = ceno_rt::read();
+    scratch.sort();
+    // Print any output you feel like, eg the first element of the sorted vector:
+    debug_println!("{}", scratch[0]);
+}</code></pre>
+<p>The guest program reads a list of numbers from the host, creates a mutable copy of it, and then sorts the copy using the standard <code>sort</code> method from the Rust standard library. The <code>debug_println!</code> macro is used to print the first element of the sorted vector, which can be useful for debugging.</p>
+<p>This example demonstrates that the Ceno zkVM supports a significant portion of the Rust standard library, including common data structures and algorithms. This makes it easy to write complex programs for the guest, as you can leverage the power and convenience of the standard library.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="advanced-topics"><a class="header" href="#advanced-topics">Advanced Topics</a></h1>
+<p>This chapter is for developers who want to dive deeper into the internals of Ceno.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="guest-programming-ceno_rt"><a class="header" href="#guest-programming-ceno_rt">Guest Programming (<code>ceno_rt</code>)</a></h1>
+<p>The <code>ceno_rt</code> crate provides the runtime environment for guest programs running inside the Ceno ZKVM. It offers essential functionalities for interacting with the host and the ZKVM environment.</p>
+<h2 id="execution-environment"><a class="header" href="#execution-environment">Execution Environment</a></h2>
+<p>A guest program’s execution begins at the <code>_start</code> symbol, which is defined in <code>ceno_rt</code>. This entry point sets up the global pointer and stack, and then calls the standard Rust <code>main</code> function.</p>
+<p>After <code>main</code> returns, or to exit explicitly, the program can call <code>ceno_rt::halt(exit_code)</code>. An <code>exit_code</code> of 0 indicates success.</p>
+<h2 id="key-features-of-ceno_rt-include"><a class="header" href="#key-features-of-ceno_rt-include">Key features of <code>ceno_rt</code> include:</a></h2>
+<h3 id="memory-mapped-io-mmio"><a class="header" href="#memory-mapped-io-mmio">Memory-Mapped I/O (<code>mmio</code>)</a></h3>
+<p>The <code>ceno_rt::mmio</code> module provides a way to read data provided by the host through memory-mapped regions.</p>
+<ul>
+<li><strong>Hints</strong>: These are private inputs from the host. You can read them using <code>ceno_rt::mmio::read_slice()</code> to get a byte slice or <code>ceno_rt::mmio::read::&lt;T&gt;()</code> to deserialize a specific type.</li>
+<li><strong>Public I/O</strong>: The <code>ceno_rt::mmio::commit</code> function is used to reveal public outputs. It verifies that the output produced by the guest matches the expected output provided by the host.</li>
+</ul>
+<h3 id="standard-io-io"><a class="header" href="#standard-io-io">Standard I/O (<code>io</code>)</a></h3>
+<p>The <code>ceno_rt::io</code> module contains <code>IOWriter</code> for writing data. In debug builds, a global <code>IOWriter</code> instance is available through <code>ceno_rt::io::info_out()</code>. You can use the <code>debug_print!</code> and <code>debug_println!</code> macros for logging during development.</p>
+<h3 id="dynamic-memory-allocator"><a class="header" href="#dynamic-memory-allocator">Dynamic Memory (<code>allocator</code>)</a></h3>
+<p>For dynamic memory needs, <code>ceno_rt::allocator</code> provides a simple allocator.</p>
+<h3 id="system-calls-syscalls"><a class="header" href="#system-calls-syscalls">System Calls (<code>syscalls</code>)</a></h3>
+<p>The <code>ceno_rt::syscalls</code> module offers low-level functions to access precompiled operations for performance-critical tasks. For more details, see the “Accelerated Operations with Precompiles” chapter.</p>
+<h3 id="weakly-linked-functions"><a class="header" href="#weakly-linked-functions">Weakly Linked Functions</a></h3>
+<p><code>ceno_rt</code> defines several weakly linked functions (e.g., <code>sys_write</code>, <code>sys_alloc_words</code>, <code>sys_rand</code>) that provide default implementations for certain system-level operations. These can be overridden by the host environment.</p>
+<p>When writing a guest program, you will typically include <code>ceno_rt</code> as a dependency in your <code>Cargo.toml</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="accelerated-operations-with-precompiles-syscalls"><a class="header" href="#accelerated-operations-with-precompiles-syscalls">Accelerated Operations with Precompiles (Syscalls)</a></h1>
+<p>Ceno provides “precompiles” to accelerate common, computationally intensive operations. These are implemented as <code>syscalls</code> that the guest program can invoke. Using precompiles is much more efficient than executing the equivalent logic in standard RISC-V instructions.</p>
+<h2 id="using-precompiles"><a class="header" href="#using-precompiles">Using Precompiles</a></h2>
+<p>To use a precompile, you need to call the corresponding function from the <code>ceno_rt::syscalls</code> module in your guest code.</p>
+<p>For example, to compute a Keccak permutation, you can use <code>syscall_keccak_permute</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use ceno_rt::syscalls::syscall_keccak_permute;
+
+let mut state = [0u64; 25];
+// ... initialize state ...
+syscall_keccak_permute(&amp;mut state);
+<span class="boring">}</span></code></pre>
+<h2 id="available-precompiles"><a class="header" href="#available-precompiles">Available Precompiles</a></h2>
+<p>Ceno currently offers the following precompiles:</p>
+<ul>
+<li>
+<p><strong>Hashing:</strong></p>
+<ul>
+<li><code>syscall_keccak_permute</code>: For Keccak-f[1600] permutation, the core of Keccak and SHA-3.</li>
+<li><code>syscall_sha256_extend</code>: For the SHA-256 message schedule (<code>W</code> table) extension.</li>
+</ul>
+</li>
+<li>
+<p><strong>Cryptography:</strong></p>
+<ul>
+<li><code>syscall_secp256k1_add</code>: Elliptic curve addition on secp256k1.</li>
+<li><code>syscall_secp256k1_double</code>: Elliptic curve point doubling on secp256k1.</li>
+<li><code>syscall_secp256k1_decompress</code>: Decompress a secp256k1 public key.</li>
+<li><code>syscall_bn254_add</code>: Elliptic curve addition on BN254.</li>
+<li><code>syscall_bn254_double</code>: Elliptic curve point doubling on BN254.</li>
+<li><code>syscall_bn254_fp_addmod</code>, <code>syscall_bn254_fp_mulmod</code>: Field arithmetic for BN254’s base field.</li>
+<li><code>syscall_bn254_fp2_addmod</code>, <code>syscall_bn254_fp2_mulmod</code>: Field arithmetic for BN254’s quadratic extension field.</li>
+</ul>
+</li>
+</ul>
+<p>You can find examples of how to use each of these syscalls in the <code>examples/</code> directory of the project.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="profiling--performance"><a class="header" href="#profiling--performance">Profiling &amp; Performance</a></h1>
+<p>Ceno includes tools to help you analyze and optimize the performance of your ZK programs.</p>
+<h2 id="execution-profiling"><a class="header" href="#execution-profiling">Execution Profiling</a></h2>
+<p>You can profile the execution of your guest program by using the <code>--profiling</code> flag with the <code>cargo ceno run</code> or other binary commands. This will output detailed statistics about the execution, such as cycle counts for different parts of the program.</p>
+<p>For example:</p>
+<pre><code class="language-bash">cargo ceno run --profiling=1 -- &lt;your_program&gt;
+</code></pre>
+<p>The value passed to <code>--profiling</code> controls the granularity of the profiling information.</p>
+<p>The output will show a tree of spans with timing information, allowing you to identify performance bottlenecks in your code.</p>
+<h2 id="benchmarking"><a class="header" href="#benchmarking">Benchmarking</a></h2>
+<p>The <code>ceno_zkvm</code> crate contains a <code>benches</code> directory with several benchmarks. You can use these as a reference for writing your own benchmarks using <code>criterion</code>.</p>
+<p>Running the benchmarks can give you an idea of the performance of different operations and help you optimize your code. To run the benchmarks, you can use the standard <code>cargo bench</code> command.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="differences-from-risc-v"><a class="header" href="#differences-from-risc-v">Differences from RISC-V</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="integration-with-ethereum"><a class="header" href="#integration-with-ethereum">Integration with Ethereum</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="prover-network"><a class="header" href="#prover-network">Prover Network</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="on-chain-verification"><a class="header" href="#on-chain-verification">On-chain verification</a></h1>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-c2a407aa.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>
