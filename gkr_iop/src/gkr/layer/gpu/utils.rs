@@ -58,6 +58,8 @@ pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
         if let Some(first_idx) = first_idx {
             let num_vars = all_mles[first_idx].mle.num_vars();
             mle_size_info.push((num_vars, num_vars));
+        } else {
+            mle_size_info.push((0, 0));
         }
     }
 

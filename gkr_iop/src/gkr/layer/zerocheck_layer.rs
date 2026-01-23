@@ -185,19 +185,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 "residual monomials must exist when common plan is present"
             );
             log_common_term_plan_stats(&self.name, common_plan.as_ref(), &monomial_terms);
-            if let Some(ref plan) = common_plan {
-                assert!(
-                    residual_terms.iter().all(|term| !term.product.is_empty()),
-                    "residual monomials must retain at least one witness when common factoring is enabled"
-                );
-                self.main_sumcheck_expression_common_factored = Some(plan.clone());
-                self.main_sumcheck_expression_monomial_terms_excluded_shared =
-                    Some(residual_terms);
-            } else {
-                self.main_sumcheck_expression_common_factored = None;
-                self.main_sumcheck_expression_monomial_terms_excluded_shared =
-                    Some(monomial_terms.clone());
-            }
+            self.main_sumcheck_expression_common_factored = common_plan;
+            self.main_sumcheck_expression_monomial_terms_excluded_shared =
+                Some(residual_terms);
         }
         tracing::trace!(
             "{} main sumcheck monomial terms count: {}",
@@ -472,17 +462,16 @@ fn build_common_factored_plan_and_residual_terms<E: ExtensionField>(
     let mut grouped: BTreeMap<Vec<usize>, Vec<usize>> = BTreeMap::new();
     for (term_idx, witnesses) in sorted_witnesses.iter().enumerate() {
         let mut prefix = Vec::new();
-        let mut best_prefix = Vec::new();
+        let mut best_prefix = None;
         for &wit in witnesses {
             prefix.push(wit);
             if prefix_counts.get(&prefix).copied().unwrap_or(0) >= 2 {
-                best_prefix = prefix.clone();
+                best_prefix = Some(prefix.clone());
             }
         }
-        if best_prefix.is_empty() {
-            best_prefix = witnesses.clone();
+        if let Some(best_prefix) = best_prefix {
+            grouped.entry(best_prefix).or_default().push(term_idx);
         }
-        grouped.entry(best_prefix).or_default().push(term_idx);
     }
 
     let mut term_common_lengths = vec![0usize; monomial_terms.len()];
@@ -494,16 +483,19 @@ fn build_common_factored_plan_and_residual_terms<E: ExtensionField>(
             .map(|&term_idx| sorted_witnesses[term_idx].len())
             .min()
             .unwrap_or(0);
-        if min_term_len > 0 && witness_indices.len() >= min_term_len {
-            let new_len = min_term_len.saturating_sub(1);
-            witness_indices.truncate(new_len);
+        if min_term_len == 0 {
+            continue;
+        }
+        if witness_indices.len() > min_term_len {
+            witness_indices.truncate(min_term_len);
         }
         let effective_len = witness_indices.len();
-        if effective_len > 0 {
-            has_shared_prefix = true;
-            for &term_idx in &term_indices {
-                term_common_lengths[term_idx] = effective_len;
-            }
+        if effective_len == 0 {
+            continue;
+        }
+        has_shared_prefix = true;
+        for &term_idx in &term_indices {
+            term_common_lengths[term_idx] = effective_len;
         }
         groups.push(CommonTermGroup {
             shared_len: effective_len,
@@ -519,8 +511,13 @@ fn build_common_factored_plan_and_residual_terms<E: ExtensionField>(
             }
         }
         debug_assert!(
-            coverage.iter().all(|&count| count == 1),
-            "each monomial term must appear exactly once in common term plan"
+            coverage
+                .iter()
+                .zip(term_common_lengths.iter())
+                .all(|(&count, &len)| {
+                    (len == 0 && count == 0) || (len > 0 && count == 1)
+                }),
+            "factored monomials must appear exactly once in common term plan"
         );
     }
 

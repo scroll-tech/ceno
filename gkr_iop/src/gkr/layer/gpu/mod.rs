@@ -267,11 +267,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                         term_idx,
                         mle_indices_per_term.len()
                     );
-                    debug_assert!(
-                        !mle_indices_per_term[term_idx].is_empty(),
-                        "factored term {} has no residual multiplicands",
-                        term_idx
-                    );
                 }
             }
         }
