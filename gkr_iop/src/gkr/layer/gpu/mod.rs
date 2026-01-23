@@ -237,10 +237,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         exit_span!(span_eq);
 
         let plan = layer.main_sumcheck_expression_common_factored.as_ref();
-        let residual_terms =
-            layer
-                .main_sumcheck_expression_monomial_terms_excluded_shared
-                .as_ref();
+        let residual_terms = layer
+            .main_sumcheck_expression_monomial_terms_excluded_shared
+            .as_ref();
         // Calculate max_num_var and max_degree from the extracted relationships
         let monomial_terms = match (plan, residual_terms) {
             (Some(_), Some(residual)) => residual.clone(),
@@ -276,20 +275,30 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         let max_degree = if let Some(plan) = plan {
             plan.groups
                 .iter()
-                .flat_map(|group| group.term_indices.iter().map(|term_idx| {
-                    let shared_len = group.shared_len;
-                    let residual_len = mle_indices_per_term
-                        .get(*term_idx)
-                        .map(|v| v.len())
-                        .unwrap_or(0);
-                    shared_len + residual_len
-                }))
+                .flat_map(|group| {
+                    group.term_indices.iter().map(|term_idx| {
+                        let shared_len = group.shared_len;
+                        let residual_len = mle_indices_per_term
+                            .get(*term_idx)
+                            .map(|v| v.len())
+                            .unwrap_or(0);
+                        shared_len + residual_len
+                    })
+                })
                 .max()
                 .unwrap_or_else(|| {
-                    mle_indices_per_term.iter().map(|indices| indices.len()).max().unwrap_or(0)
+                    mle_indices_per_term
+                        .iter()
+                        .map(|indices| indices.len())
+                        .max()
+                        .unwrap_or(0)
                 })
         } else {
-            mle_indices_per_term.iter().map(|indices| indices.len()).max().unwrap_or(0)
+            mle_indices_per_term
+                .iter()
+                .map(|indices| indices.len())
+                .max()
+                .unwrap_or(0)
         };
 
         // Convert types for GPU function Call
@@ -313,7 +322,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 basic_tr,
             )
             .unwrap();
-        println!("finish sumcheck");
         let evals_gpu = evals_gpu.into_iter().flatten().collect();
         let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect();
 

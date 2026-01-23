@@ -66,10 +66,7 @@ pub fn extract_mle_relationships_from_monomial_terms<'a, E: ExtensionField>(
     (term_coefficients, mle_indices_per_term, mle_size_info)
 }
 
-pub fn encode_common_term_plan(
-    plan: &CommonFactoredTermPlan,
-    total_mles: usize,
-) -> CommonTermPlan {
+pub fn encode_common_term_plan(plan: &CommonFactoredTermPlan, total_mles: usize) -> CommonTermPlan {
     let mut term_offsets = Vec::with_capacity(plan.groups.len() + 1);
     let mut term_terms = Vec::new();
     term_offsets.push(0);
