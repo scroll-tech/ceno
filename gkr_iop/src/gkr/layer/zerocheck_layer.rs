@@ -432,6 +432,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn build_common_factored_plan_and_residual_terms<E: ExtensionField>(
     monomial_terms: &[Term<Expression<E>, Expression<E>>],
 ) -> (
