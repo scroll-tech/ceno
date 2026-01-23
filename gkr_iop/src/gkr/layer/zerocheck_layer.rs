@@ -186,8 +186,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             );
             log_common_term_plan_stats(&self.name, common_plan.as_ref(), &monomial_terms);
             self.main_sumcheck_expression_common_factored = common_plan;
-            self.main_sumcheck_expression_monomial_terms_excluded_shared =
-                Some(residual_terms);
+            self.main_sumcheck_expression_monomial_terms_excluded_shared = Some(residual_terms);
         }
         tracing::trace!(
             "{} main sumcheck monomial terms count: {}",
@@ -435,7 +434,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
 
 fn build_common_factored_plan_and_residual_terms<E: ExtensionField>(
     monomial_terms: &[Term<Expression<E>, Expression<E>>],
-) -> (Option<CommonFactoredTermPlan>, Vec<Term<Expression<E>, Expression<E>>>) {
+) -> (
+    Option<CommonFactoredTermPlan>,
+    Vec<Term<Expression<E>, Expression<E>>>,
+) {
     if monomial_terms.is_empty() {
         return (None, Vec::new());
     }
@@ -514,9 +516,7 @@ fn build_common_factored_plan_and_residual_terms<E: ExtensionField>(
             coverage
                 .iter()
                 .zip(term_common_lengths.iter())
-                .all(|(&count, &len)| {
-                    (len == 0 && count == 0) || (len > 0 && count == 1)
-                }),
+                .all(|(&count, &len)| { (len == 0 && count == 0) || (len > 0 && count == 1) }),
             "factored monomials must appear exactly once in common term plan"
         );
     }
@@ -533,11 +533,11 @@ fn build_common_factored_plan_and_residual_terms<E: ExtensionField>(
                 "term {} shorter than common prefix",
                 term_idx
             );
-            for (expr, expected) in original.iter().take(*remove_len).zip(
-                sorted_witnesses[term_idx]
-                    .iter()
-                    .take(*remove_len),
-            ) {
+            for (expr, expected) in original
+                .iter()
+                .take(*remove_len)
+                .zip(sorted_witnesses[term_idx].iter().take(*remove_len))
+            {
                 let witness_id = witness_index_from_expr(expr);
                 debug_assert_eq!(
                     witness_id, *expected,
@@ -595,8 +595,9 @@ fn normalize_monomial_term_products<E: ExtensionField>(
     terms: &mut [Term<Expression<E>, Expression<E>>],
 ) {
     for term in terms {
-        term.product
-            .sort_unstable_by(|lhs, rhs| witness_index_from_expr(rhs).cmp(&witness_index_from_expr(lhs)));
+        term.product.sort_unstable_by(|lhs, rhs| {
+            witness_index_from_expr(rhs).cmp(&witness_index_from_expr(lhs))
+        });
     }
 }
 
@@ -703,10 +704,8 @@ fn log_common_term_plan_stats<E: ExtensionField>(
     );
 
     let naive_mul_count: usize = term_factor_counts.iter().sum();
-    let coverage_percentage =
-        (shared_terms as f64 / total_terms.max(1) as f64) * 100.0;
-    let factored_percentage =
-        (factored_terms as f64 / total_terms.max(1) as f64) * 100.0;
+    let coverage_percentage = (shared_terms as f64 / total_terms.max(1) as f64) * 100.0;
+    let factored_percentage = (factored_terms as f64 / total_terms.max(1) as f64) * 100.0;
     tracing::info!(
         target: "gkr::layer",
         "[CommonFactoredTermPlan] gkr::layer {} groups={} shared_terms={}/{} ({coverage_percentage:.2}%) factored_terms={}/{} ({factored_percentage:.2}%) common_wit_range=[{}, {}] naive_mul={} factored_mul={}",
