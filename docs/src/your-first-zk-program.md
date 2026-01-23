@@ -1,8 +1,10 @@
 # Your First ZK Program
 
-In the previous chapter, you ran a pre-compiled Fibonacci example. Now, let's look at the actual Rust code for that guest program and understand how it works.
+In the previous chapter, you ran a pre-compiled Fibonacci example. Now, let's look at the actual Rust code for that
+guest program and understand how it works.
 
-The goal of this program is to calculate the `n`-th Fibonacci number inside the Ceno zkVM and then commit the result to the public output.
+The goal of this program is to calculate the `n`-th Fibonacci number inside the Ceno zkVM and then commit the result to
+the public output.
 
 ## The Code
 
@@ -10,12 +12,10 @@ Here is the complete source code for the Fibonacci example (`examples/examples/f
 
 ```rust
 extern crate ceno_rt;
-use rkyv::Archived;
 
 fn main() {
     // Compute the (1 << log_n) 'th fibonacci number, using normal Rust code.
-    let log_n: &Archived<u32> = ceno_rt::read();
-    let log_n: u32 = log_n.into();
+    let log_n: u32 = ceno_rt::read();
     let mut a = 0_u32;
     let mut b = 1_u32;
     let n = 1 << log_n;
@@ -26,7 +26,7 @@ fn main() {
         b = c;
     }
     // Constrain with public io
-    ceno_rt::commit::<Archived<u32>, _>(&b);
+    ceno_rt::commit(&b);
 }
 ```
 
@@ -38,45 +38,56 @@ Let's break down the key parts of this program.
 
 ```rust
 extern crate ceno_rt;
-use rkyv::Archived;
 ```
 
-Every Ceno guest program needs to import the `ceno_rt` crate. This crate provides essential functions for interacting with the zkVM environment, such as reading private inputs and committing public outputs. `rkyv` is used for zero-copy deserialization, which is how data is passed into the program.
+Every Ceno guest program needs to import the `ceno_rt` crate. This crate provides essential functions for interacting
+with the zkVM environment, such as reading private inputs and committing public outputs.
 
 ### 2. Reading Private Inputs
 
 ```rust
-let log_n: &Archived<u32> = ceno_rt::read();
-let log_n: u32 = log_n.into();
+fn main() {
+    let log_n: u32 = ceno_rt::read();
+}
 ```
 
-The `ceno_rt::read()` function is used to read private data that the host provides. In the previous chapter, we passed `--hints=10`. This is the value that `ceno_rt::read()` retrieves. The program receives it as an `Archived<u32>`, which is then converted into a standard `u32`.
+The `ceno_rt::read()` function is used to read private data that the host provides. In the previous chapter, we passed
+`--hints=10`. This is the value that `ceno_rt::read()` retrieves. The program receives it as an `Archived<u32>`, which
+is then converted into a standard `u32`.
 
 ### 3. Core Logic
 
 ```rust
-let mut a = 0_u32;
-let mut b = 1_u32;
-let n = 1 << log_n;
-for _ in 0..n {
-    let mut c = a + b;
-    c %= 7919; // Modulus to prevent overflow.
-    a = b;
-    b = c;
+fn main() {
+    let mut a = 0_u32;
+    let mut b = 1_u32;
+    let n = 1 << log_n;
+    for _ in 0..n {
+        let mut c = a + b;
+        c %= 7919; // Modulus to prevent overflow.
+        a = b;
+        b = c;
+    }
 }
 ```
 
-This is standard Rust code for calculating a Fibonacci sequence. It uses the `log_n` input to determine the number of iterations (`n = 1 << log_n`, which is `2^10 = 1024`). The calculation is performed modulo `7919` to keep the numbers within a manageable size.
+This is standard Rust code for calculating a Fibonacci sequence. It uses the `log_n` input to determine the number of
+iterations (`n = 1 << log_n`, which is `2^10 = 1024`). The calculation is performed modulo `7919` to keep the numbers
+within a manageable size.
 
 This is a key takeaway: **You can write normal Rust code for your core computational logic.**
 
 ### 4. Committing Public Output
 
 ```rust
-ceno_rt::commit::<Archived<u32>, _>(&b);
+fn main() {
+    ceno_rt::commit(&b);
+}
 ```
 
-After the calculation is complete, `ceno_rt::commit()` is called. This function takes the final result (`b`) and commits it as a public output of the zkVM. The host can then verify that the program produced the correct public output. In our `run` command, this is checked against the `--public-io=4191` argument.
+After the calculation is complete, `ceno_rt::commit()` is called. This function takes the final result (`b`) and commits
+it as a public output of the zkVM. The host can then verify that the program produced the correct public output. In our
+`run` command, this is checked against the `--public-io=4191` argument.
 
 ## Building the Program
 
@@ -86,7 +97,8 @@ To build this program so that it can be run inside the Ceno zkVM, you can use th
 cargo ceno build --example fibonacci
 ```
 
-This will produce an ELF file at `examples/target/riscv32im-ceno-zkvm-elf/release/fibonacci`. This is the file that is executed by the `run` command.
+This will produce an ELF file at `examples/target/riscv32im-ceno-zkvm-elf/release/fibonacci`. This is the file that is
+executed by the `run` command.
 
 ## Running the Program
 
@@ -114,8 +126,10 @@ fn main() {
 }
 ```
 
-**TODO:** support generating hints file by running the guest program (possibly in a different mode, say, hint generating mode)
+**TODO:** support generating hints file by running the guest program (possibly in a different mode, say, hint generating
+mode)
 
 **TODO:** support providing public io also in binary file
 
-Now that you understand the basic components of a Ceno program, the next section will explore the interaction between the host and the guest in more detail.
+Now that you understand the basic components of a Ceno program, the next section will explore the interaction between
+the host and the guest in more detail.
