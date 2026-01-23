@@ -67,6 +67,17 @@ rkyv = { version = "0.8", default-features = false, features = [
 
 _Note: For local development, you can use a path dependency: `ceno_rt = { path = "../ceno/ceno_rt" }`_
 
+Special notes, as ceno rely on nightly rust toolchain, please also add file `rust-toolchain.toml` with example content
+
+```toml
+[toolchain]
+# refer toolchain from https://github.com/scroll-tech/ceno/blob/master/rust-toolchain.toml#L2
+channel = "nightly-2025-11-20"
+targets = ["riscv32im-unknown-none-elf"]
+# We need the sources for build-std.
+components = ["rust-src"]
+```
+
 ### 3. Writing the Guest Program
 
 Now, let's write a simple guest program in `src/main.rs`. This program will read one `u32` values from the input, add a
@@ -74,11 +85,9 @@ constant to it, and write the result to the output.
 
 ```rust
 extern crate ceno_rt;
-use rkyv::Archived;
 
 fn main() {
     let a: u32 = ceno_rt::read();
-    let a: u32 = a.into();
     let b: u32 = 3;
     let c = a.wrapping_add(b);
 
