@@ -9,12 +9,15 @@ build-std = [
 ]
 build-std-features = [
   "compiler-builtins-mem",
-  "panic_immediate_abort",
   "default",
 ]
+panic-immediate-abort = true
 
 [profile.dev]
-panic = "abort"
+panic = "immediate-abort"
+
+[profile.release]
+panic = "immediate-abort"
 
 [build]
 rustflags = [
@@ -25,5 +28,7 @@ rustflags = [
   "-Zlocation-detail=none",
   "-C",
   "passes=lower-atomic",
+  '--cfg',
+  'getrandom_backend="custom"', # getrandom v3.3+ requires this cfg to use a custom getrandom implementation
 ]
 target = "../ceno_rt/riscv32im-ceno-zkvm-elf.json"

@@ -5,6 +5,7 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -36,6 +37,11 @@ pub struct JalrInstruction<E>(PhantomData<E>);
 ///   the program table
 impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     type InstructionConfig = JalrConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::JALR]
+    }
 
     fn name() -> String {
         format!("{:?}", InsnKind::JALR)
@@ -111,6 +117,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
@@ -150,7 +157,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
         config
             .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         Ok(())
     }

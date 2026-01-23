@@ -1,6 +1,7 @@
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::SignedExtendConfig,
     instructions::{
@@ -37,6 +38,11 @@ pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
     type InstructionConfig = LoadConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -165,6 +171,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
@@ -184,7 +191,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         set_val!(instance, config.imm, imm.1);
         config
             .im_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
         config.rs1_read.assign_value(instance, rs1);
         config.memory_read.assign_value(instance, memory_read);
         config

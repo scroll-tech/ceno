@@ -20,4 +20,10 @@ allowed-duplicate-crates = [
   "toml_datetime",
   "winnow",
   "generic-array",
+  "num-bigint",
+  "rfc6979",
+  "k256",
+  "p256",
+  "primeorder",
+  "ecdsa",
 ]

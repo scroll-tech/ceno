@@ -6,14 +6,14 @@ use getrandom::{Error, register_custom_getrandom};
 use core::arch::{asm, global_asm};
 use std::{
     alloc::{Layout, alloc_zeroed},
-    ptr::null,
+    ptr,
 };
 
 #[cfg(target_arch = "riscv32")]
 mod allocator;
 
 mod mmio;
-pub use mmio::{commit, read, read_slice};
+pub use mmio::{commit, read, read_owned, read_slice};
 
 mod io;
 #[cfg(debug_assertions)]
@@ -21,8 +21,6 @@ pub use io::info_out;
 
 mod params;
 pub use params::*;
-
-pub mod syscalls;
 
 #[unsafe(no_mangle)]
 #[linkage = "weak"]
@@ -39,7 +37,7 @@ pub extern "C" fn sys_alloc_words(nwords: usize) -> *mut u32 {
 #[unsafe(no_mangle)]
 #[linkage = "weak"]
 pub extern "C" fn sys_getenv(_name: *const u8) -> *const u8 {
-    null()
+    ptr::null()
 }
 
 /// Generates random bytes.
@@ -51,26 +49,37 @@ pub extern "C" fn sys_getenv(_name: *const u8) -> *const u8 {
 #[unsafe(no_mangle)]
 #[linkage = "weak"]
 pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
-    unsafe fn step() -> u32 {
+    fn step() -> u32 {
         static mut X: u32 = 0xae569764;
         // We are stealing Borland Delphi's random number generator.
         // The random numbers here are only good enough to make eg
         // HashMap work.
+        //
+        // SAFETY: Used for hashing purposes so it is more or less OK to have conflicting reads
+        // and writes.
         unsafe {
             X = X.wrapping_mul(134775813) + 1;
             X
         }
     }
-    // TODO(Matthias): this is a bit inefficient,
-    // we could fill whole u32 words at a time.
-    // But it's just for testing.
-    for i in 0..words {
+    let mut idx = 0;
+    let steps = words / 4;
+    let rest = words % 4;
+    for _ in 0..steps {
+        let bytes = step().to_le_bytes();
+        // SAFETY: Up to the caller
         unsafe {
-            let element = recv_buf.add(i);
-            // The lower bits ain't really random, so might as well take
-            // the higher order ones, if we are only using 8 bits.
-            *element = step().to_le_bytes()[3];
+            ptr::copy_nonoverlapping(bytes.as_ptr(), recv_buf.add(idx), 4);
         }
+        idx = idx.wrapping_add(4);
+    }
+    let [a, b, c, _] = step().to_le_bytes();
+    for (_, el) in (0..rest).zip([a, b, c]) {
+        // SAFETY: Up to the caller
+        unsafe {
+            *recv_buf.add(idx) = el;
+        }
+        idx = idx.wrapping_add(1);
     }
 }
 
@@ -85,6 +94,23 @@ pub fn my_get_random(buf: &mut [u8]) -> Result<(), Error> {
     Ok(())
 }
 register_custom_getrandom!(my_get_random);
+
+/// Custom getrandom implementation for getrandom v0.3
+///
+/// see also: <https://docs.rs/getrandom/0.3.3/getrandom/#custom-backend>
+///
+/// # Safety
+/// - `dest` must be valid for writes of `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn __getrandom_v03_custom(
+    dest: *mut u8,
+    len: usize,
+) -> Result<(), getrandom_v3::Error> {
+    unsafe {
+        sys_rand(dest, len);
+    }
+    Ok(())
+}
 
 pub fn halt(exit_code: u32) -> ! {
     #[cfg(target_arch = "riscv32")]
@@ -137,4 +163,18 @@ _start:
 unsafe extern "C" {
     // The address of this variable is the start of the stack (growing downwards).
     static _stack_start: u8;
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::sys_rand;
+
+    #[test]
+    fn fills_with_random_bytes() {
+        let mut buf = [0u8; 65];
+        unsafe {
+            sys_rand(buf.as_mut_ptr(), buf.len());
+        }
+        assert_ne!(buf, [0u8; 65]);
+    }
 }

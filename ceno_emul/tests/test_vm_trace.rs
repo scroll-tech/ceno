@@ -1,13 +1,11 @@
 #![allow(clippy::unusual_byte_groupings)]
 use anyhow::Result;
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use rustc_hash::FxHashMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use ceno_emul::{
-    CENO_PLATFORM, Cycle, EmuContext, InsnKind, Instruction, Platform, Program, StepRecord, Tracer,
-    VMState, WordAddr, encode_rv32,
+    CENO_PLATFORM, Cycle, EmuContext, FullTracer as Tracer, InsnKind, Instruction, Platform,
+    Program, StepRecord, VMState, WordAddr, encode_rv32,
 };
 
 #[test]
@@ -19,7 +17,7 @@ fn test_vm_trace() -> Result<()> {
         program_fibonacci_20(),
         Default::default(),
     );
-    let mut ctx = VMState::new(CENO_PLATFORM, Arc::new(program));
+    let mut ctx = VMState::new(CENO_PLATFORM.clone(), Arc::new(program));
 
     let steps = run(&mut ctx)?;
 
@@ -31,10 +29,17 @@ fn test_vm_trace() -> Result<()> {
     let ops: Vec<InsnKind> = steps.iter().map(|step| step.insn().kind).collect();
     assert_eq!(ops, expected_ops_fibonacci_20());
 
-    assert_eq!(
-        ctx.tracer().final_accesses(),
-        &expected_final_accesses_fibonacci_20()
-    );
+    let final_accesses = ctx.tracer().final_accesses();
+    let expected = expected_final_accesses_fibonacci_20();
+    assert_eq!(final_accesses.len(), expected.len());
+    for (addr, cycle) in expected {
+        assert_eq!(
+            final_accesses.cycle(addr),
+            cycle,
+            "mismatch at addr {:?}",
+            addr
+        );
+    }
 
     Ok(())
 }
@@ -48,7 +53,7 @@ fn test_empty_program() -> Result<()> {
         vec![],
         BTreeMap::new(),
     );
-    let mut ctx = VMState::new(CENO_PLATFORM, Arc::new(empty_program));
+    let mut ctx = VMState::new(CENO_PLATFORM.clone(), Arc::new(empty_program));
     let res = run(&mut ctx);
     assert!(matches!(res, Err(e) if e.to_string().contains("InstructionAccessFault")),);
     Ok(())
@@ -111,8 +116,8 @@ fn expected_ops_fibonacci_20() -> Vec<InsnKind> {
 }
 
 /// Reconstruct the last access of each register.
-fn expected_final_accesses_fibonacci_20() -> HashMap<WordAddr, Cycle> {
-    let mut accesses = HashMap::new();
+fn expected_final_accesses_fibonacci_20() -> FxHashMap<WordAddr, Cycle> {
+    let mut accesses = FxHashMap::default();
     let x = |i| WordAddr::from(Platform::register_vma(i));
     const C: Cycle = Tracer::SUBCYCLES_PER_INSN;
 

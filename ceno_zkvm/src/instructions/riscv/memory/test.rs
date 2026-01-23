@@ -1,6 +1,7 @@
 use crate::{
     Value,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
+    e2e::ShardContext,
     instructions::{
         Instruction,
         riscv::{
@@ -102,9 +103,10 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
     };
     let (raw_witin, lkm) = Inst::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_s_instruction(
+        &[StepRecord::new_s_instruction(
             12,
             MOCK_PC_START,
             insn_code,
@@ -163,9 +165,10 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
     };
     let (raw_witin, lkm) = Inst::assign_instances(
         &config,
+        &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![StepRecord::new_im_instruction(
+        &[StepRecord::new_im_instruction(
             12,
             MOCK_PC_START,
             insn_code,

@@ -1,8 +1,9 @@
+use either::Either;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
-    Expression, ToExpr,
+    Expression, Instance, StructuralWitIn, ToExpr,
     mle::{Point, PointAndEval},
     monomial::Term,
 };
@@ -20,7 +21,7 @@ use crate::{
     error::BackendError,
     evaluation::EvalExpression,
     hal::{MultilinearPolynomial, ProverBackend, ProverDevice},
-    selector::SelectorType,
+    selector::{SelectorContext, SelectorType},
 };
 
 pub mod cpu;
@@ -58,7 +59,12 @@ pub struct Layer<E: ExtensionField> {
     pub n_witin: usize,
     pub n_structural_witin: usize,
     pub n_fixed: usize,
+    pub n_instance: usize,
     pub max_expr_degree: usize,
+    /// keep all structural witin which could be evaluated succinctly without PCS
+    pub structural_witins: Vec<StructuralWitIn>,
+    /// instance openings
+    pub instance_openings: Vec<Instance>,
     /// num challenges dedicated to this layer.
     pub n_challenges: usize,
     /// Expressions to prove in this layer. For zerocheck and linear layers,
@@ -123,6 +129,7 @@ impl<E: ExtensionField> Layer<E> {
         n_witin: usize,
         n_structural_witin: usize,
         n_fixed: usize,
+        n_instance: usize,
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
         n_challenges: usize,
@@ -135,6 +142,8 @@ impl<E: ExtensionField> Layer<E> {
             usize,
         ),
         expr_names: Vec<String>,
+        structural_witins: Vec<StructuralWitIn>,
+        instance_openings: Vec<Instance>,
     ) -> Self {
         assert_eq!(expr_names.len(), exprs.len(), "there are expr without name");
         let max_expr_degree = exprs
@@ -151,7 +160,10 @@ impl<E: ExtensionField> Layer<E> {
                     n_witin,
                     n_structural_witin,
                     n_fixed,
+                    n_instance,
                     max_expr_degree,
+                    structural_witins,
+                    instance_openings,
                     n_challenges,
                     exprs,
                     exprs_with_selector_out_eval_monomial_form: vec![],
@@ -183,8 +195,8 @@ impl<E: ExtensionField> Layer<E> {
         pub_io_evals: &[E],
         challenges: &mut Vec<E>,
         transcript: &mut T,
-        num_instances: usize,
-    ) -> LayerProof<E> {
+        selector_ctxs: &[SelectorContext],
+    ) -> (LayerProof<E>, Point<E>) {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
@@ -203,7 +215,7 @@ impl<E: ExtensionField> Layer<E> {
                     pub_io_evals,
                     challenges,
                     transcript,
-                    num_instances,
+                    selector_ctxs,
                 )
             }
             LayerType::Linear => {
@@ -219,7 +231,7 @@ impl<E: ExtensionField> Layer<E> {
 
         self.update_claims(claims, &sumcheck_layer_proof.main.evals, &point);
 
-        sumcheck_layer_proof
+        (sumcheck_layer_proof, point)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -229,10 +241,11 @@ impl<E: ExtensionField> Layer<E> {
         proof: LayerProof<E>,
         claims: &mut [PointAndEval<E>],
         pub_io_evals: &[E],
+        raw_pi: &[Vec<E::BaseField>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
-        num_instances: usize,
-    ) -> Result<(), BackendError> {
+        selector_ctxs: &[SelectorContext],
+    ) -> Result<Point<E>, BackendError> {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
@@ -243,9 +256,10 @@ impl<E: ExtensionField> Layer<E> {
                 proof,
                 eval_and_dedup_points,
                 pub_io_evals,
+                raw_pi,
                 challenges,
                 transcript,
-                num_instances,
+                selector_ctxs,
             )?,
             LayerType::Linear => {
                 assert_eq!(eval_and_dedup_points.len(), 1);
@@ -263,7 +277,7 @@ impl<E: ExtensionField> Layer<E> {
 
         self.update_claims(claims, &evals, &in_point);
 
-        Ok(())
+        Ok(in_point)
     }
 
     // extract claim and dudup point
@@ -319,9 +333,9 @@ impl<E: ExtensionField> Layer<E> {
         n_challenges: usize,
         out_evals: OutEvalGroups,
     ) -> Layer<E> {
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
+        let w_len = cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len();
+        let r_len = cb.cs.r_expressions.len() + cb.cs.r_table_expressions.len();
+        let lk_len = cb.cs.lk_expressions.len() + cb.cs.lk_table_expressions.len() * 2; // logup lk table include p, q
         let zero_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
@@ -331,9 +345,12 @@ impl<E: ExtensionField> Layer<E> {
         assert_eq!(lookup_evals.len(), lk_len);
         assert_eq!(zero_evals.len(), zero_len);
 
-        let non_zero_expr_len = cb.cs.w_expressions_namespace_map.len()
-            + cb.cs.r_expressions_namespace_map.len()
-            + cb.cs.lk_expressions.len();
+        let non_zero_expr_len = cb.cs.w_expressions.len()
+            + cb.cs.w_table_expressions.len()
+            + cb.cs.r_expressions.len()
+            + cb.cs.r_table_expressions.len()
+            + cb.cs.lk_expressions.len()
+            + cb.cs.lk_table_expressions.len() * 2;
         let zero_expr_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
@@ -341,88 +358,116 @@ impl<E: ExtensionField> Layer<E> {
         let mut expr_names = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
         let mut expressions = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
 
-        // process r_record
-        let evals =
-            Self::dedup_last_selector_evals(cb.cs.r_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, ((ram_expr, name), ram_eval)) in cb
-            .cs
-            .r_expressions
-            .iter()
-            .zip_eq(&cb.cs.r_expressions_namespace_map)
+        if let Some(r_selector) = cb.cs.r_selector.as_ref() {
+            // process r_record
+            let evals = Self::dedup_last_selector_evals(r_selector, &mut expr_evals);
+            for (idx, ((ram_expr, name), ram_eval)) in (cb
+                .cs
+                .r_expressions
+                .iter()
+                .chain(cb.cs.r_table_expressions.iter().map(|t| &t.expr)))
+            .zip_eq(
+                cb.cs
+                    .r_expressions_namespace_map
+                    .iter()
+                    .chain(&cb.cs.r_table_expressions_namespace_map),
+            )
             .zip_eq(&r_record_evals)
             .enumerate()
-        {
-            expressions.push(ram_expr - E::BaseField::ONE.expr());
-            evals.push(EvalExpression::<E>::Linear(
-                // evaluation = claim * one - one (padding)
-                *ram_eval,
-                E::BaseField::ONE.expr().into(),
-                E::BaseField::ONE.neg().expr().into(),
-            ));
-            expr_names.push(format!("{}/{idx}", name));
+            {
+                expressions.push(ram_expr - E::BaseField::ONE.expr());
+                evals.push(EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - one (padding)
+                    *ram_eval,
+                    E::BaseField::ONE.expr().into(),
+                    E::BaseField::ONE.neg().expr().into(),
+                ));
+                expr_names.push(format!("{}/{idx}", name));
+            }
         }
 
-        // process w_record
-        let evals =
-            Self::dedup_last_selector_evals(cb.cs.w_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, ((ram_expr, name), ram_eval)) in cb
-            .cs
-            .w_expressions
-            .iter()
-            .zip_eq(&cb.cs.w_expressions_namespace_map)
+        if let Some(w_selector) = cb.cs.w_selector.as_ref() {
+            // process w_record
+            let evals = Self::dedup_last_selector_evals(w_selector, &mut expr_evals);
+            for (idx, ((ram_expr, name), ram_eval)) in (cb
+                .cs
+                .w_expressions
+                .iter()
+                .chain(cb.cs.w_table_expressions.iter().map(|t| &t.expr)))
+            .zip_eq(
+                cb.cs
+                    .w_expressions_namespace_map
+                    .iter()
+                    .chain(&cb.cs.w_table_expressions_namespace_map),
+            )
             .zip_eq(&w_record_evals)
             .enumerate()
-        {
-            expressions.push(ram_expr - E::BaseField::ONE.expr());
-            evals.push(EvalExpression::<E>::Linear(
-                // evaluation = claim * one - one (padding)
-                *ram_eval,
-                E::BaseField::ONE.expr().into(),
-                E::BaseField::ONE.neg().expr().into(),
-            ));
-            expr_names.push(format!("{}/{idx}", name));
+            {
+                expressions.push(ram_expr - E::BaseField::ONE.expr());
+                evals.push(EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - one (padding)
+                    *ram_eval,
+                    E::BaseField::ONE.expr().into(),
+                    E::BaseField::ONE.neg().expr().into(),
+                ));
+                expr_names.push(format!("{}/{idx}", name));
+            }
         }
 
-        // process lookup records
-        let evals =
-            Self::dedup_last_selector_evals(cb.cs.lk_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, ((lookup, name), lookup_eval)) in cb
-            .cs
-            .lk_expressions
-            .iter()
-            .zip_eq(&cb.cs.lk_expressions_namespace_map)
+        if let Some(lk_selector) = cb.cs.lk_selector.as_ref() {
+            // process lookup records
+            let evals = Self::dedup_last_selector_evals(lk_selector, &mut expr_evals);
+            for (idx, ((lookup, name), lookup_eval)) in (cb
+                .cs
+                .lk_expressions
+                .iter()
+                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.multiplicity))
+                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.values)))
+            .zip_eq(if cb.cs.lk_table_expressions.is_empty() {
+                Either::Left(cb.cs.lk_expressions_namespace_map.iter())
+            } else {
+                // repeat expressions_namespace_map twice to deal with lk p, q
+                Either::Right(
+                    cb.cs
+                        .lk_expressions_namespace_map
+                        .iter()
+                        .chain(&cb.cs.lk_expressions_namespace_map),
+                )
+            })
             .zip_eq(&lookup_evals)
             .enumerate()
-        {
-            expressions.push(lookup - cb.cs.chip_record_alpha.clone());
-            evals.push(EvalExpression::<E>::Linear(
-                // evaluation = claim * one - alpha (padding)
-                *lookup_eval,
-                E::BaseField::ONE.expr().into(),
-                cb.cs.chip_record_alpha.clone().neg().into(),
-            ));
-            expr_names.push(format!("{}/{idx}", name));
+            {
+                expressions.push(lookup - cb.cs.chip_record_alpha.clone());
+                evals.push(EvalExpression::<E>::Linear(
+                    // evaluation = claim * one - alpha (padding)
+                    *lookup_eval,
+                    E::BaseField::ONE.expr().into(),
+                    cb.cs.chip_record_alpha.clone().neg().into(),
+                ));
+                expr_names.push(format!("{}/{idx}", name));
+            }
         }
 
-        // process zero_record
-        let evals =
-            Self::dedup_last_selector_evals(cb.cs.zero_selector.as_ref().unwrap(), &mut expr_evals);
-        for (idx, (zero_expr, name)) in izip!(
-            0..,
-            chain!(
-                cb.cs
-                    .assert_zero_expressions
-                    .iter()
-                    .zip_eq(&cb.cs.assert_zero_expressions_namespace_map),
-                cb.cs
-                    .assert_zero_sumcheck_expressions
-                    .iter()
-                    .zip_eq(&cb.cs.assert_zero_sumcheck_expressions_namespace_map)
-            )
-        ) {
-            expressions.push(zero_expr.clone());
-            evals.push(EvalExpression::Zero);
-            expr_names.push(format!("{}/{idx}", name));
+        if let Some(zero_selector) = cb.cs.zero_selector.as_ref() {
+            // process zero_record
+            let evals = Self::dedup_last_selector_evals(zero_selector, &mut expr_evals);
+            for (idx, (zero_expr, name)) in izip!(
+                0..,
+                chain!(
+                    cb.cs
+                        .assert_zero_expressions
+                        .iter()
+                        .zip_eq(&cb.cs.assert_zero_expressions_namespace_map),
+                    cb.cs
+                        .assert_zero_sumcheck_expressions
+                        .iter()
+                        .zip_eq(&cb.cs.assert_zero_sumcheck_expressions_namespace_map)
+                )
+            ) {
+                expressions.push(zero_expr.clone());
+                evals.push(EvalExpression::Zero);
+                expr_names.push(format!("{}/{idx}", name));
+            }
         }
 
         // Sort expressions, expr_names, and evals according to eval.0 and classify evals.
@@ -433,7 +478,7 @@ impl<E: ExtensionField> Layer<E> {
         } = &cb.cs;
 
         let in_eval_expr = (non_zero_expr_len..)
-            .take(cb.cs.num_witin as usize + cb.cs.num_fixed)
+            .take(cb.cs.num_witin as usize + cb.cs.num_fixed + cb.cs.instance_openings.len())
             .collect_vec();
         if rotations.is_empty() {
             Layer::new(
@@ -442,12 +487,15 @@ impl<E: ExtensionField> Layer<E> {
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
+                cb.cs.instance_openings.len(),
                 expressions,
                 n_challenges,
                 in_eval_expr,
                 expr_evals,
                 ((None, vec![]), 0, 0),
                 expr_names,
+                cb.cs.structural_witins.clone(),
+                cb.cs.instance_openings.clone(),
             )
         } else {
             let Some(RotationParams {
@@ -464,6 +512,7 @@ impl<E: ExtensionField> Layer<E> {
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
+                cb.cs.instance_openings.len(),
                 expressions,
                 n_challenges,
                 in_eval_expr,
@@ -474,6 +523,8 @@ impl<E: ExtensionField> Layer<E> {
                     *rotation_cyclic_subgroup_size,
                 ),
                 expr_names,
+                cb.cs.structural_witins.clone(),
+                cb.cs.instance_openings.clone(),
             )
         }
     }

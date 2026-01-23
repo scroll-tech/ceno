@@ -1,12 +1,17 @@
-use crate::{Change, EmuContext, Platform, VMState, WORD_SIZE, Word, WriteOp, utils::MemoryView};
+use super::{SyscallEffects, SyscallSpec, SyscallWitness};
+use crate::{
+    Change, EmuContext, Platform, Tracer, VMState, WORD_SIZE, Word, WriteOp, utils::MemoryView,
+};
 use itertools::Itertools;
-use secp::{self};
+use k256::{FieldBytes, elliptic_curve::PrimeField};
 use std::iter;
 
-use super::{SyscallEffects, SyscallSpec, SyscallWitness};
-
 pub struct Secp256k1AddSpec;
+
 pub struct Secp256k1DoubleSpec;
+
+pub struct Secp256k1ScalarInvertSpec;
+
 pub struct Secp256k1DecompressSpec;
 
 impl SyscallSpec for Secp256k1AddSpec {
@@ -14,15 +19,23 @@ impl SyscallSpec for Secp256k1AddSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * SECP256K1_ARG_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::SECP256K1_ADD;
+    const CODE: u32 = ceno_syscall::SECP256K1_ADD;
 }
 
 impl SyscallSpec for Secp256k1DoubleSpec {
     const NAME: &'static str = "SECP256K1_DOUBLE";
 
-    const REG_OPS_COUNT: usize = 2;
+    const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = SECP256K1_ARG_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::SECP256K1_DOUBLE;
+    const CODE: u32 = ceno_syscall::SECP256K1_DOUBLE;
+}
+
+impl SyscallSpec for Secp256k1ScalarInvertSpec {
+    const NAME: &'static str = "SECP256K1_SCALAR_INVERT";
+
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize = COORDINATE_WORDS;
+    const CODE: u32 = ceno_syscall::SECP256K1_SCALAR_INVERT;
 }
 
 impl SyscallSpec for Secp256k1DecompressSpec {
@@ -30,7 +43,7 @@ impl SyscallSpec for Secp256k1DecompressSpec {
 
     const REG_OPS_COUNT: usize = 2;
     const MEM_OPS_COUNT: usize = 2 * COORDINATE_WORDS;
-    const CODE: u32 = ceno_rt::syscalls::SECP256K1_DECOMPRESS;
+    const CODE: u32 = ceno_syscall::SECP256K1_DECOMPRESS;
 }
 
 // A secp256k1 point in uncompressed form takes 64 bytes
@@ -91,7 +104,7 @@ impl From<SecpMaybePoint> for [Word; SECP256K1_ARG_WORDS] {
 }
 
 /// Trace the execution of a secp256k1_add call
-pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
+pub fn secp256k1_add<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
     let q_ptr = vm.peek_register(Platform::reg_arg1());
 
@@ -111,7 +124,7 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
 
     // Memory segments of P and Q
     let [mut p_view, q_view] =
-        [p_ptr, q_ptr].map(|start| MemoryView::<SECP256K1_ARG_WORDS>::new(vm, start));
+        [p_ptr, q_ptr].map(|start| MemoryView::<_, SECP256K1_ARG_WORDS>::new(vm, start));
 
     // Read P and Q from words via wrapper type
     let [p, q] = [&p_view, &q_view].map(|view| SecpPoint::from(view.words()));
@@ -136,7 +149,7 @@ pub fn secp256k1_add(vm: &VMState) -> SyscallEffects {
 }
 
 /// Trace the execution of a secp256k1_double call
-pub fn secp256k1_double(vm: &VMState) -> SyscallEffects {
+pub fn secp256k1_double<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p_ptr = vm.peek_register(Platform::reg_arg0());
 
     // Read the argument pointers
@@ -147,7 +160,7 @@ pub fn secp256k1_double(vm: &VMState) -> SyscallEffects {
     )];
 
     // P's memory segment
-    let mut p_view = MemoryView::<SECP256K1_ARG_WORDS>::new(vm, p_ptr);
+    let mut p_view = MemoryView::<_, SECP256K1_ARG_WORDS>::new(vm, p_ptr);
     // Create point from words via wrapper type
     let p = SecpPoint::from(p_view.words());
 
@@ -160,6 +173,33 @@ pub fn secp256k1_double(vm: &VMState) -> SyscallEffects {
     let mem_ops = p_view.mem_ops().to_vec();
 
     assert_eq!(mem_ops.len(), SECP256K1_ARG_WORDS);
+    SyscallEffects {
+        witness: SyscallWitness::new(mem_ops, reg_ops),
+        next_pc: None,
+    }
+}
+
+pub fn secp256k1_invert<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
+    let p_ptr = vm.peek_register(Platform::reg_arg0());
+
+    // Read the argument pointers
+    let reg_ops = vec![WriteOp::new_register_op(
+        Platform::reg_arg0(),
+        Change::new(p_ptr, p_ptr),
+        0, // Cycle set later in finalize().
+    )];
+
+    // P's memory segment
+    let mut p_view = MemoryView::<_, COORDINATE_WORDS>::new(vm, p_ptr);
+    let p = k256::Scalar::from_repr(*FieldBytes::from_slice(&p_view.bytes())).expect("illegal p");
+    let p_inv = p.invert().unwrap();
+    let bytes: [u8; 32] = p_inv.to_bytes().into();
+    let output_words: [Word; COORDINATE_WORDS] = unsafe { std::mem::transmute(bytes) };
+
+    p_view.write(output_words);
+    let mem_ops = p_view.mem_ops().to_vec();
+
+    assert_eq!(mem_ops.len(), COORDINATE_WORDS);
     SyscallEffects {
         witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,
@@ -196,7 +236,7 @@ impl From<SecpCoordinate> for [Word; COORDINATE_WORDS] {
 }
 
 /// Trace the execution of a secp256k1_decompress call
-pub fn secp256k1_decompress(vm: &VMState) -> SyscallEffects {
+pub fn secp256k1_decompress<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let ptr = vm.peek_register(Platform::reg_arg0());
     let y_is_odd = vm.peek_register(Platform::reg_arg1());
 
@@ -215,10 +255,10 @@ pub fn secp256k1_decompress(vm: &VMState) -> SyscallEffects {
     ];
 
     // Memory segment of X coordinate
-    let input_view = MemoryView::<COORDINATE_WORDS>::new(vm, ptr);
+    let input_view = MemoryView::<_, COORDINATE_WORDS>::new(vm, ptr);
     // Memory segment where Y coordinate will be written
     let mut output_view =
-        MemoryView::<COORDINATE_WORDS>::new(vm, ptr + (COORDINATE_WORDS * WORD_SIZE) as u32);
+        MemoryView::<_, COORDINATE_WORDS>::new(vm, ptr + (COORDINATE_WORDS * WORD_SIZE) as u32);
 
     let point = {
         // Encode parity byte according to secp spec

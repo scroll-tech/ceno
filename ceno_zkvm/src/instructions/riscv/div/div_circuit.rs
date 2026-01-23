@@ -75,6 +75,7 @@ use super::{
 };
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::{AssertLtConfig, IsEqualConfig, IsLtConfig, IsZeroConfig, Signed},
     instructions::{Instruction, riscv::constants::LIMB_BITS},
@@ -117,6 +118,11 @@ pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = DivRemConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -310,6 +316,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
@@ -419,7 +426,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             div_pos as u64,
         )?;
 
-        config.r_insn.assign_instance(instance, lkm, step)?;
+        config
+            .r_insn
+            .assign_instance(instance, shard_ctx, lkm, step)?;
 
         Ok(())
     }

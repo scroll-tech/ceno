@@ -94,7 +94,9 @@ macro_rules! ceno_crypto {
         impl __rp::Crypto for $n {
             #[inline]
             fn sha256(&self, input: &[u8]) -> [u8; 32] {
-                $crate::sha256::sha256(input)
+                use $crate::ceno_sha2::{Digest, Sha256};
+                let output = Sha256::digest(input);
+                output.into()
             }
             #[inline]
             fn bn254_g1_add(
@@ -102,7 +104,7 @@ macro_rules! ceno_crypto {
                 p1: &[u8],
                 p2: &[u8],
             ) -> Result<[u8; 64], __rp::PrecompileError> {
-                $crate::bn254::bn254_g1_add(p1, p2).map_err(__map_err)
+                $crate::bn254::g1_point_add(p1, p2).map_err(__map_err)
             }
             #[inline]
             fn bn254_g1_mul(
@@ -110,14 +112,14 @@ macro_rules! ceno_crypto {
                 point: &[u8],
                 scalar: &[u8],
             ) -> Result<[u8; 64], __rp::PrecompileError> {
-                $crate::bn254::bn254_g1_mul(point, scalar).map_err(__map_err)
+                $crate::bn254::g1_point_mul(point, scalar).map_err(__map_err)
             }
             #[inline]
             fn bn254_pairing_check(
                 &self,
                 pairs: &[(&[u8], &[u8])],
             ) -> Result<bool, __rp::PrecompileError> {
-                $crate::bn254::bn254_pairing_check(pairs).map_err(__map_err)
+                $crate::bn254::pairing_check(pairs).map_err(__map_err)
             }
             #[inline]
             fn secp256k1_ecrecover(
@@ -135,7 +137,7 @@ macro_rules! ceno_crypto {
                 sig: &[u8; 64],
                 pk: &[u8; 64],
             ) -> bool {
-                $crate::secp256r1::secp256r1_verify_signature(msg, sig, pk)
+                $crate::secp256r1::secp256r1_verify_signature(msg, sig, pk).is_some()
             }
         }
 

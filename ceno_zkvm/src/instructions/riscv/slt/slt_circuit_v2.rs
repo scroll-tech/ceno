@@ -1,6 +1,7 @@
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
     instructions::{
@@ -29,6 +30,11 @@ pub struct SetLessThanConfig<E: ExtensionField> {
 }
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruction<E, I> {
     type InstructionConfig = SetLessThanConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -75,11 +81,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [<E as ExtensionField>::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        config.r_insn.assign_instance(instance, lkm, step)?;
+        config
+            .r_insn
+            .assign_instance(instance, shard_ctx, lkm, step)?;
 
         let rs1 = step.rs1().unwrap().value;
         let rs2 = step.rs2().unwrap().value;

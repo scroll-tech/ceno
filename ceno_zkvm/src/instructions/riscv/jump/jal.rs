@@ -5,6 +5,7 @@ use ff_ext::ExtensionField;
 use crate::{
     Value,
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -36,6 +37,11 @@ pub struct JalInstruction<E>(PhantomData<E>);
 ///   of native WitIn values for address space arithmetic.
 impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     type InstructionConfig = JalConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::JAL]
+    }
 
     fn name() -> String {
         format!("{:?}", InsnKind::JAL)
@@ -64,13 +70,14 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         config
             .j_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         let rd_written = Value::new(step.rd().unwrap().value.after, lk_multiplicity);
         config.rd_written.assign_value(instance, rd_written);

@@ -1,5 +1,5 @@
-use ceno_zkvm::precompiles::{run_faster_keccakf, setup_lookup_keccak_gkr_circuit};
-use clap::{Parser, command};
+use ceno_zkvm::precompiles::{run_lookup_keccakf, setup_lookup_keccak_gkr_circuit};
+use clap::Parser;
 use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::BasefoldDefault;
@@ -71,7 +71,7 @@ fn main() {
         .map(|_| std::array::from_fn(|_| rng.next_u64()))
         .collect_vec();
     let circuit_setup = setup_lookup_keccak_gkr_circuit();
-    let proof = run_faster_keccakf::<E, Pcs>(
+    let proof = run_lookup_keccakf::<E, Pcs>(
         circuit_setup.expect("setup circuit error"),
         states,
         true,

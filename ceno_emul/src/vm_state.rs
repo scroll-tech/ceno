@@ -1,49 +1,78 @@
-use std::collections::HashMap;
-
 use super::rv32im::EmuContext;
 use crate::{
     PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
+    dense_addr_space::DenseAddrSpace,
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
-    tracer::{Change, StepRecord, Tracer},
+    tracer::{Change, FullTracer, Tracer},
 };
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
 
+pub struct HaltState {
+    pub exit_code: u32,
+}
+
 /// An implementation of the machine state and of the side-effects of operations.
-pub struct VMState {
+pub const VM_REG_COUNT: usize = 32 + 1;
+
+pub struct VMState<T: Tracer = FullTracer> {
     program: Arc<Program>,
     platform: Platform,
     pc: Word,
-    /// Map a word-address (addr/4) to a word.
-    memory: HashMap<WordAddr, Word>,
-    registers: [Word; VMState::REG_COUNT],
+    /// Emulated main memory backed by a pre-allocated vector covering the
+    /// platform layout in `memory.x`.
+    memory: DenseAddrSpace<Word>,
+    registers: [Word; VM_REG_COUNT],
     // Termination.
-    halted: bool,
-    tracer: Tracer,
+    halt_state: Option<HaltState>,
+    tracer: T,
 }
 
-impl VMState {
+impl VMState<FullTracer> {
+    pub fn new(platform: Platform, program: Arc<Program>) -> Self {
+        Self::new_with_tracer(platform, program)
+    }
+
+    pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
+        VMState::<FullTracer>::new_from_elf_with_tracer(platform, elf)
+    }
+}
+
+impl<T: Tracer> VMState<T> {
     /// The number of registers that the VM uses.
     /// 32 architectural registers + 1 register RD_NULL for dark writes to x0.
-    pub const REG_COUNT: usize = 32 + 1;
+    pub const REG_COUNT: usize = VM_REG_COUNT;
 
-    pub fn new(platform: Platform, program: Arc<Program>) -> Self {
+    pub fn new_with_tracer(platform: Platform, program: Arc<Program>) -> Self
+    where
+        T::Config: Default,
+    {
+        Self::new_with_tracer_config(platform, program, T::Config::default())
+    }
+
+    pub fn new_with_tracer_config(
+        platform: Platform,
+        program: Arc<Program>,
+        config: T::Config,
+    ) -> Self {
         let pc = program.entry;
 
         let mut vm = Self {
             pc,
             platform: platform.clone(),
             program: program.clone(),
-            memory: HashMap::new(),
-            registers: [0; VMState::REG_COUNT],
-            halted: false,
-            tracer: Tracer::new(Some(&platform)),
+            memory: DenseAddrSpace::new(
+                ByteAddr::from(platform.rom.start).waddr(),
+                ByteAddr::from(platform.heap.end).waddr(),
+            ),
+            registers: [0; VM_REG_COUNT],
+            halt_state: None,
+            tracer: T::new(&platform, config),
         };
 
-        // init memory from program.image
         for (&addr, &value) in &program.image {
             vm.init_memory(ByteAddr(addr).waddr(), value);
         }
@@ -51,21 +80,32 @@ impl VMState {
         vm
     }
 
-    pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
+    pub fn new_from_elf_with_tracer(platform: Platform, elf: &[u8]) -> Result<Self>
+    where
+        T::Config: Default,
+    {
         let program = Arc::new(Program::load_elf(elf, u32::MAX)?);
         let platform = Platform {
-            prog_data: program.image.keys().copied().collect(),
+            prog_data: Arc::new(program.image.keys().copied().collect()),
             ..platform
         };
-        Ok(Self::new(platform, program))
+        Ok(Self::new_with_tracer(platform, program))
     }
 
     pub fn halted(&self) -> bool {
-        self.halted
+        self.halt_state.is_some()
     }
 
-    pub fn tracer(&self) -> &Tracer {
+    pub fn halted_state(&self) -> Option<&HaltState> {
+        self.halt_state.as_ref()
+    }
+
+    pub fn tracer(&self) -> &T {
         &self.tracer
+    }
+
+    pub fn take_tracer(self) -> T {
+        self.tracer
     }
 
     pub fn platform(&self) -> &Platform {
@@ -78,10 +118,12 @@ impl VMState {
 
     /// Set a word in memory without side effects.
     pub fn init_memory(&mut self, addr: WordAddr, value: Word) {
-        self.memory.insert(addr, value);
+        self.memory
+            .write(addr, value)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
     }
 
-    pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<StepRecord>> + '_ {
+    pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<T::Record>> + '_ {
         from_fn(move || {
             if self.halted() {
                 None
@@ -91,10 +133,17 @@ impl VMState {
         })
     }
 
-    fn step(&mut self) -> Result<StepRecord> {
+    pub fn next_step_record(&mut self) -> Result<Option<T::Record>> {
+        if self.halted() {
+            return Ok(None);
+        }
+        self.step().map(Some)
+    }
+
+    fn step(&mut self) -> Result<T::Record> {
         crate::rv32im::step(self)?;
         let step = self.tracer.advance();
-        if step.is_busy_loop() && !self.halted() {
+        if self.tracer.is_busy_loop(&step) && !self.halted() {
             Err(anyhow!("Stuck in loop {}", "{}"))
         } else {
             Ok(step)
@@ -105,14 +154,16 @@ impl VMState {
         self.registers[idx] = value;
     }
 
-    fn halt(&mut self) {
+    fn halt(&mut self, exit_code: u32) {
         self.set_pc(0.into());
-        self.halted = true;
+        self.halt_state = Some(HaltState { exit_code });
     }
 
     fn apply_syscall(&mut self, effects: SyscallEffects) -> Result<()> {
         for (addr, value) in effects.iter_mem_values() {
-            self.memory.insert(addr, value);
+            self.memory
+                .write(addr, value)
+                .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
         }
 
         for (idx, value) in effects.iter_reg_values() {
@@ -127,14 +178,14 @@ impl VMState {
     }
 }
 
-impl EmuContext for VMState {
+impl<T: Tracer> EmuContext for VMState<T> {
     // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {
         let function = self.load_register(Platform::reg_ecall())?;
         if function == Platform::ecall_halt() {
             let exit_code = self.load_register(Platform::reg_arg0())?;
             tracing::debug!("halt with exit_code={}", exit_code);
-            self.halt();
+            self.halt(exit_code);
             Ok(true)
         } else {
             match handle_syscall(self, function) {
@@ -175,6 +226,7 @@ impl EmuContext for VMState {
 
     fn on_normal_end(&mut self, _decoded: &Instruction) {
         self.tracer.store_pc(ByteAddr(self.pc));
+        self.tracer.track_mmu_maxtouch_after();
     }
 
     fn get_pc(&self) -> ByteAddr {
@@ -212,7 +264,9 @@ impl EmuContext for VMState {
     fn store_memory(&mut self, addr: WordAddr, after: Word) -> Result<()> {
         let before = self.peek_memory(addr);
         self.tracer.store_memory(addr, Change { after, before });
-        self.memory.insert(addr, after);
+        self.memory
+            .write(addr, after)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
         Ok(())
     }
 
@@ -223,7 +277,9 @@ impl EmuContext for VMState {
 
     /// Get the value of a memory word without side-effects.
     fn peek_memory(&self, addr: WordAddr) -> Word {
-        *self.memory.get(&addr).unwrap_or(&0)
+        self.memory
+            .read(addr)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"))
     }
 
     fn fetch(&mut self, pc: WordAddr) -> Option<Instruction> {
@@ -232,6 +288,7 @@ impl EmuContext for VMState {
         let idx = (relative_pc / WORD_SIZE as u32) as usize;
         let word = self.program.instructions.get(idx).copied()?;
         self.tracer.fetch(pc, word);
+        self.tracer.track_mmu_maxtouch_before();
         Some(word)
     }
 

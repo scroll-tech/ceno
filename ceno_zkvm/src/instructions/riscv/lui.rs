@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -33,6 +34,11 @@ pub struct LuiInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     type InstructionConfig = LuiConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::LUI]
+    }
 
     fn name() -> String {
         format!("{:?}", InsnKind::LUI)
@@ -88,13 +94,14 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [E::BaseField],
         lk_multiplicity: &mut LkMultiplicity,
         step: &ceno_emul::StepRecord,
     ) -> Result<(), ZKVMError> {
         config
             .i_insn
-            .assign_instance(instance, lk_multiplicity, step)?;
+            .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         let rd_written = split_to_u8(step.rd().unwrap().value.after);
         for (val, witin) in izip!(rd_written.iter().skip(1), config.rd_written) {
@@ -117,6 +124,7 @@ mod tests {
     use crate::{
         Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
+        e2e::ShardContext,
         instructions::{
             Instruction,
             riscv::{constants::UInt, lui::LuiInstruction},
@@ -153,9 +161,10 @@ mod tests {
         let insn_code = encode_rv32(InsnKind::LUI, 0, 0, 4, imm);
         let (raw_witin, lkm) = LuiInstruction::<E>::assign_instances(
             &config,
+            &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![StepRecord::new_i_instruction(
+            &[StepRecord::new_i_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                 insn_code,

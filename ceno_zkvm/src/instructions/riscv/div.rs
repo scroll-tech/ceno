@@ -53,6 +53,7 @@ mod test {
     use crate::{
         Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
+        e2e::ShardContext,
         instructions::{
             Instruction,
             riscv::{
@@ -63,7 +64,7 @@ mod test {
         scheme::mock_prover::{MOCK_PC_START, MockProver},
         structs::ProgramParams,
     };
-    use ceno_emul::{Change, InsnKind, StepRecord, encode_rv32};
+    use ceno_emul::{Change, StepRecord, encode_rv32};
     #[cfg(feature = "u16limb_circuit")]
     use ff_ext::BabyBearExt4 as BE;
     use ff_ext::{ExtensionField, GoldilocksExt2 as GE};
@@ -83,7 +84,6 @@ mod test {
         fn output(config: Self::InstructionConfig) -> UInt<E>;
         // the correct/expected value for given parameters
         fn correct(dividend: Self::NumType, divisor: Self::NumType) -> Self::NumType;
-        const INSN_KIND: InsnKind;
     }
 
     impl<E: ExtensionField> TestInstance<E> for DivInstruction<E> {
@@ -101,7 +101,6 @@ mod test {
                 dividend.wrapping_div(divisor)
             }
         }
-        const INSN_KIND: InsnKind = InsnKind::DIV;
     }
 
     impl<E: ExtensionField> TestInstance<E> for RemInstruction<E> {
@@ -119,7 +118,6 @@ mod test {
                 dividend.wrapping_rem(divisor)
             }
         }
-        const INSN_KIND: InsnKind = InsnKind::REM;
     }
 
     impl<E: ExtensionField> TestInstance<E> for DivuInstruction<E> {
@@ -137,7 +135,6 @@ mod test {
                 dividend / divisor
             }
         }
-        const INSN_KIND: InsnKind = InsnKind::DIVU;
     }
 
     impl<E: ExtensionField> TestInstance<E> for RemuInstruction<E> {
@@ -155,10 +152,12 @@ mod test {
                 dividend % divisor
             }
         }
-        const INSN_KIND: InsnKind = InsnKind::REMU;
     }
 
-    fn verify<E: ExtensionField, Insn: Instruction<E> + TestInstance<E>>(
+    fn verify<
+        E: ExtensionField,
+        Insn: Instruction<E, InsnType = ceno_emul::InsnKind> + TestInstance<E>,
+    >(
         name: &str,
         dividend: <Insn as TestInstance<E>>::NumType,
         divisor: <Insn as TestInstance<E>>::NumType,
@@ -175,13 +174,18 @@ mod test {
             .unwrap()
             .unwrap();
         let outcome = Insn::correct(dividend, divisor);
-        let insn_code = encode_rv32(Insn::INSN_KIND, 2, 3, 4, 0);
+        let insn_kind = Insn::inst_kinds()
+            .first()
+            .copied()
+            .expect("instruction must declare at least one InsnKind");
+        let insn_code = encode_rv32(insn_kind, 2, 3, 4, 0);
         // values assignment
         let ([raw_witin, _], lkm) = Insn::assign_instances(
             &config,
+            &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![StepRecord::new_r_instruction(
+            &[StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
                 insn_code,
@@ -220,7 +224,10 @@ mod test {
     }
 
     // shortcut to verify given pair produces correct output
-    fn verify_positive<E: ExtensionField, Insn: Instruction<E> + TestInstance<E>>(
+    fn verify_positive<
+        E: ExtensionField,
+        Insn: Instruction<E, InsnType = ceno_emul::InsnKind> + TestInstance<E>,
+    >(
         name: &str,
         dividend: <Insn as TestInstance<E>>::NumType,
         divisor: <Insn as TestInstance<E>>::NumType,

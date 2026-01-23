@@ -78,14 +78,17 @@ pub fn search_workspace_root<P: AsRef<Path>>(path: P) -> anyhow::Result<PathBuf>
 pub fn get_rust_flags() -> String {
     const BASE_RUST_FLAGS: &[&str] = &[
         "-C",
-        "panic=abort",
+        "panic=immediate-abort",
         "-C",
         "link-arg=-Tmemory.x",
         "-C",
         "link-arg=-Tceno_link.x",
         "-Zlocation-detail=none",
+        "-Zunstable-options",
         "-C",
         "passes=lower-atomic",
+        "--cfg",
+        "getrandom_backend=\"custom\"",
     ];
 
     let mut rust_flags = std::env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
@@ -102,7 +105,7 @@ pub fn apply_cargo_build_std_args(command: &mut Command) {
         "-Z",
         "build-std=alloc,core,compiler_builtins,std,panic_abort,proc_macro",
         "-Z",
-        "build-std-features=compiler-builtins-mem,panic_immediate_abort,default",
+        "build-std-features=compiler-builtins-mem,default",
     ];
     command.args(BASE_CARGO_ARGS);
 }

@@ -10,5 +10,7 @@ repository = "https://github.com/scroll-tech/ceno"
 version = "0.1.0"
 
 [dependencies]
+ceno_serde = { path = "../ceno_serde" }
 getrandom = { version = "0.2.15", features = ["custom"], default-features = false }
-rkyv.workspace = true
+getrandom_v3 = { package = "getrandom", version = "0.3", default-features = false }
+serde.workspace = true

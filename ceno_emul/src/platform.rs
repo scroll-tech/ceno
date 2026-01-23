@@ -1,5 +1,6 @@
 use core::fmt::{self, Formatter};
-use std::{collections::BTreeSet, fmt::Display, ops::Range};
+use once_cell::sync::Lazy;
+use std::{collections::BTreeSet, fmt::Display, ops::Range, sync::Arc};
 
 use crate::addr::{Addr, RegIdx};
 
@@ -11,7 +12,7 @@ use crate::addr::{Addr, RegIdx};
 #[derive(Clone, Debug)]
 pub struct Platform {
     pub rom: Range<Addr>,
-    pub prog_data: BTreeSet<Addr>,
+    pub prog_data: Arc<BTreeSet<Addr>>,
     pub public_io: Range<Addr>,
 
     pub stack: Range<Addr>,
@@ -91,7 +92,7 @@ impl Display for Platform {
 // │   0x0800_0000 .. 0x1000_0000
 // │
 // └───────────────────────────── 0x8000_0000 (rom base)
-pub const CENO_PLATFORM: Platform = Platform {
+pub static CENO_PLATFORM: Lazy<Platform> = Lazy::new(|| Platform {
     rom: 0x0800_0000..0x1000_0000,       // 128 MB
     public_io: 0x1000_0000..0x1800_0000, // 128 MB
     stack: 0x1800_0000..0x2000_4000, // stack grows downward 128MB, 0x4000 reserved for debug io.
@@ -103,9 +104,9 @@ pub const CENO_PLATFORM: Platform = Platform {
     // and the real heap start from 0x3800_0000
     heap: 0x3000_0000..0x4000_0000,
     unsafe_ecall_nop: false,
-    prog_data: BTreeSet::new(),
+    prog_data: Arc::new(BTreeSet::new()),
     is_debug: false,
-};
+});
 
 impl Platform {
     // Virtual memory layout.
@@ -206,11 +207,11 @@ impl Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{VMState, WORD_SIZE};
+    use crate::{PreflightTracer, VMState, WORD_SIZE};
 
     #[test]
     fn test_no_overlap() {
-        let p = CENO_PLATFORM;
+        let p = CENO_PLATFORM.clone();
         // ROM and RAM do not overlap.
         assert!(!p.is_rom(p.heap.start));
         assert!(!p.is_rom(p.heap.end - WORD_SIZE as Addr));
@@ -219,7 +220,7 @@ mod tests {
         // Registers do not overlap with ROM or RAM.
         for reg in [
             Platform::register_vma(0),
-            Platform::register_vma(VMState::REG_COUNT - 1),
+            Platform::register_vma(VMState::<PreflightTracer>::REG_COUNT - 1),
         ] {
             assert!(!p.is_rom(reg));
             assert!(!p.is_ram(reg));

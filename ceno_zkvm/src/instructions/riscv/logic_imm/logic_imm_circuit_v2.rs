@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -30,6 +31,11 @@ pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     type InstructionConfig = LogicConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)
@@ -94,6 +100,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
 
     fn assign_instance(
         config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
         instance: &mut [<E as ExtensionField>::BaseField],
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
@@ -115,7 +122,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
             imm_hi.into(),
         );
 
-        config.assign_instance(instance, lkm, step)
+        config.assign_instance(instance, shard_ctx, lkm, step)
     }
 }
 
@@ -163,11 +170,13 @@ impl<E: ExtensionField> LogicConfig<E> {
     fn assign_instance(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
+        shard_ctx: &mut ShardContext,
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let num_limbs = LIMB_BITS / 8;
-        self.i_insn.assign_instance(instance, lkm, step)?;
+        self.i_insn
+            .assign_instance(instance, shard_ctx, lkm, step)?;
 
         let rs1_read = split_to_u8(step.rs1().unwrap().value);
         self.rs1_read.assign_limbs(instance, &rs1_read);
