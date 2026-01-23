@@ -255,7 +255,7 @@ pub mod tests {
         let system_config = SystemConfig::default()
             .with_public_values(4)
             .with_max_segment_len((1 << 25) - 100);
-        let config = NativeConfig::new(system_config, Native);
+        let config = NativeConfig::new(system_config, Native(true));
 
         let executor = VmExecutor::<F, NativeConfig>::new(config).unwrap();
 

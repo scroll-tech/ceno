@@ -1063,7 +1063,7 @@ mod tests {
         let system_config = SystemConfig::default()
             .with_public_values(20)
             .with_max_segment_len((1 << 22) - 100);
-        let config = NativeConfig::new(system_config, Native);
+        let config = NativeConfig::new(system_config, Native(true));
 
         let executor = VmExecutor::<F, NativeConfig>::new(config).expect("executor initiation");
         let exe = VmExe::new(program);
