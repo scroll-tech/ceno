@@ -436,9 +436,9 @@ impl CenoAggregationProver {
         let last_internal = proofs.pop().unwrap();
 
         // Export last internal proof
-        let file =
-            File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
-        bincode::serialize_into(file, &last_internal).expect("failed to serialize internal proof");
+        // let file =
+        //     File::create("./src/exports/internal_proof.bin").expect("Create export proof file");
+        // bincode::serialize_into(file, &last_internal).expect("failed to serialize internal proof");
 
         // _todo: possible multi-layer wrapping for reducing AIR heights
 
@@ -469,9 +469,9 @@ impl CenoAggregationProver {
         .expect("root proof");
 
         // Export root proof
-        let file = File::create("./src/exports/root_proof.bin").expect("Create export proof file");
-        bincode::serialize_into(file, &air_permuted_root_proof)
-            .expect("failed to serialize root proof");
+        // let file = File::create("./src/exports/root_proof.bin").expect("Create export proof file");
+        // bincode::serialize_into(file, &air_permuted_root_proof)
+        //     .expect("failed to serialize root proof");
 
         println!(
             "Root - Completed root proof at: {:?}",
@@ -487,8 +487,8 @@ impl CenoAggregationProver {
             .prove_static(root_proof, &self.pk);
 
         // Export halo2 proof
-        let file = File::create("./src/exports/halo2_proof.bin").expect("Create export proof file");
-        bincode::serialize_into(file, &halo2_proof).expect("failed to serialize halo2 proof");
+        // let file = File::create("./src/exports/halo2_proof.bin").expect("Create export proof file");
+        // bincode::serialize_into(file, &halo2_proof).expect("failed to serialize halo2 proof");
 
         halo2_proof
     }
