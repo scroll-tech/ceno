@@ -26,7 +26,7 @@ use p3::field::FieldAlgebra;
 use std::{sync::Arc, path::PathBuf};
 
 fn params_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ceno_recursion/src/params")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("/src/params")
 }
 
 pub const HALO2_VERIFIER_K: usize = 23;
