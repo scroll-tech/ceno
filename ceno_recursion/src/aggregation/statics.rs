@@ -176,7 +176,9 @@ mod tests {
         .expect("Deserialize root proof");
 
         let halo2_proof = agg_prover.prove_static(&root_proof);
-        agg_prover.verify_static(halo2_proof).expect("halo2 proof exists");
+        agg_prover
+            .verify_static(halo2_proof)
+            .expect("halo2 proof exists");
     }
 
     #[test]
