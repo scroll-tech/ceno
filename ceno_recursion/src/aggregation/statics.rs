@@ -23,7 +23,11 @@ use openvm_sdk::{config::Halo2Config, keygen::Halo2ProvingKey, prover::Halo2Prov
 use openvm_stark_backend::proof::Proof;
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 use p3::field::FieldAlgebra;
-use std::sync::Arc;
+use std::{sync::Arc, path::PathBuf};
+
+fn params_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ceno_recursion/src/params")
+}
 
 pub const HALO2_VERIFIER_K: usize = 23;
 
@@ -70,7 +74,7 @@ impl Default for StaticProverVerifier {
 }
 impl StaticProverVerifier {
     pub fn new() -> Self {
-        let params_reader = CacheHalo2ParamsReader::new("./src/params/");
+        let params_reader = CacheHalo2ParamsReader::new(params_dir());
         let halo2_config = Halo2Config {
             verifier_k: HALO2_VERIFIER_K,
             wrapper_k: None, // Auto-tuned
