@@ -66,7 +66,7 @@ use openvm_stark_sdk::{
 };
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use std::{fs::File, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use crate::aggregation::types::{InternalVmVerifierPvs, VmVerifierPvs};
 use anyhow::Result;
