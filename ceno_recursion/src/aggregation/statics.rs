@@ -175,12 +175,12 @@ mod tests {
         )
         .expect("Deserialize root proof");
 
-        // let halo2_proof = agg_prover.prove_static(&root_proof);
-        // agg_prover.verify_static(halo2_proof);
+        let halo2_proof = agg_prover.prove_static(&root_proof);
+        agg_prover.verify_static(halo2_proof).expect("halo2 proof exists");
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_static_verifier() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 

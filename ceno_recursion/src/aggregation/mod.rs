@@ -825,7 +825,6 @@ mod tests {
     use crate::{
         aggregation::{
             CenoAggregationProver, F, RootVmVerifierInput, ZKVMProofInput, verify_proofs,
-            verify_root_proof,
         },
         zkvm_verifier::binding::E,
     };
