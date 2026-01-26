@@ -23,11 +23,7 @@ use openvm_sdk::{config::Halo2Config, keygen::Halo2ProvingKey, prover::Halo2Prov
 use openvm_stark_backend::proof::Proof;
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 use p3::field::FieldAlgebra;
-use std::{
-    env,
-    path::Path,
-    sync::Arc,
-};
+use std::{env, path::Path, sync::Arc};
 pub const HALO2_VERIFIER_K: usize = 23;
 
 pub struct StaticProverVerifier {
@@ -119,8 +115,8 @@ impl StaticProverVerifier {
         };
 
         // Update prover/verifier
-        let wrapper_k = halo2_pk.wrapper.pinning.metadata.config_params.k;
-        let params = self.params_reader.read_params(wrapper_k);
+        // let wrapper_k = halo2_pk.wrapper.pinning.metadata.config_params.k;
+        // let params = self.params_reader.read_params(wrapper_k);
         // let static_verifier = halo2_pk.wrapper.generate_fallback_evm_verifier(&params);
         let prover = Halo2Prover::new(&self.params_reader, halo2_pk);
 
@@ -156,14 +152,10 @@ impl StaticProverVerifier {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        aggregation::{CenoAggregationProver, statics::StaticProverVerifier},
-        zkvm_verifier::binding::E,
-    };
+    use crate::{aggregation::CenoAggregationProver, zkvm_verifier::binding::E};
     use ceno_zkvm::structs::ZKVMVerifyingKey;
     use mpcs::{Basefold, BasefoldRSParams};
     use openvm_continuations::RootSC;
-    use openvm_native_recursion::halo2::utils::{CacheHalo2ParamsReader, Halo2ParamsReader};
     use openvm_stark_backend::proof::Proof;
     use openvm_stark_sdk::config::setup_tracing_with_log_level;
     use std::fs::File;
