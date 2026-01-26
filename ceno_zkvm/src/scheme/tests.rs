@@ -16,7 +16,7 @@ use crate::{
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{
-    CENO_PLATFORM,
+    CENO_PLATFORM, InsnKind,
     InsnKind::{ADD, ECALL},
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
@@ -62,6 +62,11 @@ struct TestCircuit<E: ExtensionField, const RW: usize, const L: usize> {
 
 impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for TestCircuit<E, RW, L> {
     type InstructionConfig = TestConfig;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::INVALID]
+    }
 
     fn name() -> String {
         "TEST".into()
@@ -141,12 +146,13 @@ fn test_rw_lk_expression_combination() {
         // generate mock witness
         let num_instances = 1 << 8;
         let mut zkvm_witness = ZKVMWitnesses::default();
+        let steps = vec![StepRecord::default(); num_instances];
         zkvm_witness
             .assign_opcode_circuit::<TestCircuit<E, RW, L>>(
                 &zkvm_cs,
                 &mut shard_ctx,
                 &config,
-                vec![&StepRecord::default(); num_instances],
+                &steps,
             )
             .unwrap();
 
@@ -320,7 +326,7 @@ fn test_single_add_instance_e2e() {
     let vk = pk.get_vk_slow();
 
     // single instance
-    let mut vm = VMState::new(CENO_PLATFORM, program.clone().into());
+    let mut vm = VMState::new(CENO_PLATFORM.clone(), program.clone().into());
     let all_records = vm
         .iter_until_halt()
         .collect::<Result<Vec<StepRecord>, _>>()
@@ -329,7 +335,7 @@ fn test_single_add_instance_e2e() {
         .collect::<Vec<_>>();
     let mut add_records = vec![];
     let mut halt_records = vec![];
-    all_records.iter().for_each(|record| {
+    all_records.into_iter().for_each(|record| {
         let kind = record.insn().kind;
         match kind {
             ADD => add_records.push(record),
@@ -357,7 +363,7 @@ fn test_single_add_instance_e2e() {
             &zkvm_cs,
             &mut shard_ctx,
             &add_config,
-            add_records,
+            &add_records,
         )
         .unwrap();
     zkvm_witness
@@ -365,7 +371,7 @@ fn test_single_add_instance_e2e() {
             &zkvm_cs,
             &mut shard_ctx,
             &halt_config,
-            halt_records,
+            &halt_records,
         )
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
@@ -380,7 +386,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(&shard_ctx, zkvm_witness, pi, transcript)

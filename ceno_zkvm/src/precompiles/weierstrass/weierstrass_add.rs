@@ -135,10 +135,9 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
         let eq = cb.create_placeholder_structural_witin(|| "weierstrass_add_eq");
         let sel = SelectorType::Prefix(eq.expr());
         let selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: sel.clone(),
-            sel_mem_write: sel.clone(),
-            sel_lookup: sel.clone(),
-            sel_zero: sel.clone(),
+            sel_first: None,
+            sel_last: None,
+            sel_all: sel.clone(),
         };
 
         // Default expression, will be updated in build_layer_logic
@@ -334,10 +333,10 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E>
         self.n_challenges = 0;
 
         // register selector to legacy constrain system
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
 
         let w_len = cb.cs.w_expressions.len();
         let r_len = cb.cs.r_expressions.len();

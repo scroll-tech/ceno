@@ -26,10 +26,8 @@ impl<T: Copy + Default> DenseAddrSpace<T> {
         }
     }
 
-    pub(crate) fn read(&self, addr: WordAddr) -> T {
-        self.index(addr)
-            .map(|idx| self.cells[idx])
-            .unwrap_or_default()
+    pub(crate) fn read(&self, addr: WordAddr) -> Option<T> {
+        self.index(addr).map(|idx| self.cells[idx])
     }
 
     pub(crate) fn write(&mut self, addr: WordAddr, value: T) -> Option<()> {

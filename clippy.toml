@@ -23,5 +23,7 @@ allowed-duplicate-crates = [
   "num-bigint",
   "rfc6979",
   "k256",
+  "p256",
+  "primeorder",
   "ecdsa",
 ]

@@ -368,7 +368,8 @@ fn output32_layer<E: ExtensionField>(
     let mut keccak_output32_iter = out_evals.iter().map(|x| EvalExpression::Single(*x));
 
     // process keccak output
-    let sel_type = SelectorType::OrderedSparse32 {
+    let sel_type = SelectorType::OrderedSparse {
+        num_vars: 5,
         indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
         expression: layer.sel.expr(),
     };
@@ -623,7 +624,8 @@ fn keccak_first_layer<E: ExtensionField>(
 
     // process keccak output
     let mut out_eval_iter = input32_out_evals.iter().map(|x| EvalExpression::Single(*x));
-    let sel_type = SelectorType::OrderedSparse32 {
+    let sel_type = SelectorType::OrderedSparse {
+        num_vars: 5,
         indices: vec![CYCLIC_POW2_5[0] as usize],
         expression: layer.sel_keccak_out.expr(),
     };

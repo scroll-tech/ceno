@@ -11,7 +11,7 @@ use crate::{
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
-use ceno_emul::StepRecord;
+use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::marker::PhantomData;
 
@@ -27,6 +27,11 @@ pub struct InstructionConfig<E: ExtensionField> {
 
 impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     type InstructionConfig = InstructionConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ADDI]
+    }
 
     fn name() -> String {
         format!("{:?}", Self::INST_KIND)

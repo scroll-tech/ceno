@@ -98,7 +98,8 @@ jobs:
           RUST_LOG: debug
           RUSTFLAGS: "-C opt-level=3"
           MOCK_PROVING: 1
-        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=300 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/ceno_rt_alloc
+        # set --max-cycle-per-shard=420 to test heap read from previous shard, probing from guest program
+        run: cargo run --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=420 examples/target/riscv32im-ceno-zkvm-elf/debug/examples/ceno_rt_alloc
 
       - name: Run multi-shards Guest Heap Alloc (release)
         env:
@@ -141,6 +142,11 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_curve_syscalls
 
+      - name: Run bn254_fptower_syscalls (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_fptower_syscalls
+
       - name: Run k256 ecrecover (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
@@ -150,6 +156,16 @@ jobs:
         env:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_scalar_algebra
+
+      - name: Run p256 verify hash (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256r1_verify_prehash
+
+      - name: Run p256 scalar algebra (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256r1_scalar_algebra
 
       - name: Run uint256_mul_syscall (release)
         env:

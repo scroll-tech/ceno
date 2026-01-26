@@ -10,7 +10,7 @@ use crate::{
         TableCircuit,
     },
 };
-use ceno_emul::{CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
+use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
@@ -24,15 +24,17 @@ use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
+    ops::Range,
     sync::Arc,
 };
 use sumcheck::structs::{IOPProof, IOPProverMessage};
 use tracing::Level;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::RowMajorMatrix;
 
-/// proof that the sum of N=2^n EC points is equal to `sum`
-/// in one layer instead of GKR layered circuit approach
-/// note that this one layer IOP borrowed ideas from
+/// Proof that the sum of N (not necessarily a power of two) EC points
+/// is equal to `sum` in one layer instead of multiple layers in a
+/// GKR layered circuit approach that we used for offline memory checking.
+/// Note that this one layer IOP borrowed ideas from
 /// [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
@@ -41,6 +43,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 ))]
 pub struct EccQuarkProof<E: ExtensionField> {
     pub zerocheck_proof: IOPProof<E>,
+    /// Number of EC points being summed
     pub num_instances: usize,
     pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[0,rt], y[0,rt], s[0,rt]
     pub rt: Point<E>,
@@ -109,7 +112,7 @@ pub struct ProgramParams {
 impl Default for ProgramParams {
     fn default() -> Self {
         ProgramParams {
-            platform: CENO_PLATFORM,
+            platform: CENO_PLATFORM.clone(),
             program_size: (1 << 14),
             pubio_len: (1 << 2),
             static_memory_len: (1 << 16),
@@ -365,7 +368,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
         config: &OC::InstructionConfig,
-        records: Vec<&StepRecord>,
+        records: &[StepRecord],
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
 
@@ -460,64 +463,74 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         (shard_ctx, final_mem): &(
             &ShardContext,
-            &[(&'static str, InstancePaddingStrategy, &[MemFinalRecord])],
+            &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
         ),
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
         let perm = <E::BaseField as PoseidonField>::get_default_perm();
-        let waddr_first_access = if shard_ctx.is_first_shard() {
-            shard_ctx.get_addr_accessed_first_shard()
-        } else {
-            FxHashSet::default()
-        };
+        let addr_accessed = shard_ctx.get_addr_accessed();
 
-        let non_first_shard_records = if shard_ctx.is_first_shard() {
+        // future shard needed records := shard_ctx.write_records ∪  //
+        // (shard_ctx.after_current_shard_cycle(mem_record.cycle) && !addr_accessed.contains(&waddr))
+
+        // 1. process final mem which
+        // 1.1 init in first shard
+        // 1.2 not accessed in first shard
+        // 1.3 accessed in future shard
+        let first_shard_access_later_records = if shard_ctx.is_first_shard() {
             final_mem
                 .par_iter()
+                // only process no range restriction memory record
+                // for range specified it means dynamic init across different shard
+                .filter(|(_, range, _)| range.is_none())
                 .flat_map(|(mem_name, _, final_mem)| {
                     final_mem.par_iter().filter_map(|mem_record| {
-                        // prepare cross shard writes record for those record which not accessed in first record
-                        // but access in future shard
-                        let (waddr, addr): (WordAddr, u32) = match mem_record.ram_type {
-                            RAMType::Register => (
-                                Platform::register_vma(mem_record.addr as RegIdx).into(),
-                                mem_record.addr,
-                            ),
-                            RAMType::Memory => (mem_record.addr.into(), mem_record.addr),
-                            _ => unimplemented!(),
-                        };
-                        if !waddr_first_access.contains(&waddr)
-                            && shard_ctx.after_current_shard_cycle(mem_record.cycle)
-                        {
-                            let global_write = ShardRamRecord {
-                                addr: match mem_record.ram_type {
-                                    RAMType::Register => addr,
-                                    RAMType::Memory => waddr.into(),
-                                    _ => unimplemented!(),
-                                },
-                                ram_type: mem_record.ram_type,
-                                // fill initial value to cancel initial record
-                                value: mem_record.init_value,
-                                shard: 0,
-                                local_clk: 0,
-                                global_clk: 0,
-                                is_to_write_set: true,
-                            };
-                            let ec_point: ECPoint<E> = global_write.to_ec_point(&perm);
-                            Some(ShardRamInput {
-                                name: mem_name,
-                                record: global_write,
-                                ec_point,
-                            })
-                        } else {
-                            None
-                        }
+                        let (waddr, addr) = Self::mem_addresses(mem_record);
+                        Self::make_cross_shard_input(
+                            mem_name,
+                            mem_record,
+                            waddr,
+                            addr,
+                            shard_ctx,
+                            &addr_accessed,
+                            &perm,
+                        )
                     })
                 })
                 .collect()
         } else {
             vec![]
         };
+
+        // 2. process records which
+        // 2.1 init within current shard
+        // 2.2 not accessed in current shard
+        // 2.3 access by later shards.
+        let current_shard_access_later = final_mem
+            .par_iter()
+            // only process range-restricted memory record
+            // for range specified it means dynamic init across different shard
+            .filter(|(_, range, _)| range.is_some())
+            .flat_map(|(mem_name, range, final_mem)| {
+                let range = range.as_ref().unwrap();
+                final_mem.par_iter().filter_map(|mem_record| {
+                    let (waddr, addr) = Self::mem_addresses(mem_record);
+                    if !range.contains(&addr) {
+                        return None;
+                    }
+                    Self::make_cross_shard_input(
+                        mem_name,
+                        mem_record,
+                        waddr,
+                        addr,
+                        shard_ctx,
+                        &addr_accessed,
+                        &perm,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
         let global_input = shard_ctx
             .write_records()
             .par_iter()
@@ -533,7 +546,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     }
                 })
             })
-            .chain(non_first_shard_records.into_par_iter())
+            .chain(first_shard_access_later_records.into_par_iter())
+            .chain(current_shard_access_later.into_par_iter())
             .chain(shard_ctx.read_records().par_iter().flat_map(|records| {
                 // global read -> local write
                 records.par_iter().map(|(vma, record)| {
@@ -627,6 +641,54 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.witnesses
             .into_iter()
             .flat_map(|(_, chip_inputs)| chip_inputs.into_iter())
+    }
+
+    #[inline(always)]
+    fn mem_addresses(mem_record: &MemFinalRecord) -> (WordAddr, Addr) {
+        match mem_record.ram_type {
+            RAMType::Register => (
+                Platform::register_vma(mem_record.addr as RegIdx).into(),
+                mem_record.addr,
+            ),
+            RAMType::Memory => (mem_record.addr.into(), mem_record.addr),
+            _ => unimplemented!(),
+        }
+    }
+
+    #[inline(always)]
+    fn make_cross_shard_input(
+        mem_name: &'static str,
+        mem_record: &MemFinalRecord,
+        waddr: WordAddr,
+        addr: u32,
+        shard_ctx: &ShardContext,
+        addr_accessed: &FxHashSet<WordAddr>,
+        perm: &<<E as ExtensionField>::BaseField as PoseidonField>::P,
+    ) -> Option<ShardRamInput<E>> {
+        if addr_accessed.contains(&waddr) || !shard_ctx.after_current_shard_cycle(mem_record.cycle)
+        {
+            return None;
+        }
+
+        let global_write = ShardRamRecord {
+            addr: match mem_record.ram_type {
+                RAMType::Register => addr,
+                RAMType::Memory => waddr.into(),
+                _ => unimplemented!(),
+            },
+            ram_type: mem_record.ram_type,
+            value: mem_record.init_value,
+            shard: shard_ctx.shard_id as u64,
+            local_clk: 0,
+            global_clk: 0,
+            is_to_write_set: true,
+        };
+        let ec_point: ECPoint<E> = global_write.to_ec_point(perm);
+        Some(ShardRamInput {
+            name: mem_name,
+            record: global_write,
+            ec_point,
+        })
     }
 }
 

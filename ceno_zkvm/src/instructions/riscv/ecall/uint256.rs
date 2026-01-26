@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
 use ceno_emul::{
-    ByteAddr, Change, Cycle, InsnKind, Platform, SECP256K1_SCALAR_INVERT, StepRecord, UINT256_MUL,
-    WORD_SIZE, WriteOp,
+    ByteAddr, Change, Cycle, InsnKind, Platform, SECP256K1_SCALAR_INVERT, SECP256R1_SCALAR_INVERT,
+    StepRecord, UINT256_MUL, WORD_SIZE, WriteOp,
 };
 use ff_ext::ExtensionField;
 use generic_array::typenum::Unsigned;
@@ -26,6 +26,7 @@ use sp1_curves::{
     weierstrass::{
         WeierstrassParameters,
         secp256k1::{Secp256k1, Secp256k1BaseField},
+        secp256r1::{Secp256r1, Secp256r1BaseField},
     },
 };
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
@@ -67,6 +68,11 @@ pub struct Uint256MulInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
     type InstructionConfig = EcallUint256MulConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "Ecall_Uint256Mul".to_string()
@@ -220,7 +226,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let syscall_code = UINT256_MUL;
 
@@ -385,6 +391,26 @@ impl Uint256InvSpec for Secp256K1EcallSpec {
 
 pub type Secp256k1InvInstruction<E> = Uint256InvInstruction<E, Secp256K1EcallSpec>;
 
+pub struct Secp256R1EcallSpec;
+
+impl Uint256InvSpec for Secp256R1EcallSpec {
+    type P = Secp256r1BaseField;
+
+    fn syscall() -> u32 {
+        SECP256R1_SCALAR_INVERT
+    }
+
+    fn name() -> String {
+        "secp256r1_scalar_invert".to_string()
+    }
+
+    fn modulus() -> BigUint {
+        Secp256r1::prime_group_order()
+    }
+}
+
+pub type Secp256r1InvInstruction<E> = Uint256InvInstruction<E, Secp256R1EcallSpec>;
+
 #[derive(Debug)]
 pub struct EcallUint256InvConfig<E: ExtensionField, Spec: Uint256InvSpec> {
     pub layout: Uint256InvLayout<E, Spec>,
@@ -396,6 +422,11 @@ pub struct EcallUint256InvConfig<E: ExtensionField, Spec: Uint256InvSpec> {
 
 impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstruction<E, Spec> {
     type InstructionConfig = EcallUint256InvConfig<E, Spec>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         Spec::name()
@@ -515,7 +546,7 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let syscall_code = Spec::syscall();
 

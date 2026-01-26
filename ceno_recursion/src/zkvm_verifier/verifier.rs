@@ -9,7 +9,7 @@ use crate::{
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
-        mmcs::MmcsCommitmentVariable,
+        hash::HashVariable,
         query_phase::PointAndEvalsVariable,
         utils::pow_2,
     },
@@ -20,6 +20,7 @@ use crate::{
         arr_product, build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
         eq_eval_less_or_equal_than, gen_alpha_pows, nested_product,
     },
+    basefold_verifier::verifier::batch_verify,
     tower_verifier::{
         binding::{PointAndEvalVariable, PointVariable},
         program::{iop_verifier_state_verify, verify_tower_proof},
@@ -222,10 +223,19 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let dummy_table_item = alpha;
     let dummy_table_item_multiplicity: Var<C::N> = builder.constant(C::N::ZERO);
 
-    let witin_openings: Array<C, RoundOpeningVariable<C>> =
-        builder.dyn_array(zkvm_proof_input.chip_proofs.len());
-    let fixed_openings: Array<C, RoundOpeningVariable<C>> =
-        builder.dyn_array(zkvm_proof_input.chip_proofs.len());
+    let proofs_len: Usize<C::N> = builder.eval(C::N::ZERO);
+    builder
+        .range(0, zkvm_proof_input.chip_proofs.len())
+        .for_each(|idx_vec, builder| {
+            let chip_proofs_len = builder.get(&zkvm_proof_input.chip_proofs, idx_vec[0]).len();
+            builder.assign(&proofs_len, proofs_len.clone() + chip_proofs_len);
+        });
+
+    // not each chip has witness or fixed opening
+    // therefore we need to truncate these two opening arrays
+    let witin_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len.clone());
+    let fixed_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len);
+
     let shard_ec_sum = SepticPointVariable {
         x: SepticExtensionVariable {
             vs: builder.dyn_array(7),
@@ -237,7 +247,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     };
 
     let num_chips_verified: Usize<C::N> = builder.eval(C::N::ZERO);
-    let num_chips_have_fixed: Usize<C::N> = builder.eval(C::N::ZERO);
+    let num_fixed_openings: Usize<C::N> = builder.eval(C::N::ZERO);
+    let num_witin_openings: Usize<C::N> = builder.eval(C::N::ZERO);
 
     let chip_indices: Array<C, Var<C::N>> = builder.dyn_array(zkvm_proof_input.chip_proofs.len());
     builder
@@ -356,7 +367,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                             evals: chip_proof.wits_in_evals,
                         },
                     });
-                    builder.set_value(&witin_openings, num_chips_verified.get_var(), witin_round);
+                    builder.set_value(&witin_openings, num_witin_openings.get_var(), witin_round);
+                    builder.inc(&num_witin_openings);
                 }
                 if circuit_vk.get_cs().num_fixed() > 0 {
                     let fixed_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
@@ -369,8 +381,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         },
                     });
 
-                    builder.set_value(&fixed_openings, num_chips_have_fixed.get_var(), fixed_round);
-                    builder.inc(&num_chips_have_fixed);
+                    builder.set_value(&fixed_openings, num_fixed_openings.get_var(), fixed_round);
+                    builder.inc(&num_fixed_openings);
                 }
 
                 let r_out_evals_prod = nested_product(builder, &chip_proof.r_out_evals);
@@ -388,6 +400,11 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             builder.inc(&num_chips_verified);
         });
     }
+    // truncate the witin and fixed opening arrays
+    witin_openings.truncate(builder, num_witin_openings);
+    fixed_openings.truncate(builder, num_fixed_openings);
+
+    // all proofs must be verified without missing
     builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
 
     let dummy_table_item_multiplicity =
@@ -412,69 +429,62 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         },
     );
 
-    if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
-        builder
-            .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+    builder
+        .if_eq(zkvm_proof_input.shard_id.clone(), Usize::from(0))
+        .then_or_else(
+            |builder| {
+                if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
+                    let commit = HashVariable::new(builder, &fixed_commit.commit().into());
+                    let log2_max_codeword_size: Var<C::N> = builder.constant(
+                        C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
+                    );
 
-                let log2_max_codeword_size: Var<C::N> = builder.constant(
-                    C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
-                );
-
-                builder.set(
-                    &rounds,
-                    1,
-                    RoundVariable {
-                        commit: BasefoldCommitmentVariable {
-                            commit: MmcsCommitmentVariable {
-                                value: commit_array,
+                    builder.set(
+                        &rounds,
+                        1,
+                        RoundVariable {
+                            commit: BasefoldCommitmentVariable {
+                                commit,
+                                log2_max_codeword_size: log2_max_codeword_size.into(),
                             },
-                            log2_max_codeword_size: log2_max_codeword_size.into(),
+                            openings: fixed_openings.clone(),
+                            perm: zkvm_proof_input.fixed_perm.clone(),
                         },
-                        openings: fixed_openings.clone(),
-                        perm: zkvm_proof_input.fixed_perm.clone(),
-                    },
-                );
-            });
-    } else if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
-        builder
-            .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
-            .then(|builder| {
-                let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
-                let commit_array: Array<C, Felt<C::F>> = builder.dyn_array(commit.value.len());
+                    );
+                }
+            },
+            |builder| {
+                if let Some(fixed_commit) = vk.fixed_no_omc_init_commit.as_ref() {
+                    let commit = HashVariable::new(builder, &fixed_commit.commit().into());
 
-                let log2_max_codeword_size: Var<C::N> = builder.constant(
-                    C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
-                );
+                    let log2_max_codeword_size: Var<C::N> = builder.constant(
+                        C::N::from_canonical_usize(fixed_commit.log2_max_codeword_size),
+                    );
 
-                builder.set(
-                    &rounds,
-                    1,
-                    RoundVariable {
-                        commit: BasefoldCommitmentVariable {
-                            commit: MmcsCommitmentVariable {
-                                value: commit_array,
+                    builder.set(
+                        &rounds,
+                        1,
+                        RoundVariable {
+                            commit: BasefoldCommitmentVariable {
+                                commit,
+                                log2_max_codeword_size: log2_max_codeword_size.into(),
                             },
-                            log2_max_codeword_size: log2_max_codeword_size.into(),
+                            openings: fixed_openings.clone(),
+                            perm: zkvm_proof_input.fixed_perm.clone(),
                         },
-                        openings: fixed_openings.clone(),
-                        perm: zkvm_proof_input.fixed_perm.clone(),
-                    },
-                );
-            });
-    }
+                    );
+                }
+            },
+        );
 
-    // _debug
-    // batch_verify(
-    //     builder,
-    //     zkvm_proof_input.max_num_var,
-    //     zkvm_proof_input.max_width,
-    //     rounds,
-    //     zkvm_proof_input.pcs_proof,
-    //     &mut challenger,
-    // );
+    batch_verify(
+        builder,
+        zkvm_proof_input.max_num_var,
+        zkvm_proof_input.max_width,
+        rounds,
+        zkvm_proof_input.pcs_proof,
+        &mut challenger,
+    );
 
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     let initial_global_state = eval_ceno_expr_with_instance(
@@ -956,6 +966,7 @@ pub fn verify_gkr_circuit<C: Config>(
                 builder.assert_ext_eq(main_eval, expected_eval);
             });
 
+        let zero_const = builder.constant::<Ext<C::F, C::EF>>(C::EF::ZERO);
         // check structural witin
         for s in &layer.structural_witins {
             let id = s.id;
@@ -968,13 +979,33 @@ pub fn verify_gkr_circuit<C: Config>(
                     multi_factor,
                     descending,
                     ..
-                } => eval_wellform_address_vec(
-                    builder,
-                    offset,
-                    multi_factor as u32,
-                    &in_point,
+                } => {
+                    let offset =
+                        builder.constant::<Ext<C::F, C::EF>>(C::EF::from_canonical_u32(offset));
+                    eval_wellform_address_vec(
+                        builder,
+                        offset,
+                        multi_factor as u32,
+                        &in_point,
+                        descending,
+                    )
+                }
+                StructuralWitInType::EqualDistanceDynamicSequence {
+                    multi_factor,
                     descending,
-                ),
+                    offset_instance_id,
+                    ..
+                } => {
+                    // retrieve offset from public values
+                    let offset = builder.get(pub_io_evals, offset_instance_id as usize);
+                    eval_wellform_address_vec(
+                        builder,
+                        offset,
+                        multi_factor as u32,
+                        &in_point,
+                        descending,
+                    )
+                }
                 StructuralWitInType::StackedIncrementalSequence { .. } => {
                     let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
                     let one_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
@@ -994,7 +1025,7 @@ pub fn verify_gkr_circuit<C: Config>(
 
                                             let r_slice = &in_point.slice(builder, 0, i);
                                             let eval = eval_wellform_address_vec(
-                                                builder, 0, 1, r_slice, false,
+                                                builder, zero_const, 1, r_slice, false,
                                             );
                                             builder
                                                 .assign(&res, res * (one_ext - r_i) + eval * r_i);
@@ -1033,12 +1064,11 @@ pub fn verify_gkr_circuit<C: Config>(
                 }
                 StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
                     let r_slice = in_point.slice(builder, k, in_point.len());
-
-                    eval_wellform_address_vec(builder, 0, 1, &r_slice, false)
+                    eval_wellform_address_vec(builder, zero_const, 1, &r_slice, false)
                 }
                 StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
                     let r_slice = in_point.slice(builder, 0, k);
-                    eval_wellform_address_vec(builder, 0, 1, &r_slice, false)
+                    eval_wellform_address_vec(builder, zero_const, 1, &r_slice, false)
                 }
                 StructuralWitInType::Empty => continue,
             };
@@ -1340,12 +1370,14 @@ pub fn evaluate_selector<C: Config>(
 
             (expr, sel)
         }
-        SelectorType::OrderedSparse32 {
+        SelectorType::OrderedSparse {
+            num_vars,
             indices,
             expression,
         } => {
-            let out_point_slice = out_point.slice(builder, 0, 5);
-            let in_point_slice = in_point.slice(builder, 0, 5);
+            let num_vars = *num_vars;
+            let out_point_slice = out_point.slice(builder, 0, num_vars);
+            let in_point_slice = in_point.slice(builder, 0, num_vars);
             let out_subgroup_eq = build_eq_x_r_vec_sequential(builder, &out_point_slice);
             let in_subgroup_eq = build_eq_x_r_vec_sequential(builder, &in_point_slice);
 
@@ -1356,8 +1388,8 @@ pub fn evaluate_selector<C: Config>(
                 builder.assign(&eval, eval + out_val * in_val);
             }
 
-            let out_point_slice = out_point.slice(builder, 5, out_point.len());
-            let in_point_slice = in_point.slice(builder, 5, in_point.len());
+            let out_point_slice = out_point.slice(builder, num_vars, out_point.len());
+            let in_point_slice = in_point.slice(builder, num_vars, in_point.len());
             let n_bits = builder.get(&ctx.num_instances_bit_decomps, 0);
 
             let sel =
@@ -1699,7 +1731,7 @@ pub fn verify_ecc_proof<C: Config>(
     let alpha_pows = gen_alpha_pows(
         builder,
         challenger,
-        Usize::from(SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 2),
+        Usize::from(SEPTIC_EXTENSION_DEGREE * 3 + SEPTIC_EXTENSION_DEGREE * 4),
     );
 
     let one_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
@@ -1716,7 +1748,7 @@ pub fn verify_ecc_proof<C: Config>(
         unipoly_extrapolator,
     );
 
-    let cord_slice = proof.evals.slice(builder, 2, proof.evals.len());
+    let cord_slice = proof.evals.slice(builder, 3, proof.evals.len());
     let s0: SepticExtensionVariable<C> =
         cord_slice.slice(builder, 0, SEPTIC_EXTENSION_DEGREE).into();
     let x0: SepticExtensionVariable<C> = cord_slice
@@ -1768,6 +1800,8 @@ pub fn verify_ecc_proof<C: Config>(
     let v3: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let v4: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let v5: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
+    let export_x: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
+    let export_y: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let x0_x1: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
     let x0_x3: SepticExtensionVariable<C> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE).into();
 
@@ -1777,6 +1811,8 @@ pub fn verify_ecc_proof<C: Config>(
         let x3_i = builder.get(&x3.vs, i);
         let y0_i = builder.get(&y0.vs, i);
         let y3_i = builder.get(&y3.vs, i);
+        let sum_x_i = builder.get(&proof.sum.x.vs, i);
+        let sum_y_i = builder.get(&proof.sum.y.vs, i);
         let s0_squared_i = builder.get(&s0_squared.vs, i);
 
         builder.set(&x0_x1.vs, i, x0_i - x1_i);
@@ -1784,6 +1820,8 @@ pub fn verify_ecc_proof<C: Config>(
         builder.set(&v2.vs, i, s0_squared_i - x0_i - x1_i - x3_i);
         builder.set(&v4.vs, i, x3_i - x0_i);
         builder.set(&v5.vs, i, y3_i - y0_i);
+        builder.set(&export_x.vs, i, x3_i - sum_x_i);
+        builder.set(&export_y.vs, i, y3_i - sum_y_i);
     }
 
     let s0_x0_x1 = septic_ext_mul(builder, &s0, &x0_x1);
@@ -1796,7 +1834,9 @@ pub fn verify_ecc_proof<C: Config>(
         let y1_i = builder.get(&y1.vs, i);
         let y3_i = builder.get(&y3.vs, i);
 
+        // v1 = s0 * (x0 - x1) - (y0 - y1)
         builder.set(&v1.vs, i, s0_x0_x1_i - (y0_i - y1_i));
+        // v3 = s0 * (x0 - x3) - (y0 + y3)
         builder.set(&v3.vs, i, s0_x0_x3_i - (y0_i + y3_i));
     }
 
@@ -1821,12 +1861,24 @@ pub fn verify_ecc_proof<C: Config>(
         4 * SEPTIC_EXTENSION_DEGREE,
         5 * SEPTIC_EXTENSION_DEGREE,
     );
+    let mask_export_x = alpha_pows.slice(
+        builder,
+        5 * SEPTIC_EXTENSION_DEGREE,
+        6 * SEPTIC_EXTENSION_DEGREE,
+    );
+    let mask_export_y = alpha_pows.slice(
+        builder,
+        6 * SEPTIC_EXTENSION_DEGREE,
+        7 * SEPTIC_EXTENSION_DEGREE,
+    );
 
     mask_arr(builder, &v1.vs, &mask1);
     mask_arr(builder, &v2.vs, &mask2);
     mask_arr(builder, &v3.vs, &mask3);
     mask_arr(builder, &v4.vs, &mask4);
     mask_arr(builder, &v5.vs, &mask5);
+    mask_arr(builder, &export_x.vs, &mask_export_x);
+    mask_arr(builder, &export_y.vs, &mask_export_y);
 
     let sel_add_expr = SelectorType::<E>::QuarkBinaryTreeLessThan(Expression::StructuralWitIn(
         0,
@@ -1850,18 +1902,37 @@ pub fn verify_ecc_proof<C: Config>(
     let proof_eval_0 = builder.get(&proof.evals, 0);
     builder.assert_ext_eq(proof_eval_0, expected_sel_add);
 
-    let eq_eval: Ext<<C as Config>::F, <C as Config>::EF> =
+    let eq_eval_ext: Ext<<C as Config>::F, <C as Config>::EF> =
         eq_eval(builder, &out_rt, &rt, one_ext, zero_ext);
     let out_rt_prod = arr_product(builder, &out_rt);
     let rt_prod = arr_product(builder, &rt);
     let expected_sel_bypass: Ext<C::F, C::EF> =
-        builder.eval(eq_eval - expected_sel_add - (out_rt_prod * rt_prod));
+        builder.eval(eq_eval_ext - expected_sel_add - (out_rt_prod * rt_prod));
 
     let proof_eval_1 = builder.get(&proof.evals, 1);
     builder.assert_ext_eq(proof_eval_1, expected_sel_bypass);
 
+    let lsi_on_hypercube: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(num_vars.clone());
+    builder.set(&lsi_on_hypercube, 0, zero_ext);
+    builder
+        .range(1, lsi_on_hypercube.len())
+        .for_each(|idx_vec, builder| {
+            builder.set(&lsi_on_hypercube, idx_vec[0], one_ext);
+        });
+
+    let expected_sel_export: Ext<C::F, C::EF> = {
+        let a = eq_eval(builder, &out_rt, &lsi_on_hypercube, one_ext, zero_ext);
+        let b = eq_eval(builder, &rt, &lsi_on_hypercube, one_ext, zero_ext);
+
+        builder.eval(a * b)
+    };
+
+    let proof_eval_2 = builder.get(&proof.evals, 2);
+    builder.assert_ext_eq(proof_eval_2, expected_sel_export);
+
     let add_evaluations: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let bypass_evaluations: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    let export_evaluations: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     for i in 0..SEPTIC_EXTENSION_DEGREE {
         let v1_i = builder.get(&v1.vs, i);
         let v2_i = builder.get(&v2.vs, i);
@@ -1869,11 +1940,21 @@ pub fn verify_ecc_proof<C: Config>(
         let v4_i = builder.get(&v4.vs, i);
         let v5_i = builder.get(&v5.vs, i);
 
+        let export_x_i = builder.get(&export_x.vs, i);
+        let export_y_i = builder.get(&export_y.vs, i);
+
         builder.assign(&add_evaluations, add_evaluations + v1_i + v2_i + v3_i);
         builder.assign(&bypass_evaluations, bypass_evaluations + v4_i + v5_i);
+        builder.assign(
+            &export_evaluations,
+            export_evaluations + export_x_i + export_y_i,
+        );
     }
-    let op_evaluation: Ext<C::F, C::EF> =
-        builder.eval(add_evaluations * expected_sel_add + bypass_evaluations * expected_sel_bypass);
+    let op_evaluation: Ext<C::F, C::EF> = builder.eval(
+        add_evaluations * expected_sel_add
+            + bypass_evaluations * expected_sel_bypass
+            + export_evaluations * expected_sel_export,
+    );
     builder.assert_ext_eq(sumcheck_expected_evaluation, op_evaluation);
 }
 
