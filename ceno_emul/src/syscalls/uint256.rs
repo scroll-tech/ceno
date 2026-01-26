@@ -1,5 +1,5 @@
 use crate::{
-    Change, EmuContext, Platform, SyscallSpec, VMState, WriteOp,
+    Change, EmuContext, Platform, SyscallSpec, Tracer, VMState, WriteOp,
     syscalls::{SyscallEffects, SyscallWitness},
     utils::MemoryView,
 };
@@ -26,7 +26,7 @@ impl SyscallSpec for Uint256MulSpec {
     const CODE: u32 = ceno_syscall::UINT256_MUL;
 }
 
-pub fn uint256_mul(vm: &VMState) -> SyscallEffects {
+pub fn uint256_mul<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let x_ptr = vm.peek_register(Platform::reg_arg0());
     let y_ptr = vm.peek_register(Platform::reg_arg1());
 
@@ -45,8 +45,8 @@ pub fn uint256_mul(vm: &VMState) -> SyscallEffects {
     ];
 
     // Memory segments of x, y, and modulus
-    let mut x_view = MemoryView::<UINT256_WORDS_FIELD_ELEMENT>::new(vm, x_ptr);
-    let y_and_modulus_view = MemoryView::<{ UINT256_WORDS_FIELD_ELEMENT * 2 }>::new(vm, y_ptr);
+    let mut x_view = MemoryView::<_, UINT256_WORDS_FIELD_ELEMENT>::new(vm, x_ptr);
+    let y_and_modulus_view = MemoryView::<_, { UINT256_WORDS_FIELD_ELEMENT * 2 }>::new(vm, y_ptr);
 
     // Read x, y, and modulus from words via wrapper type
     let x = biguint_from_le_words(&x_view.words());

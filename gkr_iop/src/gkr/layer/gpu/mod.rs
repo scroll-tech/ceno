@@ -262,9 +262,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
-            .sumcheck
             .prove_generic_sumcheck_gpu(
-                &cuda_hal,
                 all_witins_gpu_type_gl64,
                 &mle_size_info,
                 &term_coefficients_gl64,
@@ -306,6 +304,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 ///     rotated_rotation_expr[i].0(rx) == (1 - rx_4) * rotation_expr[i].1(0, rx_0, rx_1, ..., rx_3, rx_5, ...)
 ///                                     + rx_4 * rotation_expr[i].1(1, rx_0, 1 - rx_1, ..., rx_3, rx_5, ...)
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip_all, name = "prove_rotation_gpu", level = "info")]
 pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     _num_threads: usize,
     max_num_variables: usize,
@@ -383,9 +382,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
     // gpu prover
     let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
-        .sumcheck
         .prove_generic_sumcheck_gpu(
-            &cuda_hal,
             all_witins_gpu_type_gl64,
             &mle_size_info,
             &term_coefficients_gl64,

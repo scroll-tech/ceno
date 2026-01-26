@@ -15,6 +15,7 @@ ceno_keccak = { path = "../keccak" }
 ceno_sha2 = { path = "../sha2" }
 ceno_syscall.workspace = true
 k256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa"] }
+p256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa", "arithmetic"] }
 thiserror.workspace = true
 
 [dev-dependencies]
@@ -23,4 +24,4 @@ alloy-primitives = "1.4"
 revm-precompile.workspace = true
 
 [features]
-profiling = ["k256/profiling"]
+profiling = ["k256/std", "k256/ecdsa", "k256/profiling", "p256/std", "p256/ecdsa", "p256/arithmetic", "p256/profiling"]

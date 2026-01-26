@@ -21,9 +21,9 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, InsnKind, IterAddresses, NextCycleAccess,
-    Platform, Program, StepRecord, Tracer, VMState, WORD_SIZE, Word, WordAddr,
-    host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, NextCycleAccess,
+    Platform, PreflightTracer, Program, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word,
+    WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -43,6 +43,7 @@ use std::collections::{HashMap, HashSet};
 use std::{
     collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
+    ops::Range,
     sync::Arc,
 };
 use tracing::info_span;
@@ -180,9 +181,7 @@ pub struct ShardContext<'a> {
     num_shards: usize,
     max_cycle: Cycle,
     pub addr_future_accesses: Arc<NextCycleAccess>,
-    // this is only updated in first shard
-    addr_accessed_thread_based_first_shard:
-        Either<Vec<FxHashSet<WordAddr>>, &'a mut FxHashSet<WordAddr>>,
+    addr_accessed_tbs: Either<Vec<Vec<WordAddr>>, &'a mut Vec<WordAddr>>,
     read_records_tbs:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     write_records_tbs:
@@ -192,6 +191,11 @@ pub struct ShardContext<'a> {
     pub max_num_cross_shard_accesses: usize,
     // shard 0: [v[0], v[1]), shard 1: [v[1], v[2]), shard 2: [v[2], v[3])
     pub prev_shard_cycle_range: Vec<Cycle>,
+    pub prev_shard_heap_range: Vec<Addr>,
+    pub prev_shard_hint_range: Vec<Addr>,
+    pub platform: Platform,
+    pub shard_heap_addr_range: Range<Addr>,
+    pub shard_hint_addr_range: Range<Addr>,
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -206,11 +210,7 @@ impl<'a> Default for ShardContext<'a> {
             num_shards: 1,
             max_cycle: Cycle::MAX,
             addr_future_accesses: Arc::new(Default::default()),
-            addr_accessed_thread_based_first_shard: Either::Left(
-                (0..max_threads)
-                    .map(|_| Default::default())
-                    .collect::<Vec<_>>(),
-            ),
+            addr_accessed_tbs: Either::Left(vec![Vec::new(); max_threads]),
             read_records_tbs: Either::Left(
                 (0..max_threads)
                     .map(|_| BTreeMap::new())
@@ -221,10 +221,15 @@ impl<'a> Default for ShardContext<'a> {
                     .map(|_| BTreeMap::new())
                     .collect::<Vec<_>>(),
             ),
-            cur_shard_cycle_range: Tracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
+            cur_shard_cycle_range: FullTracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
             expected_inst_per_shard: usize::MAX,
             max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
+            prev_shard_heap_range: vec![],
+            prev_shard_hint_range: vec![],
+            platform: CENO_PLATFORM.clone(),
+            shard_heap_addr_range: CENO_PLATFORM.heap.clone(),
+            shard_hint_addr_range: CENO_PLATFORM.hints.clone(),
         }
     }
 }
@@ -244,33 +249,34 @@ impl<'a> ShardContext<'a> {
         match (
             &mut self.read_records_tbs,
             &mut self.write_records_tbs,
-            &mut self.addr_accessed_thread_based_first_shard,
+            &mut self.addr_accessed_tbs,
         ) {
             (
                 Either::Left(read_thread_based_record_storage),
                 Either::Left(write_thread_based_record_storage),
-                Either::Left(addr_accessed_thread_based_first_shard),
+                Either::Left(addr_accessed_tbs),
             ) => read_thread_based_record_storage
                 .iter_mut()
                 .zip(write_thread_based_record_storage.iter_mut())
-                .zip(addr_accessed_thread_based_first_shard.iter_mut())
-                .map(
-                    |((read, write), addr_accessed_thread_based_first_shard)| ShardContext {
-                        shard_id: self.shard_id,
-                        num_shards: self.num_shards,
-                        max_cycle: self.max_cycle,
-                        addr_future_accesses: self.addr_future_accesses.clone(),
-                        addr_accessed_thread_based_first_shard: Either::Right(
-                            addr_accessed_thread_based_first_shard,
-                        ),
-                        read_records_tbs: Either::Right(read),
-                        write_records_tbs: Either::Right(write),
-                        cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
-                        expected_inst_per_shard: self.expected_inst_per_shard,
-                        max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
-                        prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
-                    },
-                )
+                .zip(addr_accessed_tbs.iter_mut())
+                .map(|((read, write), addr_accessed_tbs)| ShardContext {
+                    shard_id: self.shard_id,
+                    num_shards: self.num_shards,
+                    max_cycle: self.max_cycle,
+                    addr_future_accesses: self.addr_future_accesses.clone(),
+                    addr_accessed_tbs: Either::Right(addr_accessed_tbs),
+                    read_records_tbs: Either::Right(read),
+                    write_records_tbs: Either::Right(write),
+                    cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
+                    expected_inst_per_shard: self.expected_inst_per_shard,
+                    max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
+                    prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
+                    prev_shard_heap_range: self.prev_shard_heap_range.clone(),
+                    prev_shard_hint_range: self.prev_shard_hint_range.clone(),
+                    platform: self.platform.clone(),
+                    shard_heap_addr_range: self.shard_heap_addr_range.clone(),
+                    shard_hint_addr_range: self.shard_hint_addr_range.clone(),
+                })
                 .collect_vec(),
             _ => panic!("invalid type"),
         }
@@ -315,17 +321,31 @@ impl<'a> ShardContext<'a> {
         (cycle as usize) >= self.cur_shard_cycle_range.end
     }
 
-    /// Extract shard_id which produce this record
+    /// Extract shard_id which produce this record by cycle
     /// NOTE prev_shard_cycle_range[0] should be 0 otherwise it will panic with subtract-overflow
     #[inline(always)]
-    pub fn extract_shard_id(&self, cycle: Cycle) -> usize {
+    pub fn extract_shard_id_by_cycle(&self, cycle: Cycle) -> usize {
         self.prev_shard_cycle_range.partition_point(|&t| t <= cycle) - 1
+    }
+
+    /// Extract shard_id which produce this record by heap addr
+    /// NOTE prev_shard_heap_range[0] should be 0 otherwise it will panic with subtract-overflow
+    #[inline(always)]
+    pub fn extract_shard_id_by_heap_addr(&self, addr: Addr) -> usize {
+        self.prev_shard_heap_range.partition_point(|&a| a <= addr) - 1
+    }
+
+    /// Extract shard_id which produce this record by hint addr
+    /// NOTE prev_shard_hint_range[0] should be 0 otherwise it will panic with subtract-overflow
+    #[inline(always)]
+    pub fn extract_shard_id_by_hint_addr(&self, addr: Addr) -> usize {
+        self.prev_shard_hint_range.partition_point(|&a| a <= addr) - 1
     }
 
     #[inline(always)]
     pub fn aligned_prev_ts(&self, prev_cycle: Cycle) -> Cycle {
         let mut ts = prev_cycle.saturating_sub(self.current_shard_offset_cycle());
-        if ts < Tracer::SUBCYCLES_PER_INSN {
+        if ts < FullTracer::SUBCYCLES_PER_INSN {
             ts = 0
         }
         ts
@@ -338,7 +358,7 @@ impl<'a> ShardContext<'a> {
 
     pub fn current_shard_offset_cycle(&self) -> Cycle {
         // cycle of each local shard start from Tracer::SUBCYCLES_PER_INSN
-        (self.cur_shard_cycle_range.start as Cycle) - Tracer::SUBCYCLES_PER_INSN
+        (self.cur_shard_cycle_range.start as Cycle) - FullTracer::SUBCYCLES_PER_INSN
     }
 
     /// Finds the **next** future access cycle for the given address, starting from
@@ -378,32 +398,71 @@ impl<'a> ShardContext<'a> {
         value: Word,
         prev_value: Option<Word>,
     ) {
-        // check read from external mem bus
-        // exclude first shard
-        if self.before_current_shard_cycle(prev_cycle)
+        if !self.is_first_shard()
             && self.is_in_current_shard(cycle)
-            && !self.is_first_shard()
+            && self.before_current_shard_cycle(prev_cycle)
         {
-            let prev_shard_id = self.extract_shard_id(prev_cycle);
-            let ram_record = self
-                .read_records_tbs
-                .as_mut()
-                .right()
-                .expect("illegal type");
-            ram_record.insert(
-                addr,
-                RAMRecord {
-                    ram_type,
-                    reg_id: id,
+            let addr_raw = addr.baddr().0;
+            let is_heap = self.platform.heap.contains(&addr_raw);
+            let is_hint = self.platform.hints.contains(&addr_raw);
+            // 1. checking reads from the external bus
+            if prev_cycle > 0 || (prev_cycle == 0 && (!is_heap && !is_hint)) {
+                let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
+                let ram_record = self
+                    .read_records_tbs
+                    .as_mut()
+                    .right()
+                    .expect("illegal type");
+                ram_record.insert(
                     addr,
-                    prev_cycle,
-                    cycle,
-                    shard_cycle: 0,
-                    prev_value,
-                    value,
-                    shard_id: prev_shard_id,
-                },
-            );
+                    RAMRecord {
+                        ram_type,
+                        reg_id: id,
+                        addr,
+                        prev_cycle,
+                        cycle,
+                        shard_cycle: 0,
+                        prev_value,
+                        value,
+                        shard_id: prev_shard_id,
+                    },
+                );
+            } else {
+                assert!(
+                    prev_cycle == 0 && (is_heap || is_hint),
+                    "addr {addr_raw:x} prev_cycle {prev_cycle}, is_heap {is_heap}, is_hint {is_hint}",
+                );
+                // 2. handle heap/hint initial reads outside the shard range.
+                let prev_shard_id = if is_heap && !self.shard_heap_addr_range.contains(&addr_raw) {
+                    Some(self.extract_shard_id_by_heap_addr(addr_raw))
+                } else if is_hint && !self.shard_hint_addr_range.contains(&addr_raw) {
+                    Some(self.extract_shard_id_by_hint_addr(addr_raw))
+                } else {
+                    // dynamic init in current shard, skip and do nothing
+                    None
+                };
+                if let Some(prev_shard_id) = prev_shard_id {
+                    let ram_record = self
+                        .read_records_tbs
+                        .as_mut()
+                        .right()
+                        .expect("illegal type");
+                    ram_record.insert(
+                        addr,
+                        RAMRecord {
+                            ram_type,
+                            reg_id: id,
+                            addr,
+                            prev_cycle,
+                            cycle,
+                            shard_cycle: 0,
+                            prev_value,
+                            value,
+                            shard_id: prev_shard_id,
+                        },
+                    );
+                }
+            }
         }
 
         // check write to external mem bus
@@ -433,29 +492,23 @@ impl<'a> ShardContext<'a> {
             );
         }
 
-        if self.is_first_shard() {
-            let addr_accessed = self
-                .addr_accessed_thread_based_first_shard
-                .as_mut()
-                .right()
-                .expect("illegal type");
-            addr_accessed.insert(addr);
-        }
+        let addr_accessed = self
+            .addr_accessed_tbs
+            .as_mut()
+            .right()
+            .expect("illegal type");
+        addr_accessed.push(addr);
     }
 
-    /// merge map from different thread, which keep the largest cycle when matched same address
-    pub fn get_addr_accessed_first_shard(&self) -> FxHashSet<WordAddr> {
+    /// merge addr accessed in different threads
+    pub fn get_addr_accessed(&self) -> FxHashSet<WordAddr> {
         let mut merged = FxHashSet::default();
-        let addr_accessed_thread_based_first_shard =
-            match &self.addr_accessed_thread_based_first_shard {
-                Either::Left(addr_accessed_thread_based_first_shard) => {
-                    addr_accessed_thread_based_first_shard
-                }
-                Either::Right(_) => panic!("invalid type"),
-            };
-
-        for s in addr_accessed_thread_based_first_shard {
-            merged.extend(s);
+        if let Either::Left(addr_accessed_tbs) = &self.addr_accessed_tbs {
+            for addrs in addr_accessed_tbs {
+                merged.extend(addrs.iter().copied());
+            }
+        } else {
+            panic!("invalid type");
         }
         merged
     }
@@ -522,7 +575,6 @@ pub trait StepCellExtractor {
     fn extract_cells(&self, step: &StepRecord) -> u64;
 }
 
-#[derive(Default)]
 pub struct ShardContextBuilder {
     pub cur_shard_id: usize,
     addr_future_accesses: Arc<NextCycleAccess>,
@@ -532,13 +584,39 @@ pub struct ShardContextBuilder {
     max_cycle_per_shard: Cycle,
     target_cell_first_shard: u64,
     prev_shard_cycle_range: Vec<Cycle>,
+    prev_shard_heap_range: Vec<Addr>,
+    prev_shard_hint_range: Vec<Addr>,
     // holds the first step for the next shard once the current shard hits its limit
     pending_step: Option<StepRecord>,
+    platform: Platform,
+}
+
+impl Default for ShardContextBuilder {
+    fn default() -> Self {
+        ShardContextBuilder {
+            cur_shard_id: 0,
+            addr_future_accesses: Arc::new(Default::default()),
+            cur_cells: 0,
+            cur_acc_cycle: 0,
+            max_cell_per_shard: 0,
+            max_cycle_per_shard: 0,
+            target_cell_first_shard: 0,
+            prev_shard_cycle_range: vec![],
+            prev_shard_heap_range: vec![],
+            prev_shard_hint_range: vec![],
+            pending_step: None,
+            platform: CENO_PLATFORM.clone(),
+        }
+    }
 }
 
 impl ShardContextBuilder {
     /// set max_cell_per_shard == u64::MAX if target for single shard
-    pub fn new(multi_prover: &MultiProver, addr_future_accesses: NextCycleAccess) -> Self {
+    pub fn new(
+        multi_prover: &MultiProver,
+        platform: Platform,
+        addr_future_accesses: NextCycleAccess,
+    ) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
         ShardContextBuilder {
@@ -551,12 +629,15 @@ impl ShardContextBuilder {
                 if multi_prover.max_cell_per_shard == u64::MAX {
                     u64::MAX
                 } else {
-                    DEFAULT_MAX_CELL_FIRST_SHARD
+                    multi_prover.max_cell_per_shard
                 }
             },
             addr_future_accesses: Arc::new(addr_future_accesses),
             prev_shard_cycle_range: vec![0],
+            prev_shard_heap_range: vec![0],
+            prev_shard_hint_range: vec![0],
             pending_step: None,
+            platform,
         }
     }
 
@@ -582,7 +663,7 @@ impl ShardContextBuilder {
                 }
             };
             let next_cells = self.cur_cells + step_cell_extractor.extract_cells(&step);
-            let next_cycle = self.cur_acc_cycle + Tracer::SUBCYCLES_PER_INSN;
+            let next_cycle = self.cur_acc_cycle + FullTracer::SUBCYCLES_PER_INSN;
             if next_cells >= target_cost_current_shard || next_cycle >= self.max_cycle_per_shard {
                 assert!(
                     !steps.is_empty(),
@@ -606,20 +687,65 @@ impl ShardContextBuilder {
                 self.prev_shard_cycle_range
                     .last()
                     .copied()
-                    .unwrap_or(Tracer::SUBCYCLES_PER_INSN)
+                    .unwrap_or(FullTracer::SUBCYCLES_PER_INSN)
+            );
+            assert_eq!(
+                steps
+                    .first()
+                    .map(|step| step.heap_maxtouch_addr.before)
+                    .unwrap_or_default(),
+                self.prev_shard_heap_range
+                    .last()
+                    .copied()
+                    .unwrap_or(self.platform.heap.start)
+                    .into()
+            );
+            assert_eq!(
+                steps
+                    .first()
+                    .map(|step| step.hint_maxtouch_addr.before)
+                    .unwrap_or_default(),
+                self.prev_shard_hint_range
+                    .last()
+                    .copied()
+                    .unwrap_or(self.platform.hints.start)
+                    .into()
             );
         }
 
         let shard_ctx = ShardContext {
             shard_id: self.cur_shard_id,
             cur_shard_cycle_range: steps.first().map(|step| step.cycle() as usize).unwrap()
-                ..(steps.last().unwrap().cycle() + Tracer::SUBCYCLES_PER_INSN) as usize,
+                ..(steps.last().unwrap().cycle() + FullTracer::SUBCYCLES_PER_INSN) as usize,
             addr_future_accesses: self.addr_future_accesses.clone(),
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
+            prev_shard_heap_range: self.prev_shard_heap_range.clone(),
+            prev_shard_hint_range: self.prev_shard_hint_range.clone(),
+            platform: self.platform.clone(),
+            shard_heap_addr_range: steps
+                .first()
+                .map(|step| step.heap_maxtouch_addr.before.0)
+                .unwrap_or_default()
+                ..steps
+                    .last()
+                    .map(|step| step.heap_maxtouch_addr.after.0)
+                    .unwrap_or_default(),
+            shard_hint_addr_range: steps
+                .first()
+                .map(|step| step.hint_maxtouch_addr.before.0)
+                .unwrap_or_default()
+                ..steps
+                    .last()
+                    .map(|step| step.hint_maxtouch_addr.after.0)
+                    .unwrap_or_default(),
             ..Default::default()
         };
         self.prev_shard_cycle_range
             .push(shard_ctx.cur_shard_cycle_range.end as u64);
+        self.prev_shard_heap_range
+            .push(shard_ctx.shard_heap_addr_range.end);
+        self.prev_shard_hint_range
+            .push(shard_ctx.shard_hint_addr_range.end);
         self.cur_cells = 0;
         self.cur_acc_cycle = 0;
         self.cur_shard_id += 1;
@@ -691,24 +817,18 @@ pub fn emulate_program<'a>(
         heap: _,
     } = init_mem_state;
 
-    let mut vm: VMState = VMState::new(platform.clone(), program);
+    let mut vm: VMState<PreflightTracer> = VMState::new_with_tracer(platform.clone(), program);
 
     for record in chain!(hints_init, io_init) {
         vm.init_memory(record.addr.into(), record.value);
     }
 
-    let mut executed_steps = 0usize;
-    let mut exit_code = None;
-    info_span!("emulator.preflight-execute").in_scope(|| {
-        for record in vm.iter_until_halt().take(max_steps) {
-            let record = record.expect("vm exec failed");
-            executed_steps += 1;
-            if record.insn().kind == InsnKind::ECALL
-                && record.rs1().unwrap().value == Platform::ecall_halt()
-            {
-                exit_code = record.rs2().map(|rs2| rs2.value);
-            }
-        }
+    let exit_code = info_span!("[ceno] emulator.preflight-execute").in_scope(|| {
+        vm.iter_until_halt()
+            .take(max_steps)
+            .try_for_each(|step| step.map(|_| ()))
+            .unwrap_or_else(|err| panic!("emulator trapped before halt: {err}"));
+        vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
 
     if platform.is_debug {
@@ -731,23 +851,12 @@ pub fn emulate_program<'a>(
     tracing::info!("program executed {insts} instructions in {end_cycle} cycles");
     metrics::gauge!("cycles").set(insts as f64);
 
-    let pi = PublicValues::new(
-        exit_code.unwrap_or(0),
-        vm.program().entry,
-        Tracer::SUBCYCLES_PER_INSN,
-        vm.get_pc().into(),
-        end_cycle,
-        multi_prover.prover_id as u32,
-        io_init.iter().map(|rec| rec.value).collect_vec(),
-        vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
-    );
-
     // Find the final register values and cycles.
     let reg_final = reg_init
         .iter()
         .map(|rec| {
             let index = rec.addr as usize;
-            if index < VMState::REG_COUNT {
+            if index < VM_REG_COUNT {
                 let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
                     ram_type: RAMType::Register,
@@ -856,6 +965,21 @@ pub fn emulate_program<'a>(
         vec![]
     };
 
+    let pi = PublicValues::new(
+        exit_code.unwrap_or(0),
+        vm.program().entry,
+        FullTracer::SUBCYCLES_PER_INSN,
+        vm.get_pc().into(),
+        end_cycle,
+        multi_prover.prover_id as u32,
+        platform.heap.start,
+        heap_final.len() as u32,
+        platform.hints.start,
+        hints_final.len() as u32,
+        io_init.iter().map(|rec| rec.value).collect_vec(),
+        vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
+    );
+
     #[cfg(debug_assertions)]
     {
         debug_memory_ranges(
@@ -870,14 +994,17 @@ pub fn emulate_program<'a>(
         );
     }
 
-    let shard_ctx_builder =
-        ShardContextBuilder::new(multi_prover, vm.take_tracer().next_accesses());
+    let shard_ctx_builder = ShardContextBuilder::new(
+        multi_prover,
+        platform.clone(),
+        vm.take_tracer().into_next_accesses(),
+    );
 
     EmulationResult {
         pi,
         exit_code,
         shard_ctx_builder,
-        executed_steps,
+        executed_steps: insts,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,
@@ -926,11 +1053,11 @@ fn setup_platform_inner(
     let preset = match preset {
         Preset::Ceno => Platform {
             is_debug,
-            ..CENO_PLATFORM
+            ..CENO_PLATFORM.clone()
         },
     };
 
-    let prog_data = program.image.keys().copied().collect::<BTreeSet<_>>();
+    let prog_data = Arc::new(program.image.keys().copied().collect::<BTreeSet<_>>());
 
     let stack = if preset.is_debug {
         (preset.stack.end - 0x4000 - stack_size)..(preset.stack.end)
@@ -1079,7 +1206,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
     std::iter::from_fn(move || {
         info_span!(
-            "app_prove.generate_witness",
+            "[ceno] app_prove.generate_witness",
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
@@ -1094,23 +1221,40 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
             let mut zkvm_witness = ZKVMWitnesses::default();
             let mut pi = pi_template.clone();
-
             tracing::debug!(
-                "{}th shard collect {} steps",
+                "{}th shard collect {} steps, heap_addr_range {:x} - {:x}, hint_addr_range {:x} - {:x}",
                 shard_ctx.shard_id,
-                shard_steps.len()
+                shard_steps.len(),
+                shard_ctx.shard_heap_addr_range.start,
+                shard_ctx.shard_heap_addr_range.end,
+                shard_ctx.shard_hint_addr_range.start,
+                shard_ctx.shard_hint_addr_range.end,
             );
 
             let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
             let last_step = shard_steps.last().expect("shard must contain steps");
             let current_shard_end_cycle =
-                last_step.cycle() + Tracer::SUBCYCLES_PER_INSN - current_shard_offset_cycle;
+                last_step.cycle() + FullTracer::SUBCYCLES_PER_INSN - current_shard_offset_cycle;
             let current_shard_init_pc = if shard_ctx.is_first_shard() {
                 program.entry
             } else {
                 shard_steps.first().unwrap().pc().before.0
             };
             let current_shard_end_pc = last_step.pc().after.0;
+
+            pi.init_pc = current_shard_init_pc;
+            pi.init_cycle = FullTracer::SUBCYCLES_PER_INSN;
+            pi.shard_id = shard_ctx.shard_id as u32;
+            pi.end_pc = current_shard_end_pc;
+            pi.end_cycle = current_shard_end_cycle;
+            pi.heap_start_addr = shard_ctx.shard_heap_addr_range.start;
+            pi.heap_shard_len = (shard_ctx.shard_heap_addr_range.end
+                - shard_ctx.shard_heap_addr_range.start)
+                / (WORD_SIZE as u32);
+            pi.hint_start_addr = shard_ctx.shard_hint_addr_range.start;
+            pi.hint_shard_len = (shard_ctx.shard_hint_addr_range.end
+                - shard_ctx.shard_hint_addr_range.start)
+                / (WORD_SIZE as u32);
 
             if let Some(target_shard_id) = target_shard_id {
                 if shard_ctx.shard_id < target_shard_id {
@@ -1146,6 +1290,39 @@ pub fn generate_witness<'a, E: ExtensionField>(
             tracing::debug!("assign_dummy_config finish in {:?}", time.elapsed());
             zkvm_witness.finalize_lk_multiplicities();
 
+            // Memory record routing (per address / waddr)
+            //
+            // Legend:
+            //   init shard  = where the "initialization record" happens
+            //   rw shard    = shards that read/write the address
+            //   later rw?   = whether there is any rw in shards > current shard
+            // Chip(s):
+            // - LocalFinalize = local finalize circuit
+            // - ShardRAM      = shard ram circuit
+            // - ShardRAM+LF   = both
+            //
+            // Root
+            // └─ Is the init record in shard 0?
+            // ├─ YES: Static initialized memory (init only exists in shard 0)
+            // │  └─ Where does the rw happen (relative to current shard)?
+            // │     ├─ rw only in shard 0
+            // │     │  ├─ later rw? NO  (no rw in >0)      -> LocalFinalize
+            // │     │  └─ later rw? YES (rw in >0 exists)  -> ShardRAM
+            // │     │
+            // │     └─ rw occurs in current shard (current shard may be >0)
+            // │        ├─ later rw? NO  (no rw in later)   -> ShardRAM + LocalFinalize
+            // │        └─ later rw? YES (rw continues)     -> ShardRAM
+            // │
+            // └─ NO: Dynamic init across shards (init can happen in any shard)
+            // └─ Is the init record in the current shard?
+            // ├─ YES: init in current shard
+            // │  ├─ later rw? NO  -> LocalFinalize
+            // │  └─ later rw? YES -> ShardRAM
+            // │
+            // └─ NO: init in a previous shard
+            // ├─ later rw? NO  -> ShardRAM + LocalFinalize
+            // └─ later rw? YES -> ShardRAM
+
             let time = std::time::Instant::now();
             system_config
                 .config
@@ -1160,12 +1337,11 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .assign_init_table_circuit(
                         &system_config.zkvm_cs,
                         &mut zkvm_witness,
+                        &pi,
                         &emul_result.final_mem_state.reg,
                         &emul_result.final_mem_state.mem,
                         &emul_result.final_mem_state.io,
-                        &emul_result.final_mem_state.hints,
                         &emul_result.final_mem_state.stack,
-                        &emul_result.final_mem_state.heap,
                     )
                     .unwrap();
                 tracing::debug!("assign_init_table_circuit finish in {:?}", time.elapsed());
@@ -1175,8 +1351,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .assign_init_table_circuit(
                         &system_config.zkvm_cs,
                         &mut zkvm_witness,
-                        &[],
-                        &[],
+                        &pi,
                         &[],
                         &[],
                         &[],
@@ -1188,10 +1363,27 @@ pub fn generate_witness<'a, E: ExtensionField>(
             let time = std::time::Instant::now();
             system_config
                 .mmu_config
+                .assign_dynamic_init_table_circuit(
+                    &system_config.zkvm_cs,
+                    &mut zkvm_witness,
+                    &pi,
+                    &emul_result.final_mem_state.hints,
+                    &emul_result.final_mem_state.heap,
+                )
+                .unwrap();
+            tracing::debug!(
+                "assign_dynamic_init_table_circuit finish in {:?}",
+                time.elapsed()
+            );
+
+            let time = std::time::Instant::now();
+            system_config
+                .mmu_config
                 .assign_continuation_circuit(
                     &system_config.zkvm_cs,
                     &shard_ctx,
                     &mut zkvm_witness,
+                    &pi,
                     &emul_result.final_mem_state.reg,
                     &emul_result.final_mem_state.mem,
                     &emul_result.final_mem_state.io,
@@ -1211,12 +1403,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 )
                 .unwrap();
             tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
-
-            pi.init_pc = current_shard_init_pc;
-            pi.init_cycle = Tracer::SUBCYCLES_PER_INSN;
-            pi.shard_id = shard_ctx.shard_id as u32;
-            pi.end_pc = current_shard_end_pc;
-            pi.end_cycle = current_shard_end_cycle;
 
             if let Some(shard_ram_witnesses) =
                 zkvm_witness.get_witness(&ShardRamCircuit::<E>::name())
@@ -1614,7 +1800,7 @@ fn create_proofs_streaming<
     init_mem_state: &InitMemState,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
-    let proofs = info_span!("app_prove.inner").in_scope(|| {
+    let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
         #[cfg(feature = "gpu")]
         {
             use crossbeam::channel;
@@ -1744,6 +1930,22 @@ fn create_proofs_streaming<
         }
     });
     metrics::gauge!("num_shards").set(proofs.len() as f64);
+
+    // Currently, due to mixed usage with other GPU backends,
+    // we need to trim ceno-gpu's memory pool while still retaining 424MB.
+    // Once the GPU backend is unified, skipping this trim
+    // could improve performance by a few seconds.
+    #[cfg(feature = "gpu")]
+    {
+        use gkr_iop::gpu::gpu_prover::*;
+
+        info_span!("[ceno] trim_gpu_mem_pool").in_scope(|| {
+            let cuda_hal = get_cuda_hal().unwrap();
+            cuda_hal.inner().trim_mem_pool().unwrap();
+            cuda_hal.inner().synchronize().unwrap();
+        });
+    };
+
     proofs
 }
 
@@ -1769,7 +1971,10 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 }
 
 #[cfg(debug_assertions)]
-fn debug_memory_ranges<'a, I: Iterator<Item = &'a MemFinalRecord>>(vm: &VMState, mem_final: I) {
+fn debug_memory_ranges<'a, T: Tracer, I: Iterator<Item = &'a MemFinalRecord>>(
+    vm: &VMState<T>,
+    mem_final: I,
+) {
     let accessed_addrs = vm
         .tracer()
         .final_accesses()
@@ -1845,7 +2050,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 #[cfg(test)]
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
-    use ceno_emul::{Cycle, NextCycleAccess, StepRecord, Tracer};
+    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepRecord};
     use itertools::Itertools;
 
     struct UniformStepExtractor;
@@ -1884,11 +2089,12 @@ mod tests {
     ) {
         let mut shard_ctx_builder = ShardContextBuilder::new(
             &MultiProver::new(0, 1, u64::MAX, max_cycle_per_shard),
+            CENO_PLATFORM.clone(),
             NextCycleAccess::default(),
         );
 
         let mut steps_iter = (0..executed_instruction).map(|i| {
-            StepRecord::new_ecall_any(Tracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
+            StepRecord::new_ecall_any(FullTracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
         });
         let mut steps = Vec::new();
 
