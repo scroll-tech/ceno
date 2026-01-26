@@ -18,8 +18,10 @@ fn compress_u32(state: &mut [u32; 8], block: [u32; 16]) {
     let mut w = [0; 64];
     w[..16].copy_from_slice(&block);
 
-    // Replace extend with a syscall
-    syscall_sha256_extend(&mut w);
+    // Replace extend with syscalls per round
+    for word in &mut w[16..64] {
+        syscall_sha256_extend(word);
+    }
 
     for i in 0..64 {
         let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
