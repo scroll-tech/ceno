@@ -66,7 +66,7 @@ use openvm_stark_sdk::{
 };
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant, fs::File, path::Path};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use crate::aggregation::types::{InternalVmVerifierPvs, VmVerifierPvs};
 use anyhow::Result;
@@ -487,8 +487,8 @@ impl CenoAggregationProver {
             .prove_static(root_proof, &self.pk);
 
         // Export halo2 proof
-        // let file = File::create("./src/exports/halo2_proof.bin").expect("Create export proof file");
-        // bincode::serialize_into(file, &halo2_proof).expect("failed to serialize halo2 proof");
+        let file = File::create(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/exports/halo2_proof.bin")).expect("Create export proof file");
+        bincode::serialize_into(file, &halo2_proof).expect("failed to serialize halo2 proof");
 
         halo2_proof
     }
