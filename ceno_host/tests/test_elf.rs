@@ -478,30 +478,34 @@ fn test_sha256_extend() -> Result<()> {
         634956631,
     ];
 
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 48);
+
     for round in 0..48 {
-        let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-        let steps = run(&mut state)?;
-        let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
-        assert_eq!(syscalls.len(), 1);
-        let witness = syscalls[0];
+        let witness = &syscalls[round];
 
         assert_eq!(witness.reg_ops.len(), 1);
         assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
 
+        assert_eq!(
+            witness.reg_ops[0].value.before,
+            witness.reg_ops[0].value.after
+        );
         let state_ptr = witness.reg_ops[0].value.before;
-        assert_eq!(state_ptr + WORD_SIZE as u32, witness.reg_ops[0].value.after);
         let state_ptr: WordAddr = state_ptr.into();
 
         assert_eq!(witness.mem_ops.len(), 5);
 
-        let offsets = [-2, -7, -15, -16, 0];
+        let offsets = [2, 7, 15, 16, 0];
         for (i, write_op) in witness.mem_ops.iter().enumerate() {
-            let mem_round_id = round + (16 + offsets[i]) as usize;
-            assert_eq!(write_op.addr, state_ptr + mem_round_id as u32);
+            let mem_addr: u32 = state_ptr.0 - offsets[i] as u32;
+            assert_eq!(write_op.addr.0, mem_addr);
             if i < 4 {
                 assert_eq!(write_op.value.before, write_op.value.after);
             } else {
-                assert_eq!(write_op.value.after, expected[mem_round_id]);
+                assert_eq!(write_op.value.after, expected[round + 16 - offsets[i]]);
             }
         }
     }
