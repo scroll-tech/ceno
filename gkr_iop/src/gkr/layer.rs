@@ -113,7 +113,6 @@ pub struct Layer<E: ExtensionField> {
     // static expression, only valid for zerocheck & sumcheck layer
     // store in 2 forms: expression & monomial
     pub main_sumcheck_expression_monomial_terms: Option<Vec<Term<Expression<E>, Expression<E>>>>,
-    #[serde(default)]
     pub main_sumcheck_expression_monomial_terms_excluded_shared:
         Option<Vec<Term<Expression<E>, Expression<E>>>>,
     pub main_sumcheck_expression: Option<Expression<E>>,

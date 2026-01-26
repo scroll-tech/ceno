@@ -318,7 +318,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 max_num_var,
                 max_degree,
                 common_term_plan_host.as_ref(),
-                // None,
                 basic_tr,
             )
             .unwrap();
