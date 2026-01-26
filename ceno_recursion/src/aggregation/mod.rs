@@ -659,13 +659,10 @@ pub fn build_zkvm_verifier_program(
     builder.halt();
 
     // Compile program
-    // #[cfg(feature = "bench-metrics")]
-    // let options = CompilerOptions::default().with_cycle_tracker();
-    // #[cfg(not(feature = "bench-metrics"))]
-    // let options = CompilerOptions::default();
-
+    #[cfg(feature = "bench-metrics")]
     let options = CompilerOptions::default().with_cycle_tracker();
-
+    #[cfg(not(feature = "bench-metrics"))]
+    let options = CompilerOptions::default();
     let mut compiler = AsmCompiler::new(options.word_size);
     compiler.build(builder.operations);
     let asm_code = compiler.code();
@@ -752,7 +749,7 @@ mod tests {
     }
 
     pub fn verify_single_inner_thread() {
-        setup_tracing_with_log_level(tracing::Level::INFO);
+        setup_tracing_with_log_level(tracing::Level::WARN);
 
         let proof_path = "./src/imported/proof.bin";
         let vk_path = "./src/imported/vk.bin";
