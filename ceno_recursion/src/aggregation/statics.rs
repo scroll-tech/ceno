@@ -121,11 +121,11 @@ impl StaticProverVerifier {
         // Update prover/verifier
         let wrapper_k = halo2_pk.wrapper.pinning.metadata.config_params.k;
         let params = self.params_reader.read_params(wrapper_k);
-        let static_verifier = halo2_pk.wrapper.generate_fallback_evm_verifier(&params);
+        // let static_verifier = halo2_pk.wrapper.generate_fallback_evm_verifier(&params);
         let prover = Halo2Prover::new(&self.params_reader, halo2_pk);
 
         self.prover = Some(prover);
-        self.verifier = Some(static_verifier);
+        // self.verifier = Some(static_verifier);
     }
 
     pub fn prove_static(
