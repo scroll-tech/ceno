@@ -4,19 +4,24 @@ use multilinear_extensions::{
     ChallengeId, Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitnessId,
     macros::{entered_span, exit_span},
     mle::{IntoMLE, Point},
+    monomial::Term,
     monomialize_expr_to_wit_terms,
     utils::{eval_by_expr, eval_by_expr_with_instance, expr_convert_to_witins},
     virtual_poly::VPAuxInfo,
 };
 use p3::field::{FieldAlgebra, dot_product};
-use std::{marker::PhantomData, ops::Neg};
+use smallvec::SmallVec;
+use std::{cmp::Ordering, collections::BTreeMap, marker::PhantomData, ops::Neg};
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState, SumCheckSubClaim, VerifierError},
     util::get_challenge_pows,
 };
 use transcript::Transcript;
 
-use super::{Layer, LayerWitness, linear_layer::LayerClaims, sumcheck_layer::LayerProof};
+use super::{
+    CommonFactoredTermPlan, CommonTermGroup, Layer, LayerWitness, linear_layer::LayerClaims,
+    sumcheck_layer::LayerProof,
+};
 use crate::{
     error::BackendError,
     evaluation::EvalExpression,
@@ -167,10 +172,22 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         );
         tracing::trace!("{} main sumcheck degree: {}", self.name, zero_expr.degree());
         self.main_sumcheck_expression = Some(zero_expr);
-        self.main_sumcheck_expression_monomial_terms = self
-            .main_sumcheck_expression
-            .as_ref()
-            .map(|expr| expr.get_monomial_terms());
+        if let Some(expr) = self.main_sumcheck_expression.as_ref() {
+            let mut monomial_terms = expr.get_monomial_terms();
+            normalize_monomial_term_products(&mut monomial_terms);
+            monomial_terms.sort_by(|a, b| compare_monomials(a, b));
+            log_monomial_term_stats(&self.name, &monomial_terms);
+            self.main_sumcheck_expression_monomial_terms = Some(monomial_terms.clone());
+            let (common_plan, residual_terms) =
+                build_common_factored_plan_and_residual_terms(&monomial_terms);
+            debug_assert!(
+                common_plan.is_none() || !residual_terms.is_empty(),
+                "residual monomials must exist when common plan is present"
+            );
+            log_common_term_plan_stats(&self.name, common_plan.as_ref(), &monomial_terms);
+            self.main_sumcheck_expression_common_factored = common_plan;
+            self.main_sumcheck_expression_monomial_terms_excluded_shared = Some(residual_terms);
+        }
         tracing::trace!(
             "{} main sumcheck monomial terms count: {}",
             self.name,
@@ -413,6 +430,297 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             evals: main_evals,
         })
     }
+}
+
+#[allow(clippy::type_complexity)]
+fn build_common_factored_plan_and_residual_terms<E: ExtensionField>(
+    monomial_terms: &[Term<Expression<E>, Expression<E>>],
+) -> (
+    Option<CommonFactoredTermPlan>,
+    Vec<Term<Expression<E>, Expression<E>>>,
+) {
+    if monomial_terms.is_empty() {
+        return (None, Vec::new());
+    }
+
+    let mut sorted_witnesses = Vec::with_capacity(monomial_terms.len());
+    for term in monomial_terms {
+        let witnesses = term
+            .product
+            .iter()
+            .map(witness_index_from_expr)
+            .collect_vec();
+        sorted_witnesses.push(witnesses);
+    }
+
+    let mut prefix_counts: BTreeMap<Vec<usize>, usize> = BTreeMap::new();
+    for witnesses in &sorted_witnesses {
+        let mut prefix = Vec::new();
+        for &wit in witnesses {
+            prefix.push(wit);
+            *prefix_counts.entry(prefix.clone()).or_default() += 1;
+        }
+    }
+
+    let mut grouped: BTreeMap<Vec<usize>, Vec<usize>> = BTreeMap::new();
+    for (term_idx, witnesses) in sorted_witnesses.iter().enumerate() {
+        let mut prefix = Vec::new();
+        let mut best_prefix = None;
+        for &wit in witnesses {
+            prefix.push(wit);
+            if prefix_counts.get(&prefix).copied().unwrap_or(0) >= 2 {
+                best_prefix = Some(prefix.clone());
+            }
+        }
+        if let Some(best_prefix) = best_prefix {
+            grouped.entry(best_prefix).or_default().push(term_idx);
+        }
+    }
+
+    let mut term_common_lengths = vec![0usize; monomial_terms.len()];
+    let mut groups = Vec::with_capacity(grouped.len());
+    let mut has_shared_prefix = false;
+    for (mut witness_indices, term_indices) in grouped {
+        let min_term_len = term_indices
+            .iter()
+            .map(|&term_idx| sorted_witnesses[term_idx].len())
+            .min()
+            .unwrap_or(0);
+        if min_term_len == 0 {
+            continue;
+        }
+        if witness_indices.len() > min_term_len {
+            witness_indices.truncate(min_term_len);
+        }
+        let effective_len = witness_indices.len();
+        if effective_len == 0 {
+            continue;
+        }
+        has_shared_prefix = true;
+        for &term_idx in &term_indices {
+            term_common_lengths[term_idx] = effective_len;
+        }
+        groups.push(CommonTermGroup {
+            shared_len: effective_len,
+            witness_indices,
+            term_indices,
+        });
+    }
+    {
+        let mut coverage = vec![0usize; monomial_terms.len()];
+        for group in &groups {
+            for &term_idx in &group.term_indices {
+                coverage[term_idx] += 1;
+            }
+        }
+        debug_assert!(
+            coverage
+                .iter()
+                .zip(term_common_lengths.iter())
+                .all(|(&count, &len)| { (len == 0 && count == 0) || (len > 0 && count == 1) }),
+            "factored monomials must appear exactly once in common term plan"
+        );
+    }
+
+    let mut residual_terms = monomial_terms.to_vec();
+    for (term_idx, remove_len) in term_common_lengths.iter().enumerate() {
+        if *remove_len == 0 {
+            continue;
+        }
+        {
+            let original = &monomial_terms[term_idx].product;
+            debug_assert!(
+                original.len() >= *remove_len,
+                "term {} shorter than common prefix",
+                term_idx
+            );
+            for (expr, expected) in original
+                .iter()
+                .take(*remove_len)
+                .zip(sorted_witnesses[term_idx].iter().take(*remove_len))
+            {
+                let witness_id = witness_index_from_expr(expr);
+                debug_assert_eq!(
+                    witness_id, *expected,
+                    "term {} common prefix mismatch: expected {} got {}",
+                    term_idx, expected, witness_id
+                );
+            }
+        }
+        residual_terms[term_idx].product.drain(..*remove_len);
+    }
+
+    let plan = if !has_shared_prefix {
+        None
+    } else {
+        Some(CommonFactoredTermPlan { groups })
+    };
+
+    (plan, residual_terms)
+}
+
+fn compare_monomials<E: ExtensionField>(
+    lhs: &Term<Expression<E>, Expression<E>>,
+    rhs: &Term<Expression<E>, Expression<E>>,
+) -> Ordering {
+    let lhs_indices = sorted_witness_indices(lhs);
+    let rhs_indices = sorted_witness_indices(rhs);
+
+    match rhs_indices.len().cmp(&lhs_indices.len()) {
+        Ordering::Equal => {
+            for (&lhs_idx, &rhs_idx) in lhs_indices.iter().zip(rhs_indices.iter()) {
+                match rhs_idx.cmp(&lhs_idx) {
+                    Ordering::Equal => continue,
+                    ord => return ord,
+                }
+            }
+            Ordering::Equal
+        }
+        ord => ord,
+    }
+}
+
+fn sorted_witness_indices<E: ExtensionField>(
+    term: &Term<Expression<E>, Expression<E>>,
+) -> SmallVec<[usize; 8]> {
+    let mut indices = term
+        .product
+        .iter()
+        .map(witness_index_from_expr)
+        .collect::<SmallVec<[usize; 8]>>();
+    indices.sort_unstable_by(|a: &usize, b: &usize| b.cmp(a));
+    indices
+}
+
+fn normalize_monomial_term_products<E: ExtensionField>(
+    terms: &mut [Term<Expression<E>, Expression<E>>],
+) {
+    for term in terms {
+        term.product.sort_unstable_by(|lhs, rhs| {
+            witness_index_from_expr(rhs).cmp(&witness_index_from_expr(lhs))
+        });
+    }
+}
+
+fn witness_index_from_expr<E: ExtensionField>(expr: &Expression<E>) -> usize {
+    match expr {
+        Expression::WitIn(witness_id) => *witness_id as usize,
+        _ => panic!("expected witness expression in monomial term"),
+    }
+}
+
+fn log_monomial_term_stats<E: ExtensionField>(
+    layer_name: &str,
+    terms: &[Term<Expression<E>, Expression<E>>],
+) {
+    let total_terms = terms.len();
+    let mut total_factors = 0usize;
+    let mut min_factors = usize::MAX;
+    let mut max_factors = 0usize;
+
+    for term in terms {
+        let factors = term.product.len();
+        total_factors += factors;
+        min_factors = min_factors.min(factors);
+        max_factors = max_factors.max(factors);
+    }
+
+    let avg_factors = if total_terms > 0 {
+        total_factors as f64 / total_terms as f64
+    } else {
+        0.0
+    };
+
+    tracing::info!(
+        target: "gkr::layer",
+        layer = layer_name,
+        total_terms,
+        total_factors,
+        min_factors = if min_factors == usize::MAX { 0 } else { min_factors },
+        max_factors,
+        avg_factors,
+        "main sumcheck monomial terms stats"
+    );
+}
+
+fn log_common_term_plan_stats<E: ExtensionField>(
+    layer_name: &str,
+    plan: Option<&CommonFactoredTermPlan>,
+    terms: &[Term<Expression<E>, Expression<E>>],
+) {
+    let total_terms = terms.len();
+    let term_factor_counts: Vec<usize> = terms.iter().map(|term| term.product.len()).collect();
+    let Some(plan) = plan else {
+        tracing::info!(
+            target: "gkr::layer",
+            layer = layer_name,
+            total_terms,
+            "main sumcheck common-term stats unavailable (no shared plan)"
+        );
+        return;
+    };
+    if total_terms == 0 {
+        tracing::info!(
+            target: "gkr::layer",
+            layer = layer_name,
+            total_groups = plan.groups.len(),
+            "main sumcheck common-term stats unavailable (no terms)"
+        );
+        return;
+    }
+
+    let mut coverage = vec![0usize; total_terms];
+    let mut factored_terms = 0usize;
+    let mut shared_terms = 0usize;
+    let mut min_common = usize::MAX;
+    let mut max_common = 0usize;
+    let mut factored_mul_count = 0usize;
+
+    for group in &plan.groups {
+        let common_len = group.witness_indices.len();
+        for &term_idx in &group.term_indices {
+            coverage[term_idx] += 1;
+            let term_len = *term_factor_counts
+                .get(term_idx)
+                .expect("term index should exist in factor counts");
+            let effective_common = common_len.min(term_len);
+            factored_mul_count += term_len - effective_common;
+            if common_len > 0 {
+                shared_terms += 1;
+                if common_len < term_len {
+                    factored_terms += 1;
+                }
+            }
+        }
+        if common_len > 0 {
+            min_common = min_common.min(common_len);
+            max_common = max_common.max(common_len);
+            factored_mul_count += common_len;
+        }
+    }
+
+    debug_assert!(
+        coverage.iter().all(|&count| count == 1),
+        "common term plan must cover every monomial exactly once"
+    );
+
+    let naive_mul_count: usize = term_factor_counts.iter().sum();
+    let coverage_percentage = (shared_terms as f64 / total_terms.max(1) as f64) * 100.0;
+    let factored_percentage = (factored_terms as f64 / total_terms.max(1) as f64) * 100.0;
+    tracing::info!(
+        target: "gkr::layer",
+        "[CommonFactoredTermPlan] gkr::layer {} groups={} shared_terms={}/{} ({coverage_percentage:.2}%) factored_terms={}/{} ({factored_percentage:.2}%) common_wit_range=[{}, {}] naive_mul={} factored_mul={}",
+        layer_name,
+        plan.groups.len(),
+        shared_terms,
+        total_terms,
+        shared_terms,
+        total_terms,
+        if min_common == usize::MAX { 0 } else { min_common },
+        max_common,
+        naive_mul_count,
+        factored_mul_count,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
