@@ -129,21 +129,18 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
     }
 
     let eq_len = 1 << point.len();
-    let (num_instances, is_sp32, indices) = match selector {
+    let (num_instances, sparse_num_var, indices) = match selector {
         SelectorType::None => panic!("SelectorType::None"),
-        SelectorType::Whole(_expr) => (eq_len, false, vec![]),
-        SelectorType::Prefix(_expr) => (selector_ctx.num_instances, false, vec![]),
-        SelectorType::OrderedSparse32 { indices, .. } => {
-            (selector_ctx.num_instances, true, indices.clone())
-        }
-        SelectorType::OrderedSparse64 { .. } => {
-            unimplemented!("OrderedSparse64 is not supported in GPU selector path")
-        }
+        SelectorType::Whole(_expr) => (eq_len, 0, vec![]),
+        SelectorType::Prefix(_expr) => (selector_ctx.num_instances, 0, vec![]),
+        SelectorType::OrderedSparse {
+            indices, num_vars, ..
+        } => (selector_ctx.num_instances, *num_vars, indices.clone()),
         SelectorType::QuarkBinaryTreeLessThan(..) => unimplemented!(),
     };
 
     // type eq
-    let eq_mle = if is_sp32 {
+    let eq_mle = if sparse_num_var > 0 {
         assert_eq!(selector_ctx.offset, 0);
         let eq = build_eq_x_r_gpu(hal, point);
         let mut eq_buf = match eq.mle {
@@ -152,11 +149,12 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         };
         let indices_u32 = indices.iter().map(|x| *x as u32).collect_vec();
-        ordered_sparse32_selector_gpu::<CudaHalBB31, BB31Ext, BB31Base>(
+        ordered_sparse_selector_gpu::<CudaHalBB31, BB31Ext, BB31Base>(
             &hal.inner,
             &mut eq_buf.buf,
             &indices_u32,
             num_instances,
+            sparse_num_var,
         )
         .unwrap();
         eq_buf
