@@ -152,7 +152,9 @@ pub fn test_syscalls() {
             3334668051, 3166416553, 634956631,
         ];
 
-        syscall_sha256_extend(&mut words);
+        for word in &mut words[16..64] {
+            syscall_sha256_extend(word);
+        }
         assert_eq!(words, expected);
     }
 

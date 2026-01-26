@@ -850,7 +850,7 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
             SelectorType::None => zero_check_expr,
             SelectorType::Whole(sel)
             | SelectorType::Prefix(sel)
-            | SelectorType::OrderedSparse32 {
+            | SelectorType::OrderedSparse {
                 expression: sel, ..
             }
             | SelectorType::QuarkBinaryTreeLessThan(sel) => match_expr(sel) * zero_check_expr,
