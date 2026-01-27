@@ -29,7 +29,7 @@ pub mod gpu_prover {
             buffer::BufferImpl,
             get_ceno_gpu_device_id,
             mle::{
-                build_mle_as_ceno, ordered_sparse32_selector_gpu, rotation_next_base_mle_gpu,
+                build_mle_as_ceno, ordered_sparse_selector_gpu, rotation_next_base_mle_gpu,
                 rotation_selector_gpu,
             },
             utils::HasUtils,
