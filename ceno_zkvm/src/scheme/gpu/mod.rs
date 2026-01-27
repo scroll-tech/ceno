@@ -935,6 +935,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBa
                 &mle_indices_per_term,
                 n,
                 max_degree,
+                None,
                 basic_transcript,
             )
             .map_err(|e| hal_to_backend_error(format!("GPU sumcheck failed: {e:?}")))?;

@@ -388,11 +388,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 },
             );
 
+        assert!(
+            mle_size_info
+                .iter()
+                .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| {
+                    assert_eq!(a, b);
+                    *a > 0 && *b > 0
+                }))
+                .all_equal()
+        );
         let num_vars = mle_size_info
-            .first()
-            .and_then(|f| f.first())
-            .as_ref()
-            .unwrap()
+            .iter()
+            .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| *a > 0 && *b > 0))
+            .take(1)
+            .collect_vec()[0]
             .0;
         exit_span!(span);
 
