@@ -224,88 +224,59 @@ pub fn verify_tower_proof<C: Config>(
     let prod_spec_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_prod_spec.clone());
 
-    iter_zip!(builder, prod_out_evals, prod_spec_point_n_eval).for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let evals = builder.iter_ptr_get(&prod_out_evals, ptr);
-        let e = evaluate_at_point_degree_1(builder, &evals, &initial_rt);
-        let p_ptr = ptr_vec[1];
-        builder.iter_ptr_set(
-            &prod_spec_point_n_eval,
-            p_ptr,
-            PointAndEvalVariable {
-                point: PointVariable {
-                    fs: initial_rt.clone(),
-                },
-                eval: e,
-            },
-        );
-    });
-
     let logup_spec_p_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_logup_spec.clone());
     let logup_spec_q_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_logup_spec.clone());
 
-    iter_zip!(
-        builder,
-        logup_out_evals,
-        logup_spec_p_point_n_eval,
-        logup_spec_q_point_n_eval
-    )
-    .for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let evals = builder.iter_ptr_get(&prod_out_evals, ptr);
+    let next_layer_evals_output_len: Usize<C::N> = builder
+        .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
+    let next_layer_evals: Array<C, Ext<C::F, C::EF>> =
+        builder.dyn_array(next_layer_evals_output_len);
+    let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
+    builder.set(&input_ctx, 0, Usize::from(0));
+    builder.set(&input_ctx, 1, num_prod_spec.clone());
+    builder.set(&input_ctx, 2, num_logup_spec.clone());
+    builder.set(
+        &input_ctx,
+        3,
+        Usize::from(proof.prod_specs_eval.inner_length),
+    );
+    builder.set(
+        &input_ctx,
+        4,
+        Usize::from(proof.prod_specs_eval.inner_inner_length),
+    );
+    builder.set(
+        &input_ctx,
+        5,
+        Usize::from(proof.logup_specs_eval.inner_length),
+    );
+    builder.set(
+        &input_ctx,
+        6,
+        Usize::from(proof.logup_specs_eval.inner_inner_length),
+    );
+    let n_v = builder.get(&num_variables, 0);
+    builder.set(&input_ctx, 8, n_v);
+    // compute expected sum
+    builder.set(&input_ctx, 7, Usize::from(0)); 
 
-        let p_slice = evals.slice(builder, 0, 2);
-        let q_slice = evals.slice(builder, 2, 4);
+    let rt = builder.get(&initial_rt, 0);
+    let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
+    builder.set(&challenges, 0, alpha);
+    builder.set(&challenges, 1, one - rt);
+    builder.set(&challenges, 2, rt);
 
-        let e1 = evaluate_at_point_degree_1(builder, &p_slice, &initial_rt);
-        let e2 = evaluate_at_point_degree_1(builder, &q_slice, &initial_rt);
-
-        let p_ptr = ptr_vec[1];
-        let q_ptr = ptr_vec[2];
-
-        builder.iter_ptr_set(
-            &logup_spec_p_point_n_eval,
-            p_ptr,
-            PointAndEvalVariable {
-                point: PointVariable {
-                    fs: initial_rt.clone(),
-                },
-                eval: e1,
-            },
+    builder.sumcheck_layer_eval(
+            &input_ctx,
+            &challenges,
+            &prod_out_evals,// TODO: convert from 2d array to 1d array
+            &logup_out_evals,
+            &next_layer_evals,
         );
-        builder.iter_ptr_set(
-            &logup_spec_q_point_n_eval,
-            q_ptr,
-            PointAndEvalVariable {
-                point: PointVariable {
-                    fs: initial_rt.clone(),
-                },
-                eval: e2,
-            },
-        );
-    });
-
     let initial_claim: Ext<C::F, C::EF> = builder.eval(zero + zero);
 
-    iter_zip!(builder, prod_spec_point_n_eval).for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let prod_eval = builder.iter_ptr_get(&prod_spec_point_n_eval, ptr);
-        builder.assign(&initial_claim, initial_claim + prod_eval.eval * alpha_acc);
-        builder.assign(&alpha_acc, alpha_acc * alpha);
-    });
-
-    builder
-        .range(0, num_logup_spec.clone())
-        .for_each(|i_vec, builder| {
-            let p = builder.get(&logup_spec_p_point_n_eval, i_vec[0]);
-            builder.assign(&initial_claim, initial_claim + p.eval * alpha_acc);
-            builder.assign(&alpha_acc, alpha_acc * alpha);
-            let q = builder.get(&logup_spec_q_point_n_eval, i_vec[0]);
-            builder.assign(&initial_claim, initial_claim + q.eval * alpha_acc);
-            builder.assign(&alpha_acc, alpha_acc * alpha);
-        });
     builder.cycle_tracker_end("initial sum");
 
     let curr_pt = initial_rt.clone();
@@ -317,11 +288,6 @@ pub fn verify_tower_proof<C: Config>(
         point: PointVariable { fs: initial_rt },
         eval: initial_claim,
     };
-
-    let next_layer_evals_output_len: Usize<C::N> = builder
-        .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
-    let next_layer_evals: Array<C, Ext<C::F, C::EF>> =
-        builder.dyn_array(next_layer_evals_output_len);
 
     builder.range(0, op_range).for_each(|i_vec, builder| {
         let round_var = i_vec[0];
@@ -349,35 +315,9 @@ pub fn verify_tower_proof<C: Config>(
         builder.cycle_tracker_start("check expected evaluation");
         let eq_e = eq_eval(builder, out_rt, &sub_rt, one, zero);
 
-        let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
         builder.set(&input_ctx, 0, round_var);
-        builder.set(&input_ctx, 1, num_prod_spec.clone());
-        builder.set(&input_ctx, 2, num_logup_spec.clone());
-        builder.set(
-            &input_ctx,
-            3,
-            Usize::from(proof.prod_specs_eval.inner_length),
-        );
-        builder.set(
-            &input_ctx,
-            4,
-            Usize::from(proof.prod_specs_eval.inner_inner_length),
-        );
-        builder.set(
-            &input_ctx,
-            5,
-            Usize::from(proof.logup_specs_eval.inner_length),
-        );
-        builder.set(
-            &input_ctx,
-            6,
-            Usize::from(proof.logup_specs_eval.inner_inner_length),
-        );
         builder.set(&input_ctx, 7, Usize::from(1));
-        let n_v = builder.get(&num_variables, 0);
-        builder.set(&input_ctx, 8, n_v);
 
-        let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
         builder.set(&challenges, 0, alpha);
 
         builder.sumcheck_layer_eval(
