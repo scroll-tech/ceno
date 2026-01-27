@@ -236,15 +236,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let witin_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len.clone());
     let fixed_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len);
 
-    let shard_ec_sum = SepticPointVariable {
-        x: SepticExtensionVariable {
-            vs: builder.dyn_array(7),
-        },
-        y: SepticExtensionVariable {
-            vs: builder.dyn_array(7),
-        },
-        is_infinity: Usize::uninit(builder),
-    };
+    let shard_ec_sum = SepticPointVariable::zero(builder);
 
     let num_chips_verified: Usize<C::N> = builder.eval(C::N::ZERO);
     let num_fixed_openings: Usize<C::N> = builder.eval(C::N::ZERO);
@@ -561,16 +553,7 @@ pub fn verify_chip_proof<C: Config>(
         &num_var_with_rotation,
         log2_num_instances.clone() + Usize::from(composed_cs.rotation_vars().unwrap_or(0)),
     );
-
-    let shard_ec_sum = SepticPointVariable {
-        x: SepticExtensionVariable {
-            vs: builder.dyn_array(7),
-        },
-        y: SepticExtensionVariable {
-            vs: builder.dyn_array(7),
-        },
-        is_infinity: Usize::uninit(builder),
-    };
+    let shard_ec_sum = SepticPointVariable::zero(builder);
 
     if composed_cs.has_ecc_ops() {
         builder.assert_nonzero(&chip_proof.has_ecc_proof);
@@ -1962,7 +1945,11 @@ pub fn septic_ext_squared<C: Config>(
     builder: &mut Builder<C>,
     a: &SepticExtensionVariable<C>,
 ) -> SepticExtensionVariable<C> {
+    let z: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let r: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
+    for i in 0..SEPTIC_EXTENSION_DEGREE {
+        builder.set(&r, i, z);
+    }
 
     let two_ext: Ext<C::F, C::EF> = builder.constant(C::EF::TWO);
     let five_ext: Ext<C::F, C::EF> = builder.constant(C::EF::from_canonical_u32(5));
@@ -2041,7 +2028,11 @@ pub fn septic_ext_mul<C: Config>(
     a: &SepticExtensionVariable<C>,
     b: &SepticExtensionVariable<C>,
 ) -> SepticExtensionVariable<C> {
+    let z: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let r: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
+    for i in 0..SEPTIC_EXTENSION_DEGREE {
+        builder.set(&r, i, z);
+    }
     let two_ext: Ext<C::F, C::EF> = builder.constant(C::EF::TWO);
     let five_ext: Ext<C::F, C::EF> = builder.constant(C::EF::from_canonical_u32(5));
 
@@ -2292,10 +2283,8 @@ pub fn add_septic_points_in_place<C: Config>(
                                         let y_sum = septic_ext_add(builder, &right.y, &left.y);
                                         let is_y_sum_zero = y_sum.is_zero(builder);
                                         builder.assert_usize_eq(is_y_sum_zero, Usize::from(1));
-                                        let zero_ext_arr: Array<C, Ext<C::F, C::EF>> =
-                                            builder.dyn_array(SEPTIC_EXTENSION_DEGREE);
-                                        builder.assign(&left.x, zero_ext_arr.clone());
-                                        builder.assign(&left.y, zero_ext_arr.clone());
+                                        builder.assign(&left.x, y_sum.clone());
+                                        builder.assign(&left.y, y_sum.clone());
                                         builder.assign(&left.is_infinity, Usize::from(1));
                                     },
                                 );

@@ -184,6 +184,15 @@ jobs:
           CENO_CROSS_SHARD_LIMIT: 32
         run: cargo run --release --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
 
+      - name: Download KZG params
+        run: |
+          if [ ! -f ceno_recursion/src/params/kzg_bn254_23.srs ]; then
+            curl -fL https://axiom-crypto.s3.amazonaws.com/challenge_0085/kzg_bn254_23.srs \
+              -o ceno_recursion/src/params/kzg_bn254_23.srs
+          else
+            echo "KZG params already exist"
+          fi
+
       - name: Run aggregation e2e
         env:
           RUSTFLAGS: "-C opt-level=3"

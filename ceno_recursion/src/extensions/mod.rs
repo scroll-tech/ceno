@@ -49,7 +49,7 @@ mod tests {
             .with_public_values(4)
             .with_max_segment_len((1 << 25) - 100);
         system_config.profiling = true;
-        let config = NativeConfig::new(system_config, Native);
+        let config = NativeConfig::new(system_config, Native(true));
 
         let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
         let exe = VmExe::new(program);

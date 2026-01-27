@@ -19,15 +19,17 @@ use gkr_iop::cpu::{CpuBackend, CpuProver};
 use gkr_iop::gpu::{GpuBackend, GpuProver};
 use gkr_iop::hal::ProverBackend;
 use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel};
-use openvm_continuations::verifier::internal::types::VmStarkProof;
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
-use openvm_native_circuit::{NativeBuilder, NativeConfig};
-use openvm_sdk::prover::vm::new_local_prover;
-use openvm_stark_backend::config::StarkGenericConfig;
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
+use openvm_native_circuit::{NativeBuilder, NativeConfig, NativeCpuBuilder};
+use openvm_sdk::{RootSC, prover::vm::new_local_prover};
+use openvm_stark_backend::{config::StarkGenericConfig, proof::Proof};
 #[cfg(not(feature = "gpu"))]
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
+use openvm_stark_sdk::config::{
+    baby_bear_poseidon2::BabyBearPoseidon2Config,
+    baby_bear_poseidon2_root::BabyBearPoseidon2RootEngine,
+};
 
 use serde::Serialize;
 use std::sync::Arc;
@@ -194,7 +196,7 @@ where
     pub fn compress_to_root_proof(
         &mut self,
         base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
-    ) -> VmStarkProof<BabyBearPoseidon2Config> {
+    ) -> Proof<RootSC> {
         let vb = NativeBuilder::default();
 
         // TODO: cache agg_prover
@@ -216,7 +218,20 @@ where
                 "Aggregation must provide existing base layer vk."
             );
             let base_vk = self.zkvm_vk.as_ref().unwrap().clone();
-            CenoAggregationProver::new(base_vk, leaf_prover, internal_prover, agg_pk.clone())
+            let root_prover = new_local_prover::<BabyBearPoseidon2RootEngine, NativeCpuBuilder>(
+                Default::default(),
+                &agg_pk.root_vm_pk,
+                agg_pk.root_committed_exe.exe.clone(),
+            )
+            .expect("root prover");
+
+            CenoAggregationProver::new(
+                base_vk,
+                leaf_prover,
+                internal_prover,
+                root_prover,
+                agg_pk.clone(),
+            )
         } else {
             let agg_prover = CenoAggregationProver::from_base_vk(self.zkvm_vk.clone().unwrap());
             self.agg_pk = Some(agg_prover.pk.clone());
