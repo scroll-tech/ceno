@@ -211,12 +211,8 @@ where
                 agg_pk.internal_committed_exe.exe.clone(),
             )
             .expect("internal prover");
-            assert!(
-                self.zkvm_vk.is_some(),
-                "Aggregation must provide existing base layer vk."
-            );
-            let base_vk = self.zkvm_vk.as_ref().unwrap().clone();
-            CenoAggregationProver::new(base_vk, leaf_prover, internal_prover, agg_pk.clone())
+
+            CenoAggregationProver::new(leaf_prover, internal_prover, agg_pk.clone())
         } else {
             let agg_prover = CenoAggregationProver::from_base_vk(self.zkvm_vk.clone().unwrap());
             self.agg_pk = Some(agg_prover.pk.clone());
