@@ -1214,7 +1214,7 @@ dependencies = [
 [[package]]
 name = "ceno_crypto_primitives"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#bc61dbd54f5cc58af6f8300997aa0d1ac9de1527"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#b79232a6fc80c799f584380273fd6d3055b36808"
 dependencies = [
  "ceno_syscall",
  "elliptic-curve",
@@ -1347,12 +1347,13 @@ dependencies = [
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#bc61dbd54f5cc58af6f8300997aa0d1ac9de1527"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#b79232a6fc80c799f584380273fd6d3055b36808"
 
 [[package]]
 name = "ceno_zkvm"
 version = "0.1.0"
 dependencies = [
+ "arrayref",
  "base64",
  "bincode 1.3.3",
  "ceno-examples",
@@ -2608,6 +2609,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "serde",
+ "smallvec",
  "strum",
  "strum_macros",
  "sumcheck",
@@ -3269,7 +3271,7 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#e7c4aaa5f44b20ff948292510ed28c4e0a567211"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#17adc274db2fb10510449026ec785ae4fc234540"
 dependencies = [
  "ceno_crypto_primitives",
  "ceno_syscall",
@@ -4887,7 +4889,7 @@ dependencies = [
 [[package]]
 name = "p256"
 version = "0.13.2"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#e7c4aaa5f44b20ff948292510ed28c4e0a567211"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#17adc274db2fb10510449026ec785ae4fc234540"
 dependencies = [
  "ceno_crypto_primitives",
  "ceno_syscall",
@@ -5605,7 +5607,7 @@ dependencies = [
 [[package]]
 name = "primeorder"
 version = "0.13.6"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#e7c4aaa5f44b20ff948292510ed28c4e0a567211"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#17adc274db2fb10510449026ec785ae4fc234540"
 dependencies = [
  "elliptic-curve",
 ]

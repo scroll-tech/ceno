@@ -3,8 +3,8 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 use anyhow::Result;
 use ceno_emul::{
     BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, EmuContext, InsnKind,
-    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, SHA_EXTEND_WORDS,
-    StepRecord, UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, StepRecord,
+    UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
     host_utils::{read_all_messages, read_all_messages_as_words},
 };
 use ceno_host::CenoStdin;
@@ -466,19 +466,6 @@ fn test_secp256k1_ecrecover() -> Result<()> {
 #[test]
 fn test_sha256_extend() -> Result<()> {
     let program_elf = ceno_examples::sha_extend_syscall;
-    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-
-    let steps = run(&mut state)?;
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
-    assert_eq!(syscalls.len(), 1);
-
-    let witness = syscalls[0];
-    assert_eq!(witness.reg_ops.len(), 1);
-    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
-
-    let state_ptr = witness.reg_ops[0].value.after;
-    assert_eq!(state_ptr, witness.reg_ops[0].value.before);
-    let state_ptr: WordAddr = state_ptr.into();
 
     let expected = [
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 34013193, 67559435, 1711661200,
@@ -491,14 +478,35 @@ fn test_sha256_extend() -> Result<()> {
         634956631,
     ];
 
-    assert_eq!(witness.mem_ops.len(), SHA_EXTEND_WORDS);
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 48);
 
-    for (i, write_op) in witness.mem_ops.iter().enumerate() {
-        assert_eq!(write_op.addr, state_ptr + i);
-        assert_eq!(write_op.value.after, expected[i]);
-        if i < 16 {
-            // sanity check: first 16 entries remain unchanged
-            assert_eq!(write_op.value.before, write_op.value.after);
+    for round in 0..48 {
+        let witness = &syscalls[round];
+
+        assert_eq!(witness.reg_ops.len(), 1);
+        assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+
+        assert_eq!(
+            witness.reg_ops[0].value.before,
+            witness.reg_ops[0].value.after
+        );
+        let state_ptr = witness.reg_ops[0].value.before;
+        let state_ptr: WordAddr = state_ptr.into();
+
+        assert_eq!(witness.mem_ops.len(), 5);
+
+        let offsets = [2, 7, 15, 16, 0];
+        for (i, write_op) in witness.mem_ops.iter().enumerate() {
+            let mem_addr: u32 = state_ptr.0 - offsets[i] as u32;
+            assert_eq!(write_op.addr.0, mem_addr);
+            if i < 4 {
+                assert_eq!(write_op.value.before, write_op.value.after);
+            } else {
+                assert_eq!(write_op.value.after, expected[round + 16 - offsets[i]]);
+            }
         }
     }
 

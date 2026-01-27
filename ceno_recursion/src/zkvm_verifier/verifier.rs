@@ -1353,12 +1353,14 @@ pub fn evaluate_selector<C: Config>(
 
             (expr, sel)
         }
-        SelectorType::OrderedSparse32 {
+        SelectorType::OrderedSparse {
+            num_vars,
             indices,
             expression,
         } => {
-            let out_point_slice = out_point.slice(builder, 0, 5);
-            let in_point_slice = in_point.slice(builder, 0, 5);
+            let num_vars = *num_vars;
+            let out_point_slice = out_point.slice(builder, 0, num_vars);
+            let in_point_slice = in_point.slice(builder, 0, num_vars);
             let out_subgroup_eq = build_eq_x_r_vec_sequential(builder, &out_point_slice);
             let in_subgroup_eq = build_eq_x_r_vec_sequential(builder, &in_point_slice);
 
@@ -1369,8 +1371,8 @@ pub fn evaluate_selector<C: Config>(
                 builder.assign(&eval, eval + out_val * in_val);
             }
 
-            let out_point_slice = out_point.slice(builder, 5, out_point.len());
-            let in_point_slice = in_point.slice(builder, 5, in_point.len());
+            let out_point_slice = out_point.slice(builder, num_vars, out_point.len());
+            let in_point_slice = in_point.slice(builder, num_vars, in_point.len());
             let n_bits = builder.get(&ctx.num_instances_bit_decomps, 0);
 
             let sel =
