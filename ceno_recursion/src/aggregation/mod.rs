@@ -381,7 +381,9 @@ impl CenoLeafVmVerifierConfig {
         let mut builder = Builder::<C>::default();
 
         {
+            builder.cycle_tracker_start("Read Ceno ZKVM Proof");
             let ceno_leaf_input = CenoLeafVmVerifierInput::read(&mut builder);
+            builder.cycle_tracker_end("Read Ceno ZKVM Proof");
             let stark_pvs = VmVerifierPvs::<Felt<F>>::uninit(&mut builder);
 
             builder.cycle_tracker_start("Verify Ceno ZKVM Proof");
