@@ -243,7 +243,7 @@ pub fn verify_tower_proof<C: Config>(
     let sumcheck_out_len: Usize<C::N> = builder
         .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
     let sumcheck_out: Array<C, Ext<C::F, C::EF>> =
-        builder.dyn_array(sumcheck_out_len);
+        builder.dyn_array(sumcheck_out_len.clone());
 
     builder.sumcheck_layer_eval(
         &input_ctx,
@@ -302,11 +302,28 @@ pub fn verify_tower_proof<C: Config>(
         point: PointVariable { fs: initial_rt },
         eval: initial_claim,
     };
-
-    let next_layer_evals_output_len: Usize<C::N> = builder
-        .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
     let next_layer_evals: Array<C, Ext<C::F, C::EF>> =
-        builder.dyn_array(next_layer_evals_output_len);
+        builder.dyn_array(sumcheck_out_len);
+    builder.set(
+        &input_ctx,
+        3,
+        Usize::from(proof.prod_specs_eval.inner_length),
+    );
+    builder.set(
+        &input_ctx,
+        4,
+        Usize::from(proof.prod_specs_eval.inner_inner_length),
+    );
+    builder.set(
+        &input_ctx,
+        5,
+        Usize::from(proof.logup_specs_eval.inner_length),
+    );
+    builder.set(
+        &input_ctx,
+        6,
+        Usize::from(proof.logup_specs_eval.inner_inner_length),
+    );
 
     builder.range(0, op_range).for_each(|i_vec, builder| {
         let round_var = i_vec[0];
@@ -335,28 +352,6 @@ pub fn verify_tower_proof<C: Config>(
         let eq_e = eq_eval(builder, out_rt, &sub_rt, one, zero);
 
         builder.set(&input_ctx, 0, round_var);
-        builder.set(&input_ctx, 1, num_prod_spec.clone());
-        builder.set(&input_ctx, 2, num_logup_spec.clone());
-        builder.set(
-            &input_ctx,
-            3,
-            Usize::from(proof.prod_specs_eval.inner_length),
-        );
-        builder.set(
-            &input_ctx,
-            4,
-            Usize::from(proof.prod_specs_eval.inner_inner_length),
-        );
-        builder.set(
-            &input_ctx,
-            5,
-            Usize::from(proof.logup_specs_eval.inner_length),
-        );
-        builder.set(
-            &input_ctx,
-            6,
-            Usize::from(proof.logup_specs_eval.inner_inner_length),
-        );
         builder.set(&input_ctx, 7, Usize::from(1));
         let n_v = builder.get(&num_variables, 0);
         builder.set(&input_ctx, 8, n_v);
