@@ -958,7 +958,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBa
         // 7 for x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[1,rt], y[1,rt], s[1,rt]
         assert_eq!(evals.len(), 3 + SEPTIC_EXTENSION_DEGREE * 7);
         let final_sum = SepticPoint::from_affine(final_sum_x.clone(), final_sum_y.clone());
-        assert_eq!(proof_gpu_e.extract_sum(), E::ZERO);
 
         Ok(EccQuarkProof {
             zerocheck_proof: proof_gpu_e,

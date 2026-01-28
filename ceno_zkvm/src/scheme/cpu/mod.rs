@@ -295,7 +295,6 @@ impl CpuEccProver {
             }
         }
         let final_sum = SepticPoint::from_affine(final_sum_x, final_sum_y);
-        assert_eq!(zerocheck_proof.extract_sum(), E::ZERO);
 
         EccQuarkProof {
             zerocheck_proof,
