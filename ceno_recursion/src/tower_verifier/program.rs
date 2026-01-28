@@ -2,7 +2,7 @@ use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
     arithmetics::{
         UniPolyExtrapolator, challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend,
-        exts_to_felts, reverse,
+        exts_to_felts,
     },
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::transcript_observe_label,
@@ -16,77 +16,6 @@ use openvm_native_recursion::challenger::{
 use openvm_stark_backend::p3_field::FieldAlgebra;
 const NATIVE_SUMCHECK_CTX_LEN: usize = 9;
 
-pub(crate) fn interpolate_uni_poly<C: Config>(
-    builder: &mut Builder<C>,
-    p_i: &Array<C, Ext<C::F, C::EF>>,
-    eval_at: Ext<C::F, C::EF>,
-) -> Ext<C::F, C::EF> {
-    let len = p_i.len();
-    let evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(len.clone());
-    let prod: Ext<C::F, C::EF> = builder.eval(eval_at);
-
-    builder.set(&evals, 0, eval_at);
-
-    // `prod = \prod_{j} (eval_at - j)`
-    let e: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    builder.range(1, len.clone()).for_each(|i_vec, builder| {
-        let i = i_vec[0];
-        let tmp: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-        builder.assign(&tmp, eval_at - e);
-        builder.set(&evals, i, tmp);
-        builder.assign(&prod, prod * tmp);
-        builder.assign(&e, e + one);
-    });
-
-    let denom_up: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    let i: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    builder.assign(&i, i + one);
-    builder.range(2, len.clone()).for_each(|_i_vec, builder| {
-        builder.assign(&denom_up, denom_up * i);
-        builder.assign(&i, i + one);
-    });
-    let denom_down: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-
-    let idx_vec_len: RVar<C::N> = builder.eval_expr(len.clone() - RVar::from(1));
-    let idx_vec: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(idx_vec_len);
-    let idx_val: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    builder.range(0, idx_vec.len()).for_each(|i_vec, builder| {
-        builder.set(&idx_vec, i_vec[0], idx_val);
-        builder.assign(&idx_val, idx_val + one);
-    });
-    let idx_rev = reverse(builder, &idx_vec);
-    let res = builder.constant(C::EF::ZERO);
-
-    let len_f = idx_val;
-    let neg_one: Ext<C::F, C::EF> = builder.constant(C::EF::NEG_ONE);
-    let evals_rev = reverse(builder, &evals);
-    let p_i_rev = reverse(builder, p_i);
-
-    let mut idx_pos: RVar<C::N> = builder.eval_expr(len.clone() - RVar::from(1));
-    iter_zip!(builder, idx_rev, evals_rev, p_i_rev).for_each(|ptr_vec, builder| {
-        let idx = builder.iter_ptr_get(&idx_rev, ptr_vec[0]);
-        let eval = builder.iter_ptr_get(&evals_rev, ptr_vec[1]);
-        let up_eval_inv: Ext<C::F, C::EF> = builder.eval(denom_up * eval);
-        builder.assign(&up_eval_inv, up_eval_inv.inverse());
-        let p = builder.iter_ptr_get(&p_i_rev, ptr_vec[2]);
-
-        builder.assign(&res, res + p * prod * denom_down * up_eval_inv);
-        builder.assign(&denom_up, denom_up * (len_f - idx) * neg_one);
-        builder.assign(&denom_down, denom_down * idx);
-
-        idx_pos = builder.eval_expr(idx_pos - RVar::from(1));
-    });
-
-    let p_i_0 = builder.get(p_i, 0);
-    let eval_0 = builder.get(&evals, 0);
-    let up_eval_inv: Ext<C::F, C::EF> = builder.eval(denom_up * eval_0);
-    builder.assign(&up_eval_inv, up_eval_inv.inverse());
-    builder.assign(&res, res + p_i_0 * prod * denom_down * up_eval_inv);
-
-    res
-}
-
 pub fn iop_verifier_state_verify<C: Config>(
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
@@ -94,7 +23,7 @@ pub fn iop_verifier_state_verify<C: Config>(
     prover_messages: &IOPProverMessageVecVariable<C>,
     max_num_variables: Felt<C::F>,
     max_degree: Felt<C::F>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) -> (
     Array<C, Ext<<C as Config>::F, <C as Config>::EF>>,
     Ext<<C as Config>::F, <C as Config>::EF>,
@@ -157,7 +86,7 @@ pub fn verify_tower_proof<C: Config>(
     max_num_variables: Usize<C::N>,
 
     proof: &TowerProofInputVariable<C>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) -> (
     PointVariable<C>,
     Array<C, PointAndEvalVariable<C>>,

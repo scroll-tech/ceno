@@ -866,7 +866,7 @@ impl<C: Config> UniPolyExtrapolator<C> {
     }
 
     pub fn extrapolate_uni_poly(
-        &mut self,
+        &self,
         builder: &mut Builder<C>,
         p_0: Ext<C::F, C::EF>,
         p_i: &Array<C, Ext<C::F, C::EF>>,
