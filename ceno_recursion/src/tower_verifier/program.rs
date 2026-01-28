@@ -202,19 +202,12 @@ pub fn verify_tower_proof<C: Config>(
     transcript_observe_label(builder, challenger, b"combine subset evals");
     let alpha = challenger.sample_ext(builder);
 
-    let alpha_acc: Ext<C::F, C::EF> = builder.eval(zero + one);
-
     // initial_claim = \sum_j alpha^j * out_j[rt]
     // out_j[rt] := (record_{j}[rt])
     // out_j[rt] := (logup_p{j}[rt])
     // out_j[rt] := (logup_q{j}[rt])
     let log2_num_fanin = 1usize;
 
-
-
-    //
-    //
-    //
     builder.cycle_tracker_start("initial sum");
     let initial_rt: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(log2_num_fanin);
     transcript_observe_label(builder, challenger, b"product_sum");
@@ -232,11 +225,6 @@ pub fn verify_tower_proof<C: Config>(
     iter_zip!(builder, prod_out_evals, prod_spec_point_n_eval).for_each(|ptr_vec, builder| {
         let ptr = ptr_vec[0];
         let evals = builder.iter_ptr_get(&prod_out_evals, ptr);
-
-        // _debug
-        // builder.print_debug(3077);
-        // _print_ext_arr(builder, &evals);
-
 
         let e = evaluate_at_point_degree_1(builder, &evals, &initial_rt);
         let p_ptr = ptr_vec[1];
@@ -298,55 +286,6 @@ pub fn verify_tower_proof<C: Config>(
         );
     });
 
-    // let initial_claim: Ext<C::F, C::EF> = builder.eval(zero + zero);
-
-    // iter_zip!(builder, prod_spec_point_n_eval).for_each(|ptr_vec, builder| {
-    //     let ptr = ptr_vec[0];
-    //     let prod_eval = builder.iter_ptr_get(&prod_spec_point_n_eval, ptr);
-    //     builder.assign(&initial_claim, initial_claim + prod_eval.eval * alpha_acc);
-
-    //     // _debug
-    //     // builder.print_debug(777);
-    //     // builder.print_e(prod_eval.eval);
-    //     // builder.print_e(alpha_acc);
-    //     // builder.print_e(initial_claim);
-
-
-    //     builder.assign(&alpha_acc, alpha_acc * alpha);
-    // });
-
-    // builder
-    //     .range(0, num_logup_spec.clone())
-    //     .for_each(|i_vec, builder| {
-    //         let p = builder.get(&logup_spec_p_point_n_eval, i_vec[0]);
-    //         builder.assign(&initial_claim, initial_claim + p.eval * alpha_acc);
-
-
-    //         // _debug
-    //         // builder.print_debug(888);
-    //         // builder.print_e(p.eval);
-    //         // builder.print_e(alpha_acc);
-    //         // builder.print_e(initial_claim);
-
-
-
-    //         builder.assign(&alpha_acc, alpha_acc * alpha);
-    //         let q = builder.get(&logup_spec_q_point_n_eval, i_vec[0]);
-    //         builder.assign(&initial_claim, initial_claim + q.eval * alpha_acc);
-
-    //         // _debug
-    //         // builder.print_debug(999);
-    //         // builder.print_e(q.eval);
-    //         // builder.print_e(alpha_acc);
-    //         // builder.print_e(initial_claim);
-
-
-
-    //         builder.assign(&alpha_acc, alpha_acc * alpha);
-    //     });
-    
-
-
     let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
     builder.set(&input_ctx, 0, Usize::from(0));
     builder.set(&input_ctx, 1, num_prod_spec.clone());
@@ -375,35 +314,11 @@ pub fn verify_tower_proof<C: Config>(
         &challenges,
         &flattened_prod_out_evals,
         &flattened_logup_out_evals,
-        // &next_layer_evals,
         &sumcheck_out,
     );
-    // _print_ext_arr(builder, &sumcheck_out);
-    // let c = builder.get(&sumcheck_out, 0);
-    // builder.print_e(init_c);
-    // builder.assign(&initial_claim, init_c);
-    
     let initial_claim = builder.get(&sumcheck_out, 0);
     builder.print_e(initial_claim);
-
     builder.cycle_tracker_end("initial sum");
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     let curr_pt = initial_rt.clone();
     let curr_eval = initial_claim;
