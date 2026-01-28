@@ -868,33 +868,49 @@ impl<C: Config> UniPolyExtrapolator<C> {
     pub fn extrapolate_uni_poly(
         &mut self,
         builder: &mut Builder<C>,
+        p_0: Ext<C::F, C::EF>,
         p_i: &Array<C, Ext<C::F, C::EF>>,
         eval_at: Ext<C::F, C::EF>,
     ) -> Ext<C::F, C::EF> {
         let res: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+        let length: RVar<_> = builder.eval_expr(p_i.len() + Usize::from(1));
 
-        builder.if_eq(p_i.len(), Usize::from(4)).then_or_else(
+        builder.if_eq(length, Usize::from(4)).then_or_else(
             |builder| {
-                let ext = self.extrapolate_uni_poly_deg_3(builder, p_i, eval_at);
+                let p_i_1: Ext<C::F, C::EF> = builder.get(p_i, 0);
+                let p_i_2: Ext<C::F, C::EF> = builder.get(p_i, 1);
+                let p_i_3: Ext<C::F, C::EF> = builder.get(p_i, 2);
+                let ext =
+                    self.extrapolate_uni_poly_deg_3(builder, p_0, p_i_1, p_i_2, p_i_3, eval_at);
                 builder.assign(&res, ext);
             },
             |builder| {
-                builder.if_eq(p_i.len(), Usize::from(3)).then_or_else(
+                builder.if_eq(length, Usize::from(3)).then_or_else(
                     |builder| {
-                        let ext = self.extrapolate_uni_poly_deg_2(builder, p_i, eval_at);
+                        let p_i_1: Ext<C::F, C::EF> = builder.get(p_i, 0);
+                        let p_i_2: Ext<C::F, C::EF> = builder.get(p_i, 1);
+                        let ext =
+                            self.extrapolate_uni_poly_deg_2(builder, p_0, p_i_1, p_i_2, eval_at);
                         builder.assign(&res, ext);
                     },
                     |builder| {
-                        builder.if_eq(p_i.len(), Usize::from(2)).then_or_else(
+                        builder.if_eq(length, Usize::from(2)).then_or_else(
                             |builder| {
-                                let ext = self.extrapolate_uni_poly_deg_1(builder, p_i, eval_at);
+                                let p_i_1: Ext<C::F, C::EF> = builder.get(p_i, 0);
+                                let ext =
+                                    self.extrapolate_uni_poly_deg_1(builder, p_0, p_i_1, eval_at);
                                 builder.assign(&res, ext);
                             },
                             |builder| {
-                                builder.if_eq(p_i.len(), Usize::from(5)).then_or_else(
+                                builder.if_eq(length, Usize::from(5)).then_or_else(
                                     |builder| {
-                                        let ext =
-                                            self.extrapolate_uni_poly_deg_4(builder, p_i, eval_at);
+                                        let p_i_1: Ext<C::F, C::EF> = builder.get(p_i, 0);
+                                        let p_i_2: Ext<C::F, C::EF> = builder.get(p_i, 1);
+                                        let p_i_3: Ext<C::F, C::EF> = builder.get(p_i, 2);
+                                        let p_i_4: Ext<C::F, C::EF> = builder.get(p_i, 3);
+                                        let ext = self.extrapolate_uni_poly_deg_4(
+                                            builder, p_0, p_i_1, p_i_2, p_i_3, p_i_4, eval_at,
+                                        );
                                         builder.assign(&res, ext);
                                     },
                                     |builder| {
@@ -914,7 +930,8 @@ impl<C: Config> UniPolyExtrapolator<C> {
     fn extrapolate_uni_poly_deg_1(
         &self,
         builder: &mut Builder<C>,
-        p_i: &Array<C, Ext<C::F, C::EF>>,
+        p_i_0: Ext<C::F, C::EF>,
+        p_i_1: Ext<C::F, C::EF>,
         eval_at: Ext<C::F, C::EF>,
     ) -> Ext<C::F, C::EF> {
         // w0 = 1 / (0−1) = -1
@@ -922,9 +939,6 @@ impl<C: Config> UniPolyExtrapolator<C> {
         let d0: Ext<C::F, C::EF> = builder.eval(eval_at - self.constants[0]);
         let d1: Ext<C::F, C::EF> = builder.eval(eval_at - self.constants[1]);
         let l: Ext<C::F, C::EF> = builder.eval(d0 * d1);
-
-        let p_i_0 = builder.get(p_i, 0);
-        let p_i_1 = builder.get(p_i, 1);
 
         let t0: Ext<C::F, C::EF> = builder.eval(self.constants[5] * p_i_0 * d0.inverse());
         let t1: Ext<C::F, C::EF> = builder.eval(self.constants[1] * p_i_1 * d1.inverse());
@@ -935,7 +949,9 @@ impl<C: Config> UniPolyExtrapolator<C> {
     fn extrapolate_uni_poly_deg_2(
         &self,
         builder: &mut Builder<C>,
-        p_i: &Array<C, Ext<C::F, C::EF>>,
+        p_i_0: Ext<C::F, C::EF>,
+        p_i_1: Ext<C::F, C::EF>,
+        p_i_2: Ext<C::F, C::EF>,
         eval_at: Ext<C::F, C::EF>,
     ) -> Ext<C::F, C::EF> {
         // w0 = 1 / ((0−1)(0−2)) =  1/2
@@ -947,10 +963,6 @@ impl<C: Config> UniPolyExtrapolator<C> {
 
         let l: Ext<C::F, C::EF> = builder.eval(d0 * d1 * d2);
 
-        let p_i_0: Ext<C::F, C::EF> = builder.get(p_i, 0);
-        let p_i_1: Ext<C::F, C::EF> = builder.get(p_i, 1);
-        let p_i_2: Ext<C::F, C::EF> = builder.get(p_i, 2);
-
         let t0: Ext<C::F, C::EF> = builder.eval(self.constants[6] * p_i_0 * d0.inverse());
         let t1: Ext<C::F, C::EF> = builder.eval(self.constants[5] * p_i_1 * d1.inverse());
         let t2: Ext<C::F, C::EF> = builder.eval(self.constants[6] * p_i_2 * d2.inverse());
@@ -961,7 +973,10 @@ impl<C: Config> UniPolyExtrapolator<C> {
     fn extrapolate_uni_poly_deg_3(
         &self,
         builder: &mut Builder<C>,
-        p_i: &Array<C, Ext<C::F, C::EF>>,
+        p_i_0: Ext<C::F, C::EF>,
+        p_i_1: Ext<C::F, C::EF>,
+        p_i_2: Ext<C::F, C::EF>,
+        p_i_3: Ext<C::F, C::EF>,
         eval_at: Ext<C::F, C::EF>,
     ) -> Ext<C::F, C::EF> {
         // w0 = 1 / ((0−1)(0−2)(0−3)) = -1/6
@@ -975,11 +990,6 @@ impl<C: Config> UniPolyExtrapolator<C> {
 
         let l: Ext<C::F, C::EF> = builder.eval(d0 * d1 * d2 * d3);
 
-        let p_i_0: Ext<C::F, C::EF> = builder.get(p_i, 0);
-        let p_i_1: Ext<C::F, C::EF> = builder.get(p_i, 1);
-        let p_i_2: Ext<C::F, C::EF> = builder.get(p_i, 2);
-        let p_i_3: Ext<C::F, C::EF> = builder.get(p_i, 3);
-
         let t0: Ext<C::F, C::EF> = builder.eval(self.constants[9] * p_i_0 * d0.inverse());
         let t1: Ext<C::F, C::EF> = builder.eval(self.constants[6] * p_i_1 * d1.inverse());
         let t2: Ext<C::F, C::EF> = builder.eval(self.constants[7] * p_i_2 * d2.inverse());
@@ -991,7 +1001,11 @@ impl<C: Config> UniPolyExtrapolator<C> {
     fn extrapolate_uni_poly_deg_4(
         &self,
         builder: &mut Builder<C>,
-        p_i: &Array<C, Ext<C::F, C::EF>>,
+        p_i_0: Ext<C::F, C::EF>,
+        p_i_1: Ext<C::F, C::EF>,
+        p_i_2: Ext<C::F, C::EF>,
+        p_i_3: Ext<C::F, C::EF>,
+        p_i_4: Ext<C::F, C::EF>,
         eval_at: Ext<C::F, C::EF>,
     ) -> Ext<C::F, C::EF> {
         // w0 = 1 / ((0−1)(0−2)(0−3)(0−4)) =  1/24
@@ -1006,12 +1020,6 @@ impl<C: Config> UniPolyExtrapolator<C> {
         let d4: Ext<C::F, C::EF> = builder.eval(eval_at - self.constants[4]);
 
         let l: Ext<C::F, C::EF> = builder.eval(d0 * d1 * d2 * d3 * d4);
-
-        let p_i_0: Ext<C::F, C::EF> = builder.get(p_i, 0);
-        let p_i_1: Ext<C::F, C::EF> = builder.get(p_i, 1);
-        let p_i_2: Ext<C::F, C::EF> = builder.get(p_i, 2);
-        let p_i_3: Ext<C::F, C::EF> = builder.get(p_i, 3);
-        let p_i_4: Ext<C::F, C::EF> = builder.get(p_i, 4);
 
         let t0: Ext<C::F, C::EF> = builder.eval(self.constants[11] * p_i_0 * d0.inverse());
         let t1: Ext<C::F, C::EF> = builder.eval(self.constants[9] * p_i_1 * d1.inverse());
