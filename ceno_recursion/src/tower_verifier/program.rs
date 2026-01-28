@@ -226,11 +226,19 @@ pub fn verify_tower_proof<C: Config>(
     let logup_spec_q_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_logup_spec.clone());
 
-    let initial_evals_len: Usize<C::N> =
-        builder.eval(num_prod_spec.clone() + num_logup_spec.clone() + num_logup_spec.clone());
+    let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
+    builder.set(&input_ctx, 0, Usize::from(0));
+    builder.set(
+        &input_ctx,
+        1,
+        num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone(),
+    );
+
+    let initial_evals_len: Usize<C::N> = builder
+        .eval(Usize::from(2) * (num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone()));
     let initial_evals = builder.dyn_array(initial_evals_len);
     let prod_idx: Usize<C::N> = builder.eval(C::N::ZERO);
-    let logup_idx: Usize<C::N> = builder.eval(num_prod_spec.clone());
+    let logup_idx: Usize<C::N> = builder.eval(num_prod_spec.clone() * Usize::from(2));
     builder
         .range(0, prod_out_evals.len())
         .for_each(|idx_vec, builder| {
@@ -238,6 +246,8 @@ pub fn verify_tower_proof<C: Config>(
 
             let e = evaluate_at_point_degree_1(builder, &evals, &initial_rt);
             builder.set(&initial_evals, prod_idx.clone(), e);
+            builder.assign(&prod_idx, prod_idx.clone() + C::N::ONE);
+            builder.set(&initial_evals, prod_idx.clone(), C::F::ONE);
             builder.assign(&prod_idx, prod_idx.clone() + C::N::ONE);
 
             let p_slice = evals.slice(builder, 0, 2);
@@ -248,16 +258,16 @@ pub fn verify_tower_proof<C: Config>(
 
             builder.set(&initial_evals, logup_idx.clone(), e1);
             builder.assign(&logup_idx, logup_idx.clone() + C::N::ONE);
+            builder.set(&initial_evals, logup_idx.clone(), C::F::ONE);
+            builder.assign(&logup_idx, logup_idx.clone() + C::N::ONE);
             builder.set(&initial_evals, logup_idx.clone(), e2);
             builder.assign(&logup_idx, logup_idx.clone() + C::N::ONE);
+            builder.set(&initial_evals, logup_idx.clone(), C::F::ONE);
+            builder.assign(&logup_idx, logup_idx.clone() + C::N::ONE);
         });
-
-    let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
-    builder.set(&input_ctx, 0, Usize::from(0));
-    builder.set(&input_ctx, 1, initial_evals.len());
     builder.set(&input_ctx, 2, Usize::from(0));
     builder.set(&input_ctx, 3, Usize::from(1));
-    builder.set(&input_ctx, 4, Usize::from(1));
+    builder.set(&input_ctx, 4, Usize::from(2));
     builder.set(&input_ctx, 5, Usize::from(0));
     builder.set(&input_ctx, 6, Usize::from(0));
     builder.set(&input_ctx, 7, Usize::from(1));
