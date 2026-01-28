@@ -279,7 +279,7 @@ pub fn verify_tower_proof<C: Config>(
         &empty_logup_evals,
         &next_layer_evals,
     );
-    let initial_claim: Ext<C::F, C::EF> = builder.eval(zero + zero);
+    let initial_claim: Ext<C::F, C::EF> = builder.get(&next_layer_evals, 0);
 
     builder.cycle_tracker_end("initial sum");
 
