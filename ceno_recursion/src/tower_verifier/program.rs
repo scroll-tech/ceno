@@ -380,8 +380,8 @@ pub fn verify_tower_proof<C: Config>(
         Usize::from(4),
     );
     builder.set(&input_ctx, 7, Usize::from(0));
-    let n_v = builder.get(&num_variables, 0);
-    builder.set(&input_ctx, 8, n_v);
+
+    builder.set(&input_ctx, 8, Usize::from(999));
 
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
     builder.set(&challenges, 0, alpha);
@@ -393,12 +393,12 @@ pub fn verify_tower_proof<C: Config>(
     // _debug
     let flattened_prod_out_evals = flatten_uniform_ext_arr(builder, &prod_out_evals);
     let flattened_logup_out_evals = flatten_uniform_ext_arr(builder, &logup_out_evals);
-    let r: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(1);
+    let init_claim: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(1);
 
-    let next_layer_evals_output_len: Usize<C::N> = builder
-        .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
-    let next_layer_evals: Array<C, Ext<C::F, C::EF>> =
-        builder.dyn_array(next_layer_evals_output_len);
+    // let next_layer_evals_output_len: Usize<C::N> = builder
+    //     .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
+    // let next_layer_evals: Array<C, Ext<C::F, C::EF>> =
+    //     builder.dyn_array(next_layer_evals_output_len);
 
     builder.sumcheck_layer_eval(
         &input_ctx,
@@ -406,11 +406,15 @@ pub fn verify_tower_proof<C: Config>(
         &flattened_prod_out_evals,
         &flattened_logup_out_evals,
         // &next_layer_evals,
-        &r,
+        &init_claim,
     );
-    _print_ext_arr(builder, &r);
-
-
+    _print_ext_arr(builder, &init_claim);
+    let init_c = builder.get(&init_claim, 0);
+    builder.print_e(init_c);
+    // builder.assign(&initial_claim, init_c);
+    
+    // let initial_claim = builder.get(&r, 0);
+    // builder.print_e(initial_claim);
 
 
 
