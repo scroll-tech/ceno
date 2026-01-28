@@ -260,7 +260,7 @@ pub fn verify_tower_proof<C: Config>(
     builder.set(&input_ctx, 4, Usize::from(1));
     builder.set(&input_ctx, 5, Usize::from(0));
     builder.set(&input_ctx, 6, Usize::from(0));
-    builder.set(&input_ctx, 7, Usize::from(0));
+    builder.set(&input_ctx, 7, Usize::from(1));
     let n_v = builder.get(&num_variables, 0);
     builder.set(&input_ctx, 8, n_v);
 
