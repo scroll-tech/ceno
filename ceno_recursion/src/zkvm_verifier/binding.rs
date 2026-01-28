@@ -165,14 +165,18 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let raw_pi = Vec::<Vec<F>>::read(builder);
         let raw_pi_num_variables = Vec::<usize>::read(builder);
         let pi_evals = Vec::<E>::read(builder);
+        builder.cycle_tracker_start("read chip proofs");
         let chip_proofs = Vec::<ZKVMChipProofs>::read(builder);
+        builder.cycle_tracker_end("read chip proofs");
         let max_num_var = usize::read(builder);
         let max_width = usize::read(builder);
         let witin_commit = BasefoldCommitment::read(builder);
         let witin_perm: Array<AsmConfig<F, BinomialExtensionField<F, 4>>, Var<F>> =
             Vec::<usize>::read(builder);
         let fixed_perm = Vec::<usize>::read(builder);
+        builder.cycle_tracker_start("read pcs proof");
         let pcs_proof = BasefoldProof::read(builder);
+        builder.cycle_tracker_end("read pcs proof");
 
         ZKVMProofInputVariable {
             shard_id,
@@ -314,18 +318,24 @@ impl Hintable<InnerConfig> for TowerProofInput {
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let num_proofs = Usize::Var(usize::read(builder));
+        builder.cycle_tracker_start("read sumcheck proofs in tower reduction");
         let proofs = builder.dyn_array(num_proofs.clone());
         iter_zip!(builder, proofs).for_each(|idx_vec, builder| {
             let ptr = idx_vec[0];
             let proof = IOPProverMessageVec::read(builder);
             builder.iter_ptr_set(&proofs, ptr, proof);
         });
+        builder.cycle_tracker_end("read sumcheck proofs in tower reduction");
 
         let num_prod_specs = Usize::Var(usize::read(builder));
+        builder.cycle_tracker_start("read prod specs eval");
         let prod_specs_eval = ThreeDimensionalVector::read(builder);
+        builder.cycle_tracker_end("read prod specs eval");
 
+        builder.cycle_tracker_start("read logup specs eval");
         let num_logup_specs = Usize::Var(usize::read(builder));
         let logup_specs_eval = ThreeDimensionalVector::read(builder);
+        builder.cycle_tracker_end("read logup specs eval");
 
         TowerProofInputVariable {
             num_proofs,
@@ -535,13 +545,19 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let w_out_evals_len = Usize::Var(usize::read(builder));
         let lk_out_evals_len = Usize::Var(usize::read(builder));
 
+        builder.cycle_tracker_start("read omc out evals");
         let r_out_evals = Vec::<Vec<E>>::read(builder);
         let w_out_evals = Vec::<Vec<E>>::read(builder);
         let lk_out_evals = Vec::<Vec<E>>::read(builder);
+        builder.cycle_tracker_end("read omc out evals");
 
+        builder.cycle_tracker_start("read tower proofs");
         let tower_proof = TowerProofInput::read(builder);
+        builder.cycle_tracker_end("read tower proofs");
         let has_main_sumcheck_proofs = Usize::Var(usize::read(builder));
+        builder.cycle_tracker_start("read main sumcheck proofs");
         let main_sumcheck_proofs = IOPProverMessageVec::read(builder);
+        builder.cycle_tracker_end("read main sumcheck proofs");
         let has_gkr_iop_proof = Usize::Var(usize::read(builder));
         let gkr_iop_proof = GKRProofInput::read(builder);
         let has_ecc_proof = Usize::Var(usize::read(builder));
@@ -551,8 +567,10 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let n_inst_0_bit_decomps = Vec::<F>::read(builder);
         let n_inst_1_bit_decomps = Vec::<F>::read(builder);
 
+        builder.cycle_tracker_start("read wit/fixed evals");
         let fixed_in_evals = Vec::<E>::read(builder);
         let wits_in_evals = Vec::<E>::read(builder);
+        builder.cycle_tracker_end("read wit/fixed evals");
 
         ZKVMChipProofInputVariable {
             idx,
@@ -601,6 +619,22 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let r_out_evals_len = self.r_out_evals.len();
         let w_out_evals_len = self.w_out_evals.len();
         let lk_out_evals_len = self.lk_out_evals.len();
+        println!(
+            "circuit {} r_len: {}, w: {}, lk: {}, n_prods: {}, n_logups: {}, n_layers: {}, n_prod_evals: {}, n_logup_evals: {}",
+            self.idx,
+            r_out_evals_len,
+            w_out_evals_len,
+            lk_out_evals_len,
+            self.tower_proof.num_prod_specs,
+            self.tower_proof.num_logup_specs,
+            self.tower_proof.proofs.len(),
+            self.tower_proof.prod_specs_eval.inner_inner_length
+                * self.tower_proof.prod_specs_eval.inner_length
+                * self.tower_proof.prod_specs_eval.outer_length,
+            self.tower_proof.logup_specs_eval.inner_inner_length
+                * self.tower_proof.logup_specs_eval.inner_length
+                * self.tower_proof.logup_specs_eval.outer_length,
+        );
 
         stream.extend(<usize as Hintable<InnerConfig>>::write(&r_out_evals_len));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&w_out_evals_len));
