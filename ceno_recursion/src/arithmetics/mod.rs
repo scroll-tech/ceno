@@ -110,6 +110,28 @@ pub fn evaluate_at_point_degree_1<C: Config>(
     builder.eval(r * (right - left) + left)
 }
 
+// In this case, the inner arr must all have the same length
+pub fn flatten_uniform_ext_arr<C: Config>(
+    builder: &mut Builder<C>,
+    arr: &Array<C, Array<C, Ext<C::F, C::EF>>>,
+) -> Array<C, Ext<C::F, C::EF>> {
+    let inner_len = builder.get(arr, 0).len();
+    let len: Usize<C::N> = builder.eval(arr.len() * inner_len);
+    let r = builder.dyn_array(len);
+
+    let idx: Usize<C::N> = builder.eval(C::N::ZERO);
+    builder.range(0, arr.len()).for_each(|idx_vec, builder| {
+        let inner_arr = builder.get(arr, idx_vec[0]);
+        iter_zip!(builder, inner_arr).for_each(|ptr_vec, builder| {
+            let e = builder.iter_ptr_get(&inner_arr, ptr_vec[0]);
+            builder.set(&r, idx.clone(), e);
+            builder.assign(&idx, idx.clone() + C::N::ONE);
+        });
+    });
+
+    r
+}
+
 pub fn _fixed_dot_product<C: Config>(
     builder: &mut Builder<C>,
     a: &[Ext<C::F, C::EF>],
