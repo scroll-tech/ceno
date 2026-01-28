@@ -202,9 +202,7 @@ pub fn verify_tower_proof<C: Config>(
 
     transcript_observe_label(builder, challenger, b"combine subset evals");
     let alpha = challenger.sample_ext(builder);
-
-    let alpha_acc: Ext<C::F, C::EF> = builder.eval(zero + one);
-
+    
     // initial_claim = \sum_j alpha^j * out_j[rt]
     // out_j[rt] := (record_{j}[rt])
     // out_j[rt] := (logup_p{j}[rt])
@@ -223,58 +221,64 @@ pub fn verify_tower_proof<C: Config>(
 
     let prod_spec_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_prod_spec.clone());
-
     let logup_spec_p_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_logup_spec.clone());
     let logup_spec_q_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_logup_spec.clone());
 
+    let initial_evals_len: Usize<C::N> =
+        builder.eval(num_prod_spec.clone() + num_logup_spec.clone() + num_logup_spec.clone());
+    let initial_evals = builder.dyn_array(initial_evals_len);
+    let prod_idx: Usize<C::N> = builder.eval(C::N::ZERO);
+    let logup_idx: Usize<C::N> = builder.eval(num_prod_spec.clone());
+    builder
+        .range(0, prod_out_evals.len())
+        .for_each(|idx_vec, builder| {
+            let evals = builder.get(&prod_out_evals, idx_vec[0]);
+
+            let e = evaluate_at_point_degree_1(builder, &evals, &initial_rt);
+            builder.set(&initial_evals, prod_idx.clone(), e);
+            builder.assign(&prod_idx, prod_idx.clone() + C::N::ONE);
+
+            let p_slice = evals.slice(builder, 0, 2);
+            let q_slice = evals.slice(builder, 2, 4);
+
+            let e1 = evaluate_at_point_degree_1(builder, &p_slice, &initial_rt);
+            let e2 = evaluate_at_point_degree_1(builder, &q_slice, &initial_rt);
+
+            builder.set(&initial_evals, logup_idx.clone(), e1);
+            builder.assign(&logup_idx, logup_idx.clone() + C::N::ONE);
+            builder.set(&initial_evals, logup_idx.clone(), e2);
+            builder.assign(&logup_idx, logup_idx.clone() + C::N::ONE);
+        });
+
+    let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
+    builder.set(&input_ctx, 0, Usize::from(0));
+    builder.set(&input_ctx, 1, initial_evals.len());
+    builder.set(&input_ctx, 2, Usize::from(0));
+    builder.set(&input_ctx, 3, Usize::from(1));
+    builder.set(&input_ctx, 4, Usize::from(1));
+    builder.set(&input_ctx, 5, Usize::from(0));
+    builder.set(&input_ctx, 6, Usize::from(0));
+    builder.set(&input_ctx, 7, Usize::from(0));
+    let n_v = builder.get(&num_variables, 0);
+    builder.set(&input_ctx, 8, n_v);
+
+    let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(1);
+    builder.set(&challenges, 0, alpha);
+
     let next_layer_evals_output_len: Usize<C::N> = builder
         .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
     let next_layer_evals: Array<C, Ext<C::F, C::EF>> =
         builder.dyn_array(next_layer_evals_output_len);
-    let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
-    builder.set(&input_ctx, 0, Usize::from(0));
-    builder.set(&input_ctx, 1, num_prod_spec.clone());
-    builder.set(&input_ctx, 2, num_logup_spec.clone());
-    builder.set(
-        &input_ctx,
-        3,
-        Usize::from(proof.prod_specs_eval.inner_length),
-    );
-    builder.set(
-        &input_ctx,
-        4,
-        Usize::from(proof.prod_specs_eval.inner_inner_length),
-    );
-    builder.set(
-        &input_ctx,
-        5,
-        Usize::from(proof.logup_specs_eval.inner_length),
-    );
-    builder.set(
-        &input_ctx,
-        6,
-        Usize::from(proof.logup_specs_eval.inner_inner_length),
-    );
-    let n_v = builder.get(&num_variables, 0);
-    builder.set(&input_ctx, 8, n_v);
-    // compute expected sum
-    builder.set(&input_ctx, 7, Usize::from(0)); 
-
-    let rt = builder.get(&initial_rt, 0);
-    let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
-    builder.set(&challenges, 0, alpha);
-    builder.set(&challenges, 1, one - rt);
-    builder.set(&challenges, 2, rt);
-
+    let empty_logup_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     builder.sumcheck_layer_eval(
-            &input_ctx,
-            &challenges,
-            &prod_out_evals,// TODO: convert from 2d array to 1d array
-            &logup_out_evals,
-            &next_layer_evals,
-        );
+        &input_ctx,
+        &challenges,
+        &initial_evals,
+        &empty_logup_evals,
+        &next_layer_evals,
+    );
     let initial_claim: Ext<C::F, C::EF> = builder.eval(zero + zero);
 
     builder.cycle_tracker_end("initial sum");
@@ -316,8 +320,31 @@ pub fn verify_tower_proof<C: Config>(
         let eq_e = eq_eval(builder, out_rt, &sub_rt, one, zero);
 
         builder.set(&input_ctx, 0, round_var);
+        builder.set(&input_ctx, 1, num_prod_spec.clone());
+        builder.set(&input_ctx, 2, num_logup_spec.clone());
+        builder.set(
+            &input_ctx,
+            3,
+            Usize::from(proof.prod_specs_eval.inner_length),
+        );
+        builder.set(
+            &input_ctx,
+            4,
+            Usize::from(proof.prod_specs_eval.inner_inner_length),
+        );
+        builder.set(
+            &input_ctx,
+            5,
+            Usize::from(proof.logup_specs_eval.inner_length),
+        );
+        builder.set(
+            &input_ctx,
+            6,
+            Usize::from(proof.logup_specs_eval.inner_inner_length),
+        );
         builder.set(&input_ctx, 7, Usize::from(1));
 
+        let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
         builder.set(&challenges, 0, alpha);
 
         builder.sumcheck_layer_eval(
