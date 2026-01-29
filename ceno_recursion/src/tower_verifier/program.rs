@@ -1,7 +1,7 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
     arithmetics::{
-        _print_ext_arr, UniPolyExtrapolator, challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend, exts_to_felts, flatten_uniform_ext_arr, reverse
+        UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts, reverse
     },
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::transcript_observe_label,
@@ -226,9 +226,6 @@ pub fn verify_tower_proof<C: Config>(
     builder.set(&challenges, 1, c1);
     builder.set(&challenges, 2, r);
 
-    // _debug
-    // let flattened_prod_out_evals = flatten_uniform_ext_arr(builder, &prod_out_evals);
-    // let flattened_logup_out_evals = flatten_uniform_ext_arr(builder, &logup_out_evals);
     let sumcheck_out_len: Usize<C::N> = builder
         .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
     let sumcheck_out: Array<C, Ext<C::F, C::EF>> =

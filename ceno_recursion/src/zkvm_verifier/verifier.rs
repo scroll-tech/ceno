@@ -14,11 +14,10 @@ use crate::{
         utils::pow_2,
     },
 };
-// use crate::basefold_verifier::verifier::batch_verify;
 use crate::{
     arithmetics::{
         arr_product, build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
-        eq_eval_less_or_equal_than, gen_alpha_pows, nested_product,
+        eq_eval_less_or_equal_than, gen_alpha_pows,
     },
     basefold_verifier::verifier::batch_verify,
     tower_verifier::{
@@ -278,18 +277,18 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     chip_proof.fixed_in_evals.len(),
                     Usize::from(circuit_vk.get_cs().num_fixed()),
                 );
-                // builder.assert_usize_eq(
-                //     chip_proof.r_out_evals.len(),
-                //     Usize::from(circuit_vk.get_cs().num_reads()),
-                // );
-                // builder.assert_usize_eq(
-                //     chip_proof.w_out_evals.len(),
-                //     Usize::from(circuit_vk.get_cs().num_writes()),
-                // );
-                // builder.assert_usize_eq(
-                //     chip_proof.lk_out_evals.len(),
-                //     Usize::from(circuit_vk.get_cs().num_lks()),
-                // );
+                builder.assert_usize_eq(
+                    chip_proof.r_out_evals.len(),
+                    Usize::from(circuit_vk.get_cs().num_reads() * 2),
+                );
+                builder.assert_usize_eq(
+                    chip_proof.w_out_evals.len(),
+                    Usize::from(circuit_vk.get_cs().num_writes() * 2),
+                );
+                builder.assert_usize_eq(
+                    chip_proof.lk_out_evals.len(),
+                    Usize::from(circuit_vk.get_cs().num_lks() * 4),
+                );
 
                 let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
                 builder.range(0, chip_proof.lk_out_evals_len.clone()).for_each(|idx_vec, builder| {
@@ -480,14 +479,14 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             },
         );
 
-    // batch_verify(
-    //     builder,
-    //     zkvm_proof_input.max_num_var,
-    //     zkvm_proof_input.max_width,
-    //     rounds,
-    //     zkvm_proof_input.pcs_proof,
-    //     &mut challenger,
-    // );
+    batch_verify(
+        builder,
+        zkvm_proof_input.max_num_var,
+        zkvm_proof_input.max_width,
+        rounds,
+        zkvm_proof_input.pcs_proof,
+        &mut challenger,
+    );
 
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     let initial_global_state = eval_ceno_expr_with_instance(
