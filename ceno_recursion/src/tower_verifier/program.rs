@@ -150,10 +150,12 @@ pub fn iop_verifier_state_verify<C: Config>(
 pub fn verify_tower_proof<C: Config>(
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
-    prod_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    logup_out_evals: &Array<C, Array<C, Ext<C::F, C::EF>>>,
+    num_prod_spec: Usize<C::N>,
+    num_logup_spec: Usize<C::N>,
+    prod_out_evals: &Array<C, Ext<C::F, C::EF>>,
+    logup_out_evals: &Array<C, Ext<C::F, C::EF>>,
     num_variables: Array<C, Usize<C::N>>,
-    num_fanin: Usize<C::N>,
+    _num_fanin: Usize<C::N>,
 
     // TowerProofVariable
     max_num_variables: Usize<C::N>,
@@ -166,24 +168,11 @@ pub fn verify_tower_proof<C: Config>(
     Array<C, PointAndEvalVariable<C>>,
     Array<C, PointAndEvalVariable<C>>,
 ) {
-    let num_prod_spec = prod_out_evals.len();
-    let num_logup_spec = logup_out_evals.len();
-
     let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
 
     builder.assert_usize_eq(proof.prod_specs_eval.len(), num_prod_spec.clone());
-    iter_zip!(builder, prod_out_evals).for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let evals = builder.iter_ptr_get(&prod_out_evals, ptr);
-        builder.assert_usize_eq(evals.len(), num_fanin.clone());
-    });
     builder.assert_usize_eq(proof.logup_specs_eval.len(), num_logup_spec.clone());
-    iter_zip!(builder, logup_out_evals).for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let evals = builder.iter_ptr_get(logup_out_evals, ptr);
-        builder.assert_usize_eq(evals.len(), RVar::from(4));
-    });
     builder.assert_usize_eq(
         num_variables.len(),
         num_prod_spec.clone() + num_logup_spec.clone(),
@@ -238,8 +227,8 @@ pub fn verify_tower_proof<C: Config>(
     builder.set(&challenges, 2, r);
 
     // _debug
-    let flattened_prod_out_evals = flatten_uniform_ext_arr(builder, &prod_out_evals);
-    let flattened_logup_out_evals = flatten_uniform_ext_arr(builder, &logup_out_evals);
+    // let flattened_prod_out_evals = flatten_uniform_ext_arr(builder, &prod_out_evals);
+    // let flattened_logup_out_evals = flatten_uniform_ext_arr(builder, &logup_out_evals);
     let sumcheck_out_len: Usize<C::N> = builder
         .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
     let sumcheck_out: Array<C, Ext<C::F, C::EF>> =
@@ -248,8 +237,8 @@ pub fn verify_tower_proof<C: Config>(
     builder.sumcheck_layer_eval(
         &input_ctx,
         &challenges,
-        &flattened_prod_out_evals,
-        &flattened_logup_out_evals,
+        prod_out_evals,
+        logup_out_evals,
         &sumcheck_out,
     );
     let initial_claim = builder.get(&sumcheck_out, 0);
