@@ -4,7 +4,10 @@ use openvm_native_compiler::{
     ir::{Array, Builder, Config},
     prelude::*,
 };
-use openvm_native_recursion::{hints::{Hintable, VecAutoHintable}, vars::HintSlice};
+use openvm_native_recursion::{
+    hints::{Hintable, VecAutoHintable},
+    vars::HintSlice,
+};
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, 4>;
 pub type InnerConfig = AsmConfig<F, E>;
@@ -262,7 +265,10 @@ impl Hintable<InnerConfig> for ThreeDimensionalVector {
         let length: Var<F> = usize::read(builder);
 
         let data = read_hint_slice(builder);
-        builder.assert_eq::<Var<F>>(data.length.clone(), inner_inner_length * inner_length * length);
+        builder.assert_eq::<Var<F>>(
+            data.length.clone(),
+            inner_inner_length * inner_length * length,
+        );
 
         ThreeDimensionalVecVariable {
             inner_inner_length,
