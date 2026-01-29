@@ -4,23 +4,18 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-        PolyEvaluator, UniPolyExtrapolator, assert_ext_arr_eq, challenger_multi_observe, eq_eval,
-        eval_ceno_expr_with_instance, eval_wellform_address_vec, mask_arr, reverse,
+        PolyEvaluator, UniPolyExtrapolator, arr_product, assert_ext_arr_eq,
+        build_eq_x_r_vec_sequential, challenger_multi_observe, concat,
+        dot_product as ext_dot_product, eq_eval, eq_eval_less_or_equal_than,
+        eval_ceno_expr_with_instance, eval_wellform_address_vec, gen_alpha_pows, mask_arr, reverse,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
         hash::HashVariable,
         query_phase::PointAndEvalsVariable,
         utils::pow_2,
+        verifier::batch_verify,
     },
-};
-// use crate::basefold_verifier::verifier::batch_verify;
-use crate::{
-    arithmetics::{
-        arr_product, build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
-        eq_eval_less_or_equal_than, gen_alpha_pows, nested_product,
-    },
-    basefold_verifier::verifier::batch_verify,
     tower_verifier::{
         binding::{PointAndEvalVariable, PointVariable},
         program::{iop_verifier_state_verify, verify_tower_proof},
@@ -280,28 +275,35 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
                 builder.assert_usize_eq(
                     chip_proof.r_out_evals.len(),
-                    Usize::from(circuit_vk.get_cs().num_reads()),
+                    Usize::from(circuit_vk.get_cs().num_reads() * 2),
                 );
                 builder.assert_usize_eq(
                     chip_proof.w_out_evals.len(),
-                    Usize::from(circuit_vk.get_cs().num_writes()),
+                    Usize::from(circuit_vk.get_cs().num_writes() * 2),
                 );
                 builder.assert_usize_eq(
                     chip_proof.lk_out_evals.len(),
-                    Usize::from(circuit_vk.get_cs().num_lks()),
+                    Usize::from(circuit_vk.get_cs().num_lks() * 4),
                 );
 
                 let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-                iter_zip!(builder, chip_proof.lk_out_evals).for_each(|ptr_vec, builder| {
-                    let evals = builder.iter_ptr_get(&chip_proof.lk_out_evals, ptr_vec[0]);
-                    let p1 = builder.get(&evals, 0);
-                    let p2 = builder.get(&evals, 1);
-                    let q1 = builder.get(&evals, 2);
-                    let q2 = builder.get(&evals, 3);
+                builder
+                    .range(0, chip_proof.lk_out_evals_len.clone())
+                    .for_each(|idx_vec, builder| {
+                        let start: Usize<C::N> =
+                            builder.eval(idx_vec[0] * C::N::from_canonical_usize(4));
+                        let end: Usize<C::N> =
+                            builder.eval(start.clone() + C::N::from_canonical_usize(4));
 
-                    builder.assign(&chip_logup_sum, chip_logup_sum + p1 * q1.inverse());
-                    builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
-                });
+                        let evals = chip_proof.lk_out_evals.slice(builder, start, end);
+                        let p1 = builder.get(&evals, 0);
+                        let p2 = builder.get(&evals, 1);
+                        let q1 = builder.get(&evals, 2);
+                        let q2 = builder.get(&evals, 3);
+
+                        builder.assign(&chip_logup_sum, chip_logup_sum + p1 * q1.inverse());
+                        builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
+                    });
                 challenger.observe(builder, chip_proof.idx_felt);
 
                 if circuit_vk.get_cs().is_with_lk_table() {
@@ -385,10 +387,10 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     builder.inc(&num_fixed_openings);
                 }
 
-                let r_out_evals_prod = nested_product(builder, &chip_proof.r_out_evals);
+                let r_out_evals_prod = arr_product(builder, &chip_proof.r_out_evals);
                 builder.assign(&prod_r, prod_r * r_out_evals_prod);
 
-                let w_out_evals_prod = nested_product(builder, &chip_proof.w_out_evals);
+                let w_out_evals_prod = arr_product(builder, &chip_proof.w_out_evals);
                 builder.assign(&prod_w, prod_w * w_out_evals_prod);
 
                 builder
@@ -590,15 +592,19 @@ pub fn verify_chip_proof<C: Config>(
             builder.set(&num_variables, idx_vec[0], num_var_with_rotation.clone());
         });
 
-    let prod_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>> =
+    let prod_out_evals: Array<C, Ext<C::F, C::EF>> =
         concat(builder, &chip_proof.r_out_evals, &chip_proof.w_out_evals);
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
+    let num_prod_spec: Usize<C::N> =
+        builder.eval(chip_proof.r_out_evals_len.clone() + chip_proof.w_out_evals_len.clone());
 
     builder.cycle_tracker_start(format!("verify tower proof for opcode {circuit_name}",).as_str());
     let (_, record_evals, logup_p_evals, logup_q_evals) = verify_tower_proof(
         builder,
         challenger,
-        prod_out_evals,
+        num_prod_spec,
+        chip_proof.lk_out_evals_len.clone(),
+        &prod_out_evals,
         &chip_proof.lk_out_evals,
         num_variables,
         num_fanin,
