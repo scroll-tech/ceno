@@ -383,8 +383,8 @@ pub fn verify_tower_proof<C: Config>(
         builder.sumcheck_layer_eval(
             &input_ctx,
             &challenges,
-            &proof.prod_specs_eval.data,
-            &proof.logup_specs_eval.data,
+            proof.prod_specs_eval.data.id.get_var(),
+            proof.logup_specs_eval.data.id.get_var(),
             &next_layer_evals,
         );
         let expected_evaluation = builder.get(&next_layer_evals, 0);
@@ -422,8 +422,8 @@ pub fn verify_tower_proof<C: Config>(
         builder.sumcheck_layer_eval(
             &input_ctx,
             &challenges,
-            &proof.prod_specs_eval.data,
-            &proof.logup_specs_eval.data,
+            proof.prod_specs_eval.data.id.get_var(),
+            proof.logup_specs_eval.data.id.get_var(),
             &next_layer_evals,
         );
 

@@ -4,7 +4,10 @@ use openvm_native_compiler::{
     ir::{Array, Builder, Config},
     prelude::*,
 };
-use openvm_native_recursion::hints::{Hintable, VecAutoHintable};
+use openvm_native_recursion::{
+    hints::{Hintable, VecAutoHintable},
+    vars::HintSlice,
+};
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, 4>;
 pub type InnerConfig = AsmConfig<F, E>;
@@ -53,30 +56,10 @@ pub struct ThreeDimensionalVecVariable<C: Config> {
     pub inner_inner_length: Var<C::N>,
     pub inner_length: Var<C::N>,
     pub length: Var<C::N>,
-    pub data: Array<C, Ext<C::F, C::EF>>,
+    pub data: HintSlice<C>,
 }
 
 impl<C: Config> ThreeDimensionalVecVariable<C> {
-    pub fn get(&self, builder: &mut Builder<C>, index: Var<C::N>) -> Array<C, Ext<C::F, C::EF>> {
-        let start: Var<C::N> = builder.eval(self.inner_inner_length * self.inner_length * index);
-        let end: Var<C::N> = builder.eval(start + self.inner_inner_length * self.inner_length);
-        self.data.slice(builder, start, end)
-    }
-
-    pub fn get_inner(
-        &self,
-        builder: &mut Builder<C>,
-        outer_index: Var<C::N>,
-        inner_index: Var<C::N>,
-    ) -> Array<C, Ext<C::F, C::EF>> {
-        let start: Var<C::N> = builder.eval(
-            self.inner_inner_length * self.inner_length * outer_index
-                + self.inner_inner_length * inner_index,
-        );
-        let end: Var<C::N> = builder.eval(start + self.inner_inner_length);
-        self.data.slice(builder, start, end)
-    }
-
     pub fn len(&self) -> Var<C::N> {
         self.length
     }
@@ -132,6 +115,8 @@ pub struct IOPProverMessage {
 }
 
 use sumcheck::structs::IOPProverMessage as InnerIOPProverMessage;
+
+use crate::basefold_verifier::utils::read_hint_slice;
 impl From<InnerIOPProverMessage<E>> for IOPProverMessage {
     fn from(value: InnerIOPProverMessage<E>) -> Self {
         IOPProverMessage {
@@ -278,8 +263,13 @@ impl Hintable<InnerConfig> for ThreeDimensionalVector {
         let inner_inner_length: Var<F> = usize::read(builder);
         let inner_length: Var<F> = usize::read(builder);
         let length: Var<F> = usize::read(builder);
-        let data = Vec::<E>::read(builder);
-        builder.assert_eq::<Var<F>>(data.len(), inner_inner_length * inner_length * length);
+
+        let data = read_hint_slice(builder);
+        builder.assert_eq::<Var<F>>(
+            data.length.clone(),
+            inner_inner_length * inner_length * length,
+        );
+
         ThreeDimensionalVecVariable {
             inner_inner_length,
             inner_length,
