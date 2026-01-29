@@ -598,9 +598,15 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let log2_num_instances = ceil_log2(next_pow2_instance);
         stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
 
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.r_out_evals_len));
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.w_out_evals_len));
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.lk_out_evals_len));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.r_out_evals_len,
+        ));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.w_out_evals_len,
+        ));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.lk_out_evals_len,
+        ));
 
         stream.extend(self.r_out_evals.write());
         stream.extend(self.w_out_evals.write());

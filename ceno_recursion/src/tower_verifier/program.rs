@@ -1,7 +1,7 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
     arithmetics::{
-        UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts, reverse
+        UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts, reverse,
     },
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::transcript_observe_label,
@@ -228,8 +228,7 @@ pub fn verify_tower_proof<C: Config>(
 
     let sumcheck_out_len: Usize<C::N> = builder
         .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
-    let sumcheck_out: Array<C, Ext<C::F, C::EF>> =
-        builder.dyn_array(sumcheck_out_len.clone());
+    let sumcheck_out: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len.clone());
 
     builder.sumcheck_layer_eval(
         &input_ctx,
@@ -248,35 +247,51 @@ pub fn verify_tower_proof<C: Config>(
         builder.dyn_array(num_logup_spec.clone());
 
     let idx: Usize<C::N> = builder.eval(C::N::ONE);
-    builder.range(0, num_prod_spec.clone()).for_each(|idx_vec, builder| {
-        let e = builder.get(&sumcheck_out, idx.clone());
-        builder.set(&prod_spec_point_n_eval, idx_vec[0], PointAndEvalVariable {
-                point: PointVariable {
-                    fs: initial_rt.clone(),
+    builder
+        .range(0, num_prod_spec.clone())
+        .for_each(|idx_vec, builder| {
+            let e = builder.get(&sumcheck_out, idx.clone());
+            builder.set(
+                &prod_spec_point_n_eval,
+                idx_vec[0],
+                PointAndEvalVariable {
+                    point: PointVariable {
+                        fs: initial_rt.clone(),
+                    },
+                    eval: e,
                 },
-                eval: e,
-            });
-        builder.assign(&idx, idx.clone() + C::N::ONE);
-    });
+            );
+            builder.assign(&idx, idx.clone() + C::N::ONE);
+        });
     let q_idx: Usize<C::N> = builder.eval(idx.clone() + num_logup_spec.clone());
-    builder.range(0, num_logup_spec.clone()).for_each(|idx_vec, builder| {
-        let e1 = builder.get(&sumcheck_out, idx.clone());
-        let e2 = builder.get(&sumcheck_out, q_idx.clone());
-        builder.set(&logup_spec_p_point_n_eval, idx_vec[0], PointAndEvalVariable {
-            point: PointVariable {
-                fs: initial_rt.clone(),
-            },
-            eval: e1,
+    builder
+        .range(0, num_logup_spec.clone())
+        .for_each(|idx_vec, builder| {
+            let e1 = builder.get(&sumcheck_out, idx.clone());
+            let e2 = builder.get(&sumcheck_out, q_idx.clone());
+            builder.set(
+                &logup_spec_p_point_n_eval,
+                idx_vec[0],
+                PointAndEvalVariable {
+                    point: PointVariable {
+                        fs: initial_rt.clone(),
+                    },
+                    eval: e1,
+                },
+            );
+            builder.set(
+                &logup_spec_q_point_n_eval,
+                idx_vec[0],
+                PointAndEvalVariable {
+                    point: PointVariable {
+                        fs: initial_rt.clone(),
+                    },
+                    eval: e2,
+                },
+            );
+            builder.assign(&idx, idx.clone() + C::N::ONE);
+            builder.assign(&q_idx, q_idx.clone() + C::N::ONE);
         });
-        builder.set(&logup_spec_q_point_n_eval, idx_vec[0], PointAndEvalVariable {
-            point: PointVariable {
-                fs: initial_rt.clone(),
-            },
-            eval: e2,
-        });
-        builder.assign(&idx, idx.clone() + C::N::ONE);
-        builder.assign(&q_idx, q_idx.clone() + C::N::ONE);
-    });
     builder.cycle_tracker_end("initial sum");
 
     let curr_pt = initial_rt.clone();
@@ -288,8 +303,7 @@ pub fn verify_tower_proof<C: Config>(
         point: PointVariable { fs: initial_rt },
         eval: initial_claim,
     };
-    let next_layer_evals: Array<C, Ext<C::F, C::EF>> =
-        builder.dyn_array(sumcheck_out_len);
+    let next_layer_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len);
     builder.set(
         &input_ctx,
         3,
