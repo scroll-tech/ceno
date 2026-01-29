@@ -619,7 +619,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let r_out_evals_len = self.r_out_evals.len();
         let w_out_evals_len = self.w_out_evals.len();
         let lk_out_evals_len = self.lk_out_evals.len();
-        println!(
+        tracing::debug!(
             "circuit {} r_len: {}, w: {}, lk: {}, n_prods: {}, n_logups: {}, n_layers: {}, n_prod_evals: {}, n_logup_evals: {}",
             self.idx,
             r_out_evals_len,
